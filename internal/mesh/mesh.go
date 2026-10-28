@@ -44,10 +44,13 @@ type Mesh struct {
 type peer struct {
 	name     string
 	ip       string
+	device   string
 	cancel   context.CancelFunc
 	reached  bool
 	lastSync time.Time
 	lastErr  string
+	ops      []core.Op
+	opsAt    time.Time
 }
 
 func New(node *core.Node, st *store.Store, port string, log *slog.Logger) *Mesh {
@@ -223,6 +226,7 @@ func (m *Mesh) refresh(ctx context.Context) {
 		if _, ok := want[ip]; !ok {
 			p.cancel()
 			delete(m.peers, ip)
+			go m.publishRemote() // runs once refresh releases the lock
 		}
 	}
 	for ip, tp := range want {
@@ -248,13 +252,18 @@ func (m *Mesh) follow(ctx context.Context, p *peer) {
 		if err != nil {
 			wait = 0
 		}
+		lost := false
 		m.mu.Lock()
 		if err != nil {
+			lost = p.reached
 			p.reached, p.lastErr = false, err.Error()
 		} else {
 			p.reached, p.lastErr, p.lastSync = true, "", time.Now()
 		}
 		m.mu.Unlock()
+		if lost {
+			m.publishRemote() // its operations are gone until it is back
+		}
 		switch {
 		case err != nil:
 			select {
@@ -264,17 +273,73 @@ func (m *Mesh) follow(ctx context.Context, p *peer) {
 			backoff = min(backoff*2, time.Minute)
 		case n > 0:
 			backoff = 5 * time.Second
+			m.peerOps(ctx, p)
 			if m.OnPeer != nil {
 				m.OnPeer(ctx, m.base(p))
 			}
 			m.log.Info("synced", "peer", p.name, "entries", n)
 		default:
 			backoff = 5 * time.Second
+			m.peerOps(ctx, p)
 			if m.OnPeer != nil {
 				m.OnPeer(ctx, m.base(p))
 			}
 		}
 	}
+}
+
+// peerOps refreshes, at most every 30s, which operations a peer runs
+// locally, and gives the node the union of every peer's.
+func (m *Mesh) peerOps(ctx context.Context, p *peer) {
+	m.mu.Lock()
+	fresh := time.Since(p.opsAt) < 30*time.Second
+	m.mu.Unlock()
+	if fresh {
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.base(p)+"/v1/operations?local=1", nil)
+	if err != nil {
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	var ops []core.Op
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&ops) != nil {
+		return
+	}
+	m.mu.Lock()
+	p.ops, p.opsAt = ops, time.Now()
+	m.mu.Unlock()
+	m.publishRemote()
+}
+
+// publishRemote gives the node every reachable peer's operations.
+func (m *Mesh) publishRemote() {
+	m.mu.Lock()
+	var all []core.RemoteOp
+	seen := map[string]bool{}
+	ips := make([]string, 0, len(m.peers))
+	for ip := range m.peers {
+		ips = append(ips, ip)
+	}
+	sort.Strings(ips)
+	for _, ip := range ips {
+		p := m.peers[ip]
+		if !p.reached || p.device == "" {
+			continue
+		}
+		for _, o := range p.ops {
+			if key := o.Plugin + "/" + o.Name; !seen[key] {
+				seen[key] = true
+				all = append(all, core.RemoteOp{Op: o, Device: p.device})
+			}
+		}
+	}
+	m.mu.Unlock()
+	m.node.SetRemoteOps(all)
 }
 
 func (m *Mesh) base(p *peer) string { return "http://" + net.JoinHostPort(p.ip, m.port) }
@@ -304,6 +369,7 @@ func (m *Mesh) pullOnce(ctx context.Context, p *peer, wait time.Duration) (int, 
 	if out.Device != "" {
 		m.mu.Lock()
 		m.devices[out.Device] = p.ip
+		p.device = out.Device
 		m.mu.Unlock()
 	}
 	return m.node.Ingest(ctx, out.Entries)

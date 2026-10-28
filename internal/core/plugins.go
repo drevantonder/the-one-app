@@ -167,18 +167,73 @@ func (n *Node) AddCoreOp(name, description string, input json.RawMessage, readOn
 // SchemaFor derives an input schema from a Go type.
 func SchemaFor[T any]() json.RawMessage { return schemaFor[T]() }
 
-// Operations lists every operation, core first, then plugins in order.
+// Operations lists every operation: core first, then plugins running here,
+// then plugins that only run on other devices.
 func (n *Node) Operations() []Op {
 	var out []Op
 	for _, c := range n.coreOps() {
 		out = append(out, c.Op)
 	}
+	local := n.LocalOperations()
+	out = append(out, local...)
+	running := map[string]bool{}
+	for _, o := range local {
+		running[o.Plugin] = true
+	}
+	for _, r := range n.remoteOps() {
+		if !running[r.Plugin] {
+			out = append(out, r.Op)
+		}
+	}
+	return out
+}
+
+// LocalOperations lists the operations of plugins running on this device.
+// This is what a node offers its peers.
+func (n *Node) LocalOperations() []Op {
+	var out []Op
 	for _, g := range n.running() {
 		for _, o := range g.manifest.Operations {
 			out = append(out, Op{Plugin: g.id, Name: o.Name, Description: o.Description, InputSchema: o.InputSchema, ReadOnly: o.ReadOnly})
 		}
 	}
 	return out
+}
+
+// RemoteOp is an operation of a plugin running on another device.
+type RemoteOp struct {
+	Op
+	Device string `json:"device"`
+}
+
+// SetRemoteOps replaces what other devices offer.
+func (n *Node) SetRemoteOps(ops []RemoteOp) {
+	n.mu.Lock()
+	same := len(ops) == len(n.remote)
+	for i := 0; same && i < len(ops); i++ {
+		same = ops[i].Plugin == n.remote[i].Plugin && ops[i].Name == n.remote[i].Name && ops[i].Device == n.remote[i].Device
+	}
+	n.remote = ops
+	n.mu.Unlock()
+	if !same {
+		n.changed()
+	}
+}
+
+func (n *Node) remoteOps() []RemoteOp {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return slices.Clone(n.remote)
+}
+
+// remoteFor finds a device running the plugin's operation.
+func (n *Node) remoteFor(plugin, op string) (string, bool) {
+	for _, r := range n.remoteOps() {
+		if r.Plugin == plugin && r.Name == op {
+			return r.Device, true
+		}
+	}
+	return "", false
 }
 
 func (n *Node) callCore(ctx context.Context, op string, input json.RawMessage, caller protocol.Caller) (protocol.Result, error) {

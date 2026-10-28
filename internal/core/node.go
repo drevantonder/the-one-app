@@ -61,7 +61,8 @@ type Node struct {
 	extraOps []coreOp
 	coord    Coordinator
 	blobs    Blobs
-	declHost []string // command that runs a declared plugin
+	declHost []string   // command that runs a declared plugin
+	remote   []RemoteOp // operations of plugins running only on other devices
 }
 
 // SetDeclaredHost sets the command that runs declared plugins. The core
@@ -445,6 +446,12 @@ func (n *Node) Call(ctx context.Context, plugin, op string, input json.RawMessag
 	}
 	g, release, err := n.acquire(plugin)
 	if err != nil {
+		// Not running here: run it on a device that has it.
+		if device, ok := n.remoteFor(plugin, op); ok {
+			if c := n.coordinator(); c != nil {
+				return c.Forward(ctx, device, plugin, op, input, caller)
+			}
+		}
 		return protocol.Result{}, err
 	}
 	defer release()

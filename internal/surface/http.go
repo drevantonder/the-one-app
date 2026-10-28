@@ -17,7 +17,11 @@ func Handler(n *core.Node, version string) http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "device": n.Device(), "version": version})
 	})
-	mux.HandleFunc("GET /v1/operations", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /v1/operations", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("local") != "" {
+			writeJSON(w, http.StatusOK, n.LocalOperations())
+			return
+		}
 		writeJSON(w, http.StatusOK, n.Operations())
 	})
 	mux.HandleFunc("GET /openapi.json", func(w http.ResponseWriter, _ *http.Request) {
