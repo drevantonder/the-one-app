@@ -5,7 +5,7 @@ package protocol
 import "encoding/json"
 
 // Version is the plugin protocol version. Bump it on breaking changes.
-const Version = 1
+const Version = 2
 
 // Core → plugin methods.
 const (
@@ -25,7 +25,6 @@ const (
 
 // Transform names a plugin can register.
 const (
-	TransformWake         = "wake"
 	TransformInstructions = "instructions"
 )
 
@@ -124,23 +123,6 @@ type AppendParams struct {
 type LogParams struct {
 	Level   string `json:"level"`
 	Message string `json:"message"`
-}
-
-// WakeDoc is what the wake transforms build, starting from empty.
-type WakeDoc struct {
-	Sections []Section `json:"sections"`
-}
-
-type Section struct {
-	Plugin string `json:"plugin"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-}
-
-// WakeArgs page through a long wake.
-type WakeArgs struct {
-	Part int   `json:"part,omitempty"`
-	At   int64 `json:"at,omitempty"`
 }
 
 // InstructionsDoc is the MCP server instructions, built by transforms.

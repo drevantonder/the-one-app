@@ -25,7 +25,7 @@ A small core, with everything else as plugins.
   - `instructions`: your standing instructions for agents, with history.
   - `memory`: long-term memory, a rewrite of
     [OptMem](https://github.com/VictorTaelin/OptMem).
-- **Shared state** (the tool list, `wake`, MCP instructions) is rebuilt from
+- **Shared state** (the tool list and the MCP instructions agents receive) is rebuilt from
   empty by running each plugin's transforms in order, as in
   [OpenCode 2](https://anoma.ly/notes/opencode-reloaded/). That makes reloads
   safe: a plugin's new generation simply replaces the old one.
@@ -57,14 +57,15 @@ go install github.com/drevantonder/the-one-app/cmd/one@latest
 one serve                       # node on 127.0.0.1:4747, MCP at /mcp
 one instructions set "Keep answers short."
 one memory note "Prefers Go for backend work"
-one wake
+one memory wake
 ```
 
 Connect your agents with the command `one mcp` (MCP over stdio), the same on
 every device. For example, `claude mcp add --scope user the-one-app -- one mcp`.
 It relays to the node, which also serves MCP over HTTP at
-`http://127.0.0.1:4747/mcp`. An agent's first call should be `wake`; the
-server's instructions tell it so.
+`http://127.0.0.1:4747/mcp`. Agents receive the MCP instructions plugins build
+together: your instructions, and the memory plugin's rule to call
+`memory_wake` first.
 
 ## Writing a plugin
 

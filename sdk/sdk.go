@@ -136,22 +136,6 @@ func Op[In any](c *Ctx, name, description string, kind Kind, fn func(*Call, In) 
 	}
 }
 
-// Wake registers a transform over the wake document.
-func (c *Ctx) Wake(fn func(doc *protocol.WakeDoc, args protocol.WakeArgs) error) {
-	c.transforms[protocol.TransformWake] = func(d, a json.RawMessage) (any, error) {
-		var doc protocol.WakeDoc
-		var args protocol.WakeArgs
-		if err := json.Unmarshal(d, &doc); err != nil {
-			return nil, err
-		}
-		if len(a) > 0 {
-			_ = json.Unmarshal(a, &args)
-		}
-		err := fn(&doc, args)
-		return doc, err
-	}
-}
-
 // Every registers a job run once per interval on exactly one of the user's
 // devices. A job's Call has no caller; it can Append like an operation.
 func (c *Ctx) Every(name string, every time.Duration, fn func(*Call) error) {

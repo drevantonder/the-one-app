@@ -38,7 +38,6 @@ const usage = `one: TheOneApp
 
   one serve [--addr ADDR] [--data DIR]   run this device's node
   one mcp                                 MCP over stdio, relayed to this device's node
-  one wake [part] [at]                    read instructions and memory
   one plugins [list]                      list plugins
   one plugins enable|disable|reload ID    manage a plugin
   one plugins link DIR                    load a plugin from a Go module, with hot reload

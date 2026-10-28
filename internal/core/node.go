@@ -24,7 +24,6 @@ import (
 // CoreID is the namespace of the core's own entries and operations.
 const CoreID = "one"
 
-
 type source struct {
 	id        string
 	builtin   bool
@@ -48,8 +47,8 @@ type Node struct {
 	store    *store.Store
 	builtins []string // bundled plugins, run as `one plugin-host <id>`, in order
 	dataDir  string
-	exe     string
-	log     *slog.Logger
+	exe      string
+	log      *slog.Logger
 
 	mu       sync.RWMutex
 	sources  map[string]*source
@@ -73,11 +72,11 @@ func New(st *store.Store, dataDir string, builtins []string, log *slog.Logger) (
 		store:    st,
 		builtins: builtins,
 		dataDir:  dataDir,
-		exe:     exe,
-		log:     log,
-		sources: map[string]*source{},
-		gens:    map[string]*generation{},
-		errs:    map[string]string{},
+		exe:      exe,
+		log:      log,
+		sources:  map[string]*source{},
+		gens:     map[string]*generation{},
+		errs:     map[string]string{},
 	}
 	for _, id := range builtins {
 		n.sources[id] = &source{id: id, builtin: true}
@@ -424,40 +423,12 @@ func (n *Node) transform(ctx context.Context, name string, doc any, args any) (j
 	return raw, nil
 }
 
-// Wake builds the wake document from empty, plugin by plugin.
-func (n *Node) Wake(ctx context.Context, args protocol.WakeArgs) (string, error) {
-	raw, err := n.transform(ctx, protocol.TransformWake, protocol.WakeDoc{Sections: []protocol.Section{}}, args)
-	if err != nil {
-		return "", err
-	}
-	var doc protocol.WakeDoc
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return "", err
-	}
-	if len(doc.Sections) == 0 {
-		return "Nothing to wake to yet: no plugin contributes to wake.", nil
-	}
-	parts := make([]string, 0, len(doc.Sections))
-	for _, s := range doc.Sections {
-		parts = append(parts, "## "+s.Title+"\n\n"+strings.TrimRight(s.Body, "\n"))
-	}
-	return strings.Join(parts, "\n\n"), nil
-}
-
 const baseInstructions = `TheOneApp is this user's personal hub, shared across their devices. Its tools come from plugins, and every tool is also a CLI command (` + "`one <plugin> <operation>`" + `) and an HTTP API.`
 
-const wakeInstruction = `Before anything else, in every session, call the ` + "`wake`" + ` tool and do what it says, to the end of its output.`
-
-// Instructions builds the MCP server instructions: the base text, the wake
-// rule if any plugin contributes to wake, then each plugin's transform.
+// Instructions builds the MCP server instructions: the base text, then each
+// plugin's transform in order.
 func (n *Node) Instructions(ctx context.Context) string {
 	base := baseInstructions
-	for _, g := range n.running() {
-		if slices.Contains(g.manifest.Transforms, protocol.TransformWake) {
-			base += "\n\n" + wakeInstruction
-			break
-		}
-	}
 	raw, err := n.transform(ctx, protocol.TransformInstructions, protocol.InstructionsDoc{Text: base}, nil)
 	if err != nil {
 		n.log.Error("building MCP instructions", "err", err)

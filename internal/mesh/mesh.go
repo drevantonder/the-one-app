@@ -132,7 +132,9 @@ func (m *Mesh) Start(ctx context.Context, h http.Handler) error {
 	}()
 	m.log.Info("on the tailnet", "name", st.Self.Name(), "url", fmt.Sprintf("http://%s:%s", strings.TrimSuffix(st.Self.DNSName, "."), m.port))
 	m.node.AddCoreOp("peers", "List this user's other devices on the tailnet and whether their nodes are syncing.", core.SchemaFor[struct{}](), true,
-		func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) { return m.peersResult(), nil })
+		func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) {
+			return m.peersResult(), nil
+		})
 	go m.discover(ctx)
 	return nil
 }

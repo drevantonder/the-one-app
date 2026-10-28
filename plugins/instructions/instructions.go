@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/drevantonder/the-one-app/protocol"
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
@@ -91,12 +90,11 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Text(fmt.Sprintf("Restored revision %d as revision %d.", in.Revision, len(revs))), nil
 	})
 
-	c.Wake(func(doc *protocol.WakeDoc, args protocol.WakeArgs) error {
-		if current() == "" || args.Part > 1 {
-			return nil
+	c.Instructions(func(text string) string {
+		if current() == "" {
+			return text
 		}
-		doc.Sections = append([]protocol.Section{{Plugin: "instructions", Title: "Instructions", Body: current()}}, doc.Sections...)
-		return nil
+		return text + "\n\n## This user's instructions\n\n" + current()
 	})
 	return nil
 }

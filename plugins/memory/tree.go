@@ -295,7 +295,7 @@ func (m *Memory) Wake(part int, at int) (string, error) {
 		if !ok {
 			nap := view.NextNap()
 			return fmt.Sprintf("Cannot wake: the memory context needs #%s, which is not compressed yet.\n"+
-				"Do the %d compressions below, then call wake again.\n\n%s", b, len(view.Pending(0)), nap), nil
+				"Do the %d compressions below, then call memory_wake again.\n\n%s", b, len(view.Pending(0)), nap), nil
 		}
 		lines = append(lines, fmt.Sprintf("#%s %s", b, s))
 	}
@@ -309,7 +309,7 @@ func (m *Memory) Wake(part int, at int) (string, error) {
 	}
 	b.WriteString(strings.Join(parts[part-1], "\n"))
 	if part < len(parts) {
-		fmt.Fprintf(&b, "\nNot awake yet. Call wake with part %d and at %d (CLI: one wake %d %d).", part+1, T, part+1, T)
+		fmt.Fprintf(&b, "\nNot awake yet. Call memory_wake with part %d and at %d (CLI: one memory wake %d %d).", part+1, T, part+1, T)
 	} else {
 		b.WriteString("\nYou are awake.")
 		if nap := m.NextNap(); nap != "" {

@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/drevantonder/the-one-app/protocol"
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
@@ -39,12 +38,6 @@ func main() {
 		})
 		sdk.Op(c, "counts", "Show check-in counts per habit.", sdk.Read, func(*sdk.Call, noIn) (sdk.Result, error) {
 			return sdk.Text(summary(counts)), nil
-		})
-		c.Wake(func(doc *protocol.WakeDoc, args protocol.WakeArgs) error {
-			if len(counts) > 0 && args.Part <= 1 {
-				doc.Sections = append(doc.Sections, protocol.Section{Plugin: "habits", Title: "Habits", Body: summary(counts)})
-			}
-			return nil
 		})
 		return nil
 	}})

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/drevantonder/the-one-app/protocol"
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
@@ -39,13 +38,19 @@ type (
 	blockIn struct {
 		Block string `json:"block" jsonschema:"a block id as wake prints it, like 16-31"`
 	}
+	wakeIn struct {
+		Part int `json:"part,omitempty" jsonschema:"which part of a long memory to read; omit for the first"`
+		At   int `json:"at,omitempty" jsonschema:"the snapshot to read the part from, as printed by the previous part"`
+	}
 )
 
 var Plugin = sdk.Plugin{ID: "memory", Version: "0.1.0", Setup: setup}
 
 const protocolText = `## Memory
 
-Your memory lives in TheOneApp, shared across this user's devices. It outlives every session, compaction, model and vendor change. Without it you do not know who you are, or what was decided and tried. ` + "`wake`" + ` reads it.
+Before anything else, in every session, call ` + "`memory_wake`" + ` and do what it says, to the end of its output.
+
+Your memory lives in TheOneApp, shared across this user's devices. It outlives every session, compaction, model and vendor change. Without it you do not know who you are, or what was decided and tried.
 
 While working, call ` + "`memory_note`" + ` (one line, at most 280 bytes) whenever you learn something new or something worth keeping happens: a task worth real effort, a fact or insight the user teaches you, anything you learn about their life (even indirectly), any event of lasting effect. Do not note redundant memories.
 
@@ -154,13 +159,9 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Text(fmt.Sprintf("Forgot %s and the summaries built on it. Call memory_nap to redo them.", b)), nil
 	})
 
-	c.Wake(func(doc *protocol.WakeDoc, args protocol.WakeArgs) error {
-		body, err := m.Wake(args.Part, int(args.At))
-		if err != nil {
-			return err
-		}
-		doc.Sections = append(doc.Sections, protocol.Section{Plugin: "memory", Title: "Memory", Body: body})
-		return nil
+	sdk.Op(c, "wake", "Read your memory. Call this first in every session and do what it says, to the end of its output.", sdk.Read, func(_ *sdk.Call, in wakeIn) (sdk.Result, error) {
+		s, err := m.Wake(in.Part, in.At)
+		return sdk.Text(s), err
 	})
 	c.Instructions(func(text string) string { return text + "\n\n" + protocolText })
 	return nil

@@ -39,10 +39,6 @@ func (o Op) ToolName() string {
 }
 
 type (
-	wakeIn struct {
-		Part int   `json:"part,omitempty" jsonschema:"which part of a long wake to read; omit for the first"`
-		At   int64 `json:"at,omitempty" jsonschema:"the snapshot to read the part from, as printed by the previous part"`
-	}
 	noIn     struct{}
 	pluginIn struct {
 		ID string `json:"id" jsonschema:"the plugin id, as listed by plugins_list"`
@@ -81,15 +77,6 @@ func (n *Node) coreOps() []coreOp {
 	extra := slices.Clone(n.extraOps)
 	n.mu.RUnlock()
 	return append([]coreOp{
-		{Op{CoreID, "wake", "Read what this user's plugins want every agent to know at the start of a session. Call this first and do what it says, to the end of its output.", schemaFor[wakeIn](), true},
-			func(ctx context.Context, raw json.RawMessage, _ protocol.Caller) (protocol.Result, error) {
-				in, err := decode[wakeIn](raw)
-				if err != nil {
-					return protocol.Result{}, err
-				}
-				text, err := n.Wake(ctx, protocol.WakeArgs{Part: in.Part, At: in.At})
-				return protocol.Result{Text: text}, err
-			}},
 		{Op{CoreID, "plugins_list", "List plugins, whether each is enabled and running, and any error.", schemaFor[noIn](), true},
 			func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) {
 				return n.listPlugins(), nil

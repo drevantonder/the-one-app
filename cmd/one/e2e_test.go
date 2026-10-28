@@ -51,8 +51,8 @@ func TestNodeOverMCP(t *testing.T) {
 	}
 	defer session.Close()
 
-	if ins := session.InitializeResult().Instructions; !strings.Contains(ins, "call the `wake` tool") || !strings.Contains(ins, "memory_note") {
-		t.Fatalf("instructions missing core or memory text:\n%s", ins)
+	if ins := session.InitializeResult().Instructions; !strings.Contains(ins, "call `memory_wake`") || !strings.Contains(ins, "memory_note") {
+		t.Fatalf("instructions missing the memory plugin's text:\n%s", ins)
 	}
 	tools, err := session.ListTools(ctx, nil)
 	if err != nil {
@@ -62,7 +62,7 @@ func TestNodeOverMCP(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names = append(names, tool.Name)
 	}
-	for _, want := range []string{"wake", "instructions_set", "memory_note", "memory_nap", "plugins_list"} {
+	for _, want := range []string{"memory_wake", "instructions_set", "memory_note", "memory_nap", "plugins_list"} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("tool %s missing from %v", want, names)
 		}
@@ -87,8 +87,8 @@ func TestNodeOverMCP(t *testing.T) {
 	if text, _ := call("memory_nap", map[string]any{"block": "0-1", "text": "facts 0 and 1"}); !strings.Contains(text, "0-1 saved") {
 		t.Fatalf("nap: %s", text)
 	}
-	wake, _ := call("wake", nil)
-	for _, want := range []string{"Keep answers short.", "#2 ", "fact 2", "You are awake."} {
+	wake, _ := call("memory_wake", nil)
+	for _, want := range []string{"#2 ", "fact 2", "You are awake."} {
 		if !strings.Contains(wake, want) {
 			t.Fatalf("wake missing %q:\n%s", want, wake)
 		}
@@ -97,11 +97,14 @@ func TestNodeOverMCP(t *testing.T) {
 	// Disabling a plugin removes its tools and wake section; enabling it
 	// again rebuilds everything from the log.
 	call("plugins_disable", map[string]any{"id": "memory"})
-	if wake, _ := call("wake", nil); strings.Contains(wake, "fact 2") {
-		t.Fatalf("memory still in wake after disable:\n%s", wake)
+	tools, _ = session.ListTools(ctx, nil)
+	for _, tool := range tools.Tools {
+		if strings.HasPrefix(tool.Name, "memory_") {
+			t.Fatalf("memory tool %s still listed after disable", tool.Name)
+		}
 	}
 	call("plugins_enable", map[string]any{"id": "memory"})
-	if wake, _ := call("wake", nil); !strings.Contains(wake, "fact 2") {
+	if wake, _ := call("memory_wake", nil); !strings.Contains(wake, "fact 2") {
 		t.Fatalf("memory not restored after enable:\n%s", wake)
 	}
 
@@ -113,10 +116,11 @@ func TestNodeOverMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stdio.Close()
-	if stdio.InitializeResult().Instructions != session.InitializeResult().Instructions {
-		t.Fatal("stdio relay instructions differ from the node's")
+	// A new session's instructions include the user's instructions, set above.
+	if ins := stdio.InitializeResult().Instructions; !strings.Contains(ins, "Keep answers short.") || !strings.Contains(ins, "memory_wake") {
+		t.Fatalf("new session instructions:\n%s", ins)
 	}
-	res, err := stdio.CallTool(ctx, &mcp.CallToolParams{Name: "wake"})
+	res, err := stdio.CallTool(ctx, &mcp.CallToolParams{Name: "memory_wake"})
 	if err != nil {
 		t.Fatal(err)
 	}

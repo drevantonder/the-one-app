@@ -94,7 +94,9 @@ func (b *Bucket) Start(ctx context.Context) error {
 		}
 	}
 	b.node.AddCoreOp("bucket_status", "Show whether this device backs up to a bucket, and when it last synced.", core.SchemaFor[struct{}](), true,
-		func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) { return b.statusResult(), nil })
+		func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) {
+			return b.statusResult(), nil
+		})
 	b.node.AddCoreOp("bucket_configure", "Back this device up to an S3-compatible bucket. A new key is made unless the bucket already has one, in which case use bucket_import with the kit instead.", core.SchemaFor[Config](), false,
 		func(ctx context.Context, raw json.RawMessage, _ protocol.Caller) (protocol.Result, error) {
 			var c Config
