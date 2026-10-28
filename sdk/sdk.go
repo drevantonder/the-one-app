@@ -32,11 +32,12 @@ import (
 )
 
 type (
-	Mode   = protocol.Mode
-	Entry  = protocol.Entry
-	Result = protocol.Result
-	Image  = protocol.Image
-	Caller = protocol.Caller
+	Mode     = protocol.Mode
+	Entry    = protocol.Entry
+	Result   = protocol.Result
+	Image    = protocol.Image
+	Caller   = protocol.Caller
+	FileInfo = protocol.FileInfo
 )
 
 const (
@@ -218,6 +219,50 @@ func (call *Call) Append(typ string, payload any) (Entry, error) {
 		return Entry{}, err
 	}
 	return e, call.ctx.applyOne(e)
+}
+
+// Invoke runs another plugin's operation, on whichever device has it, or
+// the one named by a device field in input.
+func (call *Call) Invoke(plugin, op string, input any) (Result, error) {
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return Result{}, err
+	}
+	var res Result
+	err = call.ctx.conn.Call(call.Context, protocol.MethodInvoke, protocol.InvokeParams{Plugin: plugin, Operation: op, Input: raw}, &res)
+	return res, err
+}
+
+// PutFile stores the file at path in the bucket as name, encrypted. Each
+// plugin has its own names.
+func (call *Call) PutFile(name, path string) error {
+	return call.ctx.conn.Call(call.Context, protocol.MethodFiles, protocol.FilesParams{Op: "put", Name: name, Path: path}, nil)
+}
+
+// GetFile downloads the stored file name to path.
+func (call *Call) GetFile(name, path string) error {
+	return call.ctx.conn.Call(call.Context, protocol.MethodFiles, protocol.FilesParams{Op: "get", Name: name, Path: path}, nil)
+}
+
+// Files lists the stored files whose names start with prefix.
+func (call *Call) Files(prefix string) ([]FileInfo, error) {
+	var out []FileInfo
+	err := call.ctx.conn.Call(call.Context, protocol.MethodFiles, protocol.FilesParams{Op: "list", Name: prefix}, &out)
+	return out, err
+}
+
+// DeleteFile removes the stored file name.
+func (call *Call) DeleteFile(name string) error {
+	return call.ctx.conn.Call(call.Context, protocol.MethodFiles, protocol.FilesParams{Op: "delete", Name: name}, nil)
+}
+
+// Logf writes to the node's log, as Ctx.Logf.
+func (call *Call) Logf(format string, args ...any) { call.ctx.Logf(format, args...) }
+
+// Detached is a copy of the call that outlives it, for work that carries
+// on in the background.
+func (call *Call) Detached() *Call {
+	return &Call{Context: context.WithoutCancel(call.Context), Caller: call.Caller, ctx: call.ctx}
 }
 
 func (c *Ctx) applyOne(e Entry) error {

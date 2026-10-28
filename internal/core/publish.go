@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,10 +16,14 @@ import (
 	"github.com/drevantonder/the-one-app/protocol"
 )
 
-// Blobs stores published plugin binaries (the bucket).
+// Blobs stores published plugin binaries and plugins' files (the bucket).
 type Blobs interface {
 	PutBlob(ctx context.Context, key string, data []byte) error
 	GetBlob(ctx context.Context, key string) ([]byte, error)
+	PutFile(ctx context.Context, key, path string) error
+	GetFile(ctx context.Context, key, path string) error
+	ListFiles(ctx context.Context, prefix string) ([]protocol.FileInfo, error)
+	DeleteFile(ctx context.Context, key string) error
 }
 
 // SetBlobs enables publishing plugins to every device.
@@ -174,4 +179,36 @@ func (n *Node) declaredState() (map[string]json.RawMessage, map[string]bool) {
 		}
 	}
 	return declared, removed
+}
+
+// files stores a plugin's files in the bucket, each plugin under its own id.
+func (n *Node) files(ctx context.Context, plugin string, in protocol.FilesParams) (any, error) {
+	n.mu.RLock()
+	blobs := n.blobs
+	n.mu.RUnlock()
+	if blobs == nil {
+		return nil, errors.New("storing files needs a bucket: configure one with bucket_configure")
+	}
+	if strings.Contains(in.Name, "..") || strings.HasPrefix(in.Name, "/") || (in.Name == "" && in.Op != "list") {
+		return nil, fmt.Errorf("bad file name %q", in.Name)
+	}
+	key := plugin + "/" + in.Name
+	switch in.Op {
+	case "put":
+		return struct{}{}, blobs.PutFile(ctx, key, in.Path)
+	case "get":
+		return struct{}{}, blobs.GetFile(ctx, key, in.Path)
+	case "delete":
+		return struct{}{}, blobs.DeleteFile(ctx, key)
+	case "list":
+		found, err := blobs.ListFiles(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		for i := range found {
+			found[i].Name = strings.TrimPrefix(found[i].Name, plugin+"/")
+		}
+		return found, nil
+	}
+	return nil, fmt.Errorf("unknown files op %q", in.Op)
 }

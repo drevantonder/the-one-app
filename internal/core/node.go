@@ -393,6 +393,18 @@ func (n *Node) pluginHandler(id string) rpc.Handler {
 		case protocol.MethodChanged:
 			go n.redescribe(id)
 			return nil, nil
+		case protocol.MethodInvoke:
+			var in protocol.InvokeParams
+			if err := json.Unmarshal(params, &in); err != nil {
+				return nil, err
+			}
+			return n.Call(ctx, in.Plugin, in.Operation, in.Input, protocol.Caller{Actor: "plugin " + id})
+		case protocol.MethodFiles:
+			var in protocol.FilesParams
+			if err := json.Unmarshal(params, &in); err != nil {
+				return nil, err
+			}
+			return n.files(ctx, id, in)
 		case protocol.MethodLog:
 			var in protocol.LogParams
 			_ = json.Unmarshal(params, &in)

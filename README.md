@@ -120,6 +120,11 @@ to clicks and typing, are `spaces` operations too, such as
 several. The viewer is served over HTTPS on the tailnet, with
 `tailscale serve`.
 
+Spaces aren't backed up unless you ask: `one spaces backup --name messenger
+--on true` stores the home folder (without caches) in the bucket, encrypted,
+when the Space stops and every 6 hours, keeping the last 3. To move a Space,
+`release` it, then `create` it on the other device, which restores it.
+
 ## Writing a plugin
 
 ```go
@@ -151,5 +156,7 @@ whenever its files change. `one plugins publish habits` builds it for every
 platform and installs it on all your devices, which swap to each new build as
 they sync. `habits_check_in` is then an MCP tool,
 `one habits check_in run` a CLI command, and `POST /v1/call/habits/check_in`
-an API endpoint. See [`examples/habits`](examples/habits), and
+an API endpoint. A plugin can also run other plugins' operations
+(`call.Invoke`) and keep files in the bucket, encrypted (`call.PutFile`,
+`GetFile`, `Files`, `DeleteFile`). See [`examples/habits`](examples/habits), and
 [`examples/jobs`](examples/jobs) for jobs and consistent entries.

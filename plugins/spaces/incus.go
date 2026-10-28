@@ -32,6 +32,7 @@ type space struct {
 	State    string    `json:"state"`
 	Created  time.Time `json:"created"`
 	LastUsed time.Time `json:"lastUsed,omitzero"`
+	BackedUp bool      `json:"backedUp,omitempty"`
 	port     int
 	token    string
 }

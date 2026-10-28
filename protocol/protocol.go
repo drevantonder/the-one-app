@@ -2,7 +2,10 @@
 // processes. Plugins speak JSON-RPC 2.0 over stdin/stdout, one message per line.
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Version is the plugin protocol version. Bump it on breaking changes.
 const Version = 3
@@ -27,6 +30,10 @@ const (
 	// MethodChanged is a notification: the plugin's operations changed, so
 	// the core should describe it again.
 	MethodChanged = "changed"
+	// MethodInvoke runs another plugin's operation, routed like any call.
+	MethodInvoke = "invoke"
+	// MethodFiles stores the plugin's files in the bucket, encrypted.
+	MethodFiles = "files"
 )
 
 // Transform names a plugin can register.
@@ -124,6 +131,28 @@ type CallParams struct {
 	Operation string          `json:"operation"`
 	Input     json.RawMessage `json:"input"`
 	Caller    Caller          `json:"caller"`
+}
+
+type InvokeParams struct {
+	Plugin    string          `json:"plugin"`
+	Operation string          `json:"operation"`
+	Input     json.RawMessage `json:"input"`
+}
+
+// FilesParams asks for one of put (upload Path as Name), get (download Name
+// to Path), list (names starting with Name) or delete. Paths are on the
+// device both the core and the plugin run on.
+type FilesParams struct {
+	Op   string `json:"op"`
+	Name string `json:"name"`
+	Path string `json:"path,omitempty"`
+}
+
+// FileInfo describes a stored file.
+type FileInfo struct {
+	Name     string    `json:"name"`
+	Size     int64     `json:"size"`
+	Modified time.Time `json:"modified"`
 }
 
 type Result struct {

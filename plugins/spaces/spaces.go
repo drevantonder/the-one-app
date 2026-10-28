@@ -32,6 +32,11 @@ type nameIn struct {
 	Name string `json:"name" jsonschema:"the Space's name"`
 }
 
+type backupIn struct {
+	Name string `json:"name" jsonschema:"the Space's name"`
+	On   bool   `json:"on" jsonschema:"true to back it up from now on, false to stop and delete its backups"`
+}
+
 type viewIn struct {
 	Name    string `json:"name" jsonschema:"the Space's name"`
 	Minutes int    `json:"minutes,omitempty" jsonschema:"how long the link works; default 60, at most 1440"`
@@ -39,41 +44,115 @@ type viewIn struct {
 
 // own are the plugin's operations; a Space's tools with these names are
 // left out.
-var own = []string{"create", "list", "start", "stop", "delete", "view", "refresh_tools"}
+var own = []string{"create", "list", "start", "stop", "delete", "view", "backup", "release", "refresh_tools"}
 
 func setup(c *sdk.Ctx) error {
 	if _, err := exec.LookPath("incus"); err != nil {
 		return errors.New("needs Incus (https://linuxcontainers.org/incus)")
 	}
 	t := &tools{ctx: c, sessions: map[string]*mcp.ClientSession{}}
-	c.OnReady(func(call *sdk.Call) { _ = t.refresh(call.Context) })
+	var mu sync.Mutex
+	hosts := map[string]string{} // backed-up Space → the device holding it
+	holder := func(name string) string {
+		mu.Lock()
+		defer mu.Unlock()
+		return hosts[name]
+	}
+	c.Entry("hosted", sdk.Available)
+	c.Entry("released", sdk.Available)
+	c.OnReset(func() { mu.Lock(); clear(hosts); mu.Unlock() })
+	sdk.Handle(c, "hosted", func(_ sdk.Entry, in hosted) error { mu.Lock(); hosts[in.Name] = in.Host; mu.Unlock(); return nil })
+	sdk.Handle(c, "released", func(_ sdk.Entry, in released) error { mu.Lock(); delete(hosts, in.Name); mu.Unlock(); return nil })
+	host := func(call *sdk.Call, name string) error {
+		me, err := tailnetName(call.Context)
+		if err != nil {
+			return err
+		}
+		if holder(name) != me {
+			_, err = call.Append("hosted", hosted{Name: name, Host: me})
+		}
+		return err
+	}
+	c.OnReady(func(call *sdk.Call) {
+		_ = t.refresh(call.Context)
+		go keepBackedUp(call.Detached())
+	})
 
-	sdk.Op(c, "create", "Create a Space: a Linux desktop of its own, with a browser, for agents to use. Sign in to sites in it with view.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
+	sdk.Op(c, "create", "Create a Space: a Linux desktop of its own, with a browser, for agents to use. Sign in to sites in it with view. A Space that has backups, from this device or another, is restored from the newest.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
+		saved, err := backups(call, in.Name)
+		if err != nil && !noBucket(err) {
+			return sdk.Result{}, err
+		}
+		if len(saved) > 0 {
+			me, err := tailnetName(call.Context)
+			if err != nil {
+				return sdk.Result{}, err
+			}
+			if h := holder(in.Name); h != "" && h != me {
+				return sdk.Result{}, fmt.Errorf("Space %q is on %s: release it there first, which backs it up and frees it", in.Name, h)
+			}
+		}
 		s, err := create(call.Context, in.Name)
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		_ = t.refresh(call.Context)
-		return sdk.Text(fmt.Sprintf("Created Space %q. Open it with view.", s.Name)), nil
+		defer func() { _ = t.refresh(call.Context) }()
+		if len(saved) == 0 {
+			return sdk.Text(fmt.Sprintf("Created Space %q. Open it with view; back it up with backup.", s.Name)), nil
+		}
+		if err := restore(call, s, saved[0]); err != nil {
+			return sdk.Result{}, fmt.Errorf("created Space %q, but restoring its backup failed: %w", s.Name, err)
+		}
+		if err := setBackedUp(call.Context, s.Name, true); err != nil {
+			return sdk.Result{}, err
+		}
+		if err := host(call, s.Name); err != nil {
+			return sdk.Result{}, err
+		}
+		return sdk.Text(fmt.Sprintf("Restored Space %q from its backup of %s. It is backed up as before.", s.Name, saved[0].Modified.Local().Format(time.DateTime))), nil
 	})
 	sdk.Op(c, "list", "List the Spaces on this device.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
 		spaces, err := list(call.Context)
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		if len(spaces) == 0 {
-			return sdk.Result{Text: "No Spaces. Make one with create.", Data: []space{}}, nil
+		saved, _ := call.Files("") // without a bucket there are no backups
+		latest := map[string]sdk.FileInfo{}
+		for _, f := range saved {
+			name, _, _ := strings.Cut(f.Name, "/")
+			if f.Name > latest[name].Name {
+				latest[name] = f
+			}
 		}
 		var b strings.Builder
 		w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-		for _, s := range spaces {
+		for i, s := range spaces {
 			used := "never"
 			if !s.LastUsed.IsZero() {
 				used = s.LastUsed.Local().Format(time.DateTime)
 			}
-			fmt.Fprintf(w, "%s\t%s\tlast started %s\n", s.Name, s.State, used)
+			backed := "not backed up"
+			if spaces[i].BackedUp = backedUp(call.Context, s.Name); spaces[i].BackedUp {
+				backed = "backed up"
+				if f, ok := latest[s.Name]; ok {
+					backed = fmt.Sprintf("backed up %s (%s)", f.Modified.Local().Format(time.DateTime), size(f.Size))
+				}
+			}
+			delete(latest, s.Name)
+			fmt.Fprintf(w, "%s\t%s\tlast started %s\t%s\n", s.Name, s.State, used, backed)
+		}
+		for name, f := range latest {
+			where := "not on this device"
+			if h := holder(name); h != "" {
+				where = "on " + strings.Split(h, ".")[0]
+			}
+			fmt.Fprintf(w, "%s\t%s\t\tbacked up %s (%s); create it to restore it here\n", name, where, f.Modified.Local().Format(time.DateTime), size(f.Size))
+			spaces = append(spaces, space{Name: name, State: where, BackedUp: true})
 		}
 		w.Flush()
+		if len(spaces) == 0 {
+			return sdk.Result{Text: "No Spaces. Make one with create.", Data: []space{}}, nil
+		}
 		return sdk.Result{Text: strings.TrimSpace(b.String()), Data: spaces}, nil
 	})
 	sdk.Op(c, "start", "Start a stopped Space.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
@@ -89,9 +168,15 @@ func setup(c *sdk.Ctx) error {
 		}
 		return sdk.Text("Started."), nil
 	})
-	sdk.Op(c, "stop", "Stop a Space. Its files stay; start it again any time.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
-		if _, err := find(call.Context, in.Name); err != nil {
+	sdk.Op(c, "stop", "Stop a Space. Its files stay; start it again any time. A backed-up Space is backed up first.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
+		s, err := find(call.Context, in.Name)
+		if err != nil {
 			return sdk.Result{}, err
+		}
+		if s.State == "running" && backedUp(call.Context, s.Name) {
+			if _, err := backup(call, s); err != nil {
+				return sdk.Result{}, fmt.Errorf("not stopped: backing up failed: %w", err)
+			}
 		}
 		t.drop(in.Name)
 		if _, err := incus(call.Context, "stop", prefix+in.Name); err != nil && !strings.Contains(err.Error(), "already stopped") {
@@ -99,7 +184,7 @@ func setup(c *sdk.Ctx) error {
 		}
 		return sdk.Text("Stopped."), nil
 	})
-	sdk.Op(c, "delete", "Delete a Space and everything in it, including its sign-ins.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
+	sdk.Op(c, "delete", "Delete a Space and everything in it, including its sign-ins and backups. To move a Space to another device instead, use release.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
 		s, err := find(call.Context, in.Name)
 		if err != nil {
 			return sdk.Result{}, err
@@ -109,7 +194,63 @@ func setup(c *sdk.Ctx) error {
 			return sdk.Result{}, err
 		}
 		_ = t.refresh(call.Context)
+		if err := dropBackups(call, s.Name); err != nil {
+			return sdk.Result{}, fmt.Errorf("deleted Space %q, but not all its backups: %w", s.Name, err)
+		}
 		return sdk.Text(fmt.Sprintf("Deleted Space %q.", s.Name)), nil
+	})
+	sdk.Op(c, "backup", "Turn a Space's backups on or off. Backed up, its home folder (without caches) is stored in the bucket, encrypted, when it stops and every 6 hours while it runs, keeping the last 3; it can then be restored on any device. Turning backups off deletes them.", sdk.Write, func(call *sdk.Call, in backupIn) (sdk.Result, error) {
+		s, err := find(call.Context, in.Name)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		if !in.On {
+			if err := setBackedUp(call.Context, s.Name, false); err != nil {
+				return sdk.Result{}, err
+			}
+			if err := dropBackups(call, s.Name); err != nil {
+				return sdk.Result{}, err
+			}
+			return sdk.Text(fmt.Sprintf("Space %q is no longer backed up, and its backups are deleted.", s.Name)), nil
+		}
+		if s.State != "running" {
+			return sdk.Result{}, fmt.Errorf("Space %q is %s: start it first", s.Name, s.State)
+		}
+		if err := host(call, s.Name); err != nil {
+			return sdk.Result{}, err
+		}
+		f, err := backup(call, s)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		if err := setBackedUp(call.Context, s.Name, true); err != nil {
+			return sdk.Result{}, err
+		}
+		return sdk.Text(fmt.Sprintf("Space %q is backed up (%s so far).", s.Name, size(f.Size))), nil
+	})
+	sdk.Op(c, "release", "Free a backed-up Space for another device: back it up one last time and remove it here, keeping its backups. Then create it on the other device to restore it there.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
+		s, err := find(call.Context, in.Name)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		if !backedUp(call.Context, s.Name) {
+			return sdk.Result{}, fmt.Errorf("Space %q isn't backed up: turn backups on first, or it would be lost", s.Name)
+		}
+		if s.State != "running" {
+			return sdk.Result{}, fmt.Errorf("Space %q is %s: start it first, so its last changes are backed up", s.Name, s.State)
+		}
+		if _, err := backup(call, s); err != nil {
+			return sdk.Result{}, err
+		}
+		t.drop(s.Name)
+		if err := remove(call.Context, s); err != nil {
+			return sdk.Result{}, err
+		}
+		_ = t.refresh(call.Context)
+		if _, err := call.Append("released", released{Name: s.Name}); err != nil {
+			return sdk.Result{}, err
+		}
+		return sdk.Text(fmt.Sprintf("Released Space %q: create it on another device to restore it there.", s.Name)), nil
 	})
 	sdk.Op(c, "view", "Get a link to watch and use a Space's desktop in a browser, from any of your devices: to sign in to sites, or to see what an agent is doing.", sdk.Read, func(call *sdk.Call, in viewIn) (sdk.Result, error) {
 		s, err := find(call.Context, in.Name)
