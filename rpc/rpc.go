@@ -201,5 +201,14 @@ func (c *Conn) Call(ctx context.Context, method string, params, out any) error {
 	}
 }
 
+// Notify sends a message that expects no answer.
+func (c *Conn) Notify(method string, params any) error {
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	return c.write(message{JSONRPC: "2.0", Method: method, Params: raw})
+}
+
 // Done is closed when the connection stops reading.
 func (c *Conn) Done() <-chan struct{} { return c.closed }

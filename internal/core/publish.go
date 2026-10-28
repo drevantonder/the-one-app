@@ -142,3 +142,36 @@ func (n *Node) fetchPublished(ctx context.Context, p published) (string, error) 
 	}
 	return path, os.Rename(tmp, path)
 }
+
+// declaredState folds plugin.declared and plugin.removed entries.
+func (n *Node) declaredState() (map[string]json.RawMessage, map[string]bool) {
+	declared, removed := map[string]json.RawMessage{}, map[string]bool{}
+	entries, err := n.store.Entries(CoreID)
+	if err != nil {
+		return declared, removed
+	}
+	for _, e := range entries {
+		var p struct {
+			ID   string          `json:"id"`
+			Spec json.RawMessage `json:"spec"`
+		}
+		if json.Unmarshal(e.Payload, &p) != nil {
+			continue
+		}
+		switch e.Type {
+		case "plugin.declared":
+			declared[p.ID], removed[p.ID] = p.Spec, false
+		case "plugin.removed":
+			delete(declared, p.ID)
+			removed[p.ID] = true
+		case "plugin.published":
+			removed[p.ID] = false
+		}
+	}
+	for id, r := range removed {
+		if !r {
+			delete(removed, id)
+		}
+	}
+	return declared, removed
+}

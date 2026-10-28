@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -27,9 +28,10 @@ const CoreID = "one"
 type source struct {
 	id        string
 	builtin   bool
-	dir       string     // linked Go module, rebuilt on change
-	binary    string     // last successful build of a linked plugin
-	published *published // published from another device, fetched from the bucket
+	dir       string          // linked Go module, rebuilt on change
+	binary    string          // last successful build of a linked plugin
+	published *published      // published from another device, fetched from the bucket
+	declared  json.RawMessage // a declaration, run by the declared-plugin host
 }
 
 type generation struct {
@@ -59,6 +61,15 @@ type Node struct {
 	extraOps []coreOp
 	coord    Coordinator
 	blobs    Blobs
+	declHost []string // command that runs a declared plugin
+}
+
+// SetDeclaredHost sets the command that runs declared plugins. The core
+// passes the declaration in ONE_DECLARATION and never looks inside it.
+func (n *Node) SetDeclaredHost(argv []string) {
+	n.mu.Lock()
+	n.declHost = argv
+	n.mu.Unlock()
 }
 
 // New creates a node. builtins are the plugins bundled with the binary; they
@@ -174,6 +185,11 @@ func (n *Node) acquire(id string) (*generation, func(), error) {
 }
 
 func (n *Node) command(src *source) []string {
+	if src.declared != nil {
+		n.mu.RLock()
+		defer n.mu.RUnlock()
+		return n.declHost
+	}
 	if src.builtin {
 		return []string{n.exe, "plugin-host", src.id}
 	}
@@ -204,6 +220,12 @@ func (n *Node) startPlugin(ctx context.Context, id string) error {
 		n.mu.Lock()
 		src.binary = path
 		n.mu.Unlock()
+	case src.declared != nil:
+		if len(n.command(src)) == 0 {
+			err := errors.New("this node can't run declared plugins")
+			n.setErr(id, err)
+			return err
+		}
 	case !src.builtin && n.command(src)[0] == "":
 		if err := n.build(src); err != nil {
 			n.setErr(id, err)
@@ -221,6 +243,9 @@ func (n *Node) startPlugin(ctx context.Context, id string) error {
 	delete(n.errs, id)
 	n.mu.Unlock()
 	n.log.Info("plugin started", "plugin", id, "version", g.manifest.Version, "generation", g.n)
+	// Only now is this the plugin's live generation, so anything it does on
+	// ready (such as changing its operations) reaches the right one.
+	_ = g.conn.Notify(protocol.MethodReady, struct{}{})
 	if old != nil {
 		go n.retire(old, 30*time.Second)
 	}
@@ -249,6 +274,9 @@ func (n *Node) spawn(ctx context.Context, src *source) (*generation, error) {
 	args := n.command(src)
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = append(os.Environ(), "ONE_PLUGIN="+src.id)
+	if src.declared != nil {
+		cmd.Env = append(cmd.Env, "ONE_DECLARATION="+string(src.declared))
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -284,6 +312,9 @@ func (n *Node) spawn(ctx context.Context, src *source) (*generation, error) {
 	}
 	if g.manifest.ID != src.id {
 		return fail(fmt.Errorf("plugin says its id is %q, expected %q", g.manifest.ID, src.id))
+	}
+	if p := g.manifest.Platforms; len(p) > 0 && !slices.Contains(p, runtime.GOOS) {
+		return fail(fmt.Errorf("%w: runs on %s", ErrPlatform, strings.Join(p, ", ")))
 	}
 	if err := g.conn.Call(sctx, protocol.MethodReset, struct{}{}, nil); err != nil {
 		return fail(fmt.Errorf("reset: %w", err))
@@ -357,6 +388,9 @@ func (n *Node) pluginHandler(id string) rpc.Handler {
 				n.mu.Unlock()
 			}
 			return e, err
+		case protocol.MethodChanged:
+			go n.redescribe(id)
+			return nil, nil
 		case protocol.MethodLog:
 			var in protocol.LogParams
 			_ = json.Unmarshal(params, &in)
@@ -365,6 +399,43 @@ func (n *Node) pluginHandler(id string) rpc.Handler {
 		}
 		return nil, &rpc.Error{Code: -32601, Message: "unknown method " + method}
 	}
+}
+
+// ErrPlatform means a plugin doesn't run on this device's platform.
+var ErrPlatform = errors.New("not available on this platform")
+
+// redescribe refreshes a running plugin's manifest after it says its
+// operations changed.
+func (n *Node) redescribe(id string) {
+	g, release, err := n.acquire(id)
+	if err != nil {
+		return
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var m protocol.Manifest
+	if err := g.conn.Call(ctx, protocol.MethodDescribe, struct{}{}, &m); err != nil {
+		n.log.Warn("redescribe failed", "plugin", id, "err", err)
+		return
+	}
+	n.mu.Lock()
+	g.manifest = m
+	n.mu.Unlock()
+	n.log.Info("plugin operations changed", "plugin", id, "operations", len(m.Operations))
+	n.changed()
+}
+
+// Hook passes an HTTP request to a plugin's hook.
+func (n *Node) Hook(ctx context.Context, plugin string, req protocol.HookRequest) (protocol.HookResponse, error) {
+	g, release, err := n.acquire(plugin)
+	if err != nil {
+		return protocol.HookResponse{}, err
+	}
+	defer release()
+	var res protocol.HookResponse
+	err = g.conn.Call(ctx, protocol.MethodHook, req, &res)
+	return res, err
 }
 
 // Call runs a plugin operation.

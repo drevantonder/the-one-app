@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -112,6 +113,33 @@ func TestNodeOverMCP(t *testing.T) {
 	call("plugins_enable", map[string]any{"id": "memory"})
 	if wake, _ := call("memory_wake", nil); !strings.Contains(wake, "fact 2") {
 		t.Fatalf("memory not restored after enable:\n%s", wake)
+	}
+
+	// A plugin with no code: an MCP server's tools become its operations.
+	upstream := mcp.NewServer(&mcp.Implementation{Name: "upstream", Version: "1"}, nil)
+	type echoIn struct {
+		Text string `json:"text"`
+	}
+	mcp.AddTool(upstream, &mcp.Tool{Name: "echo", Description: "Echo text back."}, func(_ context.Context, _ *mcp.CallToolRequest, in echoIn) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "echo: " + in.Text}}}, nil, nil
+	})
+	upstreamSrv := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil))
+	defer func() { upstreamSrv.CloseClientConnections(); upstreamSrv.Close() }() // the plugin keeps a live connection
+	add := exec.Command(bin, "plugins", "add", "echoer", "--mcp", upstreamSrv.URL)
+	add.Env = append(os.Environ(), "ONE_ADDR="+addr)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("plugins add: %v\n%s", err, out)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "echoer_echo", Arguments: map[string]any{"text": "hi"}})
+		if err == nil && !res.IsError && res.Content[0].(*mcp.TextContent).Text == "echo: hi" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("echoer_echo never worked: %v %+v", err, res)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	// `one mcp` relays stdio to the same node, with the same instructions and tools.

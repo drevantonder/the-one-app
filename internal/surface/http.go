@@ -43,6 +43,26 @@ func Handler(n *core.Node, version string) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, res)
 	})
+	mux.HandleFunc("/hooks/{plugin}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		q := map[string]string{}
+		for k, v := range r.URL.Query() {
+			q[k] = v[0]
+		}
+		res, err := n.Hook(r.Context(), r.PathValue("plugin"), protocol.HookRequest{Name: r.PathValue("name"), Method: r.Method, Query: q, Body: string(body)})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		if res.ContentType != "" {
+			w.Header().Set("Content-Type", res.ContentType)
+		}
+		if res.Status == 0 {
+			res.Status = http.StatusOK
+		}
+		w.WriteHeader(res.Status)
+		_, _ = io.WriteString(w, res.Body)
+	})
 	mux.Handle("/mcp", MCP(n, version))
 	return mux
 }

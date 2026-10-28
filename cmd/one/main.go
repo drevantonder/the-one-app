@@ -42,6 +42,9 @@ const usage = `one: TheOneApp
   one plugins [list]                      list plugins
   one plugins enable|disable|reload ID    manage a plugin
   one plugins link DIR                    load a plugin from a Go module, with hot reload
+  one plugins add ID --mcp URL [--oauth google --scopes S]
+                                          add a no-code plugin from an MCP server
+  one plugins remove ID                   remove an added or published plugin
   one peers                               this user's other devices and their sync state
   one bucket setup-r2 NAME                back up to a Cloudflare R2 bucket (needs CLOUDFLARE_API_TOKEN)
   one bucket status|kit|import KIT        bucket state, recovery kit, restore from a kit
@@ -132,6 +135,8 @@ func serve(args []string) error {
 	m := mesh.New(node, st, portOf(*addr), log)
 	m.OnPeer = b.AdoptFromPeer
 	node.SetCoordinator(coordinator{b, m, st.Device()})
+	node.SetDeclaredHost([]string{exe(), "plugin-host", "--declared"})
+	os.Setenv("ONE_ADDR", *addr) // plugins build their hook URLs from it
 	node.SetBlobs(b)
 	node.Start(ctx)
 	defer node.Stop()
@@ -177,7 +182,20 @@ var builtinIDs = func() []string {
 	return ids
 }()
 
+func exe() string {
+	p, _ := os.Executable()
+	return p
+}
+
 func pluginHost(args []string) error {
+	if len(args) == 1 && args[0] == "--declared" {
+		p, err := declaredPlugin()
+		if err != nil {
+			return err
+		}
+		sdk.Run(p)
+		return nil
+	}
 	if len(args) != 1 {
 		return errors.New("usage: one plugin-host <id>")
 	}
@@ -224,6 +242,9 @@ func client(args []string) error {
 	case "plugins":
 		if len(args) == 1 {
 			args = append(args, "list")
+		}
+		if args[1] == "add" {
+			return addPlugin(args[2:])
 		}
 		if args[1] == "link" && len(args) > 2 {
 			if abs, err := filepath.Abs(args[2]); err == nil {

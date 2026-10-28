@@ -115,10 +115,29 @@ func sortEntries(list []protocol.Entry) {
 // running plugin to a newly published build. A plugin linked from source on
 // this device keeps running from its source.
 func (n *Node) refreshPublished(ctx context.Context) {
-	var restart []string
+	var restart, stop []string
 	n.mu.Lock()
+	declared, removed := n.declaredState()
+	for id, spec := range declared {
+		src := n.sources[id]
+		switch {
+		case src == nil:
+			n.sources[id] = &source{id: id, declared: spec}
+		case src.declared != nil && string(src.declared) != string(spec):
+			src.declared = spec
+			if n.gens[id] != nil {
+				restart = append(restart, id)
+			}
+		}
+	}
+	for id := range removed {
+		if src := n.sources[id]; src != nil && (src.declared != nil || src.published != nil) {
+			delete(n.sources, id)
+			stop = append(stop, id)
+		}
+	}
 	for id, p := range n.publishedState() {
-		if slices.Contains(n.builtins, id) || id == CoreID {
+		if slices.Contains(n.builtins, id) || id == CoreID || removed[id] {
 			continue
 		}
 		src := n.sources[id]
@@ -135,8 +154,11 @@ func (n *Node) refreshPublished(ctx context.Context) {
 		}
 	}
 	n.mu.Unlock()
+	for _, id := range stop {
+		n.stopPlugin(id)
+	}
 	for _, id := range restart {
-		n.log.Info("new build published; swapping generation", "plugin", id)
+		n.log.Info("plugin changed; swapping generation", "plugin", id)
 		if err := n.startPlugin(ctx, id); err != nil {
 			n.log.Error("published build failed to start", "plugin", id, "err", err)
 		}

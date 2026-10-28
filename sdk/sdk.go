@@ -44,9 +44,10 @@ const (
 )
 
 type Plugin struct {
-	ID      string
-	Version string
-	Setup   func(*Ctx) error
+	ID        string
+	Version   string
+	Platforms []string // GOOS values the plugin runs on; empty means all
+	Setup     func(*Ctx) error
 }
 
 // Ctx is what Setup registers against.
@@ -62,7 +63,16 @@ type Ctx struct {
 	last       *Entry // the last entry applied, to refuse out-of-order ones
 	schedules  []protocol.Schedule
 	jobs       map[string]func(*Call) error
+	hooks      map[string]func(*Call, protocol.HookRequest) (protocol.HookResponse, error)
+	ready      []func(*Call)
 }
+
+// OnReady runs once the plugin's log has been replayed, so its state is
+// current: a good time to connect to outside services.
+func (c *Ctx) OnReady(fn func(*Call)) { c.ready = append(c.ready, fn) }
+
+// ID is the plugin's id.
+func (c *Ctx) ID() string { return c.id }
 
 // ErrLate is the error code for an entry that sorts before one already
 // applied. The core answers it by replaying the plugin's log in order.
@@ -124,8 +134,7 @@ func Op[In any](c *Ctx, name, description string, kind Kind, fn func(*Call, In) 
 		panic(fmt.Sprintf("%s.%s: input schema: %v", c.id, name, err))
 	}
 	raw, _ := json.Marshal(schema)
-	c.ops = append(c.ops, protocol.Operation{Name: name, Description: description, InputSchema: raw, ReadOnly: bool(kind)})
-	c.opFns[name] = func(call *Call, input json.RawMessage) (Result, error) {
+	c.OpRaw(name, description, raw, kind, func(call *Call, input json.RawMessage) (Result, error) {
 		var in In
 		if len(input) > 0 && string(input) != "null" {
 			if err := json.Unmarshal(input, &in); err != nil {
@@ -133,7 +142,40 @@ func Op[In any](c *Ctx, name, description string, kind Kind, fn func(*Call, In) 
 			}
 		}
 		return fn(call, in)
+	})
+}
+
+// OpRaw registers an operation with a JSON Schema given as is, for tools
+// imported from elsewhere. Registering a name again replaces it.
+func (c *Ctx) OpRaw(name, description string, schema json.RawMessage, kind Kind, fn func(*Call, json.RawMessage) (Result, error)) {
+	c.RemoveOp(name)
+	c.ops = append(c.ops, protocol.Operation{Name: name, Description: description, InputSchema: schema, ReadOnly: bool(kind)})
+	c.opFns[name] = fn
+}
+
+// RemoveOp drops an operation.
+func (c *Ctx) RemoveOp(name string) {
+	for i, o := range c.ops {
+		if o.Name == name {
+			c.ops = append(c.ops[:i], c.ops[i+1:]...)
+			break
+		}
 	}
+	delete(c.opFns, name)
+}
+
+// Changed tells the core the plugin's operations changed, after Setup (e.g.
+// tools imported once an account is connected).
+func (c *Ctx) Changed() {
+	if c.conn != nil {
+		_ = c.conn.Notify(protocol.MethodChanged, struct{}{})
+	}
+}
+
+// Hook handles HTTP requests to /hooks/<plugin>/<name> on this device's
+// node, e.g. an OAuth redirect or a webhook.
+func (c *Ctx) Hook(name string, fn func(*Call, protocol.HookRequest) (protocol.HookResponse, error)) {
+	c.hooks[name] = fn
 }
 
 // Every registers a job run once per interval on exactly one of the user's
@@ -197,6 +239,7 @@ func Run(p Plugin) {
 		apply:      map[string]func(Entry) error{},
 		transforms: map[string]func(doc, args json.RawMessage) (any, error){},
 		jobs:       map[string]func(*Call) error{},
+		hooks:      map[string]func(*Call, protocol.HookRequest) (protocol.HookResponse, error){},
 	}
 	if err := p.Setup(c); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: setup: %v\n", p.ID, err)
@@ -217,7 +260,11 @@ func (c *Ctx) handle(p Plugin) rpc.Handler {
 			for n := range c.transforms {
 				names = append(names, n)
 			}
-			return protocol.Manifest{Protocol: protocol.Version, ID: p.ID, Version: p.Version, Entries: c.entries, Operations: c.ops, Transforms: names, Schedules: c.schedules}, nil
+			hooks := make([]string, 0, len(c.hooks))
+			for h := range c.hooks {
+				hooks = append(hooks, h)
+			}
+			return protocol.Manifest{Protocol: protocol.Version, ID: p.ID, Version: p.Version, Entries: c.entries, Operations: c.ops, Transforms: names, Schedules: c.schedules, Hooks: hooks, Platforms: p.Platforms}, nil
 		case protocol.MethodReset:
 			c.last = nil
 			for _, fn := range c.reset {
@@ -255,6 +302,21 @@ func (c *Ctx) handle(p Plugin) rpc.Handler {
 				return nil, &rpc.Error{Code: -32601, Message: "unknown schedule " + in.Schedule}
 			}
 			return struct{}{}, fn(&Call{Context: ctx, Caller: Caller{Actor: "schedule:" + in.Schedule}, ctx: c})
+		case protocol.MethodReady:
+			for _, fn := range c.ready {
+				fn(&Call{Context: ctx, Caller: Caller{Actor: "ready"}, ctx: c})
+			}
+			return nil, nil
+		case protocol.MethodHook:
+			var in protocol.HookRequest
+			if err := json.Unmarshal(params, &in); err != nil {
+				return nil, err
+			}
+			fn := c.hooks[in.Name]
+			if fn == nil {
+				return protocol.HookResponse{Status: 404, Body: "no such hook"}, nil
+			}
+			return fn(&Call{Context: ctx, Caller: Caller{Actor: "hook:" + in.Name}, ctx: c}, in)
 		case protocol.MethodTransform:
 			var in protocol.TransformParams
 			if err := json.Unmarshal(params, &in); err != nil {

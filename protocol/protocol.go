@@ -5,7 +5,7 @@ package protocol
 import "encoding/json"
 
 // Version is the plugin protocol version. Bump it on breaking changes.
-const Version = 2
+const Version = 3
 
 // Core → plugin methods.
 const (
@@ -15,12 +15,18 @@ const (
 	MethodCall      = "call"
 	MethodTransform = "transform"
 	MethodRun       = "run"
+	MethodHook      = "hook"
+	// MethodReady is a notification sent once the log has been replayed.
+	MethodReady = "ready"
 )
 
 // Plugin → core methods.
 const (
 	MethodAppend = "append"
 	MethodLog    = "log"
+	// MethodChanged is a notification: the plugin's operations changed, so
+	// the core should describe it again.
+	MethodChanged = "changed"
 )
 
 // Transform names a plugin can register.
@@ -46,6 +52,23 @@ type Manifest struct {
 	Operations []Operation `json:"operations"`
 	Transforms []string    `json:"transforms"`
 	Schedules  []Schedule  `json:"schedules,omitempty"`
+	Hooks      []string    `json:"hooks,omitempty"`
+	// Platforms the plugin runs on (GOOS values); empty means all.
+	Platforms []string `json:"platforms,omitempty"`
+}
+
+// HookRequest is an HTTP request to /hooks/<plugin>/<name> on a node.
+type HookRequest struct {
+	Name   string            `json:"name"`
+	Method string            `json:"method"`
+	Query  map[string]string `json:"query,omitempty"`
+	Body   string            `json:"body,omitempty"`
+}
+
+type HookResponse struct {
+	Status      int    `json:"status,omitempty"`
+	ContentType string `json:"contentType,omitempty"`
+	Body        string `json:"body,omitempty"`
 }
 
 // Schedule is a job the plugin wants run every EveryMs, on exactly one of

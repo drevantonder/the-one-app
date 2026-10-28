@@ -43,6 +43,10 @@ type (
 	pluginIn struct {
 		ID string `json:"id" jsonschema:"the plugin id, as listed by plugins_list"`
 	}
+	addIn struct {
+		ID   string          `json:"id" jsonschema:"the new plugin's id, e.g. gmail"`
+		Spec json.RawMessage `json:"spec" jsonschema:"the declaration, e.g. {\"mcp\":{\"url\":...},\"oauth\":{...}}"`
+	}
 	linkIn struct {
 		Dir string `json:"dir" jsonschema:"absolute path of the plugin's Go module on this device"`
 	}
@@ -112,6 +116,33 @@ func (n *Node) coreOps() []coreOp {
 					return protocol.Result{}, err
 				}
 				return n.publish(ctx, in.ID, c.Actor)
+			}},
+		{Op{CoreID, "plugins_add", "Add a plugin from a declaration, with no code: e.g. a remote MCP server and its sign-in. It is added on every device.", schemaFor[addIn](), false},
+			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
+				in, err := decode[addIn](raw)
+				if err != nil {
+					return protocol.Result{}, err
+				}
+				return n.add(ctx, in, c.Actor)
+			}},
+		{Op{CoreID, "plugins_remove", "Remove an added or published plugin from every device. Its log entries are kept.", schemaFor[pluginIn](), false},
+			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
+				in, err := decode[pluginIn](raw)
+				if err != nil {
+					return protocol.Result{}, err
+				}
+				n.mu.RLock()
+				src := n.sources[in.ID]
+				n.mu.RUnlock()
+				if src == nil || (src.declared == nil && src.published == nil) {
+					return protocol.Result{}, fmt.Errorf("%q is not an added or published plugin", in.ID)
+				}
+				payload, _ := json.Marshal(map[string]string{"id": in.ID})
+				if _, err := n.store.Append(CoreID, "plugin.removed", payload, c.Actor); err != nil {
+					return protocol.Result{}, err
+				}
+				n.reconcile(ctx)
+				return protocol.Result{Text: "Removed " + in.ID + "."}, nil
 			}},
 		{Op{CoreID, "plugins_link", "Load a plugin from a Go module on this device. It is rebuilt and hot-reloaded whenever its files change.", schemaFor[linkIn](), false},
 			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
@@ -252,6 +283,8 @@ func (n *Node) listPlugins() protocol.Result {
 		n.mu.RUnlock()
 		r := row{ID: id, Kind: "builtin", Enabled: enabled[id], Running: g != nil, Error: errText}
 		switch {
+		case src.declared != nil:
+			r.Kind = "added"
 		case src.published != nil:
 			r.Kind = "published"
 		case !src.builtin:
@@ -447,4 +480,29 @@ func fingerprint(dir string) string {
 func shortHash(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:6])
+}
+
+func (n *Node) add(ctx context.Context, in addIn, actor string) (protocol.Result, error) {
+	if in.ID == "" || in.ID == CoreID || slices.Contains(n.builtins, in.ID) {
+		return protocol.Result{}, fmt.Errorf("plugin id %q is reserved or empty", in.ID)
+	}
+	if !json.Valid(in.Spec) || len(in.Spec) == 0 {
+		return protocol.Result{}, fmt.Errorf("spec must be a JSON object")
+	}
+	n.mu.RLock()
+	src := n.sources[in.ID]
+	n.mu.RUnlock()
+	if src != nil && src.declared == nil {
+		return protocol.Result{}, fmt.Errorf("a plugin called %q already exists", in.ID)
+	}
+	payload, _ := json.Marshal(map[string]any{"id": in.ID, "spec": in.Spec})
+	if _, err := n.store.Append(CoreID, "plugin.declared", payload, actor); err != nil {
+		return protocol.Result{}, err
+	}
+	state, _ := json.Marshal(pluginState{ID: in.ID, Enabled: true})
+	if _, err := n.store.Append(CoreID, "plugin.state", state, actor); err != nil {
+		return protocol.Result{}, err
+	}
+	n.reconcile(ctx)
+	return n.listPlugins(), nil
 }
