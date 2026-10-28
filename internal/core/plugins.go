@@ -299,7 +299,7 @@ func (n *Node) reload(ctx context.Context, id string) (protocol.Result, error) {
 	if !n.enabledState()[id] {
 		return protocol.Result{}, fmt.Errorf("plugin %q is disabled", id)
 	}
-	if !src.builtin {
+	if src.dir != "" { // only linked plugins are built here
 		if err := n.build(src); err != nil {
 			n.setErr(id, err)
 			return protocol.Result{}, err

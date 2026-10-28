@@ -37,6 +37,7 @@ func TestNodeOverMCP(t *testing.T) {
 
 	serve := exec.Command(bin, "serve", "--local", "--addr", addr, "--data", filepath.Join(dir, "data"))
 	serve.Stderr = os.Stderr
+	serve.Dir = dir // like launchd or systemd: not inside a Go module
 	if err := serve.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +144,10 @@ func TestNodeOverMCP(t *testing.T) {
 			t.Fatalf("echoer_echo never worked: %v %+v", err, res)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+	// Reloading a plugin with no code restarts it; there is nothing to build.
+	if res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "plugins_reload", Arguments: map[string]any{"id": "echoer"}}); err != nil || res.IsError {
+		t.Fatalf("plugins_reload echoer: %v %+v", err, res)
 	}
 	// Images, such as screenshots, come through as images.
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "echoer_picture", Arguments: map[string]any{}})
