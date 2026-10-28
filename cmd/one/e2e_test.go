@@ -104,6 +104,25 @@ func TestNodeOverMCP(t *testing.T) {
 	if wake, _ := call("wake", nil); !strings.Contains(wake, "fact 2") {
 		t.Fatalf("memory not restored after enable:\n%s", wake)
 	}
+
+	// `one mcp` relays stdio to the same node, with the same instructions and tools.
+	relay := exec.Command(bin, "mcp")
+	relay.Env = append(os.Environ(), "ONE_ADDR="+addr)
+	stdio, err := client.Connect(ctx, &mcp.CommandTransport{Command: relay}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdio.Close()
+	if stdio.InitializeResult().Instructions != session.InitializeResult().Instructions {
+		t.Fatal("stdio relay instructions differ from the node's")
+	}
+	res, err := stdio.CallTool(ctx, &mcp.CallToolParams{Name: "wake"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "fact 2") {
+		t.Fatalf("wake over stdio:\n%s", text)
+	}
 }
 
 func waitFor(t *testing.T, url string) {

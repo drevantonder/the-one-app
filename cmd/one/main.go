@@ -35,6 +35,7 @@ const version = "0.1.0-dev"
 const usage = `one: TheOneApp
 
   one serve [--addr ADDR] [--data DIR]   run this device's node
+  one mcp                                 MCP over stdio, relayed to this device's node
   one wake [part] [at]                    read instructions and memory
   one plugins [list]                      list plugins
   one plugins enable|disable|reload ID    manage a plugin
@@ -56,6 +57,8 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		err = serve(os.Args[2:])
+	case "mcp":
+		err = mcpStdio()
 	case "plugin-host":
 		err = pluginHost(os.Args[2:])
 	case "version", "--version":

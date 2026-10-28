@@ -38,8 +38,11 @@ one memory note "Prefers Go for backend work"
 one wake
 ```
 
-Connect an agent to `http://127.0.0.1:4747/mcp`. Its first call should be
-`wake`; the server's instructions tell it so.
+Connect your agents with the command `one mcp` (MCP over stdio), the same on
+every device. For example, `claude mcp add --scope user the-one-app -- one mcp`.
+It relays to the node, which also serves MCP over HTTP at
+`http://127.0.0.1:4747/mcp`. An agent's first call should be `wake`; the
+server's instructions tell it so.
 
 ## Writing a plugin
 
