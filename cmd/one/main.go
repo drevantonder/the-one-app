@@ -357,7 +357,15 @@ func buildInput(op core.Op, args []string) (json.RawMessage, error) {
 				return fmt.Errorf("%s must be true or false", name)
 			}
 			in[name] = v
-		case "array":
+		case "array": // a,b,c or, when items hold commas or aren't strings, JSON
+			if strings.HasPrefix(val, "[") {
+				var v []any
+				if err := json.Unmarshal([]byte(val), &v); err != nil {
+					return fmt.Errorf("%s must be a JSON array or comma separated", name)
+				}
+				in[name] = v
+				break
+			}
 			in[name] = strings.Split(val, ",")
 		case "object":
 			var v map[string]any
