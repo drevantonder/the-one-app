@@ -102,6 +102,24 @@ through the mesh. For example, computer use on a Mac with
 one plugins add computer-use --command "cua-driver mcp" --platforms darwin
 ```
 
+## Spaces: computers for agents
+
+On a Linux device with [Incus](https://linuxcontainers.org/incus), the
+built-in `spaces` plugin gives agents desktops of their own, each in a
+container running [Cua](https://cua.ai)'s Linux image, with no Cua account:
+
+```sh
+one spaces create --name messenger
+one spaces view --name messenger    # a link to the desktop, from any of your devices
+```
+
+Sign in to sites in the viewer once; the Space's home folder is a volume of
+its own, so sign-ins survive restarts. The Space's tools, from browser control
+to clicks and typing, are `spaces` operations too, such as
+`one spaces get_browser_state`, with a `space` argument once there are
+several. The viewer is served over HTTPS on the tailnet, with
+`tailscale serve`.
+
 ## Writing a plugin
 
 ```go

@@ -181,6 +181,11 @@ func (im *mcpImport) call(ctx context.Context, tool string, ownAccount bool, inp
 	if err != nil {
 		return Result{}, err
 	}
+	return MCPResult(res)
+}
+
+// MCPResult turns an MCP tool result into an operation's result.
+func MCPResult(res *mcp.CallToolResult) (Result, error) {
 	var parts []string
 	var images []Image
 	for _, c := range res.Content {
