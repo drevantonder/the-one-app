@@ -24,20 +24,20 @@ import (
 // CoreID is the namespace of the core's own entries and operations.
 const CoreID = "one"
 
-// Builtins ship inside the one binary and run as `one plugin-host <id>`.
-var Builtins = []string{"instructions", "memory"}
 
 type source struct {
-	id      string
-	builtin bool
-	dir     string // linked Go module, rebuilt on change
-	binary  string // last successful build of a linked plugin
+	id        string
+	builtin   bool
+	dir       string     // linked Go module, rebuilt on change
+	binary    string     // last successful build of a linked plugin
+	published *published // published from another device, fetched from the bucket
 }
 
 type generation struct {
 	id       string
 	n        int
 	manifest protocol.Manifest
+	last     orderKey // the last entry applied, in log order
 	conn     *rpc.Conn
 	cmd      *exec.Cmd
 	stdin    interface{ Close() error }
@@ -45,8 +45,9 @@ type generation struct {
 }
 
 type Node struct {
-	store   *store.Store
-	dataDir string
+	store    *store.Store
+	builtins []string // bundled plugins, run as `one plugin-host <id>`, in order
+	dataDir  string
 	exe     string
 	log     *slog.Logger
 
@@ -56,23 +57,29 @@ type Node struct {
 	errs     map[string]string
 	genCount int
 	watchers []func()
+	extraOps []coreOp
+	coord    Coordinator
+	blobs    Blobs
 }
 
-func New(st *store.Store, dataDir string, log *slog.Logger) (*Node, error) {
+// New creates a node. builtins are the plugins bundled with the binary; they
+// run first, in the order given.
+func New(st *store.Store, dataDir string, builtins []string, log *slog.Logger) (*Node, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
 	n := &Node{
-		store:   st,
-		dataDir: dataDir,
+		store:    st,
+		builtins: builtins,
+		dataDir:  dataDir,
 		exe:     exe,
 		log:     log,
 		sources: map[string]*source{},
 		gens:    map[string]*generation{},
 		errs:    map[string]string{},
 	}
-	for _, id := range Builtins {
+	for _, id := range builtins {
 		n.sources[id] = &source{id: id, builtin: true}
 	}
 	if err := n.loadLinks(); err != nil {
@@ -85,6 +92,7 @@ func (n *Node) Device() string { return n.store.Device() }
 
 // Start launches every enabled plugin.
 func (n *Node) Start(ctx context.Context) {
+	n.refreshPublished(ctx)
 	enabled := n.enabledState()
 	for _, id := range n.sourceOrder() {
 		if enabled[id] {
@@ -94,6 +102,7 @@ func (n *Node) Start(ctx context.Context) {
 		}
 	}
 	go n.watchLinks(ctx)
+	go n.runSchedules(ctx)
 }
 
 // Stop shuts down every plugin.
@@ -128,10 +137,10 @@ func (n *Node) changed() {
 func (n *Node) sourceOrder() []string {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	out := slices.Clone(Builtins)
+	out := slices.Clone(n.builtins)
 	var rest []string
 	for id := range n.sources {
-		if !slices.Contains(Builtins, id) {
+		if !slices.Contains(n.builtins, id) {
 			rest = append(rest, id)
 		}
 	}
@@ -183,7 +192,20 @@ func (n *Node) startPlugin(ctx context.Context, id string) error {
 	if src == nil {
 		return fmt.Errorf("unknown plugin %q", id)
 	}
-	if !src.builtin && n.command(src)[0] == "" {
+	n.mu.RLock()
+	pub := src.published
+	n.mu.RUnlock()
+	switch {
+	case pub != nil:
+		path, err := n.fetchPublished(ctx, *pub)
+		if err != nil {
+			n.setErr(id, err)
+			return err
+		}
+		n.mu.Lock()
+		src.binary = path
+		n.mu.Unlock()
+	case !src.builtin && n.command(src)[0] == "":
 		if err := n.build(src); err != nil {
 			n.setErr(id, err)
 			return err
@@ -271,6 +293,9 @@ func (n *Node) spawn(ctx context.Context, src *source) (*generation, error) {
 	if err != nil {
 		return fail(err)
 	}
+	if len(entries) > 0 {
+		g.last = keyOf(entries[len(entries)-1])
+	}
 	for start := 0; start < len(entries); start += 500 {
 		batch := entries[start:min(start+500, len(entries))]
 		if err := g.conn.Call(sctx, protocol.MethodApply, protocol.ApplyParams{Entries: batch}, nil); err != nil {
@@ -309,7 +334,30 @@ func (n *Node) pluginHandler(id string) rpc.Handler {
 			if in.Type == "" {
 				return nil, errors.New("append: missing type")
 			}
-			return n.store.Append(id, in.Type, in.Payload, in.Actor)
+			if err := n.checkConsistent(ctx, id, in.Type); err != nil {
+				return nil, err
+			}
+			e, err := n.store.Append(id, in.Type, in.Payload, in.Actor)
+			if err == nil && n.coordinator() != nil {
+				n.mu.RLock()
+				consistent := n.gens[id] != nil && modeOf(n.gens[id].manifest, in.Type) == protocol.Consistent
+				n.mu.RUnlock()
+				if consistent {
+					// Durable before acknowledged, so a device taking over the
+					// lease sees this entry when it catches up from the bucket.
+					if ferr := n.coordinator().Flush(ctx); ferr != nil {
+						n.log.Warn("consistent entry not yet in the bucket", "plugin", id, "err", ferr)
+					}
+				}
+			}
+			if err == nil {
+				n.mu.Lock()
+				if g := n.gens[id]; g != nil {
+					g.last = keyOf(e)
+				}
+				n.mu.Unlock()
+			}
+			return e, err
 		case protocol.MethodLog:
 			var in protocol.LogParams
 			_ = json.Unmarshal(params, &in)
@@ -333,9 +381,19 @@ func (n *Node) Call(ctx context.Context, plugin, op string, input json.RawMessag
 	if !slices.ContainsFunc(g.manifest.Operations, func(o protocol.Operation) bool { return o.Name == op }) {
 		return protocol.Result{}, fmt.Errorf("plugin %q has no operation %q", plugin, op)
 	}
-	caller.Device = n.store.Device()
+	if caller.Device == "" {
+		caller.Device = n.store.Device()
+	}
 	var res protocol.Result
 	err = g.conn.Call(ctx, protocol.MethodCall, protocol.CallParams{Operation: op, Input: input, Caller: caller}, &res)
+	if holder, ok := notHolder(err); ok {
+		// Consistent data has one writer: run the operation on its device.
+		c := n.coordinator()
+		if c == nil {
+			return res, err
+		}
+		return c.Forward(ctx, holder, plugin, op, input, caller)
+	}
 	return res, err
 }
 
@@ -386,22 +444,28 @@ func (n *Node) Wake(ctx context.Context, args protocol.WakeArgs) (string, error)
 	return strings.Join(parts, "\n\n"), nil
 }
 
-const baseInstructions = `TheOneApp holds this user's instructions, memory and tools, shared across their devices.
+const baseInstructions = `TheOneApp is this user's personal hub, shared across their devices. Its tools come from plugins, and every tool is also a CLI command (` + "`one <plugin> <operation>`" + `) and an HTTP API.`
 
-Before anything else, in every session, call the ` + "`wake`" + ` tool and do what it says, to the end of its output.
+const wakeInstruction = `Before anything else, in every session, call the ` + "`wake`" + ` tool and do what it says, to the end of its output.`
 
-Every tool here is also a CLI command (` + "`one <plugin> <operation>`" + `) and an HTTP API.`
-
-// Instructions builds the MCP server instructions from the base text.
+// Instructions builds the MCP server instructions: the base text, the wake
+// rule if any plugin contributes to wake, then each plugin's transform.
 func (n *Node) Instructions(ctx context.Context) string {
-	raw, err := n.transform(ctx, protocol.TransformInstructions, protocol.InstructionsDoc{Text: baseInstructions}, nil)
+	base := baseInstructions
+	for _, g := range n.running() {
+		if slices.Contains(g.manifest.Transforms, protocol.TransformWake) {
+			base += "\n\n" + wakeInstruction
+			break
+		}
+	}
+	raw, err := n.transform(ctx, protocol.TransformInstructions, protocol.InstructionsDoc{Text: base}, nil)
 	if err != nil {
-		n.log.Error("instructions", "err", err)
-		return baseInstructions
+		n.log.Error("building MCP instructions", "err", err)
+		return base
 	}
 	var doc protocol.InstructionsDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return baseInstructions
+		return base
 	}
 	return doc.Text
 }

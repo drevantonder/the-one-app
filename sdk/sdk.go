@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
@@ -58,6 +59,23 @@ type Ctx struct {
 	reset      []func()
 	transforms map[string]func(doc, args json.RawMessage) (any, error)
 	conn       *rpc.Conn
+	last       *Entry // the last entry applied, to refuse out-of-order ones
+	schedules  []protocol.Schedule
+	jobs       map[string]func(*Call) error
+}
+
+// ErrLate is the error code for an entry that sorts before one already
+// applied. The core answers it by replaying the plugin's log in order.
+const ErrLate = -32010
+
+func before(a, b Entry) bool {
+	if a.HLC != b.HLC {
+		return a.HLC < b.HLC
+	}
+	if a.Device != b.Device {
+		return a.Device < b.Device
+	}
+	return a.Seq < b.Seq
 }
 
 // Call is one operation invocation.
@@ -134,6 +152,13 @@ func (c *Ctx) Wake(fn func(doc *protocol.WakeDoc, args protocol.WakeArgs) error)
 	}
 }
 
+// Every registers a job run once per interval on exactly one of the user's
+// devices. A job's Call has no caller; it can Append like an operation.
+func (c *Ctx) Every(name string, every time.Duration, fn func(*Call) error) {
+	c.schedules = append(c.schedules, protocol.Schedule{Name: name, EveryMs: every.Milliseconds()})
+	c.jobs[name] = fn
+}
+
 // Instructions registers a transform over the MCP server instructions.
 func (c *Ctx) Instructions(fn func(text string) string) {
 	c.transforms[protocol.TransformInstructions] = func(d, _ json.RawMessage) (any, error) {
@@ -169,6 +194,10 @@ func (call *Call) Append(typ string, payload any) (Entry, error) {
 }
 
 func (c *Ctx) applyOne(e Entry) error {
+	if c.last != nil && !before(*c.last, e) {
+		return &rpc.Error{Code: ErrLate, Message: "entry " + e.ID + " arrived out of order"}
+	}
+	c.last = &e
 	fn := c.apply[e.Type]
 	if fn == nil {
 		return nil // unknown types (e.g. from a newer version) are skipped
@@ -183,6 +212,7 @@ func Run(p Plugin) {
 		opFns:      map[string]func(*Call, json.RawMessage) (Result, error){},
 		apply:      map[string]func(Entry) error{},
 		transforms: map[string]func(doc, args json.RawMessage) (any, error){},
+		jobs:       map[string]func(*Call) error{},
 	}
 	if err := p.Setup(c); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: setup: %v\n", p.ID, err)
@@ -203,8 +233,9 @@ func (c *Ctx) handle(p Plugin) rpc.Handler {
 			for n := range c.transforms {
 				names = append(names, n)
 			}
-			return protocol.Manifest{Protocol: protocol.Version, ID: p.ID, Version: p.Version, Entries: c.entries, Operations: c.ops, Transforms: names}, nil
+			return protocol.Manifest{Protocol: protocol.Version, ID: p.ID, Version: p.Version, Entries: c.entries, Operations: c.ops, Transforms: names, Schedules: c.schedules}, nil
 		case protocol.MethodReset:
+			c.last = nil
 			for _, fn := range c.reset {
 				fn()
 			}
@@ -230,6 +261,16 @@ func (c *Ctx) handle(p Plugin) rpc.Handler {
 				return nil, &rpc.Error{Code: -32601, Message: "unknown operation " + in.Operation}
 			}
 			return fn(&Call{Context: ctx, Caller: in.Caller, ctx: c}, in.Input)
+		case protocol.MethodRun:
+			var in protocol.RunParams
+			if err := json.Unmarshal(params, &in); err != nil {
+				return nil, err
+			}
+			fn := c.jobs[in.Schedule]
+			if fn == nil {
+				return nil, &rpc.Error{Code: -32601, Message: "unknown schedule " + in.Schedule}
+			}
+			return struct{}{}, fn(&Call{Context: ctx, Caller: Caller{Actor: "schedule:" + in.Schedule}, ctx: c})
 		case protocol.MethodTransform:
 			var in protocol.TransformParams
 			if err := json.Unmarshal(params, &in); err != nil {

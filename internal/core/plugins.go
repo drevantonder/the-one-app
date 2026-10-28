@@ -77,8 +77,11 @@ func decode[T any](raw json.RawMessage) (T, error) {
 }
 
 func (n *Node) coreOps() []coreOp {
-	return []coreOp{
-		{Op{CoreID, "wake", "Read your instructions and memory. Call this first in every session and do what it says, to the end of its output.", schemaFor[wakeIn](), true},
+	n.mu.RLock()
+	extra := slices.Clone(n.extraOps)
+	n.mu.RUnlock()
+	return append([]coreOp{
+		{Op{CoreID, "wake", "Read what this user's plugins want every agent to know at the start of a session. Call this first and do what it says, to the end of its output.", schemaFor[wakeIn](), true},
 			func(ctx context.Context, raw json.RawMessage, _ protocol.Caller) (protocol.Result, error) {
 				in, err := decode[wakeIn](raw)
 				if err != nil {
@@ -115,6 +118,14 @@ func (n *Node) coreOps() []coreOp {
 				}
 				return n.reload(ctx, in.ID)
 			}},
+		{Op{CoreID, "plugins_publish", "Build a linked plugin for every platform and install it on all of this user's devices.", schemaFor[pluginIn](), false},
+			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
+				in, err := decode[pluginIn](raw)
+				if err != nil {
+					return protocol.Result{}, err
+				}
+				return n.publish(ctx, in.ID, c.Actor)
+			}},
 		{Op{CoreID, "plugins_link", "Load a plugin from a Go module on this device. It is rebuilt and hot-reloaded whenever its files change.", schemaFor[linkIn](), false},
 			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
 				in, err := decode[linkIn](raw)
@@ -123,8 +134,20 @@ func (n *Node) coreOps() []coreOp {
 				}
 				return n.link(ctx, in.Dir, c.Actor)
 			}},
-	}
+	}, extra...)
 }
+
+// AddCoreOp adds an operation to the core namespace, for parts of the node
+// outside this package (the mesh, the bucket).
+func (n *Node) AddCoreOp(name, description string, input json.RawMessage, readOnly bool, fn func(ctx context.Context, input json.RawMessage, caller protocol.Caller) (protocol.Result, error)) {
+	n.mu.Lock()
+	n.extraOps = append(n.extraOps, coreOp{Op{CoreID, name, description, input, readOnly}, fn})
+	n.mu.Unlock()
+	n.changed()
+}
+
+// SchemaFor derives an input schema from a Go type.
+func SchemaFor[T any]() json.RawMessage { return schemaFor[T]() }
 
 // Operations lists every operation, core first, then plugins in order.
 func (n *Node) Operations() []Op {
@@ -158,7 +181,7 @@ type pluginState struct {
 // Built-ins are enabled until disabled.
 func (n *Node) enabledState() map[string]bool {
 	out := map[string]bool{}
-	for _, id := range Builtins {
+	for _, id := range n.builtins {
 		out[id] = true
 	}
 	entries, err := n.store.Entries(CoreID)
@@ -241,7 +264,10 @@ func (n *Node) listPlugins() protocol.Result {
 		src, g, errText := n.sources[id], n.gens[id], n.errs[id]
 		n.mu.RUnlock()
 		r := row{ID: id, Kind: "builtin", Enabled: enabled[id], Running: g != nil, Error: errText}
-		if !src.builtin {
+		switch {
+		case src.published != nil:
+			r.Kind = "published"
+		case !src.builtin:
 			r.Kind, r.Dir = "linked", src.dir
 		}
 		if g != nil {
@@ -278,7 +304,7 @@ func (n *Node) loadLinks() error {
 		return err
 	}
 	for id, dir := range links {
-		if !slices.Contains(Builtins, id) {
+		if !slices.Contains(n.builtins, id) {
 			n.sources[id] = &source{id: id, dir: dir}
 		}
 	}
@@ -314,7 +340,7 @@ func (n *Node) link(ctx context.Context, dir, actor string) (protocol.Result, er
 	if err != nil {
 		return protocol.Result{}, err
 	}
-	if m.ID == CoreID || slices.Contains(Builtins, m.ID) {
+	if m.ID == CoreID || slices.Contains(n.builtins, m.ID) {
 		return protocol.Result{}, fmt.Errorf("plugin id %q is reserved", m.ID)
 	}
 	n.mu.Lock()

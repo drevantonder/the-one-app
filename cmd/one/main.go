@@ -21,7 +21,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/drevantonder/the-one-app/internal/bucket"
 	"github.com/drevantonder/the-one-app/internal/core"
+	"github.com/drevantonder/the-one-app/internal/mesh"
 	"github.com/drevantonder/the-one-app/internal/store"
 	"github.com/drevantonder/the-one-app/internal/surface"
 	"github.com/drevantonder/the-one-app/plugins/instructions"
@@ -40,6 +42,9 @@ const usage = `one: TheOneApp
   one plugins [list]                      list plugins
   one plugins enable|disable|reload ID    manage a plugin
   one plugins link DIR                    load a plugin from a Go module, with hot reload
+  one peers                               this user's other devices and their sync state
+  one bucket setup-r2 NAME                back up to a Cloudflare R2 bucket (needs CLOUDFLARE_API_TOKEN)
+  one bucket status|kit|import KIT        bucket state, recovery kit, restore from a kit
   one ops                                 list every operation
   one <plugin> <operation> [args...]      run any operation, e.g. one memory note "text"
   one call <plugin> <operation> [JSON]    run an operation with raw JSON input
@@ -96,6 +101,7 @@ func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", defaultAddr(), "listen address")
 	data := fs.String("data", defaultData(), "data directory")
+	local := fs.Bool("local", false, "stay off the tailnet: no mesh, loopback only")
 	_ = fs.Parse(args)
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -115,14 +121,30 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	node, err := core.New(st, *data, log)
+	node, err := core.New(st, *data, builtinIDs, log)
 	if err != nil {
 		return err
 	}
+	b := bucket.New(node, st, log)
+	if err := b.Start(ctx); err != nil {
+		return err
+	}
+	m := mesh.New(node, st, portOf(*addr), log)
+	m.OnPeer = b.AdoptFromPeer
+	node.SetCoordinator(coordinator{b, m, st.Device()})
+	node.SetBlobs(b)
 	node.Start(ctx)
 	defer node.Stop()
-
-	srv := &http.Server{Handler: surface.Handler(node, version), ReadHeaderTimeout: 10 * time.Second}
+	mux := http.NewServeMux()
+	mux.Handle("/", surface.Handler(node, version))
+	m.Routes(mux)
+	b.Routes(mux)
+	if !*local {
+		if err := m.Start(ctx, mux); err != nil {
+			return err
+		}
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -136,12 +158,36 @@ func serve(args []string) error {
 	return nil
 }
 
+func portOf(addr string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		return port
+	}
+	return "4747"
+}
+
+// builtins are the plugins bundled in this binary, in the order their
+// transforms run.
+var builtins = []sdk.Plugin{instructions.Plugin, memory.Plugin}
+
+var builtinIDs = func() []string {
+	var ids []string
+	for _, p := range builtins {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}()
+
 func pluginHost(args []string) error {
 	if len(args) != 1 {
 		return errors.New("usage: one plugin-host <id>")
 	}
-	plugins := map[string]sdk.Plugin{"instructions": instructions.Plugin, "memory": memory.Plugin}
-	p, ok := plugins[args[0]]
+	var p sdk.Plugin
+	ok := false
+	for _, b := range builtins {
+		if b.ID == args[0] {
+			p, ok = b, true
+		}
+	}
 	if !ok {
 		return fmt.Errorf("no built-in plugin %q", args[0])
 	}
@@ -171,6 +217,10 @@ func client(args []string) error {
 			input = args[3]
 		}
 		return run(args[1], args[2], json.RawMessage(input))
+	case "bucket":
+		if len(args) >= 3 && args[1] == "setup-r2" {
+			return setupR2(args[2])
+		}
 	case "plugins":
 		if len(args) == 1 {
 			args = append(args, "list")

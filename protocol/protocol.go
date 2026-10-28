@@ -14,6 +14,7 @@ const (
 	MethodApply     = "apply"
 	MethodCall      = "call"
 	MethodTransform = "transform"
+	MethodRun       = "run"
 )
 
 // Plugin → core methods.
@@ -45,7 +46,23 @@ type Manifest struct {
 	Entries    []EntryType `json:"entries"`
 	Operations []Operation `json:"operations"`
 	Transforms []string    `json:"transforms"`
+	Schedules  []Schedule  `json:"schedules,omitempty"`
 }
+
+// Schedule is a job the plugin wants run every EveryMs, on exactly one of
+// the user's devices at a time.
+type Schedule struct {
+	Name    string `json:"name"`
+	EveryMs int64  `json:"everyMs"`
+}
+
+type RunParams struct {
+	Schedule string `json:"schedule"`
+}
+
+// ErrNotHolder is returned when a consistent entry is appended on a device
+// that does not hold the plugin's lease. The core forwards the operation.
+const ErrNotHolder = -32011
 
 type EntryType struct {
 	Type string `json:"type"`

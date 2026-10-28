@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +41,7 @@ type Store struct {
 	mu      sync.Mutex
 	seq     int64
 	lastHLC uint64
+	changed chan struct{} // closed and replaced whenever the log grows
 }
 
 func Open(path string) (*Store, error) {
@@ -51,7 +54,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, changed: make(chan struct{})}
 	if err := s.load(); err != nil {
 		db.Close()
 		return nil, err
@@ -112,7 +115,143 @@ func (s *Store) Append(plugin, typ string, payload json.RawMessage, actor string
 		return protocol.Entry{}, err
 	}
 	s.seq = seq
+	s.notify()
 	return entry(s.device, seq, hlc, plugin, typ, payload, actor), nil
+}
+
+// notify wakes everyone waiting on Changed. Callers hold s.mu.
+func (s *Store) notify() {
+	close(s.changed)
+	s.changed = make(chan struct{})
+}
+
+// Changed returns a channel that is closed the next time the log grows.
+func (s *Store) Changed() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.changed
+}
+
+// Vector is how far this node has each device's log: the highest sequence
+// number it holds per device. Logs are always received in order, so
+// everything below that number is present too.
+func (s *Store) Vector() (map[string]int64, error) {
+	rows, err := s.db.Query(`SELECT device, MAX(seq) FROM entries GROUP BY device`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	v := map[string]int64{}
+	for rows.Next() {
+		var d string
+		var n int64
+		if err := rows.Scan(&d, &n); err != nil {
+			return nil, err
+		}
+		v[d] = n
+	}
+	return v, rows.Err()
+}
+
+// After returns entries this node has beyond the given vector, from every
+// device (so nodes relay each other's logs), in per-device sequence order.
+func (s *Store) After(vector map[string]int64, limit int) ([]protocol.Entry, error) {
+	mine, err := s.Vector()
+	if err != nil {
+		return nil, err
+	}
+	var out []protocol.Entry
+	for device, have := range mine {
+		from := vector[device]
+		if have <= from {
+			continue
+		}
+		batch, err := s.DeviceEntries(device, from, limit-len(out))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, batch...)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// DeviceEntries returns one device's entries after a sequence number.
+func (s *Store) DeviceEntries(device string, after int64, limit int) ([]protocol.Entry, error) {
+	rows, err := s.db.Query(`SELECT seq, hlc, plugin, type, payload, actor FROM entries WHERE device = ? AND seq > ? ORDER BY seq LIMIT ?`, device, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []protocol.Entry
+	for rows.Next() {
+		var (
+			plugin, typ, actor string
+			seq, hlc           int64
+			payload            []byte
+		)
+		if err := rows.Scan(&seq, &hlc, &plugin, &typ, &payload, &actor); err != nil {
+			return nil, err
+		}
+		out = append(out, entry(device, seq, uint64(hlc), plugin, typ, payload, actor))
+	}
+	return out, rows.Err()
+}
+
+// Ingest stores entries received from another node or the bucket. Entries
+// already held are skipped; an entry that would leave a gap in its device's
+// log is skipped too (it arrives again later, in order). It returns the
+// entries that were new.
+func (s *Store) Ingest(entries []protocol.Entry) ([]protocol.Entry, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	entries = slices.Clone(entries)
+	slices.SortStableFunc(entries, func(a, b protocol.Entry) int {
+		if c := strings.Compare(a.Device, b.Device); c != 0 {
+			return c
+		}
+		return int(a.Seq - b.Seq)
+	})
+	vec, err := s.Vector()
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var added []protocol.Entry
+	for _, e := range entries {
+		if e.Device == s.device || e.Seq != vec[e.Device]+1 {
+			continue
+		}
+		payload := []byte(e.Payload)
+		if len(payload) == 0 {
+			payload = []byte("null")
+		}
+		if _, err := tx.Exec(`INSERT INTO entries (device, seq, hlc, plugin, type, payload, actor) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			e.Device, e.Seq, int64(e.HLC), e.Plugin, e.Type, payload, e.Actor); err != nil {
+			return nil, err
+		}
+		vec[e.Device] = e.Seq
+		if e.HLC > s.lastHLC {
+			s.lastHLC = e.HLC // our next entry sorts after everything we've seen
+		}
+		added = append(added, entry(e.Device, e.Seq, e.HLC, e.Plugin, e.Type, payload, e.Actor))
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	if len(added) > 0 {
+		s.notify()
+	}
+	return added, nil
 }
 
 // Entries returns a plugin's entries in log order.

@@ -34,7 +34,7 @@ func TestNodeOverMCP(t *testing.T) {
 	addr := ln.Addr().String()
 	ln.Close()
 
-	serve := exec.Command(bin, "serve", "--addr", addr, "--data", filepath.Join(dir, "data"))
+	serve := exec.Command(bin, "serve", "--local", "--addr", addr, "--data", filepath.Join(dir, "data"))
 	serve.Stderr = os.Stderr
 	if err := serve.Start(); err != nil {
 		t.Fatal(err)

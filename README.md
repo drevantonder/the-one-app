@@ -7,8 +7,10 @@ Every agent you use (Claude Code, Codex, opencode, anything that speaks MCP)
 connects to the same node and gets the same instructions, the same memory and
 the same tools, through MCP, a CLI or an HTTP API.
 
-> Early days: this is milestone 1, a single device. Syncing between devices
-> over Tailscale, and backup to S3-compatible storage, come next.
+Bring your own devices: a laptop, a Raspberry Pi, an old PC. Each runs a node;
+they find each other over [Tailscale](https://tailscale.com) and keep each
+other in sync, and an S3-compatible bucket (Cloudflare R2, or one you host)
+backs everything up, encrypted on your devices. No server required.
 
 ## How it's built
 
@@ -27,6 +29,26 @@ A small core, with everything else as plugins.
   empty by running each plugin's transforms in order, as in
   [OpenCode 2](https://anoma.ly/notes/opencode-reloaded/). That makes reloads
   safe: a plugin's new generation simply replaces the old one.
+
+## Devices, sync and backup
+
+- **Every device keeps a full copy** and works offline. Each appends to its own
+  log; entries sort the same way everywhere (hybrid logical clock, device,
+  sequence), so devices converge without a server.
+- **Sync** runs node to node over the tailnet, only between machines of the
+  same Tailscale user. Changes arrive within a second; devices that are never
+  online together exchange entries through the bucket. A late entry from a
+  device that was offline makes affected plugins replay their log in order.
+- **Backup**: `one bucket setup-r2 <name>` (or `bucket_configure` for any S3
+  provider). Logs are encrypted before upload; your other devices pick up the
+  bucket automatically. Keep `one bucket kit` in a password manager: with it,
+  `one bucket import <kit>` rebuilds a device from the bucket alone.
+- **Two kinds of data**, chosen per entry type. *Available* entries can be
+  written on any device, even offline, and merge. *Consistent* entries have one
+  writer at a time, chosen by a lease in the bucket (conditional writes, with
+  an epoch); other devices forward the operation to it.
+- **Jobs** (`c.Every(...)`) run once per interval on exactly one device, even
+  as devices come and go.
 
 ## Try it
 
@@ -71,6 +93,9 @@ func main() {
 ```
 
 `one plugins link ./habits` builds and loads it; it's rebuilt and hot-reloaded
-whenever its files change. `habits_check_in` is then an MCP tool,
+whenever its files change. `one plugins publish habits` builds it for every
+platform and installs it on all your devices, which swap to each new build as
+they sync. `habits_check_in` is then an MCP tool,
 `one habits check_in run` a CLI command, and `POST /v1/call/habits/check_in`
-an API endpoint. See [`examples/habits`](examples/habits).
+an API endpoint. See [`examples/habits`](examples/habits), and
+[`examples/jobs`](examples/jobs) for jobs and consistent entries.
