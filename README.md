@@ -67,6 +67,20 @@ It relays to the node, which also serves MCP over HTTP at
 together: your instructions, and the memory plugin's rule to call
 `memory_wake` first.
 
+## Plugins with no code
+
+Point a plugin at a service and its tools appear on every device:
+
+```sh
+one plugins add gmail --discovery 'https://gmail.googleapis.com/$discovery/rest?version=v1' \
+  --oauth google --scopes https://www.googleapis.com/auth/gmail.modify
+one gmail sign_in --clientId … --clientSecret …   # once, on a device with a browser
+```
+
+The source can be a remote MCP server (`--mcp URL`), a local one
+(`--command "npx …"`), or a Google API Discovery document (`--discovery URL`).
+The sign-in is stored in the plugin's own log, so it works on every device.
+
 ## Writing a plugin
 
 ```go

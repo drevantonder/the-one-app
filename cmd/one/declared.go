@@ -14,8 +14,9 @@ import (
 // declaration is a plugin with no code: a remote or local MCP server, and
 // how to sign in to it. It is all `one plugins add` needs.
 type declaration struct {
-	MCP   sdk.MCPServer `json:"mcp"`
-	OAuth *struct {
+	MCP       sdk.MCPServer `json:"mcp,omitempty"`
+	Discovery string        `json:"discovery,omitempty"` // a Google API Discovery document
+	OAuth     *struct {
 		Provider string `json:"provider,omitempty"` // "google", or empty for the URLs below
 		sdk.OAuthProvider
 	} `json:"oauth,omitempty"`
@@ -41,6 +42,10 @@ func declaredPlugin() (sdk.Plugin, error) {
 			}
 			account = sdk.OAuth(c, p)
 		}
+		if d.Discovery != "" {
+			sdk.ImportDiscovery(c, d.Discovery, account)
+			return nil
+		}
 		sdk.ImportMCP(c, d.MCP, account)
 		return nil
 	}}, nil
@@ -49,11 +54,12 @@ func declaredPlugin() (sdk.Plugin, error) {
 // addPlugin turns `one plugins add` flags into a declaration.
 func addPlugin(args []string) error {
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
-		return errors.New("usage: one plugins add ID (--mcp URL | --command CMD) [--oauth google | --auth-url U --token-url U] [--scopes a,b] [--header K=V]")
+		return errors.New("usage: one plugins add ID (--mcp URL | --command CMD | --discovery URL) [--oauth google | --auth-url U --token-url U] [--scopes a,b] [--header K=V]")
 	}
 	id := args[0]
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	url := fs.String("mcp", "", "remote MCP server URL")
+	discovery := fs.String("discovery", "", "Google API Discovery document URL")
 	command := fs.String("command", "", "local MCP server command, run on each device")
 	provider := fs.String("oauth", "", "OAuth provider: google")
 	authURL := fs.String("auth-url", "", "OAuth authorization URL")
@@ -69,8 +75,9 @@ func addPlugin(args []string) error {
 	if *command != "" {
 		d.MCP.Command = strings.Fields(*command)
 	}
-	if d.MCP.URL == "" && len(d.MCP.Command) == 0 {
-		return errors.New("give --mcp URL or --command CMD")
+	d.Discovery = *discovery
+	if d.MCP.URL == "" && len(d.MCP.Command) == 0 && d.Discovery == "" {
+		return errors.New("give --mcp URL, --command CMD or --discovery URL")
 	}
 	if *provider != "" || *authURL != "" {
 		d.OAuth = &struct {
