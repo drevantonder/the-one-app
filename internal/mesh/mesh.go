@@ -105,13 +105,35 @@ func (m *Mesh) pull(w http.ResponseWriter, r *http.Request) {
 
 // Start joins the tailnet side: it serves h on this machine's tailnet
 // address (to the same Tailscale user only) and syncs with peer nodes. If
-// Tailscale isn't running, the node simply stays local.
+// Tailscale isn't running yet, as at boot, the node stays local and joins
+// once it is.
 func (m *Mesh) Start(ctx context.Context, h http.Handler) error {
 	st, err := status(ctx)
-	if err != nil {
-		m.log.Warn("tailnet unavailable; this node stays local", "err", err)
-		return nil
+	if err == nil {
+		return m.join(ctx, h, st)
 	}
+	m.log.Warn("tailnet unavailable; this node stays local until it is", "err", err)
+	go func() {
+		t := time.NewTicker(10 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+			if st, err := status(ctx); err == nil {
+				if err := m.join(ctx, h, st); err != nil {
+					m.log.Error("joining the tailnet", "err", err)
+				}
+				return
+			}
+		}
+	}()
+	return nil
+}
+
+func (m *Mesh) join(ctx context.Context, h http.Handler, st tsStatus) error {
 	m.self = st.Self
 	ip := st.Self.ipv4()
 	if ip == "" {
