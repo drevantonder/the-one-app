@@ -60,6 +60,13 @@ one memory note "Prefers Go for backend work"
 one memory wake
 ```
 
+On a Mac, build the signed app instead, which the Apple plugins (Reminders,
+Calendar, Contacts, iMessage) need: `macos/build.sh install` puts
+`TheOneApp.app` in `~/Applications` and links `one` into `~/.local/bin`. Run
+the node from the app; macOS then asks for each permission once, as
+TheOneApp, and keeps it across updates. Reading iMessages also needs Full Disk
+Access for TheOneApp.
+
 Connect your agents with the command `one mcp` (MCP over stdio), the same on
 every device. For example, `claude mcp add --scope user the-one-app -- one mcp`.
 It relays to the node, which also serves MCP over HTTP at

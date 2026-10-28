@@ -173,7 +173,7 @@ func portOf(addr string) string {
 
 // builtins are the plugins bundled in this binary, in the order their
 // transforms run.
-var builtins = []sdk.Plugin{instructions.Plugin, memory.Plugin, shell.Plugin, apple.Reminders, apple.Calendar}
+var builtins = []sdk.Plugin{instructions.Plugin, memory.Plugin, shell.Plugin, apple.Reminders, apple.Calendar, apple.Contacts, apple.IMessage}
 
 var builtinIDs = func() []string {
 	var ids []string

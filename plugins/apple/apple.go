@@ -1,77 +1,50 @@
-// Package apple holds the built-in reminders and calendar plugins. They run
-// on macOS, where a small Swift helper reads and writes Apple's stores
-// through EventKit; other devices reach them through the mesh.
+// Package apple holds the built-in plugins for Apple apps: reminders,
+// calendar, contacts and imessage. They run on macOS, inside TheOneApp.app,
+// through small Swift helpers; other devices reach them through the mesh.
 package apple
 
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	_ "embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
-//go:embed eventkit.swift
-var helperSource []byte
-
-//go:embed Info.plist
-var helperPlist []byte
+// A helper is a small Swift program for one Apple framework, built into
+// TheOneApp.app next to the one binary (see macos/build.sh). Running inside
+// the signed app means macOS asks for each permission once, as TheOneApp.
+type helper string
 
 var (
-	helperOnce sync.Once
-	helperPath string
-	helperErr  error
+	eventkit helper = "eventkit"
+	contacts helper = "contacts"
+	messages helper = "messages"
 )
 
-// helper compiles the Swift helper the first time it's needed, and again
-// only when its source changes. macOS asks for permission once per build.
-func helper() (string, error) {
-	helperOnce.Do(func() {
-		sum := sha256.Sum256(append(append([]byte{}, helperSource...), helperPlist...))
-		cache, err := os.UserCacheDir()
-		if err != nil {
-			helperErr = err
-			return
-		}
-		dir := filepath.Join(cache, "one", "eventkit-"+hex.EncodeToString(sum[:6]))
-		helperPath = filepath.Join(dir, "one-eventkit")
-		if _, err := os.Stat(helperPath); err == nil {
-			return
-		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			helperErr = err
-			return
-		}
-		src, plist := filepath.Join(dir, "eventkit.swift"), filepath.Join(dir, "Info.plist")
-		_ = os.WriteFile(src, helperSource, 0o644)
-		_ = os.WriteFile(plist, helperPlist, 0o644)
-		tmp := helperPath + ".tmp"
-		build := exec.Command("swiftc", "-O", src, "-o", tmp, "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", plist)
-		if out, err := build.CombinedOutput(); err != nil {
-			helperErr = fmt.Errorf("building the EventKit helper needs the Xcode command line tools (xcode-select --install): %v\n%s", err, out)
-			return
-		}
-		if out, err := exec.Command("codesign", "-s", "-", "-f", "--identifier", "dev.theoneapp.eventkit", tmp).CombinedOutput(); err != nil {
-			helperErr = fmt.Errorf("signing the EventKit helper: %v\n%s", err, out)
-			return
-		}
-		helperErr = os.Rename(tmp, helperPath)
-	})
-	return helperPath, helperErr
+func (h helper) path() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	p := filepath.Join(filepath.Dir(exe), "one-"+string(h))
+	if _, err := os.Stat(p); err != nil {
+		return "", errors.New("this plugin runs inside TheOneApp.app; build and install it with macos/build.sh install")
+	}
+	return p, nil
 }
 
-// run calls the helper with a command and JSON input.
-func run(ctx context.Context, command string, input any) (sdk.Result, error) {
-	path, err := helper()
+// run calls a helper with a command and JSON input.
+func (h helper) run(ctx context.Context, command string, input any) (sdk.Result, error) {
+	path, err := h.path()
 	if err != nil {
 		return sdk.Result{}, err
 	}
@@ -86,7 +59,7 @@ func run(ctx context.Context, command string, input any) (sdk.Result, error) {
 		Error  string `json:"error"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
-		return sdk.Result{}, fmt.Errorf("EventKit helper: %s", out.String())
+		return sdk.Result{}, fmt.Errorf("%s helper: %s", h, out.String())
 	}
 	if res.Error != "" {
 		return sdk.Result{}, errors.New(res.Error)
@@ -97,9 +70,9 @@ func run(ctx context.Context, command string, input any) (sdk.Result, error) {
 	return sdk.Result{Data: res.Result}, nil
 }
 
-func op[In any](c *sdk.Ctx, name, command, description string, kind sdk.Kind) {
+func op[In any](c *sdk.Ctx, h helper, name, command, description string, kind sdk.Kind) {
 	sdk.Op(c, name, description, kind, func(call *sdk.Call, in In) (sdk.Result, error) {
-		return run(call.Context, command, in)
+		return h.run(call.Context, command, in)
 	})
 }
 
@@ -135,6 +108,27 @@ type (
 		Calendar string `json:"calendar,omitempty" jsonschema:"a calendar's name; omit for all"`
 		Query    string `json:"query,omitempty" jsonschema:"only events whose title, location or notes contain this"`
 	}
+	contactSearch struct {
+		Query string `json:"query" jsonschema:"a name, email address or phone number"`
+		Limit int    `json:"limit,omitempty" jsonschema:"at most this many; default 25"`
+	}
+	chatsIn struct {
+		Limit int `json:"limit,omitempty" jsonschema:"at most this many chats, most recent first; default 30"`
+	}
+	readIn struct {
+		Chat  string `json:"chat" jsonschema:"a chat id or group name from chats, or the other person's phone number or email"`
+		Since string `json:"since,omitempty" jsonschema:"ISO 8601; only messages after this"`
+		Limit int    `json:"limit,omitempty" jsonschema:"the most recent this many; default 50"`
+	}
+	searchIn struct {
+		Query string `json:"query" jsonschema:"text to look for, case-insensitive"`
+		Since string `json:"since,omitempty" jsonschema:"ISO 8601; only messages after this"`
+		Limit int    `json:"limit,omitempty" jsonschema:"at most this many, newest first; default 50"`
+	}
+	sendIn struct {
+		To   string `json:"to" jsonschema:"phone number (with country code) or email of an iMessage user"`
+		Text string `json:"text"`
+	}
 	eventNew struct {
 		Title    string `json:"title"`
 		Start    string `json:"start" jsonschema:"ISO 8601 date-time, or a date for all-day events"`
@@ -147,18 +141,33 @@ type (
 )
 
 var Reminders = sdk.Plugin{ID: "reminders", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
-	op[noIn](c, "lists", "reminders.lists", "List the reminder lists.", sdk.Read)
-	op[reminderList](c, "list", "reminders.list", "List reminders, incomplete ones unless asked.", sdk.Read)
-	op[reminderNew](c, "create", "reminders.create", "Create a reminder.", sdk.Write)
-	op[reminderEdit](c, "update", "reminders.update", "Change a reminder: title, list, due date, notes, priority, or completed.", sdk.Write)
-	op[byID](c, "delete", "reminders.delete", "Delete a reminder.", sdk.Write)
+	op[noIn](c, eventkit, "lists", "reminders.lists", "List the reminder lists.", sdk.Read)
+	op[reminderList](c, eventkit, "list", "reminders.list", "List reminders, incomplete ones unless asked.", sdk.Read)
+	op[reminderNew](c, eventkit, "create", "reminders.create", "Create a reminder.", sdk.Write)
+	op[reminderEdit](c, eventkit, "update", "reminders.update", "Change a reminder: title, list, due date, notes, priority, or completed.", sdk.Write)
+	op[byID](c, eventkit, "delete", "reminders.delete", "Delete a reminder.", sdk.Write)
 	return nil
 }}
 
 var Calendar = sdk.Plugin{ID: "calendar", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
-	op[noIn](c, "calendars", "calendar.calendars", "List the calendars.", sdk.Read)
-	op[eventRange](c, "events", "calendar.events", "List events in a time range (default: the next week).", sdk.Read)
-	op[eventNew](c, "create", "calendar.create", "Create an event.", sdk.Write)
-	op[byID](c, "delete", "calendar.delete", "Delete an event.", sdk.Write)
+	op[noIn](c, eventkit, "calendars", "calendar.calendars", "List the calendars.", sdk.Read)
+	op[eventRange](c, eventkit, "events", "calendar.events", "List events in a time range (default: the next week).", sdk.Read)
+	op[eventNew](c, eventkit, "create", "calendar.create", "Create an event.", sdk.Write)
+	op[byID](c, eventkit, "delete", "calendar.delete", "Delete an event.", sdk.Write)
+	return nil
+}}
+
+var Contacts = sdk.Plugin{ID: "contacts", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
+	op[contactSearch](c, contacts, "search", "contacts.search", "Find contacts by name, email address or phone number.", sdk.Read)
+	op[byID](c, contacts, "get", "contacts.get", "Get one contact by id.", sdk.Read)
+	op[noIn](c, contacts, "me", "contacts.me", "Get the user's own contact card.", sdk.Read)
+	return nil
+}}
+
+var IMessage = sdk.Plugin{ID: "imessage", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
+	op[chatsIn](c, messages, "chats", "messages.chats", "List recent iMessage and SMS conversations with their participants.", sdk.Read)
+	op[readIn](c, messages, "read", "messages.read", "Read the messages in one conversation, oldest first.", sdk.Read)
+	op[searchIn](c, messages, "search", "messages.search", "Search messages across conversations, newest first.", sdk.Read)
+	op[sendIn](c, messages, "send", "messages.send", "Send an iMessage from the user's account. This sends a real message to a real person.", sdk.Write)
 	return nil
 }}
