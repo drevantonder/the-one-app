@@ -32,7 +32,7 @@ func declaredPlugin() (sdk.Plugin, error) {
 		return sdk.Plugin{}, fmt.Errorf("bad declaration: %w", err)
 	}
 	return sdk.Plugin{ID: id, Version: "declared", Platforms: d.Platforms, Setup: func(c *sdk.Ctx) error {
-		var account *sdk.Account
+		var accounts *sdk.Accounts
 		if d.OAuth != nil {
 			p := d.OAuth.OAuthProvider
 			if d.OAuth.Provider == "google" {
@@ -41,13 +41,13 @@ func declaredPlugin() (sdk.Plugin, error) {
 			if p.AuthURL == "" || p.TokenURL == "" {
 				return errors.New("oauth needs a provider, or authUrl and tokenUrl")
 			}
-			account = sdk.OAuth(c, p)
+			accounts = sdk.OAuth(c, p)
 		}
 		if d.Discovery != "" {
-			sdk.ImportDiscovery(c, d.Discovery, account)
+			sdk.ImportDiscovery(c, d.Discovery, accounts)
 			return nil
 		}
-		sdk.ImportMCP(c, d.MCP, account)
+		sdk.ImportMCP(c, d.MCP, accounts)
 		return nil
 	}}, nil
 }

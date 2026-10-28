@@ -49,6 +49,10 @@ A small core, with everything else as plugins.
   an epoch); other devices forward the operation to it.
 - **Jobs** (`c.Every(...)`) run once per interval on exactly one device, even
   as devices come and go.
+- **Any operation runs on any device that has its plugin.** Every tool lists
+  where it is available and takes a `device` argument, e.g.
+  `one shell run --command uptime --device linux`. Without one, it runs on this
+  device if it can, otherwise on one that can.
 
 ## Try it
 
@@ -87,6 +91,8 @@ one gmail sign_in --clientId … --clientSecret …   # once, on a device with a
 The source can be a remote MCP server (`--mcp URL`), a local one
 (`--command "npx …"`), or a Google API Discovery document (`--discovery URL`).
 The sign-in is stored in the plugin's own log, so it works on every device.
+Signing in to another account adds it; with several, every operation takes an
+`account` argument, and `accounts` lists them.
 
 A local server can be limited to the devices that have it; the others reach it
 through the mesh. For example, computer use on a Mac with

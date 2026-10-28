@@ -12,19 +12,23 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // ImportDiscovery makes every method of a Google API, described by its
 // Discovery document, one of the plugin's operations, called with the
 // account's token. Discovery documents are public, so the operations exist
-// before sign-in.
-func ImportDiscovery(c *Ctx, docURL string, account *Account) {
-	im := &discoveryImport{ctx: c, docURL: docURL, account: account}
+// before sign-in. With several accounts, each operation takes an account.
+func ImportDiscovery(c *Ctx, docURL string, accounts *Accounts) {
+	im := &discoveryImport{ctx: c, docURL: docURL, accounts: accounts}
 	c.OnReady(func(call *Call) {
 		if err := im.refresh(call.Context); err != nil {
 			c.Logf("discovery: %v", err)
 		}
 	})
+	if accounts != nil {
+		accounts.OnChange(func(*Call) { im.register() })
+	}
 }
 
 type discoveryDoc struct {
@@ -62,11 +66,13 @@ type discoveryParam struct {
 }
 
 type discoveryImport struct {
-	ctx     *Ctx
-	docURL  string
-	account *Account
-	base    string
-	names   []string
+	ctx      *Ctx
+	docURL   string
+	accounts *Accounts
+
+	mu    sync.Mutex
+	doc   *discoveryDoc
+	names []string
 }
 
 func (im *discoveryImport) refresh(ctx context.Context) error {
@@ -86,7 +92,22 @@ func (im *discoveryImport) refresh(ctx context.Context) error {
 	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
 		return err
 	}
-	im.base = doc.RootURL + doc.ServicePath
+	im.mu.Lock()
+	im.doc = &doc
+	im.mu.Unlock()
+	im.register()
+	return nil
+}
+
+// register makes every method of the document an operation.
+func (im *discoveryImport) register() {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	doc := im.doc
+	if doc == nil {
+		return
+	}
+	base := doc.RootURL + doc.ServicePath
 	for _, n := range im.names {
 		im.ctx.RemoveOp(n)
 	}
@@ -110,18 +131,17 @@ func (im *discoveryImport) refresh(ctx context.Context) error {
 			name = name[i+1:] // drop the API name: gmail.users.messages.list → users.messages.list
 		}
 		name = strings.ReplaceAll(name, ".", "_")
-		schema, _ := json.Marshal(inputSchema(m, doc.Schemas))
+		schema, _ := json.Marshal(im.accounts.withAccount(inputSchema(m, doc.Schemas)))
 		kind := Write
 		if m.HTTPMethod == http.MethodGet {
 			kind = Read
 		}
 		im.ctx.OpRaw(name, m.Description, schema, kind, func(call *Call, input json.RawMessage) (Result, error) {
-			return im.call(call.Context, m, input)
+			return im.call(call.Context, base, m, input)
 		})
 		im.names = append(im.names, name)
 	}
 	im.ctx.Changed()
-	return nil
 }
 
 func inputSchema(m discoveryMethod, schemas map[string]json.RawMessage) map[string]any {
@@ -213,13 +233,15 @@ func inline(s map[string]any, schemas map[string]json.RawMessage, depth int) map
 
 var pathParam = regexp.MustCompile(`\{(\+?)([^}]+)\}`)
 
-func (im *discoveryImport) call(ctx context.Context, m discoveryMethod, input json.RawMessage) (Result, error) {
-	var in map[string]any
+func (im *discoveryImport) call(ctx context.Context, base string, m discoveryMethod, input json.RawMessage) (Result, error) {
+	in := map[string]any{}
 	if len(input) > 0 && string(input) != "null" {
 		if err := json.Unmarshal(input, &in); err != nil {
 			return Result{}, fmt.Errorf("bad input: %w", err)
 		}
 	}
+	_, own := m.Parameters["account"]
+	account := takeAccount(in, own)
 	value := func(name string) (any, bool) {
 		if v, ok := in[name]; ok {
 			return v, true
@@ -262,7 +284,7 @@ func (im *discoveryImport) call(ctx context.Context, m discoveryMethod, input js
 			q.Set(name, fmt.Sprint(v))
 		}
 	}
-	u := im.base + path
+	u := base + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
 	}
@@ -278,10 +300,10 @@ func (im *discoveryImport) call(ctx context.Context, m discoveryMethod, input js
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if im.account != nil {
-		token, err := im.account.Token(ctx)
+	if im.accounts != nil {
+		token, err := im.accounts.Token(ctx, account)
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: use sign_in first", err)
+			return Result{}, err
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
