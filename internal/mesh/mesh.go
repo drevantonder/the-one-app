@@ -135,8 +135,48 @@ func (m *Mesh) Start(ctx context.Context, h http.Handler) error {
 		func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) {
 			return m.peersResult(), nil
 		})
+	type runOnIn struct {
+		Device    string         `json:"device" jsonschema:"the device's tailnet name (e.g. linux), as listed by peers, or this device's"`
+		Plugin    string         `json:"plugin" jsonschema:"the plugin id, e.g. shell"`
+		Operation string         `json:"operation" jsonschema:"the operation name, e.g. run"`
+		Input     map[string]any `json:"input,omitempty" jsonschema:"the operation's input"`
+	}
+	m.node.AddCoreOp("run_on", "Run any operation on another of this user's devices, e.g. device linux, plugin shell, operation run.", core.SchemaFor[runOnIn](), false,
+		func(ctx context.Context, raw json.RawMessage, caller protocol.Caller) (protocol.Result, error) {
+			var in runOnIn
+			if err := json.Unmarshal(raw, &in); err != nil {
+				return protocol.Result{}, err
+			}
+			input, _ := json.Marshal(in.Input)
+			if in.Input == nil {
+				input = []byte("{}")
+			}
+			if in.Device == m.self.Name() || in.Device == m.store.Device() {
+				return m.node.Call(ctx, in.Plugin, in.Operation, input, caller)
+			}
+			ip := m.resolve(in.Device)
+			if ip == "" {
+				return protocol.Result{}, fmt.Errorf("no node on a device called %q is reachable; see peers", in.Device)
+			}
+			return m.call(ctx, ip, in.Plugin, in.Operation, input)
+		})
 	go m.discover(ctx)
 	return nil
+}
+
+// resolve finds a peer's tailnet IP by its tailnet name or node device id.
+func (m *Mesh) resolve(device string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ip, ok := m.devices[device]; ok {
+		return ip
+	}
+	for ip, p := range m.peers {
+		if p.name == device {
+			return ip
+		}
+	}
+	return ""
 }
 
 // auth admits only requests from this node's own Tailscale user.
@@ -270,13 +310,17 @@ func (m *Mesh) pullOnce(ctx context.Context, p *peer, wait time.Duration) (int, 
 }
 
 // Forward runs an operation on another device's node over the tailnet.
-func (m *Mesh) Forward(ctx context.Context, device, plugin, op string, input json.RawMessage, caller protocol.Caller) (protocol.Result, error) {
+func (m *Mesh) Forward(ctx context.Context, device, plugin, op string, input json.RawMessage, _ protocol.Caller) (protocol.Result, error) {
 	m.mu.Lock()
 	ip, ok := m.devices[device]
 	m.mu.Unlock()
 	if !ok {
 		return protocol.Result{}, fmt.Errorf("this data has one writer, device %s, and it isn't reachable right now", device)
 	}
+	return m.call(ctx, ip, plugin, op, input)
+}
+
+func (m *Mesh) call(ctx context.Context, ip, plugin, op string, input json.RawMessage) (protocol.Result, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+net.JoinHostPort(ip, m.port)+"/v1/call/"+plugin+"/"+op, bytes.NewReader(input))
 	if err != nil {
 		return protocol.Result{}, err
@@ -284,7 +328,7 @@ func (m *Mesh) Forward(ctx context.Context, device, plugin, op string, input jso
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return protocol.Result{}, fmt.Errorf("forwarding to the writer device: %w", err)
+		return protocol.Result{}, fmt.Errorf("reaching %s: %w", ip, err)
 	}
 	defer resp.Body.Close()
 	var out struct {
