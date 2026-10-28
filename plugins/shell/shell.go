@@ -1,6 +1,7 @@
 // Package shell is the built-in plugin that runs shell commands on the
 // device it's called on. Every command is logged, so all devices share an
-// audit trail. The core's run_on operation targets another device.
+// audit trail. Its operations, like every plugin's, take a device argument
+// to run on another device.
 package shell
 
 import (

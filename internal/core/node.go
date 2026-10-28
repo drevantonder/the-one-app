@@ -62,7 +62,8 @@ type Node struct {
 	coord    Coordinator
 	blobs    Blobs
 	declHost []string   // command that runs a declared plugin
-	remote   []RemoteOp // operations of plugins running only on other devices
+	remote   []RemoteOp // operations of plugins running on other devices
+	name     string     // this device's name; see Name
 }
 
 // SetDeclaredHost sets the command that runs declared plugins. The core
@@ -444,13 +445,26 @@ func (n *Node) Call(ctx context.Context, plugin, op string, input json.RawMessag
 	if plugin == CoreID {
 		return n.callCore(ctx, op, input, caller)
 	}
+	input, device, err := n.takeDevice(plugin, op, input)
+	if err != nil {
+		return protocol.Result{}, err
+	}
+	if device != "" && !n.isSelf(device) {
+		id, err := n.remoteOn(plugin, op, device)
+		if err != nil {
+			return protocol.Result{}, err
+		}
+		return n.forward(ctx, id, plugin, op, input, caller)
+	}
 	g, release, err := n.acquire(plugin)
 	if err != nil {
-		// Not running here: run it on a device that has it.
-		if device, ok := n.remoteFor(plugin, op); ok {
-			if c := n.coordinator(); c != nil {
-				return c.Forward(ctx, device, plugin, op, input, caller)
-			}
+		// Not running here: run it on a device that has it, unless asked
+		// for this one.
+		if device != "" {
+			return protocol.Result{}, n.notOn(plugin, op, device)
+		}
+		if id, ok := n.remoteFor(plugin, op); ok {
+			return n.forward(ctx, id, plugin, op, input, caller)
 		}
 		return protocol.Result{}, err
 	}
@@ -465,13 +479,18 @@ func (n *Node) Call(ctx context.Context, plugin, op string, input json.RawMessag
 	err = g.conn.Call(ctx, protocol.MethodCall, protocol.CallParams{Operation: op, Input: input, Caller: caller}, &res)
 	if holder, ok := notHolder(err); ok {
 		// Consistent data has one writer: run the operation on its device.
-		c := n.coordinator()
-		if c == nil {
-			return res, err
-		}
-		return c.Forward(ctx, holder, plugin, op, input, caller)
+		return n.forward(ctx, holder, plugin, op, input, caller)
 	}
 	return res, err
+}
+
+// forward runs an operation on another device, by its node's device id.
+func (n *Node) forward(ctx context.Context, device, plugin, op string, input json.RawMessage, caller protocol.Caller) (protocol.Result, error) {
+	c := n.coordinator()
+	if c == nil {
+		return protocol.Result{}, fmt.Errorf("device %s can't be reached without the mesh", device)
+	}
+	return c.Forward(ctx, device, plugin, op, input, caller)
 }
 
 // transform threads doc through every running plugin that registered name.

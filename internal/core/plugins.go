@@ -167,23 +167,16 @@ func (n *Node) AddCoreOp(name, description string, input json.RawMessage, readOn
 // SchemaFor derives an input schema from a Go type.
 func SchemaFor[T any]() json.RawMessage { return schemaFor[T]() }
 
-// Operations lists every operation: core first, then plugins running here,
-// then plugins that only run on other devices.
+// Operations lists every operation: core first, then every device's
+// plugins, each with the devices it is available on.
 func (n *Node) Operations() []Op {
 	var out []Op
 	for _, c := range n.coreOps() {
 		out = append(out, c.Op)
 	}
-	local := n.LocalOperations()
-	out = append(out, local...)
-	running := map[string]bool{}
-	for _, o := range local {
-		running[o.Plugin] = true
-	}
-	for _, r := range n.remoteOps() {
-		if !running[r.Plugin] {
-			out = append(out, r.Op)
-		}
+	ops, devices := n.availability()
+	for _, o := range ops {
+		out = append(out, withDevices(o, devices[o.Plugin+"/"+o.Name]))
 	}
 	return out
 }
@@ -203,7 +196,8 @@ func (n *Node) LocalOperations() []Op {
 // RemoteOp is an operation of a plugin running on another device.
 type RemoteOp struct {
 	Op
-	Device string `json:"device"`
+	Device     string `json:"device"`     // its node's device id
+	DeviceName string `json:"deviceName"` // its tailnet name
 }
 
 // SetRemoteOps replaces what other devices offer.
@@ -211,7 +205,7 @@ func (n *Node) SetRemoteOps(ops []RemoteOp) {
 	n.mu.Lock()
 	same := len(ops) == len(n.remote)
 	for i := 0; same && i < len(ops); i++ {
-		same = ops[i].Plugin == n.remote[i].Plugin && ops[i].Name == n.remote[i].Name && ops[i].Device == n.remote[i].Device
+		same = ops[i].Plugin == n.remote[i].Plugin && ops[i].Name == n.remote[i].Name && ops[i].Device == n.remote[i].Device && ops[i].DeviceName == n.remote[i].DeviceName
 	}
 	n.remote = ops
 	n.mu.Unlock()

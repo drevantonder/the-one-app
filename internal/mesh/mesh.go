@@ -133,53 +133,14 @@ func (m *Mesh) Start(ctx context.Context, h http.Handler) error {
 			m.log.Error("tailnet listener stopped", "err", err)
 		}
 	}()
+	m.node.SetName(st.Self.Name())
 	m.log.Info("on the tailnet", "name", st.Self.Name(), "url", fmt.Sprintf("http://%s:%s", strings.TrimSuffix(st.Self.DNSName, "."), m.port))
 	m.node.AddCoreOp("peers", "List this user's other devices on the tailnet and whether their nodes are syncing.", core.SchemaFor[struct{}](), true,
 		func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) {
 			return m.peersResult(), nil
 		})
-	type runOnIn struct {
-		Device    string         `json:"device" jsonschema:"the device's tailnet name (e.g. linux), as listed by peers, or this device's"`
-		Plugin    string         `json:"plugin" jsonschema:"the plugin id, e.g. shell"`
-		Operation string         `json:"operation" jsonschema:"the operation name, e.g. run"`
-		Input     map[string]any `json:"input,omitempty" jsonschema:"the operation's input"`
-	}
-	m.node.AddCoreOp("run_on", "Run any operation on another of this user's devices, e.g. device linux, plugin shell, operation run.", core.SchemaFor[runOnIn](), false,
-		func(ctx context.Context, raw json.RawMessage, caller protocol.Caller) (protocol.Result, error) {
-			var in runOnIn
-			if err := json.Unmarshal(raw, &in); err != nil {
-				return protocol.Result{}, err
-			}
-			input, _ := json.Marshal(in.Input)
-			if in.Input == nil {
-				input = []byte("{}")
-			}
-			if in.Device == m.self.Name() || in.Device == m.store.Device() {
-				return m.node.Call(ctx, in.Plugin, in.Operation, input, caller)
-			}
-			ip := m.resolve(in.Device)
-			if ip == "" {
-				return protocol.Result{}, fmt.Errorf("no node on a device called %q is reachable; see peers", in.Device)
-			}
-			return m.call(ctx, ip, in.Plugin, in.Operation, input)
-		})
 	go m.discover(ctx)
 	return nil
-}
-
-// resolve finds a peer's tailnet IP by its tailnet name or node device id.
-func (m *Mesh) resolve(device string) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if ip, ok := m.devices[device]; ok {
-		return ip
-	}
-	for ip, p := range m.peers {
-		if p.name == device {
-			return ip
-		}
-	}
-	return ""
 }
 
 // auth admits only requests from this node's own Tailscale user.
@@ -316,11 +277,11 @@ func (m *Mesh) peerOps(ctx context.Context, p *peer) {
 	m.publishRemote()
 }
 
-// publishRemote gives the node every reachable peer's operations.
+// publishRemote gives the node every reachable peer's operations, in a
+// stable order.
 func (m *Mesh) publishRemote() {
 	m.mu.Lock()
 	var all []core.RemoteOp
-	seen := map[string]bool{}
 	ips := make([]string, 0, len(m.peers))
 	for ip := range m.peers {
 		ips = append(ips, ip)
@@ -332,10 +293,7 @@ func (m *Mesh) publishRemote() {
 			continue
 		}
 		for _, o := range p.ops {
-			if key := o.Plugin + "/" + o.Name; !seen[key] {
-				seen[key] = true
-				all = append(all, core.RemoteOp{Op: o, Device: p.device})
-			}
+			all = append(all, core.RemoteOp{Op: o, Device: p.device, DeviceName: p.name})
 		}
 	}
 	m.mu.Unlock()
@@ -381,7 +339,7 @@ func (m *Mesh) Forward(ctx context.Context, device, plugin, op string, input jso
 	ip, ok := m.devices[device]
 	m.mu.Unlock()
 	if !ok {
-		return protocol.Result{}, fmt.Errorf("this data has one writer, device %s, and it isn't reachable right now", device)
+		return protocol.Result{}, fmt.Errorf("device %s isn't reachable right now", device)
 	}
 	return m.call(ctx, ip, plugin, op, input)
 }
