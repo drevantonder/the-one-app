@@ -1,6 +1,6 @@
 // Package spaces is the built-in plugin that gives agents computers of their
 // own: Linux desktops, each in a container, with a browser and apps, that
-// people watch and take over in a web viewer. It runs where Incus is
+// people watch and take over in a web viewer. It runs where Podman is
 // installed; other devices reach it through the mesh.
 //
 // The desktops are Cua's (github.com/trycua/cua), driven by the server
@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -47,8 +46,9 @@ type viewIn struct {
 var own = []string{"create", "list", "start", "stop", "delete", "view", "backup", "release", "refresh_tools"}
 
 func setup(c *sdk.Ctx) error {
-	if _, err := exec.LookPath("incus"); err != nil {
-		return errors.New("needs Incus (https://linuxcontainers.org/incus)")
+	var err error
+	if rt, err = newPodman(); err != nil {
+		return err
 	}
 	t := &tools{ctx: c, sessions: map[string]*mcp.ClientSession{}, cleaned: map[string]bool{}}
 	var mu sync.Mutex
@@ -73,9 +73,13 @@ func setup(c *sdk.Ctx) error {
 		}
 		return err
 	}
+	held := func(name string) bool { // backed up: this device holds it
+		me, err := tailnetName(context.Background())
+		return err == nil && holder(name) == me
+	}
 	c.OnReady(func(call *sdk.Call) {
 		_ = t.refresh(call.Context)
-		go keepBackedUp(call.Detached())
+		go keepBackedUp(call.Detached(), held)
 	})
 
 	sdk.Op(c, "create", "Create a Space: a Linux desktop of its own, with a browser, for agents to use. Sign in to sites in it with view. A Space that has backups, from this device or another, is restored from the newest.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
@@ -103,9 +107,6 @@ func setup(c *sdk.Ctx) error {
 		if err := restore(call, s, saved[0]); err != nil {
 			return sdk.Result{}, fmt.Errorf("created Space %q, but restoring its backup failed: %w", s.Name, err)
 		}
-		if err := setBackedUp(call.Context, s.Name, true); err != nil {
-			return sdk.Result{}, err
-		}
 		if err := host(call, s.Name); err != nil {
 			return sdk.Result{}, err
 		}
@@ -132,7 +133,7 @@ func setup(c *sdk.Ctx) error {
 				used = s.LastUsed.Local().Format(time.DateTime)
 			}
 			backed := "not backed up"
-			if spaces[i].BackedUp = backedUp(call.Context, s.Name); spaces[i].BackedUp {
+			if spaces[i].BackedUp = held(s.Name); spaces[i].BackedUp {
 				backed = "backed up"
 				if f, ok := latest[s.Name]; ok {
 					backed = fmt.Sprintf("backed up %s (%s)", f.Modified.Local().Format(time.DateTime), size(f.Size))
@@ -160,7 +161,7 @@ func setup(c *sdk.Ctx) error {
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		if _, err := incus(call.Context, "start", prefix+s.Name); err != nil && !strings.Contains(err.Error(), "already running") {
+		if err := rt.start(call.Context, s.Name); err != nil {
 			return sdk.Result{}, err
 		}
 		if err := ready(call.Context, s); err != nil {
@@ -173,13 +174,13 @@ func setup(c *sdk.Ctx) error {
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		if s.State == "running" && backedUp(call.Context, s.Name) {
+		if s.State == "running" && held(s.Name) {
 			if _, err := backup(call, s); err != nil {
 				return sdk.Result{}, fmt.Errorf("not stopped: backing up failed: %w", err)
 			}
 		}
 		t.drop(in.Name)
-		if _, err := incus(call.Context, "stop", prefix+in.Name); err != nil && !strings.Contains(err.Error(), "already stopped") {
+		if err := rt.stop(call.Context, s.Name); err != nil {
 			return sdk.Result{}, err
 		}
 		return sdk.Text("Stopped."), nil
@@ -197,6 +198,11 @@ func setup(c *sdk.Ctx) error {
 		if err := dropBackups(call, s.Name); err != nil {
 			return sdk.Result{}, fmt.Errorf("deleted Space %q, but not all its backups: %w", s.Name, err)
 		}
+		if held(s.Name) {
+			if _, err := call.Append("released", released{Name: s.Name}); err != nil {
+				return sdk.Result{}, err
+			}
+		}
 		return sdk.Text(fmt.Sprintf("Deleted Space %q.", s.Name)), nil
 	})
 	sdk.Op(c, "backup", "Turn a Space's backups on or off. Backed up, its home folder (without caches) is stored in the bucket, encrypted, when it stops and every 6 hours while it runs, keeping the last 3; it can then be restored on any device. Turning backups off deletes them.", sdk.Write, func(call *sdk.Call, in backupIn) (sdk.Result, error) {
@@ -205,11 +211,13 @@ func setup(c *sdk.Ctx) error {
 			return sdk.Result{}, err
 		}
 		if !in.On {
-			if err := setBackedUp(call.Context, s.Name, false); err != nil {
-				return sdk.Result{}, err
-			}
 			if err := dropBackups(call, s.Name); err != nil {
 				return sdk.Result{}, err
+			}
+			if held(s.Name) {
+				if _, err := call.Append("released", released{Name: s.Name}); err != nil {
+					return sdk.Result{}, err
+				}
 			}
 			return sdk.Text(fmt.Sprintf("Space %q is no longer backed up, and its backups are deleted.", s.Name)), nil
 		}
@@ -223,9 +231,6 @@ func setup(c *sdk.Ctx) error {
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		if err := setBackedUp(call.Context, s.Name, true); err != nil {
-			return sdk.Result{}, err
-		}
 		return sdk.Text(fmt.Sprintf("Space %q is backed up (%s so far).", s.Name, size(f.Size))), nil
 	})
 	sdk.Op(c, "release", "Free a backed-up Space for another device: back it up one last time and remove it here, keeping its backups. Then create it on the other device to restore it there.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
@@ -233,7 +238,7 @@ func setup(c *sdk.Ctx) error {
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		if !backedUp(call.Context, s.Name) {
+		if !held(s.Name) {
 			return sdk.Result{}, fmt.Errorf("Space %q isn't backed up: turn backups on first, or it would be lost", s.Name)
 		}
 		if s.State != "running" {
@@ -429,7 +434,7 @@ func (t *tools) call(ctx context.Context, tool string, input json.RawMessage) (s
 // plugin restarted or reconnected), the tools can neither use nor close it,
 // and it holds its profile.
 func closeBrowsers(ctx context.Context, s space) {
-	_, _ = incus(ctx, "exec", prefix+s.Name, "--", "pkill", "-f", "--", "--user-data-dir="+home+"/.local/state/cua-driver/browser-profiles/")
+	_ = rt.exec(ctx, s.Name, nil, nil, "pkill", "-f", "--", "--user-data-dir="+home+"/.local/state/cua-driver/browser-profiles/")
 	time.Sleep(time.Second)
 }
 

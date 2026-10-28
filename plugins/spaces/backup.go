@@ -1,7 +1,6 @@
 package spaces
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,17 +16,18 @@ import (
 // bucket when it stops and every few hours while it runs, encrypted, and
 // the last few backups are kept. Creating a Space with the name of a
 // backed-up one restores it, on any device, so one device at a time holds
-// it: the log records which.
+// it: the log records which, and a Space is backed up while this device
+// holds it.
 
 const (
-	backupFlag  = "user.one.backup" // Incus config on the container
 	backupEvery = 6 * time.Hour
 	keepBackups = 3
 )
 
 // caches are left out of backups: they are most of a browser profile's size
-// and rebuild themselves.
-var caches = []string{"./.cache", "*/Cache", "*/Code Cache", "*/GPUCache", "*/DawnCache", "*/GrShaderCache", "*/ShaderCache", "*/Service Worker/CacheStorage", "*/Service Worker/ScriptCache"}
+// and rebuild themselves. So are a running browser's locks, which would make
+// a restored profile look in use by another computer.
+var caches = []string{"./.cache", "*/Cache", "*/Code Cache", "*/GPUCache", "*/DawnCache", "*/GrShaderCache", "*/ShaderCache", "*/Service Worker/CacheStorage", "*/Service Worker/ScriptCache", "*/SingletonLock", "*/SingletonSocket", "*/SingletonCookie"}
 
 type hosted struct {
 	Name string `json:"name"`
@@ -36,20 +36,6 @@ type hosted struct {
 
 type released struct {
 	Name string `json:"name"`
-}
-
-func backedUp(ctx context.Context, name string) bool {
-	out, err := incus(ctx, "config", "get", prefix+name, backupFlag)
-	return err == nil && strings.TrimSpace(string(out)) == "true"
-}
-
-func setBackedUp(ctx context.Context, name string, on bool) error {
-	if on {
-		_, err := incus(ctx, "config", "set", prefix+name, backupFlag+"=true")
-		return err
-	}
-	_, err := incus(ctx, "config", "unset", prefix+name, backupFlag)
-	return err
 }
 
 // backups are a Space's stored backups, newest first.
@@ -70,19 +56,15 @@ func backup(call *sdk.Call, s space) (sdk.FileInfo, error) {
 		return sdk.FileInfo{}, err
 	}
 	defer os.Remove(tmp.Name())
-	args := []string{"exec", prefix + s.Name, "--", "tar", "-C", home, "--warning=no-file-changed"}
+	args := []string{"tar", "-C", home, "--warning=no-file-changed"}
 	for _, c := range caches {
 		args = append(args, "--exclude="+c)
 	}
-	cmd := exec.CommandContext(call.Context, "incus", append(args, "-czf", "-", ".")...)
-	cmd.Stdout = tmp
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	err = cmd.Run()
+	err = rt.exec(call.Context, s.Name, nil, tmp, append(args, "-czf", "-", ".")...)
 	tmp.Close()
 	var exit *exec.ExitError
 	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) { // 1: a file changed while it was read
-		return sdk.FileInfo{}, fmt.Errorf("packing %s: %v: %s", s.Name, err, strings.TrimSpace(stderr.String()))
+		return sdk.FileInfo{}, fmt.Errorf("packing %s: %w", s.Name, err)
 	}
 	name := fmt.Sprintf("%s/%s.tar.gz", s.Name, time.Now().UTC().Format("20060102T150405Z"))
 	if err := call.PutFile(name, tmp.Name()); err != nil {
@@ -111,7 +93,7 @@ func noBucket(err error) bool {
 	return strings.Contains(err.Error(), "needs a bucket") || strings.Contains(err.Error(), "no bucket configured")
 }
 
-// dropBackups deletes all of a Space's backups and frees its name.
+// dropBackups deletes all of a Space's backups.
 func dropBackups(call *sdk.Call, name string) error {
 	all, err := backups(call, name)
 	if err != nil {
@@ -125,10 +107,7 @@ func dropBackups(call *sdk.Call, name string) error {
 			return err
 		}
 	}
-	if len(all) > 0 {
-		_, err = call.Append("released", released{Name: name})
-	}
-	return err
+	return nil
 }
 
 // restore unpacks a backup into a freshly made Space and restarts it.
@@ -147,12 +126,13 @@ func restore(call *sdk.Call, s space, f sdk.FileInfo) error {
 		return err
 	}
 	defer in.Close()
-	cmd := exec.CommandContext(call.Context, "incus", "exec", prefix+s.Name, "--", "tar", "-C", home, "-xzf", "-")
-	cmd.Stdin = in
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("unpacking %s: %v: %s", f.Name, err, strings.TrimSpace(string(out)))
+	if err := rt.exec(call.Context, s.Name, in, nil, "tar", "-C", home, "-xzf", "-"); err != nil {
+		return fmt.Errorf("unpacking %s: %w", f.Name, err)
 	}
-	if _, err := incus(call.Context, "restart", prefix+s.Name); err != nil {
+	if err := rt.stop(call.Context, s.Name); err != nil {
+		return err
+	}
+	if err := rt.start(call.Context, s.Name); err != nil {
 		return err
 	}
 	return ready(call.Context, s)
@@ -160,12 +140,12 @@ func restore(call *sdk.Call, s space, f sdk.FileInfo) error {
 
 // keepBackedUp backs up every running, backed-up Space whose newest backup
 // is older than backupEvery. It runs for as long as the plugin does.
-func keepBackedUp(call *sdk.Call) {
+func keepBackedUp(call *sdk.Call, held func(string) bool) {
 	for {
 		spaces, err := list(call.Context)
 		if err == nil {
 			for _, s := range spaces {
-				if s.State != "running" || !backedUp(call.Context, s.Name) {
+				if s.State != "running" || !held(s.Name) {
 					continue
 				}
 				all, err := backups(call, s.Name)
