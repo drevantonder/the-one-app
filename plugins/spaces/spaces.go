@@ -50,7 +50,7 @@ func setup(c *sdk.Ctx) error {
 	if _, err := exec.LookPath("incus"); err != nil {
 		return errors.New("needs Incus (https://linuxcontainers.org/incus)")
 	}
-	t := &tools{ctx: c, sessions: map[string]*mcp.ClientSession{}}
+	t := &tools{ctx: c, sessions: map[string]*mcp.ClientSession{}, cleaned: map[string]bool{}}
 	var mu sync.Mutex
 	hosts := map[string]string{} // backed-up Space → the device holding it
 	holder := func(name string) string {
@@ -291,6 +291,7 @@ type tools struct {
 
 	mu       sync.Mutex
 	sessions map[string]*mcp.ClientSession // by Space
+	cleaned  map[string]bool               // Spaces whose leftover browsers are closed
 	names    []string
 }
 
@@ -405,9 +406,17 @@ func (t *tools) call(ctx context.Context, tool string, input json.RawMessage) (s
 		if session, err = t.connect(ctx, s); err != nil {
 			continue
 		}
-		if res, err = session.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args}); err == nil {
-			break
+		if res, err = session.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args}); err != nil {
+			continue
 		}
+		if tool == "browser_prepare" && attempt == 0 && strings.Contains(fmt.Sprint(res.StructuredContent), "browser_endpoint_owner_mismatch") {
+			// The profile is open in a browser left by an earlier connection.
+			closeBrowsers(ctx, s)
+			if res, err = session.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args}); err != nil {
+				continue
+			}
+		}
+		break
 	}
 	if err != nil {
 		return sdk.Result{}, err
@@ -415,11 +424,24 @@ func (t *tools) call(ctx context.Context, tool string, input json.RawMessage) (s
 	return sdk.MCPResult(res)
 }
 
+// closeBrowsers closes the browsers the Space's tools launched. Each belongs
+// to the connection that launched it: once that connection is gone (this
+// plugin restarted or reconnected), the tools can neither use nor close it,
+// and it holds its profile.
+func closeBrowsers(ctx context.Context, s space) {
+	_, _ = incus(ctx, "exec", prefix+s.Name, "--", "pkill", "-f", "--", "--user-data-dir="+home+"/.local/state/cua-driver/browser-profiles/")
+	time.Sleep(time.Second)
+}
+
 func (t *tools) connect(ctx context.Context, s space) (*mcp.ClientSession, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if session := t.sessions[s.Name]; session != nil {
 		return session, nil
+	}
+	if !t.cleaned[s.Name] {
+		closeBrowsers(ctx, s)
+		t.cleaned[s.Name] = true
 	}
 	transport := &mcp.StreamableClientTransport{Endpoint: s.local() + "/mcp", HTTPClient: &http.Client{Transport: bearer(s.token)}}
 	client := mcp.NewClient(&mcp.Implementation{Name: "the-one-app/spaces", Version: "1"}, nil)
@@ -431,6 +453,8 @@ func (t *tools) connect(ctx context.Context, s space) (*mcp.ClientSession, error
 	return session, nil
 }
 
+// drop forgets a Space's connection; the next one closes the browsers
+// this one launched.
 func (t *tools) drop(name string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -438,6 +462,7 @@ func (t *tools) drop(name string) {
 		_ = s.Close()
 		delete(t.sessions, name)
 	}
+	delete(t.cleaned, name)
 }
 
 type bearer string

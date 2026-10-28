@@ -120,6 +120,11 @@ to clicks and typing, are `spaces` operations too, such as
 several. The viewer is served over HTTPS on the tailnet, with
 `tailscale serve`.
 
+The built-in `messenger` plugin reads Facebook Messenger this way, from the
+browser in the Space called messenger, where you sign in to messenger.com
+once: `one messenger chats`, `read --chat …` (an unread chat is marked unread
+again) and `search --query …`.
+
 Spaces aren't backed up unless you ask: `one spaces backup --name messenger
 --on true` stores the home folder (without caches) in the bucket, encrypted,
 when the Space stops and every 6 hours, keeping the last 3. To move a Space,

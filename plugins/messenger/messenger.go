@@ -1,0 +1,393 @@
+// Package messenger is the built-in plugin that reads Facebook Messenger.
+// Messenger has no API for personal accounts and its chats are end-to-end
+// encrypted, so it reads messenger.com in a browser: the one in the Space
+// called messenger (see the spaces plugin), where the user signs in once.
+//
+//	one spaces create --name messenger
+//	one spaces view --name messenger   # open messenger.com there and sign in
+package messenger
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/drevantonder/the-one-app/sdk"
+)
+
+var Plugin = sdk.Plugin{ID: "messenger", Version: "0.2.0", Setup: setup}
+
+const (
+	space = "messenger" // the Space whose browser is signed in
+	home  = "https://www.messenger.com/"
+)
+
+type chatsIn struct {
+	Unread bool `json:"unread,omitempty" jsonschema:"only unread chats"`
+}
+
+type readIn struct {
+	Chat string `json:"chat" jsonschema:"the chat's name, or a part of it only one recent chat has"`
+}
+
+type searchIn struct {
+	Query string `json:"query" jsonschema:"words to find in messages"`
+}
+
+func setup(c *sdk.Ctx) error {
+	b := &browser{session: "messenger"}
+
+	sdk.Op(c, "chats", "List recent Messenger chats: who, their last message, when, and whether unread.", sdk.Read, func(call *sdk.Call, in chatsIn) (sdk.Result, error) {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		page, err := b.page(call)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		chats := page.chats()
+		if len(chats) == 0 {
+			return sdk.Result{}, errors.New("no chats found: is the messenger Space signed in? Open it with `one spaces view --name messenger`")
+		}
+		var shown []Chat
+		var lines []string
+		for _, ch := range chats {
+			if in.Unread && !ch.Unread {
+				continue
+			}
+			shown = append(shown, ch)
+			mark := ""
+			if ch.Unread {
+				mark = " (unread)"
+			}
+			lines = append(lines, fmt.Sprintf("%s%s, %s: %s", ch.Name, mark, ch.Time, ch.Last))
+		}
+		if len(shown) == 0 {
+			return sdk.Result{Text: "No unread chats.", Data: []Chat{}}, nil
+		}
+		return sdk.Result{Text: strings.Join(lines, "\n"), Data: shown}, nil
+	})
+
+	sdk.Op(c, "read", "Read a recent chat's messages. An unread chat is marked unread again afterwards, though the other side may still see it as seen.", sdk.Write, func(call *sdk.Call, in readIn) (sdk.Result, error) {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		page, err := b.page(call)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		ch, err := pick(page.chats(), in.Chat)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		if err := b.click(call, page, "link", ch.link); err != nil {
+			return sdk.Result{}, err
+		}
+		var msgs []Message
+		deadline := time.Now().Add(8 * time.Second)
+		for {
+			page, err = b.snapshot(call, "Message sent")
+			if err != nil {
+				return sdk.Result{}, err
+			}
+			if msgs = parseMessages(page.nodes); len(msgs) > 0 || time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		note := ""
+		if ch.Unread {
+			if err := b.markUnread(call, ch.Name); err != nil {
+				note = fmt.Sprintf("\n(Couldn't mark it unread again: %v)", err)
+			}
+		}
+		if len(msgs) == 0 {
+			return sdk.Result{}, fmt.Errorf("no messages showed in %s", ch.Name)
+		}
+		var lines []string
+		for _, m := range msgs {
+			lines = append(lines, fmt.Sprintf("[%s] %s: %s", m.Time, m.Sender, m.Text))
+		}
+		return sdk.Result{Text: strings.Join(lines, "\n") + note, Data: msgs}, nil
+	})
+
+	sdk.Op(c, "search", "Search Messenger for messages containing words, across all chats.", sdk.Read, func(call *sdk.Call, in searchIn) (sdk.Result, error) {
+		if strings.TrimSpace(in.Query) == "" {
+			return sdk.Result{}, errors.New("query is required")
+		}
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		page, err := b.page(call)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		b.dirty = true // the list shows results until the page is reloaded
+		box := page.ref("combobox", "Search Messenger")
+		if box == "" {
+			return sdk.Result{}, errors.New("no search box on the page")
+		}
+		if _, err := b.do(call, "browser_type", map[string]any{"ref": box, "text": in.Query, "replace": true}); err != nil {
+			return sdk.Result{}, err
+		}
+		var link string
+		for range 10 {
+			if page, err = b.snapshot(call, "Search messages for"); err != nil {
+				return sdk.Result{}, err
+			}
+			if link = page.ref("link", "Search messages for "+in.Query); link != "" {
+				break
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
+		if link == "" {
+			return sdk.Result{}, errors.New("Messenger didn't offer to search messages")
+		}
+		if _, err := b.do(call, "browser_click", map[string]any{"ref": link, "input_route": "dom_event"}); err != nil {
+			return sdk.Result{}, err
+		}
+		var matches []Match
+		for range 10 {
+			time.Sleep(500 * time.Millisecond)
+			if page, err = b.snapshot(call, ""); err != nil {
+				return sdk.Result{}, err
+			}
+			if matches = parseMatches(page.nodes); len(matches) > 0 {
+				break
+			}
+		}
+		if len(matches) == 0 {
+			return sdk.Result{Text: "Nothing found.", Data: []Match{}}, nil
+		}
+		var lines []string
+		for _, m := range matches {
+			if m.Matches > 0 {
+				lines = append(lines, fmt.Sprintf("%s: %d matching messages", m.Chat, m.Matches))
+			} else {
+				lines = append(lines, fmt.Sprintf("%s, %s: %s", m.Chat, m.Time, m.Text))
+			}
+		}
+		return sdk.Result{Text: strings.Join(lines, "\n"), Data: matches}, nil
+	})
+	return nil
+}
+
+// browser is the Space's browser, attached through the spaces plugin.
+type browser struct {
+	mu      sync.Mutex
+	session string // the Space's tools group work into sessions; the browser lives in this one
+	tries   int
+	target  string
+	tab     string
+	dirty   bool // the page is off the chat list (search results)
+}
+
+type page struct {
+	url   string
+	nodes []node
+	parts [][]node // the page comes in parts; a row cut between two shows in both
+	refs  []struct {
+		Ref  string `json:"ref"`
+		Role string `json:"role"`
+		Name string `json:"name"`
+	}
+}
+
+// chats are the chat list's rows, each once: a row cut between two parts
+// of the page is incomplete in one of them, without its time.
+func (p page) chats() []Chat {
+	var out []Chat
+	at := map[string]int{}
+	for _, part := range p.parts {
+		for _, c := range parseChats(part) {
+			i, seen := at[c.Name]
+			switch {
+			case !seen:
+				at[c.Name] = len(out)
+				out = append(out, c)
+			case out[i].Time == "" && c.Time != "":
+				out[i] = c
+			}
+		}
+	}
+	return out
+}
+
+func (p page) ref(role, name string) string {
+	for _, r := range p.refs {
+		if r.Role == role && r.Name == name {
+			return r.Ref
+		}
+	}
+	return ""
+}
+
+// do runs one of the Space's tools.
+func (b *browser) do(call *sdk.Call, tool string, in map[string]any) (map[string]any, error) {
+	in["space"], in["session"] = space, b.session
+	if b.target != "" && tool != "browser_prepare" && tool != "list_windows" {
+		in["target_id"], in["tab_id"] = b.target, b.tab
+	}
+	res, err := call.Invoke("spaces", tool, in)
+	if err != nil {
+		return nil, err
+	}
+	data, _ := res.Data.(map[string]any)
+	if s, _ := data["status"].(string); s == "refused" {
+		return nil, errors.New(res.Text)
+	}
+	return data, nil
+}
+
+// open starts the browser if needed and attaches to its tab.
+func (b *browser) open(call *sdk.Call) error {
+	b.target, b.tab = "", ""
+	prepared, err := b.do(call, "browser_prepare", map[string]any{"allow_launch": true, "profile": map[string]any{"mode": "isolated_named", "name": space}})
+	if err != nil && strings.Contains(err.Error(), "to this transport") && b.tries < 5 {
+		// The spaces plugin restarted, so the session's name belongs to its
+		// previous connection: carry on in a new one.
+		b.tries++
+		b.session = fmt.Sprintf("messenger-%d", time.Now().UnixNano())
+		return b.open(call)
+	}
+	if err != nil {
+		return fmt.Errorf("starting the browser in the %s Space: %w", space, err)
+	}
+	pid, _ := prepared["prepared_pid"].(float64)
+	windows, err := b.do(call, "list_windows", map[string]any{"pid": int(pid)})
+	if err != nil {
+		return err
+	}
+	ws, _ := windows["windows"].([]any)
+	if len(ws) == 0 {
+		return errors.New("the browser has no window")
+	}
+	w, _ := ws[0].(map[string]any)
+	bound, err := b.do(call, "get_browser_state", map[string]any{"pid": int(pid), "window_id": w["window_id"]})
+	if err != nil {
+		return err
+	}
+	b.target, _ = bound["target_id"].(string)
+	tabs, _ := bound["tabs"].([]any)
+	for _, t := range tabs { // the active tab, or else the first
+		if t, _ := t.(map[string]any); t["active"] == true || b.tab == "" {
+			b.tab, _ = t["tab_id"].(string)
+		}
+	}
+	if b.target == "" || b.tab == "" {
+		return errors.New("couldn't attach to the browser")
+	}
+	b.dirty = true
+	return nil
+}
+
+// snapshot reads the page, or the parts matching query; it reattaches once
+// if the browser closed (it does after a few idle minutes).
+func (b *browser) snapshot(call *sdk.Call, query string) (page, error) {
+	for attempt := range 2 {
+		if b.target == "" || attempt > 0 {
+			if err := b.open(call); err != nil {
+				return page{}, err
+			}
+		}
+		in := map[string]any{"snapshot_format": "semantic_v2"}
+		if query != "" {
+			in["query"] = query
+		}
+		var p page
+		outline := ""
+		var err error
+		for range 6 { // the page comes in parts
+			var data map[string]any
+			if data, err = b.do(call, "get_browser_state", in); err != nil {
+				break
+			}
+			raw, _ := json.Marshal(data)
+			var part struct {
+				Outline string `json:"outline"`
+				Refs    []struct {
+					Ref  string `json:"ref"`
+					Role string `json:"role"`
+					Name string `json:"name"`
+				} `json:"refs"`
+				Page     struct{ URL string } `json:"page"`
+				Snapshot struct {
+					Continuation string `json:"continuation"`
+				} `json:"snapshot"`
+			}
+			_ = json.Unmarshal(raw, &part)
+			outline += part.Outline + "\n"
+			p.parts = append(p.parts, parseOutline(part.Outline))
+			p.refs = append(p.refs, part.Refs...)
+			p.url = part.Page.URL
+			if part.Snapshot.Continuation == "" {
+				break
+			}
+			in["continuation"] = part.Snapshot.Continuation
+		}
+		if err == nil {
+			p.nodes = parseOutline(outline)
+			b.tries = 0
+			return p, nil
+		}
+		if attempt > 0 {
+			return page{}, err
+		}
+	}
+	return page{}, errors.New("unreachable")
+}
+
+// page reads the whole page, first going back to the chat list if it isn't
+// showing, and waiting for the list to load.
+func (b *browser) page(call *sdk.Call) (page, error) {
+	p, err := b.snapshot(call, "")
+	if err != nil {
+		return page{}, err
+	}
+	if b.dirty || !strings.HasPrefix(p.url, home) {
+		if _, err := b.do(call, "browser_navigate", map[string]any{"url": home}); err != nil {
+			return page{}, err
+		}
+		b.dirty = false
+		for range 20 {
+			time.Sleep(500 * time.Millisecond)
+			if p, err = b.snapshot(call, ""); err != nil {
+				return page{}, err
+			}
+			if len(p.chats()) > 0 {
+				break
+			}
+		}
+	}
+	return p, nil
+}
+
+func (b *browser) click(call *sdk.Call, p page, role, name string) error {
+	ref := p.ref(role, name)
+	if ref == "" {
+		return fmt.Errorf("%s %q isn't on the page", role, name)
+	}
+	_, err := b.do(call, "browser_click", map[string]any{"ref": ref, "input_route": "dom_event"})
+	return err
+}
+
+// markUnread uses the chat's menu to mark it unread.
+func (b *browser) markUnread(call *sdk.Call, chat string) error {
+	p, err := b.snapshot(call, menuPrefix+chat)
+	if err != nil {
+		return err
+	}
+	if err := b.click(call, p, "button", menuPrefix+chat); err != nil {
+		return err
+	}
+	for range 10 {
+		time.Sleep(300 * time.Millisecond)
+		if p, err = b.snapshot(call, "Mark as unread"); err != nil {
+			return err
+		}
+		if p.ref("menuitem", "Mark as unread") != "" {
+			return b.click(call, p, "menuitem", "Mark as unread")
+		}
+	}
+	return errors.New("its menu had no Mark as unread")
+}
