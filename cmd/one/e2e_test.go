@@ -77,6 +77,12 @@ func TestNodeOverMCP(t *testing.T) {
 		return res.Content[0].(*mcp.TextContent).Text, res.IsError
 	}
 
+	if out, _ := call("shell_run", map[string]any{"command": "echo hello from the shell"}); !strings.Contains(out, "exit 0") || !strings.Contains(out, "hello from the shell") {
+		t.Fatalf("shell_run: %s", out)
+	}
+	if out, _ := call("shell_history", nil); !strings.Contains(out, "echo hello from the shell") {
+		t.Fatalf("shell_history: %s", out)
+	}
 	call("instructions_set", map[string]any{"text": "Keep answers short."})
 	for i := range 3 {
 		call("memory_note", map[string]any{"text": fmt.Sprintf("fact %d", i)})

@@ -28,6 +28,7 @@ import (
 	"github.com/drevantonder/the-one-app/internal/surface"
 	"github.com/drevantonder/the-one-app/plugins/instructions"
 	"github.com/drevantonder/the-one-app/plugins/memory"
+	"github.com/drevantonder/the-one-app/plugins/shell"
 	"github.com/drevantonder/the-one-app/protocol"
 	"github.com/drevantonder/the-one-app/sdk"
 )
@@ -166,7 +167,7 @@ func portOf(addr string) string {
 
 // builtins are the plugins bundled in this binary, in the order their
 // transforms run.
-var builtins = []sdk.Plugin{instructions.Plugin, memory.Plugin}
+var builtins = []sdk.Plugin{instructions.Plugin, memory.Plugin, shell.Plugin}
 
 var builtinIDs = func() []string {
 	var ids []string
@@ -335,6 +336,12 @@ func buildInput(op core.Op, args []string) (json.RawMessage, error) {
 			in[name] = v
 		case "array":
 			in[name] = strings.Split(val, ",")
+		case "object":
+			var v map[string]any
+			if err := json.Unmarshal([]byte(val), &v); err != nil {
+				return fmt.Errorf("%s must be a JSON object", name)
+			}
+			in[name] = v
 		default:
 			in[name] = val
 		}
