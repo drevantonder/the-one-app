@@ -88,6 +88,14 @@ The source can be a remote MCP server (`--mcp URL`), a local one
 (`--command "npx …"`), or a Google API Discovery document (`--discovery URL`).
 The sign-in is stored in the plugin's own log, so it works on every device.
 
+A local server can be limited to the devices that have it; the others reach it
+through the mesh. For example, computer use on a Mac with
+[Cua Driver](https://cua.ai/docs/cua-driver) installed:
+
+```sh
+one plugins add computer-use --command "cua-driver mcp" --platforms darwin
+```
+
 ## Writing a plugin
 
 ```go

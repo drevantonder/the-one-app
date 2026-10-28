@@ -78,12 +78,18 @@ func (h *mcpHub) install(s *mcp.Server, old []string) []string {
 			if err != nil {
 				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: errText(err)}}}, nil
 			}
-			text := res.Text
-			if text == "" {
-				b, _ := json.MarshalIndent(res.Data, "", "  ")
-				text = string(b)
+			var content []mcp.Content
+			if text := res.Text; text != "" || res.Data != nil || len(res.Images) == 0 {
+				if text == "" {
+					b, _ := json.MarshalIndent(res.Data, "", "  ")
+					text = string(b)
+				}
+				content = append(content, &mcp.TextContent{Text: text})
 			}
-			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil
+			for _, img := range res.Images {
+				content = append(content, &mcp.ImageContent{MIMEType: img.MIMEType, Data: img.Data})
+			}
+			return &mcp.CallToolResult{Content: content}, nil
 		})
 		names = append(names, tool.Name)
 	}

@@ -35,6 +35,7 @@ type (
 	Mode   = protocol.Mode
 	Entry  = protocol.Entry
 	Result = protocol.Result
+	Image  = protocol.Image
 	Caller = protocol.Caller
 )
 

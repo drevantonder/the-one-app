@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -440,11 +441,28 @@ func run(plugin, op string, input json.RawMessage) error {
 	if err := json.Unmarshal(body, &res); err != nil {
 		return err
 	}
-	if res.Text != "" {
+	switch {
+	case res.Text != "":
 		fmt.Println(res.Text)
-		return nil
+	case res.Data != nil || len(res.Images) == 0:
+		out, _ := json.MarshalIndent(res.Data, "", "  ")
+		fmt.Println(string(out))
 	}
-	out, _ := json.MarshalIndent(res.Data, "", "  ")
-	fmt.Println(string(out))
+	for _, img := range res.Images { // a terminal can't show images, so save them
+		ext := ".png"
+		if exts, _ := mime.ExtensionsByType(img.MIMEType); len(exts) > 0 {
+			ext = exts[len(exts)-1]
+		}
+		f, err := os.CreateTemp("", "one-*"+ext)
+		if err != nil {
+			return err
+		}
+		_, err = f.Write(img.Data)
+		f.Close()
+		if err != nil {
+			return err
+		}
+		fmt.Println("image:", f.Name())
+	}
 	return nil
 }

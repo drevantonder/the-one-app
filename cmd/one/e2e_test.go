@@ -123,6 +123,9 @@ func TestNodeOverMCP(t *testing.T) {
 	mcp.AddTool(upstream, &mcp.Tool{Name: "echo", Description: "Echo text back."}, func(_ context.Context, _ *mcp.CallToolRequest, in echoIn) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "echo: " + in.Text}}}, nil, nil
 	})
+	mcp.AddTool(upstream, &mcp.Tool{Name: "picture", Description: "Return an image."}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.ImageContent{MIMEType: "image/png", Data: []byte("png bytes")}}}, nil, nil
+	})
 	upstreamSrv := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil))
 	defer func() { upstreamSrv.CloseClientConnections(); upstreamSrv.Close() }() // the plugin keeps a live connection
 	add := exec.Command(bin, "plugins", "add", "echoer", "--mcp", upstreamSrv.URL)
@@ -141,6 +144,14 @@ func TestNodeOverMCP(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+	// Images, such as screenshots, come through as images.
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "echoer_picture", Arguments: map[string]any{}})
+	if err != nil || len(res.Content) != 1 {
+		t.Fatalf("echoer_picture: %v %+v", err, res)
+	}
+	if img, ok := res.Content[0].(*mcp.ImageContent); !ok || img.MIMEType != "image/png" || string(img.Data) != "png bytes" {
+		t.Fatalf("echoer_picture: want the image, got %+v", res.Content[0])
+	}
 
 	// `one mcp` relays stdio to the same node, with the same instructions and tools.
 	relay := exec.Command(bin, "mcp")
@@ -154,7 +165,7 @@ func TestNodeOverMCP(t *testing.T) {
 	if ins := stdio.InitializeResult().Instructions; !strings.Contains(ins, "Keep answers short.") || !strings.Contains(ins, "memory_wake") {
 		t.Fatalf("new session instructions:\n%s", ins)
 	}
-	res, err := stdio.CallTool(ctx, &mcp.CallToolParams{Name: "memory_wake"})
+	res, err = stdio.CallTool(ctx, &mcp.CallToolParams{Name: "memory_wake"})
 	if err != nil {
 		t.Fatal(err)
 	}

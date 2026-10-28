@@ -127,8 +127,15 @@ type CallParams struct {
 }
 
 type Result struct {
-	Text string `json:"text,omitempty"`
-	Data any    `json:"data,omitempty"`
+	Text   string  `json:"text,omitempty"`
+	Data   any     `json:"data,omitempty"`
+	Images []Image `json:"images,omitempty"`
+}
+
+// An Image is part of a result, such as a screenshot. Data is base64 in JSON.
+type Image struct {
+	MIMEType string `json:"mimeType"`
+	Data     []byte `json:"data"`
 }
 
 type TransformParams struct {

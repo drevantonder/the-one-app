@@ -138,10 +138,13 @@ func (im *mcpImport) call(ctx context.Context, tool string, input json.RawMessag
 		return Result{}, err
 	}
 	var parts []string
+	var images []Image
 	for _, c := range res.Content {
 		switch v := c.(type) {
 		case *mcp.TextContent:
 			parts = append(parts, v.Text)
+		case *mcp.ImageContent:
+			images = append(images, Image{MIMEType: v.MIMEType, Data: v.Data})
 		default:
 			parts = append(parts, fmt.Sprintf("[%T]", c))
 		}
@@ -150,7 +153,7 @@ func (im *mcpImport) call(ctx context.Context, tool string, input json.RawMessag
 	if res.IsError {
 		return Result{}, errors.New(text)
 	}
-	return Result{Text: text, Data: res.StructuredContent}, nil
+	return Result{Text: text, Data: res.StructuredContent, Images: images}, nil
 }
 
 // authTransport adds the account's token and any fixed headers.

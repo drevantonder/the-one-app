@@ -16,6 +16,7 @@ import (
 type declaration struct {
 	MCP       sdk.MCPServer `json:"mcp,omitempty"`
 	Discovery string        `json:"discovery,omitempty"` // a Google API Discovery document
+	Platforms []string      `json:"platforms,omitempty"` // GOOS values it runs on; empty means all
 	OAuth     *struct {
 		Provider string `json:"provider,omitempty"` // "google", or empty for the URLs below
 		sdk.OAuthProvider
@@ -30,7 +31,7 @@ func declaredPlugin() (sdk.Plugin, error) {
 	if err := json.Unmarshal([]byte(os.Getenv("ONE_DECLARATION")), &d); err != nil {
 		return sdk.Plugin{}, fmt.Errorf("bad declaration: %w", err)
 	}
-	return sdk.Plugin{ID: id, Version: "declared", Setup: func(c *sdk.Ctx) error {
+	return sdk.Plugin{ID: id, Version: "declared", Platforms: d.Platforms, Setup: func(c *sdk.Ctx) error {
 		var account *sdk.Account
 		if d.OAuth != nil {
 			p := d.OAuth.OAuthProvider
@@ -54,7 +55,7 @@ func declaredPlugin() (sdk.Plugin, error) {
 // addPlugin turns `one plugins add` flags into a declaration.
 func addPlugin(args []string) error {
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
-		return errors.New("usage: one plugins add ID (--mcp URL | --command CMD | --discovery URL) [--oauth google | --auth-url U --token-url U] [--scopes a,b] [--header K=V]")
+		return errors.New("usage: one plugins add ID (--mcp URL | --command CMD | --discovery URL) [--oauth google | --auth-url U --token-url U] [--scopes a,b] [--header K=V] [--platforms darwin,linux]")
 	}
 	id := args[0]
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
@@ -65,6 +66,7 @@ func addPlugin(args []string) error {
 	authURL := fs.String("auth-url", "", "OAuth authorization URL")
 	tokenURL := fs.String("token-url", "", "OAuth token URL")
 	scopes := fs.String("scopes", "", "OAuth scopes, comma separated")
+	platforms := fs.String("platforms", "", "GOOS values it runs on, comma separated; other devices reach it through the mesh")
 	var headers headerFlag
 	fs.Var(&headers, "header", "header to send, K=V (repeatable)")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -76,6 +78,9 @@ func addPlugin(args []string) error {
 		d.MCP.Command = strings.Fields(*command)
 	}
 	d.Discovery = *discovery
+	if *platforms != "" {
+		d.Platforms = strings.Split(*platforms, ",")
+	}
 	if d.MCP.URL == "" && len(d.MCP.Command) == 0 && d.Discovery == "" {
 		return errors.New("give --mcp URL, --command CMD or --discovery URL")
 	}
