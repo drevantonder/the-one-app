@@ -123,7 +123,8 @@ several. The viewer is served over HTTPS on the tailnet, with
 The built-in `messenger` plugin reads Facebook Messenger this way, from the
 browser in the Space called messenger, where you sign in to messenger.com
 once: `one messenger chats`, `read --chat …` (an unread chat is marked unread
-again) and `search --query …`.
+again), `search --query …` and `send --chat … --text …` (to a recent chat,
+or a person by their exact name).
 
 Spaces aren't backed up unless you ask: `one spaces backup --name messenger
 --on true` stores the home folder (without caches) in the bucket, encrypted,

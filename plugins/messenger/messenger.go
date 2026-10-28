@@ -33,6 +33,11 @@ type readIn struct {
 	Chat string `json:"chat" jsonschema:"the chat's name, or a part of it only one recent chat has"`
 }
 
+type sendIn struct {
+	Chat string `json:"chat" jsonschema:"the chat's name, or a part of it only one recent chat has; anyone else by their exact name"`
+	Text string `json:"text" jsonschema:"the message"`
+}
+
 type searchIn struct {
 	Query string `json:"query" jsonschema:"words to find in messages"`
 }
@@ -110,6 +115,61 @@ func setup(c *sdk.Ctx) error {
 			lines = append(lines, fmt.Sprintf("[%s] %s: %s", m.Time, m.Sender, m.Text))
 		}
 		return sdk.Result{Text: strings.Join(lines, "\n") + note, Data: msgs}, nil
+	})
+
+	sdk.Op(c, "send", "Send a message, as the signed-in account, to a recent chat or to a person by their exact name.", sdk.Write, func(call *sdk.Call, in sendIn) (sdk.Result, error) {
+		if strings.TrimSpace(in.Text) == "" || strings.TrimSpace(in.Chat) == "" {
+			return sdk.Result{}, errors.New("chat and text are required")
+		}
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		name, err := b.openChat(call, in.Chat)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		var box string
+		for range 16 { // the conversation loads; on a narrow page its details may cover it
+			p, err := b.snapshot(call, "Write to")
+			if err != nil {
+				return sdk.Result{}, err
+			}
+			for _, r := range p.refs {
+				if r.Role == "textbox" && strings.HasPrefix(r.Name, "Write to") {
+					box = r.Ref
+				}
+			}
+			if box != "" {
+				break
+			}
+			if back, _ := b.snapshot(call, "Back"); back.ref("button", "Back") != "" {
+				_ = b.click(call, back, "button", "Back")
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if box == "" {
+			return sdk.Result{}, fmt.Errorf("no message box in the chat with %s", name)
+		}
+		if _, err := b.do(call, "browser_type", map[string]any{"ref": box, "text": in.Text}); err != nil {
+			return sdk.Result{}, err
+		}
+		if _, err := b.do(call, "browser_type", map[string]any{"ref": box, "text": "\n", "mode": "keystrokes"}); err != nil {
+			return sdk.Result{}, err
+		}
+		want := strings.TrimSpace(in.Text)
+		for range 16 {
+			time.Sleep(500 * time.Millisecond)
+			p, err := b.snapshot(call, "Message sent")
+			if err != nil {
+				return sdk.Result{}, err
+			}
+			msgs := parseMessages(p.nodes)
+			for i := len(msgs) - 1; i >= 0 && i >= len(msgs)-3; i-- {
+				if msgs[i].Sender == "You" && strings.TrimSpace(msgs[i].Text) == want {
+					return sdk.Result{Text: fmt.Sprintf("Sent to %s.", name), Data: msgs[i]}, nil
+				}
+			}
+		}
+		return sdk.Result{}, fmt.Errorf("typed the message to %s, but it didn't show as sent: check the messenger Space", name)
 	})
 
 	sdk.Op(c, "search", "Search Messenger for messages containing words, across all chats.", sdk.Read, func(call *sdk.Call, in searchIn) (sdk.Result, error) {
@@ -369,6 +429,58 @@ func (b *browser) click(call *sdk.Call, p page, role, name string) error {
 	}
 	_, err := b.do(call, "browser_click", map[string]any{"ref": ref, "input_route": "dom_event"})
 	return err
+}
+
+// openChat opens a recent chat, or else the person whose name is exactly
+// want among Messenger's search suggestions, and returns its name. Anything
+// less certain is refused, so a message never goes to the wrong person.
+func (b *browser) openChat(call *sdk.Call, want string) (string, error) {
+	p, err := b.page(call)
+	if err != nil {
+		return "", err
+	}
+	if ch, err := pick(p.chats(), want); err == nil {
+		return ch.Name, b.click(call, p, "link", ch.link)
+	} else if !strings.HasPrefix(err.Error(), "no recent chat") {
+		return "", err
+	}
+	box := p.ref("combobox", "Search Messenger")
+	if box == "" {
+		return "", errors.New("no search box on the page")
+	}
+	b.dirty = true
+	if _, err := b.do(call, "browser_type", map[string]any{"ref": box, "text": want, "replace": true}); err != nil {
+		return "", err
+	}
+	var found []string
+	for range 10 {
+		time.Sleep(500 * time.Millisecond)
+		if p, err = b.snapshot(call, want); err != nil {
+			return "", err
+		}
+		found = found[:0]
+		var exact []string
+		for _, r := range p.refs {
+			if r.Role != "link" || strings.HasPrefix(r.Name, "Search messages for") {
+				continue
+			}
+			found = append(found, r.Name)
+			if strings.EqualFold(r.Name, strings.TrimSpace(want)) {
+				exact = append(exact, r.Ref)
+			}
+		}
+		switch {
+		case len(exact) == 1:
+			_, err := b.do(call, "browser_click", map[string]any{"ref": exact[0], "input_route": "dom_event"})
+			return strings.TrimSpace(want), err
+		case len(exact) > 1:
+			return "", fmt.Errorf("several people are called %q: send from the messenger Space instead", want)
+		}
+	}
+	if len(found) == 0 {
+		return "", fmt.Errorf("no chat or person called %q", want)
+	}
+	return "", fmt.Errorf("no chat or person called exactly %q; Messenger suggests: %s", want, strings.Join(found, "; "))
 }
 
 // markUnread uses the chat's menu to mark it unread.
