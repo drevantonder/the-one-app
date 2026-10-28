@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>dev.theoneapp.eventkit</string>
+<key>CFBundleName</key><string>TheOneApp</string>
+<key>NSRemindersFullAccessUsageDescription</key><string>TheOneApp shares your reminders with your agents.</string>
+<key>NSCalendarsFullAccessUsageDescription</key><string>TheOneApp shares your calendar with your agents.</string>
+</dict></plist>
