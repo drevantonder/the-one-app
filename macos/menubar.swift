@@ -473,6 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         popover.behavior = .transient
+        popover.animates = false  // open and close at once, like the system's menu bar menus
         popover.contentViewController = panel
         popover.delegate = self
         panel.popover = popover
