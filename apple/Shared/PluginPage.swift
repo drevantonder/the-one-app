@@ -52,7 +52,7 @@ struct PluginPage: View {
         #if os(iOS)
         if sizeClass == .compact {
             List(items) { item in
-                NavigationLink { PageItemView(page: page, item: item, client: client).navigationTitle(item.title) } label: { row(item) }
+                NavigationLink { PageItemView(page: page, item: item, client: client).navigationBarTitleDisplayMode(.inline) } label: { row(item) }
             }
             .overlay { empty }
             .refreshable { await load() }
