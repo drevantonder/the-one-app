@@ -366,7 +366,7 @@ func (call *Call) Invoke(plugin, op string, input any) (Result, error) {
 		return Result{}, err
 	}
 	var res Result
-	err = call.ctx.conn.Call(call.Context, protocol.MethodInvoke, protocol.InvokeParams{Plugin: plugin, Operation: op, Input: raw}, &res)
+	err = call.ctx.conn.Call(call.Context, protocol.MethodInvoke, protocol.InvokeParams{Plugin: plugin, Operation: op, Input: raw, Agent: call.Caller.Agent}, &res)
 	return res, err
 }
 

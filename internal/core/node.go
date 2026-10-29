@@ -409,7 +409,7 @@ func (n *Node) pluginHandler(id string) rpc.Handler {
 			if err := json.Unmarshal(params, &in); err != nil {
 				return nil, err
 			}
-			return n.Call(ctx, in.Plugin, in.Operation, in.Input, protocol.Caller{Actor: "plugin " + id})
+			return n.Call(ctx, in.Plugin, in.Operation, in.Input, protocol.Caller{Actor: "plugin " + id, Agent: in.Agent})
 		case protocol.MethodFiles:
 			var in protocol.FilesParams
 			if err := json.Unmarshal(params, &in); err != nil {

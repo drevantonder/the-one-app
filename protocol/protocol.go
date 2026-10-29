@@ -174,6 +174,7 @@ type InvokeParams struct {
 	Plugin    string          `json:"plugin"`
 	Operation string          `json:"operation"`
 	Input     json.RawMessage `json:"input"`
+	Agent     string          `json:"agent,omitempty"` // the agent the invoking call is for
 }
 
 // FilesParams asks for one of put (upload Path as Name), get (download Name
