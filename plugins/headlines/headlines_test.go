@@ -101,11 +101,19 @@ func TestNoHeadline(t *testing.T) {
 	}
 }
 
-func TestWriterFallsBack(t *testing.T) {
+func TestWriterOffline(t *testing.T) {
 	p := &plugin{}
 	f := &fake{news: news, gate: 0.9}
-	if _, err := p.next(f.invoke); err == nil || !slices.Equal(f.models, writers) {
-		t.Fatalf("every writer should be tried: %v, %v", f.models, err)
+	if _, err := p.next(f.invoke); err == nil || !slices.Equal(f.models, []string{writer}) {
+		t.Fatalf("only the local writer, and its error: %v, %v", f.models, err)
+	}
+}
+
+func TestEmojiTwice(t *testing.T) {
+	p := &plugin{}
+	f := &fake{news: news, gate: 0.9, answers: []string{`{"emoji":"💍","headline":"💍 ✨ Ring looks expensive"}`}}
+	if h, _ := p.next(f.invoke); h == nil || h.line() != "💍 Ring looks expensive" {
+		t.Fatalf("%+v", h)
 	}
 }
 

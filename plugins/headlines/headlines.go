@@ -32,9 +32,9 @@ const (
 	attempts = 3
 )
 
-// writers are tried in order: a local model costs nothing, a service is
-// there for when its device is off.
-var writers = []string{"gemma4:12b", "opencode-go/deepseek-v4.1-flash"}
+// writer is local, so a headline every half minute costs nothing; a
+// subscription's allowance would run out.
+const writer = "gemma4:12b"
 
 type Headline struct {
 	Emoji string `json:"emoji"`
@@ -139,18 +139,11 @@ func (p *plugin) next(invoke invoker) (*Headline, error) {
 	for _, h := range p.recent(5) {
 		recent = append(recent, h.Text)
 	}
-	var errs []string
-	for _, model := range writers {
-		h, err := write(invoke, model, posts, recent)
-		if err == nil {
-			if h != nil {
-				h.Time = time.Now().UTC().Format(time.RFC3339)
-			}
-			return h, nil
-		}
-		errs = append(errs, model+": "+err.Error())
+	h, err := write(invoke, writer, posts, recent)
+	if h != nil {
+		h.Time = time.Now().UTC().Format(time.RFC3339)
 	}
-	return nil, fmt.Errorf("no model wrote a headline: %s", strings.Join(errs, "; "))
+	return h, err
 }
 
 var (
@@ -198,10 +191,26 @@ func worthIt(invoke invoker, posts []string) bool {
 	return *d.Answers.News.Noul >= worth
 }
 
-const style = `You write the headline for a one-line news ticker in the Mac menu bar of the person who owns these apps and agents. From the new posts, pick the one thing that matters most to them, done or just started, and say it in 3 or 4 plain words, like a newspaper headline: present tense, no code names, commit ids, version numbers or full stop. Only state what a post says; work just started is underway, not done.
-Examples of the style, from other news: Bridge reopens to traffic, Rail strike called off, City bans night flights.
-Also pick the one emoji, from all of Unicode, that best shows what this story is about.
-The headline must be at most %d characters, spaces included. If none of the posts is news to them, give an empty headline.`
+const style = `You write the one-line news ticker in the Mac menu bar of Andre, who builds The One App with a crew of AI agents that post to a shared board. Voice: a cheeky tech tabloid. Roast the agents, the bugs and the irony when a post has a hook: a bug, a repeat, a self-own, something absurd. Moves that work: a pun, a deadpan 'take three' or 'thrice' for a repeat, 'works on my machine', a bug as a person (a zombie plugin, a stray VM squatting), a grand claim undercut. Mean to code and agents, never to Andre. When there's no hook, just say the news plainly. Aim for about half funny, half straight.
+From the new posts, pick the one thing that matters most, done or just started; work just started is underway, not done.
+Rules: 3 to 5 words, at most %d characters, spaces included; one emoji that fits the story; only state what the posts say; no code names, commit ids or version numbers unless they are the news. If none of the posts is worth a glance, give an empty headline.
+Examples:
+Post: Hex dictation picked the closed MacBook's mic, not the Beats.
+Headline: 🎙️ Mic listens to shut lid
+Post: Retired the memory plugin: the Agent Board is agents' shared memory now.
+Headline: 🪦 Memory plugin forgotten
+Post: Widgets checked everywhere. Bug: the RAM column header wraps to RA/M.
+Headline: 🐏 RAM shrinks to RA/M
+Post: Fixed two copies of the app after each update: every copy relaunched itself.
+Headline: 👯 Mac app quits twinning
+Post: The node restarts a plugin whose process dies, at once, then with backoff.
+Headline: 🧟 Dead plugins now rise
+Post: New claude plugin: coding devices get Claude Code kept installed.
+Headline: 🤖 Claude Code on every box
+Post: Secrets: plugins read the ones they name; agents never read them.
+Headline: 🔐 Keys hidden from agents
+Post: The Mac app had no main menu, so Cmd-V reached no view: added Edit and Window menus.
+Headline: 📋 Mac app learns to paste`
 
 var answer = json.RawMessage(`{"type":"object","properties":{"emoji":{"type":"string"},"headline":{"type":"string"}},"required":["emoji","headline"]}`)
 
@@ -226,7 +235,7 @@ func write(invoke invoker, model string, posts, recent []string) (*Headline, err
 		if err := json.Unmarshal([]byte(res.Text), &a); err != nil {
 			return nil, fmt.Errorf("not JSON: %q", res.Text)
 		}
-		text := strings.TrimRight(strings.TrimSpace(a.Headline), ".")
+		text := strings.TrimRight(strings.TrimLeftFunc(a.Headline, notWord), ".")
 		if text == "" {
 			return nil, nil
 		}
@@ -244,6 +253,12 @@ func write(invoke invoker, model string, posts, recent []string) (*Headline, err
 		return &Headline{Emoji: emoji(a.Emoji), Text: text}, nil
 	}
 	return nil, fmt.Errorf("still too long after %d tries: %q", attempts, last)
+}
+
+// notWord is what a model sometimes puts before a headline's first word:
+// space, or the emoji again.
+func notWord(r rune) bool {
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\'' && r != '"'
 }
 
 // emoji keeps s if it is one emoji, or a short sequence like a flag or
