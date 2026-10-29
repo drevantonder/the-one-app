@@ -447,7 +447,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.delegate = self
         panel.popover = popover
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "point.3.connected.trianglepath.dotted", accessibilityDescription: "TheOneApp")
+        let ring = NSImage(named: "MenuBarIcon")
+        ring?.isTemplate = true
+        ring?.accessibilityDescription = "TheOneApp"
+        item.button?.image = ring
         item.button?.target = self
         item.button?.action = #selector(toggle(_:))
         self.item = item

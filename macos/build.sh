@@ -18,8 +18,16 @@ app=build/TheOneApp.app
 ts=--timestamp=none
 [ "${1:-}" = notarize ] && ts=--timestamp # notarization requires a secure timestamp
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp macos/Info.plist "$app/Contents/Info.plist"
+cp macos/MenuBarIcon.png macos/MenuBarIcon@2x.png "$app/Contents/Resources/"
+iconset=build/AppIcon.iconset
+rm -rf "$iconset" && mkdir -p "$iconset"
+for px in 16 32 128 256 512; do
+	sips -z $px $px macos/AppIcon.png --out "$iconset/icon_${px}x${px}.png" >/dev/null
+	sips -z $((px * 2)) $((px * 2)) macos/AppIcon.png --out "$iconset/icon_${px}x${px}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"
 go build -trimpath -ldflags "-X main.version=${VERSION:-dev}" -o "$app/Contents/MacOS/one" ./cmd/one
 codesign --force --options runtime $ts --entitlements macos/TheOneApp.entitlements \
 	--identifier dev.theoneapp.one --sign "$identity" "$app/Contents/MacOS/one"
