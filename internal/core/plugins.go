@@ -29,6 +29,7 @@ type Op struct {
 	InputSchema json.RawMessage       `json:"inputSchema"`
 	ReadOnly    bool                  `json:"readOnly,omitempty"`
 	UI          *protocol.OperationUI `json:"ui,omitempty"`
+	Widget      bool                  `json:"widget,omitempty"`
 }
 
 // ToolName is the operation's MCP tool name.
@@ -82,11 +83,11 @@ func (n *Node) coreOps() []coreOp {
 	extra := slices.Clone(n.extraOps)
 	n.mu.RUnlock()
 	return append([]coreOp{
-		{Op{CoreID, "plugins_list", "List plugins, whether each is enabled and running, and any error.", schemaFor[noIn](), true, &protocol.OperationUI{ResourceURI: pluginsView}},
+		{Op{CoreID, "plugins_list", "List plugins, whether each is enabled and running, and any error.", schemaFor[noIn](), true, &protocol.OperationUI{ResourceURI: pluginsView}, false},
 			func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) {
 				return n.listPlugins(), nil
 			}},
-		{Op{CoreID, "plugins_enable", "Enable a plugin on every device.", schemaFor[pluginIn](), false, nil},
+		{Op{CoreID, "plugins_enable", "Enable a plugin on every device.", schemaFor[pluginIn](), false, nil, false},
 			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
 				in, err := decode[pluginIn](raw)
 				if err != nil {
@@ -94,7 +95,7 @@ func (n *Node) coreOps() []coreOp {
 				}
 				return n.setEnabled(ctx, in.ID, true, c.Actor)
 			}},
-		{Op{CoreID, "plugins_disable", "Disable a plugin on every device. Its data stays in the log, so enabling it again restores everything.", schemaFor[pluginIn](), false, nil},
+		{Op{CoreID, "plugins_disable", "Disable a plugin on every device. Its data stays in the log, so enabling it again restores everything.", schemaFor[pluginIn](), false, nil, false},
 			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
 				in, err := decode[pluginIn](raw)
 				if err != nil {
@@ -102,7 +103,7 @@ func (n *Node) coreOps() []coreOp {
 				}
 				return n.setEnabled(ctx, in.ID, false, c.Actor)
 			}},
-		{Op{CoreID, "plugins_reload", "Restart a plugin as a new generation, rebuilding it first if it is linked from source.", schemaFor[pluginIn](), false, nil},
+		{Op{CoreID, "plugins_reload", "Restart a plugin as a new generation, rebuilding it first if it is linked from source.", schemaFor[pluginIn](), false, nil, false},
 			func(ctx context.Context, raw json.RawMessage, _ protocol.Caller) (protocol.Result, error) {
 				in, err := decode[pluginIn](raw)
 				if err != nil {
@@ -110,7 +111,7 @@ func (n *Node) coreOps() []coreOp {
 				}
 				return n.reload(ctx, in.ID)
 			}},
-		{Op{CoreID, "plugins_publish", "Build a linked plugin for every platform and install it on all of this user's devices.", schemaFor[pluginIn](), false, nil},
+		{Op{CoreID, "plugins_publish", "Build a linked plugin for every platform and install it on all of this user's devices.", schemaFor[pluginIn](), false, nil, false},
 			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
 				in, err := decode[pluginIn](raw)
 				if err != nil {
@@ -118,7 +119,7 @@ func (n *Node) coreOps() []coreOp {
 				}
 				return n.publish(ctx, in.ID, c.Actor)
 			}},
-		{Op{CoreID, "plugins_add", "Add a plugin from a declaration, with no code: e.g. a remote MCP server and its sign-in. It is added on every device.", schemaFor[addIn](), false, nil},
+		{Op{CoreID, "plugins_add", "Add a plugin from a declaration, with no code: e.g. a remote MCP server and its sign-in. It is added on every device.", schemaFor[addIn](), false, nil, false},
 			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
 				in, err := decode[addIn](raw)
 				if err != nil {
@@ -126,7 +127,7 @@ func (n *Node) coreOps() []coreOp {
 				}
 				return n.add(ctx, in, c.Actor)
 			}},
-		{Op{CoreID, "plugins_remove", "Remove an added or published plugin from every device. Its log entries are kept.", schemaFor[pluginIn](), false, nil},
+		{Op{CoreID, "plugins_remove", "Remove an added or published plugin from every device. Its log entries are kept.", schemaFor[pluginIn](), false, nil, false},
 			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
 				in, err := decode[pluginIn](raw)
 				if err != nil {
@@ -145,7 +146,7 @@ func (n *Node) coreOps() []coreOp {
 				n.reconcile(ctx)
 				return protocol.Result{Text: "Removed " + in.ID + "."}, nil
 			}},
-		{Op{CoreID, "plugins_link", "Load a plugin from a Go module on this device. It is rebuilt and hot-reloaded whenever its files change.", schemaFor[linkIn](), false, nil},
+		{Op{CoreID, "plugins_link", "Load a plugin from a Go module on this device. It is rebuilt and hot-reloaded whenever its files change.", schemaFor[linkIn](), false, nil, false},
 			func(ctx context.Context, raw json.RawMessage, c protocol.Caller) (protocol.Result, error) {
 				in, err := decode[linkIn](raw)
 				if err != nil {
@@ -160,7 +161,7 @@ func (n *Node) coreOps() []coreOp {
 // outside this package (the mesh, the bucket).
 func (n *Node) AddCoreOp(name, description string, input json.RawMessage, readOnly bool, fn func(ctx context.Context, input json.RawMessage, caller protocol.Caller) (protocol.Result, error)) {
 	n.mu.Lock()
-	n.extraOps = append(n.extraOps, coreOp{Op{CoreID, name, description, input, readOnly, nil}, fn})
+	n.extraOps = append(n.extraOps, coreOp{Op{CoreID, name, description, input, readOnly, nil, false}, fn})
 	n.mu.Unlock()
 	n.changed()
 }
@@ -188,7 +189,7 @@ func (n *Node) LocalOperations() []Op {
 	var out []Op
 	for _, g := range n.running() {
 		for _, o := range g.manifest.Operations {
-			out = append(out, Op{Plugin: g.id, Name: o.Name, Description: o.Description, InputSchema: o.InputSchema, ReadOnly: o.ReadOnly, UI: o.UI})
+			out = append(out, Op{Plugin: g.id, Name: o.Name, Description: o.Description, InputSchema: o.InputSchema, ReadOnly: o.ReadOnly, UI: o.UI, Widget: o.Widget})
 		}
 	}
 	return out

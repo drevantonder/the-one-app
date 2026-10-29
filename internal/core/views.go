@@ -15,9 +15,13 @@ const pluginsView = "ui://one/plugins"
 //go:embed plugins.html
 var pluginsHTML string
 
+//go:embed widget.html
+var widgetHTML string
+
 func (n *Node) addCoreViews() {
 	n.AddView(protocol.Resource{URI: pluginsView, Name: "Plugins", MIMEType: protocol.MIMEApp, Text: pluginsHTML})
-	n.extraOps = append(n.extraOps, coreOp{Op{CoreID, "menubar", "The menu bar's items: views of the core and plugins, in order.", schemaFor[noIn](), true, &protocol.OperationUI{Visibility: []string{"app"}}},
+	n.AddView(protocol.Resource{URI: protocol.WidgetView, Name: "Widget", MIMEType: protocol.MIMEApp, Text: widgetHTML})
+	n.extraOps = append(n.extraOps, coreOp{Op{CoreID, "menubar", "The menu bar's items: views of the core and plugins, in order.", schemaFor[noIn](), true, &protocol.OperationUI{Visibility: []string{"app"}}, false},
 		func(ctx context.Context, _ json.RawMessage, _ protocol.Caller) (protocol.Result, error) {
 			doc, err := n.Menubar(ctx)
 			if err != nil {

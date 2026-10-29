@@ -30,6 +30,7 @@ import (
 
 	"github.com/drevantonder/the-one-app/protocol"
 	"github.com/drevantonder/the-one-app/rpc"
+	"github.com/drevantonder/the-one-app/sdk/widget"
 )
 
 type (
@@ -238,6 +239,31 @@ func (c *Ctx) ShowIn(op, viewURI string, appOnly bool) {
 		}
 	}
 	panic(fmt.Sprintf("%s: ShowIn: no operation %q", c.id, op))
+}
+
+// Widget registers an operation that returns a widget (package widget),
+// drawn by the apps, the menu bar, home screens and MCP Apps hosts. render
+// gets the room the widget is drawn in, if known, and returns the widget and
+// a plain-text summary for agents. Renderers fetch it again after refresh
+// (15 minutes if zero), or sooner.
+func (c *Ctx) Widget(name, title, description string, refresh time.Duration, render func(*Call, widget.Space) (widget.Node, string, error)) {
+	if refresh == 0 {
+		refresh = 15 * time.Minute
+	}
+	Op(c, name, description, Read, func(call *Call, space widget.Space) (Result, error) {
+		root, text, err := render(call, space)
+		if err != nil {
+			return Result{}, err
+		}
+		now := time.Now()
+		return Result{Text: text, Data: widget.Description{
+			V: widget.Version, App: c.id, Widget: name, Title: title,
+			At: now.UnixMilli(), Next: now.Add(refresh).UnixMilli(), W: space.W, H: space.H, Root: root,
+		}}, nil
+	})
+	op := &c.ops[len(c.ops)-1]
+	op.Widget = true
+	op.UI = &protocol.OperationUI{ResourceURI: protocol.WidgetView}
 }
 
 // Menubar registers a transform over the menu bar's items: add this plugin's

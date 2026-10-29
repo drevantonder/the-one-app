@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the plugin protocol version. Bump it on breaking changes.
-const Version = 5
+const Version = 6
 
 // Core → plugin methods.
 const (
@@ -123,7 +123,14 @@ type Operation struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 	ReadOnly    bool            `json:"readOnly,omitempty"`
 	UI          *OperationUI    `json:"ui,omitempty"`
+	// Widget means the operation's result data is a widget (package
+	// sdk/widget), drawn natively on the user's devices and by WidgetView in
+	// MCP Apps hosts.
+	Widget bool `json:"widget,omitempty"`
 }
+
+// WidgetView is the core's MCP Apps view that draws any widget.
+const WidgetView = "ui://one/widget"
 
 // OperationUI is an operation's MCP Apps metadata (the tool's _meta.ui):
 // the view that shows its result, and who may call it ("model", "app";
@@ -224,7 +231,8 @@ type MenubarDoc struct {
 }
 
 // MenubarItem is one view in the menu bar: Resource (an MCP Apps view)
-// showing the result of Tool (an MCP tool name) called with no arguments.
+// showing the result of Tool (an MCP tool name) called with no arguments, or,
+// with no Resource, the widget Tool returns, drawn natively.
 // Title is shown above it; empty means the view draws its own header. With
 // Submenu, the menu shows a row with Title, and the view opens beside the
 // menu from it, like a submenu.
@@ -232,6 +240,6 @@ type MenubarItem struct {
 	ID       string `json:"id"`
 	Title    string `json:"title,omitempty"`
 	Tool     string `json:"tool"`
-	Resource string `json:"resource"`
+	Resource string `json:"resource,omitempty"`
 	Submenu  bool   `json:"submenu,omitempty"`
 }

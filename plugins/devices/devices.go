@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/drevantonder/the-one-app/sdk"
+	"github.com/drevantonder/the-one-app/sdk/widget"
 )
 
 //go:embed devices.html
@@ -31,56 +32,19 @@ func setup(c *sdk.Ctx) error {
 	})
 
 	sdk.Op(c, "list", "List this user's devices that run a node, this one first, with each online one's memory, CPU, GPU and disk use.", sdk.Read, func(call *sdk.Call, _ noIn) (sdk.Result, error) {
-		res, err := call.Invoke("one", "devices", noIn{})
+		devices, text, err := s.list(call)
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		var list struct {
-			Devices []map[string]any `json:"devices"`
+		return sdk.Result{Text: text, Data: map[string]any{"devices": devices}}, nil
+	})
+
+	c.Widget("widget", "Devices", "Show this user's devices and how loaded each one is, as a widget.", time.Minute, func(call *sdk.Call, _ widget.Space) (widget.Node, string, error) {
+		devices, text, err := s.list(call)
+		if err != nil {
+			return nil, "", err
 		}
-		if err := recode(res.Data, &list); err != nil {
-			return sdk.Result{}, err
-		}
-		lines := map[string]string{}
-		usages := make([]*Usage, len(list.Devices))
-		var mu sync.Mutex
-		var wg sync.WaitGroup
-		for i, d := range list.Devices {
-			name, _ := d["name"].(string)
-			lines[name] = fmt.Sprintf("%-20s offline", name)
-			if online, _ := d["online"].(bool); !online {
-				continue
-			}
-			wg.Go(func() {
-				var u Usage
-				var err error
-				if self, _ := d["self"].(bool); self {
-					u = s.usage()
-				} else {
-					u, err = remote(call, name)
-				}
-				mu.Lock()
-				defer mu.Unlock()
-				if err != nil {
-					d["usageError"] = err.Error()
-					lines[name] = fmt.Sprintf("%-20s online, load unknown: %v", name, err)
-					return
-				}
-				d["usage"], usages[i] = u, &u
-				lines[name] = fmt.Sprintf("%-20s %s", name, u)
-			})
-		}
-		wg.Wait()
-		list.Devices = nest(list.Devices, usages)
-		var text []string
-		for _, d := range list.Devices {
-			line := lines[d["name"].(string)]
-			if host, ok := d["host"].(string); ok {
-				line = "  " + line + " (container on " + host + ")"
-			}
-			text = append(text, line)
-		}
-		return sdk.Result{Text: strings.Join(text, "\n"), Data: list}, nil
+		return devicesWidget(devices), text, nil
 	})
 
 	view := c.View("list", devicesHTML, nil)
@@ -89,6 +53,61 @@ func setup(c *sdk.Ctx) error {
 		return append([]sdk.MenubarItem{{ID: "devices", Tool: "devices_list", Resource: view}}, items...)
 	})
 	return nil
+}
+
+// list gathers every device and, for the online ones, how loaded they are,
+// asking them all at once.
+func (s *sampler) list(call *sdk.Call) ([]map[string]any, string, error) {
+	res, err := call.Invoke("one", "devices", noIn{})
+	if err != nil {
+		return nil, "", err
+	}
+	var list struct {
+		Devices []map[string]any `json:"devices"`
+	}
+	if err := recode(res.Data, &list); err != nil {
+		return nil, "", err
+	}
+	lines := map[string]string{}
+	usages := make([]*Usage, len(list.Devices))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for i, d := range list.Devices {
+		name, _ := d["name"].(string)
+		lines[name] = fmt.Sprintf("%-20s offline", name)
+		if online, _ := d["online"].(bool); !online {
+			continue
+		}
+		wg.Go(func() {
+			var u Usage
+			var err error
+			if self, _ := d["self"].(bool); self {
+				u = s.usage()
+			} else {
+				u, err = remote(call, name)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				d["usageError"] = err.Error()
+				lines[name] = fmt.Sprintf("%-20s online, load unknown: %v", name, err)
+				return
+			}
+			d["usage"], usages[i] = u, &u
+			lines[name] = fmt.Sprintf("%-20s %s", name, u)
+		})
+	}
+	wg.Wait()
+	list.Devices = nest(list.Devices, usages)
+	var text []string
+	for _, d := range list.Devices {
+		line := lines[d["name"].(string)]
+		if host, ok := d["host"].(string); ok {
+			line = "  " + line + " (container on " + host + ")"
+		}
+		text = append(text, line)
+	}
+	return list.Devices, strings.Join(text, "\n"), nil
 }
 
 // nest moves each system container right after the device hosting it and

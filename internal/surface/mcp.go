@@ -97,6 +97,12 @@ func (h *mcpHub) install(s *mcp.Server, old installed) installed {
 		if op.UI != nil {
 			tool.Meta = mcp.Meta{"ui": op.UI}
 		}
+		if op.Widget {
+			if tool.Meta == nil {
+				tool.Meta = mcp.Meta{}
+			}
+			tool.Meta["dev.theoneapp/widget"] = true
+		}
 		s.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			args := req.Params.Arguments
 			if len(args) == 0 {

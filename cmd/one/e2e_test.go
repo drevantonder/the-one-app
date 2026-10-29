@@ -118,6 +118,37 @@ func TestNodeOverMCP(t *testing.T) {
 		}
 	}
 
+	// A widget is an MCP tool: its structured result is the widget, which the
+	// core's widget view draws in MCP Apps hosts.
+	var widgetTool *mcp.Tool
+	for _, tool := range tools.Tools {
+		if tool.Name == "devices_widget" {
+			widgetTool = tool
+		}
+	}
+	if widgetTool == nil || widgetTool.Meta["dev.theoneapp/widget"] != true {
+		t.Fatalf("devices_widget missing or not marked as a widget: %+v", widgetTool)
+	}
+	if ui, _ := widgetTool.Meta["ui"].(map[string]any); ui["resourceUri"] != "ui://one/widget" {
+		t.Fatalf("devices_widget _meta.ui: %v", widgetTool.Meta)
+	}
+	drawn, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "devices_widget", Arguments: map[string]any{}})
+	if err != nil || drawn.IsError {
+		t.Fatalf("devices_widget: %v %+v", err, drawn)
+	}
+	raw, _ = json.Marshal(drawn.StructuredContent)
+	var desc struct {
+		V    int
+		App  string
+		Root struct{ T string }
+	}
+	if json.Unmarshal(raw, &desc) != nil || desc.V != 1 || desc.App != "devices" || desc.Root.T != "col" {
+		t.Fatalf("devices_widget description: %s", raw)
+	}
+	if view, err := session.ReadResource(ctx, &mcp.ReadResourceParams{URI: "ui://one/widget"}); err != nil || !strings.Contains(view.Contents[0].Text, "ui/initialize") {
+		t.Fatalf("widget view: %v", err)
+	}
+
 	call := func(name string, args map[string]any) (string, bool) {
 		t.Helper()
 		res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
