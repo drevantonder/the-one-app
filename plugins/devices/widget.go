@@ -71,7 +71,7 @@ func stats(u *Usage) widget.Node {
 
 func header() widget.Node {
 	label := func(w float64, s string) widget.Node {
-		return cell(w, widget.Text(s, widget.Style{Size: "xs", Weight: "medium", Tone: "muted"}))
+		return cell(w, widget.Text(s, widget.Style{Size: "xs", Weight: "medium", Tone: "muted", Lines: 1}))
 	}
 	return widget.Row(widget.Stack{Gap: 10},
 		widget.Col(widget.Stack{Grow: true}, widget.Text("Devices", widget.Style{Size: "sm", Weight: "bold", Tone: "muted"})),
