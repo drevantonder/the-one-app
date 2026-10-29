@@ -201,8 +201,8 @@ func worthIt(invoke invoker, posts []string) bool {
 }
 
 const style = `You write the headline for a one-line news ticker in the Mac menu bar of the person who owns these apps and agents. From the new posts, pick the one thing that matters most to them and say it in 3 or 4 plain words, like a newspaper headline: present tense, no code names, commit ids, version numbers or full stop. Only state what a post says.
-Also pick one emoji, any emoji at all, that fits the story.
-Examples of the style, from other news: 🌉 Bridge reopens to traffic, 🚆 Rail strike called off, ✈️ City bans night flights.
+Examples of the style, from other news: Bridge reopens to traffic, Rail strike called off, City bans night flights.
+Also pick the one emoji, from all of Unicode, that best shows what this story is about.
 The headline must be at most %d characters, spaces included. If none of the posts is news to them, give an empty headline.`
 
 var answer = json.RawMessage(`{"type":"object","properties":{"emoji":{"type":"string"},"headline":{"type":"string"}},"required":["emoji","headline"]}`)
