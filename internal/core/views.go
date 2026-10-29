@@ -40,7 +40,7 @@ func (n *Node) AddView(r protocol.Resource) {
 // Menubar builds the menu bar: the core's Plugins item, then each plugin's
 // transform in order.
 func (n *Node) Menubar(ctx context.Context) (protocol.MenubarDoc, error) {
-	base := protocol.MenubarDoc{Items: []protocol.MenubarItem{{ID: "one.plugins", Tool: "plugins_list", Resource: pluginsView}}}
+	base := protocol.MenubarDoc{Items: []protocol.MenubarItem{{ID: "one.plugins", Title: "Plugins", Tool: "plugins_list", Resource: pluginsView, Submenu: true}}}
 	raw, err := n.transform(ctx, protocol.TransformMenubar, base, nil)
 	if err != nil {
 		return protocol.MenubarDoc{}, err

@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the plugin protocol version. Bump it on breaking changes.
-const Version = 4
+const Version = 5
 
 // Core → plugin methods.
 const (
@@ -225,10 +225,13 @@ type MenubarDoc struct {
 
 // MenubarItem is one view in the menu bar: Resource (an MCP Apps view)
 // showing the result of Tool (an MCP tool name) called with no arguments.
-// Title is shown above it; empty means the view draws its own header.
+// Title is shown above it; empty means the view draws its own header. With
+// Submenu, the menu shows a row with Title, and the view opens beside the
+// menu from it, like a submenu.
 type MenubarItem struct {
 	ID       string `json:"id"`
 	Title    string `json:"title,omitempty"`
 	Tool     string `json:"tool"`
 	Resource string `json:"resource"`
+	Submenu  bool   `json:"submenu,omitempty"`
 }

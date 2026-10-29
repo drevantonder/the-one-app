@@ -21,13 +21,7 @@
   .actions button[type=submit] { background: AccentColor; color: AccentColorText; border-color: transparent; }
   .error { color: #d70015; font-size: 11px; }
   [hidden] { display: none !important; }
-  #toggle .name { flex: 1; }
-  .count { color: var(--muted); }
-  .chevron { width: 10px; text-align: center; color: var(--muted); transition: transform .15s; }
-  [aria-expanded=true] .chevron { transform: rotate(90deg); }
 </style>
-<button id="toggle" aria-expanded="false"><span class="name">Plugins</span><span class="count" id="count"></span><span class="chevron">›</span></button>
-<div id="body" hidden>
 <ul id="list"></ul>
 <button id="add"><span class="check"></span><span>Add MCP Server…</span></button>
 <form id="form" hidden>
@@ -36,7 +30,6 @@
   <div class="error" id="error" hidden></div>
   <div class="actions"><button type="button" id="cancel">Cancel</button><button type="submit">Add</button></div>
 </form>
-</div>
 <script>
 let nextId = 1;
 const pending = {};
@@ -48,7 +41,6 @@ const request = (method, params) => new Promise((resolve, reject) => {
 });
 
 function render(data) {
-  document.getElementById('count').textContent = data?.plugins?.length ?? '';
   const list = document.getElementById('list');
   list.replaceChildren(...(data?.plugins ?? []).map(p => {
     const button = document.createElement('button');
@@ -102,11 +94,6 @@ function showForm(open) {
   }
 }
 
-$('toggle').onclick = () => {
-  const open = $('body').hidden;
-  $('body').hidden = !open;
-  $('toggle').setAttribute('aria-expanded', open);
-};
 $('add').onclick = () => showForm(true);
 $('cancel').onclick = () => showForm(false);
 $('source').oninput = () => { if (!nameEdited) $('name').value = suggestName($('source').value.trim()); };
