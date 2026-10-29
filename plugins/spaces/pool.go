@@ -612,6 +612,8 @@ type room struct {
 	Free   int64  `json:"free"`             // memory, in bytes
 	Total  int64  `json:"total"`            // memory, in bytes
 	Nested bool   `json:"nested,omitempty"` // in a container, sharing a host's memory
+	// Spaces is what each of the device's running Spaces uses.
+	Spaces map[string]usage `json:"spaces,omitempty"`
 }
 
 // fits reports whether another Space fits, leaving plenty for everything
@@ -631,7 +633,8 @@ func here(call *sdk.Call) (room, error) {
 	free, total := memory()
 	out, _ := exec.Command("systemd-detect-virt", "--container").Output()
 	v := strings.TrimSpace(string(out))
-	return room{Host: me, Free: free, Total: total, Nested: v != "" && v != "none"}, nil
+	used, _ := rt.stats(call.Context)
+	return room{Host: me, Free: free, Total: total, Nested: v != "" && v != "none", Spaces: used}, nil
 }
 
 // roomsAll asks every online device that runs Spaces for its room, at most

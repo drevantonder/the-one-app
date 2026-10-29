@@ -239,3 +239,7 @@ func (a *apple) forward(name string, port int) {
 		}
 	}()
 }
+
+// stats isn't read yet from Apple's container, whose figures aren't
+// documented.
+func (*apple) stats(context.Context) (map[string]usage, error) { return nil, nil }

@@ -134,3 +134,44 @@ type execError struct {
 
 func (e *execError) Error() string { return fmt.Sprintf("%v: %s", e.err, e.stderr) }
 func (e *execError) Unwrap() error { return e.err }
+
+func (p podman) stats(ctx context.Context) (map[string]usage, error) {
+	out, err := p.cmd(ctx, "stats", "--no-stream", "--format", "json")
+	if err != nil {
+		return nil, err
+	}
+	var raw []struct {
+		Name string `json:"name"`
+		CPU  string `json:"cpu_percent"`
+		Mem  string `json:"mem_usage"` // "88.25MB / 4.295GB"
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, err
+	}
+	all := map[string]usage{}
+	for _, r := range raw {
+		name, ok := strings.CutPrefix(r.Name, prefix)
+		if !ok {
+			continue
+		}
+		cpu, _ := strconv.ParseFloat(strings.TrimSuffix(r.CPU, "%"), 64)
+		mem, _, _ := strings.Cut(r.Mem, " /")
+		all[name] = usage{CPU: cpu, Mem: bytesOf(mem)}
+	}
+	return all, nil
+}
+
+// bytesOf reads a size as Podman writes it, like 88.25MB.
+func bytesOf(s string) int64 {
+	s = strings.TrimSpace(s)
+	i := strings.IndexFunc(s, func(r rune) bool { return (r < '0' || r > '9') && r != '.' })
+	if i < 0 {
+		i = len(s)
+	}
+	n, _ := strconv.ParseFloat(s[:i], 64)
+	scale := map[string]float64{"b": 1, "kb": 1e3, "mb": 1e6, "gb": 1e9, "tb": 1e12, "kib": 1 << 10, "mib": 1 << 20, "gib": 1 << 30}[strings.ToLower(s[i:])]
+	if scale == 0 {
+		scale = 1
+	}
+	return int64(n * scale)
+}

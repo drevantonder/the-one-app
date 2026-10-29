@@ -134,9 +134,22 @@ func (p *pool) link(call *sdk.Call, t tile) string {
 }
 
 // grid draws the Spaces as pictures at least min points wide; with all,
-// the user's own and a free one too.
+// the user's own, a free one and what they all use too. Sign-ins aren't
+// Spaces to watch: they show in the app's own window, and in settings.
 func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string, error) {
-	tiles := p.tiles()
+	var tiles []tile
+	for _, t := range p.tiles() {
+		if t.order != 1 {
+			tiles = append(tiles, t)
+		}
+	}
+	rooms := p.roomsAll(call)
+	uses := map[string]usage{}
+	for _, r := range rooms {
+		for n, u := range r.Spaces {
+			uses[n] = u
+		}
+	}
 	type shown struct {
 		pic, url string
 	}
@@ -177,21 +190,20 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 		if !small && t.host != "" {
 			sub = append(sub, widget.Text(t.host, widget.Style{Size: "xs", Tone: "muted"}))
 		}
+		if u, ok := uses[t.name]; ok && !small {
+			sub = append(sub, widget.Spacer(0), widget.Text(fmt.Sprintf("%s · %.0f%% CPU", size(u.Mem), u.CPU), widget.Style{Size: "xs", Tone: "muted"}))
+		}
 		cell := widget.Col(widget.Stack{Gap: 3}, pic,
 			widget.Text(t.title, widget.Style{Size: "sm", Weight: "bold", Lines: 1}),
 			widget.Row(widget.Stack{Gap: 5}, sub...))
 		if got[i].url != "" {
-			var done *widget.Action
-			if t.order == 1 {
-				done = &finish
-			}
-			cell = widget.Popout(got[i].url, t.title, done, cell)
+			cell = widget.Popout(got[i].url, t.title, nil, cell)
 		}
 		cells = append(cells, cell)
 		lines = append(lines, fmt.Sprintf("%s: %s", t.title, t.who))
 	}
 	if all {
-		cells = append(cells, p.freeTile(call, anyFree))
+		cells = append(cells, p.freeTile(call, anyFree, uses))
 	}
 	if !all {
 		me, _ := tailnetName(call.Context)
@@ -202,16 +214,49 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 			lines = append(lines, "No Spaces in use.")
 		}
 	}
-	return widget.Grid(min, 12, cells...), strings.Join(lines, "\n"), nil
+	if !all {
+		return widget.Grid(min, 12, cells...), strings.Join(lines, "\n"), nil
+	}
+	head, used := usageSummary(rooms)
+	return widget.Col(widget.Stack{Gap: 16}, head, widget.Grid(min, 12, cells...)), strings.Join(append(lines, used), "\n"), nil
+}
+
+// usageSummary is what all the Spaces use, and how full each device that
+// runs them is.
+func usageSummary(rooms []room) (widget.Node, string) {
+	var mem int64
+	var cpu float64
+	var rows []widget.Node
+	for _, r := range rooms {
+		if len(r.Spaces) == 0 || r.Total == 0 {
+			continue
+		}
+		var m int64
+		for _, u := range r.Spaces {
+			m += u.Mem
+			cpu += u.CPU
+		}
+		mem += m
+		inUse := r.Total - r.Free
+		rows = append(rows, widget.Row(widget.Stack{Gap: 10},
+			widget.Text(strings.Split(r.Host, ".")[0], widget.Style{Size: "xs", Weight: "medium"}),
+			widget.Progress(float64(inUse)/float64(r.Total), "", 160, "blue"),
+			widget.Text(fmt.Sprintf("Spaces %s · %s of %s in use", size(m), size(inUse), size(r.Total)), widget.Style{Size: "xs", Tone: "muted"})))
+	}
+	text := fmt.Sprintf("Spaces use %s of memory and %.0f%% of a CPU", size(mem), cpu)
+	return widget.Col(widget.Stack{Gap: 6}, append([]widget.Node{widget.Text(text, widget.Style{Size: "sm", Tone: "muted"})}, rows...)...), text
 }
 
 // freeTile says a Space is free, is being got ready, or why there is none.
-func (p *pool) freeTile(call *sdk.Call, free bool) widget.Node {
+func (p *pool) freeTile(call *sdk.Call, free bool, uses map[string]usage) widget.Node {
 	title, sub := "Free", "starting one…"
 	if free {
 		for _, t := range p.tiles() {
 			if t.free {
 				sub = "ready on " + t.host
+				if u, ok := uses[t.name]; ok {
+					sub += " · " + size(u.Mem)
+				}
 				break
 			}
 		}
@@ -279,8 +324,24 @@ func (p *pool) settings(call *sdk.Call) (widget.Node, string, error) {
 	if len(names) == 0 {
 		rows = append(rows, widget.Text("No sites yet.", widget.Style{Size: "sm", Tone: "muted"}))
 	}
-	rows = append(rows, widget.Popout(fmt.Sprintf("http://%s:4747/hooks/spaces/sign_in", me), "Signing in to sites", &finish,
-		widget.Row(widget.Stack{Pad: 6, Radius: 7, Border: "solid"}, widget.Text("Sign in to a site…", widget.Style{Size: "sm", Weight: "medium"}))))
+	open := 0
+	for _, t := range p.tiles() {
+		if t.order != 1 {
+			continue
+		}
+		open++
+		if url := p.link(call, t); url != "" {
+			rows = append(rows, widget.Row(widget.Stack{Gap: 8},
+				widget.Dot("orange"), widget.Text("A sign-in is open", widget.Style{Size: "sm"}), widget.Spacer(0),
+				widget.Popout(url, "Signing in to sites", &finish, widget.Text("Open", widget.Style{Size: "sm", Weight: "medium"}))))
+		}
+	}
+	if open > 0 {
+		rows = append(rows, widget.Button("Save and close", finish, false))
+	} else {
+		rows = append(rows, widget.Popout(fmt.Sprintf("http://%s:4747/hooks/spaces/sign_in", me), "Signing in to sites", &finish,
+			widget.Row(widget.Stack{Pad: 6, Radius: 7, Border: "solid"}, widget.Text("Sign in to a site…", widget.Style{Size: "sm", Weight: "medium"}))))
+	}
 
 	rows = append(rows, widget.Spacer(10), head("Backups"))
 	files, err := call.Files("")

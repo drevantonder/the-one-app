@@ -54,6 +54,14 @@ type runtime interface {
 	remove(ctx context.Context, name string) error
 	// exec runs a command in a running Space, as root.
 	exec(ctx context.Context, name string, stdin io.Reader, stdout io.Writer, args ...string) error
+	// stats is what each running Space uses now, by name.
+	stats(ctx context.Context) (map[string]usage, error)
+}
+
+// usage is what a Space uses: CPU in percent of one core, memory in bytes.
+type usage struct {
+	CPU float64 `json:"cpu"`
+	Mem int64   `json:"mem"`
 }
 
 var rt runtime
