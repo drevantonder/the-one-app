@@ -86,7 +86,7 @@ type pool struct {
 	take  sync.Mutex // one borrow at a time on this device
 }
 
-func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*sdk.Call)) {
+func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*sdk.Call)) *pool {
 	p := &pool{t: t, located: located, locate: locate, lent: map[string]borrowed{}, spare: map[string]int{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
 	t.used = p.touch
 	c.Entry("borrowed", sdk.Available)
@@ -207,6 +207,26 @@ func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*s
 		p.poke()
 		return sdk.Text(fmt.Sprintf("Keeping %d ready.", max(in.Spare, 0))), nil
 	})
+	return p
+}
+
+// status says what a pool's Space is doing, for list.
+func (p *pool) status(name string) string {
+	if !strings.HasPrefix(name, poolPrefix) {
+		return ""
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	b, ok := p.lent[name]
+	switch {
+	case !ok:
+		return "spare"
+	case b.SignIn:
+		return "signing in to the " + b.Login + " login"
+	case b.Login != "":
+		return "borrowed, with the " + b.Login + " login"
+	}
+	return "borrowed"
 }
 
 func deref(r *sdk.Result) sdk.Result {

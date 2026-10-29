@@ -173,7 +173,7 @@ func setup(c *sdk.Ctx) error {
 		_, err := call.Append("started", released{Name: name})
 		return err
 	}
-	setupPool(c, t, located, locate)
+	p := setupPool(c, t, located, locate)
 	c.OnReady(func(call *sdk.Call) {
 		locate(call)
 		_ = t.refresh(call.Context)
@@ -258,6 +258,9 @@ func setup(c *sdk.Ctx) error {
 				}
 			}
 			delete(latest, s.Name)
+			if st := p.status(s.Name); st != "" {
+				backed = st
+			}
 			fmt.Fprintf(w, "%s\t%s\tlast started %s\t%s\n", s.Name, s.State, used, backed)
 		}
 		me, _ := tailnetName(call.Context)
@@ -274,7 +277,7 @@ func setup(c *sdk.Ctx) error {
 				o.BackedUp = true
 				delete(latest, o.Name)
 			}
-			fmt.Fprintf(w, "%s\t%s\t\t\n", o.Name, o.State)
+			fmt.Fprintf(w, "%s\t%s\t\t%s\n", o.Name, o.State, p.status(o.Name))
 			spaces = append(spaces, o)
 		}
 		for name, f := range latest {
