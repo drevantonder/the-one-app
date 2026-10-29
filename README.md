@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="macos/AppIcon.png" width="180" alt="">
+  <img src="docs/ring.png" width="200" alt="">
 </p>
 
 <h1 align="center">TheOneApp</h1>
