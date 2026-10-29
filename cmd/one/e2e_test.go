@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -38,7 +39,14 @@ func TestNodeOverMCP(t *testing.T) {
 
 	serve := exec.Command(bin, "serve", "--local", "--addr", addr, "--data", filepath.Join(dir, "data"))
 	serve.Stderr = os.Stderr
-	serve.Dir = dir // like launchd or systemd: not inside a Go module
+	serve.Dir = dir                    // like launchd or systemd: not inside a Go module
+	home := filepath.Join(dir, "home") // plugins write to agents' folders in it
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gocache, _ := exec.Command("go", "env", "GOCACHE", "GOMODCACHE").Output()
+	cache := strings.Fields(string(gocache))
+	serve.Env = append(os.Environ(), "HOME="+home, "CLAUDE_CONFIG_DIR=", "CODEX_HOME=", "GOCACHE="+cache[0], "GOMODCACHE="+cache[1])
 	if err := serve.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +74,7 @@ func TestNodeOverMCP(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	for _, want := range []string{"instructions_set", "skills_list", "plugins_list",
-		"board_topics", "board_create", "board_read", "board_post", "board_nap", "board_zoom", "board_recall"} {
+		"board_topics", "board_create", "board_read", "board_post", "board_nap", "board_zoom", "board_recall", "board_news"} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("tool %s missing from %v", want, names)
 		}
@@ -141,6 +149,31 @@ func TestNodeOverMCP(t *testing.T) {
 	if top, _ := call("board_read", nil); !strings.Contains(top, "the user lives in Sydney") || !strings.Contains(top, "Subtopics:\n  projects — ") {
 		t.Fatalf("board_read:\n%s", top)
 	}
+	// Agents' prompt hook: a session's first prompt marks its place, and
+	// later prompts get only what has been posted since.
+	if settings, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json")); err != nil || !strings.Contains(string(settings), "http://"+addr+"/hooks/board/news") {
+		t.Fatalf("prompt hook not installed: %v\n%s", err, settings)
+	}
+	hook := func() string {
+		res, err := http.Post("http://"+addr+"/hooks/board/news", "application/json", strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return string(b)
+	}
+	if first := hook(); !strings.Contains(first, "news will appear here") {
+		t.Fatalf("first hook call: %q", first)
+	}
+	call("board_post", map[string]any{"topic": "projects", "text": "hook news"})
+	if news := hook(); !strings.Contains(news, "projects #1 ") || !strings.Contains(news, "hook news") || strings.Contains(news, "Sydney") {
+		t.Fatalf("hook news:\n%s", news)
+	}
+	if again := hook(); again != "" {
+		t.Fatalf("hook repeated news: %q", again)
+	}
+
 	if hits, _ := call("board_recall", map[string]any{"pattern": "board|sydney"}); !strings.Contains(hits, "projects #0 ") || !strings.Contains(hits, "(top) #3 ") {
 		t.Fatalf("board_recall:\n%s", hits)
 	}

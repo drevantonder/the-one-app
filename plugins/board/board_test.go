@@ -2,6 +2,8 @@ package board
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -242,5 +244,43 @@ func TestPostTimesShareOneZone(t *testing.T) {
 	}
 	if !strings.Contains(s, "2026-10-29 02:45Z mac") || !strings.Contains(s, "2026-10-29 02:46Z personal") {
 		t.Fatalf("times not in UTC:\n%s", s)
+	}
+}
+
+func TestNews(t *testing.T) {
+	b := New()
+	b.Post("a", postEntry{Text: "old", Time: "2026-10-29T02:00:00Z", Device: "mac"})
+	s := loadSessions("")
+	if text, first := s.news(b, "x"); !first || text != "" {
+		t.Fatalf("first: %q %v", text, first)
+	}
+	b.Post("b", postEntry{Topic: "", Text: "new", Time: "2026-10-29T02:05:00Z", Device: "linux"})
+	if text, _ := s.news(b, "x"); !strings.Contains(text, "(top) #1 2026-10-29 02:05Z linux: new") || strings.Contains(text, "old") {
+		t.Fatalf("news:\n%s", text)
+	}
+	if text, first := s.news(b, "x"); first || text != "" {
+		t.Fatalf("again: %q", text)
+	}
+}
+
+func TestInstallHooks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CODEX_HOME", "")
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	settings := filepath.Join(home, ".claude", "settings.json")
+	os.WriteFile(settings, []byte(`{"theme":"dark","hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"mine"},{"type":"command","command":"curl http://old:1/hooks/board/news"}]}]}}`), 0o644)
+	for range 2 {
+		if err := installHooks(home, "127.0.0.1:4747"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := os.ReadFile(settings)
+	if s := string(got); !strings.Contains(s, `"theme": "dark"`) || !strings.Contains(s, `"mine"`) || strings.Contains(s, "old:1") ||
+		strings.Count(s, "/hooks/board/news") != 1 || !strings.Contains(s, "http://127.0.0.1:4747/hooks/board/news") {
+		t.Fatalf("settings:\n%s", s)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "hooks.json")); !os.IsNotExist(err) {
+		t.Fatalf("wrote hooks for Codex, which isn't installed: %v", err)
 	}
 }

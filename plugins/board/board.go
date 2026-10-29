@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/drevantonder/the-one-app/protocol"
 	"github.com/drevantonder/the-one-app/sdk"
 	"github.com/drevantonder/the-one-app/sdk/optmem"
 )
@@ -61,13 +62,16 @@ type (
 		Topic string `json:"topic,omitempty" jsonschema:"the topic's path; omit for the top"`
 		Block string `json:"block" jsonschema:"a block id as read prints it, like 16-31"`
 	}
+	newsIn struct {
+		Session string `json:"session" jsonschema:"a name for your conversation that stays the same in it, like its thread link"`
+	}
 	recallIn struct {
 		Pattern string `json:"pattern" jsonschema:"case-insensitive regular expression"`
 		Topic   string `json:"topic,omitempty" jsonschema:"search only this topic; omit to search every topic"`
 	}
 )
 
-var Plugin = sdk.Plugin{ID: "board", Name: "Agent Board", Version: "0.1.0", Setup: setup}
+var Plugin = sdk.Plugin{ID: "board", Name: "Agent Board", Version: "0.2.0", Setup: setup}
 
 const protocolText = `## Agent Board
 
@@ -79,6 +83,8 @@ Before working on something, read its topic with ` + "`board_read`" + `. If it h
 
 Call ` + "`board_post`" + ` (one line, at most 280 bytes) when you start something, when you decide or learn something other agents should know, and when you finish. Life-level facts about the user go at the top: omit the topic.
 
+When other agents post, the news is shown to you with the user's next message. If you see no line saying board news will appear, your harness can't show it: call ` + "`board_news`" + ` now and then (before each new piece of work, say) to see what's new.
+
 If a tool result asks for a compression, do it with ` + "`board_nap`" + ` before your next action.
 
 To find an old post, search with ` + "`board_recall`" + `, or open a #a-b summary with ` + "`board_zoom`" + `.
@@ -87,6 +93,8 @@ If you are a subagent, never post: you cannot judge what is already known. When 
 
 func setup(c *sdk.Ctx) error {
 	b := New()
+	dir, _ := c.Dir()
+	seen := loadSessions(dir)
 
 	c.Entry("create", sdk.Available)
 	c.Entry("post", sdk.Available)
@@ -134,7 +142,7 @@ func setup(c *sdk.Ctx) error {
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		p := postEntry{Topic: t.path, Text: text, Time: time.Now().Format(time.RFC3339), Device: deviceName(call),
+		p := postEntry{Topic: t.path, Text: text, Time: time.Now().Format(time.RFC3339Nano), Device: deviceName(call),
 			Thread: strings.TrimSpace(in.Thread), Where: strings.TrimSpace(in.Where)}
 		if _, err := call.Append("post", p); err != nil {
 			return sdk.Result{}, err
@@ -202,6 +210,50 @@ func setup(c *sdk.Ctx) error {
 	sdk.Op(c, "recall", "Search posts, word for word, with a case-insensitive regular expression: in one topic, or in every topic.", sdk.Read, func(_ *sdk.Call, in recallIn) (sdk.Result, error) {
 		s, err := b.Recall(in.Pattern, in.Topic)
 		return sdk.Text(s), err
+	})
+
+	sdk.Op(c, "news", "Show the posts made since this session last looked. The first call only marks the place.", sdk.Read, func(_ *sdk.Call, in newsIn) (sdk.Result, error) {
+		session := strings.TrimSpace(in.Session)
+		if session == "" {
+			return sdk.Result{}, fmt.Errorf("name your session, like its thread link")
+		}
+		text, first := seen.news(b, "op:"+session)
+		switch {
+		case first:
+			text = "Marked. Call board_news with the same session to see what is posted after now."
+		case text == "":
+			text = "Nothing new."
+		}
+		return sdk.Text(text), nil
+	})
+
+	// The agents' prompt hook: its body is the hook input, with the session.
+	c.Hook("news", func(_ *sdk.Call, req protocol.HookRequest) (protocol.HookResponse, error) {
+		var in struct {
+			Session string `json:"session_id"`
+		}
+		if json.Unmarshal([]byte(req.Body), &in) != nil || in.Session == "" {
+			return protocol.HookResponse{}, nil
+		}
+		text, first := seen.news(b, in.Session)
+		if first {
+			text = "Agent Board news will appear here when other agents post."
+		}
+		return protocol.HookResponse{ContentType: "text/plain; charset=utf-8", Body: text}, nil
+	})
+
+	c.OnReady(func(*sdk.Call) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return
+		}
+		addr := os.Getenv("ONE_ADDR")
+		if addr == "" {
+			addr = "127.0.0.1:4747"
+		}
+		if err := installHooks(home, addr); err != nil {
+			c.Logf("board: install the agents' prompt hook: %v", err)
+		}
 	})
 
 	c.Instructions(func(text string) string { return text + "\n\n" + protocolText })
