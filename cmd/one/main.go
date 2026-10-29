@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -119,6 +120,19 @@ func defaultAddr() string {
 	return "127.0.0.1:4747"
 }
 
+// widenPath adds where tools like tailscale are installed to PATH, for the
+// node and its plugins: an app opened by launchd, as after an update, gets
+// only /usr/bin:/bin:/usr/sbin:/sbin.
+func widenPath() {
+	path := filepath.SplitList(os.Getenv("PATH"))
+	for _, dir := range []string{"/usr/local/bin", "/opt/homebrew/bin"} {
+		if !slices.Contains(path, dir) {
+			path = append(path, dir)
+		}
+	}
+	os.Setenv("PATH", strings.Join(path, string(os.PathListSeparator)))
+}
+
 func serve(args []string, bin string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", defaultAddr(), "listen address")
@@ -127,6 +141,7 @@ func serve(args []string, bin string) error {
 	_ = fs.Parse(args)
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	widenPath()
 	if err := os.MkdirAll(*data, 0o700); err != nil {
 		return err
 	}

@@ -236,6 +236,12 @@ func findNodes(ctx context.Context) ([]remote, error) {
 		go func() {
 			defer wg.Done()
 			b, err := nodeInfo(ctx, c.base, 3*time.Second)
+			// This machine's node may not be on the tailnet, as when it
+			// can't run tailscale; it still answers on loopback.
+			if err != nil && c.name == self.name {
+				c.base = "http://" + net.JoinHostPort("127.0.0.1", port)
+				b, err = nodeInfo(ctx, c.base, 3*time.Second)
+			}
 			var old errOldNode
 			switch {
 			case errors.As(err, &old):
