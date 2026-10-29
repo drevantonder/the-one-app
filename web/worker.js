@@ -1,4 +1,4 @@
-// oneapp.drevan.me: `curl -fsSL oneapp.drevan.me | sh` gets install.sh from
+// theoneapp.drevan.me: `curl -fsSL theoneapp.drevan.me | sh` gets install.sh from
 // main; a browser goes to the repo.
 const repo = "https://github.com/drevantonder/the-one-app";
 const script = "https://raw.githubusercontent.com/drevantonder/the-one-app/main/install.sh";
