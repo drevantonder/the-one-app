@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/drevantonder/the-one-app/protocol"
@@ -242,6 +243,8 @@ func setup(c *sdk.Ctx) error {
 		return protocol.HookResponse{ContentType: "text/plain; charset=utf-8", Body: text}, nil
 	})
 
+	// Agents installed later get the hook too: look again every minute.
+	var watching sync.Once
 	c.OnReady(func(*sdk.Call) {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -251,9 +254,22 @@ func setup(c *sdk.Ctx) error {
 		if addr == "" {
 			addr = "127.0.0.1:4747"
 		}
-		if err := installHooks(home, addr); err != nil {
-			c.Logf("board: install the agents' prompt hook: %v", err)
-		}
+		watching.Do(func() {
+			go func() {
+				last := ""
+				for {
+					msg := ""
+					if err := installHooks(home, addr); err != nil {
+						msg = err.Error()
+					}
+					if msg != last && msg != "" {
+						c.Logf("board: install the agents' prompt hook: %s", msg)
+					}
+					last = msg
+					time.Sleep(time.Minute)
+				}
+			}()
+		})
 	})
 
 	c.Instructions(func(text string) string { return text + "\n\n" + protocolText })
