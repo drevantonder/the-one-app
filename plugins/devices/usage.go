@@ -23,12 +23,15 @@ const (
 
 // Usage is one device's load. CPU and GPU are percent busy, oldest first,
 // one sample every sampleEvery; GPU is the busiest GPU, absent if none
-// reports.
+// reports. A system container (Container) reports no GPU, since it would
+// see its host's; Guests are the system containers a device hosts.
 type Usage struct {
-	Memory *Space `json:"memory,omitempty"`
-	Disk   *Space `json:"disk,omitempty"`
-	CPU    []int  `json:"cpu,omitempty"`
-	GPU    []int  `json:"gpu,omitempty"`
+	Memory    *Space   `json:"memory,omitempty"`
+	Disk      *Space   `json:"disk,omitempty"`
+	CPU       []int    `json:"cpu,omitempty"`
+	GPU       []int    `json:"gpu,omitempty"`
+	Container bool     `json:"container,omitempty"`
+	Guests    []string `json:"guests,omitempty"`
 }
 
 // Space is in bytes. Used memory is what the OS can't hand to a new program
@@ -65,13 +68,17 @@ func gb(b uint64) string {
 // sampler keeps the last few minutes of CPU and GPU load, which only make
 // sense as a trend.
 type sampler struct {
-	once     sync.Once
-	mu       sync.Mutex
-	cpu, gpu []int
+	once      sync.Once
+	container bool
+	mu        sync.Mutex
+	cpu, gpu  []int
+	guests    []string
 }
 
 func (s *sampler) start() {
 	s.once.Do(func() {
+		_, err := os.Stat("/run/systemd/container")
+		s.container = err == nil
 		if runtime.GOOS == "darwin" {
 			go s.iostat()
 		}
@@ -88,8 +95,9 @@ func (s *sampler) usage() Usage {
 		u.Disk = &d
 	}
 	s.mu.Lock()
-	u.CPU, u.GPU = slices.Clone(s.cpu), slices.Clone(s.gpu)
+	u.CPU, u.GPU, u.Guests = slices.Clone(s.cpu), slices.Clone(s.gpu), s.guests
 	s.mu.Unlock()
+	u.Container = s.container
 	return u
 }
 
@@ -104,7 +112,13 @@ func (s *sampler) add(to *[]int, percent int) {
 
 func (s *sampler) run() {
 	var prev cpuTimes
-	for ; ; time.Sleep(sampleEvery) {
+	for n := 0; ; n++ {
+		if n%20 == 0 {
+			g := guests()
+			s.mu.Lock()
+			s.guests = g
+			s.mu.Unlock()
+		}
 		if runtime.GOOS == "linux" {
 			if t, err := procStat(); err == nil {
 				if prev.total > 0 && t.total > prev.total {
@@ -113,9 +127,12 @@ func (s *sampler) run() {
 				prev = t
 			}
 		}
-		if p, ok := gpuBusy(); ok {
-			s.add(&s.gpu, p)
+		if !s.container {
+			if p, ok := gpuBusy(); ok {
+				s.add(&s.gpu, p)
+			}
 		}
+		time.Sleep(sampleEvery)
 	}
 }
 
@@ -150,6 +167,16 @@ func iostatIdle(line string) (int, bool) {
 	}
 	idle, err := strconv.Atoi(f[2])
 	return idle, err == nil
+}
+
+// guests lists the Incus system containers on this device, which name the
+// devices they are.
+func guests() []string {
+	out, err := exec.Command("incus", "list", "--format", "csv", "--columns", "n").Output()
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(out))
 }
 
 type cpuTimes struct{ busy, total uint64 }

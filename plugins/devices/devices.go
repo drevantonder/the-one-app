@@ -41,11 +41,13 @@ func setup(c *sdk.Ctx) error {
 		if err := recode(res.Data, &list); err != nil {
 			return sdk.Result{}, err
 		}
-		lines := make([]string, len(list.Devices))
+		lines := map[string]string{}
+		usages := make([]*Usage, len(list.Devices))
+		var mu sync.Mutex
 		var wg sync.WaitGroup
 		for i, d := range list.Devices {
 			name, _ := d["name"].(string)
-			lines[i] = fmt.Sprintf("%-20s offline", name)
+			lines[name] = fmt.Sprintf("%-20s offline", name)
 			if online, _ := d["online"].(bool); !online {
 				continue
 			}
@@ -57,17 +59,28 @@ func setup(c *sdk.Ctx) error {
 				} else {
 					u, err = remote(call, name)
 				}
+				mu.Lock()
+				defer mu.Unlock()
 				if err != nil {
 					d["usageError"] = err.Error()
-					lines[i] = fmt.Sprintf("%-20s online, load unknown: %v", name, err)
+					lines[name] = fmt.Sprintf("%-20s online, load unknown: %v", name, err)
 					return
 				}
-				d["usage"] = u
-				lines[i] = fmt.Sprintf("%-20s %s", name, u)
+				d["usage"], usages[i] = u, &u
+				lines[name] = fmt.Sprintf("%-20s %s", name, u)
 			})
 		}
 		wg.Wait()
-		return sdk.Result{Text: strings.Join(lines, "\n"), Data: list}, nil
+		list.Devices = nest(list.Devices, usages)
+		var text []string
+		for _, d := range list.Devices {
+			line := lines[d["name"].(string)]
+			if host, ok := d["host"].(string); ok {
+				line = "  " + line + " (container on " + host + ")"
+			}
+			text = append(text, line)
+		}
+		return sdk.Result{Text: strings.Join(text, "\n"), Data: list}, nil
 	})
 
 	view := c.View("list", devicesHTML, nil)
@@ -76,6 +89,36 @@ func setup(c *sdk.Ctx) error {
 		return append([]sdk.MenubarItem{{ID: "devices", Tool: "devices_list", Resource: view}}, items...)
 	})
 	return nil
+}
+
+// nest moves each system container right after the device hosting it and
+// sets its host.
+func nest(devices []map[string]any, usages []*Usage) []map[string]any {
+	byName := map[string]map[string]any{}
+	for _, d := range devices {
+		byName[d["name"].(string)] = d
+	}
+	guests := map[string][]map[string]any{}
+	for i, u := range usages {
+		if u == nil {
+			continue
+		}
+		host := devices[i]["name"].(string)
+		for _, g := range u.Guests {
+			if d := byName[g]; d != nil && d["host"] == nil && g != host {
+				d["host"] = host
+				guests[host] = append(guests[host], d)
+			}
+		}
+	}
+	var out []map[string]any
+	for _, d := range devices {
+		if d["host"] == nil {
+			out = append(out, d)
+			out = append(out, guests[d["name"].(string)]...)
+		}
+	}
+	return out
 }
 
 // remote asks another device's node, giving up quickly so one slow device

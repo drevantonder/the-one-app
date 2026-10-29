@@ -13,6 +13,8 @@
   header .label { font-size: 9px; font-weight: 500; text-align: center; }
   ul { list-style: none; margin: 0; padding: 0; }
   li.offline { opacity: .5; }
+  li.guest { padding-left: 24px; }
+  li.guest .icon { width: 18px; height: 18px; }
   .icon { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
   .text { flex: 1; min-width: 0; }
   .name, .detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -109,7 +111,7 @@ function makeRow() {
 }
 
 function update(r, d) {
-  set(r.li, 'class', d.online ? undefined : 'offline');
+  set(r.li, 'class', [d.host && 'guest', !d.online && 'offline'].filter(Boolean).join(' ') || undefined);
   const icon = iconFor(d.os);
   if (r.iconName !== icon) { r.icon.innerHTML = icons[icon]; r.iconName = icon; }
   text(r.name, d.name);
@@ -136,7 +138,7 @@ function update(r, d) {
   }
   set(r.cells[0], 'title', m ? `Memory: ${gb(m.used)} of ${gb(m.total)} GB (${percent(m)}%)` : 'Memory: unknown');
   set(r.cells[1], 'title', u.cpu?.length ? `CPU: ${last(u.cpu)}% busy` : 'CPU: unknown');
-  set(r.cells[2], 'title', u.gpu?.length ? `GPU: ${last(u.gpu)}% busy` : 'No GPU reported');
+  set(r.cells[2], 'title', u.gpu?.length ? `GPU: ${last(u.gpu)}% busy` : u.container ? 'GPU: see the host' : 'No GPU reported');
   set(r.cells[3], 'title', disk ? `Disk: ${gb(disk.total - disk.used)} GB free of ${gb(disk.total)} GB (${percent(disk)}% used)` : 'Disk: unknown');
 }
 
