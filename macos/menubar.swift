@@ -202,7 +202,7 @@ final class Panel: NSViewController {
     private var sections: [Section] = []
     private var shown = ""  // the items and their views, as last shown
     private(set) var side: NSPanel?
-    private var open: (section: Section, row: SubmenuRow)?
+    private var open: (section: Section, row: MenuRow)?
 
     override func loadView() {
         stack.orientation = .vertical
@@ -228,7 +228,7 @@ final class Panel: NSViewController {
         if !row.bounds.contains(row.convert(event.locationInWindow, from: nil)) { closeSubmenu() }
     }
 
-    func openSubmenu(_ section: Section, from row: SubmenuRow) {
+    func openSubmenu(_ section: Section, from row: MenuRow) {
         if open?.section === section { return }
         closeSubmenu()
         guard let window = view.window else { return }
@@ -331,7 +331,8 @@ final class Panel: NSViewController {
         var arranged: [NSView] = []
         for s in sections {
             if s.submenu {
-                arranged.append(SubmenuRow(title: s.title) { [weak self] row in self?.openSubmenu(s, from: row) })
+                let open: (MenuRow) -> Void = { [weak self] row in self?.openSubmenu(s, from: row) }
+                arranged.append(MenuRow(s.title, .chevron, onHover: open, onClick: open))
                 continue
             }
             if !s.title.isEmpty { arranged.append(header(s.title)) }
@@ -359,9 +360,22 @@ final class Panel: NSViewController {
 
     private func show(_ views: [NSView]) {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for v in views + [separator(), windowButton(), loginButton(), quitButton()] {
+        let footer: [NSView] = [
+            separator(),
+            MenuRow("Open The One App", onHover: { [weak self] _ in self?.closeSubmenu() }) { [weak self] _ in
+                self?.popover?.performClose(nil)
+                self?.openWindow?()
+            },
+            MenuRow("Open at Login", .toggle(SMAppService.mainApp.status == .enabled), onHover: { [weak self] _ in self?.closeSubmenu() }) { row in
+                setOpenAtLogin(row.isOn)
+                row.isOn = SMAppService.mainApp.status == .enabled
+            },
+            separator(),
+            MenuRow("Quit The One App", .shortcut("⌘Q"), onHover: { [weak self] _ in self?.closeSubmenu() }) { _ in NSApp.terminate(nil) },
+        ]
+        for v in views + footer {
             stack.addArrangedSubview(v)
-            if v is WKWebView || v is NSBox || v is SubmenuRow {
+            if v is WKWebView || v is NSBox || v is MenuRow {
                 v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -12).isActive = true
             }
         }
@@ -401,62 +415,55 @@ final class Panel: NSViewController {
         box.boxType = .separator
         return box
     }
-
-    // A borderless button draws its title greyed out while its window isn't
-    // key, so the title gets an explicit color.
-    private func menuButton(_ title: String, action: Selector, target: AnyObject) -> NSButton {
-        let b = NSButton(title: title, target: target, action: action)
-        b.isBordered = false
-        b.alignment = .left
-        b.attributedTitle = NSAttributedString(string: title, attributes: [.foregroundColor: NSColor.labelColor, .font: NSFont.systemFont(ofSize: 13)])
-        return b
-    }
-
-    private func windowButton() -> NSView {
-        padded(menuButton("Open The One App", action: #selector(openWindowClicked), target: self), top: 2)
-    }
-
-    @objc private func openWindowClicked() {
-        popover?.performClose(nil)
-        openWindow?()
-    }
-
-    private func loginButton() -> NSView {
-        let b = menuButton("Open at Login", action: #selector(toggleLogin(_:)), target: self)
-        b.setButtonType(.switch)
-        b.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        return padded(b, top: 2)
-    }
-
-    @objc private func toggleLogin(_ sender: NSButton) {
-        setOpenAtLogin(sender.state == .on)
-        sender.state = SMAppService.mainApp.status == .enabled ? .on : .off
-    }
-
-    private func quitButton() -> NSView {
-        let b = menuButton("Quit The One App", action: #selector(NSApplication.terminate(_:)), target: NSApp)
-        b.keyEquivalent = "q"
-        b.keyEquivalentModifierMask = .command
-        return padded(b, top: 2)
-    }
 }
 
-// A SubmenuRow is a menu row that opens its item's view beside the menu, on
-// hover or click.
-final class SubmenuRow: NSView {
-    private let onOpen: (SubmenuRow) -> Void
-    var highlighted = false { didSet { needsDisplay = true } }
+// A MenuRow is one native row of the menu, drawn and highlighted like a
+// macOS menu item: a title, an accessory on the right, and an action on click.
+final class MenuRow: NSView {
+    enum Accessory { case none, chevron, shortcut(String), toggle(Bool) }
 
-    init(title: String, onOpen: @escaping (SubmenuRow) -> Void) {
-        self.onOpen = onOpen
+    private let onClick: (MenuRow) -> Void
+    private let onHover: ((MenuRow) -> Void)?
+    private var toggle: NSSwitch?
+    private var hovering = false { didSet { needsDisplay = true } }
+    var highlighted = false { didSet { needsDisplay = true } }  // kept while its submenu is open
+    var isOn: Bool {
+        get { toggle?.state == .on }
+        set { toggle?.state = newValue ? .on : .off }
+    }
+
+    init(_ title: String, _ accessory: Accessory = .none, onHover: ((MenuRow) -> Void)? = nil, onClick: @escaping (MenuRow) -> Void) {
+        self.onClick = onClick
+        self.onHover = onHover
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 13)
-        let chevron = NSImageView(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil) ?? NSImage())
-        chevron.symbolConfiguration = .init(pointSize: 10, weight: .semibold)
-        chevron.contentTintColor = .secondaryLabelColor
-        for v in [label, chevron] as [NSView] {
+        var views: [NSView] = [label]
+        var trailing: NSView?
+        switch accessory {
+        case .none: break
+        case .chevron:
+            let chevron = NSImageView(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil) ?? NSImage())
+            chevron.symbolConfiguration = .init(pointSize: 10, weight: .semibold)
+            chevron.contentTintColor = .secondaryLabelColor
+            trailing = chevron
+        case .shortcut(let keys):
+            let shortcut = NSTextField(labelWithString: keys)
+            shortcut.font = .systemFont(ofSize: 13)
+            shortcut.textColor = .secondaryLabelColor
+            trailing = shortcut
+        case .toggle(let on):
+            let toggle = NSSwitch()
+            toggle.controlSize = .mini
+            toggle.state = on ? .on : .off
+            toggle.target = self
+            toggle.action = #selector(switched)
+            self.toggle = toggle
+            trailing = toggle
+        }
+        if let trailing { views.append(trailing) }
+        for v in views {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -464,19 +471,38 @@ final class SubmenuRow: NSView {
             heightAnchor.constraint(equalToConstant: 24),
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+        if let trailing {
+            NSLayoutConstraint.activate([
+                trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+                trailing.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+        }
+        setAccessibilityRole(.menuItem)
+        setAccessibilityLabel(title)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
     }
 
     required init?(coder: NSCoder) { nil }
 
-    override func mouseEntered(with event: NSEvent) { onOpen(self) }
-    override func mouseDown(with event: NSEvent) { onOpen(self) }
+    @objc private func switched() { onClick(self) }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        onHover?(self)
+    }
+
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func mouseDown(with event: NSEvent) {}
+
+    override func mouseUp(with event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        toggle.map { $0.state = $0.state == .on ? .off : .on }
+        onClick(self)
+    }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard highlighted else { return }
+        guard hovering || highlighted else { return }
         NSColor.labelColor.withAlphaComponent(0.1).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
     }
@@ -609,6 +635,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if let m = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown], handler: { [weak self] e in
             if e.type == .keyDown {
                 if e.keyCode == 53 { self?.close(); return nil }
+                if e.modifierFlags.contains(.command), e.charactersIgnoringModifiers == "q" { NSApp.terminate(nil); return nil }
                 return e
             }
             if !ours(e.window) { self?.close() }
