@@ -180,6 +180,7 @@ final class Section: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     weak var panel: Panel?
     private var result: [String: Any]
     private var initialized = false
+    private(set) var sized = false
 
     init(item: [String: Any], html: String, csp: [String: Any]?, result: [String: Any], panel: Panel) {
         title = item["title"] as? String ?? ""
@@ -188,7 +189,7 @@ final class Section: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         self.result = result
         self.panel = panel
         let config = WKWebViewConfiguration()
-        web = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: 1), configuration: config)
+        web = WKWebView(frame: NSRect(x: 0, y: 0, width: width - 12, height: 1), configuration: config)
         web.setValue(false, forKey: "drawsBackground")
         web.translatesAutoresizingMaskIntoConstraints = false
         height = web.heightAnchor.constraint(equalToConstant: 1)
@@ -237,6 +238,7 @@ final class Section: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         case "ui/notifications/size-changed":
             if let h = params["height"] as? Double {
                 height.constant = min(CGFloat(h), maxHeight)
+                sized = true
                 panel?.fit()
             }
         case "ui/open-link":
@@ -282,6 +284,7 @@ final class Panel: NSViewController {
     weak var popover: NSPopover?
     private let stack = NSStackView()
     private var sections: [Section] = []
+    private var shown = ""  // the items and their views, as last shown
 
     override func loadView() {
         stack.orientation = .vertical
@@ -300,37 +303,64 @@ final class Panel: NSViewController {
         show([message("Loading…")])
     }
 
-    // reload asks the node for the menu bar afresh, as on every open.
+    // reload asks the node for the menu bar afresh, as on every open. If the
+    // items and their views are the same as shown, it only refreshes their
+    // data; otherwise it builds the new views out of sight and swaps them in
+    // once they have their heights, so the popover doesn't shrink and regrow.
     func reload() async {
         let items: [[String: Any]]
         do {
             let doc = try await client.request("tools/call", ["name": "menubar", "arguments": [:] as [String: Any]])
             items = (doc["structuredContent"] as? [String: Any])?["items"] as? [[String: Any]] ?? []
         } catch {
+            sections.forEach { $0.close() }
+            sections = []
+            shown = ""
             show([message("The One App isn't running."), message(error.localizedDescription, small: true)])
             return
         }
-        var fresh: [Section] = []
+        var views: [(item: [String: Any], html: String, csp: [String: Any]?)] = []
         for item in items {
-            guard let tool = item["tool"] as? String, let uri = item["resource"] as? String else { continue }
+            guard let uri = item["resource"] as? String else { continue }
             do {
                 let res = try await client.request("resources/read", ["uri": uri])
                 guard let content = (res["contents"] as? [[String: Any]])?.first, let html = content["text"] as? String else { continue }
                 let csp = ((content["_meta"] as? [String: Any])?["ui"] as? [String: Any])?["csp"] as? [String: Any]
-                let result = try await client.request("tools/call", ["name": tool, "arguments": [:] as [String: Any]])
-                fresh.append(Section(item: item, html: html, csp: csp, result: result, panel: self))
+                views.append((item, html, csp))
             } catch {
                 NSLog("menu bar item \(item["id"] ?? uri): \(error)")
             }
         }
+        let signature = json(views.map { [$0.item, $0.html] })
+        if signature == shown && !sections.isEmpty {
+            await refreshResults()
+            return
+        }
+        var fresh: [Section] = []
+        for v in views {
+            guard let tool = v.item["tool"] as? String,
+                  let result = try? await client.request("tools/call", ["name": tool, "arguments": [:] as [String: Any]]) else { continue }
+            fresh.append(Section(item: v.item, html: v.html, csp: v.csp, result: result, panel: self))
+        }
+        for f in fresh {  // in the window but invisible, so they load and lay out
+            f.web.alphaValue = 0
+            f.web.frame.size.width = width - 12
+            view.addSubview(f.web)
+        }
+        let deadline = Date().addingTimeInterval(1.5)
+        while Date() < deadline && !fresh.allSatisfy(\.sized) {
+            try? await Task.sleep(nanoseconds: 30_000_000)
+        }
         sections.forEach { $0.close() }
         sections = fresh
-        var views: [NSView] = []
+        shown = signature
+        fresh.forEach { $0.web.removeFromSuperview(); $0.web.alphaValue = 1 }
+        var arranged: [NSView] = []
         for s in sections {
-            if !s.title.isEmpty { views.append(header(s.title)) }
-            views.append(s.web)
+            if !s.title.isEmpty { arranged.append(header(s.title)) }
+            arranged.append(s.web)
         }
-        show(views)
+        show(arranged)
     }
 
     // refreshResults re-runs every item's tool, after a view changed something.
