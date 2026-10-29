@@ -30,7 +30,8 @@ final class Shell: ObservableObject {
     @Published var devices: (online: Int, total: Int)?
     @Published var error: String?
     @Published var widgets: [LiveWidget] = []
-    private var client: MCPClient?
+    @Published var pages: [AppPage] = []
+    private(set) var client: MCPClient?
     private let preferred: [URL]
 
     init(nodes preferred: [URL]) {
@@ -82,6 +83,8 @@ final class Shell: ObservableObject {
                               enabled: r["enabled"] as? Bool ?? false, running: r["running"] as? Bool ?? false)
             }
             await loadWidgets()
+            let pageRows = (try? await call("pages"))?["pages"] as? [[String: Any]] ?? []
+            pages = pageRows.compactMap(AppPage.init)
             let list = try await call("devices")["devices"] as? [[String: Any]] ?? []
             devices = (list.filter { $0["online"] as? Bool == true }.count, list.count)
             known = list.compactMap { $0["name"] as? String }
@@ -109,6 +112,7 @@ extension Shell {
 
 enum Page: Hashable {
     case home, plugins
+    case page(String)
 }
 
 // HomePage shows every widget on the user's devices.
@@ -162,6 +166,11 @@ struct ShellView: View {
                     NavigationLink(value: Page.plugins) {
                         Label("Plugins", systemImage: "puzzlepiece.extension")
                     }
+                    ForEach(shell.pages) { p in
+                        NavigationLink(value: Page.page(p.id)) {
+                            Label(p.title, systemImage: p.icon)
+                        }
+                    }
                 }
             }
             .navigationTitle("The One App")
@@ -173,6 +182,10 @@ struct ShellView: View {
                 switch page {
                 case .home, nil: HomePage(shell: shell)
                 case .plugins: PluginsPage(shell: shell)
+                case .page(let id):
+                    if let p = shell.pages.first(where: { $0.id == id }), let client = shell.client {
+                        PluginPage(page: p, client: client).id(p.id)
+                    }
                 }
             }
             .toolbar {

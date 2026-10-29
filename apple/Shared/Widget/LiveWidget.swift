@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class LiveWidget: ObservableObject, Identifiable {
     let tool: String
+    let input: [String: Any]
     @Published var description: Description?
     @Published var error: String?
     var changed: (() -> Void)?
@@ -12,8 +13,9 @@ final class LiveWidget: ObservableObject, Identifiable {
 
     nonisolated var id: String { tool }
 
-    init(tool: String, client: MCPClient, result: [String: Any]? = nil) {
+    init(tool: String, client: MCPClient, input: [String: Any] = [:], result: [String: Any]? = nil) {
         self.tool = tool
+        self.input = input
         self.client = client
         if let result { description = Description(result: result) }
     }
@@ -30,7 +32,7 @@ final class LiveWidget: ObservableObject, Identifiable {
 
     func load() async {
         do {
-            show(try await client.request("tools/call", ["name": tool, "arguments": [:] as [String: Any]]))
+            show(try await client.request("tools/call", ["name": tool, "arguments": input]))
         } catch {
             self.error = error.localizedDescription
         }

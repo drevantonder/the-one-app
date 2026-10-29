@@ -236,6 +236,7 @@ final class Panel: NSViewController {
     let client = MCPClient(node: nodeURL, name: "The One App menu bar")
     weak var popover: NSPopover?
     var openWindow: (() -> Void)?
+    var showBars: (([[String: Any]]) -> Void)?
     private let stack = NSStackView()
     private var sections: [MenuSection] = []
     private var shown = ""  // the items and their views, as last shown
@@ -329,8 +330,9 @@ final class Panel: NSViewController {
             show([message("The One App isn't running."), message(error.localizedDescription, small: true)])
             return
         }
+        showBars?(items.filter { $0["bar"] as? Bool == true })
         var views: [(item: [String: Any], html: String, csp: [String: Any]?)] = []
-        for item in items {
+        for item in items where item["bar"] as? Bool != true {
             // An item without a view is a widget, drawn natively.
             guard let uri = item["resource"] as? String, !uri.isEmpty else {
                 views.append((item, "", nil))
@@ -575,6 +577,56 @@ final class SidePanel: NSPanel {
     }
 }
 
+// A BarItem is a menu bar item of its own, beside the app's: titled with the
+// first line of its tool's text, it opens the tool's widget below it.
+@MainActor
+final class BarItem: NSObject {
+    let tool: String
+    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let popover = NSPopover()
+    private let live: LiveWidget
+    private let client: MCPClient
+
+    init(tool: String, client: MCPClient) {
+        self.tool = tool
+        self.client = client
+        live = LiveWidget(tool: tool, client: client)
+        super.init()
+        popover.behavior = .transient
+        popover.animates = false
+        let host = NSHostingController(rootView: LiveWidgetView(widget: live).padding(14).frame(width: 340, alignment: .topLeading))
+        host.sizingOptions = .preferredContentSize
+        popover.contentViewController = host
+        item.button?.target = self
+        item.button?.action = #selector(toggle(_:))
+        item.button?.lineBreakMode = .byTruncatingTail
+    }
+
+    func refresh() async {
+        guard let result = try? await client.request("tools/call", ["name": tool, "arguments": [:] as [String: Any]]) else { return }
+        live.show(result)
+        let text = (result["content"] as? [[String: Any]])?.first?["text"] as? String ?? ""
+        let line = text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+        item.button?.title = line.count > 32 ? line.prefix(31).trimmingCharacters(in: .whitespaces) + "…" : line
+        item.isVisible = !line.isEmpty
+    }
+
+    func remove() {
+        popover.performClose(nil)
+        NSStatusBar.system.removeStatusItem(item)
+    }
+
+    @objc private func toggle(_ sender: NSStatusBarButton) {
+        if popover.isShown {
+            popover.performClose(sender)
+            return
+        }
+        NSApp.activate()
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+        Task { await refresh() }
+    }
+}
+
 // The app runs the node, so it opens at login unless the user turns that off.
 func setOpenAtLogin(_ on: Bool) {
     UserDefaults.standard.set(on, forKey: "openAtLogin")
@@ -591,6 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let panel = Panel()
     private let popover = NSPopover()
     private var item: NSStatusItem?
+    private var bars: [String: BarItem] = [:]
     private var monitors: [Any] = []
     private var observers: [NSObjectProtocol] = []
     private var window: NSWindow?
@@ -604,6 +657,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.delegate = self
         panel.popover = popover
         panel.openWindow = { [weak self] in self?.showWindow() }
+        panel.showBars = { [weak self] items in self?.showBars(items) }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let ring = NSImage(named: "MenuBarIcon")
         ring?.isTemplate = true
@@ -620,13 +674,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             await panel.reload()
         }
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
-            Task { @MainActor in await self.panel.refreshResults() }
+            Task { @MainActor in
+                await self.panel.refreshResults()
+                for bar in self.bars.values { await bar.refresh() }
+            }
+        }
+        // Plugins that start later add their items too.
+        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            Task { @MainActor in if !self.popover.isShown { await self.panel.reload() } }
         }
         let built = executableID()
         Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
             MainActor.assumeIsolated {
                 if let now = self.executableID(), now != built { self.relaunch() }
             }
+        }
+    }
+
+    // showBars keeps a BarItem for each item the menu bar puts beside it.
+    private func showBars(_ items: [[String: Any]]) {
+        let tools = Set(items.compactMap { $0["tool"] as? String })
+        for (tool, bar) in bars where !tools.contains(tool) {
+            bar.remove()
+            bars[tool] = nil
+        }
+        for tool in items.compactMap({ $0["tool"] as? String }) where bars[tool] == nil {
+            let bar = BarItem(tool: tool, client: panel.client)
+            bars[tool] = bar
+            Task { await bar.refresh() }
         }
     }
 
