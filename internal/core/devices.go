@@ -69,20 +69,25 @@ func withDevices(o Op, devices []string) Op {
 	if ownsDevice(o) {
 		return o // the plugin has its own device argument; it wins
 	}
-	var schema map[string]any
+	var schema map[string]json.RawMessage
 	if json.Unmarshal(o.InputSchema, &schema) != nil || schema == nil {
-		schema = map[string]any{"type": "object"}
+		schema = map[string]json.RawMessage{"type": json.RawMessage(`"object"`)}
 	}
-	props, _ := schema["properties"].(map[string]any)
-	if props == nil {
-		props = map[string]any{}
-	}
-	props[deviceArg] = map[string]any{
+	arg, _ := json.Marshal(map[string]any{
 		"type":        "string",
 		"enum":        devices,
 		"description": "The device to run on. Default: this one if it has the plugin, otherwise one that does.",
+	})
+	// Spliced in last, not re-marshaled, so the plugin's own arguments keep
+	// their order: the CLI fills them from positional words in that order.
+	props := strings.TrimSpace(string(schema["properties"]))
+	device := `"` + deviceArg + `":` + string(arg) + "}"
+	if strings.HasPrefix(props, "{") && strings.TrimSpace(props[1:]) != "}" {
+		props = strings.TrimSuffix(props, "}") + "," + device
+	} else {
+		props = "{" + device
 	}
-	schema["properties"] = props
+	schema["properties"] = json.RawMessage(props)
 	o.InputSchema, _ = json.Marshal(schema)
 	return o
 }

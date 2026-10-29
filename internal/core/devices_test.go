@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -102,5 +103,26 @@ func TestDeviceArgument(t *testing.T) {
 	// This device, which doesn't have it: no quiet fallback elsewhere.
 	if err := call("shell", "run", `{"command":"ls","device":"mac"}`); err == nil || !strings.Contains(err.Error(), "it is on: linux, pi") {
 		t.Fatalf("running on this device, which lacks it: got %v", err)
+	}
+}
+
+func TestWithDevicesKeepsArgumentOrder(t *testing.T) {
+	o := withDevices(Op{InputSchema: json.RawMessage(`{"type":"object","properties":{"topic":{"type":"string"},"block":{"type":"string"},"text":{"type":"string"}}}`)}, []string{"mac"})
+	props := string(o.InputSchema)
+	props = props[strings.Index(props, `"properties"`):]
+	var at []int
+	for _, name := range []string{`"topic"`, `"block"`, `"text"`, `"device"`} {
+		at = append(at, strings.Index(props, name))
+	}
+	if !slices.IsSorted(at) || at[0] < 0 {
+		t.Fatalf("argument order lost: %s", o.InputSchema)
+	}
+	for _, in := range []string{`{"type":"object"}`, `{"type":"object","properties":{}}`, ``} {
+		var schema struct {
+			Properties map[string]any `json:"properties"`
+		}
+		if err := json.Unmarshal(withDevices(Op{InputSchema: json.RawMessage(in)}, []string{"mac"}).InputSchema, &schema); err != nil || len(schema.Properties) != 1 {
+			t.Errorf("%q: %v %v", in, schema.Properties, err)
+		}
 	}
 }
