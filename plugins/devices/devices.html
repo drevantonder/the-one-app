@@ -13,8 +13,6 @@
   header .label { font-size: 9px; font-weight: 500; text-align: center; }
   ul { list-style: none; margin: 0; padding: 0; }
   li.offline { opacity: .5; }
-  li.guest { padding-left: 24px; }
-  li.guest .icon { width: 18px; height: 18px; }
   .icon { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
   .text { flex: 1; min-width: 0; }
   .name, .detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -33,6 +31,7 @@ const icons = {
   server: '<rect x="4" y="4" width="16" height="7" rx="1"/><rect x="4" y="13" width="16" height="7" rx="1"/><path d="M8 7.5h.01M8 16.5h.01"/>',
   phone: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>',
   desktop: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M9 20h6M12 16v4"/>',
+  container: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
 };
 const iconFor = os => ({ macOS: 'laptop', linux: 'server', iOS: 'phone', android: 'phone', windows: 'desktop' })[os] ?? 'desktop';
 
@@ -111,13 +110,13 @@ function makeRow() {
 }
 
 function update(r, d) {
-  set(r.li, 'class', [d.host && 'guest', !d.online && 'offline'].filter(Boolean).join(' ') || undefined);
-  const icon = iconFor(d.os);
+  set(r.li, 'class', d.online ? undefined : 'offline');
+  const icon = d.host ? 'container' : iconFor(d.os);
   if (r.iconName !== icon) { r.icon.innerHTML = icons[icon]; r.iconName = icon; }
   text(r.name, d.name);
   const version = d.version ? `v${d.version}` : '';
   text(r.detail, d.online
-    ? [d.self && 'This device', version].filter(Boolean).join(' · ')
+    ? [d.self && 'This device', d.host && `On ${d.host}`, version].filter(Boolean).join(' · ')
     : (d.lastSeen ? `Last seen ${ago(d.lastSeen)}` : 'Offline'));
   const u = d.online ? d.usage : undefined;
   set(r.stats, 'hidden', u ? undefined : '');
