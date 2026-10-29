@@ -9,8 +9,6 @@ One app to rule them all, one app to find them,<br>
 one app to bring them all, and in the network bind them.
 </i></p>
 
-<p align="center">A personal backend for your AI agents, running on the devices you already own.</p>
-
 Every agent you use (Claude Code, Codex, opencode, anything that speaks MCP)
 connects to the same node and gets the same instructions, the same memory and
 the same tools, through MCP, a CLI or an HTTP API.
