@@ -45,7 +45,7 @@ type viewIn struct {
 
 // own are the plugin's operations; a Space's tools with these names are
 // left out.
-var own = []string{"create", "list", "start", "stop", "delete", "view", "backup", "release", "refresh_tools"}
+var own = []string{"create", "list", "start", "stop", "delete", "view", "backup", "release", "refresh_tools", "borrow", "sign_in", "give_back", "logins", "forget_login", "pool"}
 
 func setup(c *sdk.Ctx) error {
 	var err error
@@ -173,6 +173,7 @@ func setup(c *sdk.Ctx) error {
 		_, err := call.Append("started", released{Name: name})
 		return err
 	}
+	setupPool(c, t, located, locate)
 	c.OnReady(func(call *sdk.Call) {
 		locate(call)
 		_ = t.refresh(call.Context)
@@ -186,6 +187,9 @@ func setup(c *sdk.Ctx) error {
 	})
 
 	sdk.Op(c, "create", "Create a Space: a Linux desktop of its own, with a browser, for agents to use. Sign in to sites in it with view. A Space that has backups, from this device or another, is restored from the newest.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
+		if strings.HasPrefix(in.Name, poolPrefix) {
+			return sdk.Result{}, fmt.Errorf("%s names are the pool's: borrow one with borrow", poolPrefix)
+		}
 		saved, err := backups(call, in.Name)
 		if err != nil && !noBucket(err) {
 			return sdk.Result{}, err
@@ -232,6 +236,9 @@ func setup(c *sdk.Ctx) error {
 		latest := map[string]sdk.FileInfo{}
 		for _, f := range saved {
 			name, _, _ := strings.Cut(f.Name, "/")
+			if strings.HasPrefix(name, "@") {
+				continue
+			}
 			if f.Name > latest[name].Name {
 				latest[name] = f
 			}
@@ -451,6 +458,7 @@ type tools struct {
 	// every device's Spaces.
 	elsewhere func(call *sdk.Call, name, op string, in any) (sdk.Result, bool, error)
 	names     func() []string
+	used      func(name string) // a Space's tool was called on this device
 
 	mu       sync.Mutex
 	sessions map[string]*mcp.ClientSession // by Space
@@ -557,6 +565,9 @@ func (t *tools) call(call *sdk.Call, tool string, input json.RawMessage) (sdk.Re
 		return res, err
 	}
 	delete(args, "space")
+	if t.used != nil {
+		t.used(name)
+	}
 	s, err := find(ctx, name)
 	if err != nil {
 		return sdk.Result{}, err

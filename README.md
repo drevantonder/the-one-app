@@ -156,6 +156,20 @@ to clicks and typing, are `spaces` operations too, such as
 several. The viewer is served over HTTPS on the tailnet, with
 `tailscale serve`.
 
+Agents don't have to share a Space: each borrows one of its own, and gives
+it back when done, when it is deleted. Sign in to sites once, in a saved
+login that every borrowed Space's browser can start with:
+
+```sh
+one spaces sign_in                      # a link to a browser in the default login
+one spaces give_back --space pool-…     # saves the login (or it saves itself when time is up)
+one spaces borrow --login default       # an agent's own Space, already signed in
+one spaces pool --spare 1 --device linux  # keep one ready there, memory allowing
+```
+
+Logins are kept in the bucket, encrypted. An agent's changes to its copy go
+when its Space does; a borrowed Space left idle for 15 minutes is given back.
+
 The built-in `messenger` plugin reads Facebook Messenger this way, from the
 browser in the Space called messenger, where you sign in to messenger.com
 once: `one messenger chats`, `read --chat …` (an unread chat is marked unread
