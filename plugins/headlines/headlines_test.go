@@ -41,8 +41,10 @@ func TestEmoji(t *testing.T) {
 type fake struct {
 	news   string
 	judge  map[string]float64 // nil: the judge is offline
+	choice string             // the judge's pick of the news
 	roast  []string
 	plain  []string
+	asked  map[string]any
 	chats  map[string][][]map[string]string
 	models []string
 }
@@ -55,9 +57,13 @@ func (f *fake) invoke(plugin, op string, in any) (sdk.Result, error) {
 		if f.judge == nil {
 			return sdk.Result{}, errors.New("offline")
 		}
+		f.asked = in.(map[string]any)
 		answers := map[string]any{}
 		for q, v := range f.judge {
 			answers[q] = map[string]any{"noul": v}
+		}
+		if f.choice != "" {
+			answers["news"] = map[string]any{"choice": f.choice}
 		}
 		return sdk.Result{Data: map[string]any{"answers": answers}}, nil
 	case "models_chat":
@@ -81,29 +87,39 @@ func (f *fake) invoke(plugin, op string, in any) (sdk.Result, error) {
 	return sdk.Result{}, errors.New("unknown " + plugin + "_" + op)
 }
 
-func reply(emoji, text string) string { return `{"emoji":"` + emoji + `","headline":"` + text + `"}` }
+// written is the writer's answer: headlines as emoji and text, in pairs.
+func written(pairs ...string) string {
+	var hs []map[string]string
+	for i := 0; i+1 < len(pairs); i += 2 {
+		hs = append(hs, map[string]string{"emoji": pairs[i], "headline": pairs[i+1]})
+	}
+	raw, _ := json.Marshal(map[string]any{"headlines": hs})
+	return string(raw)
+}
 
-var good = map[string]float64{"worth": 0.9, "roast_true": 0.9, "roast_funny": 0.78, "news_true": 0.9}
+var (
+	roasts = written("🙈", "No peeking, agents", "🔐", "Keys go to the vault", "🤡", "Agents locked out of everything ever")
+	plains = written("🔐", "Secrets kept by the core", "🔑", "Your keys stay secret")
+	good   = map[string]float64{"worth": 0.9, "r1_true": 0.9, "r1_funny": 0.72, "r2_true": 0.85, "r2_funny": 0.78, "n1_true": 0.9, "n2_true": 0.9}
+)
 
-func with(q string, v float64) map[string]float64 {
+func with(kv ...any) map[string]float64 {
 	m := maps.Clone(good)
-	m[q] = v
+	for i := 0; i+1 < len(kv); i += 2 {
+		m[kv[i].(string)] = kv[i+1].(float64)
+	}
 	return m
 }
 
 func TestNext(t *testing.T) {
-	p := &plugin{}
-	f := &fake{news: news, judge: good,
-		roast: []string{reply("🙈", "No peeking, agents")},
-		plain: []string{reply("🔐", "Agents can no longer read your secret keys"), reply("🔐", "Your keys stay secret.")},
+	f := &fake{news: news, judge: good, roast: []string{roasts}, plain: []string{plains}}
+	h, err := (&plugin{}).next(f.invoke)
+	if err != nil || h == nil || h.line() != "🔐 Keys go to the vault" || h.Kind != "roast" || h.Time == "" {
+		t.Fatalf("the funniest true roast wins: %+v, %v", h, err)
 	}
-	h, err := p.next(f.invoke)
-	if err != nil || h == nil || h.line() != "🙈 No peeking, agents" || h.Kind != "roast" || h.Time == "" {
-		t.Fatalf("a true, funny roast wins: %+v, %v", h, err)
-	}
-	retry := f.chats["news"][1]
-	if len(retry) != 3 || !strings.Contains(retry[2]["content"], "42 characters, 18 too many") {
-		t.Fatalf("the writer should be told how far over it went: %v", retry)
+	state := f.asked["state"].(map[string]any)
+	if state["roast 3"] != nil || state["roast 2"] != "🔐 Keys go to the vault" || state["news 2"] != "🔑 Your keys stay secret" {
+		t.Fatalf("the judge sees every take that fits, by name: %v", state)
 	}
 	if c := f.chats["roast"][0][0]["content"]; !strings.Contains(c, "Core secrets: agents never read them.") || strings.Contains(c, "fca0b23") {
 		t.Fatalf("prompt: %s", c)
@@ -111,47 +127,59 @@ func TestNext(t *testing.T) {
 }
 
 func TestPick(t *testing.T) {
-	roast, plain := reply("🙈", "No peeking, agents"), reply("🔐", "Your keys stay secret")
 	for name, c := range map[string]struct {
-		judge        map[string]float64
-		roast, plain string
-		want         string
+		judge  map[string]float64
+		choice string
+		roast  string
+		want   string
 	}{
-		"true and funny":       {good, roast, plain, "roast"},
-		"invented":             {with("roast_true", 0.4), roast, plain, "news"},
-		"not funny":            {with("roast_funny", 0.68), roast, plain, "news"},
-		"news wrong too":       {map[string]float64{"worth": 0.9, "roast_true": 0.9, "roast_funny": 0.6, "news_true": 0.5}, roast, plain, "roast"},
-		"nothing right":        {map[string]float64{"worth": 0.9, "roast_true": 0.5, "news_true": 0.5}, roast, plain, ""},
-		"not worth it":         {with("worth", 0.3), roast, plain, ""},
-		"no roast written":     {good, "", plain, "news"},
-		"judge offline":        {nil, roast, plain, "news"},
-		"judge offline, roast": {nil, roast, "", "roast"},
+		"funniest true roast":     {good, "", roasts, "Keys go to the vault"},
+		"funniest invents":        {with("r2_true", 0.5), "", roasts, "Secrets kept by the core"},
+		"none funny enough":       {with("r2_funny", 0.7), "", roasts, "Secrets kept by the core"},
+		"the judge's news":        {with("r2_funny", 0.7), "news 2", roasts, "Your keys stay secret"},
+		"its news is wrong":       {with("r2_funny", 0.7, "n2_true", 0.4), "news 2", roasts, "No peeking, agents"},
+		"a pick that isn't there": {with("r2_funny", 0.7), "news 9", roasts, "Secrets kept by the core"},
+		"nothing right":           {with("r1_true", 0.5, "r2_true", 0.5, "n1_true", 0.5), "", roasts, ""},
+		"not worth it":            {with("worth", 0.3), "", roasts, ""},
+		"judge offline":           {nil, "", roasts, "Secrets kept by the core"},
+		"no roasts written":       {good, "", written(), "Secrets kept by the core"},
 	} {
-		f := &fake{news: news, judge: c.judge}
-		if c.roast != "" {
-			f.roast = []string{c.roast}
-		}
-		if c.plain != "" {
-			f.plain = []string{c.plain}
-		}
+		f := &fake{news: news, judge: c.judge, choice: c.choice, roast: []string{c.roast}, plain: []string{plains}}
 		h, err := (&plugin{}).next(f.invoke)
-		if got := ""; err != nil || (h == nil) != (c.want == "") || h != nil && h.Kind != c.want {
+		if got := ""; err != nil || (h == nil) != (c.want == "") || h != nil && h.Text != c.want {
 			if h != nil {
-				got = h.Kind
+				got = h.Text
 			}
 			t.Errorf("%s: got %q, %v; want %q", name, got, err, c.want)
+		}
+		if h != nil && (h.Kind == "news") != strings.HasPrefix(c.want, "S") && (h.Kind == "news") != strings.HasPrefix(c.want, "Y") {
+			t.Errorf("%s: kind %q", name, h.Kind)
 		}
 	}
 }
 
+func TestTakes(t *testing.T) {
+	recent := []Headline{{Emoji: "🔑", Text: "Your keys stay secret"}}
+	f := &fake{news: news, judge: with("r2_funny", 0.7), roast: []string{written("🙈", "No peeking, agents", "🙈", "no peeking, agents")}, plain: []string{plains}}
+	(&plugin{headlines: recent}).next(f.invoke)
+	state := f.asked["state"].(map[string]any)
+	if state["roast 2"] != nil || state["news 2"] != nil || state["news 1"] != "🔐 Secrets kept by the core" {
+		t.Fatalf("repeats, of each other or of the ticker, are dropped: %v", state)
+	}
+	long := written("📰", "This one is far too long to fit", "📰", "And so is this one, also too long")
+	f = &fake{news: news, judge: good, roast: []string{long, written("🙈", "No peeking, agents")}, plain: []string{long, long}}
+	h, err := (&plugin{}).next(f.invoke)
+	if err != nil || h == nil || h.Text != "No peeking, agents" || !strings.Contains(f.chats["roast"][1][2]["content"], "Every one is over 24 characters") {
+		t.Fatalf("all too long: told once, then dropped: %+v, %v", h, err)
+	}
+}
+
 func TestNoHeadline(t *testing.T) {
-	p := &plugin{headlines: []Headline{{Emoji: "🔐", Text: "Your keys stay secret"}}}
 	for name, f := range map[string]*fake{
 		"nothing new":    {news: "Nothing new."},
-		"writers say no": {news: news, judge: good, roast: []string{reply("", "")}, plain: []string{reply("", "")}},
-		"repeats":        {news: news, judge: good, roast: []string{reply("🔑", "your keys stay secret")}, plain: []string{reply("🔑", "Your keys stay secret")}},
+		"writers say no": {news: news, judge: good, roast: []string{written()}, plain: []string{written()}},
 	} {
-		if h, err := p.next(f.invoke); h != nil || err != nil {
+		if h, err := (&plugin{}).next(f.invoke); h != nil || err != nil {
 			t.Errorf("%s: %+v, %v", name, h, err)
 		}
 	}
@@ -165,7 +193,7 @@ func TestWriterOffline(t *testing.T) {
 }
 
 func TestEmojiTwice(t *testing.T) {
-	f := &fake{news: news, judge: with("roast_true", 0), plain: []string{reply("💍", "💍 ✨ Ring looks expensive")}}
+	f := &fake{news: news, judge: with("r1_true", 0.0, "r2_true", 0.0), plain: []string{written("💍", "💍 ✨ Ring looks expensive")}}
 	if h, _ := (&plugin{}).next(f.invoke); h == nil || h.line() != "💍 Ring looks expensive" {
 		t.Fatalf("%+v", h)
 	}

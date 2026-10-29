@@ -5,12 +5,12 @@
 package headlines
 
 import (
-	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,10 +31,11 @@ const (
 	judge    = "typesafe/jev-latest"
 	worth    = 0.6  // how sure the judge must be that the posts deserve a headline
 	honest   = 0.8  // that a roast doesn't invent
-	funny    = 0.73 // that a roast lands; Jev's answers here run 0.67 to 0.8
+	funny    = 0.75 // that the best roast lands; Jev's answers here run 0.6 to 0.8
 	accurate = 0.7  // that the news is right
 	session  = "headlines"
-	attempts = 3
+	attempts = 2
+	takes    = 6 // headlines written of each kind, for the judge to pick from
 )
 
 // writer is local, so a headline every half minute costs nothing; a
@@ -142,12 +143,18 @@ func (p *plugin) next(invoke invoker) (*Headline, error) {
 	for _, h := range p.recent(5) {
 		recent = append(recent, h.Text)
 	}
-	roast, errRoast := write(invoke, writer, styles["roast"], posts, recent)
+	roasts, errRoast := write(invoke, writer, styles["roast"], posts, recent)
 	news, errNews := write(invoke, writer, styles["news"], posts, recent)
-	if roast == nil && news == nil {
+	if len(roasts) == 0 && len(news) == 0 {
 		return nil, errors.Join(errRoast, errNews)
 	}
-	h := pick(invoke, posts, roast, news)
+	for i := range roasts {
+		roasts[i].Kind = "roast"
+	}
+	for i := range news {
+		news[i].Kind = "news"
+	}
+	h := pick(invoke, posts, roasts, news)
 	if h != nil {
 		h.Time = time.Now().UTC().Format(time.RFC3339)
 	}
@@ -173,52 +180,75 @@ func newsPosts(text string) []string {
 	return out
 }
 
-// pick has the judge say whether the posts deserve a headline and, of the
-// roast and the news written for them, which to show: the roast if it is
-// true and funny, else the news if it is right. If the judge can't answer,
-// the news is shown.
-func pick(invoke invoker, posts []string, roast, news *Headline) *Headline {
-	if roast != nil {
-		roast.Kind = "roast"
-	}
-	if news != nil {
-		news.Kind = "news"
-	}
+// pick has the judge say whether the posts deserve a headline and which of
+// the candidates to show: the funniest roast that is true, if it's funny
+// enough, else the news that best tells the main point, if it's right. A
+// pick-one question ranks the news well, but would pick a roast that
+// invents, so roasts are each asked whether they're true and funny. If the
+// judge can't answer, the first news is shown.
+func pick(invoke invoker, posts []string, roasts, news []Headline) *Headline {
 	state := map[string]any{"posts": strings.Join(posts, "\n")}
-	if roast != nil {
-		state["roast headline"] = roast.line()
+	questions := map[string]any{"worth": map[string]any{"type": "noul", "instructions": "Are these posts worth a glance on Andre's news ticker: something now works, was fixed or changed, real work started, or a bug or blunder worth a laugh? No for rules for agents, notes on preferences, compressions and routine status."}}
+	for i, h := range roasts {
+		name := fmt.Sprintf("roast %d", i+1)
+		state[name] = h.line()
+		questions[fmt.Sprintf("r%d_true", i+1)] = map[string]any{"type": "noul", "instructions": "Is " + name + " true to what the posts say (a joke may exaggerate, but not invent)?"}
+		questions[fmt.Sprintf("r%d_funny", i+1)] = map[string]any{"type": "noul", "instructions": "Would " + name + " make a tech person smile?"}
 	}
-	if news != nil {
-		state["news headline"] = news.line()
+	options := map[string]string{}
+	for i, h := range news {
+		name := fmt.Sprintf("news %d", i+1)
+		state[name] = h.line()
+		options[name] = name
+		questions[fmt.Sprintf("n%d_true", i+1)] = map[string]any{"type": "noul", "instructions": "Is " + name + " accurate to the posts?"}
 	}
-	res, err := invoke("models", "decide", map[string]any{"model": judge, "state": state, "questions": map[string]any{
-		"worth":       map[string]any{"type": "noul", "instructions": "Are these posts worth a glance on Andre's news ticker: something now works, was fixed or changed, real work started, or a bug or blunder worth a laugh? No for rules for agents, notes on preferences, compressions and routine status."},
-		"roast_true":  map[string]any{"type": "noul", "instructions": "Is the roast headline true to what the posts say (a joke may exaggerate, but not invent)?"},
-		"roast_funny": map[string]any{"type": "noul", "instructions": "Would the roast headline make a tech person smile?"},
-		"news_true":   map[string]any{"type": "noul", "instructions": "Is the news headline accurate to the posts?"},
-	}})
+	if len(news) > 1 {
+		questions["news"] = map[string]any{"type": "choice", "instructions": "Which news headline best tells the main point of the posts, accurately?", "criteria": options}
+	}
+	first := func() *Headline {
+		if len(news) > 0 {
+			return &news[0]
+		}
+		return &roasts[0]
+	}
+	res, err := invoke("models", "decide", map[string]any{"model": judge, "state": state, "questions": questions})
 	if err != nil {
-		return cmp.Or(news, roast)
+		return first()
 	}
 	raw, _ := json.Marshal(res.Data)
 	var d struct {
 		Answers map[string]struct {
-			Noul float64 `json:"noul"`
+			Noul   float64 `json:"noul"`
+			Choice string  `json:"choice"`
 		} `json:"answers"`
 	}
 	if json.Unmarshal(raw, &d) != nil || len(d.Answers) == 0 {
-		return cmp.Or(news, roast)
+		return first()
 	}
-	a := func(q string) float64 { return d.Answers[q].Noul }
-	switch {
-	case a("worth") < worth:
+	a := func(q string, i int) float64 { return d.Answers[fmt.Sprintf(q, i+1)].Noul }
+	if d.Answers["worth"].Noul < worth {
 		return nil
-	case roast != nil && a("roast_true") >= honest && a("roast_funny") >= funny:
-		return roast
-	case news != nil && a("news_true") >= accurate:
-		return news
-	case roast != nil && a("roast_true") >= honest:
-		return roast
+	}
+	best := -1
+	for i := range roasts {
+		if a("r%d_true", i) >= honest && (best < 0 || a("r%d_funny", i) > a("r%d_funny", best)) {
+			best = i
+		}
+	}
+	if best >= 0 && a("r%d_funny", best) >= funny {
+		return &roasts[best]
+	}
+	n := 0
+	if c, ok := strings.CutPrefix(d.Answers["news"].Choice, "news "); ok {
+		if i, err := strconv.Atoi(c); err == nil && i >= 1 && i <= len(news) {
+			n = i - 1
+		}
+	}
+	if n < len(news) && a("n%d_true", n) >= accurate {
+		return &news[n]
+	}
+	if best >= 0 {
+		return &roasts[best]
 	}
 	return nil
 }
@@ -227,13 +257,13 @@ const ticker = "You write headlines for the one-line news ticker in the Mac menu
 
 var rules = fmt.Sprintf(`
 From the new posts, take the one thing that matters most, done or just started; work just started is underway, not done.
-Rules: 3 to 5 words, at most %d characters, spaces included; one emoji that fits; no code names or commit ids. If none of the posts is worth a glance, give an empty headline.
+Write %d different headlines, each its own take. Rules for each: 3 to 5 words, at most %d characters, spaces included; one emoji that fits; no code names or commit ids. If none of the posts is worth a glance, give no headlines.
 Examples:
-`, limit)
+`, takes, limit)
 
 // styles are the writer's prompts, one for each kind of headline, so each
 // commits: a roast is all joke, news is all fact. Both are written for every
-// update, and the judge picks.
+// update, several takes of each, and the judge picks.
 var styles = map[string]string{
 	"roast": ticker + `Find the hook in these posts, a bug, a repeat, a self-own, an irony, and make fun of it, like a cheeky tech tabloid. Commit to the joke; no plain summary. Moves that work: a pun, a deadpan 'take three' or 'thrice' for a repeat, 'works on my machine', a bug as a person (a zombie plugin, a stray VM squatting), a grand claim undercut. Mean to code and agents, never to Andre. The joke must be about what the posts really say.` + rules + `Post: Hex dictation picked the closed MacBook's mic, not the Beats.
 Headline: 🎙️ Mic listens to shut lid
@@ -257,47 +287,58 @@ Post: Brand: The One App. Icon: a 3D gold One Ring inscribed with device and age
 Headline: 💍 App gets a One Ring icon`,
 }
 
-var answer = json.RawMessage(`{"type":"object","properties":{"emoji":{"type":"string"},"headline":{"type":"string"}},"required":["emoji","headline"]}`)
+var answers = json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"headlines":{"type":"array","maxItems":%d,"items":{"type":"object","properties":{"emoji":{"type":"string"},"headline":{"type":"string"}},"required":["emoji","headline"]}}},"required":["headlines"]}`, takes))
 
-// write has model write a headline, telling it how far over the limit it
-// went until it fits. An empty headline means the model found no news.
-func write(invoke invoker, model, style string, posts, recent []string) (*Headline, error) {
+// write has model write takes headlines in one style, and keeps those that
+// fit and aren't already on the ticker. If none fit, it is told so once.
+func write(invoke invoker, model, style string, posts, recent []string) ([]Headline, error) {
 	prompt := "New posts:\n" + strings.Join(posts, "\n")
 	if len(recent) > 0 {
 		prompt += "\n\nAlready on the ticker, don't repeat: " + strings.Join(recent, "; ")
 	}
 	msgs := []map[string]string{{"role": "user", "content": prompt}}
-	var last string
 	for range attempts {
-		res, err := invoke("models", "chat", map[string]any{"model": model, "system": style, "messages": msgs, "schema": answer})
+		res, err := invoke("models", "chat", map[string]any{"model": model, "system": style, "messages": msgs, "schema": answers})
 		if err != nil {
 			return nil, err
 		}
 		var a struct {
-			Emoji    string `json:"emoji"`
-			Headline string `json:"headline"`
+			Headlines []struct {
+				Emoji    string `json:"emoji"`
+				Headline string `json:"headline"`
+			} `json:"headlines"`
 		}
 		if err := json.Unmarshal([]byte(res.Text), &a); err != nil {
 			return nil, fmt.Errorf("not JSON: %q", res.Text)
 		}
-		text := strings.TrimRight(strings.TrimLeftFunc(a.Headline, notWord), ".")
-		if text == "" {
+		if len(a.Headlines) == 0 {
 			return nil, nil
 		}
-		if n := utf8.RuneCountInString(text); n > limit {
-			last = text
-			msgs = append(msgs, map[string]string{"role": "assistant", "content": res.Text},
-				map[string]string{"role": "user", "content": fmt.Sprintf("%q is %d characters, %d too many. Say the same thing in at most %d.", text, n, n-limit, limit)})
-			continue
-		}
+		var out []Headline
+		long := 0
+		seen := map[string]bool{}
 		for _, h := range recent {
-			if strings.EqualFold(h, text) {
-				return nil, nil
-			}
+			seen[strings.ToLower(h)] = true
 		}
-		return &Headline{Emoji: emoji(a.Emoji), Text: text}, nil
+		for _, h := range a.Headlines {
+			text := strings.TrimRight(strings.TrimLeftFunc(h.Headline, notWord), ".")
+			if utf8.RuneCountInString(text) > limit {
+				long++
+				continue
+			}
+			if text == "" || seen[strings.ToLower(text)] {
+				continue
+			}
+			seen[strings.ToLower(text)] = true
+			out = append(out, Headline{Emoji: emoji(h.Emoji), Text: text})
+		}
+		if len(out) > 0 || long < len(a.Headlines) {
+			return out, nil
+		}
+		msgs = append(msgs, map[string]string{"role": "assistant", "content": res.Text},
+			map[string]string{"role": "user", "content": fmt.Sprintf("Every one is over %d characters. Write %d again, each at most %d.", limit, takes, limit)})
 	}
-	return nil, fmt.Errorf("still too long after %d tries: %q", attempts, last)
+	return nil, fmt.Errorf("every headline over %d characters, %d times", limit, attempts)
 }
 
 // notWord is what a model sometimes puts before a headline's first word:
