@@ -39,6 +39,7 @@ const writer = "gemma4:12b"
 type Headline struct {
 	Emoji string `json:"emoji"`
 	Text  string `json:"text"`
+	Kind  string `json:"kind,omitempty"` // roast or news
 	Time  string `json:"time"`
 }
 
@@ -132,15 +133,17 @@ func (p *plugin) next(invoke invoker) (*Headline, error) {
 	if len(posts) == 0 {
 		return nil, nil
 	}
-	if !worthIt(invoke, posts) {
+	ok, kind := judge(invoke, posts)
+	if !ok {
 		return nil, nil
 	}
 	var recent []string
 	for _, h := range p.recent(5) {
 		recent = append(recent, h.Text)
 	}
-	h, err := write(invoke, writer, posts, recent)
+	h, err := write(invoke, writer, styles[kind], posts, recent)
 	if h != nil {
+		h.Kind = kind
 		h.Time = time.Now().UTC().Format(time.RFC3339)
 	}
 	return h, err
@@ -165,17 +168,25 @@ func newsPosts(text string) []string {
 	return out
 }
 
-// worthIt asks the gate whether the posts deserve a headline; if it can't
-// answer, the writer decides.
-func worthIt(invoke invoker, posts []string) bool {
+// judge asks the gate whether the posts deserve a headline, and whether to
+// roast them or tell them straight. If it can't answer, the writer decides
+// whether they're worth one, and tells them straight.
+func judge(invoke invoker, posts []string) (bool, string) {
 	res, err := invoke("models", "decide", map[string]any{
 		"model": gate,
 		"state": map[string]any{"posts": strings.Join(posts, "\n")},
-		"questions": map[string]any{"news": map[string]any{"type": "noul",
-			"instructions": "Would the person who owns these apps and agents find any of these posts worth a glance on a news ticker: something now works, was fixed or changed, or an agent started real work on something? No for rules for agents, notes on how someone likes things, compressions of old posts, and routine status."}},
+		"questions": map[string]any{
+			"news": map[string]any{"type": "noul",
+				"instructions": "Would the person who owns these apps and agents find any of these posts worth a glance on a news ticker: something now works, was fixed or changed, or an agent started real work on something? No for rules for agents, notes on how someone likes things, compressions of old posts, and routine status."},
+			"kind": map[string]any{"type": "choice", "instructions": "How should a cheeky news ticker cover the most interesting of these posts?",
+				"criteria": map[string]string{
+					"roast": "It has a hook to make fun of: a bug, a repeat, a self-own, an irony, something absurd or embarrassing.",
+					"news":  "A plain change or new thing worth knowing; nothing funny about it.",
+				}},
+		},
 	})
 	if err != nil {
-		return true
+		return true, "news"
 	}
 	raw, _ := json.Marshal(res.Data)
 	var d struct {
@@ -183,19 +194,33 @@ func worthIt(invoke invoker, posts []string) bool {
 			News struct {
 				Noul *float64 `json:"noul"`
 			} `json:"news"`
+			Kind struct {
+				Choice string `json:"choice"`
+			} `json:"kind"`
 		} `json:"answers"`
 	}
 	if json.Unmarshal(raw, &d) != nil || d.Answers.News.Noul == nil {
-		return true
+		return true, "news"
 	}
-	return *d.Answers.News.Noul >= worth
+	kind := d.Answers.Kind.Choice
+	if _, ok := styles[kind]; !ok {
+		kind = "news"
+	}
+	return *d.Answers.News.Noul >= worth, kind
 }
 
-const style = `You write the one-line news ticker in the Mac menu bar of Andre, who builds The One App with a crew of AI agents that post to a shared board. Voice: a cheeky tech tabloid. Roast the agents, the bugs and the irony when a post has a hook: a bug, a repeat, a self-own, something absurd. Moves that work: a pun, a deadpan 'take three' or 'thrice' for a repeat, 'works on my machine', a bug as a person (a zombie plugin, a stray VM squatting), a grand claim undercut. Mean to code and agents, never to Andre. When there's no hook, just say the news plainly. Aim for about half funny, half straight.
-From the new posts, pick the one thing that matters most, done or just started; work just started is underway, not done.
-Rules: 3 to 5 words, at most %d characters, spaces included; one emoji that fits the story; only state what the posts say; no code names, commit ids or version numbers unless they are the news. If none of the posts is worth a glance, give an empty headline.
+const ticker = "You write headlines for the one-line news ticker in the Mac menu bar of Andre, who builds The One App with a crew of AI agents that post to a shared board. "
+
+var rules = fmt.Sprintf(`
+From the new posts, take the one thing that matters most, done or just started; work just started is underway, not done.
+Rules: 3 to 5 words, at most %d characters, spaces included; one emoji that fits; no code names or commit ids. If none of the posts is worth a glance, give an empty headline.
 Examples:
-Post: Hex dictation picked the closed MacBook's mic, not the Beats.
+`, limit)
+
+// styles are the writer's prompts, one for each kind of headline, so each
+// commits: a roast is all joke, news is all fact.
+var styles = map[string]string{
+	"roast": ticker + `These posts have a hook: make fun of it, like a cheeky tech tabloid. Commit to the joke; no plain summary. Moves that work: a pun, a deadpan 'take three' or 'thrice' for a repeat, 'works on my machine', a bug as a person (a zombie plugin, a stray VM squatting), a grand claim undercut. Mean to code and agents, never to Andre. The joke must be about what the posts really say.` + rules + `Post: Hex dictation picked the closed MacBook's mic, not the Beats.
 Headline: 🎙️ Mic listens to shut lid
 Post: Retired the memory plugin: the Agent Board is agents' shared memory now.
 Headline: 🪦 Memory plugin forgotten
@@ -205,18 +230,23 @@ Post: Fixed two copies of the app after each update: every copy relaunched itsel
 Headline: 👯 Mac app quits twinning
 Post: The node restarts a plugin whose process dies, at once, then with backoff.
 Headline: 🧟 Dead plugins now rise
-Post: New claude plugin: coding devices get Claude Code kept installed.
+Post: The Mac app had no main menu, so Cmd-V reached no view: added Edit and Window menus.
+Headline: 📋 Mac app learns to paste`,
+	"news": ticker + `Say plainly and exactly what changed for Andre, like a wire-service headline: present tense, the most useful fact, no jokes. Only state what the posts say.` + rules + `Post: New claude plugin: coding devices get Claude Code kept installed.
 Headline: 🤖 Claude Code on every box
 Post: Secrets: plugins read the ones they name; agents never read them.
 Headline: 🔐 Keys hidden from agents
-Post: The Mac app had no main menu, so Cmd-V reached no view: added Edit and Window menus.
-Headline: 📋 Mac app learns to paste`
+Post: Devices is now a plugin: per-node RAM ring, CPU and GPU sparklines, disk bar.
+Headline: 📊 Devices get sparklines
+Post: Brand: The One App. Icon: a 3D gold One Ring inscribed with device and agent icons.
+Headline: 💍 App gets a One Ring icon`,
+}
 
 var answer = json.RawMessage(`{"type":"object","properties":{"emoji":{"type":"string"},"headline":{"type":"string"}},"required":["emoji","headline"]}`)
 
 // write has model write a headline, telling it how far over the limit it
 // went until it fits. An empty headline means the model found no news.
-func write(invoke invoker, model string, posts, recent []string) (*Headline, error) {
+func write(invoke invoker, model, style string, posts, recent []string) (*Headline, error) {
 	prompt := "New posts:\n" + strings.Join(posts, "\n")
 	if len(recent) > 0 {
 		prompt += "\n\nAlready on the ticker, don't repeat: " + strings.Join(recent, "; ")
@@ -224,7 +254,7 @@ func write(invoke invoker, model string, posts, recent []string) (*Headline, err
 	msgs := []map[string]string{{"role": "user", "content": prompt}}
 	var last string
 	for range attempts {
-		res, err := invoke("models", "chat", map[string]any{"model": model, "system": fmt.Sprintf(style, limit), "messages": msgs, "schema": answer})
+		res, err := invoke("models", "chat", map[string]any{"model": model, "system": style, "messages": msgs, "schema": answer})
 		if err != nil {
 			return nil, err
 		}

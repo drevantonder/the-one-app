@@ -40,7 +40,9 @@ func TestEmoji(t *testing.T) {
 type fake struct {
 	news    string
 	gate    float64
+	kind    string
 	answers []string
+	systems []string
 	chats   [][]map[string]string
 	models  []string
 }
@@ -50,10 +52,15 @@ func (f *fake) invoke(plugin, op string, in any) (sdk.Result, error) {
 	case "board_news":
 		return sdk.Text(f.news), nil
 	case "models_decide":
-		return sdk.Result{Data: map[string]any{"answers": map[string]any{"news": map[string]any{"noul": f.gate}}}}, nil
+		answers := map[string]any{"news": map[string]any{"noul": f.gate}}
+		if f.kind != "" {
+			answers["kind"] = map[string]any{"choice": f.kind}
+		}
+		return sdk.Result{Data: map[string]any{"answers": answers}}, nil
 	case "models_chat":
 		m := in.(map[string]any)
 		f.models = append(f.models, m["model"].(string))
+		f.systems = append(f.systems, m["system"].(string))
 		f.chats = append(f.chats, m["messages"].([]map[string]string))
 		if len(f.answers) == 0 {
 			return sdk.Result{}, errors.New("offline")
@@ -136,3 +143,17 @@ func TestWidget(t *testing.T) {
 }
 
 func sdkSpace(w, h float64) widget.Space { return widget.Space{W: w, H: h} }
+
+func TestKinds(t *testing.T) {
+	for kind, want := range map[string]string{"roast": "roast", "news": "news", "": "news", "gossip": "news"} {
+		p := &plugin{}
+		f := &fake{news: news, gate: 0.9, kind: kind, answers: []string{`{"emoji":"🧟","headline":"Dead plugins now rise"}`}}
+		h, err := p.next(f.invoke)
+		if err != nil || h == nil || h.Kind != want || f.systems[0] != styles[want] {
+			t.Errorf("Jev says %q: %+v, %v", kind, h, err)
+		}
+	}
+	if !strings.Contains(styles["roast"], "at most 24 characters") || strings.Contains(styles["news"], "joke;") {
+		t.Fatal("each style has the rules, and only its own voice")
+	}
+}
