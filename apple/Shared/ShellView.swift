@@ -103,11 +103,13 @@ struct ShellView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $page) {
-                NavigationLink(value: Page.plugins) {
-                    Label("Plugins", systemImage: "puzzlepiece.extension")
+                SwiftUI.Section { identity }
+                SwiftUI.Section {
+                    NavigationLink(value: Page.plugins) {
+                        Label("Plugins", systemImage: "puzzlepiece.extension")
+                    }
                 }
             }
-            .safeAreaInset(edge: .top) { identity }
             .navigationTitle("The One App")
             #if os(macOS)
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
@@ -126,23 +128,21 @@ struct ShellView: View {
         .task { await shell.load() }
     }
 
+    // The title names the app, so this row shows the network it reaches.
     private var identity: some View {
         HStack(spacing: 10) {
             logo.resizable().frame(width: 36, height: 36).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 1) {
-                Text("The One App").font(.headline)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(devicesText).font(.headline)
+                Text(shell.version ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, 2)
     }
 
-    private var subtitle: String {
+    private var devicesText: String {
         guard let devices = shell.devices else { return shell.error == nil ? "Connecting…" : "Offline" }
-        let count = devices.online == devices.total ? "\(devices.total) devices" : "\(devices.online) of \(devices.total) devices online"
-        return [count, shell.version].compactMap { $0 }.joined(separator: " · ")
+        return devices.online == devices.total ? "\(devices.total) devices" : "\(devices.online) of \(devices.total) devices online"
     }
 
     private var logo: Image {
