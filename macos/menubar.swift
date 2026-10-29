@@ -650,7 +650,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var windowClosed: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        WidgetContext.popouts = { Popouts.shared.open($0, $1) }
+        WidgetContext.popouts = { Popouts.shared.open($0, $1, $2) }
         Task {
             if await anotherCopyStays() { NSApp.terminate(nil) } else { start() }
         }

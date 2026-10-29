@@ -10,6 +10,7 @@ struct PopoutItem: Identifiable {
     let id: String // its title: opening one already shown brings it back
     let url: URL
     let web: WKWebView
+    var onClose: (@MainActor () -> Void)?
 }
 
 private func webView(_ url: URL) -> WKWebView {
@@ -56,15 +57,16 @@ final class Popouts: ObservableObject {
     }
     private var panels: [PopoutPanel] = []
 
-    func open(_ url: URL, _ title: String) {
+    func open(_ url: URL, _ title: String, _ onClose: (@MainActor () -> Void)?) {
         if !items.contains(where: { $0.id == title }) {
-            items.append(PopoutItem(id: title, url: url, web: webView(url)))
+            items.append(PopoutItem(id: title, url: url, web: webView(url), onClose: onClose))
         }
         focus = title
         arrange()
     }
 
     func close(_ id: String) {
+        items.first { $0.id == id }?.onClose?()
         items.removeAll { $0.id == id }
         driving.remove(id)
         if focus == id { focus = items.last?.id }
@@ -245,8 +247,8 @@ final class Popouts: ObservableObject {
     static let shared = Popouts()
     @Published var shown: PopoutItem?
 
-    func open(_ url: URL, _ title: String) {
-        shown = PopoutItem(id: title, url: url, web: webView(url))
+    func open(_ url: URL, _ title: String, _ onClose: (@MainActor () -> Void)?) {
+        shown = PopoutItem(id: title, url: url, web: webView(url), onClose: onClose)
     }
 }
 
@@ -259,13 +261,14 @@ struct WebHost: UIViewRepresentable {
 /// Shows the page a widget opened over the whole screen.
 struct PopoutCover: ViewModifier {
     @ObservedObject var popouts = Popouts.shared
+    @State private var closed: (@MainActor () -> Void)?
 
     func body(content: Content) -> some View {
-        content.fullScreenCover(item: $popouts.shown) { item in
+        content.fullScreenCover(item: $popouts.shown, onDismiss: { closed?(); closed = nil }) { item in
             NavigationStack {
                 WebHost(web: item.web).ignoresSafeArea(edges: .bottom)
                     .navigationTitle(item.id).navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { popouts.shown = nil } } }
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { closed = item.onClose; popouts.shown = nil } } }
             }
         }
     }

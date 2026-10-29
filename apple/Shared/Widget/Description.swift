@@ -107,6 +107,7 @@ struct GridNode: Decodable {
 struct PopoutNode: Decodable {
     let url: String
     let title: String
+    let close: WidgetAction?
     let c: [Skippable<Node>]
     var children: [Node] { c.compactMap(\.value) }
 }

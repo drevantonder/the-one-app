@@ -43,6 +43,20 @@ func setupPage(c *sdk.Ctx, p *pool) {
 			At: now.UnixMilli(), Next: now.Add(10 * time.Second).UnixMilli(), Root: widget.Col(widget.Stack{Gap: 6},
 				widget.Text("Spaces", widget.Style{Size: "xs", Tone: "muted"}), root)}}, nil
 	})
+	sdk.Op(c, "finish_sign_in", "Save the sites signed in to in every open sign-in, and close them.", sdk.Write, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
+		var spaces []string
+		for _, t := range p.tiles() {
+			if t.order == 1 {
+				spaces = append(spaces, t.name)
+			}
+		}
+		for _, s := range spaces {
+			if _, err := p.giveBackOp(call, giveBackIn{Space: s}); err != nil {
+				return sdk.Result{}, err
+			}
+		}
+		return sdk.Text(fmt.Sprintf("Saved %d sign-ins.", len(spaces))), nil
+	})
 	c.Menubar(func(items []sdk.MenubarItem) []sdk.MenubarItem {
 		return append(items, sdk.MenubarItem{ID: "spaces", Tool: "spaces_menubar"})
 	})
@@ -57,6 +71,9 @@ func setupPage(c *sdk.Ctx, p *pool) {
 		return protocol.HookResponse{ContentType: "text/html", Body: fmt.Sprintf(`<meta http-equiv="refresh" content="0;url=%s">`, url)}, nil
 	})
 }
+
+// finish saves the sign-ins when their windows close.
+var finish = widget.Action{Op: "finish_sign_in"}
 
 type viewLink struct {
 	url   string
@@ -164,7 +181,11 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 			widget.Text(t.title, widget.Style{Size: "sm", Weight: "bold", Lines: 1}),
 			widget.Row(widget.Stack{Gap: 5}, sub...))
 		if got[i].url != "" {
-			cell = widget.Popout(got[i].url, t.title, cell)
+			var done *widget.Action
+			if t.order == 1 {
+				done = &finish
+			}
+			cell = widget.Popout(got[i].url, t.title, done, cell)
 		}
 		cells = append(cells, cell)
 		lines = append(lines, fmt.Sprintf("%s: %s", t.title, t.who))
@@ -174,7 +195,7 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 	}
 	if !all {
 		me, _ := tailnetName(call.Context)
-		cells = append(cells, widget.Popout(fmt.Sprintf("http://%s:4747/hooks/spaces/sign_in", me), "Signing in to sites",
+		cells = append(cells, widget.Popout(fmt.Sprintf("http://%s:4747/hooks/spaces/sign_in", me), "Signing in to sites", &finish,
 			widget.Col(widget.Stack{Aspect: 1.6, Radius: 8, Border: "dashed", Align: "center", Justify: "center"},
 				widget.Text("＋ Sign in", widget.Style{Size: "xs", Tone: "muted"}))))
 		if len(lines) == 0 {
@@ -258,13 +279,8 @@ func (p *pool) settings(call *sdk.Call) (widget.Node, string, error) {
 	if len(names) == 0 {
 		rows = append(rows, widget.Text("No sites yet.", widget.Style{Size: "sm", Tone: "muted"}))
 	}
-	rows = append(rows, widget.Popout(fmt.Sprintf("http://%s:4747/hooks/spaces/sign_in", me), "Signing in to sites",
+	rows = append(rows, widget.Popout(fmt.Sprintf("http://%s:4747/hooks/spaces/sign_in", me), "Signing in to sites", &finish,
 		widget.Row(widget.Stack{Pad: 6, Radius: 7, Border: "solid"}, widget.Text("Sign in to a site…", widget.Style{Size: "sm", Weight: "medium"}))))
-	for _, t := range p.tiles() {
-		if t.order == 1 {
-			rows = append(rows, widget.Button("Save the sign-in now", widget.Action{Op: "give_back", Input: map[string]any{"space": t.name}}, false))
-		}
-	}
 
 	rows = append(rows, widget.Spacer(10), head("Backups"))
 	files, err := call.Files("")

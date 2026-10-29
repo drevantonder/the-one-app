@@ -15,9 +15,11 @@ struct WidgetContext {
     /// The widget's plugin, whose operations its actions name.
     var app = ""
     /// Opens a live web page in a window of its own; nil where that can't happen.
-    var popout: (@MainActor (URL, String) -> Void)? = WidgetContext.popouts
+    var popout: Popout? = WidgetContext.popouts
     /// How the app opens popouts; home-screen widgets have none.
-    nonisolated(unsafe) static var popouts: (@MainActor (URL, String) -> Void)?
+    nonisolated(unsafe) static var popouts: Popout?
+    /// Opens url titled title; the closure runs when it is closed.
+    typealias Popout = @MainActor (URL, String, (@MainActor () -> Void)?) -> Void
 
     func tool(_ op: String) -> String { app == "one" ? op : "\(app)_\(op)" }
 }
@@ -117,7 +119,10 @@ struct NodeView: View {
         case .popout(let p):
             let content = StackView(stack: Stack.column(p.children), ctx: ctx)
             if let url = URL(string: p.url), let popout = ctx.popout {
-                Button { popout(url, p.title) } label: { content.contentShape(Rectangle()) }.buttonStyle(.plain)
+                Button {
+                    let run = ctx.run
+                    popout(url, p.title, p.close.map { action in { Task { try? await run?(action) } } })
+                } label: { content.contentShape(Rectangle()) }.buttonStyle(.plain)
             } else if let url = URL(string: p.url) {
                 Link(destination: url) { content }.buttonStyle(.plain)
             } else {

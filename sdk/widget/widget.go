@@ -138,9 +138,13 @@ func Grid(min, gap float64, children ...Node) Node {
 
 // Popout opens url, a live web page, in a window of its own titled title
 // when its children are tapped: floating over other windows where the
-// renderer can.
-func Popout(url, title string, children ...Node) Node {
-	return Node{"t": "popout", "url": url, "title": title, "c": nonNil(children)}
+// renderer can. Closing the window runs onClose, if there is one.
+func Popout(url, title string, onClose *Action, children ...Node) Node {
+	n := Node{"t": "popout", "url": url, "title": title, "c": nonNil(children)}
+	if onClose != nil {
+		n["close"] = onClose
+	}
+	return n
 }
 
 // Img shows a picture from src, an https or data URL. With aspect (width

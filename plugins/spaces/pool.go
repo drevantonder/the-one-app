@@ -120,24 +120,7 @@ func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*s
 	})
 	sdk.Op(c, "sign_in", "Sign in to sites, for agents to use: opens a browser with a saved login (or a new one) in a Space of its own and gives a link to it. Sign in to as many sites as you like; the login is saved when given back with give_back, or when the time is up.", sdk.Write, p.signIn)
 	setupPage(c, p)
-	sdk.Op(c, "give_back", "Give back a borrowed Space: it is deleted with everything in it. A sign_in Space's login is saved first.", sdk.Write, func(call *sdk.Call, in giveBackIn) (sdk.Result, error) {
-		if res, ok, err := t.elsewhere(call, in.Space, "give_back", in); ok {
-			return res, err
-		}
-		p.mu.Lock()
-		b, ok := p.lent[in.Space]
-		p.mu.Unlock()
-		if !ok {
-			return sdk.Result{}, fmt.Errorf("Space %q isn't borrowed", in.Space)
-		}
-		if err := p.giveBack(call, b); err != nil {
-			return sdk.Result{}, err
-		}
-		if b.SignIn {
-			return sdk.Text(fmt.Sprintf("Saved the %s login and gave back Space %q.", b.Login, b.Space)), nil
-		}
-		return sdk.Text(fmt.Sprintf("Gave back Space %q.", b.Space)), nil
-	})
+	sdk.Op(c, "give_back", "Give back a borrowed Space: it is deleted with everything in it. A sign_in Space's login is saved first.", sdk.Write, p.giveBackOp)
 	sdk.Op(c, "logins", "List the saved browser logins agents can borrow a Space with.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
 		files, err := call.Files(loginFiles)
 		if err != nil {
@@ -184,6 +167,25 @@ func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*s
 		return sdk.Text(fmt.Sprintf("Forgot the %s login.", in.Login)), nil
 	})
 	return p
+}
+
+func (p *pool) giveBackOp(call *sdk.Call, in giveBackIn) (sdk.Result, error) {
+	if res, ok, err := p.t.elsewhere(call, in.Space, "give_back", in); ok {
+		return res, err
+	}
+	p.mu.Lock()
+	b, ok := p.lent[in.Space]
+	p.mu.Unlock()
+	if !ok {
+		return sdk.Result{}, fmt.Errorf("Space %q isn't borrowed", in.Space)
+	}
+	if err := p.giveBack(call, b); err != nil {
+		return sdk.Result{}, err
+	}
+	if b.SignIn {
+		return sdk.Text(fmt.Sprintf("Saved the %s login and gave back Space %q.", b.Login, b.Space)), nil
+	}
+	return sdk.Text(fmt.Sprintf("Gave back Space %q.", b.Space)), nil
 }
 
 func (p *pool) signIn(call *sdk.Call, in signInIn) (sdk.Result, error) {
