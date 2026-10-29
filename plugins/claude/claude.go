@@ -6,14 +6,13 @@
 package claude
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/drevantonder/the-one-app/plugins/internal/nodes"
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
@@ -46,10 +45,8 @@ type plugin struct {
 	login  *login
 }
 
-// me is this device's name. It isn't kept: it is the hostname until the
-// node joins the tailnet.
 func (p *plugin) me(call *sdk.Call) string {
-	name, _ := selfName(call)
+	name, _ := nodes.Self(call)
 	return name
 }
 
@@ -89,7 +86,7 @@ func setup(c *sdk.Ctx) error {
 	})
 
 	sdk.Op(c, "coding", "Choose the devices to code on. Each gets Claude Code and claude-swap installed and kept up to date, and sign_in signs them in.", sdk.Write, func(call *sdk.Call, in codingIn) (sdk.Result, error) {
-		names, err := deviceNames(call)
+		names, err := nodes.Names(call)
 		if err != nil {
 			return sdk.Result{}, err
 		}
@@ -157,44 +154,4 @@ func (p *plugin) keepInstalled(call *sdk.Call) {
 			call.Logf("add the signed-in account to claude-swap: %v", err)
 		}
 	}
-}
-
-type onlineDevice struct {
-	Name   string `json:"name"`
-	Self   bool   `json:"self"`
-	Online bool   `json:"online"`
-}
-
-func nodes(call *sdk.Call) ([]onlineDevice, error) {
-	res, err := call.Invoke("one", "devices", struct{}{})
-	if err != nil {
-		return nil, err
-	}
-	raw, _ := json.Marshal(res.Data)
-	var d struct {
-		Devices []onlineDevice `json:"devices"`
-	}
-	return d.Devices, json.Unmarshal(raw, &d)
-}
-
-func deviceNames(call *sdk.Call) ([]string, error) {
-	ds, err := nodes(call)
-	var names []string
-	for _, d := range ds {
-		names = append(names, d.Name)
-	}
-	return names, err
-}
-
-func selfName(call *sdk.Call) (string, error) {
-	ds, err := nodes(call)
-	for _, d := range ds {
-		if d.Self {
-			return d.Name, nil
-		}
-	}
-	if err == nil {
-		err = errors.New("this device isn't in the device list")
-	}
-	return "", err
 }

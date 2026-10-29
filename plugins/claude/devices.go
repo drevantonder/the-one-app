@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/drevantonder/the-one-app/plugins/internal/nodes"
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
@@ -59,7 +60,7 @@ func (p *plugin) here(call *sdk.Call) device {
 
 // all asks every online device for its Claude Code setup at once.
 func (p *plugin) all(call *sdk.Call) ([]device, error) {
-	ds, err := nodes(call)
+	ds, err := nodes.List(call)
 	if err != nil {
 		return nil, err
 	}
