@@ -5,7 +5,9 @@
 package headlines
 
 import (
+	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -26,8 +28,11 @@ const (
 	every = 30 * time.Second
 	keep  = 50 // headlines kept in memory
 
-	gate     = "typesafe/jev-latest"
-	worth    = 0.6 // how sure the gate must be that the news deserves a headline
+	judge    = "typesafe/jev-latest"
+	worth    = 0.6  // how sure the judge must be that the posts deserve a headline
+	honest   = 0.8  // that a roast doesn't invent
+	funny    = 0.73 // that a roast lands; Jev's answers here run 0.67 to 0.8
+	accurate = 0.7  // that the news is right
 	session  = "headlines"
 	attempts = 3
 )
@@ -133,20 +138,20 @@ func (p *plugin) next(invoke invoker) (*Headline, error) {
 	if len(posts) == 0 {
 		return nil, nil
 	}
-	ok, kind := judge(invoke, posts)
-	if !ok {
-		return nil, nil
-	}
 	var recent []string
 	for _, h := range p.recent(5) {
 		recent = append(recent, h.Text)
 	}
-	h, err := write(invoke, writer, styles[kind], posts, recent)
+	roast, errRoast := write(invoke, writer, styles["roast"], posts, recent)
+	news, errNews := write(invoke, writer, styles["news"], posts, recent)
+	if roast == nil && news == nil {
+		return nil, errors.Join(errRoast, errNews)
+	}
+	h := pick(invoke, posts, roast, news)
 	if h != nil {
-		h.Kind = kind
 		h.Time = time.Now().UTC().Format(time.RFC3339)
 	}
-	return h, err
+	return h, nil
 }
 
 var (
@@ -168,45 +173,54 @@ func newsPosts(text string) []string {
 	return out
 }
 
-// judge asks the gate whether the posts deserve a headline, and whether to
-// roast them or tell them straight. If it can't answer, the writer decides
-// whether they're worth one, and tells them straight.
-func judge(invoke invoker, posts []string) (bool, string) {
-	res, err := invoke("models", "decide", map[string]any{
-		"model": gate,
-		"state": map[string]any{"posts": strings.Join(posts, "\n")},
-		"questions": map[string]any{
-			"news": map[string]any{"type": "noul",
-				"instructions": "Would the person who owns these apps and agents find any of these posts worth a glance on a news ticker: something now works, was fixed or changed, or an agent started real work on something? No for rules for agents, notes on how someone likes things, compressions of old posts, and routine status."},
-			"kind": map[string]any{"type": "choice", "instructions": "How should a cheeky news ticker cover the most interesting of these posts?",
-				"criteria": map[string]string{
-					"roast": "It has a hook to make fun of: a bug, a repeat, a self-own, an irony, something absurd or embarrassing.",
-					"news":  "A plain change or new thing worth knowing; nothing funny about it.",
-				}},
-		},
-	})
+// pick has the judge say whether the posts deserve a headline and, of the
+// roast and the news written for them, which to show: the roast if it is
+// true and funny, else the news if it is right. If the judge can't answer,
+// the news is shown.
+func pick(invoke invoker, posts []string, roast, news *Headline) *Headline {
+	if roast != nil {
+		roast.Kind = "roast"
+	}
+	if news != nil {
+		news.Kind = "news"
+	}
+	state := map[string]any{"posts": strings.Join(posts, "\n")}
+	if roast != nil {
+		state["roast headline"] = roast.line()
+	}
+	if news != nil {
+		state["news headline"] = news.line()
+	}
+	res, err := invoke("models", "decide", map[string]any{"model": judge, "state": state, "questions": map[string]any{
+		"worth":       map[string]any{"type": "noul", "instructions": "Are these posts worth a glance on Andre's news ticker: something now works, was fixed or changed, real work started, or a bug or blunder worth a laugh? No for rules for agents, notes on preferences, compressions and routine status."},
+		"roast_true":  map[string]any{"type": "noul", "instructions": "Is the roast headline true to what the posts say (a joke may exaggerate, but not invent)?"},
+		"roast_funny": map[string]any{"type": "noul", "instructions": "Would the roast headline make a tech person smile?"},
+		"news_true":   map[string]any{"type": "noul", "instructions": "Is the news headline accurate to the posts?"},
+	}})
 	if err != nil {
-		return true, "news"
+		return cmp.Or(news, roast)
 	}
 	raw, _ := json.Marshal(res.Data)
 	var d struct {
-		Answers struct {
-			News struct {
-				Noul *float64 `json:"noul"`
-			} `json:"news"`
-			Kind struct {
-				Choice string `json:"choice"`
-			} `json:"kind"`
+		Answers map[string]struct {
+			Noul float64 `json:"noul"`
 		} `json:"answers"`
 	}
-	if json.Unmarshal(raw, &d) != nil || d.Answers.News.Noul == nil {
-		return true, "news"
+	if json.Unmarshal(raw, &d) != nil || len(d.Answers) == 0 {
+		return cmp.Or(news, roast)
 	}
-	kind := d.Answers.Kind.Choice
-	if _, ok := styles[kind]; !ok {
-		kind = "news"
+	a := func(q string) float64 { return d.Answers[q].Noul }
+	switch {
+	case a("worth") < worth:
+		return nil
+	case roast != nil && a("roast_true") >= honest && a("roast_funny") >= funny:
+		return roast
+	case news != nil && a("news_true") >= accurate:
+		return news
+	case roast != nil && a("roast_true") >= honest:
+		return roast
 	}
-	return *d.Answers.News.Noul >= worth, kind
+	return nil
 }
 
 const ticker = "You write headlines for the one-line news ticker in the Mac menu bar of Andre, who builds The One App with a crew of AI agents that post to a shared board. "
@@ -218,9 +232,10 @@ Examples:
 `, limit)
 
 // styles are the writer's prompts, one for each kind of headline, so each
-// commits: a roast is all joke, news is all fact.
+// commits: a roast is all joke, news is all fact. Both are written for every
+// update, and the judge picks.
 var styles = map[string]string{
-	"roast": ticker + `These posts have a hook: make fun of it, like a cheeky tech tabloid. Commit to the joke; no plain summary. Moves that work: a pun, a deadpan 'take three' or 'thrice' for a repeat, 'works on my machine', a bug as a person (a zombie plugin, a stray VM squatting), a grand claim undercut. Mean to code and agents, never to Andre. The joke must be about what the posts really say.` + rules + `Post: Hex dictation picked the closed MacBook's mic, not the Beats.
+	"roast": ticker + `Find the hook in these posts, a bug, a repeat, a self-own, an irony, and make fun of it, like a cheeky tech tabloid. Commit to the joke; no plain summary. Moves that work: a pun, a deadpan 'take three' or 'thrice' for a repeat, 'works on my machine', a bug as a person (a zombie plugin, a stray VM squatting), a grand claim undercut. Mean to code and agents, never to Andre. The joke must be about what the posts really say.` + rules + `Post: Hex dictation picked the closed MacBook's mic, not the Beats.
 Headline: 🎙️ Mic listens to shut lid
 Post: Retired the memory plugin: the Agent Board is agents' shared memory now.
 Headline: 🪦 Memory plugin forgotten
