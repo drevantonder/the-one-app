@@ -65,7 +65,7 @@ func TestNodeOverMCP(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names = append(names, tool.Name)
 	}
-	for _, want := range []string{"memory_wake", "instructions_set", "memory_note", "memory_nap", "plugins_list"} {
+	for _, want := range []string{"memory_wake", "instructions_set", "skills_list", "memory_note", "memory_nap", "plugins_list"} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("tool %s missing from %v", want, names)
 		}
