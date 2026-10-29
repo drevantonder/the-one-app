@@ -44,7 +44,7 @@ function render(data) {
     if (!d.online) li.className = 'offline';
     li.innerHTML = `<svg viewBox="0 0 24 24">${icons[iconFor(d.os)]}</svg><div class="text"><div class="name"></div><div class="detail"></div></div><span class="dot"></span>`;
     li.querySelector('.name').textContent = d.name;
-    const version = d.version ? `v${d.version}` : '';
+    const version = d.version ? d.version.replace(/^(\d)/, 'v$1') : '';
     li.querySelector('.detail').textContent = d.online
       ? [d.self && 'This device', version].filter(Boolean).join(' · ')
       : (d.lastSeen ? `Last seen ${ago(d.lastSeen)}` : 'Offline');
