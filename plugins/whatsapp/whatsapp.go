@@ -37,7 +37,7 @@ import (
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
-var Plugin = sdk.Plugin{ID: "whatsapp", Version: "0.1.0", Setup: setup}
+var Plugin = sdk.Plugin{ID: "whatsapp", Name: "WhatsApp", Version: "0.1.0", Setup: setup}
 
 const released = "link" // the released link's file in the bucket
 
