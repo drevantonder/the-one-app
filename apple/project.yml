@@ -1,9 +1,11 @@
-# The iPhone and iPad app. Generate the Xcode project with `xcodegen` in this
-# directory; the Mac gets the same shell from the menu bar app (macos/).
+# The One App for iPhone, iPad and Mac. Generate the Xcode project with
+# `xcodegen` in this directory. macos/build.sh builds the Mac target and adds
+# the node and the Apple plugins' helpers to it.
 name: TheOneApp
 options:
   deploymentTarget:
     iOS: "18.0"
+    macOS: "14.0"
 settings:
   DEVELOPMENT_TEAM: X96JC3HCV7
   CODE_SIGN_STYLE: Automatic
@@ -28,3 +30,13 @@ targets:
         # Nodes serve plain HTTP on the tailnet, which only admits this user's devices.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+  TheOneAppMac:
+    type: application
+    platform: macOS
+    sources: [Shared, ../macos/menubar.swift]
+    settings:
+      PRODUCT_NAME: TheOneApp
+      PRODUCT_BUNDLE_IDENTIFIER: dev.theoneapp
+      INFOPLIST_FILE: ../macos/Info.plist
+      # macos/build.sh signs the finished bundle with the Developer ID.
+      CODE_SIGNING_ALLOWED: NO
