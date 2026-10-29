@@ -255,6 +255,9 @@ func (p *pool) spares(spaces []space) []space {
 // in.Here it prefers a spare on another device to making one, and passes
 // op on to it, answering with its result.
 func (p *pool) borrow(call *sdk.Call, op string, in borrowIn, b borrowed) (borrowed, *sdk.Result, error) {
+	if b.Login != "" && !validName.MatchString(b.Login) {
+		return b, nil, fmt.Errorf("no login named %q", b.Login)
+	}
 	if b.Login != "" {
 		saved, err := savedLogins(call, b.Login)
 		if err != nil {
@@ -369,6 +372,8 @@ func (p *pool) prepare(call *sdk.Call, s space, b borrowed) error {
 		return err
 	}
 	dir := profiles + b.Login
+	// The browser tools only open a profile they made, as this marks.
+	owned := fmt.Sprintf(`mkdir -p "$1" && printf '%%s' '{"schema":"cua-driver-browser-profile-v1","mode":"isolated_named","name":%q}' > "$1/.cua-driver-owned-profile.json" && chmod 700 "$1" && chown -R cua:cua %s/.local`, b.Login, home)
 	if len(saved) > 0 {
 		tmp, err := os.CreateTemp("", "one-login-*.tar.gz")
 		if err != nil {
@@ -384,7 +389,7 @@ func (p *pool) prepare(call *sdk.Call, s space, b borrowed) error {
 			return err
 		}
 		defer in.Close()
-		if err := rt.exec(call.Context, s.Name, in, nil, "sh", "-c", `mkdir -p "$1" && tar -C "$1" -xzf - && chown -R cua:cua `+home+`/.local`, "sh", dir); err != nil {
+		if err := rt.exec(call.Context, s.Name, in, nil, "sh", "-c", `mkdir -p "$1" && tar -C "$1" -xzf - && `+owned, "sh", dir); err != nil {
 			return fmt.Errorf("unpacking the %s login: %w", b.Login, err)
 		}
 	}
@@ -392,7 +397,7 @@ func (p *pool) prepare(call *sdk.Call, s space, b borrowed) error {
 		return nil
 	}
 	return rt.exec(call.Context, s.Name, nil, nil, "sh", "-c",
-		`mkdir -p "$1" && chown -R cua:cua `+home+`/.local && runuser -u cua -- env DISPLAY=:1 HOME=`+home+` setsid chromium --user-data-dir="$1" --password-store=basic --no-first-run --start-maximized >/dev/null 2>&1 </dev/null &`, "sh", dir)
+		owned+` && runuser -u cua -- env DISPLAY=:1 HOME=`+home+` setsid chromium --user-data-dir="$1" --password-store=basic --no-first-run --start-maximized >/dev/null 2>&1 </dev/null &`, "sh", dir)
 }
 
 // giveBack saves a sign-in's login and deletes the Space.
