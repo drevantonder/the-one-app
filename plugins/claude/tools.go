@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -44,6 +45,20 @@ func install(ctx context.Context) error {
 		verb = "upgrade"
 	}
 	_, err := run(ctx, "uv", "tool", verb, "claude-swap")
+	return err
+}
+
+// connect adds this node's MCP server to Claude Code for every project, so
+// its agents get the network's tools and instructions.
+func connect(ctx context.Context) error {
+	one, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	out, err := run(ctx, "claude", "mcp", "add", "--scope", "user", "the-one-app", "--", one, "mcp")
+	if err != nil && strings.Contains(out, "already exists") {
+		return nil
+	}
 	return err
 }
 

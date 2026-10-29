@@ -135,7 +135,8 @@ func setup(c *sdk.Ctx) error {
 }
 
 // keepInstalled installs Claude Code and claude-swap once this device is a
-// coding device, and updates claude-swap daily. Claude Code updates itself.
+// coding device, connects it to this node, and updates claude-swap daily.
+// Claude Code updates itself.
 func (p *plugin) keepInstalled(call *sdk.Call) {
 	var updated time.Time
 	for ; ; time.Sleep(time.Minute) {
@@ -150,6 +151,9 @@ func (p *plugin) keepInstalled(call *sdk.Call) {
 			continue
 		}
 		updated = time.Now()
+		if err := connect(call.Context); err != nil {
+			call.Logf("add the-one-app to Claude Code's MCP servers: %v", err)
+		}
 		if err := adopt(call.Context); err != nil {
 			call.Logf("add the signed-in account to claude-swap: %v", err)
 		}
