@@ -766,9 +766,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         NSApp.terminate(nil)
     }
 
-    // Opening the app again, from Spotlight say, shows the menu.
+    // Opening the app again, from the Dock, Spotlight or Finder, shows its window.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !popover.isShown, let button = item?.button { toggle(button) }
+        showWindow()
         return false
     }
 
