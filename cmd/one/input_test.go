@@ -18,4 +18,8 @@ func TestBuildInputArrays(t *testing.T) {
 			t.Errorf("--path %s: got %s %v, want %s", args, got, err, want)
 		}
 	}
+	nullable := core.Op{Plugin: "p", Name: "o", InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":["null","array"],"items":{"type":"string"}}}}`)}
+	if got, err := buildInput(nullable, []string{"--path", "a,b"}); err != nil || string(got) != `{"path":["a","b"]}` {
+		t.Errorf("nullable array: got %s %v", got, err)
+	}
 }

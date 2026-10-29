@@ -356,8 +356,13 @@ func properties(schema json.RawMessage) ([]prop, error) {
 			return nil, err
 		}
 		typ, _ := p.Type.(string)
-		if list, ok := p.Type.([]any); ok && len(list) > 0 {
-			typ, _ = list[0].(string)
+		if list, ok := p.Type.([]any); ok {
+			for _, t := range list {
+				if t != "null" {
+					typ, _ = t.(string)
+					break
+				}
+			}
 		}
 		out = append(out, prop{name: t.(string), typ: typ})
 	}
