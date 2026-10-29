@@ -213,7 +213,18 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 		}
 		return widget.Grid(min, 12, cells...), strings.Join(lines, "\n"), nil
 	}
+	// Sign in opens the sign-in already open, or starts one.
+	me, _ := tailnetName(call.Context)
+	signIn := fmt.Sprintf("http://%s:4747/hooks/spaces/sign_in", me)
+	for i, t := range tiles {
+		if t.order == 1 && got[i].url != "" {
+			signIn = got[i].url
+		}
+	}
 	head, text := p.summary(rooms, len(cells)-1)
+	head = widget.Row(widget.Stack{Gap: 12}, head, widget.Spacer(0),
+		widget.Popout(signIn, "Signing in to sites", &finish,
+			widget.Row(widget.Stack{Pad: 7, Radius: 8, Border: "solid"}, widget.Text("Sign in to a site", widget.Style{Size: "sm", Weight: "medium"}))))
 	return widget.Col(widget.Stack{Gap: 20}, head, widget.Grid(min, 20, cells...)), strings.Join(append(lines, text), "\n"), nil
 }
 
