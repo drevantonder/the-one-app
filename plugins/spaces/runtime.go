@@ -38,7 +38,8 @@ type space struct {
 	token    string
 }
 
-// A runtime runs Spaces' containers: Podman on Linux.
+// A runtime runs Spaces' containers: Podman on Linux, Apple's container on
+// Mac.
 type runtime interface {
 	list(ctx context.Context) ([]space, error)
 	// run creates and starts a Space's container, its home volume seeded

@@ -104,10 +104,13 @@ one plugins add computer-use --command "cua-driver mcp" --platforms darwin
 
 ## Spaces: computers for agents
 
-On a Linux device with [Podman](https://podman.io) (and lingering on, with
-`loginctl enable-linger`, so Spaces outlive logins), the built-in `spaces`
-plugin gives agents desktops of their own, each in a rootless container
-running [Cua](https://cua.ai)'s Linux image, with no Cua account:
+The built-in `spaces` plugin gives agents desktops of their own, each a
+container running [Cua](https://cua.ai)'s Linux image, with no Cua account.
+On Linux it uses rootless [Podman](https://podman.io) (with lingering on,
+`loginctl enable-linger`, so Spaces outlive logins); on a Mac, Apple's
+[container](https://github.com/apple/container) (`brew install container &&
+brew services start container`), a light VM per Space. Every device lists
+every Space and passes calls on to the one it is on.
 
 ```sh
 one spaces create --name messenger

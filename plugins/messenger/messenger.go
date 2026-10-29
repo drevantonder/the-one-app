@@ -404,12 +404,13 @@ func (b *browser) page(call *sdk.Call) (page, error) {
 	if err != nil {
 		return page{}, err
 	}
-	if b.dirty || !strings.HasPrefix(p.url, home) {
+	for attempt := 0; attempt < 2 && (b.dirty || !strings.HasPrefix(p.url, home) || len(p.chats()) == 0); attempt++ {
+		// Load the chat list; if it doesn't show, load it once more.
 		if _, err := b.do(call, "browser_navigate", map[string]any{"url": home}); err != nil {
 			return page{}, err
 		}
 		b.dirty = false
-		for range 20 {
+		for range 40 { // a browser that just started can take a while
 			time.Sleep(500 * time.Millisecond)
 			if p, err = b.snapshot(call, ""); err != nil {
 				return page{}, err

@@ -1,7 +1,8 @@
 // Package spaces is the built-in plugin that gives agents computers of their
 // own: Linux desktops, each in a container, with a browser and apps, that
-// people watch and take over in a web viewer. It runs where Podman is
-// installed; other devices reach it through the mesh.
+// people watch and take over in a web viewer. It runs where Podman (Linux)
+// or Apple's container (Mac) is installed; other devices reach it through
+// the mesh.
 //
 // The desktops are Cua's (github.com/trycua/cua), driven by the server
 // inside each one, cua-spacesd: its MCP tools become this plugin's
@@ -14,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -25,7 +27,7 @@ import (
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
-var Plugin = sdk.Plugin{ID: "spaces", Version: "0.1.0", Platforms: []string{"linux"}, Setup: setup}
+var Plugin = sdk.Plugin{ID: "spaces", Version: "0.1.0", Platforms: []string{"linux", "darwin"}, Setup: setup}
 
 type nameIn struct {
 	Name string `json:"name" jsonschema:"the Space's name"`
@@ -47,7 +49,12 @@ var own = []string{"create", "list", "start", "stop", "delete", "view", "backup"
 
 func setup(c *sdk.Ctx) error {
 	var err error
-	if rt, err = newPodman(); err != nil {
+	if goruntime.GOOS == "darwin" {
+		rt, err = newApple()
+	} else {
+		rt, err = newPodman()
+	}
+	if err != nil {
 		return err
 	}
 	t := &tools{ctx: c, sessions: map[string]*mcp.ClientSession{}, cleaned: map[string]bool{}}
@@ -77,7 +84,81 @@ func setup(c *sdk.Ctx) error {
 		me, err := tailnetName(context.Background())
 		return err == nil && holder(name) == me
 	}
+	// Every Space is recorded with the device it is on, so any device can
+	// list it and pass calls about it on to that device.
+	where := map[string]string{} // Space → its device's tailnet name
+	located := func(name string) string {
+		mu.Lock()
+		defer mu.Unlock()
+		return where[name]
+	}
+	c.Entry("located", sdk.Available)
+	c.Entry("gone", sdk.Available)
+	c.OnReset(func() { mu.Lock(); clear(where); mu.Unlock() })
+	sdk.Handle(c, "located", func(_ sdk.Entry, in hosted) error { mu.Lock(); where[in.Name] = in.Host; mu.Unlock(); return nil })
+	sdk.Handle(c, "gone", func(_ sdk.Entry, in released) error { mu.Lock(); delete(where, in.Name); mu.Unlock(); return nil })
+	// locate records this device's Spaces as they are.
+	locate := func(call *sdk.Call) {
+		me, err := tailnetName(call.Context)
+		if err != nil {
+			return
+		}
+		spaces, err := list(call.Context)
+		if err != nil {
+			return
+		}
+		here := map[string]bool{}
+		for _, s := range spaces {
+			here[s.Name] = true
+			if located(s.Name) != me {
+				_, _ = call.Append("located", hosted{Name: s.Name, Host: me})
+			}
+		}
+		mu.Lock()
+		var gone []string
+		for name, h := range where {
+			if h == me && !here[name] {
+				gone = append(gone, name)
+			}
+		}
+		mu.Unlock()
+		for _, name := range gone {
+			_, _ = call.Append("gone", released{Name: name})
+		}
+	}
+	// elsewhere runs op on the device a Space is on, when that isn't this
+	// one.
+	t.elsewhere = func(call *sdk.Call, name, op string, in any) (sdk.Result, bool, error) {
+		if _, err := find(call.Context, name); err == nil {
+			return sdk.Result{}, false, nil
+		}
+		me, _ := tailnetName(call.Context)
+		h := located(name)
+		if h == "" || h == me {
+			return sdk.Result{}, false, nil
+		}
+		raw, _ := json.Marshal(in)
+		var args map[string]any
+		_ = json.Unmarshal(raw, &args)
+		if args == nil {
+			args = map[string]any{}
+		}
+		args["device"] = strings.Split(h, ".")[0]
+		res, err := call.Invoke("spaces", op, args)
+		return res, true, err
+	}
+	t.names = func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		var names []string
+		for n := range where {
+			names = append(names, n)
+		}
+		slices.Sort(names)
+		return names
+	}
 	c.OnReady(func(call *sdk.Call) {
+		locate(call)
 		_ = t.refresh(call.Context)
 		go keepBackedUp(call.Detached(), held)
 	})
@@ -96,11 +177,16 @@ func setup(c *sdk.Ctx) error {
 				return sdk.Result{}, fmt.Errorf("Space %q is on %s: release it there first, which backs it up and frees it", in.Name, h)
 			}
 		}
+		if h := located(in.Name); h != "" {
+			if me, _ := tailnetName(call.Context); h != me {
+				return sdk.Result{}, fmt.Errorf("Space %q is on %s", in.Name, strings.Split(h, ".")[0])
+			}
+		}
 		s, err := create(call.Context, in.Name)
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		defer func() { _ = t.refresh(call.Context) }()
+		defer func() { locate(call); _ = t.refresh(call.Context) }()
 		if len(saved) == 0 {
 			return sdk.Text(fmt.Sprintf("Created Space %q. Open it with view; back it up with backup.", s.Name)), nil
 		}
@@ -112,7 +198,7 @@ func setup(c *sdk.Ctx) error {
 		}
 		return sdk.Text(fmt.Sprintf("Restored Space %q from its backup of %s. It is backed up as before.", s.Name, saved[0].Modified.Local().Format(time.DateTime))), nil
 	})
-	sdk.Op(c, "list", "List the Spaces on this device.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
+	sdk.Op(c, "list", "List the Spaces on every device, and backed-up ones on none.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
 		spaces, err := list(call.Context)
 		if err != nil {
 			return sdk.Result{}, err
@@ -142,6 +228,23 @@ func setup(c *sdk.Ctx) error {
 			delete(latest, s.Name)
 			fmt.Fprintf(w, "%s\t%s\tlast started %s\t%s\n", s.Name, s.State, used, backed)
 		}
+		me, _ := tailnetName(call.Context)
+		mu.Lock()
+		var others []space
+		for name, h := range where {
+			if h != me && !slices.ContainsFunc(spaces, func(s space) bool { return s.Name == name }) {
+				others = append(others, space{Name: name, State: "on " + strings.Split(h, ".")[0]})
+			}
+		}
+		mu.Unlock()
+		for _, o := range others {
+			if _, ok := latest[o.Name]; ok {
+				o.BackedUp = true
+				delete(latest, o.Name)
+			}
+			fmt.Fprintf(w, "%s\t%s\t\t\n", o.Name, o.State)
+			spaces = append(spaces, o)
+		}
 		for name, f := range latest {
 			where := "not on this device"
 			if h := holder(name); h != "" {
@@ -157,6 +260,9 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Result{Text: strings.TrimSpace(b.String()), Data: spaces}, nil
 	})
 	sdk.Op(c, "start", "Start a stopped Space.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
+		if res, ok, err := t.elsewhere(call, in.Name, "start", in); ok {
+			return res, err
+		}
 		s, err := find(call.Context, in.Name)
 		if err != nil {
 			return sdk.Result{}, err
@@ -170,6 +276,9 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Text("Started."), nil
 	})
 	sdk.Op(c, "stop", "Stop a Space. Its files stay; start it again any time. A backed-up Space is backed up first.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
+		if res, ok, err := t.elsewhere(call, in.Name, "stop", in); ok {
+			return res, err
+		}
 		s, err := find(call.Context, in.Name)
 		if err != nil {
 			return sdk.Result{}, err
@@ -186,6 +295,9 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Text("Stopped."), nil
 	})
 	sdk.Op(c, "delete", "Delete a Space and everything in it, including its sign-ins and backups. To move a Space to another device instead, use release.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
+		if res, ok, err := t.elsewhere(call, in.Name, "delete", in); ok {
+			return res, err
+		}
 		s, err := find(call.Context, in.Name)
 		if err != nil {
 			return sdk.Result{}, err
@@ -194,6 +306,7 @@ func setup(c *sdk.Ctx) error {
 		if err := remove(call.Context, s); err != nil {
 			return sdk.Result{}, err
 		}
+		locate(call)
 		_ = t.refresh(call.Context)
 		if err := dropBackups(call, s.Name); err != nil {
 			return sdk.Result{}, fmt.Errorf("deleted Space %q, but not all its backups: %w", s.Name, err)
@@ -206,6 +319,9 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Text(fmt.Sprintf("Deleted Space %q.", s.Name)), nil
 	})
 	sdk.Op(c, "backup", "Turn a Space's backups on or off. Backed up, its home folder (without caches) is stored in the bucket, encrypted, when it stops and every 6 hours while it runs, keeping the last 3; it can then be restored on any device. Turning backups off deletes them.", sdk.Write, func(call *sdk.Call, in backupIn) (sdk.Result, error) {
+		if res, ok, err := t.elsewhere(call, in.Name, "backup", in); ok {
+			return res, err
+		}
 		s, err := find(call.Context, in.Name)
 		if err != nil {
 			return sdk.Result{}, err
@@ -234,6 +350,9 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Text(fmt.Sprintf("Space %q is backed up (%s so far).", s.Name, size(f.Size))), nil
 	})
 	sdk.Op(c, "release", "Free a backed-up Space for another device: back it up one last time and remove it here, keeping its backups. Then create it on the other device to restore it there.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
+		if res, ok, err := t.elsewhere(call, in.Name, "release", in); ok {
+			return res, err
+		}
 		s, err := find(call.Context, in.Name)
 		if err != nil {
 			return sdk.Result{}, err
@@ -251,6 +370,7 @@ func setup(c *sdk.Ctx) error {
 		if err := remove(call.Context, s); err != nil {
 			return sdk.Result{}, err
 		}
+		locate(call)
 		_ = t.refresh(call.Context)
 		if _, err := call.Append("released", released{Name: s.Name}); err != nil {
 			return sdk.Result{}, err
@@ -258,6 +378,9 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Text(fmt.Sprintf("Released Space %q: create it on another device to restore it there.", s.Name)), nil
 	})
 	sdk.Op(c, "view", "Get a link to watch and use a Space's desktop in a browser, from any of your devices: to sign in to sites, or to see what an agent is doing.", sdk.Read, func(call *sdk.Call, in viewIn) (sdk.Result, error) {
+		if res, ok, err := t.elsewhere(call, in.Name, "view", in); ok {
+			return res, err
+		}
 		s, err := find(call.Context, in.Name)
 		if err != nil {
 			return sdk.Result{}, err
@@ -284,7 +407,7 @@ func setup(c *sdk.Ctx) error {
 		if err := t.refresh(call.Context); err != nil {
 			return sdk.Result{}, err
 		}
-		return sdk.Text(fmt.Sprintf("%d tools.", len(t.names))), nil
+		return sdk.Text(fmt.Sprintf("%d tools.", len(t.ops))), nil
 	})
 	return nil
 }
@@ -293,11 +416,15 @@ func setup(c *sdk.Ctx) error {
 // offers the same tools, so they are listed from any running one.
 type tools struct {
 	ctx *sdk.Ctx
+	// elsewhere passes a call on to the device a Space is on; names are
+	// every device's Spaces.
+	elsewhere func(call *sdk.Call, name, op string, in any) (sdk.Result, bool, error)
+	names     func() []string
 
 	mu       sync.Mutex
 	sessions map[string]*mcp.ClientSession // by Space
 	cleaned  map[string]bool               // Spaces whose leftover browsers are closed
-	names    []string
+	ops      []string
 }
 
 func (t *tools) refresh(ctx context.Context) error {
@@ -323,9 +450,11 @@ func (t *tools) refresh(ctx context.Context) error {
 		}
 		break
 	}
-	var names []string
+	names := t.names()
 	for _, s := range spaces {
-		names = append(names, s.Name)
+		if !slices.Contains(names, s.Name) {
+			names = append(names, s.Name)
+		}
 	}
 	t.register(listed, names)
 	return nil
@@ -336,10 +465,10 @@ func (t *tools) refresh(ctx context.Context) error {
 func (t *tools) register(listed []*mcp.Tool, spaces []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for _, n := range t.names {
+	for _, n := range t.ops {
 		t.ctx.RemoveOp(n)
 	}
-	t.names = nil
+	t.ops = nil
 	if len(spaces) > 0 {
 		for _, tool := range listed {
 			if slices.Contains(own, tool.Name) {
@@ -368,15 +497,16 @@ func (t *tools) register(listed []*mcp.Tool, spaces []string) {
 			}
 			name := tool.Name
 			t.ctx.OpRaw(name, "In a Space: "+tool.Description, raw, kind, func(call *sdk.Call, input json.RawMessage) (sdk.Result, error) {
-				return t.call(call.Context, name, input)
+				return t.call(call, name, input)
 			})
-			t.names = append(t.names, name)
+			t.ops = append(t.ops, name)
 		}
 	}
 	t.ctx.Changed()
 }
 
-func (t *tools) call(ctx context.Context, tool string, input json.RawMessage) (sdk.Result, error) {
+func (t *tools) call(call *sdk.Call, tool string, input json.RawMessage) (sdk.Result, error) {
+	ctx := call.Context
 	args := map[string]any{}
 	if len(input) > 0 && string(input) != "null" {
 		if err := json.Unmarshal(input, &args); err != nil {
@@ -384,17 +514,18 @@ func (t *tools) call(ctx context.Context, tool string, input json.RawMessage) (s
 		}
 	}
 	name, _ := args["space"].(string)
-	delete(args, "space")
 	if name == "" {
-		spaces, err := list(ctx)
-		if err != nil {
-			return sdk.Result{}, err
-		}
-		if len(spaces) != 1 {
+		names := t.names()
+		if len(names) != 1 {
 			return sdk.Result{}, errors.New("which Space? pass space")
 		}
-		name = spaces[0].Name
+		name = names[0]
+		args["space"] = name
 	}
+	if res, ok, err := t.elsewhere(call, name, tool, args); ok {
+		return res, err
+	}
+	delete(args, "space")
 	s, err := find(ctx, name)
 	if err != nil {
 		return sdk.Result{}, err

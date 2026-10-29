@@ -480,10 +480,21 @@ func (n *Node) Call(ctx context.Context, plugin, op string, input json.RawMessag
 		}
 		return protocol.Result{}, err
 	}
-	defer release()
 	if !slices.ContainsFunc(g.manifest.Operations, func(o protocol.Operation) bool { return o.Name == op }) {
+		release()
+		// The plugin runs here without this operation, which another
+		// device's has (operations can depend on the device).
+		if device == "" {
+			if id, ok := n.remoteFor(plugin, op); ok {
+				return n.forward(ctx, id, plugin, op, input, caller)
+			}
+		}
+		if device != "" {
+			return protocol.Result{}, n.notOn(plugin, op, device)
+		}
 		return protocol.Result{}, fmt.Errorf("plugin %q has no operation %q", plugin, op)
 	}
+	defer release()
 	if caller.Device == "" {
 		caller.Device = n.store.Device()
 	}
