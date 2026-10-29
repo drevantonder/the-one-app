@@ -44,6 +44,7 @@ type generation struct {
 	cmd      *exec.Cmd
 	stdin    interface{ Close() error }
 	inflight sync.WaitGroup
+	started  time.Time
 }
 
 type Node struct {
@@ -68,6 +69,9 @@ type Node struct {
 	views    []protocol.Resource // the core's own views
 	remoteUI []protocol.Resource // views of plugins running on other devices
 	name     string              // this device's name; see Name
+	ctx      context.Context     // from Start; restarts run in it
+	stopped  bool
+	crashes  map[string]int // consecutive unexpected exits, for backoff
 }
 
 // SetDeclaredHost sets the command that runs declared plugins. The core
@@ -95,6 +99,8 @@ func New(st *store.Store, dataDir string, builtins []string, log *slog.Logger) (
 		gens:     map[string]*generation{},
 		errs:     map[string]string{},
 		names:    map[string]string{},
+		crashes:  map[string]int{},
+		ctx:      context.Background(),
 	}
 	n.addCoreViews()
 	for _, id := range builtins {
@@ -110,6 +116,9 @@ func (n *Node) Device() string { return n.store.Device() }
 
 // Start launches every enabled plugin.
 func (n *Node) Start(ctx context.Context) {
+	n.mu.Lock()
+	n.ctx = ctx
+	n.mu.Unlock()
 	n.refreshPublished(ctx)
 	enabled := n.enabledState()
 	for _, id := range n.sourceOrder() {
@@ -128,6 +137,7 @@ func (n *Node) Stop() {
 	n.mu.Lock()
 	gens := n.gens
 	n.gens = map[string]*generation{}
+	n.stopped = true
 	n.mu.Unlock()
 	for _, g := range gens {
 		n.retire(g, 5*time.Second)
@@ -257,8 +267,56 @@ func (n *Node) startPlugin(ctx context.Context, id string) error {
 	if old != nil {
 		go n.retire(old, 30*time.Second)
 	}
+	go n.watch(g)
 	n.changed()
 	return nil
+}
+
+// watch restarts a plugin when its live generation's connection ends without
+// the core retiring it, as when its process crashes or is killed. Repeated
+// crashes back off, so a plugin that keeps dying doesn't spin.
+func (n *Node) watch(g *generation) {
+	<-g.conn.Done()
+	n.mu.Lock()
+	if n.gens[g.id] != g {
+		n.mu.Unlock()
+		return
+	}
+	delete(n.gens, g.id)
+	if time.Since(g.started) > time.Minute {
+		n.crashes[g.id] = 0
+	}
+	n.mu.Unlock()
+	n.log.Warn("plugin exited; restarting", "plugin", g.id, "generation", g.n)
+	go n.retire(g, 0)
+	n.changed()
+	for {
+		n.mu.Lock()
+		k := n.crashes[g.id]
+		n.crashes[g.id]++
+		ctx := n.ctx
+		n.mu.Unlock()
+		var delay time.Duration
+		if k > 0 {
+			delay = min(time.Second<<min(k-1, 6), time.Minute)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		n.mu.RLock()
+		replaced := n.stopped || n.gens[g.id] != nil
+		n.mu.RUnlock()
+		if replaced || !n.enabledState()[g.id] {
+			return
+		}
+		err := n.startPlugin(ctx, g.id)
+		if err == nil || errors.Is(err, ErrPlatform) {
+			return
+		}
+		n.log.Error("plugin failed to restart", "plugin", g.id, "err", err)
+	}
 }
 
 func (n *Node) stopPlugin(id string) {
@@ -299,7 +357,7 @@ func (n *Node) spawn(ctx context.Context, src *source) (*generation, error) {
 	}
 	n.mu.Lock()
 	n.genCount++
-	g := &generation{id: src.id, n: n.genCount, cmd: cmd, stdin: stdin}
+	g := &generation{id: src.id, n: n.genCount, cmd: cmd, stdin: stdin, started: time.Now()}
 	n.mu.Unlock()
 	g.conn = rpc.New(stdout, stdin, n.pluginHandler(src.id), false)
 	go func() { _ = g.conn.Run(context.Background()) }()

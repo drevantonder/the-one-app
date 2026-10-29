@@ -11,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -271,6 +273,28 @@ func TestNodeOverMCP(t *testing.T) {
 	call("plugins_enable", map[string]any{"id": "board"})
 	if top, _ := call("board_read", nil); !strings.Contains(top, "fact 2") {
 		t.Fatalf("board not restored after enable:\n%s", top)
+	}
+	// A plugin whose process dies is started again, without a reload.
+	if runtime.GOOS != "windows" {
+		out, err := exec.Command("pgrep", "-P", strconv.Itoa(serve.Process.Pid), "-f", "plugin-host board").Output()
+		if err != nil {
+			t.Fatalf("finding the board's process: %v", err)
+		}
+		pid, _ := strconv.Atoi(strings.Fields(string(out))[0])
+		if p, err := os.FindProcess(pid); err != nil || p.Kill() != nil {
+			t.Fatalf("killing the board's process %d: %v", pid, err)
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "board_read"})
+			if err == nil && !res.IsError && strings.Contains(res.Content[0].(*mcp.TextContent).Text, "fact 2") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("board not restarted after its process was killed: %v %+v", err, res)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 
 	// A plugin with no code: an MCP server's tools become its operations.
