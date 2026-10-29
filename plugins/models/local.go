@@ -292,8 +292,10 @@ func (a *apple) available(ctx context.Context) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.known == nil {
-		out, err := exec.CommandContext(ctx, "fm", "available").CombinedOutput()
-		ok := err == nil && strings.Contains(string(out), "available") && !strings.Contains(string(out), "not available")
+		// It exits non-zero when Private Cloud Compute isn't available, even
+		// if the on-device model is.
+		out, _ := exec.CommandContext(ctx, "fm", "available").CombinedOutput()
+		ok := strings.Contains(string(out), "System model available")
 		a.known = &ok
 	}
 	return *a.known
