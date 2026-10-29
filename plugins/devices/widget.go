@@ -17,7 +17,7 @@ var icons = map[string]string{
 }
 
 // Columns' widths, shared by the header and every row so they line up.
-const ramW, cpuW, gpuW, diskW, statGap = 22, 32, 32, 26, 7
+const ramW, cpuW, gpuW, diskW, statGap = 26, 32, 32, 26, 6
 
 func iconFor(d map[string]any) widget.Node {
 	os, _ := d["os"].(string)
@@ -156,5 +156,10 @@ func devicesWidget(devices []map[string]any, space widget.Space) widget.Node {
 	for _, d := range devices {
 		rows = append(rows, row(d))
 	}
-	return widget.Col(widget.Stack{Gap: 8}, rows...)
+	// With height to spare, as in a large widget, the rows spread out.
+	gap := 8.0
+	if space.H > 0 {
+		gap = max(8, min(20, (space.H-60)/float64(len(devices)+1)-30))
+	}
+	return widget.Col(widget.Stack{Gap: gap}, rows...)
 }

@@ -72,8 +72,7 @@ struct NodeView: View {
                 StackView(stack: Stack.column(l.children), ctx: ctx)
             }
         case .text(let t):
-            // One-line text shrinks a little to fit before it truncates.
-            let view = Text(t.text).styled(t.size, t.weight, t.tone).lineLimit(t.lines).minimumScaleFactor(t.lines == 1 ? 0.75 : 1)
+            let view = Text(t.text).styled(t.size, t.weight, t.tone).lineLimit(t.lines)
                 .multilineTextAlignment(t.align == "center" ? .center : t.align == "end" ? .trailing : .leading)
             switch t.anim {
             case "numeric": view.contentTransition(.numericText())
