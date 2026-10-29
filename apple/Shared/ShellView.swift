@@ -173,10 +173,12 @@ struct ShellView: View {
     @StateObject var shell: Shell
     // Remembered, so the app opens where it was left, as after an update.
     @AppStorage("page") private var page: Page = .home
+    // nil on an iPhone once its page is closed: kept non-nil, the menu's rows stop opening anything.
+    @State private var selection: Page?
 
     var body: some View {
         NavigationSplitView {
-            List(selection: Binding<Page?>(get: { page }, set: { if let p = $0 { page = p } })) {
+            List(selection: $selection) {
                 SwiftUI.Section { identity }
                 SwiftUI.Section {
                     NavigationLink(value: Page.home) {
@@ -198,7 +200,7 @@ struct ShellView: View {
             #endif
         } detail: {
             Group {
-                switch page {
+                switch selection ?? page {
                 case .home: HomePage(shell: shell)
                 case .plugins: PluginsPage(shell: shell)
                 case .page(let id):
@@ -213,6 +215,8 @@ struct ShellView: View {
                 }
             }
         }
+        .onAppear { if selection == nil { selection = page } }
+        .onChange(of: selection) { if let selection { page = selection } }
         .task { await shell.load() }
     }
 
