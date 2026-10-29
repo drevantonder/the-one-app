@@ -1,7 +1,12 @@
-# TheOneApp
+<p align="center">
+  <img src="macos/AppIcon.png" width="180" alt="">
+</p>
 
-The one app to rule them all: a personal backend for your AI agents, running on
-the devices you already own.
+<h1 align="center">TheOneApp</h1>
+
+<p align="center"><b>One app to rule them all.</b></p>
+
+<p align="center">A personal backend for your AI agents, running on the devices you already own.</p>
 
 Every agent you use (Claude Code, Codex, opencode, anything that speaks MCP)
 connects to the same node and gets the same instructions, the same memory and
