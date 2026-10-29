@@ -215,8 +215,14 @@ func findNodes(ctx context.Context) ([]remote, error) {
 	if err := json.Unmarshal(out, &st); err != nil {
 		return nil, err
 	}
+	// Each machine is reached at its own tailnet address: ONE_ADDR may name
+	// another machine's node, which would then be updated in this one's name.
 	port := portOf(defaultAddr())
-	candidates := []remote{{name: st.Self.name(), base: "http://" + defaultAddr()}}
+	self := remote{name: st.Self.name(), base: "http://" + net.JoinHostPort("127.0.0.1", port)}
+	if len(st.Self.TailscaleIPs) > 0 {
+		self.base = "http://" + net.JoinHostPort(st.Self.TailscaleIPs[0], port)
+	}
+	candidates := []remote{self}
 	for _, p := range st.Peer {
 		if p.UserID == st.Self.UserID && p.Online && len(p.TailscaleIPs) > 0 {
 			candidates = append(candidates, remote{name: p.name(), base: "http://" + net.JoinHostPort(p.TailscaleIPs[0], port)})
@@ -544,14 +550,14 @@ func push(ctx context.Context, n remote, ver, file string) error {
 	defer f.Close()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPut, n.base+"/v1/update", f)
 	req.Header.Set("X-One-Version", ver)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s", bytes.TrimSpace(body))
+	// A node can restart before its reply arrives; whether it came back on
+	// the new build is what decides.
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s", bytes.TrimSpace(body))
+		}
 	}
 	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
@@ -560,5 +566,5 @@ func push(ctx context.Context, n remote, ver, file string) error {
 			return nil
 		}
 	}
-	return errors.New("installed, but the node hasn't come back")
+	return errors.New("the node didn't come back on the new build")
 }
