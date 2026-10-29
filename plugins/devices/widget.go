@@ -78,7 +78,7 @@ func header() widget.Node {
 		widget.Row(widget.Stack{Gap: statGap}, label(ramW, "RAM"), label(cpuW, "CPU"), label(gpuW, "GPU"), label(diskW, "DISK")))
 }
 
-func row(d map[string]any) widget.Node {
+func row(d map[string]any, details bool) widget.Node {
 	name, _ := d["name"].(string)
 	online, _ := d["online"].(bool)
 	small := widget.Style{Size: "xs", Tone: "muted", Lines: 1}
@@ -110,6 +110,9 @@ func row(d map[string]any) widget.Node {
 	children := []widget.Node{
 		iconFor(d),
 		widget.Col(widget.Stack{Grow: true, Gap: 1}, widget.Text(name, widget.Style{Lines: 1, Size: "sm"}), detail),
+	}
+	if !details {
+		children[1] = widget.Col(widget.Stack{Grow: true}, widget.Text(name, widget.Style{Lines: 1, Size: "sm"}))
 	}
 	if end != nil {
 		children = append(children, end)
@@ -152,13 +155,17 @@ func devicesWidget(devices []map[string]any, space widget.Space) widget.Node {
 		}
 		return widget.Col(widget.Stack{Gap: 7}, rows...)
 	}
+	// A medium widget has no room for each device's second line.
+	details := space.H == 0 || space.H >= 220
 	rows := []widget.Node{header()}
 	for _, d := range devices {
-		rows = append(rows, row(d))
+		rows = append(rows, row(d, details))
 	}
 	// With height to spare, as in a large widget, the rows spread out.
 	gap := 8.0
-	if space.H > 0 {
+	if !details {
+		gap = 6
+	} else if space.H > 0 {
 		gap = max(8, min(20, (space.H-60)/float64(len(devices)+1)-30))
 	}
 	return widget.Col(widget.Stack{Gap: gap}, rows...)
