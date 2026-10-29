@@ -18,7 +18,7 @@ the-one-app/apple #58 2026-10-29 07:33Z mac in the-one-app/apple: Mac app reopen
 
 func TestNewsPosts(t *testing.T) {
 	got := newsPosts(news)
-	want := []string{"Core secrets: agents never read them.", "Mac app reopens its window after an update."}
+	want := []string{"Core secrets: agents never read them.", "Starting: a board hook.", "Mac app reopens its window after an update."}
 	if !slices.Equal(got, want) {
 		t.Fatalf("%q", got)
 	}
@@ -91,7 +91,6 @@ func TestNoHeadline(t *testing.T) {
 	p := &plugin{headlines: []Headline{{Emoji: "🔐", Text: "Your keys stay secret"}}}
 	for name, f := range map[string]*fake{
 		"nothing new":    {news: "Nothing new."},
-		"only plans":     {news: "New on the Agent Board since you last looked:\nx #1 2026-10-29 05:30Z mac: Starting: work", gate: 1},
 		"gate says no":   {news: news, gate: 0.3, answers: []string{`{"emoji":"🔐","headline":"Keys"}`}},
 		"writer says no": {news: news, gate: 0.9, answers: []string{`{"emoji":"","headline":""}`}},
 		"a repeat":       {news: news, gate: 0.9, answers: []string{`{"emoji":"🔑","headline":"Your keys stay secret"}`}},

@@ -156,17 +156,15 @@ func (p *plugin) next(invoke invoker) (*Headline, error) {
 var (
 	newsLine = regexp.MustCompile(`^\S+ #\d+ \S+ \S+ [^\s:]+(?: in [^:]+)?: (.*)$`)
 	aside    = regexp.MustCompile(`\s*\([^)]*\)`)
-	planned  = regexp.MustCompile(`^(Starting|Delegated|Taking)\b`)
 )
 
 // newsPosts is the text of each post in board_news, without what only an
-// agent needs: commit ids and asides in brackets. Plans and hand-offs aren't
-// news yet.
+// agent needs: commit ids and asides in brackets.
 func newsPosts(text string) []string {
 	var out []string
 	for _, l := range strings.Split(text, "\n") {
 		m := newsLine.FindStringSubmatch(l)
-		if m == nil || planned.MatchString(m[1]) {
+		if m == nil {
 			continue
 		}
 		out = append(out, strings.TrimSpace(aside.ReplaceAllString(m[1], "")))
@@ -181,7 +179,7 @@ func worthIt(invoke invoker, posts []string) bool {
 		"model": gate,
 		"state": map[string]any{"posts": strings.Join(posts, "\n")},
 		"questions": map[string]any{"news": map[string]any{"type": "noul",
-			"instructions": "Does any of these posts say something new now works, was fixed, or changed for the person who owns these apps? No for plans, hand-offs, rules for agents, notes on someone's preferences, and bug reports still open."}},
+			"instructions": "Would the person who owns these apps and agents find any of these posts worth a glance on a news ticker: something now works, was fixed or changed, or an agent started real work on something? No for rules for agents, notes on how someone likes things, compressions of old posts, and routine status."}},
 	})
 	if err != nil {
 		return true
@@ -200,7 +198,7 @@ func worthIt(invoke invoker, posts []string) bool {
 	return *d.Answers.News.Noul >= worth
 }
 
-const style = `You write the headline for a one-line news ticker in the Mac menu bar of the person who owns these apps and agents. From the new posts, pick the one thing that matters most to them and say it in 3 or 4 plain words, like a newspaper headline: present tense, no code names, commit ids, version numbers or full stop. Only state what a post says.
+const style = `You write the headline for a one-line news ticker in the Mac menu bar of the person who owns these apps and agents. From the new posts, pick the one thing that matters most to them, done or just started, and say it in 3 or 4 plain words, like a newspaper headline: present tense, no code names, commit ids, version numbers or full stop. Only state what a post says; work just started is underway, not done.
 Examples of the style, from other news: Bridge reopens to traffic, Rail strike called off, City bans night flights.
 Also pick the one emoji, from all of Unicode, that best shows what this story is about.
 The headline must be at most %d characters, spaces included. If none of the posts is news to them, give an empty headline.`
