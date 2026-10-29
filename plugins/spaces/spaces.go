@@ -45,7 +45,7 @@ type viewIn struct {
 
 // own are the plugin's operations; a Space's tools with these names are
 // left out.
-var own = []string{"create", "list", "start", "stop", "delete", "view", "backup", "release", "refresh_tools", "borrow", "sign_in", "give_back", "logins", "forget_login", "room", "screen", "page", "page_settings", "menubar", "finish_sign_in"}
+var own = []string{"create", "list", "start", "stop", "delete", "view", "backup", "release", "refresh_tools", "borrow", "sign_in", "give_back", "logins", "forget_login", "room", "screen", "page", "page_settings", "menubar", "finish_sign_in", "open_sign_in"}
 
 func setup(c *sdk.Ctx) error {
 	var err error

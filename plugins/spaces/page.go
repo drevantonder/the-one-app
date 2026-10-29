@@ -33,7 +33,14 @@ func setupPage(c *sdk.Ctx, p *pool) {
 	c.PageSettings("page", func(call *sdk.Call, _ *time.Location) (widget.Node, string, error) {
 		return p.settings(call)
 	})
-	c.PageAction("page", "Sign in to a site", "person.crop.circle.badge.plus", "/hooks/spaces/sign_in", "finish_sign_in")
+	sdk.Op(c, "open_sign_in", "Open a browser to sign in to sites in, or the one already open: its link.", sdk.Write, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
+		url, err := p.signInLink(call)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		return sdk.Result{Text: url, Data: map[string]any{"url": url}}, nil
+	})
+	c.PageAction("page", "Sign in to a site", "person.crop.circle.badge.plus", "open_sign_in", "finish_sign_in")
 	sdk.Op(c, "menubar", "Draw the Spaces in use, for the menu bar.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
 		root, text, err := p.grid(call, 120, false)
 		if err != nil {
@@ -64,21 +71,29 @@ func setupPage(c *sdk.Ctx, p *pool) {
 	// A link that opens a browser to sign in to sites in, for the app to
 	// open in a window of its own.
 	c.Hook("sign_in", func(call *sdk.Call, _ protocol.HookRequest) (protocol.HookResponse, error) {
-		url := ""
-		for _, t := range p.tiles() { // one already open is opened again
-			if t.order == 1 {
-				url = p.link(call, t)
-			}
-		}
-		if url == "" {
-			res, err := p.signIn(call, signInIn{})
-			if err != nil {
-				return protocol.HookResponse{Status: 500, ContentType: "text/plain", Body: err.Error()}, nil
-			}
-			url, _ = res.Data.(map[string]any)["url"].(string)
+		url, err := p.signInLink(call)
+		if err != nil {
+			return protocol.HookResponse{Status: 500, ContentType: "text/plain", Body: err.Error()}, nil
 		}
 		return protocol.HookResponse{ContentType: "text/html", Body: fmt.Sprintf(`<meta http-equiv="refresh" content="0;url=%s">`, url)}, nil
 	})
+}
+
+// signInLink is the live view of the sign-in already open, or of a new one.
+func (p *pool) signInLink(call *sdk.Call) (string, error) {
+	for _, t := range p.tiles() {
+		if t.order == 1 {
+			if url := p.link(call, t); url != "" {
+				return url, nil
+			}
+		}
+	}
+	res, err := p.signIn(call, signInIn{})
+	if err != nil {
+		return "", err
+	}
+	url, _ := res.Data.(map[string]any)["url"].(string)
+	return url, nil
 }
 
 // finish saves the sign-ins when their windows close.

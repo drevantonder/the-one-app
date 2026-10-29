@@ -13,7 +13,7 @@ struct AppPage: Identifiable {
 
     /// A button beside the title that opens a page in a window of its own.
     struct Action: Identifiable {
-        let title: String, icon: String, popout: String, close: String?
+        let title: String, icon: String, open: String, close: String?
         var id: String { title }
     }
 
@@ -26,8 +26,8 @@ struct AppPage: Identifiable {
         self.items = (row["items"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         self.settings = (row["settings"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         self.actions = (row["actions"] as? [[String: Any]] ?? []).compactMap { a in
-            guard let title = a["title"] as? String, let popout = a["popout"] as? String else { return nil }
-            return Action(title: title, icon: a["icon"] as? String ?? "plus", popout: popout, close: a["close"] as? String)
+            guard let title = a["title"] as? String, let open = a["open"] as? String else { return nil }
+            return Action(title: title, icon: a["icon"] as? String ?? "plus", open: open, close: a["close"] as? String)
         }
     }
 }
@@ -75,7 +75,11 @@ struct PluginPage: View {
         .toolbar {
             ForEach(page.actions) { action in
                 ToolbarItem {
-                    Button(action.title, systemImage: action.icon) { open(action) }
+                    if opening == action.id {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button(action.title, systemImage: action.icon) { Task { await open(action) } }
+                    }
                 }
             }
             if page.settings != nil {
@@ -95,8 +99,16 @@ struct PluginPage: View {
         }
     }
 
-    private func open(_ action: AppPage.Action) {
-        guard let url = URL(string: action.popout, relativeTo: client.node)?.absoluteURL else { return }
+    @State private var opening: String?
+
+    private func open(_ action: AppPage.Action) async {
+        opening = action.id
+        defer { opening = nil }
+        let result = try? await client.request("tools/call", ["name": action.open, "arguments": [:] as [String: Any]])
+        guard let raw = (result?["structuredContent"] as? [String: Any])?["url"] as? String, let url = URL(string: raw) else {
+            error = (result?["content"] as? [[String: Any]])?.first?["text"] as? String ?? "Couldn't open it."
+            return
+        }
         let client = client
         var onClose: (@MainActor () -> Void)?
         if let tool = action.close {

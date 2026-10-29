@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the plugin protocol version. Bump it on breaking changes.
-const Version = 10
+const Version = 11
 
 // Core → plugin methods.
 const (
@@ -284,14 +284,15 @@ type Page struct {
 	Actions  []PageAction `json:"actions,omitempty"`
 }
 
-// PageAction is a button beside the page's title. It opens Popout, a URL
-// or a path on the node, in a window of its own, and runs Close, a tool,
-// when that window closes. Icon is an SF Symbol name.
+// PageAction is a button beside the page's title. It runs Open, a tool
+// whose result's data has the URL of a live page, opens that page in a
+// window of its own, and runs Close, a tool too, when the window closes.
+// Icon is an SF Symbol name.
 type PageAction struct {
-	Title  string `json:"title"`
-	Icon   string `json:"icon,omitempty"`
-	Popout string `json:"popout"`
-	Close  string `json:"close,omitempty"`
+	Title string `json:"title"`
+	Icon  string `json:"icon,omitempty"`
+	Open  string `json:"open"`
+	Close string `json:"close,omitempty"`
 }
 
 // PageItem is one entry in a page's list, Depth levels in under the one

@@ -326,13 +326,14 @@ func (c *Ctx) PageSettings(name string, render func(call *Call, loc *time.Locati
 	panic(fmt.Sprintf("%s: PageSettings: no page %q", c.id, name))
 }
 
-// PageAction adds a button beside page name's title, opening popout (a URL
-// or a path on the node) and running this plugin's operation close, if
-// any, when its window closes.
-func (c *Ctx) PageAction(name, title, icon, popout, close string) {
+// PageAction adds a button beside page name's title. It runs this
+// plugin's operation open, whose result's data has the "url" of a live
+// page, opens that page in a window of its own, and runs the operation
+// close, if any, when the window closes.
+func (c *Ctx) PageAction(name, title, icon, open, close string) {
 	for i, p := range c.pages {
 		if p.ID == c.id+"."+name {
-			a := protocol.PageAction{Title: title, Icon: icon, Popout: popout}
+			a := protocol.PageAction{Title: title, Icon: icon, Open: c.id + "_" + open}
 			if close != "" {
 				a.Close = c.id + "_" + close
 			}
