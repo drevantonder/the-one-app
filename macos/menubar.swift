@@ -591,7 +591,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // like any other; closing it leaves just the menu bar item.
     func showWindow() {
         if window == nil {
-            let host = NSHostingController(rootView: ShellView(shell: Shell(node: nodeURL)).frame(minWidth: 720, minHeight: 460))
+            let host = NSHostingController(rootView: ShellView(shell: Shell(nodes: [nodeURL])).frame(minWidth: 720, minHeight: 460))
             host.sceneBridgingOptions = [.all]
             let w = NSWindow(contentViewController: host)
             w.styleMask.insert(.fullSizeContentView)

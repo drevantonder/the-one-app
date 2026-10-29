@@ -19,37 +19,70 @@ struct Plugin: Identifiable {
     }
 }
 
+// Shell is the app's view of the user's network. Every node holds the whole
+// network and runs any plugin's operations wherever they live, so the app
+// talks to whichever node answers first: this device's, or one of the
+// devices it has seen.
 @MainActor
 final class Shell: ObservableObject {
     @Published var version: String?
     @Published var plugins: [Plugin] = []
+    @Published var devices: (online: Int, total: Int)?
     @Published var error: String?
-    private(set) var client: MCPClient
+    private var client: MCPClient?
+    private let preferred: [URL]
 
-    init(node: URL) {
-        client = MCPClient(node: node, name: "The One App")
+    init(nodes preferred: [URL]) {
+        self.preferred = preferred
     }
 
-    var host: String { client.node.host ?? "" }
+    // The devices seen running a node, remembered for next time.
+    private var known: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "nodes") ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: "nodes") }
+    }
 
-    func connect(to node: URL) {
-        client = MCPClient(node: node, name: "The One App")
-        version = nil
-        plugins = []
-        Task { await load() }
+    private func candidates() -> [URL] {
+        var urls = client.map { [$0.node] } ?? []
+        for url in preferred + known.compactMap({ URL(string: "http://\($0):4747") }) where !urls.contains(url) {
+            urls.append(url)
+        }
+        return urls
+    }
+
+    private func healthy(_ node: URL) async -> String? {
+        let req = URLRequest(url: node.appendingPathComponent("healthz"), timeoutInterval: 3)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["version"] as? String ?? ""
+    }
+
+    private func call(_ tool: String) async throws -> [String: Any] {
+        guard let client else { throw MCPError.badResponse }
+        let result = try await client.request("tools/call", ["name": tool, "arguments": [:] as [String: Any]])
+        return result["structuredContent"] as? [String: Any] ?? [:]
     }
 
     func load() async {
+        var reached: (URL, String)?
+        for node in candidates() {
+            if let v = await healthy(node) { reached = (node, v); break }
+        }
+        guard let (node, v) = reached else {
+            error = "None of your devices answered. Is Tailscale on?"
+            return
+        }
+        if client?.node != node { client = MCPClient(node: node, name: "The One App") }
+        version = v
         do {
-            let (data, _) = try await URLSession.shared.data(from: client.node.appendingPathComponent("healthz"))
-            version = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["version"] as? String
-            let result = try await client.request("tools/call", ["name": "plugins_list", "arguments": [:] as [String: Any]])
-            let rows = (result["structuredContent"] as? [String: Any])?["plugins"] as? [[String: Any]] ?? []
+            let rows = try await call("plugins_list")["plugins"] as? [[String: Any]] ?? []
             plugins = rows.compactMap { r in
                 guard let id = r["id"] as? String else { return nil }
                 return Plugin(id: id, name: r["name"] as? String ?? id, version: r["version"] as? String,
                               enabled: r["enabled"] as? Bool ?? false, running: r["running"] as? Bool ?? false)
             }
+            let list = try await call("devices")["devices"] as? [[String: Any]] ?? []
+            devices = (list.filter { $0["online"] as? Bool == true }.count, list.count)
+            known = list.compactMap { $0["name"] as? String }
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -65,7 +98,6 @@ enum Page: Hashable {
 // later, beside the open page. On an iPhone it collapses to one column.
 struct ShellView: View {
     @StateObject var shell: Shell
-    var settings: AnyView?
     @State private var page: Page? = .plugins
 
     var body: some View {
@@ -88,9 +120,6 @@ struct ShellView: View {
                         ToolbarItem {
                             Button("Refresh", systemImage: "arrow.clockwise") { Task { await shell.load() } }
                         }
-                        if let settings {
-                            ToolbarItem { settings }
-                        }
                     }
             }
         }
@@ -111,8 +140,9 @@ struct ShellView: View {
     }
 
     private var subtitle: String {
-        guard let version = shell.version else { return shell.error == nil ? "Connecting to \(shell.host)…" : shell.host }
-        return "\(version) · \(shell.host)"
+        guard let devices = shell.devices else { return shell.error == nil ? "Connecting…" : "Offline" }
+        let count = devices.online == devices.total ? "\(devices.total) devices" : "\(devices.online) of \(devices.total) devices online"
+        return [count, shell.version].compactMap { $0 }.joined(separator: " · ")
     }
 
     private var logo: Image {
@@ -134,7 +164,7 @@ struct PluginsPage: View {
         content
             .overlay {
                 if let error = shell.error, shell.plugins.isEmpty {
-                    ContentUnavailableView("Can't reach \(shell.host)", systemImage: "wifi.exclamationmark", description: Text(error))
+                    ContentUnavailableView("Can't reach your devices", systemImage: "wifi.exclamationmark", description: Text(error))
                 }
             }
             .refreshable { await shell.load() }
