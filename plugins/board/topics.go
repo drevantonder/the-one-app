@@ -81,19 +81,19 @@ func show(path string) string {
 }
 
 func words(path string) optmem.Words {
-	arg, cli := "", `""`
+	arg, cli := "", ""
 	if path != "" {
-		arg, cli = fmt.Sprintf(`topic "%s", `, path), path
+		arg, cli = fmt.Sprintf(`topic "%s", `, path), "--topic "+path+" "
 	}
 	w := optmem.Words{
 		One: "post", Many: "posts in " + path, Log: "the topic", Write: "post", Title: "Topic " + path,
 		Empty: "No posts yet. Post the first with board_post.",
 		Again: "call board_read again",
 		Nap: func(b string) string {
-			return fmt.Sprintf(`board_nap with %sblock "%s" and text "<your line>" (CLI: one board nap %s %s "<your line>")`, arg, b, cli, b)
+			return fmt.Sprintf(`board_nap with %sblock "%s" and text "<your line>" (CLI: one board nap %s--block %s --text "<your line>")`, arg, b, cli, b)
 		},
 		Next: func(part, at int) string {
-			return fmt.Sprintf("Call board_read with %spart %d and at %d (CLI: one board read %s %d %d)", arg, part, at, cli, part, at)
+			return fmt.Sprintf("Call board_read with %spart %d and at %d (CLI: one board read %s--part %d --at %d)", arg, part, at, cli, part, at)
 		},
 	}
 	if path == "" {

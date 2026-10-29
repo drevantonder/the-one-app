@@ -172,7 +172,7 @@ func TestNapGoesToTheBusiestTopic(t *testing.T) {
 	}
 	life := b.topics["life"].log
 	life.PutSummary(optmem.Block{Lo: 0, Hi: 2}, life.Digest(optmem.Block{Lo: 0, Hi: 2}), "a and b")
-	if nap := b.NextNap("life"); !strings.Contains(nap, `topic "projects", block "0-1"`) {
+	if nap := b.NextNap("life"); !strings.Contains(nap, `topic "projects", block "0-1"`) || !strings.Contains(nap, `one board nap --topic projects --block 0-1 --text "<your line>"`) {
 		t.Fatalf("then the busiest:\n%s", nap)
 	}
 	napAll(b)
