@@ -13,7 +13,7 @@ import (
 const (
 	TopLines   = optmem.WakeLines // lines a read of the top prints
 	TopicLines = 48               // lines a read of any other topic prints
-	stamp      = "2006-01-02 15:04"
+	stamp      = "2006-01-02 15:04Z"
 )
 
 type topic struct {
@@ -118,9 +118,11 @@ func (b *Board) ensure(path string) *topic {
 	return t
 }
 
+// when is a post's time in UTC: devices stamp posts in their own zones, and
+// every device must print them alike.
 func when(s string) time.Time {
 	t, _ := time.Parse(time.RFC3339, s)
-	return t
+	return t.UTC()
 }
 
 func (t *topic) touch(at time.Time) {

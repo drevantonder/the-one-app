@@ -99,9 +99,9 @@ func TestTopicsTree(t *testing.T) {
 	create(t, b, "projects/the-one-app", "The One App")
 	post(b, "projects/the-one-app", "started the board")
 	post(b, "", "the user lives in Sydney")
-	want := "(top) — 1 post — active 2026-10-29 14:05 — mac in the-one-app: the user lives in Sydney\n" +
-		"  projects — Work projects — no posts — active 2026-10-29 14:05\n" +
-		"    projects/the-one-app — The One App — 1 post — active 2026-10-29 14:05 — mac in the-one-app: started the board"
+	want := "(top) — 1 post — active 2026-10-29 03:05Z — mac in the-one-app: the user lives in Sydney\n" +
+		"  projects — Work projects — no posts — active 2026-10-29 03:05Z\n" +
+		"    projects/the-one-app — The One App — 1 post — active 2026-10-29 03:05Z — mac in the-one-app: started the board"
 	if got := b.Topics(); got != want {
 		t.Fatalf("topics:\n%s\nwant:\n%s", got, want)
 	}
@@ -120,12 +120,12 @@ func TestReadEndsWithSubtopics(t *testing.T) {
 	post(b, "projects/the-one-app", "second")
 
 	top, _ := b.Read("", 0, 0)
-	if !strings.HasPrefix(top, "#0 2026-10-29 14:05 mac in the-one-app: read projects before working\n") ||
-		!strings.HasSuffix(top, "Subtopics:\n  projects — Work projects — active 2026-10-29 14:05") {
+	if !strings.HasPrefix(top, "#0 2026-10-29 03:05Z mac in the-one-app: read projects before working\n") ||
+		!strings.HasSuffix(top, "Subtopics:\n  projects — Work projects — active 2026-10-29 03:05Z") {
 		t.Fatalf("top:\n%s", top)
 	}
 	app, _ := b.Read("projects/the-one-app", 0, 0)
-	for _, want := range []string{"projects/the-one-app: The One App\n", "#1 2026-10-29 14:05 mac in the-one-app: second\n",
+	for _, want := range []string{"projects/the-one-app: The One App\n", "#1 2026-10-29 03:05Z mac in the-one-app: second\n",
 		"Subtopics:\n  projects/the-one-app/whatsapp — The WhatsApp plugin — active", "board_nap with topic \"projects/the-one-app\", block \"0-1\""} {
 		if !strings.Contains(app, want) {
 			t.Errorf("read is missing %q:\n%s", want, app)
@@ -188,11 +188,11 @@ func TestRecallAcrossTopics(t *testing.T) {
 	post(b, "projects", "chose sqlite for the store")
 	post(b, "projects", "tea break")
 	all, _ := b.Recall("tea", "")
-	want := "(top) #0 2026-10-29 14:05 mac in the-one-app: the user likes tea\nprojects #1 2026-10-29 14:05 mac in the-one-app: tea break\n2 matches."
+	want := "(top) #0 2026-10-29 03:05Z mac in the-one-app: the user likes tea\nprojects #1 2026-10-29 03:05Z mac in the-one-app: tea break\n2 matches."
 	if all != want {
 		t.Fatalf("recall:\n%s\nwant:\n%s", all, want)
 	}
-	if one, _ := b.Recall("tea", "projects"); one != "#1 2026-10-29 14:05 mac in the-one-app: tea break\n1 match." {
+	if one, _ := b.Recall("tea", "projects"); one != "#1 2026-10-29 03:05Z mac in the-one-app: tea break\n1 match." {
 		t.Fatalf("recall in projects:\n%s", one)
 	}
 	if hit, _ := b.Recall("^projects", ""); !strings.Contains(hit, "2 matches") {
@@ -227,7 +227,20 @@ func TestReplayIsDeterministic(t *testing.T) {
 		t.Fatalf("topics differ:\n%s\n---\n%s", a.Topics(), c.Topics())
 	}
 	x, _ := a.Read("projects/x", 0, 0)
-	if !strings.HasPrefix(x, "projects/x: X\n#0 2026-10-29 14:05 linux: early (thread: t3://1)") {
+	if !strings.HasPrefix(x, "projects/x: X\n#0 2026-10-29 03:05Z linux: early (thread: t3://1)") {
 		t.Fatalf("projects/x:\n%s", x)
+	}
+}
+
+func TestPostTimesShareOneZone(t *testing.T) {
+	b := New()
+	b.Post("a", postEntry{Text: "from the mac", Time: "2026-10-29T12:45:00+10:00", Device: "mac"})
+	b.Post("b", postEntry{Text: "from personal", Time: "2026-10-29T02:46:00Z", Device: "personal"})
+	s, err := b.Read("", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "2026-10-29 02:45Z mac") || !strings.Contains(s, "2026-10-29 02:46Z personal") {
+		t.Fatalf("times not in UTC:\n%s", s)
 	}
 }
