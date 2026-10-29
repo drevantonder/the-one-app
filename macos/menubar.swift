@@ -456,6 +456,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         self.item = item
         if UserDefaults.standard.object(forKey: "openAtLogin") == nil { setOpenAtLogin(true) }
         Task { await node.ensureRunning() }
+        let built = executableID()
+        Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                if let now = self.executableID(), now != built { self.relaunch() }
+            }
+        }
+    }
+
+    // `one update` replaces the bundle and restarts only the node, so the app
+    // watches its own executable and relaunches itself, and the node, when
+    // a new build lands.
+    private func executableID() -> Int? {
+        guard let path = Bundle.main.executablePath else { return nil }
+        return (try? FileManager.default.attributesOfItem(atPath: path))?[.systemFileNumber] as? Int
+    }
+
+    private func relaunch() {
+        node.stop()
+        let open = Process()
+        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        open.arguments = ["-n", Bundle.main.bundlePath]
+        try? open.run()
+        NSApp.terminate(nil)
     }
 
     // Opening the app again, from Spotlight say, shows the menu.
