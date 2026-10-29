@@ -1,13 +1,17 @@
 package board
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/drevantonder/the-one-app/sdk"
 	"github.com/drevantonder/the-one-app/sdk/optmem"
+	"github.com/drevantonder/the-one-app/sdk/widget"
 )
 
 const at = "2026-10-29T14:05:00+11:00"
@@ -291,5 +295,35 @@ func TestInstallHooks(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".pi")); !os.IsNotExist(err) {
 		t.Fatalf("wrote an extension for Pi, which isn't installed: %v", err)
+	}
+}
+
+func TestViews(t *testing.T) {
+	b := New()
+	create(t, b, "projects", "Projects.")
+	create(t, b, "projects/app", "The app.")
+	post(b, "", "first, at the top")
+	b.Post("linux:0", postEntry{Topic: "projects/app", Text: "newest, in the app", Time: "2026-10-29T15:00:00+11:00", Device: "linux"})
+
+	root, text := b.Widget(widget.Space{})
+	if first, _, _ := strings.Cut(text, "\n"); first != "newest, in the app — #projects/app" {
+		t.Errorf("widget's first line = %q, want the newest post", first)
+	}
+	if raw, _ := json.Marshal(root); strings.Contains(string(raw), "linux") || !strings.Contains(string(raw), "#general") {
+		t.Errorf("widget should show posts and channels, not devices: %s", raw)
+	}
+	if n, _ := widgetPosts(widget.Space{W: 170, H: 170}); n != 1 {
+		t.Errorf("a small widget shows %d posts, want 1", n)
+	}
+
+	want := []sdk.PageItem{{ID: "", Title: "general"}, {ID: "projects", Title: "projects"}, {ID: "projects/app", Title: "app", Depth: 1}}
+	if got := b.Channels(); !slices.Equal(got, want) {
+		t.Errorf("Channels() = %v, want %v", got, want)
+	}
+	if _, text, err := b.Channel("projects/app"); err != nil || text != "#projects/app\n2026-10-29 04:00Z newest, in the app" {
+		t.Errorf("Channel = %q, %v", text, err)
+	}
+	if _, _, err := b.Channel("nowhere"); err == nil {
+		t.Error("a channel that doesn't exist should fail")
 	}
 }

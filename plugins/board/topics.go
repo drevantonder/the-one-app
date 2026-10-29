@@ -26,6 +26,7 @@ type ref struct {
 	topic *topic
 	i     int
 	at    time.Time
+	text  string // as posted, without who posted it
 }
 
 // Board is the state rebuilt from the plugin's log.
@@ -160,7 +161,7 @@ func (b *Board) Post(id string, p postEntry) {
 		text = strings.TrimSpace(who) + ": " + text
 	}
 	t.log.Add(id, at.Format(stamp), text)
-	b.posts = append(b.posts, ref{t, t.log.T() - 1, at})
+	b.posts = append(b.posts, ref{t, t.log.T() - 1, at, p.Text})
 }
 
 // find returns an existing topic.

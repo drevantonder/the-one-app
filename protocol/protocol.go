@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the plugin protocol version. Bump it on breaking changes.
-const Version = 6
+const Version = 7
 
 // Core → plugin methods.
 const (
@@ -40,6 +40,7 @@ const (
 const (
 	TransformInstructions = "instructions"
 	TransformMenubar      = "menubar"
+	TransformPages        = "pages"
 )
 
 // Mode is how an entry type behaves when devices disagree.
@@ -235,11 +236,39 @@ type MenubarDoc struct {
 // with no Resource, the widget Tool returns, drawn natively.
 // Title is shown above it; empty means the view draws its own header. With
 // Submenu, the menu shows a row with Title, and the view opens beside the
-// menu from it, like a submenu.
+// menu from it, like a submenu. With Bar, the item is not in the menu but
+// beside it in the system menu bar, titled with the first line of Tool's
+// text result, and the view opens below it.
 type MenubarItem struct {
 	ID       string `json:"id"`
 	Title    string `json:"title,omitempty"`
 	Tool     string `json:"tool"`
 	Resource string `json:"resource,omitempty"`
 	Submenu  bool   `json:"submenu,omitempty"`
+	Bar      bool   `json:"bar,omitempty"`
+}
+
+// PagesDoc is the pages plugins add to the app's sidebar, built by
+// transforms. Pages show in order.
+type PagesDoc struct {
+	Pages []Page `json:"pages"`
+}
+
+// Page is a page of the app: Items (an MCP tool name) lists what it holds
+// as {"items": [PageItem]}, and choosing one draws the widget Tool returns
+// for {"item": its ID}. Icon is an SF Symbol name.
+type Page struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Icon  string `json:"icon,omitempty"`
+	Tool  string `json:"tool"`
+	Items string `json:"items"`
+}
+
+// PageItem is one entry in a page's list, Depth levels in under the one
+// before it.
+type PageItem struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Depth int    `json:"depth,omitempty"`
 }

@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -42,6 +43,8 @@ type (
 	FileInfo = protocol.FileInfo
 	// MenubarItem is a view in the menu bar; see Ctx.Menubar.
 	MenubarItem = protocol.MenubarItem
+	// PageItem is an entry in a page's list; see Ctx.Page.
+	PageItem = protocol.PageItem
 )
 
 const (
@@ -72,6 +75,7 @@ type Ctx struct {
 	jobs       map[string]func(*Call) error
 	hooks      map[string]func(*Call, protocol.HookRequest) (protocol.HookResponse, error)
 	ready      []func(*Call)
+	pages      []protocol.Page
 	resources  []protocol.Resource
 }
 
@@ -275,6 +279,50 @@ func (c *Ctx) Menubar(fn func(items []MenubarItem) []MenubarItem) {
 			return nil, err
 		}
 		doc.Items = fn(doc.Items)
+		return doc, nil
+	}
+}
+
+type pageIn struct {
+	Item string `json:"item,omitempty" jsonschema:"the ID of the page's item to show, as its list gives it"`
+}
+
+// Page adds a page to the app's sidebar, titled title with an SF Symbol
+// icon. It lists items, and draws the one chosen with render. It adds
+// operations name, which draws an item as a widget, and name_items.
+func (c *Ctx) Page(name, title, icon, description string, items func(*Call) ([]PageItem, error), render func(*Call, string) (widget.Node, string, error)) {
+	Op(c, name+"_items", "List the items of the "+title+" page.", Read, func(call *Call, _ struct{}) (Result, error) {
+		list, err := items(call)
+		if err != nil {
+			return Result{}, err
+		}
+		if list == nil {
+			list = []PageItem{}
+		}
+		lines := make([]string, len(list))
+		for i, it := range list {
+			lines[i] = strings.Repeat("  ", it.Depth) + it.Title
+		}
+		return Result{Text: strings.Join(lines, "\n"), Data: map[string]any{"items": list}}, nil
+	})
+	Op(c, name, description, Read, func(call *Call, in pageIn) (Result, error) {
+		root, text, err := render(call, in.Item)
+		if err != nil {
+			return Result{}, err
+		}
+		now := time.Now()
+		return Result{Text: text, Data: widget.Description{
+			V: widget.Version, App: c.id, Widget: name, Title: title, At: now.UnixMilli(), Next: now.Add(time.Minute).UnixMilli(), Root: root,
+		}}, nil
+	})
+	c.ops[len(c.ops)-1].UI = &protocol.OperationUI{ResourceURI: protocol.WidgetView}
+	c.pages = append(c.pages, protocol.Page{ID: c.id + "." + name, Title: title, Icon: icon, Tool: c.id + "_" + name, Items: c.id + "_" + name + "_items"})
+	c.transforms[protocol.TransformPages] = func(d, _ json.RawMessage) (any, error) {
+		var doc protocol.PagesDoc
+		if err := json.Unmarshal(d, &doc); err != nil {
+			return nil, err
+		}
+		doc.Pages = append(doc.Pages, c.pages...)
 		return doc, nil
 	}
 }

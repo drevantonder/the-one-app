@@ -13,6 +13,7 @@ import (
 	"github.com/drevantonder/the-one-app/protocol"
 	"github.com/drevantonder/the-one-app/sdk"
 	"github.com/drevantonder/the-one-app/sdk/optmem"
+	"github.com/drevantonder/the-one-app/sdk/widget"
 )
 
 type (
@@ -271,6 +272,17 @@ func setup(c *sdk.Ctx) error {
 			}()
 		})
 	})
+
+	c.Widget("widget", "Agent Board", "Show the newest posts on the Agent Board, as a widget.", time.Minute, func(_ *sdk.Call, space widget.Space) (widget.Node, string, error) {
+		root, text := b.Widget(space)
+		return root, text, nil
+	})
+	c.Menubar(func(items []sdk.MenubarItem) []sdk.MenubarItem {
+		return append(items, sdk.MenubarItem{ID: "board", Tool: "board_widget", Bar: true})
+	})
+	c.Page("channel", "Agent Board", "bubble.left.and.bubble.right", "Show one topic of the Agent Board as a channel: its posts, newest first, as a widget.",
+		func(*sdk.Call) ([]sdk.PageItem, error) { return b.Channels(), nil },
+		func(_ *sdk.Call, item string) (widget.Node, string, error) { return b.Channel(item) })
 
 	c.Instructions(func(text string) string { return text + "\n\n" + protocolText })
 	return nil

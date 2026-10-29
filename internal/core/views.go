@@ -30,6 +30,15 @@ func (n *Node) addCoreViews() {
 			b, _ := json.Marshal(doc)
 			return protocol.Result{Text: string(b), Data: doc}, nil
 		}})
+	n.extraOps = append(n.extraOps, coreOp{Op{CoreID, "pages", "The pages plugins add to the app's sidebar, in order.", schemaFor[noIn](), true, &protocol.OperationUI{Visibility: []string{"app"}}, false},
+		func(ctx context.Context, _ json.RawMessage, _ protocol.Caller) (protocol.Result, error) {
+			doc, err := n.Pages(ctx)
+			if err != nil {
+				return protocol.Result{}, err
+			}
+			b, _ := json.Marshal(doc)
+			return protocol.Result{Text: string(b), Data: doc}, nil
+		}})
 }
 
 // AddView adds one of the core's MCP Apps views, for parts of the node
@@ -55,6 +64,22 @@ func (n *Node) Menubar(ctx context.Context) (protocol.MenubarDoc, error) {
 	}
 	if doc.Items == nil {
 		doc.Items = []protocol.MenubarItem{}
+	}
+	return doc, nil
+}
+
+// Pages builds the app's pages from each plugin's transform, in order.
+func (n *Node) Pages(ctx context.Context) (protocol.PagesDoc, error) {
+	raw, err := n.transform(ctx, protocol.TransformPages, protocol.PagesDoc{Pages: []protocol.Page{}}, nil)
+	if err != nil {
+		return protocol.PagesDoc{}, err
+	}
+	var doc protocol.PagesDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return protocol.PagesDoc{}, err
+	}
+	if doc.Pages == nil {
+		doc.Pages = []protocol.Page{}
 	}
 	return doc, nil
 }

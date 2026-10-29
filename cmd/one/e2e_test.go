@@ -96,10 +96,13 @@ func TestNodeOverMCP(t *testing.T) {
 		t.Fatalf("menubar: %v %+v", err, bar)
 	}
 	var doc struct {
-		Items []struct{ ID, Tool, Resource string }
+		Items []struct {
+			ID, Tool, Resource string
+			Bar                bool
+		}
 	}
 	raw, _ := json.Marshal(bar.StructuredContent)
-	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Items) != 2 || doc.Items[0].ID != "devices" || doc.Items[1].ID != "one.plugins" {
+	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Items) != 3 || doc.Items[0].ID != "devices" || doc.Items[1].ID != "one.plugins" || doc.Items[2].ID != "board" || !doc.Items[2].Bar {
 		t.Fatalf("menubar items: %s", raw)
 	}
 	for _, item := range doc.Items {
@@ -115,6 +118,27 @@ func TestNodeOverMCP(t *testing.T) {
 			t.Fatalf("%s: no structured result: %v %+v", item.Tool, err, res)
 		}
 	}
+	// Pages: a plugin's page lists items, and draws each as a widget.
+	pages, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "pages", Arguments: map[string]any{}})
+	if err != nil || pages.IsError {
+		t.Fatalf("pages: %v %+v", err, pages)
+	}
+	var pdoc struct {
+		Pages []struct{ ID, Title, Tool, Items string }
+	}
+	raw, _ = json.Marshal(pages.StructuredContent)
+	if err := json.Unmarshal(raw, &pdoc); err != nil || len(pdoc.Pages) != 1 || pdoc.Pages[0].Tool != "board_channel" || pdoc.Pages[0].Items != "board_channel_items" {
+		t.Fatalf("pages: %s", raw)
+	}
+	items, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "board_channel_items", Arguments: map[string]any{}})
+	if raw, _ = json.Marshal(items.StructuredContent); err != nil || !strings.Contains(string(raw), `"title":"general"`) {
+		t.Fatalf("board_channel_items: %v %s", err, raw)
+	}
+	channel, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "board_channel", Arguments: map[string]any{"item": ""}})
+	if raw, _ = json.Marshal(channel.StructuredContent); err != nil || channel.IsError || !strings.Contains(string(raw), "#general") {
+		t.Fatalf("board_channel: %v %s", err, raw)
+	}
+
 	for _, tool := range tools.Tools {
 		if ui, _ := tool.Meta["ui"].(map[string]any); tool.Name == "plugins_list" && ui["resourceUri"] != "ui://one/plugins" {
 			t.Fatalf("plugins_list _meta: %v", tool.Meta)
