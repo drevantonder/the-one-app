@@ -57,6 +57,9 @@ func TestNodeOverMCP(t *testing.T) {
 	if ins := session.InitializeResult().Instructions; !strings.Contains(ins, "call `memory_wake`") || !strings.Contains(ins, "memory_note") {
 		t.Fatalf("instructions missing the memory plugin's text:\n%s", ins)
 	}
+	if ins := session.InitializeResult().Instructions; !strings.Contains(ins, "## Agent Board") || !strings.Contains(ins, "board_post") {
+		t.Fatalf("instructions missing the board's text:\n%s", ins)
+	}
 	tools, err := session.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +68,8 @@ func TestNodeOverMCP(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names = append(names, tool.Name)
 	}
-	for _, want := range []string{"memory_wake", "instructions_set", "skills_list", "memory_note", "memory_nap", "plugins_list"} {
+	for _, want := range []string{"memory_wake", "instructions_set", "skills_list", "memory_note", "memory_nap", "plugins_list",
+		"board_topics", "board_create", "board_read", "board_post", "board_nap", "board_zoom", "board_recall"} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("tool %s missing from %v", want, names)
 		}
@@ -130,6 +134,21 @@ func TestNodeOverMCP(t *testing.T) {
 		if !strings.Contains(wake, want) {
 			t.Fatalf("wake missing %q:\n%s", want, wake)
 		}
+	}
+
+	call("board_create", map[string]any{"topic": "projects", "description": "Work projects"})
+	if text, isErr := call("board_create", map[string]any{"topic": "projects/the-one-app/whatsapp", "description": "x"}); !isErr {
+		t.Fatalf("create without a parent should be a tool error, got %q", text)
+	}
+	call("board_post", map[string]any{"topic": "projects", "text": "started the board", "where": "the-one-app"})
+	if text, _ := call("board_post", map[string]any{"text": "the user lives in Sydney"}); !strings.Contains(text, "Posted as #0 in the top.") {
+		t.Fatalf("board_post: %s", text)
+	}
+	if top, _ := call("board_read", nil); !strings.Contains(top, "the user lives in Sydney") || !strings.Contains(top, "Subtopics:\n  projects — ") {
+		t.Fatalf("board_read:\n%s", top)
+	}
+	if hits, _ := call("board_recall", map[string]any{"pattern": "board|sydney"}); !strings.Contains(hits, "projects #0 ") || !strings.Contains(hits, "(top) #0 ") {
+		t.Fatalf("board_recall:\n%s", hits)
 	}
 
 	// Disabling a plugin removes its tools and wake section; enabling it

@@ -35,6 +35,8 @@ A small core, with everything else as plugins.
   - `instructions`: your standing instructions for agents, with history.
   - `memory`: long-term memory, a rewrite of
     [OptMem](https://github.com/VictorTaelin/OptMem).
+  - `board`: the Agent Board, where agents leave each other one-line posts
+    in topics, each its own OptMem log.
 - **Shared state** (the tool list and the MCP instructions agents receive) is rebuilt from
   empty by running each plugin's transforms in order, as in
   [OpenCode 2](https://anoma.ly/notes/opencode-reloaded/). That makes reloads
