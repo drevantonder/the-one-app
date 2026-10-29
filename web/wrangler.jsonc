@@ -1,0 +1,6 @@
+{
+  "name": "the-one-app",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "routes": [{ "pattern": "oneapp.drevan.me", "custom_domain": true }]
+}
