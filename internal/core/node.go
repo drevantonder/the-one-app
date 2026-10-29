@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -275,7 +276,7 @@ func (n *Node) setErr(id string, err error) {
 func (n *Node) spawn(ctx context.Context, src *source) (*generation, error) {
 	args := n.command(src)
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Env = append(os.Environ(), "ONE_PLUGIN="+src.id)
+	cmd.Env = append(os.Environ(), "ONE_PLUGIN="+src.id, "ONE_PLUGIN_DIR="+filepath.Join(n.dataDir, "plugins", src.id, "data"))
 	if src.declared != nil {
 		cmd.Env = append(cmd.Env, "ONE_DECLARATION="+string(src.declared))
 	}

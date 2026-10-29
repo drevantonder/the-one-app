@@ -21,6 +21,7 @@ package sdk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -75,6 +76,16 @@ func (c *Ctx) OnReady(fn func(*Call)) { c.ready = append(c.ready, fn) }
 
 // ID is the plugin's id.
 func (c *Ctx) ID() string { return c.id }
+
+// Dir is a folder of the plugin's own on this device, for what can't live
+// in its log, such as another service's session. Other devices don't see it.
+func (c *Ctx) Dir() (string, error) {
+	dir := os.Getenv("ONE_PLUGIN_DIR")
+	if dir == "" {
+		return "", errors.New("no plugin folder: the plugin isn't run by a node")
+	}
+	return dir, os.MkdirAll(dir, 0o700)
+}
 
 // ErrLate is the error code for an entry that sorts before one already
 // applied. The core answers it by replaying the plugin's log in order.
