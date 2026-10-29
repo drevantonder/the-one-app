@@ -6,4 +6,6 @@
 - Changes to `protocol/` are breaking for every plugin: bump `protocol.Version`.
 - Run `go test ./...` before finishing. `cmd/one/e2e_test.go` builds the real binary and drives it over MCP.
 - Commit and push to main as you go: one atomic commit per change, made once it works and its tests pass, not one at the end. Conventional Commits, with no co-author or "Generated with" lines.
+- GitHub main is the only shared state: several threads, on several machines, work on this at once. Pull (`git pull --rebase`) before starting and before each push. Clone the repo; never copy a working tree to another machine.
+- Deploy to the user's devices only what is on main.
 - No filler docs or comments. Document only what the code can't make clear.
