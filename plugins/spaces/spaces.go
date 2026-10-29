@@ -563,10 +563,16 @@ func (t *tools) call(call *sdk.Call, tool string, input json.RawMessage) (sdk.Re
 // closeBrowsers closes the browsers the Space's tools launched. Each belongs
 // to the connection that launched it: once that connection is gone (this
 // plugin restarted or reconnected), the tools can neither use nor close it,
-// and it holds its profile.
+// and it holds its profile. The profiles are then marked as closed normally
+// (the tools end a connection's browsers the same way), or the browsers
+// would offer to restore their pages when next started.
 func closeBrowsers(ctx context.Context, s space) {
-	_ = rt.exec(ctx, s.Name, nil, nil, "pkill", "-f", "--", "--user-data-dir="+home+"/.local/state/cua-driver/browser-profiles/")
-	time.Sleep(time.Second)
+	const profiles = home + "/.local/state/cua-driver/browser-profiles/"
+	browsers := "[-]-user-data-dir=" + profiles // [-] so as not to match this script
+	_ = rt.exec(ctx, s.Name, nil, nil, "sh", "-c", `
+pkill -f -- '`+browsers+`'
+for i in $(seq 50); do pgrep -f -- '`+browsers+`' >/dev/null || break; sleep 0.1; done
+sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/' `+profiles+`*/Default/Preferences`)
 }
 
 func (t *tools) connect(ctx context.Context, s space) (*mcp.ClientSession, error) {
