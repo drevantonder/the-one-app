@@ -10,7 +10,7 @@ one app to bring them all, and in the network bind them.
 </i></p>
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/drevantonder/the-one-app/main/install.sh | sh
+curl -fsSL theoneapp.drevan.me | sh
 ```
 
 Every agent you use (Claude Code, Codex, opencode, anything that speaks MCP)
@@ -67,7 +67,7 @@ A small core, with everything else as plugins.
 ## Try it
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/drevantonder/the-one-app/main/install.sh | sh
+curl -fsSL theoneapp.drevan.me | sh
 one serve                       # node on 127.0.0.1:4747, MCP at /mcp
 one instructions set "Keep answers short."
 one memory note "Prefers Go for backend work"

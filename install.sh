@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs The One App from the latest release:
-#   curl -fsSL https://raw.githubusercontent.com/drevantonder/the-one-app/main/install.sh | sh
+#   curl -fsSL theoneapp.drevan.me | sh
 set -eu
 url=https://github.com/drevantonder/the-one-app/releases/latest/download
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
