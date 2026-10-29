@@ -1,7 +1,8 @@
 // Package models is the built-in plugin that makes AI models usable by
 // plugins and agents across the user's devices: local ones served by Ollama,
-// Apple's on-device model on Macs, image models in ComfyUI, and any
-// OpenAI-compatible service the user adds a key for, such as OpenCode Go.
+// Apple's on-device model on Macs, image models in ComfyUI, services such as
+// OpenCode Go once the user sets their key as a secret, and any other
+// OpenAI-compatible server the user adds.
 package models
 
 import (
@@ -18,7 +19,7 @@ import (
 
 const version = "0.1.0"
 
-var Plugin = sdk.Plugin{ID: "models", Name: "Models", Version: version, Platforms: []string{"linux", "darwin", "windows"}, Setup: setup}
+var Plugin = sdk.Plugin{ID: "models", Name: "Models", Version: version, Platforms: []string{"linux", "darwin", "windows"}, Secrets: secretNames(), Setup: setup}
 
 // Model is one model a device or service can run.
 type Model struct {
@@ -30,19 +31,27 @@ type Model struct {
 	Loaded  bool   `json:"loaded,omitempty"`
 }
 
-// provider is an OpenAI-compatible service the user added a key for.
+// provider is an OpenAI-compatible service: a known one, whose key is one
+// of the user's secrets, or a server the user added.
 type provider struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"baseUrl"`
-	Key     string `json:"key"`
+	Key     string `json:"-"`
 }
 
-// presets are services that need only a key.
-var presets = map[string]string{
-	"opencode-go": "https://opencode.ai/zen/go/v1",
-	"opencode":    "https://opencode.ai/zen/v1",
-	"openrouter":  "https://openrouter.ai/api/v1",
-	"openai":      "https://api.openai.com/v1",
+// known are the services used once the secret holding their key is set.
+var known = []struct{ name, baseURL, secret string }{
+	{"opencode-go", "https://opencode.ai/zen/go/v1", "OPENCODE_API_KEY"},
+	{"openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"},
+	{"openai", "https://api.openai.com/v1", "OPENAI_API_KEY"},
+}
+
+func secretNames() []string {
+	var out []string
+	for _, k := range known {
+		out = append(out, k.secret)
+	}
+	return out
 }
 
 type message struct {
@@ -80,9 +89,8 @@ type unloadIn struct {
 }
 
 type addIn struct {
-	Name    string `json:"name" jsonschema:"what to call the service, used before its models' names; opencode-go, opencode, openrouter and openai need no base URL"`
-	Key     string `json:"key" jsonschema:"the service's API key"`
-	BaseURL string `json:"baseUrl,omitempty" jsonschema:"the service's OpenAI-compatible API, ending in /v1"`
+	Name    string `json:"name" jsonschema:"what to call the server, used before its models' names"`
+	BaseURL string `json:"baseUrl" jsonschema:"its OpenAI-compatible API, ending in /v1, like http://desktop:1234/v1"`
 }
 
 type removeIn struct {
@@ -105,6 +113,9 @@ func setup(c *sdk.Ctx) error {
 		p.mu.Unlock()
 	})
 	sdk.Handle(c, "provider", func(_ sdk.Entry, in provider) error {
+		if slices.ContainsFunc(known, func(k struct{ name, baseURL, secret string }) bool { return k.name == in.Name }) {
+			return nil // added with its key before keys were secrets
+		}
 		p.mu.Lock()
 		p.providers[in.Name] = in
 		p.mu.Unlock()
@@ -117,7 +128,7 @@ func setup(c *sdk.Ctx) error {
 		return nil
 	})
 
-	sdk.Op(c, "list", "List every model plugins and agents can use: each device's local models (Ollama, Apple's on-device model, ComfyUI image models), whether each is loaded, and the models of each service added with add_service.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
+	sdk.Op(c, "list", "List every model plugins and agents can use: each device's local models (Ollama, Apple's on-device model, ComfyUI image models), whether each is loaded, and the models of services: OpenCode Go, OpenRouter and OpenAI once their key is set with secrets_set as OPENCODE_API_KEY, OPENROUTER_API_KEY or OPENAI_API_KEY, and servers added with add_service.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
 		models, errs := p.all(call)
 		return sdk.Result{Text: report(models, errs), Data: map[string]any{"models": models}}, nil
 	})
@@ -171,19 +182,19 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Text("Unloaded."), nil
 	})
 
-	sdk.Op(c, "add_service", "Add an OpenAI-compatible model service with its API key, such as an OpenCode Go key, so its models can be used from every device. Adding one with the same name replaces it.", sdk.Write, func(call *sdk.Call, in addIn) (sdk.Result, error) {
-		pr := provider{Name: strings.TrimSpace(in.Name), Key: strings.TrimSpace(in.Key), BaseURL: strings.TrimRight(cmp.Or(in.BaseURL, presets[in.Name]), "/")}
+	sdk.Op(c, "add_service", "Add an OpenAI-compatible server that needs no key, such as LM Studio or vLLM on another machine, so its models can be used from every device. Services with a key, like OpenCode Go, are used once their key is set with secrets_set. Adding one with the same name replaces it.", sdk.Write, func(call *sdk.Call, in addIn) (sdk.Result, error) {
+		pr := provider{Name: strings.TrimSpace(in.Name), BaseURL: strings.TrimRight(strings.TrimSpace(in.BaseURL), "/")}
 		switch {
 		case pr.Name == "" || strings.Contains(pr.Name, "/"):
-			return sdk.Result{}, errors.New("give the service a name without a /")
+			return sdk.Result{}, errors.New("give the server a name without a /")
+		case slices.ContainsFunc(known, func(k struct{ name, baseURL, secret string }) bool { return k.name == pr.Name }):
+			return sdk.Result{}, fmt.Errorf("%s is used once its key is set with secrets_set", pr.Name)
 		case pr.BaseURL == "":
-			return sdk.Result{}, fmt.Errorf("give %s's base URL", pr.Name)
-		case pr.Key == "":
-			return sdk.Result{}, errors.New("give the service's API key")
+			return sdk.Result{}, errors.New("give the server's base URL")
 		}
 		models, err := serviceModels(call.Context, pr)
 		if err != nil {
-			return sdk.Result{}, fmt.Errorf("that key doesn't work: %w", err)
+			return sdk.Result{}, fmt.Errorf("can't list its models: %w", err)
 		}
 		if _, err := call.Append("provider", pr); err != nil {
 			return sdk.Result{}, err
@@ -191,8 +202,8 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Result{Text: fmt.Sprintf("Added %s, with %d models.", pr.Name, len(models)), Data: map[string]any{"models": models}}, nil
 	})
 
-	sdk.Op(c, "remove_service", "Remove a model service and its key.", sdk.Write, func(call *sdk.Call, in removeIn) (sdk.Result, error) {
-		if _, ok := p.provider(in.Name); !ok {
+	sdk.Op(c, "remove_service", "Remove a server added with add_service.", sdk.Write, func(call *sdk.Call, in removeIn) (sdk.Result, error) {
+		if _, ok := p.added(in.Name); !ok {
 			return sdk.Result{}, fmt.Errorf("no service named %q", in.Name)
 		}
 		if _, err := call.Append("provider.removed", in); err != nil {
@@ -207,22 +218,38 @@ func setup(c *sdk.Ctx) error {
 	return nil
 }
 
-func (p *plugin) provider(name string) (provider, bool) {
+func (p *plugin) added(name string) (provider, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	pr, ok := p.providers[name]
 	return pr, ok
 }
 
-func (p *plugin) providerList() []provider {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	out := make([]provider, 0, len(p.providers))
-	for _, pr := range p.providers {
-		out = append(out, pr)
+// services is the known services whose key is set, then the added servers.
+func (p *plugin) services(call *sdk.Call) []provider {
+	var out []provider
+	for _, k := range known {
+		if key, err := call.Secret(k.secret); err == nil && key != "" {
+			out = append(out, provider{Name: k.name, BaseURL: k.baseURL, Key: key})
+		}
 	}
-	slices.SortFunc(out, func(a, b provider) int { return strings.Compare(a.Name, b.Name) })
-	return out
+	p.mu.Lock()
+	var added []provider
+	for _, pr := range p.providers {
+		added = append(added, pr)
+	}
+	p.mu.Unlock()
+	slices.SortFunc(added, func(a, b provider) int { return strings.Compare(a.Name, b.Name) })
+	return append(out, added...)
+}
+
+func (p *plugin) service(call *sdk.Call, name string) (provider, bool) {
+	for _, pr := range p.services(call) {
+		if pr.Name == name {
+			return pr, true
+		}
+	}
+	return provider{}, false
 }
 
 // chat runs on this device if the model is a service's or local, and
@@ -246,7 +273,7 @@ func (p *plugin) chat(call *sdk.Call, in chatIn) (sdk.Result, error) {
 		req.ResponseFormat = &responseFormat{Type: "json_schema", JSONSchema: jsonSchema{Name: "answer", Schema: in.Schema, Strict: true}}
 	}
 	if name, model, ok := strings.Cut(in.Model, "/"); ok {
-		if pr, ok := p.provider(name); ok {
+		if pr, ok := p.service(call, name); ok {
 			req.Model = model
 			return answer(openAI{baseURL: pr.BaseURL, key: pr.Key}.chat(call.Context, req))
 		}
@@ -289,7 +316,7 @@ func (p *plugin) all(call *sdk.Call) ([]Model, []string) {
 	if err != nil {
 		errs = append(errs, err.Error())
 	}
-	providers := p.providerList()
+	providers := p.services(call)
 	lists := make([][]Model, len(ds)+len(providers))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -368,7 +395,7 @@ func report(models []Model, errs []string) string {
 		b.WriteString(")\n")
 	}
 	if len(models) == 0 {
-		b.WriteString("No models. Download one with download, or add a service's key with add_service.\n")
+		b.WriteString("No models. Download one with download, or set a service's key, like OPENCODE_API_KEY, with secrets_set.\n")
 	}
 	for _, e := range errs {
 		fmt.Fprintf(&b, "error: %s\n", e)
