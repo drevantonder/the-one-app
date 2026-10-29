@@ -1,62 +1,22 @@
 package claude
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/drevantonder/the-one-app/plugins/internal/cli"
 )
 
-// path finds the tools where their installers put them, even when the node
-// was started without those folders in PATH.
-func path() string {
-	home, _ := os.UserHomeDir()
-	return strings.Join([]string{filepath.Join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", os.Getenv("PATH")}, string(os.PathListSeparator))
-}
-
-func command(ctx context.Context, name string, args ...string) *exec.Cmd {
-	if p, err := which(name); err == nil {
-		name = p
-	}
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = append(os.Environ(), "PATH="+path())
-	return cmd
-}
-
-func which(name string) (string, error) {
-	for _, dir := range filepath.SplitList(path()) {
-		p := filepath.Join(dir, name)
-		if info, err := os.Stat(p); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-			return p, nil
-		}
-	}
-	return "", exec.ErrNotFound
-}
-
-func run(ctx context.Context, name string, args ...string) (string, error) {
-	var out bytes.Buffer
-	cmd := command(ctx, name, args...)
-	cmd.Stdout, cmd.Stderr = &out, &out
-	err := cmd.Run()
-	if err != nil {
-		return out.String(), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, tail(out.String()))
-	}
-	return out.String(), nil
-}
-
-func tail(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) > 500 {
-		s = "…" + s[len(s)-500:]
-	}
-	return s
-}
+var (
+	which   = cli.Which
+	command = cli.Command
+	run     = cli.Run
+	tail    = cli.Tail
+)
 
 func installed() bool {
 	_, e1 := which("claude")
