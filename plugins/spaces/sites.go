@@ -11,6 +11,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/drevantonder/the-one-app/sdk"
 )
 
 // A login's sites are read from its browser's cookies when it is saved:
@@ -96,7 +98,28 @@ func sitesIn(archive string) ([]site, int, error) {
 	if !found {
 		return nil, 0, nil
 	}
-	db, err := sql.Open("sqlite", "file:"+tmp.Name()+"?mode=ro")
+	return sitesInDB(tmp.Name())
+}
+
+// liveSites reads the sites a running Space's browser is signed in to, as
+// far as it has written its cookies out (within half a minute).
+func liveSites(call *sdk.Call, s space, login string) ([]site, int, error) {
+	tmp, err := os.CreateTemp("", "one-cookies-*.db")
+	if err != nil {
+		return nil, 0, err
+	}
+	defer os.Remove(tmp.Name())
+	err = rt.exec(call.Context, s.Name, nil, tmp, "cat", profiles+login+"/Default/Cookies")
+	tmp.Close()
+	if err != nil {
+		return nil, 0, nil // no cookies yet
+	}
+	return sitesInDB(tmp.Name())
+}
+
+// sitesInDB reads the sites in a browser's cookie database.
+func sitesInDB(path string) ([]site, int, error) {
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	if err != nil {
 		return nil, 0, err
 	}
@@ -133,4 +156,21 @@ func sitesIn(archive string) ([]site, int, error) {
 	}
 	slices.SortFunc(sites, func(a, b site) int { return strings.Compare(a.Site, b.Site) })
 	return sites, len(others), rows.Err()
+}
+
+// siteNames lists sites for people: "x.com and messenger.com", or none.
+func siteNames(sites []site) string {
+	var names []string
+	for _, s := range sites {
+		if s.Until.IsZero() || s.Until.After(time.Now()) {
+			names = append(names, s.Site)
+		}
+	}
+	switch len(names) {
+	case 0:
+		return "no site"
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }

@@ -109,7 +109,12 @@ func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*s
 		if strings.TrimSpace(in.For) == "" {
 			return sdk.Result{}, errors.New("say what it's for, in a few words: the user sees it")
 		}
-		b, fwd, err := p.borrow(call, "borrow", in, borrowed{Login: in.Login, Agent: call.Caller.Agent, For: strings.TrimSpace(in.For)})
+		who := call.Caller.Agent
+		if plugin, ok := strings.CutPrefix(call.Caller.Actor, "plugin "); ok && who == "" {
+			who = strings.ToUpper(plugin[:1]) + plugin[1:] // e.g. Messenger
+			call.Caller.Agent = who                        // kept if passed on to another device
+		}
+		b, fwd, err := p.borrow(call, "borrow", in, borrowed{Login: in.Login, Agent: who, For: strings.TrimSpace(in.For)})
 		if err != nil || fwd != nil {
 			return deref(fwd), err
 		}
@@ -180,7 +185,7 @@ func (p *pool) giveBackOp(call *sdk.Call, in giveBackIn) (sdk.Result, error) {
 	if !ok {
 		return sdk.Result{}, fmt.Errorf("Space %q isn't borrowed", in.Space)
 	}
-	if err := p.giveBack(call, b); err != nil {
+	if err := p.giveBack(call, b, "given back"); err != nil {
 		return sdk.Result{}, err
 	}
 	if b.SignIn {
@@ -335,6 +340,7 @@ func (p *pool) borrow(call *sdk.Call, op string, in borrowIn, b borrowed) (borro
 	p.mu.Lock()
 	p.used[s.Name] = time.Now()
 	p.mu.Unlock()
+	call.Logf("spaces: %s borrowed %s for %q, login %q", cmp(b.Agent, "someone"), b.Space, b.For, b.Login)
 	if _, err := call.Append("borrowed", b); err != nil {
 		return b, nil, err
 	}
@@ -433,13 +439,15 @@ func (p *pool) prepare(call *sdk.Call, s space, b borrowed) error {
 }
 
 // giveBack saves a sign-in's login and deletes the Space.
-func (p *pool) giveBack(call *sdk.Call, b borrowed) error {
+func (p *pool) giveBack(call *sdk.Call, b borrowed, why string) error {
+	call.Logf("spaces: %s: %s", b.Space, why)
 	s, err := find(call.Context, b.Space)
 	if err == nil && b.SignIn {
 		sites, err := saveLogin(call, s, b.Login)
 		if err != nil {
 			return fmt.Errorf("not given back: saving the %s login failed: %w", b.Login, err)
 		}
+		call.Logf("spaces: saved the %s login from %s: signed in to %s, with cookies from %d other sites", b.Login, b.Space, siteNames(sites.Sites), sites.Others)
 		if _, err := call.Append("sites", sites); err != nil {
 			return err
 		}
@@ -553,7 +561,13 @@ func (p *pool) tend(call *sdk.Call) {
 	}
 	p.mu.Unlock()
 	for _, b := range due {
-		if err := p.giveBack(call, b); err != nil {
+		why := "gone"
+		if p.isLent(b.Space) && b.SignIn {
+			why = "sign-in time up"
+		} else if p.isLent(b.Space) {
+			why = "idle for 15 minutes"
+		}
+		if err := p.giveBack(call, b, why); err != nil {
 			call.Logf("spaces: giving back %s: %v", b.Space, err)
 		}
 	}

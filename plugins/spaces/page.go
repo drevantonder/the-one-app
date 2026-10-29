@@ -2,6 +2,7 @@ package spaces
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -20,6 +21,7 @@ import (
 type tile struct {
 	name, title, who, host string
 	since                  time.Time
+	login                  string // a sign-in's
 	free                   bool
 	order                  int // borrowed, signing in, the user's own
 }
@@ -32,6 +34,35 @@ func setupPage(c *sdk.Ctx, p *pool) {
 		})
 	c.PageSettings("page", func(call *sdk.Call, _ *time.Location) (widget.Node, string, error) {
 		return p.settings(call)
+	})
+	sdk.Op(c, "sites", "Which sites a Space's browser is signed in to now, or, without a Space, the saved login.", sdk.Read, func(call *sdk.Call, in sitesQuery) (sdk.Result, error) {
+		if in.Space == "" {
+			p.mu.Lock()
+			l, ok := p.sites[cmp(in.Login, "default")]
+			p.mu.Unlock()
+			if !ok {
+				return sdk.Text("Nothing saved yet."), nil
+			}
+			return sdk.Result{Text: fmt.Sprintf("Saved %s: signed in to %s, with cookies from %d other sites.", l.At.Local().Format(time.DateTime), siteNames(l.Sites), l.Others), Data: l}, nil
+		}
+		if res, ok, err := p.t.elsewhere(call, in.Space, "sites", in); ok {
+			return res, err
+		}
+		s, err := find(call.Context, in.Space)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		login := cmp(in.Login, "default")
+		p.mu.Lock()
+		if b, ok := p.lent[in.Space]; ok && b.Login != "" {
+			login = b.Login
+		}
+		p.mu.Unlock()
+		sites, others, err := liveSites(call, s, login)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		return sdk.Result{Text: fmt.Sprintf("Signed in to %s, with cookies from %d other sites.", siteNames(sites), others), Data: loginSites{Login: login, Sites: sites, Others: others}}, nil
 	})
 	sdk.Op(c, "open_sign_in", "Open a browser to sign in to sites in, or the one already open: its link.", sdk.Write, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
 		url, err := p.signInLink(call)
@@ -79,6 +110,30 @@ func setupPage(c *sdk.Ctx, p *pool) {
 	})
 }
 
+type sitesQuery struct {
+	Space string `json:"space,omitempty" jsonschema:"a running Space; none for the saved login"`
+	Login string `json:"login,omitempty" jsonschema:"the login; default is default"`
+}
+
+// signedIn says, for a sign-in's tile, which sites it is signed in to so
+// far.
+func (p *pool) signedIn(call *sdk.Call, t tile) string {
+	var data loginSites
+	if res, ok, err := p.t.elsewhere(call, t.name, "sites", sitesQuery{Space: t.name, Login: t.login}); ok {
+		if err != nil {
+			return ""
+		}
+		b, _ := json.Marshal(res.Data)
+		_ = json.Unmarshal(b, &data)
+	} else if s, err := find(call.Context, t.name); err == nil {
+		data.Sites, _, _ = liveSites(call, s, cmp(t.login, "default"))
+	}
+	if len(data.Sites) == 0 {
+		return "Not signed in to a site yet"
+	}
+	return "Signed in to " + siteNames(data.Sites)
+}
+
 // signInLink is the live view of the sign-in already open, or of a new one.
 func (p *pool) signInLink(call *sdk.Call) (string, error) {
 	for _, t := range p.tiles() {
@@ -117,7 +172,7 @@ func (p *pool) tiles() []tile {
 		case strings.HasPrefix(n, poolPrefix) && !lent:
 			t.free = true
 		case lent && b.SignIn:
-			t.title, t.since, t.order = "Signing in to sites", b.Since, 1
+			t.title, t.since, t.order, t.login = "Signing in to sites", b.Since, 1, b.Login
 		case lent:
 			t.title, t.who, t.since = cmp(b.For, "Borrowed"), cmp(b.Agent, "An agent"), b.Since
 		default:
@@ -202,6 +257,9 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 			pic = widget.Col(widget.Stack{Aspect: 16.0 / 10, Radius: 10, Border: "solid"})
 		}
 		var line []widget.Node
+		if t.order == 1 {
+			t.who = p.signedIn(call, t)
+		}
 		if t.who != "" {
 			line = append(line, widget.Text(t.who, widget.Style{Size: "sm", Tone: "muted", Lines: 1}))
 		}
