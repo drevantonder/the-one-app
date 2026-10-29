@@ -8,6 +8,7 @@
 package messenger
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -89,6 +90,7 @@ func setup(c *sdk.Ctx) error {
 		if err := b.click(call, page, "link", ch.link); err != nil {
 			return sdk.Result{}, err
 		}
+		b.dirty = true
 		var msgs []Message
 		deadline := time.Now().Add(8 * time.Second)
 		for {
@@ -103,7 +105,9 @@ func setup(c *sdk.Ctx) error {
 		}
 		note := ""
 		if ch.Unread {
-			if err := b.markUnread(call, ch.Name); err != nil {
+			if _, err := b.page(call); err != nil {
+				note = fmt.Sprintf("\n(Couldn't mark it unread again: %v)", err)
+			} else if err := b.markUnread(call, ch.Name); err != nil {
 				note = fmt.Sprintf("\n(Couldn't mark it unread again: %v)", err)
 			}
 		}
@@ -155,19 +159,19 @@ func setup(c *sdk.Ctx) error {
 		if _, err := b.do(call, "browser_type", map[string]any{"ref": box, "text": "\n", "mode": "keystrokes"}); err != nil {
 			return sdk.Result{}, err
 		}
-		want := strings.TrimSpace(in.Text)
-		for range 16 {
-			time.Sleep(500 * time.Millisecond)
-			p, err := b.snapshot(call, "Message sent")
+		// Confirm it from the chat list, which is quick to read where the
+		// conversation may not be.
+		want := "You: " + strings.Join(strings.Fields(in.Text), " ")
+		time.Sleep(time.Second)
+		for range 10 {
+			p, err := b.page(call)
 			if err != nil {
 				return sdk.Result{}, err
 			}
-			msgs := parseMessages(p.nodes)
-			for i := len(msgs) - 1; i >= 0 && i >= len(msgs)-3; i-- {
-				if msgs[i].Sender == "You" && strings.TrimSpace(msgs[i].Text) == want {
-					return sdk.Result{Text: fmt.Sprintf("Sent to %s.", name), Data: msgs[i]}, nil
-				}
+			if ch, err := pick(p.chats(), name); err == nil && strings.Join(strings.Fields(ch.Last), " ") == want {
+				return sdk.Result{Text: fmt.Sprintf("Sent to %s.", ch.Name), Data: ch}, nil
 			}
+			time.Sleep(500 * time.Millisecond)
 		}
 		return sdk.Result{}, fmt.Errorf("typed the message to %s, but it didn't show as sent: check the messenger Space", name)
 	})
@@ -239,7 +243,7 @@ type browser struct {
 	tries   int
 	target  string
 	tab     string
-	dirty   bool // the page is off the chat list (search results)
+	dirty   bool // the page is off the chat list: a conversation, or search results
 }
 
 type page struct {
@@ -254,20 +258,23 @@ type page struct {
 }
 
 // chats are the chat list's rows, each once: a row cut between two parts
-// of the page is incomplete in one of them, without its time.
+// of the page shows in both, each missing what the other has.
 func (p page) chats() []Chat {
 	var out []Chat
 	at := map[string]int{}
 	for _, part := range p.parts {
 		for _, c := range parseChats(part) {
 			i, seen := at[c.Name]
-			switch {
-			case !seen:
+			if !seen {
 				at[c.Name] = len(out)
 				out = append(out, c)
-			case out[i].Time == "" && c.Time != "":
+				continue
+			}
+			link := cmp.Or(out[i].link, c.link)
+			if out[i].Time == "" && c.Time != "" {
 				out[i] = c
 			}
+			out[i].link = link
 		}
 	}
 	return out
@@ -397,30 +404,54 @@ func (b *browser) snapshot(call *sdk.Call, query string) (page, error) {
 	return page{}, errors.New("unreachable")
 }
 
-// page reads the whole page, first going back to the chat list if it isn't
-// showing, and waiting for the list to load.
+// page reads the chat list, loading it unless it is showing. Anything else
+// is loaded over rather than read: the browser tools can take 20 seconds
+// to read a page as deeply nested as some conversations.
 func (b *browser) page(call *sdk.Call) (page, error) {
-	p, err := b.snapshot(call, "")
-	if err != nil {
-		return page{}, err
+	if b.target != "" && !b.dirty {
+		p, err := b.snapshot(call, "")
+		if err != nil {
+			return page{}, err
+		}
+		if p.url == home && len(p.chats()) > 0 {
+			return p, nil
+		}
 	}
-	for attempt := 0; attempt < 2 && (b.dirty || !strings.HasPrefix(p.url, home) || len(p.chats()) == 0); attempt++ {
-		// Load the chat list; if it doesn't show, load it once more.
-		if _, err := b.do(call, "browser_navigate", map[string]any{"url": home}); err != nil {
+	var p page
+	for range 2 { // if the list doesn't show, load it once more
+		if err := b.navigate(call, home); err != nil {
 			return page{}, err
 		}
 		b.dirty = false
 		for range 40 { // a browser that just started can take a while
 			time.Sleep(500 * time.Millisecond)
+			var err error
 			if p, err = b.snapshot(call, ""); err != nil {
 				return page{}, err
 			}
 			if len(p.chats()) > 0 {
-				break
+				return p, nil
 			}
 		}
 	}
 	return p, nil
+}
+
+// navigate loads url, reattaching once if the browser closed.
+func (b *browser) navigate(call *sdk.Call, url string) error {
+	if b.target == "" {
+		if err := b.open(call); err != nil {
+			return err
+		}
+	}
+	if _, err := b.do(call, "browser_navigate", map[string]any{"url": url}); err == nil {
+		return nil
+	}
+	if err := b.open(call); err != nil {
+		return err
+	}
+	_, err := b.do(call, "browser_navigate", map[string]any{"url": url})
+	return err
 }
 
 func (b *browser) click(call *sdk.Call, p page, role, name string) error {
@@ -440,6 +471,7 @@ func (b *browser) openChat(call *sdk.Call, want string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	b.dirty = true
 	if ch, err := pick(p.chats(), want); err == nil {
 		return ch.Name, b.click(call, p, "link", ch.link)
 	} else if !strings.HasPrefix(err.Error(), "no recent chat") {
@@ -449,7 +481,6 @@ func (b *browser) openChat(call *sdk.Call, want string) (string, error) {
 	if box == "" {
 		return "", errors.New("no search box on the page")
 	}
-	b.dirty = true
 	if _, err := b.do(call, "browser_type", map[string]any{"ref": box, "text": want, "replace": true}); err != nil {
 		return "", err
 	}

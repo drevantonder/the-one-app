@@ -101,10 +101,11 @@ func TestPick(t *testing.T) {
 }
 
 func TestChatsAcrossParts(t *testing.T) {
-	// The first part ends inside Sam's row; the second repeats the rows,
-	// Sam's in full.
+	// The first part ends inside Sam's row, after its link; the second
+	// repeats the rows, Sam's without its link.
 	first := chatList + `
 - row "Sam Hi 2 hours ago More options for Sam"
+  - link "Sam Hi 2 hours ago" [focusable=true]
 - statictext "Sam"
 - button "More options for Sam"`
 	second := `- row "Kim Park More options for Kim Park"
@@ -117,9 +118,9 @@ func TestChatsAcrossParts(t *testing.T) {
 	p := page{parts: [][]node{parseOutline(first), parseOutline(second)}}
 	var got []string
 	for _, c := range p.chats() {
-		got = append(got, c.Name+"|"+c.Last+"|"+c.Time)
+		got = append(got, c.Name+"|"+c.Last+"|"+c.Time+"|"+c.link)
 	}
-	want := []string{"🕊️ Walkers 💡|Ana: 8am Saturday, \"bring water\"|15 hours ago", "Kim Park|You: see you then|19 hours ago", "Sam|Hi|2 hours ago"}
+	want := []string{"🕊️ Walkers 💡|Ana: 8am Saturday, \"bring water\"|15 hours ago|Group chat: 🕊️ Walkers 💡", "Kim Park|You: see you then|19 hours ago|Kim Park You: see you then 19 hours ago Seen by Kim Park", "Sam|Hi|2 hours ago|Sam Hi 2 hours ago"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
