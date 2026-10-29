@@ -62,7 +62,7 @@ func (n *Node) AddMenubarItem(item protocol.MenubarItem) {
 // transform in order.
 func (n *Node) Menubar(ctx context.Context) (protocol.MenubarDoc, error) {
 	n.mu.RLock()
-	base := protocol.MenubarDoc{Items: append(slices.Clone(n.menubar), protocol.MenubarItem{ID: "one.plugins", Title: "Plugins", Tool: "plugins_list", Resource: pluginsView})}
+	base := protocol.MenubarDoc{Items: append(slices.Clone(n.menubar), protocol.MenubarItem{ID: "one.plugins", Tool: "plugins_list", Resource: pluginsView})}
 	n.mu.RUnlock()
 	raw, err := n.transform(ctx, protocol.TransformMenubar, base, nil)
 	if err != nil {
