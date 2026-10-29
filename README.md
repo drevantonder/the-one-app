@@ -94,8 +94,10 @@ release instead, and needs no Go.
 `one release v1.2.3` publishes one: it tests the tip of `main`, signs it off
 with [gh-signoff](https://github.com/basecamp/gh-signoff), builds every
 platform locally and the notarized app on the Mac, updates every device, and
-creates the GitHub release. Notarizing needs a notarytool profile on the Mac,
-once: `xcrun notarytool store-credentials one`.
+creates the GitHub release. The app is notarized once the Mac has a
+notarytool profile (`xcrun notarytool store-credentials one`); until then it
+is only signed, which `install.sh` installs fine, but a browser download needs
+Open Anyway in System Settings.
 
 ## Plugins with no code
 

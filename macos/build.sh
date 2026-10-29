@@ -4,7 +4,8 @@
 # ID so macOS keeps its permissions across rebuilds.
 # Usage: macos/build.sh [install|zip|notarize]
 #   zip       also zip the app into build/TheOneApp-macos.zip, as `one update` sends it
-#   notarize  zip it notarized and stapled, for a release
+#   notarize  zip it notarized and stapled, for a release; only signed if
+#             there is no notarytool profile
 #   SIGN_IDENTITY   signing identity (default: the first "Developer ID Application")
 #   VERSION         the version the node reports (default: dev)
 #   NOTARY_PROFILE  notarytool keychain profile (default: one)
@@ -48,6 +49,10 @@ zip)
 	;;
 notarize)
 	rm -f "$zip" && ditto -c -k --keepParent "$app" "$zip"
+	if ! xcrun notarytool history --keychain-profile "${NOTARY_PROFILE:-one}" >/dev/null 2>&1; then
+		echo "warning: no notarytool profile ${NOTARY_PROFILE:-one}, so $zip is signed but not notarized" >&2
+		exit 0
+	fi
 	xcrun notarytool submit "$zip" --keychain-profile "${NOTARY_PROFILE:-one}" --wait
 	xcrun stapler staple "$app"
 	rm -f "$zip" && ditto -c -k --keepParent "$app" "$zip"
