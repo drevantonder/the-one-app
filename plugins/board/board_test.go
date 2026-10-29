@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/drevantonder/the-one-app/sdk"
 	"github.com/drevantonder/the-one-app/sdk/optmem"
@@ -320,10 +321,25 @@ func TestViews(t *testing.T) {
 	if got := b.Channels(); !slices.Equal(got, want) {
 		t.Errorf("Channels() = %v, want %v", got, want)
 	}
-	if _, text, err := b.Channel("projects/app"); err != nil || text != "#projects/app\n2026-10-29 04:00Z newest, in the app" {
+	brisbane := time.FixedZone("AEST", 10*3600)
+	now := time.Date(2026, 10, 29, 16, 0, 0, 0, brisbane)
+	if _, text, err := b.Channel("projects/app", now); err != nil || text != "#projects/app\n2026-10-29 14:00 newest, in the app" {
 		t.Errorf("Channel = %q, %v", text, err)
 	}
-	if _, _, err := b.Channel("nowhere"); err == nil {
+	if _, _, err := b.Channel("nowhere", now); err == nil {
 		t.Error("a channel that doesn't exist should fail")
+	}
+}
+
+// A day starts at midnight where the reader is, not where the node is.
+func TestDaysAreTheReaders(t *testing.T) {
+	b := New()
+	b.Post("mac:0", postEntry{Text: "early", Time: "2026-10-28T23:00:00Z"})
+	now := time.Date(2026, 10, 29, 1, 0, 0, 0, time.UTC)
+	for loc, want := range map[*time.Location]string{time.UTC: "Yesterday", time.FixedZone("AEST", 10*3600): "Today"} {
+		root, _, _ := b.Channel("", now.In(loc))
+		if raw, _ := json.Marshal(root); !strings.Contains(string(raw), `"text":"`+want+`"`) {
+			t.Errorf("in %s, a post at 23:00Z should be under %s: %s", loc, want, raw)
+		}
 	}
 }

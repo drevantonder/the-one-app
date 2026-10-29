@@ -285,12 +285,14 @@ func (c *Ctx) Menubar(fn func(items []MenubarItem) []MenubarItem) {
 
 type pageIn struct {
 	Item string `json:"item,omitempty" jsonschema:"the ID of the page's item to show, as its list gives it"`
+	TZ   string `json:"tz,omitempty" jsonschema:"the IANA time zone to show times in, like Australia/Brisbane; omit for the node's own"`
 }
 
 // Page adds a page to the app's sidebar, titled title with an SF Symbol
-// icon. It lists items, and draws the one chosen with render. It adds
-// operations name, which draws an item as a widget, and name_items.
-func (c *Ctx) Page(name, title, icon, description string, items func(*Call) ([]PageItem, error), render func(*Call, string) (widget.Node, string, error)) {
+// icon. It lists items, and draws the one chosen with render, for a person
+// in loc. It adds operations name, which draws an item as a widget, and
+// name_items.
+func (c *Ctx) Page(name, title, icon, description string, items func(*Call) ([]PageItem, error), render func(call *Call, item string, loc *time.Location) (widget.Node, string, error)) {
 	Op(c, name+"_items", "List the items of the "+title+" page.", Read, func(call *Call, _ struct{}) (Result, error) {
 		list, err := items(call)
 		if err != nil {
@@ -306,7 +308,14 @@ func (c *Ctx) Page(name, title, icon, description string, items func(*Call) ([]P
 		return Result{Text: strings.Join(lines, "\n"), Data: map[string]any{"items": list}}, nil
 	})
 	Op(c, name, description, Read, func(call *Call, in pageIn) (Result, error) {
-		root, text, err := render(call, in.Item)
+		loc, err := time.LoadLocation(in.TZ)
+		if err != nil {
+			return Result{}, fmt.Errorf("tz: %w", err)
+		}
+		if in.TZ == "" {
+			loc = time.Local
+		}
+		root, text, err := render(call, in.Item, loc)
 		if err != nil {
 			return Result{}, err
 		}

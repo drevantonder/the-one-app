@@ -115,7 +115,7 @@ struct PageItemView: View {
     @StateObject private var widget: LiveWidget
 
     init(page: AppPage, item: PageItem, client: MCPClient) {
-        _widget = StateObject(wrappedValue: LiveWidget(tool: page.tool, client: client, input: ["item": item.id]))
+        _widget = StateObject(wrappedValue: LiveWidget(tool: page.tool, client: client, input: ["item": item.id, "tz": TimeZone.current.identifier]))
     }
 
     var body: some View {

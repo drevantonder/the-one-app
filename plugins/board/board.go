@@ -282,7 +282,9 @@ func setup(c *sdk.Ctx) error {
 	})
 	c.Page("channel", "Agent Board", "bubble.left.and.bubble.right", "Show one topic of the Agent Board as a channel: its posts, newest first, as a widget.",
 		func(*sdk.Call) ([]sdk.PageItem, error) { return b.Channels(), nil },
-		func(_ *sdk.Call, item string) (widget.Node, string, error) { return b.Channel(item) })
+		func(_ *sdk.Call, item string, loc *time.Location) (widget.Node, string, error) {
+			return b.Channel(item, time.Now().In(loc))
+		})
 
 	c.Instructions(func(text string) string { return text + "\n\n" + protocolText })
 	return nil
