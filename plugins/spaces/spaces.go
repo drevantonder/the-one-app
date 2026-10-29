@@ -563,6 +563,12 @@ func (t *tools) register(listed []*mcp.Tool, spaces []string) {
 }
 
 func (t *tools) call(call *sdk.Call, tool string, input json.RawMessage) (sdk.Result, error) {
+	return t.callAs(call, tool, input, true)
+}
+
+// callAs runs a Space's tool; one that isn't use, like a thumbnail, leaves
+// the Space as idle as it was.
+func (t *tools) callAs(call *sdk.Call, tool string, input json.RawMessage, use bool) (sdk.Result, error) {
 	ctx := call.Context
 	args := map[string]any{}
 	if len(input) > 0 && string(input) != "null" {
@@ -579,11 +585,19 @@ func (t *tools) call(call *sdk.Call, tool string, input json.RawMessage) (sdk.Re
 		name = names[0]
 		args["space"] = name
 	}
+	if !use {
+		if _, err := find(ctx, name); err != nil {
+			raw, _ := json.Marshal(map[string]any{"space": name, "width": args["max_image_dimension"]})
+			if res, ok, err := t.elsewhere(call, name, "screen", json.RawMessage(raw)); ok {
+				return res, err
+			}
+		}
+	}
 	if res, ok, err := t.elsewhere(call, name, tool, args); ok {
 		return res, err
 	}
 	delete(args, "space")
-	if t.used != nil {
+	if t.used != nil && use {
 		t.used(name)
 	}
 	s, err := find(ctx, name)

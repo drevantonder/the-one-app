@@ -22,8 +22,8 @@ func (t *tools) screen(call *sdk.Call, in screenIn) (sdk.Image, error) {
 	if w <= 0 {
 		w = 480
 	}
-	raw, _ := json.Marshal(map[string]any{"space": in.Space, "session": "screen", "max_image_dimension": min(w, 1920)})
-	res, err := t.call(call, "get_desktop_state", raw)
+	raw, _ := json.Marshal(map[string]any{"space": in.Space, "max_image_dimension": min(w, 1920)})
+	res, err := t.callAs(call, "get_desktop_state", raw, false)
 	if err != nil {
 		return sdk.Image{}, err
 	}
