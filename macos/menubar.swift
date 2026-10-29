@@ -651,9 +651,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         WidgetContext.popouts = { Popouts.shared.open($0, $1, $2) }
+        NSApp.mainMenu = mainMenu()
         Task {
             if await anotherCopyStays() { NSApp.terminate(nil) } else { start() }
         }
+    }
+
+    // mainMenu gives the window the standard menus, without which ⌘V, ⌘C
+    // and the like reach no view, such as a Space's live page.
+    private func mainMenu() -> NSMenu {
+        let menu = NSMenu()
+        func add(_ title: String, _ items: [NSMenuItem]) {
+            let sub = NSMenu(title: title)
+            items.forEach(sub.addItem)
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.submenu = sub
+            menu.addItem(item)
+        }
+        func item(_ title: String, _ action: Selector, _ key: String, _ mods: NSEvent.ModifierFlags = .command) -> NSMenuItem {
+            let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            i.keyEquivalentModifierMask = mods
+            return i
+        }
+        add("The One App", [item("Quit The One App", #selector(NSApplication.terminate(_:)), "q")])
+        add("Edit", [
+            item("Undo", Selector(("undo:")), "z"),
+            item("Redo", Selector(("redo:")), "z", [.command, .shift]),
+            .separator(),
+            item("Cut", #selector(NSText.cut(_:)), "x"),
+            item("Copy", #selector(NSText.copy(_:)), "c"),
+            item("Paste", #selector(NSText.paste(_:)), "v"),
+            item("Select All", #selector(NSText.selectAll(_:)), "a"),
+        ])
+        add("Window", [
+            item("Close", #selector(NSWindow.performClose(_:)), "w"),
+            item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
+        ])
+        return menu
     }
 
     // relaunch starts the new build with `open -n` before the old one quits,
