@@ -300,7 +300,7 @@ func buildAssets(ctx context.Context, src, commit, dir, ver string, need map[str
 			path := filepath.Join(dir, asset)
 			var err error
 			if asset == appAsset {
-				err = buildApp(ctx, commit, path, ver, macBuilder(nodes), notarize)
+				err = buildApp(ctx, commit, path, ver, nodes, notarize)
 			} else {
 				err = buildBinary(ctx, src, path, ver, asset)
 			}
@@ -331,53 +331,78 @@ func buildBinary(ctx context.Context, src, out, ver, asset string) error {
 	return nil
 }
 
-// macBuilder is the Mac that builds TheOneApp.app: ONE_MAC, else this machine
-// if it is a Mac, else the first Mac running the app.
-func macBuilder(nodes []remote) string {
-	if m := os.Getenv("ONE_MAC"); m != "" {
-		return m
-	}
-	if runtime.GOOS == "darwin" {
-		return ""
-	}
-	for _, n := range nodes {
-		if n.build.App {
-			return n.name
+// macBuilder is the Mac node that builds TheOneApp.app: the one named by
+// ONE_MAC, else the first running the app, else the first Mac. Nil means this
+// machine, a Mac with no node of its own.
+func macBuilder(nodes []remote) (*remote, error) {
+	name := os.Getenv("ONE_MAC")
+	for _, pick := range []func(remote) bool{
+		func(n remote) bool { return name != "" && n.name == name },
+		func(n remote) bool { return name == "" && n.build.App },
+		func(n remote) bool { return name == "" && n.build.OS == "darwin" },
+	} {
+		for _, n := range nodes {
+			if pick(n) {
+				return &n, nil
+			}
 		}
 	}
-	for _, n := range nodes {
-		if n.build.OS == "darwin" {
-			return n.name
-		}
+	if name == "" && runtime.GOOS == "darwin" {
+		return nil, nil
 	}
-	return ""
+	return nil, errors.New("building the Mac app needs a Mac that runs a node (ONE_MAC names one)")
 }
 
-// buildApp builds the commit's TheOneApp.app with macos/build.sh, in a
-// clone on the Mac (over SSH unless it is this machine), and fetches it zipped.
-func buildApp(ctx context.Context, commit, out, ver, host string, notarize bool) error {
-	mode := "zip"
-	if notarize {
-		mode = "notarize"
-	}
-	script := checkoutScript(`"$HOME/.cache/one-build"`, commit) +
-		fmt.Sprintf(`; VERSION=%s exec "$SHELL" -lc 'macos/build.sh %s >&2 && cat build/%s'`, ver, mode, appAsset)
-	var cmd *exec.Cmd
-	switch {
-	case host != "":
-		cmd = exec.CommandContext(ctx, "ssh", host, script)
-	case runtime.GOOS == "darwin":
-		cmd = exec.CommandContext(ctx, "sh", "-c", script)
-	default:
-		return errors.New("building the Mac app needs a Mac: set ONE_MAC to one you can ssh to")
+// buildApp has a Mac build the commit's TheOneApp.app, zipped. A Mac's node
+// builds it rather than SSH, as only a process in the logged-in session can
+// sign with the keychain.
+func buildApp(ctx context.Context, commit, out, ver string, nodes []remote, notarize bool) error {
+	mac, err := macBuilder(nodes)
+	if err != nil {
+		return err
 	}
 	f, err := os.Create(out)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	if mac == nil {
+		return buildAppHere(ctx, commit, ver, notarize, f)
+	}
+	body, _ := json.Marshal(appRequest{Commit: commit, Version: ver, Notarize: notarize})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, mac.base+"/v1/update/app", bytes.NewReader(body))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("on %s: %s", mac.name, bytes.TrimSpace(msg))
+	}
+	_, err = io.Copy(f, resp.Body)
+	return err
+}
+
+type appRequest struct {
+	Commit   string `json:"commit"`
+	Version  string `json:"version"`
+	Notarize bool   `json:"notarize"`
+}
+
+// buildAppHere builds the commit's app with macos/build.sh in a clone on
+// this Mac, and writes it zipped to w.
+func buildAppHere(ctx context.Context, commit, ver string, notarize bool, w io.Writer) error {
+	mode := "zip"
+	if notarize {
+		mode = "notarize"
+	}
+	// A login shell, for the PATH to go and swiftc that apps don't get.
+	script := checkoutScript(`"$HOME/.cache/one-build"`, commit) +
+		fmt.Sprintf(`; VERSION=%s exec "${SHELL:-/bin/zsh}" -lc 'macos/build.sh %s >&2 && cat build/%s'`, ver, mode, appAsset)
+	cmd := exec.CommandContext(ctx, "sh", "-c", script)
 	var stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = f, &stderr
+	cmd.Stdout, cmd.Stderr = w, &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%w\n%s", err, lastLines(stderr.String(), 15))
 	}

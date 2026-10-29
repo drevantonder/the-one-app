@@ -87,9 +87,9 @@ together: your instructions, and the memory plugin's rule to call
 `one update` updates the node on every device of yours that runs one: it
 builds the tip of `main` (in a clean clone, never your working tree), sends
 each node its build over the tailnet, and each installs it and restarts in
-place. Macs running TheOneApp.app get the app, built and signed on a Mac over
-SSH (`ONE_MAC`, else the first Mac with the app). `one update --release` takes
-the latest GitHub release instead, and needs no Go.
+place. Macs running TheOneApp.app get the app, which a Mac's node builds and
+signs (`ONE_MAC` names which). `one update --release` takes the latest GitHub
+release instead, and needs no Go.
 
 `one release v1.2.3` publishes one: it tests the tip of `main`, signs it off
 with [gh-signoff](https://github.com/basecamp/gh-signoff), builds every

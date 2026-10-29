@@ -9,8 +9,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"sync"
+)
+
+var (
+	commitRE  = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	versionRE = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]*$`)
 )
 
 // errRestart ends serve so main can run the new build in its place.
@@ -46,10 +53,38 @@ func appBundle(exe string) string {
 
 // updateRoutes lets the owner's devices replace this node's build: PUT a
 // binary (or, for an app, a zip of TheOneApp.app) with X-One-Version set,
-// and the node installs it and restarts.
+// and the node installs it and restarts. A Mac's node also builds the app.
 func updateRoutes(mux *http.ServeMux, exe string, restart func()) {
 	mux.HandleFunc("GET /v1/update", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, nodeBuild{OS: runtime.GOOS, Arch: runtime.GOARCH, Version: version, App: appBundle(exe) != ""})
+	})
+	var building sync.Mutex
+	mux.HandleFunc("POST /v1/update/app", func(w http.ResponseWriter, r *http.Request) {
+		if runtime.GOOS != "darwin" {
+			http.Error(w, "only a Mac builds TheOneApp.app", http.StatusNotFound)
+			return
+		}
+		var in appRequest
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || !commitRE.MatchString(in.Commit) || !versionRE.MatchString(in.Version) {
+			http.Error(w, "want a full commit hash and a version", http.StatusBadRequest)
+			return
+		}
+		building.Lock()
+		defer building.Unlock()
+		f, err := os.CreateTemp("", "one-app-*.zip")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer os.Remove(f.Name())
+		defer f.Close()
+		if err := buildAppHere(r.Context(), in.Commit, in.Version, in.Notarize, f); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, _ = f.Seek(0, io.SeekStart)
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = io.Copy(w, f)
 	})
 	mux.HandleFunc("PUT /v1/update", func(w http.ResponseWriter, r *http.Request) {
 		want := r.Header.Get("X-One-Version")
