@@ -62,13 +62,12 @@ type Node struct {
 	extraOps []coreOp
 	coord    Coordinator
 	blobs    Blobs
-	declHost []string               // command that runs a declared plugin
-	remote   []RemoteOp             // operations of plugins running on other devices
-	names    map[string]string      // plugin id → name, from its last manifest
-	views    []protocol.Resource    // the core's own views
-	menubar  []protocol.MenubarItem // the core's own menu bar items
-	remoteUI []protocol.Resource    // views of plugins running on other devices
-	name     string                 // this device's name; see Name
+	declHost []string            // command that runs a declared plugin
+	remote   []RemoteOp          // operations of plugins running on other devices
+	names    map[string]string   // plugin id → name, from its last manifest
+	views    []protocol.Resource // the core's own views
+	remoteUI []protocol.Resource // views of plugins running on other devices
+	name     string              // this device's name; see Name
 }
 
 // SetDeclaredHost sets the command that runs declared plugins. The core

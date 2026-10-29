@@ -3,7 +3,6 @@ package mesh
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,26 +60,17 @@ type peer struct {
 	version  string
 }
 
-const (
-	nodesKey    = "mesh_nodes"
-	devicesView = "ui://one/devices"
-)
-
-//go:embed devices.html
-var devicesHTML string
+const nodesKey = "mesh_nodes"
 
 func New(node *core.Node, st *store.Store, port string, log *slog.Logger) *Mesh {
 	m := &Mesh{node: node, store: st, port: port, log: log, who: whois{cache: map[string]whoisEntry{}}, peers: map[string]*peer{}, devices: map[string]string{}, nodes: map[string]string{}}
 	if raw, _ := st.Meta(nodesKey); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &m.nodes)
 	}
-	node.AddView(protocol.Resource{URI: devicesView, Name: "Devices", MIMEType: protocol.MIMEApp, Text: devicesHTML})
 	node.AddCoreOp("devices", "List this user's devices that run a node, this one first: name, OS, version, and whether each is online.", core.SchemaFor[struct{}](), true,
 		func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) {
 			return m.devicesResult(), nil
 		})
-	node.SetUI("devices", &protocol.OperationUI{ResourceURI: devicesView})
-	node.AddMenubarItem(protocol.MenubarItem{ID: "one.devices", Title: "Devices", Tool: "devices", Resource: devicesView})
 	return m
 }
 

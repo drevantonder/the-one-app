@@ -82,7 +82,7 @@ func TestNodeOverMCP(t *testing.T) {
 		Items []struct{ ID, Tool, Resource string }
 	}
 	raw, _ := json.Marshal(bar.StructuredContent)
-	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Items) != 2 || doc.Items[0].ID != "one.devices" || doc.Items[1].ID != "one.plugins" {
+	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Items) != 2 || doc.Items[0].ID != "devices" || doc.Items[1].ID != "one.plugins" {
 		t.Fatalf("menubar items: %s", raw)
 	}
 	for _, item := range doc.Items {
@@ -220,7 +220,7 @@ func TestNodeOverMCP(t *testing.T) {
 	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "fact 2") {
 		t.Fatalf("board_read over stdio:\n%s", text)
 	}
-	if view, err := stdio.ReadResource(ctx, &mcp.ReadResourceParams{URI: "ui://one/devices"}); err != nil || !strings.Contains(view.Contents[0].Text, "ui/initialize") {
+	if view, err := stdio.ReadResource(ctx, &mcp.ReadResourceParams{URI: "ui://devices/list"}); err != nil || !strings.Contains(view.Contents[0].Text, "ui/initialize") {
 		t.Fatalf("devices view over stdio: %v", err)
 	}
 }

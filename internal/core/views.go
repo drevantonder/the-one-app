@@ -37,33 +37,10 @@ func (n *Node) AddView(r protocol.Resource) {
 	n.changed()
 }
 
-// SetUI sets the MCP Apps metadata of a core operation added with AddCoreOp.
-func (n *Node) SetUI(op string, ui *protocol.OperationUI) {
-	n.mu.Lock()
-	for i := range n.extraOps {
-		if n.extraOps[i].Name == op {
-			n.extraOps[i].UI = ui
-		}
-	}
-	n.mu.Unlock()
-	n.changed()
-}
-
-// AddMenubarItem adds one of the core's own menu bar items. They come first,
-// in the order added, then Plugins; plugins' transforms run on the result.
-func (n *Node) AddMenubarItem(item protocol.MenubarItem) {
-	n.mu.Lock()
-	n.menubar = append(n.menubar, item)
-	n.mu.Unlock()
-	n.changed()
-}
-
-// Menubar builds the menu bar: the core's items, then each plugin's
+// Menubar builds the menu bar: the core's Plugins item, then each plugin's
 // transform in order.
 func (n *Node) Menubar(ctx context.Context) (protocol.MenubarDoc, error) {
-	n.mu.RLock()
-	base := protocol.MenubarDoc{Items: append(slices.Clone(n.menubar), protocol.MenubarItem{ID: "one.plugins", Tool: "plugins_list", Resource: pluginsView})}
-	n.mu.RUnlock()
+	base := protocol.MenubarDoc{Items: []protocol.MenubarItem{{ID: "one.plugins", Tool: "plugins_list", Resource: pluginsView}}}
 	raw, err := n.transform(ctx, protocol.TransformMenubar, base, nil)
 	if err != nil {
 		return protocol.MenubarDoc{}, err
