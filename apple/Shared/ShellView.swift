@@ -168,56 +168,88 @@ struct WidgetCard: View {
 }
 
 // ShellView is the app: a sidebar of pages, for plugins to add their own to
-// later, beside the open page. On an iPhone it collapses to one column.
+// later, beside the open page. On an iPhone it is a menu that opens each page.
 struct ShellView: View {
     @StateObject var shell: Shell
     // Remembered, so the app opens where it was left, as after an update.
     @AppStorage("page") private var page: Page = .home
-    // nil on an iPhone once its page is closed: kept non-nil, the menu's rows stop opening anything.
     @State private var selection: Page?
+    @State private var path: [Page] = []
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $selection) {
-                SwiftUI.Section { identity }
-                SwiftUI.Section {
-                    NavigationLink(value: Page.home) {
-                        Label("Home", systemImage: "square.grid.2x2")
-                    }
-                    NavigationLink(value: Page.plugins) {
-                        Label("Plugins", systemImage: "puzzlepiece.extension")
-                    }
-                    ForEach(shell.pages) { p in
-                        NavigationLink(value: Page.page(p.id)) {
-                            Label(p.title, systemImage: p.icon)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("The One App")
-            #if os(macOS)
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+        Group {
+            #if os(iOS)
+            // A collapsed split view can keep a row selected without showing its page, after which no row opens anything.
+            if sizeClass == .compact { stack } else { split }
+            #else
+            split
             #endif
+        }
+        .onAppear {
+            if selection == nil { selection = page }
+            if path.isEmpty { path = [page] }
+        }
+        .onChange(of: selection) { if let selection { page = selection } }
+        .onChange(of: path) { if let last = path.last { page = last } }
+        .task { await shell.load() }
+    }
+
+    private var split: some View {
+        NavigationSplitView {
+            List(selection: $selection) { menu }
+                .navigationTitle("The One App")
+                #if os(macOS)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+                #endif
         } detail: {
-            Group {
-                switch selection ?? page {
-                case .home: HomePage(shell: shell)
-                case .plugins: PluginsPage(shell: shell)
-                case .page(let id):
-                    if let p = shell.pages.first(where: { $0.id == id }), let client = shell.client {
-                        PluginPage(page: p, client: client).id(p.id)
-                    }
-                }
+            detail(selection ?? page)
+        }
+    }
+
+    private var stack: some View {
+        NavigationStack(path: $path) {
+            List { menu }
+                .navigationTitle("The One App")
+                .navigationDestination(for: Page.self) { detail($0) }
+        }
+    }
+
+    @ViewBuilder private var menu: some View {
+        SwiftUI.Section { identity }
+        SwiftUI.Section {
+            NavigationLink(value: Page.home) {
+                Label("Home", systemImage: "square.grid.2x2")
             }
-            .toolbar {
-                ToolbarItem {
-                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await shell.load() } }
+            NavigationLink(value: Page.plugins) {
+                Label("Plugins", systemImage: "puzzlepiece.extension")
+            }
+            ForEach(shell.pages) { p in
+                NavigationLink(value: Page.page(p.id)) {
+                    Label(p.title, systemImage: p.icon)
                 }
             }
         }
-        .onAppear { if selection == nil { selection = page } }
-        .onChange(of: selection) { if let selection { page = selection } }
-        .task { await shell.load() }
+    }
+
+    private func detail(_ page: Page) -> some View {
+        Group {
+            switch page {
+            case .home: HomePage(shell: shell)
+            case .plugins: PluginsPage(shell: shell)
+            case .page(let id):
+                if let p = shell.pages.first(where: { $0.id == id }), let client = shell.client {
+                    PluginPage(page: p, client: client).id(p.id)
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem {
+                Button("Refresh", systemImage: "arrow.clockwise") { Task { await shell.load() } }
+            }
+        }
     }
 
     // The title names the app, so this row shows the network it reaches.
