@@ -3,100 +3,12 @@
 // in a sandboxed web view that talks to the node through this host.
 import AppKit
 import ServiceManagement
+import SwiftUI
 import WebKit
 
 let nodeURL = URL(string: "http://" + (ProcessInfo.processInfo.environment["ONE_ADDR"] ?? "127.0.0.1:4747"))!
 let width: CGFloat = 300
 let maxHeight: CGFloat = 600
-
-enum MCPError: Error, LocalizedError {
-    case rpc(String)
-    case sessionExpired
-    case badResponse
-
-    var errorDescription: String? {
-        switch self {
-        case .rpc(let m): return m
-        case .sessionExpired: return "the node forgot this session"
-        case .badResponse: return "the node sent something unexpected"
-        }
-    }
-}
-
-// MCPClient speaks MCP's Streamable HTTP transport to the node.
-actor MCPClient {
-    private let endpoint = nodeURL.appendingPathComponent("mcp")
-    private var session: String?
-    private var connecting: Task<Void, Error>?
-    private var nextID = 1
-
-    func request(_ method: String, _ params: [String: Any] = [:]) async throws -> [String: Any] {
-        try await connect()
-        do {
-            return try await send(method, params)
-        } catch MCPError.sessionExpired {
-            session = nil
-            try await connect()
-            return try await send(method, params)
-        }
-    }
-
-    private func connect() async throws {
-        if session != nil { return }
-        if let connecting { return try await connecting.value }
-        let task = Task {
-            _ = try await self.send("initialize", [
-                "protocolVersion": "2025-06-18", "capabilities": [:] as [String: Any],
-                "clientInfo": ["name": "The One App menu bar", "version": "1"],
-            ])
-            _ = try await self.post(["jsonrpc": "2.0", "method": "notifications/initialized"])
-        }
-        connecting = task
-        defer { connecting = nil }
-        try await task.value
-    }
-
-    private func send(_ method: String, _ params: [String: Any]) async throws -> [String: Any] {
-        let id = nextID
-        nextID += 1
-        let (data, resp) = try await post(["jsonrpc": "2.0", "id": id, "method": method, "params": params])
-        if let s = resp.value(forHTTPHeaderField: "Mcp-Session-Id") { session = s }
-        if resp.statusCode == 404 && method != "initialize" { throw MCPError.sessionExpired }
-        let messages: [[String: Any]]
-        if resp.value(forHTTPHeaderField: "Content-Type")?.contains("text/event-stream") == true {
-            messages = events(data)
-        } else {
-            messages = [(try? JSONSerialization.jsonObject(with: data)) as? [String: Any]].compactMap { $0 }
-        }
-        guard let reply = messages.first(where: { ($0["id"] as? Int) == id }) else { throw MCPError.badResponse }
-        if let err = reply["error"] as? [String: Any] { throw MCPError.rpc(err["message"] as? String ?? "error") }
-        return reply["result"] as? [String: Any] ?? [:]
-    }
-
-    private func post(_ body: [String: Any]) async throws -> (Data, HTTPURLResponse) {
-        var req = URLRequest(url: endpoint, timeoutInterval: 60)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
-        req.setValue("2025-06-18", forHTTPHeaderField: "MCP-Protocol-Version")
-        if let session { req.setValue(session, forHTTPHeaderField: "Mcp-Session-Id") }
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse else { throw MCPError.badResponse }
-        return (data, http)
-    }
-
-    private func events(_ data: Data) -> [[String: Any]] {
-        let text = String(decoding: data, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n")
-        return text.components(separatedBy: "\n\n").compactMap { event in
-            let payload = event.split(separator: "\n")
-                .filter { $0.hasPrefix("data:") }
-                .map { $0.dropFirst(5).drop(while: { $0 == " " }) }
-                .joined(separator: "\n")
-            return (try? JSONSerialization.jsonObject(with: Data(payload.utf8))) as? [String: Any]
-        }
-    }
-}
 
 // NodeProcess starts `one serve` from the app, unless a node already answers
 // (one run by launchd, say), and stops it again on quit.
@@ -282,8 +194,9 @@ final class Section: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
 @MainActor
 final class Panel: NSViewController {
-    let client = MCPClient()
+    let client = MCPClient(node: nodeURL, name: "The One App menu bar")
     weak var popover: NSPopover?
+    var openWindow: (() -> Void)?
     private let stack = NSStackView()
     private var sections: [Section] = []
     private var shown = ""  // the items and their views, as last shown
@@ -445,7 +358,7 @@ final class Panel: NSViewController {
 
     private func show(_ views: [NSView]) {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for v in views + [separator(), loginButton(), quitButton()] {
+        for v in views + [separator(), windowButton(), loginButton(), quitButton()] {
             stack.addArrangedSubview(v)
             if v is WKWebView || v is NSBox || v is SubmenuRow {
                 v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -12).isActive = true
@@ -496,6 +409,15 @@ final class Panel: NSViewController {
         b.alignment = .left
         b.attributedTitle = NSAttributedString(string: title, attributes: [.foregroundColor: NSColor.labelColor, .font: NSFont.systemFont(ofSize: 13)])
         return b
+    }
+
+    private func windowButton() -> NSView {
+        padded(menuButton("Open The One App", action: #selector(openWindowClicked), target: self), top: 2)
+    }
+
+    @objc private func openWindowClicked() {
+        popover?.performClose(nil)
+        openWindow?()
     }
 
     private func loginButton() -> NSView {
@@ -600,6 +522,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var item: NSStatusItem?
     private var monitors: [Any] = []
     private var observers: [NSObjectProtocol] = []
+    private var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Closed by hand, not .transient, so clicks in an open submenu don't close the menu.
@@ -608,6 +531,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = panel
         popover.delegate = self
         panel.popover = popover
+        panel.openWindow = { [weak self] in self?.showWindow() }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let ring = NSImage(named: "MenuBarIcon")
         ring?.isTemplate = true
@@ -624,6 +548,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 if let now = self.executableID(), now != built { self.relaunch() }
             }
         }
+    }
+
+    // showWindow opens the app's window, the same shell the iPhone and iPad
+    // app shows, on this Mac's node.
+    func showWindow() {
+        if window == nil {
+            let host = NSHostingController(rootView: ShellView(shell: Shell(node: nodeURL)).frame(minWidth: 420, minHeight: 480))
+            let w = NSWindow(contentViewController: host)
+            w.title = "The One App"
+            w.setContentSize(NSSize(width: 480, height: 600))
+            w.isReleasedWhenClosed = false
+            w.center()
+            window = w
+        }
+        NSApp.activate()
+        window?.makeKeyAndOrderFront(nil)
     }
 
     // `one update` replaces the bundle and restarts only the node, so the app
@@ -703,10 +643,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 }
 
-MainActor.assumeIsolated {
-    let delegate = AppDelegate()
-    let app = NSApplication.shared
-    app.delegate = delegate
-    app.setActivationPolicy(.accessory)
-    app.run()
+@main
+enum Main {
+    static func main() {
+        MainActor.assumeIsolated {
+            let delegate = AppDelegate()
+            let app = NSApplication.shared
+            app.delegate = delegate
+            app.setActivationPolicy(.accessory)
+            app.run()
+        }
+    }
 }

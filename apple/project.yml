@@ -1,0 +1,30 @@
+# The iPhone and iPad app. Generate the Xcode project with `xcodegen` in this
+# directory; the Mac gets the same shell from the menu bar app (macos/).
+name: TheOneApp
+options:
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  DEVELOPMENT_TEAM: X96JC3HCV7
+  CODE_SIGN_STYLE: Automatic
+  SWIFT_VERSION: "5.0"
+  MARKETING_VERSION: 0.1.0
+  CURRENT_PROJECT_VERSION: 1
+targets:
+  TheOneApp:
+    type: application
+    platform: iOS
+    sources: [Shared, iOS]
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: dev.theoneapp
+      TARGETED_DEVICE_FAMILY: "1,2"
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: iOS/Info.plist
+      properties:
+        CFBundleDisplayName: The One App
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        # Nodes serve plain HTTP on the tailnet, which only admits this user's devices.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true

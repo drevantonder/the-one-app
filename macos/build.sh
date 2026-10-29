@@ -31,7 +31,7 @@ iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"
 go build -trimpath -ldflags "-X main.version=${VERSION:-dev}" -o "$app/Contents/MacOS/one" ./cmd/one
 codesign --force --options runtime $ts --entitlements macos/TheOneApp.entitlements \
 	--identifier dev.theoneapp.one --sign "$identity" "$app/Contents/MacOS/one"
-swiftc -O -suppress-warnings macos/menubar.swift -o "$app/Contents/MacOS/TheOneApp"
+swiftc -O -suppress-warnings -parse-as-library macos/menubar.swift apple/Shared/*.swift -o "$app/Contents/MacOS/TheOneApp"
 for helper in eventkit contacts messages; do
 	swiftc -O -suppress-warnings "plugins/apple/$helper.swift" -o "$app/Contents/MacOS/one-$helper"
 	codesign --force --options runtime $ts --entitlements macos/TheOneApp.entitlements \
