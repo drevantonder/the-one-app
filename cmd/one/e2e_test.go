@@ -54,9 +54,6 @@ func TestNodeOverMCP(t *testing.T) {
 	}
 	defer session.Close()
 
-	if ins := session.InitializeResult().Instructions; !strings.Contains(ins, "call `memory_wake`") || !strings.Contains(ins, "memory_note") {
-		t.Fatalf("instructions missing the memory plugin's text:\n%s", ins)
-	}
 	if ins := session.InitializeResult().Instructions; !strings.Contains(ins, "## Agent Board") || !strings.Contains(ins, "board_post") {
 		t.Fatalf("instructions missing the board's text:\n%s", ins)
 	}
@@ -68,7 +65,7 @@ func TestNodeOverMCP(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names = append(names, tool.Name)
 	}
-	for _, want := range []string{"memory_wake", "instructions_set", "skills_list", "memory_note", "memory_nap", "plugins_list",
+	for _, want := range []string{"instructions_set", "skills_list", "plugins_list",
 		"board_topics", "board_create", "board_read", "board_post", "board_nap", "board_zoom", "board_recall"} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("tool %s missing from %v", want, names)
@@ -121,19 +118,16 @@ func TestNodeOverMCP(t *testing.T) {
 	}
 	call("instructions_set", map[string]any{"text": "Keep answers short."})
 	for i := range 3 {
-		call("memory_note", map[string]any{"text": fmt.Sprintf("fact %d", i)})
+		call("board_post", map[string]any{"text": fmt.Sprintf("fact %d", i)})
 	}
-	if text, isErr := call("memory_note", map[string]any{"text": ""}); !isErr {
-		t.Fatalf("empty note should be a tool error, got %q", text)
+	if text, isErr := call("board_post", map[string]any{"text": ""}); !isErr {
+		t.Fatalf("empty post should be a tool error, got %q", text)
 	}
-	if text, _ := call("memory_nap", map[string]any{"block": "0-1", "text": "facts 0 and 1"}); !strings.Contains(text, "0-1 saved") {
+	if text, _ := call("board_nap", map[string]any{"block": "0-1", "text": "facts 0 and 1"}); !strings.Contains(text, "0-1 saved") {
 		t.Fatalf("nap: %s", text)
 	}
-	wake, _ := call("memory_wake", nil)
-	for _, want := range []string{"#2 ", "fact 2", "You are awake."} {
-		if !strings.Contains(wake, want) {
-			t.Fatalf("wake missing %q:\n%s", want, wake)
-		}
+	if top, _ := call("board_read", nil); !strings.Contains(top, "#2 ") || !strings.Contains(top, "fact 2") {
+		t.Fatalf("board_read after posts:\n%s", top)
 	}
 
 	call("board_create", map[string]any{"topic": "projects", "description": "Work projects"})
@@ -141,28 +135,28 @@ func TestNodeOverMCP(t *testing.T) {
 		t.Fatalf("create without a parent should be a tool error, got %q", text)
 	}
 	call("board_post", map[string]any{"topic": "projects", "text": "started the board", "where": "the-one-app"})
-	if text, _ := call("board_post", map[string]any{"text": "the user lives in Sydney"}); !strings.Contains(text, "Posted as #0 in the top.") {
+	if text, _ := call("board_post", map[string]any{"text": "the user lives in Sydney"}); !strings.Contains(text, "Posted as #3 in the top.") {
 		t.Fatalf("board_post: %s", text)
 	}
 	if top, _ := call("board_read", nil); !strings.Contains(top, "the user lives in Sydney") || !strings.Contains(top, "Subtopics:\n  projects — ") {
 		t.Fatalf("board_read:\n%s", top)
 	}
-	if hits, _ := call("board_recall", map[string]any{"pattern": "board|sydney"}); !strings.Contains(hits, "projects #0 ") || !strings.Contains(hits, "(top) #0 ") {
+	if hits, _ := call("board_recall", map[string]any{"pattern": "board|sydney"}); !strings.Contains(hits, "projects #0 ") || !strings.Contains(hits, "(top) #3 ") {
 		t.Fatalf("board_recall:\n%s", hits)
 	}
 
 	// Disabling a plugin removes its tools and wake section; enabling it
 	// again rebuilds everything from the log.
-	call("plugins_disable", map[string]any{"id": "memory"})
+	call("plugins_disable", map[string]any{"id": "board"})
 	tools, _ = session.ListTools(ctx, nil)
 	for _, tool := range tools.Tools {
-		if strings.HasPrefix(tool.Name, "memory_") {
-			t.Fatalf("memory tool %s still listed after disable", tool.Name)
+		if strings.HasPrefix(tool.Name, "board_") {
+			t.Fatalf("board tool %s still listed after disable", tool.Name)
 		}
 	}
-	call("plugins_enable", map[string]any{"id": "memory"})
-	if wake, _ := call("memory_wake", nil); !strings.Contains(wake, "fact 2") {
-		t.Fatalf("memory not restored after enable:\n%s", wake)
+	call("plugins_enable", map[string]any{"id": "board"})
+	if top, _ := call("board_read", nil); !strings.Contains(top, "fact 2") {
+		t.Fatalf("board not restored after enable:\n%s", top)
 	}
 
 	// A plugin with no code: an MCP server's tools become its operations.
@@ -216,15 +210,15 @@ func TestNodeOverMCP(t *testing.T) {
 	}
 	defer stdio.Close()
 	// A new session's instructions include the user's instructions, set above.
-	if ins := stdio.InitializeResult().Instructions; !strings.Contains(ins, "Keep answers short.") || !strings.Contains(ins, "memory_wake") {
+	if ins := stdio.InitializeResult().Instructions; !strings.Contains(ins, "Keep answers short.") || !strings.Contains(ins, "board_read") {
 		t.Fatalf("new session instructions:\n%s", ins)
 	}
-	res, err = stdio.CallTool(ctx, &mcp.CallToolParams{Name: "memory_wake"})
+	res, err = stdio.CallTool(ctx, &mcp.CallToolParams{Name: "board_read"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "fact 2") {
-		t.Fatalf("wake over stdio:\n%s", text)
+		t.Fatalf("board_read over stdio:\n%s", text)
 	}
 	if view, err := stdio.ReadResource(ctx, &mcp.ReadResourceParams{URI: "ui://one/devices"}); err != nil || !strings.Contains(view.Contents[0].Text, "ui/initialize") {
 		t.Fatalf("devices view over stdio: %v", err)

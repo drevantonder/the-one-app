@@ -32,7 +32,6 @@ import (
 	"github.com/drevantonder/the-one-app/plugins/apple"
 	"github.com/drevantonder/the-one-app/plugins/board"
 	"github.com/drevantonder/the-one-app/plugins/instructions"
-	"github.com/drevantonder/the-one-app/plugins/memory"
 	"github.com/drevantonder/the-one-app/plugins/messenger"
 	"github.com/drevantonder/the-one-app/plugins/shell"
 	"github.com/drevantonder/the-one-app/plugins/skills"
@@ -199,7 +198,7 @@ func portOf(addr string) string {
 
 // builtins are the plugins bundled in this binary, in the order their
 // transforms run.
-var builtins = []sdk.Plugin{instructions.Plugin, agentsmd.Plugin, skills.Plugin, memory.Plugin, board.Plugin, shell.Plugin, apple.Reminders, apple.Calendar, apple.Contacts, apple.IMessage, spaces.Plugin, messenger.Plugin, whatsapp.Plugin}
+var builtins = []sdk.Plugin{instructions.Plugin, agentsmd.Plugin, skills.Plugin, board.Plugin, shell.Plugin, apple.Reminders, apple.Calendar, apple.Contacts, apple.IMessage, spaces.Plugin, messenger.Plugin, whatsapp.Plugin}
 
 var builtinIDs = func() []string {
 	var ids []string

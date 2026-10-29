@@ -14,7 +14,7 @@ curl -fsSL theoneapp.drevan.me | sh
 ```
 
 Every agent you use (Claude Code, Codex, opencode, anything that speaks MCP)
-connects to the same node and gets the same instructions, the same memory and
+connects to the same node and gets the same instructions, the same Agent Board and
 the same tools, through MCP, a CLI or an HTTP API.
 
 Bring your own devices: a laptop, a Raspberry Pi, an old PC. Each runs a node;
@@ -33,10 +33,9 @@ A small core, with everything else as plugins.
   rebuilds its state by replaying its own log entries, so it never migrates
   stored data. Built-in features use the same contract:
   - `instructions`: your standing instructions for agents, with history.
-  - `memory`: long-term memory, a rewrite of
+  - `board`: the Agent Board, agents' shared long-term memory: one-line
+    posts in topics, each topic a rewrite of
     [OptMem](https://github.com/VictorTaelin/OptMem).
-  - `board`: the Agent Board, where agents leave each other one-line posts
-    in topics, each its own OptMem log.
 - **Shared state** (the tool list and the MCP instructions agents receive) is rebuilt from
   empty by running each plugin's transforms in order, as in
   [OpenCode 2](https://anoma.ly/notes/opencode-reloaded/). That makes reloads
@@ -72,8 +71,8 @@ A small core, with everything else as plugins.
 curl -fsSL theoneapp.drevan.me | sh
 one serve                       # node on 127.0.0.1:4747, MCP at /mcp
 one instructions set "Keep answers short."
-one memory note "Prefers Go for backend work"
-one memory wake
+one board post "" "Prefers Go for backend work"
+one board read
 ```
 
 On a Mac, build the signed app instead, which the Apple plugins (Reminders,
@@ -91,8 +90,8 @@ Connect your agents with the command `one mcp` (MCP over stdio), the same on
 every device. For example, `claude mcp add --scope user the-one-app -- one mcp`.
 It relays to the node, which also serves MCP over HTTP at
 `http://127.0.0.1:4747/mcp`. Agents receive the MCP instructions plugins build
-together: your instructions, and the memory plugin's rule to call
-`memory_wake` first.
+together: your instructions, and the board's rule to read the
+top of the Agent Board first.
 
 ## Updating
 
