@@ -2,8 +2,9 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-// Home-screen and desktop widgets: any widget on the user's network, chosen
-// when the widget is added, drawn by the same renderer as the app.
+// Home-screen, desktop and lock-screen widgets: any widget on the user's
+// network, chosen when the widget is added, drawn by the same renderer as the
+// app. The lock screen shows the first line of its text, as the menu bar does.
 
 struct WidgetChoice: AppEntity {
     let id: String  // the widget's MCP tool
@@ -55,6 +56,7 @@ struct ChooseWidget: WidgetConfigurationIntent {
 struct Entry: TimelineEntry {
     var date = Date()
     var description: Description?
+    var line = ""
     var message = ""
 }
 
@@ -82,7 +84,8 @@ struct Provider: AppIntentTimelineProvider {
         do {
             let result = try await client.request("tools/call", ["name": tool, "arguments": ["w": size.width, "h": size.height]])
             guard let d = Description(result: result) else { return Entry(message: "This widget couldn't be drawn.") }
-            return Entry(description: d)
+            let text = (result["content"] as? [[String: Any]])?.first?["text"] as? String ?? ""
+            return Entry(description: d, line: text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? "")
         } catch {
             return Entry(message: error.localizedDescription)
         }
@@ -91,8 +94,28 @@ struct Provider: AppIntentTimelineProvider {
 
 struct EntryView: View {
     let entry: Entry
+    @Environment(\.widgetFamily) private var family
 
     var body: some View {
+        Group {
+            #if os(iOS)
+            if family == .accessoryInline {
+                Text(entry.description == nil ? entry.message : entry.line)
+            } else if family == .accessoryRectangular {
+                Text(entry.description == nil ? entry.message : entry.line)
+                    .font(.headline).lineLimit(3)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            } else {
+                content
+            }
+            #else
+            content
+            #endif
+        }
+        .containerBackground(.fill.tertiary, for: .widget)
+    }
+
+    @ViewBuilder private var content: some View {
         Group {
             if let d = entry.description {
                 WidgetView(description: d, ctx: WidgetContext(homeScreen: true))
@@ -102,7 +125,6 @@ struct EntryView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .containerBackground(.fill.tertiary, for: .widget)
     }
 }
 
@@ -114,6 +136,14 @@ struct OneWidgets: Widget {
         }
         .configurationDisplayName("The One App")
         .description("A widget from your devices.")
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
+        .supportedFamilies(families)
+    }
+
+    private var families: [WidgetFamily] {
+        #if os(iOS)
+        [.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge, .accessoryInline, .accessoryRectangular]
+        #else
+        [.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge]
+        #endif
     }
 }
