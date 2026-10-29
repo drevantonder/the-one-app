@@ -2,6 +2,7 @@
 // items (the "menubar" tool), and shows each item's view, an HTML resource,
 // in a sandboxed web view that talks to the node through this host.
 import AppKit
+import ServiceManagement
 import WebKit
 
 let nodeURL = URL(string: "http://" + (ProcessInfo.processInfo.environment["ONE_ADDR"] ?? "127.0.0.1:4747"))!
@@ -350,7 +351,7 @@ final class Panel: NSViewController {
 
     private func show(_ views: [NSView]) {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for v in views + [separator(), quitButton()] {
+        for v in views + [separator(), loginButton(), quitButton()] {
             stack.addArrangedSubview(v)
             if v is WKWebView || v is NSBox {
                 v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -12).isActive = true
@@ -393,13 +394,43 @@ final class Panel: NSViewController {
         return box
     }
 
-    private func quitButton() -> NSView {
-        let b = NSButton(title: "Quit TheOneApp", target: NSApp, action: #selector(NSApplication.terminate(_:)))
+    // A borderless button draws its title greyed out while its window isn't
+    // key, so the title gets an explicit color.
+    private func menuButton(_ title: String, action: Selector, target: AnyObject) -> NSButton {
+        let b = NSButton(title: title, target: target, action: action)
         b.isBordered = false
         b.alignment = .left
+        b.attributedTitle = NSAttributedString(string: title, attributes: [.foregroundColor: NSColor.labelColor, .font: NSFont.systemFont(ofSize: 13)])
+        return b
+    }
+
+    private func loginButton() -> NSView {
+        let b = menuButton("Open at Login", action: #selector(toggleLogin(_:)), target: self)
+        b.setButtonType(.switch)
+        b.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        return padded(b, top: 2)
+    }
+
+    @objc private func toggleLogin(_ sender: NSButton) {
+        setOpenAtLogin(sender.state == .on)
+        sender.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    }
+
+    private func quitButton() -> NSView {
+        let b = menuButton("Quit TheOneApp", action: #selector(NSApplication.terminate(_:)), target: NSApp)
         b.keyEquivalent = "q"
         b.keyEquivalentModifierMask = .command
         return padded(b, top: 2)
+    }
+}
+
+// The app runs the node, so it opens at login unless the user turns that off.
+func setOpenAtLogin(_ on: Bool) {
+    UserDefaults.standard.set(on, forKey: "openAtLogin")
+    do {
+        if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+    } catch {
+        NSLog("open at login: \(error)")
     }
 }
 
@@ -420,6 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         item.button?.target = self
         item.button?.action = #selector(toggle(_:))
         self.item = item
+        if UserDefaults.standard.object(forKey: "openAtLogin") == nil { setOpenAtLogin(true) }
         Task { await node.ensureRunning() }
     }
 
@@ -438,8 +470,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             popover.performClose(sender)
             return
         }
+        // The popover's window must be key for the views to take keyboard input.
+        NSApp.activate()
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-        NSApp.activate(ignoringOtherApps: true)
+        panel.view.window?.makeKey()
         Task { await panel.reload() }
     }
 }
