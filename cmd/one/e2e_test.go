@@ -232,8 +232,8 @@ func TestNodeOverMCP(t *testing.T) {
 	if top, _ := call("board_read", nil); !strings.Contains(top, "the user lives in Sydney") || !strings.Contains(top, "Subtopics:\n  projects — ") {
 		t.Fatalf("board_read:\n%s", top)
 	}
-	// Agents' prompt hook: a session's first prompt marks its place, and
-	// later prompts get only what has been posted since.
+	// Agents' prompt hook: a session's first prompt gets the top of the
+	// board, and later prompts only what has been posted since.
 	if settings, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json")); err != nil || !strings.Contains(string(settings), "http://"+addr+"/hooks/board/news") {
 		t.Fatalf("prompt hook not installed: %v\n%s", err, settings)
 	}
@@ -246,7 +246,7 @@ func TestNodeOverMCP(t *testing.T) {
 		b, _ := io.ReadAll(res.Body)
 		return string(b)
 	}
-	if first := hook(); !strings.Contains(first, "news will appear here") {
+	if first := hook(); !strings.Contains(first, "news will appear here") || !strings.Contains(first, "the user lives in Sydney") {
 		t.Fatalf("first hook call: %q", first)
 	}
 	call("board_post", map[string]any{"topic": "projects", "text": "hook news"})

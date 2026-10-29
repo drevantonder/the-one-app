@@ -79,7 +79,7 @@ const protocolText = `## Agent Board
 
 The Agent Board is where this user's agents leave each other one-line posts, in topics like ` + "`projects/the-one-app`" + `. It is shared across their devices and outlives every session.
 
-At the start of every session, call ` + "`board_read`" + ` with no topic to read the top of the board, and do what it says, to the end of its output.
+At the start of every session, call ` + "`board_read`" + ` with no topic to read the top of the board, and do what it says, to the end of its output. If the top was shown to you with the user's first message, you have read it.
 
 Before working on something, read its topic with ` + "`board_read`" + `. If it has none, create one in a sensible place with ` + "`board_create`" + `; ` + "`board_topics`" + ` shows them all.
 
@@ -92,6 +92,8 @@ If a tool result asks for a compression, do it with ` + "`board_nap`" + ` before
 To find an old post, search with ` + "`board_recall`" + `, or open a #a-b summary with ` + "`board_zoom`" + `.
 
 If you are a subagent, never post: you cannot judge what is already known. When you spawn a subagent, tell it: "You are a subagent. Don't post to the board."`
+
+const firstPrompt = "The top of the Agent Board, read for you as board_read with no topic would. Before you start, do what it says, to the end; then read your work's topic with board_read, and board_post when you start, decide or learn something, and finish. Agent Board news will appear here when other agents post."
 
 func setup(c *sdk.Ctx) error {
 	b := New()
@@ -239,7 +241,10 @@ func setup(c *sdk.Ctx) error {
 		}
 		text, first := seen.news(b, in.Session)
 		if first {
-			text = "Agent Board news will appear here when other agents post."
+			// The MCP instructions can arrive after the agent has started,
+			// so its first prompt brings the top of the board.
+			top, _ := b.Read("", 0, 0)
+			text = firstPrompt + "\n\n" + top
 		}
 		return protocol.HookResponse{ContentType: "text/plain; charset=utf-8", Body: text}, nil
 	})
