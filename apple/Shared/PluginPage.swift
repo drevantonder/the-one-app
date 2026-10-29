@@ -33,13 +33,19 @@ struct PluginPage: View {
     let page: AppPage
     let client: MCPClient
     @State private var items: [PageItem] = []
-    @State private var selection: String?
+    @AppStorage private var selection: String?
     @State private var error: String?
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
     @State private var showSettings = false
+
+    init(page: AppPage, client: MCPClient) {
+        self.page = page
+        self.client = client
+        _selection = AppStorage("page.\(page.id).item")
+    }
 
     var body: some View {
         Group {

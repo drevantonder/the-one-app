@@ -693,6 +693,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // shows recent results at once instead of old ones that then jump.
         Task {
             await node.ensureRunning()
+            if let was = UserDefaults.standard.string(forKey: "windowWas") { showWindow(front: was == "front") }
+            UserDefaults.standard.removeObject(forKey: "windowWas")
             await panel.reload()
         }
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
@@ -730,7 +732,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // showWindow opens the app's window, the same shell the iPhone and iPad
     // app shows, on this Mac's node. While it's open the app is in the Dock
     // like any other; closing it leaves just the menu bar item.
-    func showWindow() {
+    func showWindow(front: Bool = true) {
         if window == nil {
             let host = NSHostingController(rootView: ShellView(shell: Shell(nodes: [nodeURL])).modifier(PopoutCover()).frame(minWidth: 720, minHeight: 460))
             host.sceneBridgingOptions = [.all]
@@ -745,8 +747,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             window = w
             Popouts.shared.appWindow = w
             w.center()
+            w.setFrameAutosaveName("Main") // and puts it back where it was, if it has been open before
         }
         NSApp.setActivationPolicy(.regular)
+        guard front else { window?.orderBack(nil); return }
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
     }
@@ -759,7 +763,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return (try? FileManager.default.attributesOfItem(atPath: path))?[.systemFileNumber] as? Int
     }
 
+    // relaunch reopens the window if it's open, where it was, on the page it
+    // showed, and in front only if it was in front.
     private func relaunch() {
+        if window?.isVisible == true { UserDefaults.standard.set(NSApp.isActive ? "front" : "back", forKey: "windowWas") }
         node.stop()
         let open = Process()
         open.executableURL = URL(fileURLWithPath: "/usr/bin/open")

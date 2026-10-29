@@ -110,9 +110,27 @@ extension Shell {
     }
 }
 
-enum Page: Hashable {
+enum Page: Hashable, RawRepresentable {
     case home, plugins
     case page(String)
+
+    init?(rawValue: String) {
+        switch rawValue {
+        case "home": self = .home
+        case "plugins": self = .plugins
+        default:
+            guard rawValue.hasPrefix("page:") else { return nil }
+            self = .page(String(rawValue.dropFirst(5)))
+        }
+    }
+
+    var rawValue: String {
+        switch self {
+        case .home: "home"
+        case .plugins: "plugins"
+        case .page(let id): "page:" + id
+        }
+    }
 }
 
 // HomePage shows every widget on the user's devices.
@@ -153,11 +171,12 @@ struct WidgetCard: View {
 // later, beside the open page. On an iPhone it collapses to one column.
 struct ShellView: View {
     @StateObject var shell: Shell
-    @State private var page: Page? = .home
+    // Remembered, so the app opens where it was left, as after an update.
+    @AppStorage("page") private var page: Page = .home
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $page) {
+            List(selection: Binding<Page?>(get: { page }, set: { if let p = $0 { page = p } })) {
                 SwiftUI.Section { identity }
                 SwiftUI.Section {
                     NavigationLink(value: Page.home) {
@@ -180,7 +199,7 @@ struct ShellView: View {
         } detail: {
             Group {
                 switch page {
-                case .home, nil: HomePage(shell: shell)
+                case .home: HomePage(shell: shell)
                 case .plugins: PluginsPage(shell: shell)
                 case .page(let id):
                     if let p = shell.pages.first(where: { $0.id == id }), let client = shell.client {
