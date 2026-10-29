@@ -23,11 +23,12 @@ type openAI struct {
 }
 
 type chatRequest struct {
-	Model          string          `json:"model"`
-	Messages       []message       `json:"messages"`
-	MaxTokens      int             `json:"max_tokens,omitempty"`
-	ResponseFormat *responseFormat `json:"response_format,omitempty"`
-	Stream         bool            `json:"stream"`
+	Model           string          `json:"model"`
+	Messages        []message       `json:"messages"`
+	MaxTokens       int             `json:"max_tokens,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	ResponseFormat  *responseFormat `json:"response_format,omitempty"`
+	Stream          bool            `json:"stream"`
 }
 
 type responseFormat struct {
@@ -75,8 +76,8 @@ func (o openAI) chat(ctx context.Context, in chatRequest) (string, error) {
 	if err := o.do(req, &out); err != nil {
 		return "", err
 	}
-	if len(out.Choices) == 0 {
-		return "", errors.New("the model gave no answer")
+	if len(out.Choices) == 0 || strings.TrimSpace(out.Choices[0].Message.Content) == "" {
+		return "", errors.New("the model gave no answer; if it reasons, its reasoning may have used up maxTokens")
 	}
 	return strings.TrimSpace(out.Choices[0].Message.Content), nil
 }

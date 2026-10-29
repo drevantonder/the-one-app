@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -109,10 +110,33 @@ func (l *local) chat(ctx context.Context, model string, req chatRequest) (string
 		defer l.gpu.Unlock()
 		l.comfy.free(ctx)
 		req.Model = m.Name
+		if req.ReasoningEffort == "" {
+			req.ReasoningEffort = "none"
+		}
 		text, err := openAI{baseURL: l.ollama.base + "/v1"}.chat(ctx, req)
 		return text, true, err
 	}
 	return "", false, nil
+}
+
+// decide answers with a local decision model, if this device has it.
+func (l *local) decide(ctx context.Context, req decideRequest) (json.RawMessage, bool, error) {
+	ms, err := l.ollama.models(ctx)
+	if err != nil {
+		return nil, false, nil
+	}
+	for _, m := range ms {
+		if m.Kind != "decide" || !sameModel(m.Name, req.Model) {
+			continue
+		}
+		l.gpu.Lock()
+		defer l.gpu.Unlock()
+		l.comfy.free(ctx)
+		req.Model = m.Name
+		out, err := systemOne{baseURL: l.ollama.base + "/v1"}.decide(ctx, req)
+		return out, true, err
+	}
+	return nil, false, nil
 }
 
 func (l *local) image(ctx context.Context, in imageIn) (sdk.Image, error) {
@@ -204,8 +228,9 @@ func (o ollama) version(ctx context.Context) (string, error) {
 func (o ollama) models(ctx context.Context) ([]Model, error) {
 	var tags, ps struct {
 		Models []struct {
-			Name string `json:"name"`
-			Size int64  `json:"size"`
+			Name         string   `json:"name"`
+			Size         int64    `json:"size"`
+			Capabilities []string `json:"capabilities"`
 		} `json:"models"`
 	}
 	if err := o.get(ctx, "/api/tags", &tags); err != nil {
@@ -217,6 +242,9 @@ func (o ollama) models(ctx context.Context) ([]Model, error) {
 	out := make([]Model, 0, len(tags.Models))
 	for _, t := range tags.Models {
 		m := Model{Name: strings.TrimSuffix(t.Name, ":latest"), Backend: "ollama", Kind: "chat", Size: t.Size}
+		if slices.Contains(t.Capabilities, "decision") {
+			m.Kind = "decide"
+		}
 		for _, p := range ps.Models {
 			m.Loaded = m.Loaded || p.Name == t.Name
 		}

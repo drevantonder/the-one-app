@@ -26,7 +26,7 @@ type Model struct {
 	Name    string `json:"name"`
 	Device  string `json:"device,omitempty"` // empty for a service's, which every device reaches itself
 	Backend string `json:"backend"`          // ollama, apple, comfyui, or the service's name
-	Kind    string `json:"kind"`             // chat or image
+	Kind    string `json:"kind"`             // chat, decide or image
 	Size    int64  `json:"size,omitempty"`   // bytes on disk
 	Loaded  bool   `json:"loaded,omitempty"`
 }
@@ -51,6 +51,9 @@ func secretNames() []string {
 	for _, k := range known {
 		out = append(out, k.secret)
 	}
+	for _, d := range deciders {
+		out = append(out, d.secret)
+	}
 	return out
 }
 
@@ -65,7 +68,8 @@ type chatIn struct {
 	System    string          `json:"system,omitempty" jsonschema:"a system prompt"`
 	Messages  []message       `json:"messages,omitempty" jsonschema:"the conversation so far, instead of or before prompt"`
 	Schema    json.RawMessage `json:"schema,omitempty" jsonschema:"a JSON Schema the answer must match, to get JSON back"`
-	MaxTokens int             `json:"maxTokens,omitempty" jsonschema:"the most tokens to answer with"`
+	MaxTokens int             `json:"maxTokens,omitempty" jsonschema:"the most tokens to answer with, reasoning included"`
+	Reasoning string          `json:"reasoning,omitempty" jsonschema:"how much a model that reasons does before answering: none, low, medium or high; local models default to none, services to their own default"`
 }
 
 type imageIn struct {
@@ -128,7 +132,7 @@ func setup(c *sdk.Ctx) error {
 		return nil
 	})
 
-	sdk.Op(c, "list", "List every model plugins and agents can use: each device's local models (Ollama, Apple's on-device model, ComfyUI image models), whether each is loaded, and the models of services: OpenCode Go, OpenRouter and OpenAI once their key is set with secrets_set as OPENCODE_API_KEY, OPENROUTER_API_KEY or OPENAI_API_KEY, and servers added with add_service.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
+	sdk.Op(c, "list", "List every model plugins and agents can use: each device's local models (Ollama, Apple's on-device model, ComfyUI image models), whether each is loaded, and the models of services: OpenCode Go, OpenRouter and OpenAI once their key is set with secrets_set as OPENCODE_API_KEY, OPENROUTER_API_KEY or OPENAI_API_KEY, and servers added with add_service; decision models (kind decide) such as Ollama's Clef and TypeSafe's Jev once TYPESAFE_API_KEY is set.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
 		models, errs := p.all(call)
 		return sdk.Result{Text: report(models, errs), Data: map[string]any{"models": models}}, nil
 	})
@@ -151,6 +155,10 @@ func setup(c *sdk.Ctx) error {
 
 	sdk.Op(c, "chat", "Ask a model and get its answer. Runs on whichever device has the model; a service's models run from this device. With schema, the answer is JSON matching it.", sdk.Read, func(call *sdk.Call, in chatIn) (sdk.Result, error) {
 		return p.chat(call, in)
+	})
+
+	sdk.Op(c, "decide", "Ask a decision model questions about something and get typed answers with probabilities, fast: yes/no (noul), one of several options (choice), or a level on a scale (score). Runs on whichever device has the model; a service's, like typesafe/jev-latest once TYPESAFE_API_KEY is set, from this device.", sdk.Read, func(call *sdk.Call, in decideIn) (sdk.Result, error) {
+		return p.decide(call, in)
 	})
 
 	sdk.Op(c, "image", "Make an image from a prompt with an image model in ComfyUI on this device. Other models are unloaded from the GPU first.", sdk.Read, func(call *sdk.Call, in imageIn) (sdk.Result, error) {
@@ -213,7 +221,7 @@ func setup(c *sdk.Ctx) error {
 	})
 
 	c.Instructions(func(text string) string {
-		return text + "\n\nModels: to use an AI model for a task, such as a local model for private or bulk work or an image model, call models_list, then models_chat or models_image."
+		return text + "\n\nModels: to use an AI model for a task, such as a local model for private or bulk work or an image model, call models_list, then models_chat or models_image; for fast yes/no, pick-one or score questions, models_decide with a decision model."
 	})
 	return nil
 }
@@ -268,7 +276,7 @@ func (p *plugin) chat(call *sdk.Call, in chatIn) (sdk.Result, error) {
 	if len(msgs) == 0 {
 		return sdk.Result{}, errors.New("give a prompt or messages")
 	}
-	req := chatRequest{Messages: msgs, MaxTokens: in.MaxTokens}
+	req := chatRequest{Messages: msgs, MaxTokens: in.MaxTokens, ReasoningEffort: in.Reasoning}
 	if len(in.Schema) > 0 {
 		req.ResponseFormat = &responseFormat{Type: "json_schema", JSONSchema: jsonSchema{Name: "answer", Schema: in.Schema, Strict: true}}
 	}
@@ -317,7 +325,8 @@ func (p *plugin) all(call *sdk.Call) ([]Model, []string) {
 		errs = append(errs, err.Error())
 	}
 	providers := p.services(call)
-	lists := make([][]Model, len(ds)+len(providers))
+	decide := decisionServices(call)
+	lists := make([][]Model, len(ds)+len(providers)+len(decide))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	fail := func(who string, err error) {
@@ -353,6 +362,21 @@ func (p *plugin) all(call *sdk.Call) ([]Model, []string) {
 				lists[len(ds)+j] = append(lists[len(ds)+j], Model{Name: pr.Name + "/" + n, Backend: pr.Name, Kind: "chat"})
 			}
 		})
+	}
+	j := len(ds) + len(providers)
+	for name, s := range decide {
+		k := j
+		wg.Go(func() {
+			names, err := s.models(call.Context)
+			if err != nil {
+				fail(name, err)
+				return
+			}
+			for _, n := range names {
+				lists[k] = append(lists[k], Model{Name: name + "/" + n, Backend: name, Kind: "decide"})
+			}
+		})
+		j++
 	}
 	wg.Wait()
 	var out []Model

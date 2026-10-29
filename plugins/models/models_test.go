@@ -1,6 +1,10 @@
 package models
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -46,5 +50,44 @@ func TestSession(t *testing.T) {
 	later := append(first, message{Role: "assistant", Content: "hello"}, message{Role: "user", Content: "more"})
 	if session(first) != session(later) || session(first) == session(first[:1]) {
 		t.Fatal("a conversation keeps its session, and another gets its own")
+	}
+}
+
+func TestLocalModelsDontReason(t *testing.T) {
+	var got chatRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tags":
+			io.WriteString(w, `{"models":[{"name":"gemma4:12b","capabilities":["completion","thinking"]},{"name":"clef-flash:latest","capabilities":["decision"]}]}`)
+		case "/api/ps":
+			io.WriteString(w, `{"models":[]}`)
+		case "/v1/chat/completions":
+			json.NewDecoder(r.Body).Decode(&got)
+			io.WriteString(w, `{"choices":[{"message":{"content":"","reasoning":"thinking..."}}]}`)
+		case "/v1/systemone":
+			io.WriteString(w, `{"answers":{"news":{"type":"noul","noul":0.91}}}`)
+		}
+	}))
+	defer srv.Close()
+	l := &local{ollama: ollama{base: srv.URL}}
+	ms, _ := l.ollama.models(t.Context())
+	if len(ms) != 2 || ms[0].Kind != "chat" || ms[1].Kind != "decide" || ms[1].Name != "clef-flash" {
+		t.Fatalf("models: %+v", ms)
+	}
+	if _, ok, err := l.chat(t.Context(), "gemma4:12b", chatRequest{}); !ok || err == nil {
+		t.Fatal("an answer that is all reasoning should be an error, not empty")
+	}
+	if got.ReasoningEffort != "none" {
+		t.Fatalf("reasoning_effort %q, want none", got.ReasoningEffort)
+	}
+	if _, ok, _ := l.decide(t.Context(), decideRequest{Model: "gemma4:12b"}); ok {
+		t.Fatal("a chat model can't decide")
+	}
+	raw, ok, err := l.decide(t.Context(), decideRequest{Model: "clef-flash"})
+	if !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	if res, _ := decision(raw, nil); res.Text != "news: 0.91 probability yes" {
+		t.Fatalf("%q", res.Text)
 	}
 }
