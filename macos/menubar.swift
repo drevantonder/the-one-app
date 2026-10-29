@@ -650,6 +650,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var windowClosed: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Task {
+            if await anotherCopyStays() { NSApp.terminate(nil) } else { start() }
+        }
+    }
+
+    // relaunch starts the new build with `open -n` before the old one quits,
+    // so every copy running then starts one: once two run, they'd stay two.
+    // A copy waits for any started before it to quit, and quits if one stays.
+    private func anotherCopyStays() async -> Bool {
+        let me = NSRunningApplication.current
+        let key = { (a: NSRunningApplication) in (a.launchDate ?? .distantPast, a.processIdentifier) }
+        for _ in 0..<20 {
+            let earlier = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+                .filter { $0 != me && !$0.isTerminated && key($0) < key(me) }
+            if earlier.isEmpty { return false }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        return true
+    }
+
+    private func start() {
         // Closed by hand, not .transient, so clicks in an open submenu don't close the menu.
         popover.behavior = .applicationDefined
         popover.animates = false  // open and close at once, like the system's menu bar menus
