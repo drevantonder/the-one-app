@@ -16,7 +16,9 @@ import (
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
-var Plugin = sdk.Plugin{ID: "models", Name: "Models", Version: "0.1.0", Platforms: []string{"linux", "darwin", "windows"}, Setup: setup}
+const version = "0.1.0"
+
+var Plugin = sdk.Plugin{ID: "models", Name: "Models", Version: version, Platforms: []string{"linux", "darwin", "windows"}, Setup: setup}
 
 // Model is one model a device or service can run.
 type Model struct {

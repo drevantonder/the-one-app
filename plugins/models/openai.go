@@ -3,6 +3,8 @@ package models
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -40,6 +42,7 @@ type jsonSchema struct {
 }
 
 func (o openAI) do(req *http.Request, out any) error {
+	req.Header.Set("user-agent", "the-one-app/"+version)
 	if o.key != "" {
 		req.Header.Set("authorization", "Bearer "+o.key)
 	}
@@ -61,6 +64,7 @@ func (o openAI) chat(ctx context.Context, in chatRequest) (string, error) {
 	body, _ := json.Marshal(in)
 	req, _ := http.NewRequestWithContext(ctx, "POST", o.baseURL+"/chat/completions", bytes.NewReader(body))
 	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-opencode-session", session(in.Messages))
 	var out struct {
 		Choices []struct {
 			Message struct {
@@ -131,4 +135,17 @@ func serviceModels(ctx context.Context, pr provider) ([]string, error) {
 	serviceCache.m[pr] = cached{names, time.Now()}
 	serviceCache.Unlock()
 	return names, nil
+}
+
+// session names a conversation by how it starts, so each turn of it gets
+// the same ID: OpenCode routes and caches prompts by it.
+func session(msgs []message) string {
+	h := sha256.New()
+	for i, m := range msgs {
+		if i == 2 {
+			break
+		}
+		h.Write([]byte(m.Role + "\x00" + m.Content + "\x00"))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:32]
 }

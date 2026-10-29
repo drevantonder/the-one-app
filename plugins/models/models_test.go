@@ -40,3 +40,11 @@ func TestReport(t *testing.T) {
 		}
 	}
 }
+
+func TestSession(t *testing.T) {
+	first := []message{{Role: "system", Content: "be brief"}, {Role: "user", Content: "hi"}}
+	later := append(first, message{Role: "assistant", Content: "hello"}, message{Role: "user", Content: "more"})
+	if session(first) != session(later) || session(first) == session(first[:1]) {
+		t.Fatal("a conversation keeps its session, and another gets its own")
+	}
+}
