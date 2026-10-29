@@ -30,7 +30,7 @@ func nodeEnv(t *testing.T, home string) []string {
 		t.Fatal(err)
 	}
 	cache := strings.Fields(string(out))
-	return append(os.Environ(), "HOME="+home, "CLAUDE_CONFIG_DIR=", "CODEX_HOME=", "GOCACHE="+cache[0], "GOMODCACHE="+cache[1])
+	return append(os.Environ(), "HOME="+home, "CLAUDE_CONFIG_DIR=", "CODEX_HOME=", "XDG_CONFIG_HOME=", "PI_CODING_AGENT_DIR=", "GOCACHE="+cache[0], "GOMODCACHE="+cache[1])
 }
 
 // TestNodeOverMCP builds the real binary, runs a node, and drives it with the
@@ -53,7 +53,7 @@ func TestNodeOverMCP(t *testing.T) {
 
 	serve := exec.Command(bin, "serve", "--local", "--addr", addr, "--data", filepath.Join(dir, "data"))
 	serve.Stderr = os.Stderr
-	serve.Dir = dir                    // like launchd or systemd: not inside a Go module
+	serve.Dir = dir // like launchd or systemd: not inside a Go module
 	home := filepath.Join(dir, "home")
 	serve.Env = nodeEnv(t, home)
 	if err := serve.Start(); err != nil {

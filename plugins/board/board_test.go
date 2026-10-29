@@ -267,7 +267,10 @@ func TestInstallHooks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("PI_CODING_AGENT_DIR", "")
 	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".config", "opencode"), 0o755)
 	settings := filepath.Join(home, ".claude", "settings.json")
 	os.WriteFile(settings, []byte(`{"theme":"dark","hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"mine"},{"type":"command","command":"curl http://old:1/hooks/board/news"}]}]}}`), 0o644)
 	for range 2 {
@@ -282,5 +285,11 @@ func TestInstallHooks(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "hooks.json")); !os.IsNotExist(err) {
 		t.Fatalf("wrote hooks for Codex, which isn't installed: %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(home, ".config", "opencode", "plugins", "one-board.js")); err != nil || !strings.Contains(string(b), `"http://127.0.0.1:4747/hooks/board/news"`) {
+		t.Fatalf("OpenCode plugin: %v\n%s", err, b)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".pi")); !os.IsNotExist(err) {
+		t.Fatalf("wrote an extension for Pi, which isn't installed: %v", err)
 	}
 }

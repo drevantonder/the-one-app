@@ -71,7 +71,7 @@ type (
 	}
 )
 
-var Plugin = sdk.Plugin{ID: "board", Name: "Agent Board", Version: "0.2.0", Setup: setup}
+var Plugin = sdk.Plugin{ID: "board", Name: "Agent Board", Version: "0.3.0", Setup: setup}
 
 const protocolText = `## Agent Board
 

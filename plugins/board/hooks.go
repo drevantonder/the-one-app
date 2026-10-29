@@ -2,9 +2,20 @@ package board
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
+)
+
+// Agents without settings hooks get a plugin of their own that does what
+// the hook does.
+var (
+	//go:embed agents/opencode.js
+	opencodePlugin string
+	//go:embed agents/pi.ts
+	piExtension string
 )
 
 // hookPath is the node URL path the agents' prompt hook posts to.
@@ -30,9 +41,44 @@ func hookFiles(home string) []string {
 	return []string{filepath.Join(claude, "settings.json"), filepath.Join(codex, "hooks.json")}
 }
 
+type agentPlugin struct{ dir, file, text string }
+
+// agentPlugins are those plugins, each written only if its agent's folder
+// exists.
+func agentPlugins(home string) []agentPlugin {
+	config := os.Getenv("XDG_CONFIG_HOME")
+	if config == "" {
+		config = filepath.Join(home, ".config")
+	}
+	pi := os.Getenv("PI_CODING_AGENT_DIR")
+	if pi == "" {
+		pi = filepath.Join(home, ".pi", "agent")
+	}
+	return []agentPlugin{
+		{filepath.Join(config, "opencode"), filepath.Join(config, "opencode", "plugins", "one-board.js"), opencodePlugin},
+		{pi, filepath.Join(pi, "extensions", "one-board.ts"), piExtension},
+	}
+}
+
 // installHooks adds the board's prompt hook to every agent's settings,
 // replacing an older one, and leaves everything else in them as it was.
+// Agents with plugins instead get the board's plugin.
 func installHooks(home, addr string) error {
+	for _, p := range agentPlugins(home) {
+		if _, err := os.Stat(p.dir); err != nil {
+			continue
+		}
+		text := strings.ReplaceAll(p.text, "{{addr}}", addr)
+		if old, err := os.ReadFile(p.file); err == nil && string(old) == text {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(p.file), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(p.file, []byte(text), 0o644); err != nil {
+			return err
+		}
+	}
 	for _, file := range hookFiles(home) {
 		if _, err := os.Stat(filepath.Dir(file)); err != nil {
 			continue
