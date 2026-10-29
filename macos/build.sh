@@ -1,7 +1,7 @@
 #!/bin/sh
-# Builds TheOneApp.app: the one binary plus the Swift helpers the Apple
-# plugins use, signed with a Developer ID so macOS keeps its permissions
-# across rebuilds. Usage: macos/build.sh [install]
+# Builds TheOneApp.app: the menu bar app, which runs the node, plus the one
+# binary and the Swift helpers the Apple plugins use, signed with a Developer
+# ID so macOS keeps its permissions across rebuilds. Usage: macos/build.sh [install]
 #   SIGN_IDENTITY  signing identity (default: the first "Developer ID Application")
 set -eu
 cd "$(dirname "$0")/.."
@@ -13,6 +13,9 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp macos/Info.plist "$app/Contents/Info.plist"
 go build -trimpath -o "$app/Contents/MacOS/one" ./cmd/one
+codesign --force --options runtime --timestamp=none --entitlements macos/TheOneApp.entitlements \
+	--identifier dev.theoneapp.one --sign "$identity" "$app/Contents/MacOS/one"
+swiftc -O -suppress-warnings macos/menubar.swift -o "$app/Contents/MacOS/TheOneApp"
 for helper in eventkit contacts messages; do
 	swiftc -O -suppress-warnings "plugins/apple/$helper.swift" -o "$app/Contents/MacOS/one-$helper"
 	codesign --force --options runtime --timestamp=none --entitlements macos/TheOneApp.entitlements \
