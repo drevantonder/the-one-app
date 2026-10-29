@@ -297,6 +297,9 @@ func (p *pool) borrow(call *sdk.Call, op string, in borrowIn, b borrowed) (borro
 	}
 	ready := p.spares(spaces)
 	if len(ready) == 0 && !in.Here {
+		// A device short of memory doesn't make one itself, even when the
+		// one that should can't be reached.
+		var tried error
 		if host := p.elsewhere(call); host != "" {
 			args := map[string]any{"for": in.For, "login": in.Login, "here": true, "device": strings.Split(host, ".")[0]}
 			if op == "sign_in" {
@@ -307,6 +310,13 @@ func (p *pool) borrow(call *sdk.Call, op string, in borrowIn, b borrowed) (borro
 				return b, &res, nil
 			}
 			call.Logf("spaces: borrowing on %s: %v", host, err)
+			tried = fmt.Errorf("couldn't reach %s: %w", strings.Split(host, ".")[0], err)
+		}
+		if r, err := here(call); err == nil && !r.fits() {
+			if tried != nil {
+				return b, nil, tried
+			}
+			return b, nil, errors.New("no device has the memory to spare for another Space right now")
 		}
 	}
 	var s space
