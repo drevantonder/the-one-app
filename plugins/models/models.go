@@ -121,8 +121,19 @@ func setup(c *sdk.Ctx) error {
 	})
 
 	sdk.Op(c, "here", "List this device's local models and downloads in progress; list shows every device's.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
-		models := p.local.models(call.Context, p.me(call))
-		return sdk.Result{Text: report(models, nil), Data: map[string]any{"models": models, "downloads": p.local.downloads()}}, nil
+		models, downloads := p.local.models(call.Context, p.me(call)), p.local.downloads()
+		text := report(models, nil)
+		for name, d := range downloads {
+			switch {
+			case d.Error != "":
+				text += fmt.Sprintf("\ndownloading %s failed: %s", name, d.Error)
+			case d.Total > 0:
+				text += fmt.Sprintf("\ndownloading %s: %s, %.0f%% of %.1f GB", name, d.Status, float64(d.Completed)*100/float64(d.Total), float64(d.Total)/1e9)
+			default:
+				text += fmt.Sprintf("\ndownloading %s: %s", name, d.Status)
+			}
+		}
+		return sdk.Result{Text: text, Data: map[string]any{"models": models, "downloads": downloads}}, nil
 	})
 
 	sdk.Op(c, "chat", "Ask a model and get its answer. Runs on whichever device has the model; a service's models run from this device. With schema, the answer is JSON matching it.", sdk.Read, func(call *sdk.Call, in chatIn) (sdk.Result, error) {
