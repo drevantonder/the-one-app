@@ -13,7 +13,7 @@ struct WidgetContext {
 }
 
 private func sizeOf(_ size: String?) -> CGFloat {
-    switch size { case "xl": 28; case "lg": 20; case "sm": 13; case "xs": 11; default: 15 }
+    switch size { case "xl": 28; case "lg": 20; case "sm": 13; case "xs": 10; default: 15 }
 }
 
 private func weightOf(_ weight: String?) -> Font.Weight {
