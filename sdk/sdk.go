@@ -326,6 +326,23 @@ func (c *Ctx) PageSettings(name string, render func(call *Call, loc *time.Locati
 	panic(fmt.Sprintf("%s: PageSettings: no page %q", c.id, name))
 }
 
+// PageAction adds a button beside page name's title, opening popout (a URL
+// or a path on the node) and running this plugin's operation close, if
+// any, when its window closes.
+func (c *Ctx) PageAction(name, title, icon, popout, close string) {
+	for i, p := range c.pages {
+		if p.ID == c.id+"."+name {
+			a := protocol.PageAction{Title: title, Icon: icon, Popout: popout}
+			if close != "" {
+				a.Close = c.id + "_" + close
+			}
+			c.pages[i].Actions = append(c.pages[i].Actions, a)
+			return
+		}
+	}
+	panic(fmt.Sprintf("%s: PageAction: no page %q", c.id, name))
+}
+
 func (c *Ctx) pageItems(name, title string, items func(*Call) ([]PageItem, error)) {
 	Op(c, name+"_items", "List the items of the "+title+" page.", Read, func(call *Call, _ struct{}) (Result, error) {
 		list, err := items(call)

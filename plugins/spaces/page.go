@@ -33,6 +33,7 @@ func setupPage(c *sdk.Ctx, p *pool) {
 	c.PageSettings("page", func(call *sdk.Call, _ *time.Location) (widget.Node, string, error) {
 		return p.settings(call)
 	})
+	c.PageAction("page", "Sign in to a site", "person.crop.circle.badge.plus", "/hooks/spaces/sign_in", "finish_sign_in")
 	sdk.Op(c, "menubar", "Draw the Spaces in use, for the menu bar.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
 		root, text, err := p.grid(call, 120, false)
 		if err != nil {
@@ -63,11 +64,19 @@ func setupPage(c *sdk.Ctx, p *pool) {
 	// A link that opens a browser to sign in to sites in, for the app to
 	// open in a window of its own.
 	c.Hook("sign_in", func(call *sdk.Call, _ protocol.HookRequest) (protocol.HookResponse, error) {
-		res, err := p.signIn(call, signInIn{})
-		if err != nil {
-			return protocol.HookResponse{Status: 500, ContentType: "text/plain", Body: err.Error()}, nil
+		url := ""
+		for _, t := range p.tiles() { // one already open is opened again
+			if t.order == 1 {
+				url = p.link(call, t)
+			}
 		}
-		url, _ := res.Data.(map[string]any)["url"].(string)
+		if url == "" {
+			res, err := p.signIn(call, signInIn{})
+			if err != nil {
+				return protocol.HookResponse{Status: 500, ContentType: "text/plain", Body: err.Error()}, nil
+			}
+			url, _ = res.Data.(map[string]any)["url"].(string)
+		}
 		return protocol.HookResponse{ContentType: "text/html", Body: fmt.Sprintf(`<meta http-equiv="refresh" content="0;url=%s">`, url)}, nil
 	})
 }
@@ -213,18 +222,8 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 		}
 		return widget.Grid(min, 12, cells...), strings.Join(lines, "\n"), nil
 	}
-	// Sign in opens the sign-in already open, or starts one.
-	me, _ := tailnetName(call.Context)
-	signIn := fmt.Sprintf("http://%s:4747/hooks/spaces/sign_in", me)
-	for i, t := range tiles {
-		if t.order == 1 && got[i].url != "" {
-			signIn = got[i].url
-		}
-	}
 	items, text := p.summary(rooms, len(cells)-1)
-	head := widget.Row(widget.Stack{Gap: 8}, append(items, widget.Spacer(0),
-		widget.Popout(signIn, "Signing in to sites", &finish,
-			widget.Row(widget.Stack{Pad: 7, Radius: 8, Border: "solid"}, widget.Text("Sign in to a site", widget.Style{Size: "sm", Weight: "medium", Lines: 1}))))...)
+	head := widget.Row(widget.Stack{Gap: 8}, items...)
 	return widget.Col(widget.Stack{Gap: 20}, head, widget.Grid(min, 20, cells...)), strings.Join(append(lines, text), "\n"), nil
 }
 

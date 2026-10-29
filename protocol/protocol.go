@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the plugin protocol version. Bump it on breaking changes.
-const Version = 9
+const Version = 10
 
 // Core → plugin methods.
 const (
@@ -275,12 +275,23 @@ type PagesDoc struct {
 // Tool's widget is the whole page. Settings, a tool too, draws the page's
 // settings, behind a gear. Icon is an SF Symbol name.
 type Page struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Icon     string `json:"icon,omitempty"`
-	Tool     string `json:"tool"`
-	Items    string `json:"items,omitempty"`
-	Settings string `json:"settings,omitempty"`
+	ID       string       `json:"id"`
+	Title    string       `json:"title"`
+	Icon     string       `json:"icon,omitempty"`
+	Tool     string       `json:"tool"`
+	Items    string       `json:"items,omitempty"`
+	Settings string       `json:"settings,omitempty"`
+	Actions  []PageAction `json:"actions,omitempty"`
+}
+
+// PageAction is a button beside the page's title. It opens Popout, a URL
+// or a path on the node, in a window of its own, and runs Close, a tool,
+// when that window closes. Icon is an SF Symbol name.
+type PageAction struct {
+	Title  string `json:"title"`
+	Icon   string `json:"icon,omitempty"`
+	Popout string `json:"popout"`
+	Close  string `json:"close,omitempty"`
 }
 
 // PageItem is one entry in a page's list, Depth levels in under the one

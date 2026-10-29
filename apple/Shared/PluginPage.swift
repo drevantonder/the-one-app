@@ -9,6 +9,13 @@ struct AppPage: Identifiable {
     let tool: String
     let items: String? // none: the tool's widget is the whole page
     let settings: String?
+    let actions: [Action]
+
+    /// A button beside the title that opens a page in a window of its own.
+    struct Action: Identifiable {
+        let title: String, icon: String, popout: String, close: String?
+        var id: String { title }
+    }
 
     init?(_ row: [String: Any]) {
         guard let id = row["id"] as? String, let tool = row["tool"] as? String else { return nil }
@@ -18,6 +25,10 @@ struct AppPage: Identifiable {
         self.tool = tool
         self.items = (row["items"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         self.settings = (row["settings"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        self.actions = (row["actions"] as? [[String: Any]] ?? []).compactMap { a in
+            guard let title = a["title"] as? String, let popout = a["popout"] as? String else { return nil }
+            return Action(title: title, icon: a["icon"] as? String ?? "plus", popout: popout, close: a["close"] as? String)
+        }
     }
 }
 
@@ -62,6 +73,11 @@ struct PluginPage: View {
         }
         .navigationTitle(page.title)
         .toolbar {
+            ForEach(page.actions) { action in
+                ToolbarItem {
+                    Button(action.title, systemImage: action.icon) { open(action) }
+                }
+            }
             if page.settings != nil {
                 ToolbarItem { Button("Settings", systemImage: "gearshape") { showSettings = true } }
             }
@@ -77,6 +93,16 @@ struct PluginPage: View {
                 .frame(minWidth: 420, minHeight: 360)
             }
         }
+    }
+
+    private func open(_ action: AppPage.Action) {
+        guard let url = URL(string: action.popout, relativeTo: client.node)?.absoluteURL else { return }
+        let client = client
+        var onClose: (@MainActor () -> Void)?
+        if let tool = action.close {
+            onClose = { Task { _ = try? await client.request("tools/call", ["name": tool, "arguments": [:] as [String: Any]]) } }
+        }
+        WidgetContext.popouts?(url, action.title, onClose)
     }
 
     @ViewBuilder private var content: some View {
