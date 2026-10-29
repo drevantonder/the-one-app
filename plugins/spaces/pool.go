@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,11 +25,10 @@ import (
 // then starts with a copy. Agents' copies are thrown away with their Space,
 // so only sign_in changes a login.
 //
-// Borrowed Spaces come from a pool on each device, which keeps the spares
-// set with pool running while there is memory for them; a device that
-// keeps none borrows on one that does. A borrowed Space is deleted when
-// given back or left idle, so agents never share one and none are left
-// running.
+// Borrowed Spaces come from a pool: one free Space is kept running, on the
+// device with the most room, as long as one has room to spare for it. A
+// borrowed Space is deleted when given back or left idle, so agents never
+// share one and none are left running.
 
 const (
 	loginFiles  = "@logins/" // @ isn't in Space names, so it isn't a Space's backups
@@ -43,14 +43,13 @@ type borrowed struct {
 	Login  string    `json:"login,omitempty"`
 	SignIn bool      `json:"signIn,omitempty"`
 	Until  time.Time `json:"until,omitzero"` // a sign-in's end
-}
-
-type spare struct {
-	Host  string `json:"host"`
-	Spare int    `json:"spare"`
+	Agent  string    `json:"agent,omitempty"`
+	For    string    `json:"for,omitempty"`
+	Since  time.Time `json:"since,omitzero"`
 }
 
 type borrowIn struct {
+	For   string `json:"for" jsonschema:"what you need it for, in a few words, e.g. Syncing X bookmarks; shown to the user"`
 	Login string `json:"login,omitempty" jsonschema:"the saved login to start the browser with, e.g. default; none for a browser signed in to nothing"`
 	Here  bool   `json:"here,omitempty" jsonschema:"only a Space on this device"`
 }
@@ -69,10 +68,6 @@ type loginIn struct {
 	Login string `json:"login" jsonschema:"the login's name"`
 }
 
-type spareIn struct {
-	Spare int `json:"spare" jsonschema:"how many Spaces to keep ready on this device, memory allowing; 0, the default, borrows on a device that keeps some"`
-}
-
 type pool struct {
 	t       *tools
 	located func(string) string
@@ -80,26 +75,36 @@ type pool struct {
 
 	mu    sync.Mutex
 	lent  map[string]borrowed
-	spare map[string]int // by device
 	used  map[string]time.Time
+	rooms []room // every device's, as last asked
+	asked time.Time
 	kick  chan struct{}
 	take  sync.Mutex // one borrow at a time on this device
 }
 
 func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*sdk.Call)) *pool {
-	p := &pool{t: t, located: located, locate: locate, lent: map[string]borrowed{}, spare: map[string]int{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
+	p := &pool{t: t, located: located, locate: locate, lent: map[string]borrowed{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
 	t.used = p.touch
 	c.Entry("borrowed", sdk.Available)
 	c.Entry("returned", sdk.Available)
-	c.Entry("spare", sdk.Available)
-	c.OnReset(func() { p.mu.Lock(); clear(p.lent); clear(p.spare); p.mu.Unlock() })
+	c.Entry("spare", sdk.Available) // no longer written
+	c.OnReset(func() { p.mu.Lock(); clear(p.lent); p.mu.Unlock() })
 	sdk.Handle(c, "borrowed", func(_ sdk.Entry, in borrowed) error { p.mu.Lock(); p.lent[in.Space] = in; p.mu.Unlock(); return nil })
 	sdk.Handle(c, "returned", func(_ sdk.Entry, in released) error { p.mu.Lock(); delete(p.lent, in.Name); p.mu.Unlock(); return nil })
-	sdk.Handle(c, "spare", func(_ sdk.Entry, in spare) error { p.mu.Lock(); p.spare[in.Host] = in.Spare; p.mu.Unlock(); return nil })
 	c.OnReady(func(call *sdk.Call) { go p.keep(call.Detached()) })
+	sdk.Op(c, "room", "How much room this device has for Spaces.", sdk.Read, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
+		r, err := here(call)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		return sdk.Result{Text: fmt.Sprintf("%s: %s free of %s", r.Host, size(r.Free), size(r.Total)), Data: r}, nil
+	})
 
 	sdk.Op(c, "borrow", "Borrow a Space of your own, for as long as you need a browser or desktop, starting its browser with a saved login. Give it back with give_back when done; one left idle for 15 minutes is given back for you, and anything in it is lost.", sdk.Write, func(call *sdk.Call, in borrowIn) (sdk.Result, error) {
-		b, fwd, err := p.borrow(call, "borrow", in, borrowed{Login: in.Login})
+		if strings.TrimSpace(in.For) == "" {
+			return sdk.Result{}, errors.New("say what it's for, in a few words: the user sees it")
+		}
+		b, fwd, err := p.borrow(call, "borrow", in, borrowed{Login: in.Login, Agent: call.Caller.Agent, For: strings.TrimSpace(in.For)})
 		if err != nil || fwd != nil {
 			return deref(fwd), err
 		}
@@ -118,7 +123,7 @@ func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*s
 		if in.Minutes == 0 {
 			minutes = 30
 		}
-		b, fwd, err := p.borrow(call, "sign_in", borrowIn{Login: login, Here: in.Here}, borrowed{Login: login, SignIn: true, Until: time.Now().Add(time.Duration(minutes) * time.Minute)})
+		b, fwd, err := p.borrow(call, "sign_in", borrowIn{Login: login, Here: in.Here}, borrowed{Login: login, SignIn: true, For: "Signing in to sites", Until: time.Now().Add(time.Duration(minutes) * time.Minute)})
 		if err != nil || fwd != nil {
 			return deref(fwd), err
 		}
@@ -196,17 +201,6 @@ func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*s
 		}
 		return sdk.Text(fmt.Sprintf("Forgot the %s login.", in.Login)), nil
 	})
-	sdk.Op(c, "pool", "Set how many Spaces this device keeps ready to borrow, while it has memory for them.", sdk.Write, func(call *sdk.Call, in spareIn) (sdk.Result, error) {
-		me, err := tailnetName(call.Context)
-		if err != nil {
-			return sdk.Result{}, err
-		}
-		if _, err := call.Append("spare", spare{Host: me, Spare: max(in.Spare, 0)}); err != nil {
-			return sdk.Result{}, err
-		}
-		p.poke()
-		return sdk.Text(fmt.Sprintf("Keeping %d ready.", max(in.Spare, 0))), nil
-	})
 	return p
 }
 
@@ -220,13 +214,12 @@ func (p *pool) status(name string) string {
 	b, ok := p.lent[name]
 	switch {
 	case !ok:
-		return "spare"
+		return "free"
 	case b.SignIn:
 		return "signing in to the " + b.Login + " login"
-	case b.Login != "":
-		return "borrowed, with the " + b.Login + " login"
 	}
-	return "borrowed"
+	who := cmp(b.Agent, "an agent")
+	return fmt.Sprintf("%s: %s", who, b.For)
 }
 
 func deref(r *sdk.Result) sdk.Result {
@@ -295,8 +288,8 @@ func (p *pool) borrow(call *sdk.Call, op string, in borrowIn, b borrowed) (borro
 	}
 	ready := p.spares(spaces)
 	if len(ready) == 0 && !in.Here {
-		if host := p.spareElsewhere(call); host != "" {
-			args := map[string]any{"login": in.Login, "here": true, "device": strings.Split(host, ".")[0]}
+		if host := p.elsewhere(call); host != "" {
+			args := map[string]any{"for": in.For, "login": in.Login, "here": true, "device": strings.Split(host, ".")[0]}
 			if op == "sign_in" {
 				args["minutes"] = int(time.Until(b.Until).Round(time.Minute).Minutes())
 			}
@@ -314,6 +307,7 @@ func (p *pool) borrow(call *sdk.Call, op string, in borrowIn, b borrowed) (borro
 		return b, nil, err
 	}
 	b.Space = s.Name
+	b.Since = time.Now().UTC()
 	if err := p.prepare(call, s, b); err != nil {
 		_ = p.drop(call, s)
 		return b, nil, err
@@ -331,10 +325,21 @@ func (p *pool) borrow(call *sdk.Call, op string, in borrowIn, b borrowed) (borro
 	return b, nil, nil
 }
 
-// spareElsewhere is another device with a spare in its pool, or, if this
-// device keeps none, one that keeps some.
-func (p *pool) spareElsewhere(call *sdk.Call) string {
+// elsewhere is another device to borrow on: one with a free Space, or else
+// the one with the most room, if that isn't this one.
+func (p *pool) elsewhere(call *sdk.Call) string {
 	me, _ := tailnetName(call.Context)
+	if h := p.freeOn(call, me); h != "" {
+		return h
+	}
+	if best := p.best(call); best != nil && best.Host != me {
+		return best.Host
+	}
+	return ""
+}
+
+// freeOn is a device other than me with a free Space.
+func (p *pool) freeOn(call *sdk.Call, me string) string {
 	names := p.t.names()
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -344,19 +349,6 @@ func (p *pool) spareElsewhere(call *sdk.Call) string {
 				return h
 			}
 		}
-	}
-	if p.spare[me] > 0 {
-		return ""
-	}
-	var hosts []string
-	for h, n := range p.spare {
-		if n > 0 && h != me {
-			hosts = append(hosts, h)
-		}
-	}
-	slices.Sort(hosts)
-	if len(hosts) > 0 {
-		return hosts[0]
 	}
 	return ""
 }
@@ -515,7 +507,6 @@ func (p *pool) tend(call *sdk.Call) {
 		here[s.Name] = true
 	}
 	p.mu.Lock()
-	want := p.spare[me]
 	var due []borrowed
 	for name, b := range p.lent {
 		h := p.located(name)
@@ -547,15 +538,37 @@ func (p *pool) tend(call *sdk.Call) {
 			_ = p.drop(call, s)
 		}
 	}
+	// One free Space in all: the one whose name sorts first stays. The
+	// device with the most room makes one when there is none.
 	ready := p.spares(spaces)
-	for _, s := range ready[min(want, len(ready)):] {
-		_ = p.drop(call, s)
-	}
-	if len(ready) < want && roomFor() {
-		if _, err := p.make(call); err != nil {
-			call.Logf("spaces: making a spare: %v", err)
+	free := p.free()
+	for _, s := range ready {
+		if len(free) > 0 && s.Name != free[0] {
+			_ = p.drop(call, s)
 		}
 	}
+	if len(free) == 0 {
+		if best := p.best(call); best != nil && best.Host == me {
+			if _, err := p.make(call); err != nil {
+				call.Logf("spaces: making a free Space: %v", err)
+			}
+		}
+	}
+}
+
+// free are the names of every device's free Spaces, sorted.
+func (p *pool) free() []string {
+	names := p.t.names()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for _, n := range names {
+		if _, lent := p.lent[n]; strings.HasPrefix(n, poolPrefix) && !lent {
+			out = append(out, n)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 func (p *pool) isLent(name string) bool {
@@ -565,11 +578,100 @@ func (p *pool) isLent(name string) bool {
 	return ok
 }
 
-// roomFor reports whether this device has memory for another Space and
-// still a quarter of its memory free.
-func roomFor() bool {
+// A room is a device's room for Spaces.
+type room struct {
+	Host   string `json:"host"`
+	Free   int64  `json:"free"`             // memory, in bytes
+	Total  int64  `json:"total"`            // memory, in bytes
+	Nested bool   `json:"nested,omitempty"` // in a container, sharing a host's memory
+}
+
+// fits reports whether another Space fits, leaving plenty for everything
+// else: a third of the memory, and at least 6 GB.
+func (r room) fits() bool {
+	return r.Total > 0 && r.Free-spaceMemory >= max(r.Total*3/10, 6<<30)
+}
+
+func here(call *sdk.Call) (room, error) {
+	me, err := tailnetName(call.Context)
+	if err != nil {
+		return room{}, err
+	}
+	if _, err := list(call.Context); err != nil {
+		return room{}, err
+	}
 	free, total := memory()
-	return total > 0 && free-spaceMemory > total/4
+	out, _ := exec.Command("systemd-detect-virt", "--container").Output()
+	v := strings.TrimSpace(string(out))
+	return room{Host: me, Free: free, Total: total, Nested: v != "" && v != "none"}, nil
+}
+
+// roomsAll asks every online device that runs Spaces for its room, at most
+// every 20 seconds.
+func (p *pool) roomsAll(call *sdk.Call) []room {
+	p.mu.Lock()
+	if time.Since(p.asked) < 20*time.Second {
+		defer p.mu.Unlock()
+		return p.rooms
+	}
+	p.mu.Unlock()
+	var rooms []room
+	if r, err := here(call); err == nil {
+		rooms = append(rooms, r)
+	}
+	res, err := call.Invoke("one", "devices", map[string]any{})
+	if err == nil {
+		raw, _ := json.Marshal(res.Data)
+		var d struct {
+			Devices []struct {
+				Name   string `json:"name"`
+				Self   bool   `json:"self"`
+				Online bool   `json:"online"`
+			} `json:"devices"`
+		}
+		_ = json.Unmarshal(raw, &d)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		for _, dev := range d.Devices {
+			if dev.Self || !dev.Online {
+				continue
+			}
+			wg.Go(func() {
+				res, err := call.Invoke("spaces", "room", map[string]any{"device": dev.Name})
+				if err != nil {
+					return
+				}
+				raw, _ := json.Marshal(res.Data)
+				var r room
+				if json.Unmarshal(raw, &r) == nil && r.Host != "" {
+					mu.Lock()
+					rooms = append(rooms, r)
+					mu.Unlock()
+				}
+			})
+		}
+		wg.Wait()
+	}
+	slices.SortFunc(rooms, func(a, b room) int { return strings.Compare(a.Host, b.Host) })
+	p.mu.Lock()
+	p.rooms, p.asked = rooms, time.Now()
+	p.mu.Unlock()
+	return rooms
+}
+
+// best is the device a new Space should go on: one it fits on, not inside
+// another device, with the most free memory. Nil when it fits nowhere.
+func (p *pool) best(call *sdk.Call) *room {
+	var best *room
+	for _, r := range p.roomsAll(call) {
+		if !r.fits() {
+			continue
+		}
+		if best == nil || best.Nested && !r.Nested || best.Nested == r.Nested && r.Free > best.Free {
+			best = &r
+		}
+	}
+	return best
 }
 
 // memory is this device's free and total memory, in bytes; 0 if unknown.

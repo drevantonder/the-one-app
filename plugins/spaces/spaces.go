@@ -45,7 +45,7 @@ type viewIn struct {
 
 // own are the plugin's operations; a Space's tools with these names are
 // left out.
-var own = []string{"create", "list", "start", "stop", "delete", "view", "backup", "release", "refresh_tools", "borrow", "sign_in", "give_back", "logins", "forget_login", "pool"}
+var own = []string{"create", "list", "start", "stop", "delete", "view", "backup", "release", "refresh_tools", "borrow", "sign_in", "give_back", "logins", "forget_login", "room", "screen"}
 
 func setup(c *sdk.Ctx) error {
 	var err error
@@ -438,6 +438,13 @@ func setup(c *sdk.Ctx) error {
 			return sdk.Result{}, err
 		}
 		return sdk.Result{Text: fmt.Sprintf("%s\nThe link works for %d minutes.", url, minutes), Data: map[string]any{"url": url, "minutes": minutes}}, nil
+	})
+	sdk.Op(c, "screen", "A small picture of a Space's desktop, as it is now.", sdk.Read, func(call *sdk.Call, in screenIn) (sdk.Result, error) {
+		img, err := t.screen(call, in)
+		if err != nil {
+			return sdk.Result{}, err
+		}
+		return sdk.Result{Text: "The desktop of Space " + in.Space + ".", Images: []sdk.Image{img}}, nil
 	})
 	sdk.Op(c, "refresh_tools", "Reload the tools Spaces offer.", sdk.Write, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
 		if err := t.refresh(call.Context); err != nil {

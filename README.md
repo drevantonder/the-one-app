@@ -163,9 +163,11 @@ login that every borrowed Space's browser can start with:
 ```sh
 one spaces sign_in                      # a link to a browser in the default login
 one spaces give_back --space pool-…     # saves the login (or it saves itself when time is up)
-one spaces borrow --login default       # an agent's own Space, already signed in
-one spaces pool --spare 1 --device linux  # keep one ready there, memory allowing
+one spaces borrow --for "Syncing X bookmarks" --login default   # an agent's own Space, signed in
 ```
+
+One free Space is kept running, on whichever device has the most room, as
+long as one can spare the memory.
 
 Logins are kept in the bucket, encrypted. An agent's changes to its copy go
 when its Space does; a borrowed Space left idle for 15 minutes is given back.
