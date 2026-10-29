@@ -103,7 +103,7 @@ func chats(db *sql.DB) ([]chatRow, error) {
 	rows, err := db.Query(`SELECT c.jid, c.name, c.unread, c.last, m.id, m.sender, m.sender_name, m.from_me, m.time, m.text
 		FROM chats c LEFT JOIN messages m ON m.chat = c.jid AND m.id = (
 			SELECT id FROM messages WHERE chat = c.jid ORDER BY time DESC, rowid DESC LIMIT 1)
-		WHERE c.last > 0 ORDER BY c.last DESC`)
+		WHERE m.id IS NOT NULL ORDER BY c.last DESC`)
 	if err != nil {
 		return nil, err
 	}

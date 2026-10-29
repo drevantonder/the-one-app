@@ -473,7 +473,7 @@ func (p *plugin) chats(call *sdk.Call, in chatsIn) (sdk.Result, error) {
 		if c.Unread > 0 {
 			mark = fmt.Sprintf(" (%d unread)", c.Unread)
 		}
-		lines = append(lines, fmt.Sprintf("%s%s, %s: %s", c.Name, mark, when(c.Time), c.Last))
+		lines = append(lines, fmt.Sprintf("%s%s, %s: %s", c.Name, mark, when(c.Time), strings.Join(strings.Fields(c.Last), " ")))
 	}
 	if len(shown) == 0 {
 		if in.Unread {
@@ -577,7 +577,12 @@ func (p *plugin) shown(ctx context.Context, ms []stored, withChat bool) ([]Messa
 				names[m.Chat] = p.name(ctx, m.Chat, group, "")
 			}
 			msg.Chat = names[m.Chat]
-			line = msg.Chat + " " + line
+			switch {
+			case sender == "You":
+				line = fmt.Sprintf("[%s] You to %s: %s", m.Time.Local().Format("2 Jan 2006 15:04"), msg.Chat, m.Text)
+			case sender != msg.Chat:
+				line = fmt.Sprintf("[%s] %s in %s: %s", m.Time.Local().Format("2 Jan 2006 15:04"), sender, msg.Chat, m.Text)
+			}
 		}
 		out = append(out, msg)
 		lines = append(lines, line)
