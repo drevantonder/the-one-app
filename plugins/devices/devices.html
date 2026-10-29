@@ -20,6 +20,7 @@
   .stats { display: flex; align-items: center; gap: 9px; flex: none; }
   .stats > * { display: flex; justify-content: center; }
   .ram { width: 18px; } .cpu, .gpu { width: 36px; } .disk { width: 30px; }
+  [hidden] { display: none !important; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--online); flex: none; }
 </style>
 <header><span class="text">Devices</span><span class="stats"><span class="label ram">RAM</span><span class="label cpu">CPU</span><span class="label gpu">GPU</span><span class="label disk">DISK</span></span></header>
@@ -45,54 +46,111 @@ function ago(iso) {
 
 const gb = bytes => (bytes / 2 ** 30).toFixed(1);
 const level = percent => percent >= 85 ? '#ff453a' : percent >= 70 ? '#ff9f0a' : '#30d158';
-const svg = (w, h, body) => `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`;
-
-function ring(percent) {
-  const r = 6.5, c = 2 * Math.PI * r;
-  return svg(18, 18, `<circle cx="9" cy="9" r="${r}" fill="none" stroke="var(--track)" stroke-width="3"/>` +
-    `<circle cx="9" cy="9" r="${r}" fill="none" stroke="${level(percent)}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${c * percent / 100} ${c}" transform="rotate(-90 9 9)"/>`);
-}
-
-function spark(samples, color) {
-  const w = 36, h = 16;
-  if (!samples?.length) return svg(w, h, `<line x1="4" y1="8" x2="${w - 4}" y2="8" stroke="var(--track)" stroke-width="1.5" stroke-dasharray="2 3"/>`);
-  if (samples.length === 1) samples = [samples[0], samples[0]];
-  const pts = samples.map((p, i) => `${(i / (samples.length - 1) * w).toFixed(1)},${(h - 1 - p / 100 * (h - 2)).toFixed(1)}`).join(' ');
-  return svg(w, h, `<path d="M0,${h} L${pts.replaceAll(' ', ' L')} L${w},${h}Z" fill="${color}" opacity=".2"/>` +
-    `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.4" stroke-linejoin="round"/>`);
-}
-
-function bar(percent) {
-  return svg(30, 6, `<rect width="30" height="6" rx="3" fill="var(--track)"/><rect width="${Math.max(6, 30 * percent / 100)}" height="6" rx="3" fill="${level(percent)}"/>`);
-}
-
 const last = samples => samples[samples.length - 1];
 const percent = space => Math.round(space.used / space.total * 100);
+const RING = 2 * Math.PI * 6.5, W = 36, H = 16;
 
-function stats(u) {
-  const cell = (cls, title, html) => `<span class="${cls}" title="${title}">${html}</span>`;
-  const m = u.memory, d = u.disk;
-  return '<span class="stats">' +
-    cell('ram', m ? `Memory: ${gb(m.used)} of ${gb(m.total)} GB (${percent(m)}%)` : 'Memory: unknown', m ? ring(percent(m)) : '') +
-    cell('cpu', u.cpu?.length ? `CPU: ${last(u.cpu)}% busy` : 'CPU: unknown', spark(u.cpu, 'var(--cpu)')) +
-    cell('gpu', u.gpu?.length ? `GPU: ${last(u.gpu)}% busy` : 'No GPU reported', spark(u.gpu, 'var(--gpu)')) +
-    cell('disk', d ? `Disk: ${gb(d.total - d.used)} GB free of ${gb(d.total)} GB (${percent(d)}% used)` : 'Disk: unknown', d ? bar(percent(d)) : '') +
-    '</span>';
+// Rows are built once per device and then only have their values set, so a
+// refresh never replaces what's on screen.
+const rows = new Map();
+
+function el(tag, attrs = {}, children = []) {
+  const e = tag === 'li' || tag === 'span' || tag === 'div' ? document.createElement(tag) : document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  e.append(...children);
+  return e;
+}
+
+function set(e, attr, value) {
+  if (value === undefined) e.removeAttribute(attr);
+  else if (e.getAttribute(attr) !== String(value)) e.setAttribute(attr, value);
+}
+
+function text(e, value) {
+  if (e.textContent !== value) e.textContent = value;
+}
+
+function spark() {
+  const area = el('path', { opacity: '.2' }), line = el('polyline', { fill: 'none', 'stroke-width': '1.4', 'stroke-linejoin': 'round' });
+  const none = el('line', { x1: 4, y1: 8, x2: W - 4, y2: 8, stroke: 'var(--track)', 'stroke-width': '1.5', 'stroke-dasharray': '2 3' });
+  return { svg: el('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}` }, [area, line, none]), area, line, none };
+}
+
+function drawSpark(s, samples, color) {
+  const has = samples?.length > 0;
+  set(s.none, 'visibility', has ? 'hidden' : undefined);
+  set(s.area, 'visibility', has ? undefined : 'hidden');
+  set(s.line, 'visibility', has ? undefined : 'hidden');
+  if (!has) return;
+  if (samples.length === 1) samples = [samples[0], samples[0]];
+  const pts = samples.map((p, i) => `${(i / (samples.length - 1) * W).toFixed(1)},${(H - 1 - p / 100 * (H - 2)).toFixed(1)}`);
+  set(s.line, 'points', pts.join(' '));
+  set(s.line, 'stroke', color);
+  set(s.area, 'd', `M0,${H} L${pts.join(' L')} L${W},${H}Z`);
+  set(s.area, 'fill', color);
+}
+
+function makeRow() {
+  const r = {};
+  r.icon = el('svg', { class: 'icon', viewBox: '0 0 24 24' });
+  r.name = el('div', { class: 'name' });
+  r.detail = el('div', { class: 'detail' });
+  r.ringFill = el('circle', { cx: 9, cy: 9, r: 6.5, fill: 'none', 'stroke-width': 3, 'stroke-linecap': 'round', transform: 'rotate(-90 9 9)' });
+  r.ring = el('svg', { width: 18, height: 18, viewBox: '0 0 18 18' }, [el('circle', { cx: 9, cy: 9, r: 6.5, fill: 'none', stroke: 'var(--track)', 'stroke-width': 3 }), r.ringFill]);
+  r.cpu = spark();
+  r.gpu = spark();
+  r.barFill = el('rect', { height: 6, rx: 3 });
+  r.bar = el('svg', { width: 30, height: 6 }, [el('rect', { width: 30, height: 6, rx: 3, fill: 'var(--track)' }), r.barFill]);
+  r.cells = [el('span', { class: 'ram' }, [r.ring]), el('span', { class: 'cpu' }, [r.cpu.svg]), el('span', { class: 'gpu' }, [r.gpu.svg]), el('span', { class: 'disk' }, [r.bar])];
+  r.stats = el('span', { class: 'stats' }, r.cells);
+  r.dot = el('span', { class: 'dot' });
+  r.li = el('li', {}, [r.icon, el('div', { class: 'text' }, [r.name, r.detail]), r.stats, r.dot]);
+  return r;
+}
+
+function update(r, d) {
+  set(r.li, 'class', d.online ? undefined : 'offline');
+  const icon = iconFor(d.os);
+  if (r.iconName !== icon) { r.icon.innerHTML = icons[icon]; r.iconName = icon; }
+  text(r.name, d.name);
+  const version = d.version ? `v${d.version}` : '';
+  text(r.detail, d.online
+    ? [d.self && 'This device', version].filter(Boolean).join(' · ')
+    : (d.lastSeen ? `Last seen ${ago(d.lastSeen)}` : 'Offline'));
+  const u = d.online ? d.usage : undefined;
+  set(r.stats, 'hidden', u ? undefined : '');
+  set(r.dot, 'hidden', d.online && !u ? undefined : '');
+  if (!u) return;
+  const m = u.memory, disk = u.disk;
+  set(r.ring, 'visibility', m ? undefined : 'hidden');
+  if (m) {
+    set(r.ringFill, 'stroke', level(percent(m)));
+    set(r.ringFill, 'stroke-dasharray', `${(RING * percent(m) / 100).toFixed(2)} ${RING.toFixed(2)}`);
+  }
+  drawSpark(r.cpu, u.cpu, 'var(--cpu)');
+  drawSpark(r.gpu, u.gpu, 'var(--gpu)');
+  set(r.bar, 'visibility', disk ? undefined : 'hidden');
+  if (disk) {
+    set(r.barFill, 'width', Math.max(6, 30 * percent(disk) / 100).toFixed(1));
+    set(r.barFill, 'fill', level(percent(disk)));
+  }
+  set(r.cells[0], 'title', m ? `Memory: ${gb(m.used)} of ${gb(m.total)} GB (${percent(m)}%)` : 'Memory: unknown');
+  set(r.cells[1], 'title', u.cpu?.length ? `CPU: ${last(u.cpu)}% busy` : 'CPU: unknown');
+  set(r.cells[2], 'title', u.gpu?.length ? `GPU: ${last(u.gpu)}% busy` : 'No GPU reported');
+  set(r.cells[3], 'title', disk ? `Disk: ${gb(disk.total - disk.used)} GB free of ${gb(disk.total)} GB (${percent(disk)}% used)` : 'Disk: unknown');
 }
 
 function render(data) {
-  document.getElementById('list').replaceChildren(...(data?.devices ?? []).map(d => {
-    const li = document.createElement('li');
-    if (!d.online) li.className = 'offline';
-    li.innerHTML = `<svg class="icon" viewBox="0 0 24 24">${icons[iconFor(d.os)]}</svg><div class="text"><div class="name"></div><div class="detail"></div></div>` +
-      (!d.online ? '' : d.usage ? stats(d.usage) : '<span class="dot"></span>');
-    li.querySelector('.name').textContent = d.name;
-    const version = d.version ? `v${d.version}` : '';
-    li.querySelector('.detail').textContent = d.online
-      ? [d.self && 'This device', version].filter(Boolean).join(' · ')
-      : (d.lastSeen ? `Last seen ${ago(d.lastSeen)}` : 'Offline');
-    return li;
-  }));
+  const devices = data?.devices ?? [];
+  const lis = devices.map(d => {
+    if (!rows.has(d.name)) rows.set(d.name, makeRow());
+    const r = rows.get(d.name);
+    update(r, d);
+    return r.li;
+  });
+  for (const name of rows.keys()) if (!devices.some(d => d.name === name)) rows.delete(name);
+  const list = document.getElementById('list');
+  if (lis.length !== list.children.length || lis.some((li, i) => list.children[i] !== li)) list.replaceChildren(...lis);
 }
 
 let nextId = 1;
