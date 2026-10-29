@@ -10,6 +10,12 @@ typealias WidgetRun = (WidgetAction) async throws -> Void
 struct WidgetContext {
     var run: WidgetRun?
     var images: [String: Image] = [:]
+    /// On a home screen, actions run as app intents instead.
+    var homeScreen = false
+    /// The widget's plugin, whose operations its actions name.
+    var app = ""
+
+    func tool(_ op: String) -> String { app == "one" ? op : "\(app)_\(op)" }
 }
 
 private func sizeOf(_ size: String?) -> CGFloat {
@@ -45,7 +51,9 @@ struct WidgetView: View {
     var ctx = WidgetContext()
 
     var body: some View {
-        NodeView(node: description.root, axis: .vertical, ctx: ctx)
+        var ctx = ctx
+        ctx.app = description.app
+        return NodeView(node: description.root, axis: .vertical, ctx: ctx)
     }
 }
 
@@ -384,21 +392,27 @@ struct ActionButton: View {
     @State private var busy = false
 
     var body: some View {
-        Button {
-            Task {
-                busy = true
-                try? await ctx.run?(node.action)
-                busy = false
-            }
-        } label: {
-            Text(node.label).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .foregroundStyle(node.primary == true ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-                .background(node.primary == true ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.secondary.opacity(0.2)), in: Capsule())
-                .opacity(busy ? 0.5 : 1)
+        if ctx.homeScreen {
+            Button(intent: RunWidgetAction(tool: ctx.tool(node.action.op), input: node.action.input)) { label }.buttonStyle(.plain)
+        } else {
+            Button {
+                Task {
+                    busy = true
+                    try? await ctx.run?(node.action)
+                    busy = false
+                }
+            } label: { label }
+            .buttonStyle(.plain)
+            .disabled(ctx.run == nil || busy)
         }
-        .buttonStyle(.plain)
-        .disabled(ctx.run == nil || busy)
+    }
+
+    private var label: some View {
+        Text(node.label).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .foregroundStyle(node.primary == true ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+            .background(node.primary == true ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.secondary.opacity(0.2)), in: Capsule())
+            .opacity(busy ? 0.5 : 1)
     }
 }
 
@@ -408,15 +422,19 @@ struct ActionToggle: View {
     @State private var on: Bool?
 
     var body: some View {
-        Toggle(isOn: Binding(get: { on ?? node.on }, set: { value in
-            on = value
-            Task {
-                do { try await ctx.run?(node.action) } catch { on = nil }
-            }
-        })) {
-            Text(node.label).font(.system(size: 15))
+        if ctx.homeScreen {
+            Toggle(isOn: node.on, intent: RunWidgetAction(tool: ctx.tool(node.action.op), input: node.action.input)) { label }
+        } else {
+            Toggle(isOn: Binding(get: { on ?? node.on }, set: { value in
+                on = value
+                Task {
+                    do { try await ctx.run?(node.action) } catch { on = nil }
+                }
+            })) { label }
+            .disabled(ctx.run == nil)
+            .onChange(of: node.on) { on = nil }
         }
-        .disabled(ctx.run == nil)
-        .onChange(of: node.on) { on = nil }
     }
+
+    private var label: some View { Text(node.label).font(.system(size: 15)) }
 }

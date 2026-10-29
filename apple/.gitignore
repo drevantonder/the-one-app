@@ -1,2 +1,3 @@
 TheOneApp.xcodeproj/
 iOS/Info.plist
+WidgetKit/Info-*.plist

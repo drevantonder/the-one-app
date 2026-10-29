@@ -17,6 +17,8 @@ targets:
     type: application
     platform: iOS
     sources: [Shared, iOS]
+    dependencies:
+      - target: TheOneAppWidgets
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: dev.theoneapp
       TARGETED_DEVICE_FAMILY: "1,2"
@@ -34,9 +36,43 @@ targets:
     type: application
     platform: macOS
     sources: [Shared, ../macos/menubar.swift]
+    dependencies:
+      - target: TheOneAppWidgetsMac
     settings:
       PRODUCT_NAME: TheOneApp
       PRODUCT_BUNDLE_IDENTIFIER: dev.theoneapp
       INFOPLIST_FILE: ../macos/Info.plist
       # macos/build.sh signs the finished bundle with the Developer ID.
       CODE_SIGNING_ALLOWED: NO
+  TheOneAppWidgets:
+    type: app-extension
+    platform: iOS
+    sources: &widgetSources [Shared/MCPClient.swift, Shared/Network.swift, Shared/Widget, WidgetKit/Widgets.swift]
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: dev.theoneapp.widgets
+      TARGETED_DEVICE_FAMILY: "1,2"
+    info: &widgetInfo
+      path: WidgetKit/Info-iOS.plist
+      properties:
+        CFBundleDisplayName: The One App
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+  TheOneAppWidgetsMac:
+    type: app-extension
+    platform: macOS
+    sources: *widgetSources
+    settings:
+      PRODUCT_NAME: TheOneAppWidgets
+      PRODUCT_BUNDLE_IDENTIFIER: dev.theoneapp.widgets
+      CODE_SIGN_ENTITLEMENTS: WidgetKit/Widgets.entitlements
+      CODE_SIGNING_ALLOWED: NO
+    info:
+      path: WidgetKit/Info-macOS.plist
+      properties:
+        CFBundleDisplayName: The One App
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true

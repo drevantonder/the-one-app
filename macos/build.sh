@@ -34,6 +34,11 @@ codesign --force --options runtime $ts --entitlements macos/TheOneApp.entitlemen
 (cd apple && xcodegen --quiet)
 xcodebuild -project apple/TheOneApp.xcodeproj -scheme TheOneAppMac -configuration Release -derivedDataPath build/xcode -quiet build
 cp build/xcode/Build/Products/Release/TheOneApp.app/Contents/MacOS/TheOneApp "$app/Contents/MacOS/TheOneApp"
+# The desktop widgets: an app extension, sandboxed as macOS requires.
+mkdir -p "$app/Contents/PlugIns"
+cp -R build/xcode/Build/Products/Release/TheOneApp.app/Contents/PlugIns/TheOneAppWidgets.appex "$app/Contents/PlugIns/"
+codesign --force --options runtime $ts --entitlements apple/WidgetKit/Widgets.entitlements \
+	--sign "$identity" "$app/Contents/PlugIns/TheOneAppWidgets.appex"
 for helper in eventkit contacts messages; do
 	swiftc -O -suppress-warnings "plugins/apple/$helper.swift" -o "$app/Contents/MacOS/one-$helper"
 	codesign --force --options runtime $ts --entitlements macos/TheOneApp.entitlements \
