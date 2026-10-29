@@ -74,7 +74,7 @@ func header() widget.Node {
 		return cell(w, widget.Text(s, widget.Style{Size: "xs", Weight: "medium", Tone: "muted", Lines: 1}))
 	}
 	return widget.Row(widget.Stack{Gap: 10},
-		widget.Col(widget.Stack{Grow: true}, widget.Text("Devices", widget.Style{Size: "sm", Weight: "bold", Tone: "muted"})),
+		widget.Col(widget.Stack{Grow: true}, widget.Text("Devices", widget.Style{Size: "xs", Weight: "medium", Tone: "muted", Lines: 1})),
 		widget.Row(widget.Stack{Gap: statGap}, label(ramW, "RAM"), label(cpuW, "CPU"), label(gpuW, "GPU"), label(diskW, "DISK")))
 }
 
@@ -125,35 +125,55 @@ func str(v any) string {
 	return s
 }
 
-// compactRow fits a small home-screen widget: each device's icon, name and
-// memory ring.
+// short is a device's name cut to a few letters, for a small widget.
+func short(name string) string {
+	if r := []rune(name); len(r) > 4 {
+		return string(r[:3])
+	}
+	return name
+}
+
+// Columns of a small widget's rows.
+const nameS, ramS, cpuS, diskS = 28, 24, 26, 26
+
+// compactRow fits a small home-screen widget: each device's short name,
+// memory ring, CPU and disk.
 func compactRow(d map[string]any) widget.Node {
 	name, _ := d["name"].(string)
 	online, _ := d["online"].(bool)
-	end := widget.Spacer(0)
+	cells := []widget.Node{widget.Col(widget.Stack{W: nameS}, widget.Text(short(name), widget.Style{Size: "sm", Lines: 1}))}
 	var u Usage
-	if online && recode(d["usage"], &u) == nil && u.Memory != nil && u.Memory.Total > 0 {
-		end = widget.Gauge(float64(u.Memory.Used)/float64(u.Memory.Total), level(u.Memory.Used, u.Memory.Total), 15)
+	if online && recode(d["usage"], &u) == nil {
+		var ram, disk widget.Node = widget.Spacer(0), widget.Spacer(0)
+		if m := u.Memory; m != nil && m.Total > 0 {
+			ram = widget.Gauge(float64(m.Used)/float64(m.Total), level(m.Used, m.Total), 15)
+		}
+		if k := u.Disk; k != nil && k.Total > 0 {
+			disk = widget.Progress(float64(k.Used)/float64(k.Total), "", diskS, level(k.Used, k.Total))
+		}
+		cells = append(cells, cell(ramS, ram), cell(cpuS, widget.Spark(floats(u.CPU), 100, "blue", cpuS, 12)), cell(diskS, disk))
 	} else if online {
-		end = widget.Dot("green")
+		cells = append(cells, widget.Dot("green"))
 	}
-	icon := iconFor(d)
-	icon["size"] = 18
-	return widget.Row(widget.Stack{Gap: 8, Dim: !online},
-		icon,
-		widget.Col(widget.Stack{Grow: true}, widget.Text(name, widget.Style{Size: "sm", Lines: 1})),
-		end)
+	return widget.Row(widget.Stack{Gap: 6, Dim: !online}, cells...)
+}
+
+func compactHeader() widget.Node {
+	label := func(w float64, s string) widget.Node {
+		return cell(w, widget.Text(s, widget.Style{Size: "xs", Weight: "medium", Tone: "muted", Lines: 1}))
+	}
+	return widget.Row(widget.Stack{Gap: 6}, widget.Spacer(nameS), label(ramS, "RAM"), label(cpuS, "CPU"), label(diskS, "DISK"))
 }
 
 // devicesWidget draws every device. Narrower than the full table needs, as
-// in a small home-screen widget, it shows just names and memory.
+// in a small home-screen widget, it shows short names and fewer columns.
 func devicesWidget(devices []map[string]any, space widget.Space) widget.Node {
 	if space.W > 0 && space.W < 260 {
-		rows := []widget.Node{widget.Text("Devices", widget.Style{Size: "sm", Weight: "bold", Tone: "muted"})}
+		rows := []widget.Node{compactHeader()}
 		for _, d := range devices {
 			rows = append(rows, compactRow(d))
 		}
-		return widget.Col(widget.Stack{Gap: 7}, rows...)
+		return widget.Col(widget.Stack{Gap: 9}, rows...)
 	}
 	// A medium widget has no room for each device's second line.
 	details := space.H == 0 || space.H >= 220
