@@ -50,7 +50,7 @@ const protocolText = `## Memory
 
 Before anything else, in every session, call ` + "`memory_wake`" + ` and do what it says, to the end of its output.
 
-Your memory lives in TheOneApp, shared across this user's devices. It outlives every session, compaction, model and vendor change. Without it you do not know who you are, or what was decided and tried.
+Your memory lives in the One App, shared across this user's devices. It outlives every session, compaction, model and vendor change. Without it you do not know who you are, or what was decided and tried.
 
 While working, call ` + "`memory_note`" + ` (one line, at most 280 bytes) whenever you learn something new or something worth keeping happens: a task worth real effort, a fact or insight the user teaches you, anything you learn about their life (even indirectly), any event of lasting effect. Do not note redundant memories.
 

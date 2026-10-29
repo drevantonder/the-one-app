@@ -1,4 +1,4 @@
-# TheOneApp
+# The One App
 
 - Small core, everything else a plugin. Built-in plugins (`plugins/`) use exactly the public `sdk` a user plugin would; never give them private hooks into the core.
 - Plugins never write shared state. They append to their own log and register transforms; the core rebuilds shared things (operations, MCP instructions) from empty, in plugin order. The core never names or knows about a specific plugin.

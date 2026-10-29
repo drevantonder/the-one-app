@@ -555,7 +555,7 @@ func (n *Node) transform(ctx context.Context, name string, doc any, args any) (j
 	return raw, nil
 }
 
-const baseInstructions = `TheOneApp is this user's personal hub, shared across their devices. Its tools come from plugins, and every tool is also a CLI command (` + "`one <plugin> <operation>`" + `) and an HTTP API.`
+const baseInstructions = `The One App is this user's personal hub, shared across their devices. Its tools come from plugins, and every tool is also a CLI command (` + "`one <plugin> <operation>`" + `) and an HTTP API.`
 
 // Instructions builds the MCP server instructions: the base text, then each
 // plugin's transform in order.

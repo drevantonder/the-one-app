@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key><string>dev.theoneapp</string>
-	<key>CFBundleName</key><string>TheOneApp</string>
-	<key>CFBundleDisplayName</key><string>TheOneApp</string>
+	<key>CFBundleName</key><string>The One App</string>
+	<key>CFBundleDisplayName</key><string>The One App</string>
 	<key>CFBundleExecutable</key><string>TheOneApp</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
@@ -13,9 +13,9 @@
 	<key>LSMinimumSystemVersion</key><string>14.0</string>
 	<key>LSUIElement</key><true/>
 	<key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
-	<key>NSRemindersFullAccessUsageDescription</key><string>TheOneApp shares your reminders with your agents.</string>
-	<key>NSCalendarsFullAccessUsageDescription</key><string>TheOneApp shares your calendar with your agents.</string>
-	<key>NSContactsUsageDescription</key><string>TheOneApp shares your contacts with your agents.</string>
-	<key>NSAppleEventsUsageDescription</key><string>TheOneApp sends iMessages for your agents through the Messages app.</string>
+	<key>NSRemindersFullAccessUsageDescription</key><string>The One App shares your reminders with your agents.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key><string>The One App shares your calendar with your agents.</string>
+	<key>NSContactsUsageDescription</key><string>The One App shares your contacts with your agents.</string>
+	<key>NSAppleEventsUsageDescription</key><string>The One App sends iMessages for your agents through the Messages app.</string>
 </dict>
 </plist>

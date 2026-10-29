@@ -2,7 +2,7 @@
   <img src="docs/ring.png" width="200" alt="">
 </p>
 
-<h1 align="center">TheOneApp</h1>
+<h1 align="center">The One App</h1>
 
 <p align="center"><b>One app to rule them all.</b></p>
 
@@ -74,9 +74,9 @@ Calendar, Contacts, iMessage) need: `macos/build.sh install` puts
 `TheOneApp.app` in `~/Applications` and links `one` into `~/.local/bin`. Open
 the app: it adds a menu bar item and starts the node, unless one is already
 running, logging to `~/Library/Logs/TheOneApp/node.log`. macOS then asks for
-each permission once, as TheOneApp, and keeps it across updates; a node
+each permission once, as The One App, and keeps it across updates; a node
 started some other way may be asked again. Reading iMessages also needs Full
-Disk Access for TheOneApp.
+Disk Access for The One App.
 
 Or build it yourself: `go install github.com/drevantonder/the-one-app/cmd/one@latest`.
 

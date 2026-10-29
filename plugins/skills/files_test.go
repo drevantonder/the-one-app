@@ -137,7 +137,7 @@ func TestOthersFoldersLeftAlone(t *testing.T) {
 	if fi, _ := os.Lstat(filepath.Join(root, "docx")); fi.Mode()&os.ModeSymlink == 0 {
 		t.Fatal("symlink replaced")
 	}
-	if !strings.Contains(lines["pdf"][0], "isn't TheOneApp's") || !strings.Contains(lines["docx"][0], "symlink") {
+	if !strings.Contains(lines["pdf"][0], "isn't the One App's") || !strings.Contains(lines["docx"][0], "symlink") {
 		t.Fatalf("not reported: %q", lines)
 	}
 }

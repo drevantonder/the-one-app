@@ -111,7 +111,7 @@ func setup(c *sdk.Ctx) error {
 	c.OnReset(func() { p.mu.Lock(); p.holder = linked{}; p.mu.Unlock() })
 	sdk.Handle(c, "linked", func(_ sdk.Entry, in linked) error { p.mu.Lock(); p.holder = in; p.mu.Unlock(); return nil })
 	sdk.Handle(c, "unlinked", func(_ sdk.Entry, _ struct{}) error { p.mu.Lock(); p.holder = linked{}; p.mu.Unlock(); return nil })
-	store.SetOSInfo("TheOneApp", [3]uint32{0, 1, 0})
+	store.SetOSInfo("The One App", [3]uint32{0, 1, 0})
 
 	sdk.Op(c, "sign_in", "Link WhatsApp on this device, as WhatsApp Desktop is linked: with a code to enter on the phone, or by taking the link another device released.", sdk.Write, p.signIn)
 	c.OnReady(func(call *sdk.Call) {

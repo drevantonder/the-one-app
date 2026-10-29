@@ -1,4 +1,4 @@
-// Command one is TheOneApp: the node (one serve), the CLI for every plugin
+// Command one is the One App: the node (one serve), the CLI for every plugin
 // operation (one <plugin> <operation> ...), and the host for built-in plugins.
 package main
 
@@ -44,7 +44,7 @@ import (
 // version is set at build time; see `one update`.
 var version = "dev"
 
-const usage = `one: TheOneApp
+const usage = `one: the One App
 
   one serve [--addr ADDR] [--data DIR]   run this device's node
   one update                              update every device's node: from this checkout, or the latest release
@@ -178,7 +178,7 @@ func serve(args []string, bin string) error {
 		defer cancel()
 		_ = srv.Shutdown(sctx)
 	}()
-	log.Info("TheOneApp node running", "device", st.Device(), "api", "http://"+ln.Addr().String(), "mcp", "http://"+ln.Addr().String()+"/mcp", "data", *data)
+	log.Info("The One App node running", "device", st.Device(), "api", "http://"+ln.Addr().String(), "mcp", "http://"+ln.Addr().String()+"/mcp", "data", *data)
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

@@ -137,7 +137,7 @@ func OpenAPI(ops []core.Op, version string) map[string]any {
 	}
 	return map[string]any{
 		"openapi": "3.1.0",
-		"info":    map[string]any{"title": "TheOneApp", "version": version},
+		"info":    map[string]any{"title": "The One App", "version": version},
 		"paths":   paths,
 	}
 }

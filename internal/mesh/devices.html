@@ -77,7 +77,7 @@ addEventListener('message', event => {
 
 new ResizeObserver(() => send({ method: 'ui/notifications/size-changed', params: { height: document.documentElement.scrollHeight } }))
   .observe(document.documentElement);
-request('ui/initialize', { appInfo: { name: 'TheOneApp devices', version: '1' }, appCapabilities: {}, protocolVersion: '2026-01-26' })
+request('ui/initialize', { appInfo: { name: 'The One App devices', version: '1' }, appCapabilities: {}, protocolVersion: '2026-01-26' })
   .then(result => {
     if (result?.hostContext?.theme) document.documentElement.dataset.theme = result.hostContext.theme;
     send({ method: 'ui/notifications/initialized', params: {} });

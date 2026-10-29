@@ -126,7 +126,7 @@ func (f *files) sync(want map[string]map[string]string, gone []string) (edits ma
 				say("isn't a folder, left alone")
 				continue
 			case !ours(dir):
-				say("isn't TheOneApp's (no %s in it), left alone", marker)
+				say("isn't the One App's (no %s in it), left alone", marker)
 				continue
 			default:
 				cur, at, err := readSkill(name, dir)
@@ -260,7 +260,7 @@ func writeSkill(dir string, files map[string]string) error {
 
 func fill(dir string, files map[string]string) error {
 	if !ours(dir) {
-		if err := write(filepath.Join(dir, marker), "Made by TheOneApp's skills plugin, which keeps this skill the same on every device. Edits here are kept as a new revision; delete this file to take the folder over."); err != nil {
+		if err := write(filepath.Join(dir, marker), "Made by the One App's skills plugin, which keeps this skill the same on every device. Edits here are kept as a new revision; delete this file to take the folder over."); err != nil {
 			return err
 		}
 	}

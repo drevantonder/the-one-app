@@ -1,4 +1,4 @@
-// TheOneApp's menu bar: an MCP Apps host. It asks the node for the menu bar's
+// The One App's menu bar: an MCP Apps host. It asks the node for the menu bar's
 // items (the "menubar" tool), and shows each item's view, an HTML resource,
 // in a sandboxed web view that talks to the node through this host.
 import AppKit
@@ -47,7 +47,7 @@ actor MCPClient {
         let task = Task {
             _ = try await self.send("initialize", [
                 "protocolVersion": "2025-06-18", "capabilities": [:] as [String: Any],
-                "clientInfo": ["name": "TheOneApp menu bar", "version": "1"],
+                "clientInfo": ["name": "The One App menu bar", "version": "1"],
             ])
             _ = try await self.post(["jsonrpc": "2.0", "method": "notifications/initialized"])
         }
@@ -223,7 +223,7 @@ final class Section: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         case "ui/initialize":
             reply(id, [
                 "protocolVersion": "2026-01-26",
-                "hostInfo": ["name": "TheOneApp", "version": "1"],
+                "hostInfo": ["name": "The One App", "version": "1"],
                 "hostCapabilities": ["openLinks": [:] as [String: Any], "serverTools": [:] as [String: Any]],
                 "hostContext": [
                     "theme": theme(), "platform": "desktop", "displayMode": "inline", "availableDisplayModes": ["inline"],
@@ -307,7 +307,7 @@ final class Panel: NSViewController {
             let doc = try await client.request("tools/call", ["name": "menubar", "arguments": [:] as [String: Any]])
             items = (doc["structuredContent"] as? [String: Any])?["items"] as? [[String: Any]] ?? []
         } catch {
-            show([message("TheOneApp isn't running."), message(error.localizedDescription, small: true)])
+            show([message("The One App isn't running."), message(error.localizedDescription, small: true)])
             return
         }
         var fresh: [Section] = []
@@ -417,7 +417,7 @@ final class Panel: NSViewController {
     }
 
     private func quitButton() -> NSView {
-        let b = menuButton("Quit TheOneApp", action: #selector(NSApplication.terminate(_:)), target: NSApp)
+        let b = menuButton("Quit The One App", action: #selector(NSApplication.terminate(_:)), target: NSApp)
         b.keyEquivalent = "q"
         b.keyEquivalentModifierMask = .command
         return padded(b, top: 2)
@@ -449,7 +449,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let ring = NSImage(named: "MenuBarIcon")
         ring?.isTemplate = true
-        ring?.accessibilityDescription = "TheOneApp"
+        ring?.accessibilityDescription = "The One App"
         item.button?.image = ring
         item.button?.target = self
         item.button?.action = #selector(toggle(_:))

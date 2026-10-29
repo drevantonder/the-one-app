@@ -18,7 +18,7 @@ import (
 
 // A helper is a small Swift program for one Apple framework, built into
 // TheOneApp.app next to the one binary (see macos/build.sh). Running inside
-// the signed app means macOS asks for each permission once, as TheOneApp.
+// the signed app means macOS asks for each permission once, as The One App.
 type helper string
 
 var (
