@@ -621,7 +621,7 @@ func (t *tools) callAs(call *sdk.Call, tool string, input json.RawMessage, use b
 		}
 		if tool == "browser_prepare" && attempt == 0 && strings.Contains(fmt.Sprint(res.StructuredContent), "browser_endpoint_owner_mismatch") {
 			// The profile is open in a browser left by an earlier connection.
-			closeBrowsers(ctx, s)
+			closeBrowsers(ctx, s, false)
 			if res, err = session.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args}); err != nil {
 				continue
 			}
@@ -634,20 +634,34 @@ func (t *tools) callAs(call *sdk.Call, tool string, input json.RawMessage, use b
 	return sdk.MCPResult(res)
 }
 
-// closeBrowsers closes the browsers the Space's tools launched. Each belongs
-// to the connection that launched it: once that connection is gone (this
-// plugin restarted or reconnected), the tools can neither use nor close it,
-// and it holds its profile. The profiles are then marked as closed normally
-// (the tools end a connection's browsers the same way), or the browsers
-// would offer to restore their pages when next started.
-func closeBrowsers(ctx context.Context, s space) {
+// closeBrowsers closes the browsers the Space's tools launched, and with
+// signIns the one a sign-in opened too. Each of the tools' belongs to the
+// connection that launched it: once that connection is gone (this plugin
+// restarted or reconnected), the tools can neither use nor close it, and it
+// holds its profile. The profiles are then marked as closed normally (the
+// tools end a connection's browsers the same way), or the browsers would
+// offer to restore their pages when next started.
+func closeBrowsers(ctx context.Context, s space, signIns bool) {
 	const profiles = home + "/.local/state/cua-driver/browser-profiles/"
-	browsers := "[-]-user-data-dir=" + profiles // [-] so as not to match this script
+	keep := signInClass
+	if signIns {
+		keep = "--matches-no-browser"
+	}
 	_ = rt.exec(ctx, s.Name, nil, nil, "sh", "-c", `
-pkill -f -- '`+browsers+`'
-for i in $(seq 50); do pgrep -f -- '`+browsers+`' >/dev/null || break; sleep 0.1; done
+main() { # each browser's own process, not its helpers
+	for p in $(pgrep -f -- '[-]-user-data-dir=`+profiles+`'); do
+		c=$(tr '\0' ' ' </proc/$p/cmdline 2>/dev/null) || continue
+		case "$c" in *--type=*|*`+keep+`*) ;; *) echo $p ;; esac
+	done
+}
+pids=$(main)
+[ -n "$pids" ] && kill $pids
+for i in $(seq 50); do [ -z "$(main)" ] && break; sleep 0.1; done
 sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/' `+profiles+`*/Default/Preferences`)
 }
+
+// signInClass marks the browser a sign-in opens, which the tools didn't.
+const signInClass = "--class=one-sign-in"
 
 func (t *tools) connect(ctx context.Context, s space) (*mcp.ClientSession, error) {
 	t.mu.Lock()
@@ -656,7 +670,7 @@ func (t *tools) connect(ctx context.Context, s space) (*mcp.ClientSession, error
 		return session, nil
 	}
 	if !t.cleaned[s.Name] {
-		closeBrowsers(ctx, s)
+		closeBrowsers(ctx, s, false)
 		t.cleaned[s.Name] = true
 	}
 	transport := &mcp.StreamableClientTransport{Endpoint: s.local() + "/mcp", HTTPClient: &http.Client{Transport: bearer(s.token)}}

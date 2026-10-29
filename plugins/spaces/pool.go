@@ -416,7 +416,7 @@ func (p *pool) prepare(call *sdk.Call, s space, b borrowed) error {
 		return nil
 	}
 	return rt.exec(call.Context, s.Name, nil, nil, "sh", "-c",
-		owned+` && runuser -u cua -- env DISPLAY=:1 HOME=`+home+` setsid chromium --user-data-dir="$1" --password-store=basic --no-first-run --start-maximized >/dev/null 2>&1 </dev/null &`, "sh", dir)
+		owned+` && runuser -u cua -- env DISPLAY=:1 HOME=`+home+` setsid chromium `+signInClass+` --user-data-dir="$1" --password-store=basic --no-first-run --start-maximized >/dev/null 2>&1 </dev/null &`, "sh", dir)
 }
 
 // giveBack saves a sign-in's login and deletes the Space.
@@ -459,7 +459,7 @@ func savedLogins(call *sdk.Call, login string) ([]sdk.FileInfo, error) {
 // written out, and stores the login's profile, keeping the last few. It
 // gives the sites the login is signed in to.
 func saveLogin(call *sdk.Call, s space, login string) (loginSites, error) {
-	closeBrowsers(call.Context, s)
+	closeBrowsers(call.Context, s, true)
 	out := loginSites{Login: login, At: time.Now().UTC()}
 	tmp, err := os.CreateTemp("", "one-login-*.tar.gz")
 	if err != nil {
