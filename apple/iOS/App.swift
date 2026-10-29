@@ -23,10 +23,7 @@ struct Root: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ShellView(shell: shell, settings: AnyView(Button("Node", systemImage: "server.rack") { editing = true }))
-                .navigationTitle("")
-        }
+        ShellView(shell: shell, settings: AnyView(Button("Node", systemImage: "server.rack") { editing = true }))
         .sheet(isPresented: $editing) {
             NavigationStack {
                 Form {

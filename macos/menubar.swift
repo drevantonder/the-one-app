@@ -550,6 +550,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var monitors: [Any] = []
     private var observers: [NSObjectProtocol] = []
     private var window: NSWindow?
+    private var windowClosed: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Closed by hand, not .transient, so clicks in an open submenu don't close the menu.
@@ -586,17 +587,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     // showWindow opens the app's window, the same shell the iPhone and iPad
-    // app shows, on this Mac's node.
+    // app shows, on this Mac's node. While it's open the app is in the Dock
+    // like any other; closing it leaves just the menu bar item.
     func showWindow() {
         if window == nil {
-            let host = NSHostingController(rootView: ShellView(shell: Shell(node: nodeURL)).frame(minWidth: 420, minHeight: 480))
+            let host = NSHostingController(rootView: ShellView(shell: Shell(node: nodeURL)).frame(minWidth: 720, minHeight: 460))
+            host.sceneBridgingOptions = [.all]
             let w = NSWindow(contentViewController: host)
-            w.title = "The One App"
-            w.setContentSize(NSSize(width: 480, height: 600))
+            w.styleMask.insert(.fullSizeContentView)
+            w.toolbarStyle = .unified
+            w.setContentSize(NSSize(width: 1000, height: 680))
             w.isReleasedWhenClosed = false
-            w.center()
+            windowClosed = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+                MainActor.assumeIsolated { NSApp.setActivationPolicy(.accessory) }
+            }
             window = w
+            w.center()
         }
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
     }
