@@ -4,7 +4,10 @@
 
 <h1 align="center">The One App</h1>
 
-<p align="center"><b>One app to rule them all.</b></p>
+<p align="center"><i>
+One app to rule them all, one app to find them,<br>
+one app to bring them all, and in the network bind them.
+</i></p>
 
 <p align="center">A personal backend for your AI agents, running on the devices you already own.</p>
 
