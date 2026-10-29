@@ -221,10 +221,10 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 			signIn = got[i].url
 		}
 	}
-	head, text := p.summary(rooms, len(cells)-1)
-	head = widget.Row(widget.Stack{Gap: 12}, head, widget.Spacer(0),
+	items, text := p.summary(rooms, len(cells)-1)
+	head := widget.Row(widget.Stack{Gap: 8}, append(items, widget.Spacer(0),
 		widget.Popout(signIn, "Signing in to sites", &finish,
-			widget.Row(widget.Stack{Pad: 7, Radius: 8, Border: "solid"}, widget.Text("Sign in to a site", widget.Style{Size: "sm", Weight: "medium"}))))
+			widget.Row(widget.Stack{Pad: 7, Radius: 8, Border: "solid"}, widget.Text("Sign in to a site", widget.Style{Size: "sm", Weight: "medium", Lines: 1}))))...)
 	return widget.Col(widget.Stack{Gap: 20}, head, widget.Grid(min, 20, cells...)), strings.Join(append(lines, text), "\n"), nil
 }
 
@@ -246,10 +246,10 @@ func (p *pool) freeTile(call *sdk.Call, host string) widget.Node {
 
 // summary is one small line: how many Spaces run, what they use together,
 // and how full each device that runs them is.
-func (p *pool) summary(rooms []room, running int) (widget.Node, string) {
+func (p *pool) summary(rooms []room, running int) ([]widget.Node, string) {
 	var mem, limit int64
 	var cpu float64
-	items := []widget.Node{widget.Text(fmt.Sprintf("%d running", running), widget.Style{Size: "sm", Tone: "muted"})}
+	items := []widget.Node{widget.Text(fmt.Sprintf("%d running", running), widget.Style{Size: "sm", Tone: "muted", Lines: 1})}
 	text := fmt.Sprintf("%d running", running)
 	var devices []widget.Node
 	for _, r := range rooms {
@@ -262,9 +262,9 @@ func (p *pool) summary(rooms []room, running int) (widget.Node, string) {
 			limit += spaceMemory
 		}
 		inUse := r.Total - r.Free
-		devices = append(devices, widget.Text(strings.Split(r.Host, ".")[0], widget.Style{Size: "sm", Tone: "muted"}),
+		devices = append(devices, widget.Text(strings.Split(r.Host, ".")[0], widget.Style{Size: "sm", Tone: "muted", Lines: 1}),
 			widget.Progress(float64(inUse)/float64(r.Total), "", 44, level(float64(inUse)/float64(r.Total))),
-			widget.Text(fmt.Sprintf("%s of %s", size(inUse), size(r.Total)), widget.Style{Size: "sm", Tone: "muted"}))
+			widget.Text(fmt.Sprintf("%s of %s", size(inUse), size(r.Total)), widget.Style{Size: "sm", Tone: "muted", Lines: 1}))
 	}
 	if limit > 0 {
 		items = append(items, p.meters("", usage{CPU: cpu, Mem: mem}, limit)...)
@@ -274,7 +274,7 @@ func (p *pool) summary(rooms []room, running int) (widget.Node, string) {
 		items = append(items, widget.Spacer(6))
 		items = append(items, devices...)
 	}
-	return widget.Row(widget.Stack{Gap: 8}, items...), text
+	return items, text
 }
 
 // meters are a ring for memory, of limit, and a line of recent CPU, as on
