@@ -578,7 +578,8 @@ final class SidePanel: NSPanel {
 }
 
 // A BarItem is a menu bar item of its own, beside the app's: titled with the
-// first line of its tool's text, it opens the tool's widget below it.
+// first line of its tool's text, it opens the tool's widget below it. A new
+// title pushes the old one up and out.
 @MainActor
 final class BarItem: NSObject {
     let tool: String
@@ -607,7 +608,19 @@ final class BarItem: NSObject {
         live.show(result)
         let text = (result["content"] as? [[String: Any]])?.first?["text"] as? String ?? ""
         let line = text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
-        item.button?.title = line.count > 32 ? line.prefix(31).trimmingCharacters(in: .whitespaces) + "…" : line
+        let title = line.count > 32 ? line.prefix(31).trimmingCharacters(in: .whitespaces) + "…" : line
+        if let button = item.button, button.title != title {
+            if !button.title.isEmpty {
+                let push = CATransition()
+                push.type = .push
+                push.subtype = .fromTop
+                push.duration = 0.35
+                push.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                button.wantsLayer = true
+                button.layer?.add(push, forKey: "title")
+            }
+            button.title = title
+        }
         item.isVisible = !line.isEmpty
     }
 
