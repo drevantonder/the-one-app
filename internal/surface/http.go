@@ -24,6 +24,13 @@ func Handler(n *core.Node, version string) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, n.Operations())
 	})
+	mux.HandleFunc("GET /v1/resources", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("local") != "" {
+			writeJSON(w, http.StatusOK, nonNil(n.LocalResources()))
+			return
+		}
+		writeJSON(w, http.StatusOK, nonNil(n.Resources()))
+	})
 	mux.HandleFunc("GET /openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, OpenAPI(n.Operations(), version))
 	})
@@ -81,6 +88,13 @@ func callerOf(r *http.Request) protocol.Caller {
 }
 
 func mcpCaller() protocol.Caller { return protocol.Caller{Actor: "owner"} }
+
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
 
 func errText(err error) string { return err.Error() }
 

@@ -139,6 +139,7 @@ func serve(args []string) error {
 	}
 	m := mesh.New(node, st, portOf(*addr), log)
 	m.OnPeer = b.AdoptFromPeer
+	m.Version = version
 	node.SetCoordinator(coordinator{b, m, st.Device()})
 	node.SetDeclaredHost([]string{exe(), "plugin-host", "--declared"})
 	os.Setenv("ONE_ADDR", *addr) // plugins build their hook URLs from it

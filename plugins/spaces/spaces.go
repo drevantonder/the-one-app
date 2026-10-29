@@ -27,7 +27,7 @@ import (
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
-var Plugin = sdk.Plugin{ID: "spaces", Version: "0.1.0", Platforms: []string{"linux", "darwin"}, Setup: setup}
+var Plugin = sdk.Plugin{ID: "spaces", Name: "Spaces", Version: "0.1.0", Platforms: []string{"linux", "darwin"}, Setup: setup}
 
 type nameIn struct {
 	Name string `json:"name" jsonschema:"the Space's name"`

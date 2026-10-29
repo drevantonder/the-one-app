@@ -140,7 +140,7 @@ type (
 	}
 )
 
-var Reminders = sdk.Plugin{ID: "reminders", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
+var Reminders = sdk.Plugin{ID: "reminders", Name: "Reminders", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
 	op[noIn](c, eventkit, "lists", "reminders.lists", "List the reminder lists.", sdk.Read)
 	op[reminderList](c, eventkit, "list", "reminders.list", "List reminders, incomplete ones unless asked.", sdk.Read)
 	op[reminderNew](c, eventkit, "create", "reminders.create", "Create a reminder.", sdk.Write)
@@ -149,7 +149,7 @@ var Reminders = sdk.Plugin{ID: "reminders", Version: "0.1.0", Platforms: []strin
 	return nil
 }}
 
-var Calendar = sdk.Plugin{ID: "calendar", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
+var Calendar = sdk.Plugin{ID: "calendar", Name: "Calendar", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
 	op[noIn](c, eventkit, "calendars", "calendar.calendars", "List the calendars.", sdk.Read)
 	op[eventRange](c, eventkit, "events", "calendar.events", "List events in a time range (default: the next week).", sdk.Read)
 	op[eventNew](c, eventkit, "create", "calendar.create", "Create an event.", sdk.Write)
@@ -157,14 +157,14 @@ var Calendar = sdk.Plugin{ID: "calendar", Version: "0.1.0", Platforms: []string{
 	return nil
 }}
 
-var Contacts = sdk.Plugin{ID: "contacts", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
+var Contacts = sdk.Plugin{ID: "contacts", Name: "Contacts", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
 	op[contactSearch](c, contacts, "search", "contacts.search", "Find contacts by name, email address or phone number.", sdk.Read)
 	op[byID](c, contacts, "get", "contacts.get", "Get one contact by id.", sdk.Read)
 	op[noIn](c, contacts, "me", "contacts.me", "Get the user's own contact card.", sdk.Read)
 	return nil
 }}
 
-var IMessage = sdk.Plugin{ID: "imessage", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
+var IMessage = sdk.Plugin{ID: "imessage", Name: "iMessage", Version: "0.1.0", Platforms: []string{"darwin"}, Setup: func(c *sdk.Ctx) error {
 	op[chatsIn](c, messages, "chats", "messages.chats", "List recent iMessage and SMS conversations with their participants.", sdk.Read)
 	op[readIn](c, messages, "read", "messages.read", "Read the messages in one conversation, oldest first.", sdk.Read)
 	op[searchIn](c, messages, "search", "messages.search", "Search messages across conversations, newest first.", sdk.Read)

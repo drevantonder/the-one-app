@@ -3,13 +3,14 @@ package mesh
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
-	"slices"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -36,6 +37,11 @@ type Mesh struct {
 	mu      sync.Mutex
 	peers   map[string]*peer  // by tailnet IP
 	devices map[string]string // node device id → tailnet IP
+	known   []tsPeer          // this user's other machines, online or not
+	nodes   map[string]string // tailnet name → version, of machines seen running a node
+
+	// Version is this node's version, which peers show.
+	Version string
 
 	// OnPeer runs after each successful pull from a peer, with its base URL.
 	OnPeer func(ctx context.Context, base string)
@@ -50,11 +56,32 @@ type peer struct {
 	lastSync time.Time
 	lastErr  string
 	ops      []core.Op
+	views    []protocol.Resource
 	opsAt    time.Time
+	version  string
 }
 
+const (
+	nodesKey    = "mesh_nodes"
+	devicesView = "ui://one/devices"
+)
+
+//go:embed devices.html
+var devicesHTML string
+
 func New(node *core.Node, st *store.Store, port string, log *slog.Logger) *Mesh {
-	return &Mesh{node: node, store: st, port: port, log: log, who: whois{cache: map[string]whoisEntry{}}, peers: map[string]*peer{}, devices: map[string]string{}}
+	m := &Mesh{node: node, store: st, port: port, log: log, who: whois{cache: map[string]whoisEntry{}}, peers: map[string]*peer{}, devices: map[string]string{}, nodes: map[string]string{}}
+	if raw, _ := st.Meta(nodesKey); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &m.nodes)
+	}
+	node.AddView(protocol.Resource{URI: devicesView, Name: "Devices", MIMEType: protocol.MIMEApp, Text: devicesHTML})
+	node.AddCoreOp("devices", "List this user's devices that run a node, this one first: name, OS, version, and whether each is online.", core.SchemaFor[struct{}](), true,
+		func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) {
+			return m.devicesResult(), nil
+		})
+	node.SetUI("devices", &protocol.OperationUI{ResourceURI: devicesView})
+	node.AddMenubarItem(protocol.MenubarItem{ID: "one.devices", Title: "Devices", Tool: "devices", Resource: devicesView})
+	return m
 }
 
 type pullRequest struct {
@@ -64,6 +91,7 @@ type pullRequest struct {
 
 type pullResponse struct {
 	Device  string           `json:"device"`
+	Version string           `json:"version,omitempty"`
 	Entries []protocol.Entry `json:"entries"`
 }
 
@@ -90,7 +118,7 @@ func (m *Mesh) pull(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(entries) > 0 || wait == 0 {
-			writeJSON(w, pullResponse{Device: m.store.Device(), Entries: entries})
+			writeJSON(w, pullResponse{Device: m.store.Device(), Version: m.Version, Entries: entries})
 			return
 		}
 		select {
@@ -157,7 +185,7 @@ func (m *Mesh) join(ctx context.Context, h http.Handler, st tsStatus) error {
 	}()
 	m.node.SetName(st.Self.Name())
 	m.log.Info("on the tailnet", "name", st.Self.Name(), "url", fmt.Sprintf("http://%s:%s", strings.TrimSuffix(st.Self.DNSName, "."), m.port))
-	m.node.AddCoreOp("peers", "List this user's other devices on the tailnet and whether their nodes are syncing.", core.SchemaFor[struct{}](), true,
+	m.node.AddCoreOp("peers", "List this user's other devices on the tailnet, online or not, and whether their nodes are syncing.", core.SchemaFor[struct{}](), true,
 		func(context.Context, json.RawMessage, protocol.Caller) (protocol.Result, error) {
 			return m.peersResult(), nil
 		})
@@ -198,13 +226,19 @@ func (m *Mesh) refresh(ctx context.Context) {
 		return
 	}
 	want := map[string]tsPeer{}
+	var known []tsPeer
 	for _, p := range st.Peer {
-		if p.UserID == st.Self.UserID && p.Online && p.ipv4() != "" {
+		if p.UserID != st.Self.UserID || p.ipv4() == "" {
+			continue
+		}
+		known = append(known, p)
+		if p.Online {
 			want[p.ipv4()] = p
 		}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.known = known
 	for ip, p := range m.peers {
 		if _, ok := want[ip]; !ok {
 			p.cancel()
@@ -293,10 +327,28 @@ func (m *Mesh) peerOps(ctx context.Context, p *peer) {
 	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&ops) != nil {
 		return
 	}
+	views, _ := m.peerViews(ctx, p)
 	m.mu.Lock()
-	p.ops, p.opsAt = ops, time.Now()
+	p.ops, p.views, p.opsAt = ops, views, time.Now()
 	m.mu.Unlock()
 	m.publishRemote()
+}
+
+func (m *Mesh) peerViews(ctx context.Context, p *peer) ([]protocol.Resource, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.base(p)+"/v1/resources?local=1", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var views []protocol.Resource
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s", resp.Status)
+	}
+	return views, json.NewDecoder(resp.Body).Decode(&views)
 }
 
 // publishRemote gives the node every reachable peer's operations, in a
@@ -304,6 +356,7 @@ func (m *Mesh) peerOps(ctx context.Context, p *peer) {
 func (m *Mesh) publishRemote() {
 	m.mu.Lock()
 	var all []core.RemoteOp
+	var views []protocol.Resource
 	ips := make([]string, 0, len(m.peers))
 	for ip := range m.peers {
 		ips = append(ips, ip)
@@ -317,9 +370,11 @@ func (m *Mesh) publishRemote() {
 		for _, o := range p.ops {
 			all = append(all, core.RemoteOp{Op: o, Device: p.device, DeviceName: p.name})
 		}
+		views = append(views, p.views...)
 	}
 	m.mu.Unlock()
 	m.node.SetRemoteOps(all)
+	m.node.SetRemoteResources(views)
 }
 
 func (m *Mesh) base(p *peer) string { return "http://" + net.JoinHostPort(p.ip, m.port) }
@@ -349,7 +404,14 @@ func (m *Mesh) pullOnce(ctx context.Context, p *peer, wait time.Duration) (int, 
 	if out.Device != "" {
 		m.mu.Lock()
 		m.devices[out.Device] = p.ip
-		p.device = out.Device
+		p.device, p.version = out.Device, out.Version
+		if v, ok := m.nodes[p.name]; !ok || v != out.Version {
+			m.nodes[p.name] = out.Version
+			b, _ := json.Marshal(m.nodes)
+			if err := m.store.SetMeta(nodesKey, string(b)); err != nil {
+				m.log.Warn("saving the devices seen", "err", err)
+			}
+		}
 		m.mu.Unlock()
 	}
 	return m.node.Ingest(ctx, out.Entries)
@@ -394,33 +456,104 @@ func (m *Mesh) peersResult() protocol.Result {
 	type row struct {
 		Name     string `json:"name"`
 		IP       string `json:"ip"`
+		OS       string `json:"os,omitempty"`
+		Online   bool   `json:"online"`
 		Syncing  bool   `json:"syncing"`
+		Version  string `json:"version,omitempty"`
+		LastSeen string `json:"lastSeen,omitempty"`
 		LastSync string `json:"lastSync,omitempty"`
 		Error    string `json:"error,omitempty"`
 	}
 	m.mu.Lock()
 	var rows []row
-	for _, p := range m.peers {
-		r := row{Name: p.name, IP: p.ip, Syncing: p.reached, Error: p.lastErr}
-		if !p.lastSync.IsZero() {
-			r.LastSync = p.lastSync.Format(time.RFC3339)
+	for _, tp := range m.known {
+		r := row{Name: tp.Name(), IP: tp.ipv4(), OS: tp.OS, Online: tp.Online}
+		if !tp.Online && !tp.LastSeen.IsZero() {
+			r.LastSeen = tp.LastSeen.Format(time.RFC3339)
+		}
+		if p := m.peers[r.IP]; p != nil {
+			r.Syncing, r.Version, r.Error = p.reached, p.version, p.lastErr
+			if !p.lastSync.IsZero() {
+				r.LastSync = p.lastSync.Format(time.RFC3339)
+			}
 		}
 		rows = append(rows, r)
 	}
 	m.mu.Unlock()
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
 	var lines []string
-	for _, r := range slices.Clone(rows) {
-		state := "no node reachable"
-		if r.Syncing {
+	for _, r := range rows {
+		state := "offline"
+		switch {
+		case r.Syncing:
 			state = "syncing"
+		case r.Online:
+			state = "no node reachable"
 		}
 		lines = append(lines, fmt.Sprintf("%-20s %-16s %s", r.Name, r.IP, state))
 	}
 	if len(lines) == 0 {
-		lines = []string{"No other devices of yours are online on the tailnet."}
+		lines = []string{"You have no other devices on the tailnet."}
 	}
 	return protocol.Result{Text: strings.Join(lines, "\n"), Data: rows}
+}
+
+// devicesResult lists this device, then every other machine of this user's
+// that has been seen running a node, online or not.
+func (m *Mesh) devicesResult() protocol.Result {
+	type row struct {
+		Name     string `json:"name"`
+		OS       string `json:"os"`
+		Self     bool   `json:"self,omitempty"`
+		Online   bool   `json:"online"`
+		Version  string `json:"version,omitempty"`
+		LastSeen string `json:"lastSeen,omitempty"`
+	}
+	m.mu.Lock()
+	self := row{Name: m.node.Name(), OS: m.self.OS, Self: true, Online: true, Version: m.Version}
+	if self.OS == "" {
+		self.OS = map[string]string{"darwin": "macOS"}[runtime.GOOS]
+		if self.OS == "" {
+			self.OS = runtime.GOOS
+		}
+	}
+	var rows []row
+	for _, tp := range m.known {
+		version, isNode := m.nodes[tp.Name()]
+		p := m.peers[tp.ipv4()]
+		if p != nil && p.reached {
+			version, isNode = p.version, true
+		}
+		if !isNode {
+			continue
+		}
+		r := row{Name: tp.Name(), OS: tp.OS, Online: p != nil && p.reached, Version: version}
+		switch {
+		case r.Online:
+		case !tp.Online && !tp.LastSeen.IsZero():
+			r.LastSeen = tp.LastSeen.Format(time.RFC3339)
+		case p != nil && !p.lastSync.IsZero():
+			r.LastSeen = p.lastSync.Format(time.RFC3339)
+		}
+		rows = append(rows, r)
+	}
+	m.mu.Unlock()
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+	rows = append([]row{self}, rows...)
+	lines := make([]string, 0, len(rows))
+	for _, r := range rows {
+		state := "online"
+		switch {
+		case r.Self:
+			state = "this device"
+		case !r.Online && r.LastSeen != "":
+			state = "offline, last seen " + r.LastSeen
+		case !r.Online:
+			state = "offline"
+		}
+		lines = append(lines, fmt.Sprintf("%-20s %-8s %-12s %s", r.Name, r.OS, r.Version, state))
+	}
+	return protocol.Result{Text: strings.Join(lines, "\n"), Data: map[string]any{"devices": rows}}
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

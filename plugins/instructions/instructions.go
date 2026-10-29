@@ -25,7 +25,7 @@ type restoreIn struct {
 
 type noIn struct{}
 
-var Plugin = sdk.Plugin{ID: "instructions", Version: "0.1.0", Setup: setup}
+var Plugin = sdk.Plugin{ID: "instructions", Name: "Instructions", Version: "0.1.0", Setup: setup}
 
 func setup(c *sdk.Ctx) error {
 	var revs []revision

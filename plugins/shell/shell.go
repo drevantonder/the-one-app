@@ -37,7 +37,7 @@ type historyIn struct {
 	Limit int `json:"limit,omitempty" jsonschema:"how many recent commands; default 20"`
 }
 
-var Plugin = sdk.Plugin{ID: "shell", Version: "0.1.0", Setup: setup}
+var Plugin = sdk.Plugin{ID: "shell", Name: "Shell", Version: "0.1.0", Setup: setup}
 
 func setup(c *sdk.Ctx) error {
 	var log []sdk.Entry

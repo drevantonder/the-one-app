@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Devices</title>
+<style>
+  :root { color-scheme: light dark; --muted: color-mix(in srgb, currentColor 55%, transparent); --online: #34c759; }
+  [data-theme=light] { color-scheme: light; }
+  [data-theme=dark] { color-scheme: dark; }
+  html, body { margin: 0; background: transparent; font: 13px/1.3 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; align-items: center; gap: 10px; padding: 4px 8px; }
+  li.offline { opacity: .5; }
+  svg { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+  .text { flex: 1; min-width: 0; }
+  .name, .detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .detail { font-size: 11px; color: var(--muted); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--online); flex: none; }
+  .offline .dot { background: var(--muted); }
+</style>
+<ul id="list"></ul>
+<script>
+const icons = {
+  laptop: '<rect x="5" y="6" width="14" height="9" rx="1"/><path d="M3 18h18"/>',
+  server: '<rect x="4" y="4" width="16" height="7" rx="1"/><rect x="4" y="13" width="16" height="7" rx="1"/><path d="M8 7.5h.01M8 16.5h.01"/>',
+  phone: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>',
+  desktop: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M9 20h6M12 16v4"/>',
+};
+const iconFor = os => ({ macOS: 'laptop', linux: 'server', iOS: 'phone', android: 'phone', windows: 'desktop' })[os] ?? 'desktop';
+
+function ago(iso) {
+  const minutes = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? 'yesterday' : `${days} days ago`;
+}
+
+function render(data) {
+  document.getElementById('list').replaceChildren(...(data?.devices ?? []).map(d => {
+    const li = document.createElement('li');
+    if (!d.online) li.className = 'offline';
+    li.innerHTML = `<svg viewBox="0 0 24 24">${icons[iconFor(d.os)]}</svg><div class="text"><div class="name"></div><div class="detail"></div></div><span class="dot"></span>`;
+    li.querySelector('.name').textContent = d.name;
+    const version = d.version ? `v${d.version}` : '';
+    li.querySelector('.detail').textContent = d.online
+      ? [d.self && 'This device', version].filter(Boolean).join(' · ')
+      : (d.lastSeen ? `Last seen ${ago(d.lastSeen)}` : 'Offline');
+    return li;
+  }));
+}
+
+let nextId = 1;
+const pending = {};
+const send = message => parent.postMessage({ jsonrpc: '2.0', ...message }, '*');
+const request = (method, params) => new Promise((resolve, reject) => {
+  const id = nextId++;
+  pending[id] = { resolve, reject };
+  send({ id, method, params });
+});
+
+addEventListener('message', event => {
+  const message = event.data;
+  if (event.source !== parent || message?.jsonrpc !== '2.0') return;
+  if (message.id && pending[message.id]) {
+    const p = pending[message.id];
+    delete pending[message.id];
+    message.error ? p.reject(message.error) : p.resolve(message.result);
+  } else if (message.method === 'ui/notifications/tool-result') {
+    render(message.params.structuredContent);
+  } else if (message.method === 'ui/notifications/host-context-changed' && message.params.theme) {
+    document.documentElement.dataset.theme = message.params.theme;
+  }
+});
+
+new ResizeObserver(() => send({ method: 'ui/notifications/size-changed', params: { height: document.documentElement.scrollHeight } }))
+  .observe(document.documentElement);
+request('ui/initialize', { appInfo: { name: 'TheOneApp devices', version: '1' }, appCapabilities: {}, protocolVersion: '2026-01-26' })
+  .then(result => {
+    if (result?.hostContext?.theme) document.documentElement.dataset.theme = result.hostContext.theme;
+    send({ method: 'ui/notifications/initialized', params: {} });
+  });
+</script>
+</html>

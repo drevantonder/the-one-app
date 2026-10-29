@@ -19,7 +19,7 @@ import (
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
-var Plugin = sdk.Plugin{ID: "messenger", Version: "0.2.0", Setup: setup}
+var Plugin = sdk.Plugin{ID: "messenger", Name: "Messenger", Version: "0.2.0", Setup: setup}
 
 const (
 	space = "messenger" // the Space whose browser is signed in

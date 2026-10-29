@@ -44,7 +44,7 @@ type (
 	}
 )
 
-var Plugin = sdk.Plugin{ID: "memory", Version: "0.1.0", Setup: setup}
+var Plugin = sdk.Plugin{ID: "memory", Name: "Memory", Version: "0.1.0", Setup: setup}
 
 const protocolText = `## Memory
 

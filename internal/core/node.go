@@ -62,9 +62,13 @@ type Node struct {
 	extraOps []coreOp
 	coord    Coordinator
 	blobs    Blobs
-	declHost []string   // command that runs a declared plugin
-	remote   []RemoteOp // operations of plugins running on other devices
-	name     string     // this device's name; see Name
+	declHost []string               // command that runs a declared plugin
+	remote   []RemoteOp             // operations of plugins running on other devices
+	names    map[string]string      // plugin id → name, from its last manifest
+	views    []protocol.Resource    // the core's own views
+	menubar  []protocol.MenubarItem // the core's own menu bar items
+	remoteUI []protocol.Resource    // views of plugins running on other devices
+	name     string                 // this device's name; see Name
 }
 
 // SetDeclaredHost sets the command that runs declared plugins. The core
@@ -91,7 +95,9 @@ func New(st *store.Store, dataDir string, builtins []string, log *slog.Logger) (
 		sources:  map[string]*source{},
 		gens:     map[string]*generation{},
 		errs:     map[string]string{},
+		names:    map[string]string{},
 	}
+	n.addCoreViews()
 	for _, id := range builtins {
 		n.sources[id] = &source{id: id, builtin: true}
 	}
@@ -309,6 +315,11 @@ func (n *Node) spawn(ctx context.Context, src *source) (*generation, error) {
 	defer cancel()
 	if err := g.conn.Call(sctx, protocol.MethodDescribe, struct{}{}, &g.manifest); err != nil {
 		return fail(fmt.Errorf("describe: %w", err))
+	}
+	if g.manifest.Name != "" {
+		n.mu.Lock()
+		n.names[src.id] = g.manifest.Name
+		n.mu.Unlock()
 	}
 	if g.manifest.Protocol != protocol.Version {
 		return fail(fmt.Errorf("plugin speaks protocol %d, core speaks %d", g.manifest.Protocol, protocol.Version))

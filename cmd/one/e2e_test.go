@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -67,6 +68,35 @@ func TestNodeOverMCP(t *testing.T) {
 	for _, want := range []string{"memory_wake", "instructions_set", "memory_note", "memory_nap", "plugins_list"} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("tool %s missing from %v", want, names)
+		}
+	}
+
+	// MCP Apps: the menu bar lists views, each a ui:// resource showing a
+	// tool's structured result.
+	bar, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "menubar", Arguments: map[string]any{}})
+	if err != nil || bar.IsError {
+		t.Fatalf("menubar: %v %+v", err, bar)
+	}
+	var doc struct {
+		Items []struct{ ID, Tool, Resource string }
+	}
+	raw, _ := json.Marshal(bar.StructuredContent)
+	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Items) != 2 || doc.Items[0].ID != "one.devices" || doc.Items[1].ID != "one.plugins" {
+		t.Fatalf("menubar items: %s", raw)
+	}
+	for _, item := range doc.Items {
+		view, err := session.ReadResource(ctx, &mcp.ReadResourceParams{URI: item.Resource})
+		if err != nil || view.Contents[0].MIMEType != "text/html;profile=mcp-app" || !strings.Contains(view.Contents[0].Text, "ui/initialize") {
+			t.Fatalf("view %s: %v", item.Resource, err)
+		}
+		res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: item.Tool, Arguments: map[string]any{}})
+		if err != nil || res.IsError || res.StructuredContent == nil {
+			t.Fatalf("%s: no structured result: %v %+v", item.Tool, err, res)
+		}
+	}
+	for _, tool := range tools.Tools {
+		if ui, _ := tool.Meta["ui"].(map[string]any); tool.Name == "plugins_list" && ui["resourceUri"] != "ui://one/plugins" {
+			t.Fatalf("plugins_list _meta: %v", tool.Meta)
 		}
 	}
 
@@ -176,6 +206,9 @@ func TestNodeOverMCP(t *testing.T) {
 	}
 	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "fact 2") {
 		t.Fatalf("wake over stdio:\n%s", text)
+	}
+	if view, err := stdio.ReadResource(ctx, &mcp.ReadResourceParams{URI: "ui://one/devices"}); err != nil || !strings.Contains(view.Contents[0].Text, "ui/initialize") {
+		t.Fatalf("devices view over stdio: %v", err)
 	}
 }
 

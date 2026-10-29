@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the plugin protocol version. Bump it on breaking changes.
-const Version = 3
+const Version = 4
 
 // Core → plugin methods.
 const (
@@ -39,6 +39,7 @@ const (
 // Transform names a plugin can register.
 const (
 	TransformInstructions = "instructions"
+	TransformMenubar      = "menubar"
 )
 
 // Mode is how an entry type behaves when devices disagree.
@@ -54,6 +55,7 @@ const (
 type Manifest struct {
 	Protocol   int         `json:"protocol"`
 	ID         string      `json:"id"`
+	Name       string      `json:"name,omitempty"` // shown to people; the id if empty
 	Version    string      `json:"version"`
 	Entries    []EntryType `json:"entries"`
 	Operations []Operation `json:"operations"`
@@ -62,6 +64,23 @@ type Manifest struct {
 	Hooks      []string    `json:"hooks,omitempty"`
 	// Platforms the plugin runs on (GOOS values); empty means all.
 	Platforms []string `json:"platforms,omitempty"`
+	// Resources are MCP resources, such as MCP Apps views. Each URI starts
+	// with ui://<id>/.
+	Resources []Resource `json:"resources,omitempty"`
+}
+
+// MIMEApp is the MIME type of an MCP Apps view.
+const MIMEApp = "text/html;profile=mcp-app"
+
+// Resource is an MCP resource served as is, e.g. an MCP Apps view (HTML,
+// MIMEApp). Meta is its _meta, such as {"ui":{"csp":{...}}}.
+type Resource struct {
+	URI         string          `json:"uri"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	MIMEType    string          `json:"mimeType"`
+	Text        string          `json:"text"`
+	Meta        json.RawMessage `json:"meta,omitempty"`
 }
 
 // HookRequest is an HTTP request to /hooks/<plugin>/<name> on a node.
@@ -103,6 +122,15 @@ type Operation struct {
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"`
 	ReadOnly    bool            `json:"readOnly,omitempty"`
+	UI          *OperationUI    `json:"ui,omitempty"`
+}
+
+// OperationUI is an operation's MCP Apps metadata (the tool's _meta.ui):
+// the view that shows its result, and who may call it ("model", "app";
+// empty means both).
+type OperationUI struct {
+	ResourceURI string   `json:"resourceUri,omitempty"`
+	Visibility  []string `json:"visibility,omitempty"`
 }
 
 // Entry is one record in a device's append-only log.
@@ -187,4 +215,20 @@ type LogParams struct {
 // InstructionsDoc is the MCP server instructions, built by transforms.
 type InstructionsDoc struct {
 	Text string `json:"text"`
+}
+
+// MenubarDoc is the menu bar, built by transforms from the core's items.
+// Items show in order.
+type MenubarDoc struct {
+	Items []MenubarItem `json:"items"`
+}
+
+// MenubarItem is one view in the menu bar: Resource (an MCP Apps view)
+// showing the result of Tool (an MCP tool name) called with no arguments.
+// Title is shown above it; empty means the view draws its own header.
+type MenubarItem struct {
+	ID       string `json:"id"`
+	Title    string `json:"title,omitempty"`
+	Tool     string `json:"tool"`
+	Resource string `json:"resource"`
 }

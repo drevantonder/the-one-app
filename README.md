@@ -66,10 +66,12 @@ one memory wake
 
 On a Mac, build the signed app instead, which the Apple plugins (Reminders,
 Calendar, Contacts, iMessage) need: `macos/build.sh install` puts
-`TheOneApp.app` in `~/Applications` and links `one` into `~/.local/bin`. Run
-the node from the app; macOS then asks for each permission once, as
-TheOneApp, and keeps it across updates. Reading iMessages also needs Full Disk
-Access for TheOneApp.
+`TheOneApp.app` in `~/Applications` and links `one` into `~/.local/bin`. Open
+the app: it adds a menu bar item and starts the node, unless one is already
+running, logging to `~/Library/Logs/TheOneApp/node.log`. macOS then asks for
+each permission once, as TheOneApp, and keeps it across updates; a node
+started some other way may be asked again. Reading iMessages also needs Full
+Disk Access for TheOneApp.
 
 Connect your agents with the command `one mcp` (MCP over stdio), the same on
 every device. For example, `claude mcp add --scope user the-one-app -- one mcp`.
@@ -170,3 +172,16 @@ an API endpoint. A plugin can also run other plugins' operations
 (`call.Invoke`) and keep files in the bucket, encrypted (`call.PutFile`,
 `GetFile`, `Files`, `DeleteFile`). See [`examples/habits`](examples/habits), and
 [`examples/jobs`](examples/jobs) for jobs and consistent entries.
+
+## Views
+
+A plugin can show its results as an [MCP Apps](https://modelcontextprotocol.io/community/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp)
+view, an HTML page that MCP hosts like Claude draw: `c.View(name, html, meta)`
+adds one at `ui://<plugin>/<name>`, and `c.ShowIn(op, uri, appOnly)` shows an
+operation's result in it. The view gets its data through tool calls; it has
+no network access unless its CSP allows it.
+
+The menu bar is built like the MCP instructions: the core's items (Devices,
+Plugins) come first, then each plugin's `c.Menubar(...)` transform can add its
+own view, made for a narrow menu, or reorder or hide any. `one menubar` shows
+the result.

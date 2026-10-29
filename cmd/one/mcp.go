@@ -12,7 +12,8 @@ import (
 
 // mcpStdio serves MCP over stdin/stdout by relaying to this device's node, so
 // agents are configured the same way on every device: `one mcp`, no URL.
-// Tools and instructions mirror the node's, and follow it when plugins change.
+// Tools, resources and instructions mirror the node's, and follow it when
+// plugins change.
 func mcpStdio() error {
 	ctx := context.Background()
 	endpoint := "http://" + defaultAddr() + "/mcp"
@@ -21,6 +22,7 @@ func mcpStdio() error {
 		mu     sync.Mutex
 		server *mcp.Server
 		names  []string
+		uris   []string
 		remote *mcp.ClientSession
 	)
 	sync_ := func() {
@@ -48,10 +50,29 @@ func mcpStdio() error {
 			})
 			names = append(names, name)
 		}
+		var resources []*mcp.Resource
+		for r, err := range remote.Resources(ctx, nil) {
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "one mcp: list resources:", err)
+				return
+			}
+			resources = append(resources, r)
+		}
+		if len(uris) > 0 {
+			server.RemoveResources(uris...)
+		}
+		uris = uris[:0]
+		for _, r := range resources {
+			server.AddResource(r, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+				return remote.ReadResource(ctx, &mcp.ReadResourceParams{URI: req.Params.URI})
+			})
+			uris = append(uris, r.URI)
+		}
 	}
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "one-mcp", Version: version}, &mcp.ClientOptions{
-		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) { go sync_() },
+		ToolListChangedHandler:     func(context.Context, *mcp.ToolListChangedRequest) { go sync_() },
+		ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) { go sync_() },
 	})
 	var err error
 	for attempt := 0; ; attempt++ {

@@ -27,6 +27,8 @@ type tsPeer struct {
 	TailscaleIPs []string
 	UserID       int64
 	Online       bool
+	OS           string
+	LastSeen     time.Time
 }
 
 func (p tsPeer) ipv4() string {

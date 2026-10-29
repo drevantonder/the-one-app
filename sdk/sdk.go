@@ -39,6 +39,8 @@ type (
 	Image    = protocol.Image
 	Caller   = protocol.Caller
 	FileInfo = protocol.FileInfo
+	// MenubarItem is a view in the menu bar; see Ctx.Menubar.
+	MenubarItem = protocol.MenubarItem
 )
 
 const (
@@ -48,6 +50,7 @@ const (
 
 type Plugin struct {
 	ID        string
+	Name      string // shown to people, e.g. "iMessage"; the ID if empty
 	Version   string
 	Platforms []string // GOOS values the plugin runs on; empty means all
 	Setup     func(*Ctx) error
@@ -68,6 +71,7 @@ type Ctx struct {
 	jobs       map[string]func(*Call) error
 	hooks      map[string]func(*Call, protocol.HookRequest) (protocol.HookResponse, error)
 	ready      []func(*Call)
+	resources  []protocol.Resource
 }
 
 // OnReady runs once the plugin's log has been replayed, so its state is
@@ -210,6 +214,45 @@ func (c *Ctx) Instructions(fn func(text string) string) {
 	}
 }
 
+// View adds an MCP Apps view at ui://<plugin id>/<name>: an HTML page that
+// shows an operation's result in an MCP host, such as Claude or the menu
+// bar. It has no network access unless meta's ui.csp allows it, so it gets
+// its data through tool calls. It returns the view's URI.
+func (c *Ctx) View(name, html string, meta json.RawMessage) string {
+	uri := "ui://" + c.id + "/" + name
+	c.resources = append(c.resources, protocol.Resource{URI: uri, Name: c.id + " " + name, MIMEType: protocol.MIMEApp, Text: html, Meta: meta})
+	return uri
+}
+
+// ShowIn sets the view that shows an operation's result. With appOnly, only
+// views call it: agents don't see it as a tool.
+func (c *Ctx) ShowIn(op, viewURI string, appOnly bool) {
+	for i, o := range c.ops {
+		if o.Name == op {
+			ui := &protocol.OperationUI{ResourceURI: viewURI}
+			if appOnly {
+				ui.Visibility = []string{"app"}
+			}
+			c.ops[i].UI = ui
+			return
+		}
+	}
+	panic(fmt.Sprintf("%s: ShowIn: no operation %q", c.id, op))
+}
+
+// Menubar registers a transform over the menu bar's items: add this plugin's
+// own, or reorder or hide any.
+func (c *Ctx) Menubar(fn func(items []MenubarItem) []MenubarItem) {
+	c.transforms[protocol.TransformMenubar] = func(d, _ json.RawMessage) (any, error) {
+		var doc protocol.MenubarDoc
+		if err := json.Unmarshal(d, &doc); err != nil {
+			return nil, err
+		}
+		doc.Items = fn(doc.Items)
+		return doc, nil
+	}
+}
+
 // Logf writes to the core's log.
 func (c *Ctx) Logf(format string, args ...any) {
 	if c.conn == nil {
@@ -321,7 +364,7 @@ func (c *Ctx) handle(p Plugin) rpc.Handler {
 			for h := range c.hooks {
 				hooks = append(hooks, h)
 			}
-			return protocol.Manifest{Protocol: protocol.Version, ID: p.ID, Version: p.Version, Entries: c.entries, Operations: c.ops, Transforms: names, Schedules: c.schedules, Hooks: hooks, Platforms: p.Platforms}, nil
+			return protocol.Manifest{Protocol: protocol.Version, ID: p.ID, Name: p.Name, Version: p.Version, Entries: c.entries, Operations: c.ops, Transforms: names, Schedules: c.schedules, Hooks: hooks, Platforms: p.Platforms, Resources: c.resources}, nil
 		case protocol.MethodReset:
 			c.last = nil
 			for _, fn := range c.reset {
