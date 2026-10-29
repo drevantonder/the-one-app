@@ -35,12 +35,12 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Result{Text: text, Data: map[string]any{"devices": devices}}, nil
 	})
 
-	c.Widget("widget", "Devices", "Show this user's devices and how loaded each one is, as a widget.", time.Minute, func(call *sdk.Call, _ widget.Space) (widget.Node, string, error) {
+	c.Widget("widget", "Devices", "Show this user's devices and how loaded each one is, as a widget.", time.Minute, func(call *sdk.Call, space widget.Space) (widget.Node, string, error) {
 		devices, text, err := s.list(call)
 		if err != nil {
 			return nil, "", err
 		}
-		return devicesWidget(devices), text, nil
+		return devicesWidget(devices, space), text, nil
 	})
 
 	c.Menubar(func(items []sdk.MenubarItem) []sdk.MenubarItem {

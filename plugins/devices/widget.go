@@ -122,7 +122,36 @@ func str(v any) string {
 	return s
 }
 
-func devicesWidget(devices []map[string]any) widget.Node {
+// compactRow fits a small home-screen widget: each device's icon, name and
+// memory ring.
+func compactRow(d map[string]any) widget.Node {
+	name, _ := d["name"].(string)
+	online, _ := d["online"].(bool)
+	end := widget.Spacer(0)
+	var u Usage
+	if online && recode(d["usage"], &u) == nil && u.Memory != nil && u.Memory.Total > 0 {
+		end = widget.Gauge(float64(u.Memory.Used)/float64(u.Memory.Total), level(u.Memory.Used, u.Memory.Total), 15)
+	} else if online {
+		end = widget.Dot("green")
+	}
+	icon := iconFor(d)
+	icon["size"] = 18
+	return widget.Row(widget.Stack{Gap: 8, Dim: !online},
+		icon,
+		widget.Col(widget.Stack{Grow: true}, widget.Text(name, widget.Style{Size: "sm", Lines: 1})),
+		end)
+}
+
+// devicesWidget draws every device. Narrower than the full table needs, as
+// in a small home-screen widget, it shows just names and memory.
+func devicesWidget(devices []map[string]any, space widget.Space) widget.Node {
+	if space.W > 0 && space.W < 260 {
+		rows := []widget.Node{widget.Text("Devices", widget.Style{Size: "sm", Weight: "bold", Tone: "muted"})}
+		for _, d := range devices {
+			rows = append(rows, compactRow(d))
+		}
+		return widget.Col(widget.Stack{Gap: 7}, rows...)
+	}
 	rows := []widget.Node{header()}
 	for _, d := range devices {
 		rows = append(rows, row(d))
