@@ -122,11 +122,14 @@ func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*s
 		if err != nil || fwd != nil {
 			return deref(fwd), err
 		}
-		view, err := call.Invoke("spaces", "view", map[string]any{"name": b.Space, "minutes": minutes})
+		s, err := find(call.Context, b.Space)
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		url, _ := view.Data.(map[string]any)["url"].(string)
+		url, err := viewURL(call.Context, s, minutes)
+		if err != nil {
+			return sdk.Result{}, err
+		}
 		text := fmt.Sprintf("Sign in to sites in the %s login here:\n%s\nIt is saved in %d minutes, or as soon as you give back Space %q (give_back).", login, url, minutes, b.Space)
 		return sdk.Result{Text: text, Data: map[string]any{"space": b.Space, "login": login, "url": url, "until": b.Until}}, nil
 	})

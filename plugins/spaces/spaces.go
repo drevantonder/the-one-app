@@ -430,15 +430,10 @@ func setup(c *sdk.Ctx) error {
 		if in.Minutes == 0 {
 			minutes = 60
 		}
-		path, err := viewerPath(call.Context, s, minutes*60)
+		url, err := viewURL(call.Context, s, minutes)
 		if err != nil {
 			return sdk.Result{}, err
 		}
-		host, err := tailnetName(call.Context)
-		if err != nil {
-			return sdk.Result{}, err
-		}
-		url := fmt.Sprintf("https://%s:%d%s", host, s.port, path)
 		return sdk.Result{Text: fmt.Sprintf("%s\nThe link works for %d minutes.", url, minutes), Data: map[string]any{"url": url, "minutes": minutes}}, nil
 	})
 	sdk.Op(c, "refresh_tools", "Reload the tools Spaces offer.", sdk.Write, func(call *sdk.Call, _ struct{}) (sdk.Result, error) {
@@ -448,6 +443,19 @@ func setup(c *sdk.Ctx) error {
 		return sdk.Text(fmt.Sprintf("%d tools.", len(t.ops))), nil
 	})
 	return nil
+}
+
+// viewURL is a link to the Space's viewer that works for minutes.
+func viewURL(ctx context.Context, s space, minutes int) (string, error) {
+	path, err := viewerPath(ctx, s, minutes*60)
+	if err != nil {
+		return "", err
+	}
+	host, err := tailnetName(ctx)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("https://%s:%d%s", host, s.port, path), nil
 }
 
 // tools imports the MCP tools of the server in every Space. Each Space
