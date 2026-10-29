@@ -4,7 +4,6 @@ package devices
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -14,9 +13,6 @@ import (
 	"github.com/drevantonder/the-one-app/sdk"
 	"github.com/drevantonder/the-one-app/sdk/widget"
 )
-
-//go:embed devices.html
-var devicesHTML string
 
 type noIn struct{}
 
@@ -47,10 +43,8 @@ func setup(c *sdk.Ctx) error {
 		return devicesWidget(devices), text, nil
 	})
 
-	view := c.View("list", devicesHTML, nil)
-	c.ShowIn("list", view, false)
 	c.Menubar(func(items []sdk.MenubarItem) []sdk.MenubarItem {
-		return append([]sdk.MenubarItem{{ID: "devices", Tool: "devices_list", Resource: view}}, items...)
+		return append([]sdk.MenubarItem{{ID: "devices", Tool: "devices_widget"}}, items...)
 	})
 	return nil
 }

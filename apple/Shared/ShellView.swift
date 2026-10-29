@@ -29,6 +29,7 @@ final class Shell: ObservableObject {
     @Published var plugins: [Plugin] = []
     @Published var devices: (online: Int, total: Int)?
     @Published var error: String?
+    @Published var widgets: [LiveWidget] = []
     private var client: MCPClient?
     private let preferred: [URL]
 
@@ -80,6 +81,7 @@ final class Shell: ObservableObject {
                 return Plugin(id: id, name: r["name"] as? String ?? id, version: r["version"] as? String,
                               enabled: r["enabled"] as? Bool ?? false, running: r["running"] as? Bool ?? false)
             }
+            await loadWidgets()
             let list = try await call("devices")["devices"] as? [[String: Any]] ?? []
             devices = (list.filter { $0["online"] as? Bool == true }.count, list.count)
             known = list.compactMap { $0["name"] as? String }
@@ -90,21 +92,73 @@ final class Shell: ObservableObject {
     }
 }
 
+extension Shell {
+    // Every tool marked as a widget, each drawn afresh on every load.
+    func loadWidgets() async {
+        guard let client,
+              let tools = try? await client.request("tools/list")["tools"] as? [[String: Any]] else { return }
+        let names = tools.compactMap { t -> String? in
+            ((t["_meta"] as? [String: Any])?["dev.theoneapp/widget"] as? Bool) == true ? t["name"] as? String : nil
+        }
+        widgets = names.map { name in widgets.first { $0.tool == name } ?? LiveWidget(tool: name, client: client) }
+        await withTaskGroup(of: Void.self) { group in
+            for w in widgets { group.addTask { await w.load() } }
+        }
+    }
+}
+
 enum Page: Hashable {
-    case plugins
+    case home, plugins
+}
+
+// HomePage shows every widget on the user's devices.
+struct HomePage: View {
+    @ObservedObject var shell: Shell
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
+                ForEach(shell.widgets) { widget in
+                    WidgetCard(widget: widget)
+                }
+            }
+            .padding()
+        }
+        .overlay {
+            if shell.widgets.isEmpty, let error = shell.error {
+                ContentUnavailableView("Can't reach your devices", systemImage: "wifi.exclamationmark", description: Text(error))
+            }
+        }
+        .refreshable { await shell.load() }
+        .navigationTitle("Home")
+    }
+}
+
+struct WidgetCard: View {
+    @ObservedObject var widget: LiveWidget
+
+    var body: some View {
+        LiveWidgetView(widget: widget)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
 }
 
 // ShellView is the app: a sidebar of pages, for plugins to add their own to
 // later, beside the open page. On an iPhone it collapses to one column.
 struct ShellView: View {
     @StateObject var shell: Shell
-    @State private var page: Page? = .plugins
+    @State private var page: Page? = .home
 
     var body: some View {
         NavigationSplitView {
             List(selection: $page) {
                 SwiftUI.Section { identity }
                 SwiftUI.Section {
+                    NavigationLink(value: Page.home) {
+                        Label("Home", systemImage: "square.grid.2x2")
+                    }
                     NavigationLink(value: Page.plugins) {
                         Label("Plugins", systemImage: "puzzlepiece.extension")
                     }
@@ -115,14 +169,16 @@ struct ShellView: View {
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
             #endif
         } detail: {
-            switch page {
-            case .plugins, nil:
-                PluginsPage(shell: shell)
-                    .toolbar {
-                        ToolbarItem {
-                            Button("Refresh", systemImage: "arrow.clockwise") { Task { await shell.load() } }
-                        }
-                    }
+            Group {
+                switch page {
+                case .home, nil: HomePage(shell: shell)
+                case .plugins: PluginsPage(shell: shell)
+                }
+            }
+            .toolbar {
+                ToolbarItem {
+                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await shell.load() } }
+                }
             }
         }
         .task { await shell.load() }

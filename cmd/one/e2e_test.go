@@ -103,9 +103,12 @@ func TestNodeOverMCP(t *testing.T) {
 		t.Fatalf("menubar items: %s", raw)
 	}
 	for _, item := range doc.Items {
-		view, err := session.ReadResource(ctx, &mcp.ReadResourceParams{URI: item.Resource})
-		if err != nil || view.Contents[0].MIMEType != "text/html;profile=mcp-app" || !strings.Contains(view.Contents[0].Text, "ui/initialize") {
-			t.Fatalf("view %s: %v", item.Resource, err)
+		// An item with no view is a widget, which the apps draw natively.
+		if item.Resource != "" {
+			view, err := session.ReadResource(ctx, &mcp.ReadResourceParams{URI: item.Resource})
+			if err != nil || view.Contents[0].MIMEType != "text/html;profile=mcp-app" || !strings.Contains(view.Contents[0].Text, "ui/initialize") {
+				t.Fatalf("view %s: %v", item.Resource, err)
+			}
 		}
 		res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: item.Tool, Arguments: map[string]any{}})
 		if err != nil || res.IsError || res.StructuredContent == nil {
@@ -293,8 +296,8 @@ func TestNodeOverMCP(t *testing.T) {
 	if text := res.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "fact 2") {
 		t.Fatalf("board_read over stdio:\n%s", text)
 	}
-	if view, err := stdio.ReadResource(ctx, &mcp.ReadResourceParams{URI: "ui://devices/list"}); err != nil || !strings.Contains(view.Contents[0].Text, "ui/initialize") {
-		t.Fatalf("devices view over stdio: %v", err)
+	if view, err := stdio.ReadResource(ctx, &mcp.ReadResourceParams{URI: "ui://one/widget"}); err != nil || !strings.Contains(view.Contents[0].Text, "ui/initialize") {
+		t.Fatalf("widget view over stdio: %v", err)
 	}
 }
 

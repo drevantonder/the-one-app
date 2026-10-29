@@ -80,16 +80,54 @@ func shell(csp: [String: Any]?) -> String {
     """
 }
 
-// A Section is one menu bar item: its view, and the bridge between the view
-// and the node.
+// A MenuSection is one menu bar item: a widget drawn natively, or an MCP
+// Apps view in a web view.
 @MainActor
-final class Section: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+protocol MenuSection: AnyObject {
+    var title: String { get }
+    var tool: String { get }
+    var submenu: Bool { get }
+    var content: NSView { get }
+    var sized: Bool { get }
+    func update(_ result: [String: Any])
+    func close()
+}
+
+@MainActor
+final class WidgetSection: MenuSection {
+    let title: String
+    let tool: String
+    let submenu: Bool
+    let content: NSView
+    let sized = true
+    private let live: LiveWidget
+
+    init(item: [String: Any], result: [String: Any], panel: Panel) {
+        title = item["title"] as? String ?? ""
+        tool = item["tool"] as? String ?? ""
+        submenu = item["submenu"] as? Bool ?? false
+        live = LiveWidget(tool: tool, client: panel.client, result: result)
+        let host = NSHostingView(rootView: LiveWidgetView(widget: live).padding(.horizontal, 8).padding(.vertical, 4)
+            .frame(width: width - 12, alignment: .leading))
+        host.translatesAutoresizingMaskIntoConstraints = false
+        content = host
+        live.changed = { [weak panel] in panel?.fit() }
+    }
+
+    func update(_ result: [String: Any]) { live.show(result) }
+    func close() { content.removeFromSuperview() }
+}
+
+// A WebSection is an MCP Apps view, and the bridge between it and the node.
+@MainActor
+final class WebSection: NSObject, MenuSection, WKScriptMessageHandler, WKNavigationDelegate {
     let title: String
     let tool: String
     let submenu: Bool
     let html: String
     let web: WKWebView
     let height: NSLayoutConstraint
+    var content: NSView { web }
     weak var panel: Panel?
     private var result: [String: Any]
     private var initialized = false
@@ -199,10 +237,10 @@ final class Panel: NSViewController {
     weak var popover: NSPopover?
     var openWindow: (() -> Void)?
     private let stack = NSStackView()
-    private var sections: [Section] = []
+    private var sections: [MenuSection] = []
     private var shown = ""  // the items and their views, as last shown
     private(set) var side: NSPanel?
-    private var open: (section: Section, row: MenuRow)?
+    private var open: (section: MenuSection, row: MenuRow)?
 
     override func loadView() {
         stack.orientation = .vertical
@@ -228,19 +266,19 @@ final class Panel: NSViewController {
         if !row.bounds.contains(row.convert(event.locationInWindow, from: nil)) { closeSubmenu() }
     }
 
-    func openSubmenu(_ section: Section, from row: MenuRow) {
+    func openSubmenu(_ section: MenuSection, from row: MenuRow) {
         if open?.section === section { return }
         closeSubmenu()
         guard let window = view.window else { return }
         let side = self.side ?? SidePanel.make()
         self.side = side
         let content = side.contentView!
-        section.web.removeFromSuperview()
-        content.addSubview(section.web)
+        section.content.removeFromSuperview()
+        content.addSubview(section.content)
         NSLayoutConstraint.activate([
-            section.web.topAnchor.constraint(equalTo: content.topAnchor, constant: 6),
-            section.web.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 6),
-            section.web.widthAnchor.constraint(equalToConstant: width - 12),
+            section.content.topAnchor.constraint(equalTo: content.topAnchor, constant: 6),
+            section.content.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 6),
+            section.content.widthAnchor.constraint(equalToConstant: width - 12),
         ])
         open = (section, row)
         row.highlighted = true
@@ -251,7 +289,7 @@ final class Panel: NSViewController {
 
     func closeSubmenu() {
         guard let (section, row) = open else { return }
-        section.web.removeFromSuperview()
+        section.content.removeFromSuperview()
         row.highlighted = false
         if let side {
             side.parent?.removeChildWindow(side)
@@ -266,7 +304,7 @@ final class Panel: NSViewController {
         guard let side, let (section, row) = open, let window = view.window else { return }
         let screen = window.screen?.visibleFrame ?? .infinite
         let rowTop = window.convertToScreen(row.convert(row.bounds, to: nil)).maxY
-        let h = section.height.constant + 12
+        let h = section.content.fittingSize.height + 12
         let menu = window.convertToScreen(view.convert(view.bounds, to: nil))
         var x = menu.maxX + 4
         if x + width > screen.maxX { x = menu.minX - width - 4 }
@@ -293,7 +331,11 @@ final class Panel: NSViewController {
         }
         var views: [(item: [String: Any], html: String, csp: [String: Any]?)] = []
         for item in items {
-            guard let uri = item["resource"] as? String else { continue }
+            // An item without a view is a widget, drawn natively.
+            guard let uri = item["resource"] as? String, !uri.isEmpty else {
+                views.append((item, "", nil))
+                continue
+            }
             do {
                 let res = try await client.request("resources/read", ["uri": uri])
                 guard let content = (res["contents"] as? [[String: Any]])?.first, let html = content["text"] as? String else { continue }
@@ -308,16 +350,18 @@ final class Panel: NSViewController {
             await refreshResults()
             return
         }
-        var fresh: [Section] = []
+        var fresh: [MenuSection] = []
         for v in views {
             guard let tool = v.item["tool"] as? String,
                   let result = try? await client.request("tools/call", ["name": tool, "arguments": [:] as [String: Any]]) else { continue }
-            fresh.append(Section(item: v.item, html: v.html, csp: v.csp, result: result, panel: self))
+            fresh.append(v.html.isEmpty
+                ? WidgetSection(item: v.item, result: result, panel: self)
+                : WebSection(item: v.item, html: v.html, csp: v.csp, result: result, panel: self))
         }
         for f in fresh {  // in the window but invisible, so they load and lay out
-            f.web.alphaValue = 0
-            f.web.frame.size.width = width - 12
-            view.addSubview(f.web)
+            f.content.alphaValue = 0
+            f.content.frame.size.width = width - 12
+            view.addSubview(f.content)
         }
         let deadline = Date().addingTimeInterval(1.5)
         while Date() < deadline && !fresh.allSatisfy(\.sized) {
@@ -327,7 +371,7 @@ final class Panel: NSViewController {
         sections.forEach { $0.close() }
         sections = fresh
         shown = signature
-        fresh.forEach { $0.web.removeFromSuperview(); $0.web.alphaValue = 1 }
+        fresh.forEach { $0.content.removeFromSuperview(); $0.content.alphaValue = 1 }
         var arranged: [NSView] = []
         for s in sections {
             if s.submenu {
@@ -336,7 +380,7 @@ final class Panel: NSViewController {
                 continue
             }
             if !s.title.isEmpty { arranged.append(header(s.title)) }
-            arranged.append(s.web)
+            arranged.append(s.content)
         }
         show(arranged)
     }
@@ -375,7 +419,7 @@ final class Panel: NSViewController {
         ]
         for v in views + footer {
             stack.addArrangedSubview(v)
-            if v is WKWebView || v is NSBox || v is MenuRow {
+            if v is WKWebView || v is NSBox || v is MenuRow || sections.contains(where: { $0.content === v }) {
                 v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -12).isActive = true
             }
         }

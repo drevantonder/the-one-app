@@ -17,7 +17,7 @@ var icons = map[string]string{
 }
 
 // Columns' widths, shared by the header and every row so they line up.
-const ramW, cpuW, gpuW, diskW, statGap = 18, 36, 36, 30, 9
+const ramW, cpuW, gpuW, diskW, statGap = 24, 36, 36, 30, 8
 
 func iconFor(d map[string]any) widget.Node {
 	os, _ := d["os"].(string)
