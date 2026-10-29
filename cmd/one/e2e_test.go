@@ -109,7 +109,7 @@ func TestNodeOverMCP(t *testing.T) {
 	for _, item := range doc.Items {
 		ids = append(ids, item.ID)
 	}
-	if err != nil || len(ids) == 0 || !slices.Equal(ids, []string{"devices", "one.plugins", "headlines"}) && !slices.Equal(ids, []string{"devices", "one.plugins", "spaces", "headlines"}) || !doc.Items[len(ids)-1].Bar {
+	if err != nil || len(ids) == 0 || !slices.Equal(ids, []string{"devices", "one.plugins", "board"}) && !slices.Equal(ids, []string{"devices", "one.plugins", "board", "spaces"}) || !doc.Items[2].Bar {
 		t.Fatalf("menubar items: %s", raw)
 	}
 	for _, item := range doc.Items {
