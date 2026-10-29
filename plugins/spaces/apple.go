@@ -55,13 +55,7 @@ func newApple() (runtime, error) {
 	if _, err := exec.LookPath("container"); err != nil {
 		return nil, fmt.Errorf("needs Apple's container (brew install container; brew services start container)")
 	}
-	a := &apple{forwards: map[string]net.Listener{}}
-	if spaces, err := a.list(context.Background()); err == nil {
-		for _, s := range spaces {
-			a.forward(s.Name, s.port)
-		}
-	}
-	return a, nil
+	return &apple{forwards: map[string]net.Listener{}}, nil
 }
 
 // socket is where a Space's server is published on the Mac.
@@ -116,6 +110,7 @@ func (a *apple) list(ctx context.Context) ([]space, error) {
 			s.LastUsed = c.Status.StartedDate
 		}
 		s.port, _ = strconv.Atoi(l["one.port"])
+		a.forward(s.Name, s.port) // once the runtime answers, which at login can take a while
 		spaces = append(spaces, s)
 	}
 	return spaces, nil

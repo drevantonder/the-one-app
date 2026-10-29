@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/drevantonder/the-one-app/sdk"
 )
 
 // A Space is a container running Cua's Linux desktop image, with its home
@@ -99,6 +101,36 @@ func create(ctx context.Context, name string) (space, error) {
 		return space{}, err
 	}
 	return s, ready(ctx, s)
+}
+
+// restart starts this device's stopped Spaces that weren't stopped with
+// stop, once the runtime answers: at login it may still be starting. It
+// reports whether it waited or started any.
+func restart(call *sdk.Call, down func(string) bool) bool {
+	spaces, err := list(call.Context)
+	changed := err != nil
+	for i := 0; err != nil; i++ {
+		if i == 60 {
+			call.Logf("spaces: not restarting Spaces: %v", err)
+			return true
+		}
+		time.Sleep(5 * time.Second)
+		spaces, err = list(call.Context)
+	}
+	for _, s := range spaces {
+		if s.State == "running" || down(s.Name) {
+			continue
+		}
+		if err := rt.start(call.Context, s.Name); err != nil {
+			call.Logf("spaces: restarting %s: %v", s.Name, err)
+			continue
+		}
+		changed = true
+		if err := ready(call.Context, s); err != nil {
+			call.Logf("spaces: %v", err)
+		}
+	}
+	return changed
 }
 
 func remove(ctx context.Context, s space) error {

@@ -157,10 +157,32 @@ func setup(c *sdk.Ctx) error {
 		slices.Sort(names)
 		return names
 	}
+	// Spaces stopped with stop stay stopped; others are started when the
+	// node starts, as after a reboot.
+	down := map[string]bool{}
+	isDown := func(name string) bool { mu.Lock(); defer mu.Unlock(); return down[name] }
+	c.Entry("stopped", sdk.Available)
+	c.Entry("started", sdk.Available)
+	c.OnReset(func() { mu.Lock(); clear(down); mu.Unlock() })
+	sdk.Handle(c, "stopped", func(_ sdk.Entry, in released) error { mu.Lock(); down[in.Name] = true; mu.Unlock(); return nil })
+	sdk.Handle(c, "started", func(_ sdk.Entry, in released) error { mu.Lock(); delete(down, in.Name); mu.Unlock(); return nil })
+	up := func(call *sdk.Call, name string) error {
+		if !isDown(name) {
+			return nil
+		}
+		_, err := call.Append("started", released{Name: name})
+		return err
+	}
 	c.OnReady(func(call *sdk.Call) {
 		locate(call)
 		_ = t.refresh(call.Context)
 		go keepBackedUp(call.Detached(), held)
+		go func(call *sdk.Call) {
+			if restart(call, isDown) {
+				locate(call)
+				_ = t.refresh(call.Context)
+			}
+		}(call.Detached())
 	})
 
 	sdk.Op(c, "create", "Create a Space: a Linux desktop of its own, with a browser, for agents to use. Sign in to sites in it with view. A Space that has backups, from this device or another, is restored from the newest.", sdk.Write, func(call *sdk.Call, in nameIn) (sdk.Result, error) {
@@ -184,6 +206,9 @@ func setup(c *sdk.Ctx) error {
 		}
 		s, err := create(call.Context, in.Name)
 		if err != nil {
+			return sdk.Result{}, err
+		}
+		if err := up(call, s.Name); err != nil {
 			return sdk.Result{}, err
 		}
 		defer func() { locate(call); _ = t.refresh(call.Context) }()
@@ -270,6 +295,9 @@ func setup(c *sdk.Ctx) error {
 		if err := rt.start(call.Context, s.Name); err != nil {
 			return sdk.Result{}, err
 		}
+		if err := up(call, s.Name); err != nil {
+			return sdk.Result{}, err
+		}
 		if err := ready(call.Context, s); err != nil {
 			return sdk.Result{}, err
 		}
@@ -290,6 +318,9 @@ func setup(c *sdk.Ctx) error {
 		}
 		t.drop(in.Name)
 		if err := rt.stop(call.Context, s.Name); err != nil {
+			return sdk.Result{}, err
+		}
+		if _, err := call.Append("stopped", released{Name: s.Name}); err != nil {
 			return sdk.Result{}, err
 		}
 		return sdk.Text("Stopped."), nil
