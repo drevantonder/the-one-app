@@ -145,8 +145,8 @@ brew services start container`), a light VM per Space. Every device lists
 every Space and passes calls on to the one it is on.
 
 ```sh
-one spaces create --name messenger
-one spaces view --name messenger    # a link to the desktop, from any of your devices
+one spaces create --name work
+one spaces view --name work    # a link to the desktop, from any of your devices
 ```
 
 Sign in to sites in the viewer once; the Space's home folder is a volume of
@@ -172,13 +172,13 @@ long as one can spare the memory.
 Logins are kept in the bucket, encrypted. An agent's changes to its copy go
 when its Space does; a borrowed Space left idle for 15 minutes is given back.
 
-The built-in `messenger` plugin reads Facebook Messenger this way, from the
-browser in the Space called messenger, where you sign in to messenger.com
-once: `one messenger chats`, `read --chat …` (an unread chat is marked unread
+The built-in `messenger` plugin reads Facebook Messenger this way, in a
+Space it borrows with your default login, once you've signed in to
+messenger.com in it: `one messenger chats`, `read --chat …` (an unread chat is marked unread
 again), `search --query …` and `send --chat … --text …` (to a recent chat,
 or a person by their exact name).
 
-Spaces aren't backed up unless you ask: `one spaces backup --name messenger
+Spaces aren't backed up unless you ask: `one spaces backup --name work
 --on true` stores the home folder (without caches) in the bucket, encrypted,
 when the Space stops and every 6 hours, keeping the last 3. To move a Space,
 `release` it, then `create` it on the other device, which restores it.

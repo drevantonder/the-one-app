@@ -1,10 +1,10 @@
 // Package messenger is the built-in plugin that reads Facebook Messenger.
 // Messenger has no API for personal accounts and its chats are end-to-end
-// encrypted, so it reads messenger.com in a browser: the one in the Space
-// called messenger (see the spaces plugin), where the user signs in once.
+// encrypted, so it reads messenger.com in a browser: in a Space it borrows
+// (see the spaces plugin), signed in with the user's login for everything,
+// where they sign in to messenger.com once:
 //
-//	one spaces create --name messenger
-//	one spaces view --name messenger   # open messenger.com there and sign in
+//	one spaces sign_in   # open messenger.com there and sign in
 package messenger
 
 import (
@@ -22,7 +22,7 @@ import (
 var Plugin = sdk.Plugin{ID: "messenger", Name: "Messenger", Version: "0.2.0", Setup: setup}
 
 const (
-	space = "messenger" // the Space whose browser is signed in
+	login = "default" // the Spaces login signed in to messenger.com
 	home  = "https://www.messenger.com/"
 )
 
@@ -55,7 +55,7 @@ func setup(c *sdk.Ctx) error {
 		}
 		chats := page.chats()
 		if len(chats) == 0 {
-			return sdk.Result{}, errors.New("no chats found: is the messenger Space signed in? Open it with `one spaces view --name messenger`")
+			return sdk.Result{}, errors.New("no chats found: is your login signed in to messenger.com? Sign in with `one spaces sign_in`")
 		}
 		var shown []Chat
 		var lines []string
@@ -239,6 +239,7 @@ func setup(c *sdk.Ctx) error {
 // browser is the Space's browser, attached through the spaces plugin.
 type browser struct {
 	mu      sync.Mutex
+	space   string // the borrowed Space; given back when idle, then borrowed again
 	session string // the Space's tools group work into sessions; the browser lives in this one
 	tries   int
 	target  string
@@ -289,9 +290,44 @@ func (p page) ref(role, name string) string {
 	return ""
 }
 
-// do runs one of the Space's tools.
+// borrow takes a Space with the login, unless one is borrowed.
+func (b *browser) borrow(call *sdk.Call) error {
+	if b.space != "" {
+		return nil
+	}
+	res, err := call.Invoke("spaces", "borrow", map[string]any{"for": "Reading Messenger", "login": login})
+	if err != nil {
+		return err
+	}
+	b.space, _ = res.Data.(map[string]any)["space"].(string)
+	b.target, b.tab = "", ""
+	if b.space == "" {
+		return errors.New("couldn't borrow a Space")
+	}
+	return nil
+}
+
+// do runs one of the Space's tools, borrowing a Space again if the last one
+// was given back.
 func (b *browser) do(call *sdk.Call, tool string, in map[string]any) (map[string]any, error) {
-	in["space"], in["session"] = space, b.session
+	data, err := b.try(call, tool, in)
+	if err != nil && strings.Contains(err.Error(), "no Space named") {
+		b.space = ""
+		if tool != "browser_prepare" {
+			if err := b.open(call); err != nil {
+				return nil, err
+			}
+		}
+		data, err = b.try(call, tool, in)
+	}
+	return data, err
+}
+
+func (b *browser) try(call *sdk.Call, tool string, in map[string]any) (map[string]any, error) {
+	if err := b.borrow(call); err != nil {
+		return nil, err
+	}
+	in["space"], in["session"] = b.space, b.session
 	if b.target != "" && tool != "browser_prepare" && tool != "list_windows" {
 		in["target_id"], in["tab_id"] = b.target, b.tab
 	}
@@ -309,7 +345,7 @@ func (b *browser) do(call *sdk.Call, tool string, in map[string]any) (map[string
 // open starts the browser if needed and attaches to its tab.
 func (b *browser) open(call *sdk.Call) error {
 	b.target, b.tab = "", ""
-	prepared, err := b.do(call, "browser_prepare", map[string]any{"allow_launch": true, "profile": map[string]any{"mode": "isolated_named", "name": space}})
+	prepared, err := b.do(call, "browser_prepare", map[string]any{"allow_launch": true, "profile": map[string]any{"mode": "isolated_named", "name": login}})
 	if err != nil && strings.Contains(err.Error(), "to this transport") && b.tries < 5 {
 		// The spaces plugin restarted, so the session's name belongs to its
 		// previous connection: carry on in a new one.
@@ -318,7 +354,7 @@ func (b *browser) open(call *sdk.Call) error {
 		return b.open(call)
 	}
 	if err != nil {
-		return fmt.Errorf("starting the browser in the %s Space: %w", space, err)
+		return fmt.Errorf("starting the browser in Space %s: %w", b.space, err)
 	}
 	pid, _ := prepared["prepared_pid"].(float64)
 	windows, err := b.do(call, "list_windows", map[string]any{"pid": int(pid)})
