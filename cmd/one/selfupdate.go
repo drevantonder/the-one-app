@@ -101,12 +101,93 @@ func updateRoutes(mux *http.ServeMux, exe string, restart func()) {
 	})
 }
 
-func install(exe, want string, body io.Reader) error {
-	dir := filepath.Dir(exe)
+// staging prefixes the dir an install unpacks into, beside what it replaces.
+const staging = ".one-update-"
+
+// installed is what an install replaces: the app bundle exe runs from, or exe.
+func installed(exe string) string {
 	if app := appBundle(exe); app != "" {
-		dir = filepath.Dir(app)
+		return app
 	}
-	tmp, err := os.MkdirTemp(dir, ".one-update-")
+	return exe
+}
+
+// home is where exe's build belongs. A build left in a staging dir, by an
+// install cut short, belongs beside that dir.
+func home(exe string) string {
+	p := installed(exe)
+	if dir := filepath.Dir(p); strings.HasPrefix(filepath.Base(dir), staging) {
+		return filepath.Join(filepath.Dir(dir), filepath.Base(p))
+	}
+	return p
+}
+
+// settle readies a starting node's install dir and returns the exe to
+// restart as. An install cut short, as when the app restarts the node in
+// the middle of the next update, leaves its staging dir behind, and a whole
+// app in it that macOS may then launch in place of the real one. Every
+// staging dir goes but the one this build runs from, if it does, and it
+// puts a copy of itself home: the app still running from there moves home
+// when it next relaunches.
+func settle(exe string) (string, error) {
+	p, h := installed(exe), home(exe)
+	left, _ := filepath.Glob(filepath.Join(filepath.Dir(h), staging+"*"))
+	for _, d := range left {
+		if !strings.HasPrefix(exe, d+string(filepath.Separator)) {
+			_ = os.RemoveAll(d)
+		}
+	}
+	if h == p {
+		return exe, nil
+	}
+	if err := copyHome(p, h); err != nil {
+		return exe, err
+	}
+	return filepath.Join(h, strings.TrimPrefix(exe, p)), nil
+}
+
+func copyHome(from, to string) error {
+	tmp, err := os.MkdirTemp(filepath.Dir(to), staging)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	dst := filepath.Join(tmp, filepath.Base(to))
+	if strings.HasSuffix(from, ".app") {
+		if out, err := exec.Command("ditto", from, dst).CombinedOutput(); err != nil {
+			return fmt.Errorf("ditto: %s", out)
+		}
+	} else if err := copyFile(from, dst); err != nil {
+		return err
+	}
+	return replace(dst, to)
+}
+
+func copyFile(from, to string) error {
+	in, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(to, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// installing keeps two updates from swapping the same build at once.
+var installing sync.Mutex
+
+func install(exe, want string, body io.Reader) error {
+	installing.Lock()
+	defer installing.Unlock()
+	to := home(exe)
+	tmp, err := os.MkdirTemp(filepath.Dir(to), staging)
 	if err != nil {
 		return err
 	}
@@ -121,12 +202,12 @@ func install(exe, want string, body io.Reader) error {
 		return err
 	}
 
-	from, to, newExe := filepath.Join(tmp, "upload"), exe, filepath.Join(tmp, "upload")
+	from, newExe := filepath.Join(tmp, "upload"), filepath.Join(tmp, "upload")
 	if app := appBundle(exe); app != "" {
 		if err := unzip(from, tmp); err != nil {
 			return err
 		}
-		from, to = filepath.Join(tmp, filepath.Base(app)), app
+		from = filepath.Join(tmp, filepath.Base(app))
 		newExe = filepath.Join(from, strings.TrimPrefix(exe, app))
 	} else if err := os.Chmod(from, 0o755); err != nil {
 		return err
@@ -140,10 +221,15 @@ func install(exe, want string, body io.Reader) error {
 			return fmt.Errorf("the app's signature is invalid: %s", out)
 		}
 	}
-	// A running program can't be overwritten everywhere, but it can be moved.
+	return replace(from, to)
+}
+
+// replace moves from over to. A running program can't be overwritten
+// everywhere, but it can be moved.
+func replace(from, to string) error {
 	old := to + ".old"
 	_ = os.RemoveAll(old)
-	if err := os.Rename(to, old); err != nil {
+	if err := os.Rename(to, old); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err := os.Rename(from, to); err != nil {

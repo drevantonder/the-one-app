@@ -74,3 +74,43 @@ func TestSelfUpdate(t *testing.T) {
 		t.Fatal("the node exited instead of restarting in place")
 	}
 }
+
+// TestSettle clears the staging dirs installs cut short leave behind, and
+// puts a build that runs from one back where it belongs.
+func TestSettle(t *testing.T) {
+	dir := t.TempDir()
+	write := func(path, data string) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(data), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin := filepath.Join(dir, "one")
+	write(bin, "old")
+	write(filepath.Join(dir, ".one-update-1", "upload"), "cut short")
+	stray := filepath.Join(dir, ".one-update-2", "one")
+	write(stray, "new")
+
+	exe, err := settle(stray)
+	if err != nil || exe != bin {
+		t.Fatalf("settle(stray) = %q, %v; want %q", exe, err, bin)
+	}
+	if b, _ := os.ReadFile(bin); string(b) != "new" {
+		t.Fatalf("home holds %q, want the stray build", b)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".one-update-1")); !os.IsNotExist(err) {
+		t.Fatal("a stale staging dir survived")
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Fatal("settle removed the build it runs from")
+	}
+
+	if exe, err := settle(bin); err != nil || exe != bin {
+		t.Fatalf("settle(home) = %q, %v", exe, err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".one-update-*")); len(left) > 0 {
+		t.Fatalf("staging dirs left: %v", left)
+	}
+}

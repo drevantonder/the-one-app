@@ -665,6 +665,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         WidgetContext.popouts = { Popouts.shared.open($0, $1, $2) }
         NSApp.mainMenu = mainMenu()
+        if home != Bundle.main.bundleURL, FileManager.default.fileExists(atPath: home.path) {
+            relaunch()
+            return
+        }
         Task {
             if await anotherCopyStays() { NSApp.terminate(nil) } else { start() }
         }
@@ -806,9 +810,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // watches its own executable and relaunches itself, and the node, when
     // a new build lands.
     private func executableID() -> Int? {
-        guard let path = Bundle.main.executablePath else { return nil }
+        let path = home.appendingPathComponent("Contents/MacOS/" + Bundle.main.executableURL!.lastPathComponent).path
         return (try? FileManager.default.attributesOfItem(atPath: path))?[.systemFileNumber] as? Int
     }
+
+    // home is where the app belongs. A copy in a staging dir, left by an
+    // update cut short, belongs beside it, and launched there, it hands over.
+    private let home: URL = {
+        let app = Bundle.main.bundleURL
+        let dir = app.deletingLastPathComponent()
+        guard dir.lastPathComponent.hasPrefix(".one-update-") else { return app }
+        return dir.deletingLastPathComponent().appendingPathComponent(app.lastPathComponent)
+    }()
 
     // relaunch reopens the window if it's open, where it was, on the page it
     // showed, and in front only if it was in front.
@@ -817,7 +830,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         node.stop()
         let open = Process()
         open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        open.arguments = ["-n", Bundle.main.bundlePath]
+        open.arguments = ["-n", home.path]
         try? open.run()
         NSApp.terminate(nil)
     }

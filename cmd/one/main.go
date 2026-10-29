@@ -80,7 +80,10 @@ func main() {
 	var err error
 	switch os.Args[1] {
 	case "serve":
-		bin := self()
+		bin, serr := settle(self())
+		if serr != nil {
+			fmt.Fprintln(os.Stderr, "putting this build in place:", serr)
+		}
 		if err = serve(os.Args[2:], bin); errors.Is(err, errRestart) {
 			err = reexec(bin)
 		}
