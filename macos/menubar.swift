@@ -103,6 +103,7 @@ final class Section: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         self.result = result
         self.panel = panel
         let config = WKWebViewConfiguration()
+        config.preferences.inactiveSchedulingPolicy = .none  // keep updating while the menu is closed
         web = WKWebView(frame: NSRect(x: 0, y: 0, width: width - 12, height: 1), configuration: config)
         web.setValue(false, forKey: "drawsBackground")
         web.translatesAutoresizingMaskIntoConstraints = false
@@ -541,7 +542,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         item.button?.action = #selector(toggle(_:))
         self.item = item
         if UserDefaults.standard.object(forKey: "openAtLogin") == nil { setOpenAtLogin(true) }
-        Task { await node.ensureRunning() }
+        // Build the views now and keep their data fresh, so opening the menu
+        // shows recent results at once instead of old ones that then jump.
+        Task {
+            await node.ensureRunning()
+            await panel.reload()
+        }
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            Task { @MainActor in await self.panel.refreshResults() }
+        }
         let built = executableID()
         Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
             MainActor.assumeIsolated {
