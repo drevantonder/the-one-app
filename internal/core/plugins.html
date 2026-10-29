@@ -13,6 +13,12 @@
   button:hover { background: var(--hover); }
   .check { width: 14px; text-align: center; }
   .off { color: var(--muted); }
+  li { display: flex; align-items: center; }
+  li > .row { flex: 1; }
+  .row:not(.toggle):hover { background: none; }
+  .remove { width: auto; flex: none; margin-left: 4px; color: var(--muted); visibility: hidden; }
+  li:hover .remove, .remove.confirm { visibility: visible; }
+  .remove.confirm { color: #d70015; }
   form { display: grid; gap: 6px; padding: 6px 8px 8px; }
   label { display: grid; gap: 2px; font-size: 11px; color: var(--muted); }
   input { font: inherit; padding: 4px 6px; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 5px; background: transparent; color: CanvasText; }
@@ -40,19 +46,39 @@ const request = (method, params) => new Promise((resolve, reject) => {
   send({ id, method, params });
 });
 
+// Built-ins can only be disabled; plugins the user added are removed instead.
+const removable = p => p.kind === 'added' || p.kind === 'published';
+const call = (name, args) => request('tools/call', { name, arguments: args })
+  .then(() => request('tools/call', { name: 'plugins_list', arguments: {} }))
+  .then(result => render(result.structuredContent));
+
 function render(data) {
   const list = document.getElementById('list');
   list.replaceChildren(...(data?.plugins ?? []).map(p => {
-    const button = document.createElement('button');
-    button.className = p.enabled ? '' : 'off';
-    button.innerHTML = '<span class="check"></span><span class="name"></span>';
-    button.querySelector('.check').textContent = p.enabled ? '✓' : '';
-    button.querySelector('.name').textContent = p.name;
-    button.onclick = () => request('tools/call', { name: p.enabled ? 'plugins_disable' : 'plugins_enable', arguments: { id: p.id } })
-      .then(() => request('tools/call', { name: 'plugins_list', arguments: {} }))
-      .then(result => render(result.structuredContent));
     const li = document.createElement('li');
-    li.append(button);
+    const row = document.createElement('button');
+    row.className = 'row' + (p.enabled ? '' : ' off') + (removable(p) ? '' : ' toggle');
+    row.innerHTML = '<span class="check"></span><span class="name"></span>';
+    row.querySelector('.check').textContent = !removable(p) && p.enabled ? '✓' : '';
+    row.querySelector('.name').textContent = p.name;
+    li.append(row);
+    if (!removable(p)) {
+      row.onclick = () => call(p.enabled ? 'plugins_disable' : 'plugins_enable', { id: p.id });
+      return li;
+    }
+    const remove = document.createElement('button');
+    remove.className = 'remove';
+    remove.textContent = 'Remove';
+    remove.onclick = () => {
+      if (!remove.classList.contains('confirm')) {
+        remove.classList.add('confirm');
+        remove.textContent = 'Remove?';
+        return;
+      }
+      call('plugins_remove', { id: p.id });
+    };
+    li.onmouseleave = () => { remove.classList.remove('confirm'); remove.textContent = 'Remove'; };
+    li.append(remove);
     return li;
   }));
 }
