@@ -174,6 +174,7 @@ func shell(csp: [String: Any]?) -> String {
 final class Section: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     let title: String
     let tool: String
+    let submenu: Bool
     let html: String
     let web: WKWebView
     let height: NSLayoutConstraint
@@ -185,6 +186,7 @@ final class Section: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     init(item: [String: Any], html: String, csp: [String: Any]?, result: [String: Any], panel: Panel) {
         title = item["title"] as? String ?? ""
         tool = item["tool"] as? String ?? ""
+        submenu = item["submenu"] as? Bool ?? false
         self.html = html
         self.result = result
         self.panel = panel
@@ -285,6 +287,8 @@ final class Panel: NSViewController {
     private let stack = NSStackView()
     private var sections: [Section] = []
     private var shown = ""  // the items and their views, as last shown
+    private(set) var side: NSPanel?
+    private var open: (section: Section, row: SubmenuRow)?
 
     override func loadView() {
         stack.orientation = .vertical
@@ -300,7 +304,60 @@ final class Panel: NSViewController {
             stack.widthAnchor.constraint(equalToConstant: width),
         ])
         view = root
+        root.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self))
         show([message("Loading…")])
+    }
+
+    // Leaving the open submenu's row for another part of the menu closes it.
+    override func mouseMoved(with event: NSEvent) {
+        guard let row = open?.row else { return }
+        if !row.bounds.contains(row.convert(event.locationInWindow, from: nil)) { closeSubmenu() }
+    }
+
+    func openSubmenu(_ section: Section, from row: SubmenuRow) {
+        if open?.section === section { return }
+        closeSubmenu()
+        guard let window = view.window else { return }
+        let side = self.side ?? SidePanel.make()
+        self.side = side
+        let content = side.contentView!
+        section.web.removeFromSuperview()
+        content.addSubview(section.web)
+        NSLayoutConstraint.activate([
+            section.web.topAnchor.constraint(equalTo: content.topAnchor, constant: 6),
+            section.web.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 6),
+            section.web.widthAnchor.constraint(equalToConstant: width - 12),
+        ])
+        open = (section, row)
+        row.highlighted = true
+        placeSubmenu()
+        window.addChildWindow(side, ordered: .above)
+        side.orderFront(nil)
+    }
+
+    func closeSubmenu() {
+        guard let (section, row) = open else { return }
+        section.web.removeFromSuperview()
+        row.highlighted = false
+        if let side {
+            side.parent?.removeChildWindow(side)
+            side.orderOut(nil)
+        }
+        open = nil
+    }
+
+    // placeSubmenu puts the submenu beside the menu, level with its row, or
+    // on the menu's left if there's no room on the right.
+    private func placeSubmenu() {
+        guard let side, let (section, row) = open, let window = view.window else { return }
+        let screen = window.screen?.visibleFrame ?? .infinite
+        let rowTop = window.convertToScreen(row.convert(row.bounds, to: nil)).maxY
+        let h = section.height.constant + 12
+        let menu = window.convertToScreen(view.convert(view.bounds, to: nil))
+        var x = menu.maxX + 4
+        if x + width > screen.maxX { x = menu.minX - width - 4 }
+        let top = min(rowTop + 6, screen.maxY)
+        side.setFrame(NSRect(x: x, y: max(top - h, screen.minY), width: width, height: h), display: true)
     }
 
     // reload asks the node for the menu bar afresh, as on every open. If the
@@ -313,6 +370,7 @@ final class Panel: NSViewController {
             let doc = try await client.request("tools/call", ["name": "menubar", "arguments": [:] as [String: Any]])
             items = (doc["structuredContent"] as? [String: Any])?["items"] as? [[String: Any]] ?? []
         } catch {
+            closeSubmenu()
             sections.forEach { $0.close() }
             sections = []
             shown = ""
@@ -351,12 +409,17 @@ final class Panel: NSViewController {
         while Date() < deadline && !fresh.allSatisfy(\.sized) {
             try? await Task.sleep(nanoseconds: 30_000_000)
         }
+        closeSubmenu()
         sections.forEach { $0.close() }
         sections = fresh
         shown = signature
         fresh.forEach { $0.web.removeFromSuperview(); $0.web.alphaValue = 1 }
         var arranged: [NSView] = []
         for s in sections {
+            if s.submenu {
+                arranged.append(SubmenuRow(title: s.title) { [weak self] row in self?.openSubmenu(s, from: row) })
+                continue
+            }
             if !s.title.isEmpty { arranged.append(header(s.title)) }
             arranged.append(s.web)
         }
@@ -377,13 +440,14 @@ final class Panel: NSViewController {
         let size = NSSize(width: width, height: min(stack.fittingSize.height, maxHeight + 120))
         preferredContentSize = size
         popover?.contentSize = size
+        placeSubmenu()
     }
 
     private func show(_ views: [NSView]) {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for v in views + [separator(), loginButton(), quitButton()] {
             stack.addArrangedSubview(v)
-            if v is WKWebView || v is NSBox {
+            if v is WKWebView || v is NSBox || v is SubmenuRow {
                 v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -12).isActive = true
             }
         }
@@ -454,6 +518,70 @@ final class Panel: NSViewController {
     }
 }
 
+// A SubmenuRow is a menu row that opens its item's view beside the menu, on
+// hover or click.
+final class SubmenuRow: NSView {
+    private let onOpen: (SubmenuRow) -> Void
+    var highlighted = false { didSet { needsDisplay = true } }
+
+    init(title: String, onOpen: @escaping (SubmenuRow) -> Void) {
+        self.onOpen = onOpen
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 13)
+        let chevron = NSImageView(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil) ?? NSImage())
+        chevron.symbolConfiguration = .init(pointSize: 10, weight: .semibold)
+        chevron.contentTintColor = .secondaryLabelColor
+        for v in [label, chevron] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 24),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func mouseEntered(with event: NSEvent) { onOpen(self) }
+    override func mouseDown(with event: NSEvent) { onOpen(self) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard highlighted else { return }
+        NSColor.labelColor.withAlphaComponent(0.1).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
+    }
+}
+
+// SidePanel holds an open submenu's view. It can become key, so the view's
+// fields take typing.
+final class SidePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+
+    static func make() -> SidePanel {
+        let panel = SidePanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 100), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel.isFloatingPanel = true
+        panel.level = .popUpMenu
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        let effect = NSVisualEffectView()
+        effect.material = .popover
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 10
+        effect.layer?.masksToBounds = true
+        panel.contentView = effect
+        return panel
+    }
+}
+
 // The app runs the node, so it opens at login unless the user turns that off.
 func setOpenAtLogin(_ on: Bool) {
     UserDefaults.standard.set(on, forKey: "openAtLogin")
@@ -470,9 +598,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let panel = Panel()
     private let popover = NSPopover()
     private var item: NSStatusItem?
+    private var monitors: [Any] = []
+    private var observers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        popover.behavior = .transient
+        // Closed by hand, not .transient, so clicks in an open submenu don't close the menu.
+        popover.behavior = .applicationDefined
         popover.animates = false  // open and close at once, like the system's menu bar menus
         popover.contentViewController = panel
         popover.delegate = self
@@ -518,6 +649,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return false
     }
 
+    // watchForClose closes the menu on a click outside it and its submenu, on
+    // Escape, and when another app takes over.
+    private func watchForClose() {
+        guard monitors.isEmpty else { return }
+        let ours = { [weak self] (w: NSWindow?) -> Bool in
+            guard let self, let w else { return false }
+            return w === self.panel.view.window || w === self.panel.side || w === self.item?.button?.window
+        }
+        if let m = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown], handler: { [weak self] e in
+            if e.type == .keyDown {
+                if e.keyCode == 53 { self?.close(); return nil }
+                return e
+            }
+            if !ours(e.window) { self?.close() }
+            return e
+        }) { monitors.append(m) }
+        if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.close() }
+        }) { monitors.append(m) }
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.close() }
+        })
+    }
+
+    private func close() {
+        if popover.isShown { popover.performClose(nil) }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        panel.closeSubmenu()
+        monitors.forEach(NSEvent.removeMonitor)
+        observers.forEach(NotificationCenter.default.removeObserver)
+        monitors = []
+        observers = []
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         node.stop()
     }
@@ -531,6 +698,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         NSApp.activate()
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
         panel.view.window?.makeKey()
+        watchForClose()
         Task { await panel.reload() }
     }
 }
