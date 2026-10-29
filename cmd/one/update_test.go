@@ -38,6 +38,7 @@ func TestSelfUpdate(t *testing.T) {
 	serve := exec.Command(bin, "serve", "--local", "--addr", addr, "--data", filepath.Join(dir, "data"))
 	serve.Stderr = os.Stderr
 	serve.Dir = dir
+	serve.Env = nodeEnv(t, filepath.Join(dir, "home"))
 	if err := serve.Start(); err != nil {
 		t.Fatal(err)
 	}

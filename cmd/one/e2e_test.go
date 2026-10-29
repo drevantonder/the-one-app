@@ -19,6 +19,20 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// nodeEnv runs a test node with its own home, with a Claude Code folder, so
+// its plugins write to agents' settings there and not the user's.
+func nodeEnv(t *testing.T, home string) []string {
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "env", "GOCACHE", "GOMODCACHE").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := strings.Fields(string(out))
+	return append(os.Environ(), "HOME="+home, "CLAUDE_CONFIG_DIR=", "CODEX_HOME=", "GOCACHE="+cache[0], "GOMODCACHE="+cache[1])
+}
+
 // TestNodeOverMCP builds the real binary, runs a node, and drives it with the
 // official MCP client, the way an agent would.
 func TestNodeOverMCP(t *testing.T) {
@@ -40,13 +54,8 @@ func TestNodeOverMCP(t *testing.T) {
 	serve := exec.Command(bin, "serve", "--local", "--addr", addr, "--data", filepath.Join(dir, "data"))
 	serve.Stderr = os.Stderr
 	serve.Dir = dir                    // like launchd or systemd: not inside a Go module
-	home := filepath.Join(dir, "home") // plugins write to agents' folders in it
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	gocache, _ := exec.Command("go", "env", "GOCACHE", "GOMODCACHE").Output()
-	cache := strings.Fields(string(gocache))
-	serve.Env = append(os.Environ(), "HOME="+home, "CLAUDE_CONFIG_DIR=", "CODEX_HOME=", "GOCACHE="+cache[0], "GOMODCACHE="+cache[1])
+	home := filepath.Join(dir, "home")
+	serve.Env = nodeEnv(t, home)
 	if err := serve.Start(); err != nil {
 		t.Fatal(err)
 	}
