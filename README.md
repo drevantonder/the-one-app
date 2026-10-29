@@ -57,7 +57,7 @@ A small core, with everything else as plugins.
 ## Try it
 
 ```sh
-go install github.com/drevantonder/the-one-app/cmd/one@latest
+curl -fsSL https://raw.githubusercontent.com/drevantonder/the-one-app/main/install.sh | sh
 one serve                       # node on 127.0.0.1:4747, MCP at /mcp
 one instructions set "Keep answers short."
 one memory note "Prefers Go for backend work"
@@ -73,12 +73,29 @@ each permission once, as TheOneApp, and keeps it across updates; a node
 started some other way may be asked again. Reading iMessages also needs Full
 Disk Access for TheOneApp.
 
+Or build it yourself: `go install github.com/drevantonder/the-one-app/cmd/one@latest`.
+
 Connect your agents with the command `one mcp` (MCP over stdio), the same on
 every device. For example, `claude mcp add --scope user the-one-app -- one mcp`.
 It relays to the node, which also serves MCP over HTTP at
 `http://127.0.0.1:4747/mcp`. Agents receive the MCP instructions plugins build
 together: your instructions, and the memory plugin's rule to call
 `memory_wake` first.
+
+## Updating
+
+`one update` updates the node on every device of yours that runs one: it
+builds the tip of `main` (in a clean clone, never your working tree), sends
+each node its build over the tailnet, and each installs it and restarts in
+place. Macs running TheOneApp.app get the app, built and signed on a Mac over
+SSH (`ONE_MAC`, else the first Mac with the app). `one update --release` takes
+the latest GitHub release instead, and needs no Go.
+
+`one release v1.2.3` publishes one: it tests the tip of `main`, signs it off
+with [gh-signoff](https://github.com/basecamp/gh-signoff), builds every
+platform locally and the notarized app on the Mac, updates every device, and
+creates the GitHub release. Notarizing needs a notarytool profile on the Mac,
+once: `xcrun notarytool store-credentials one`.
 
 ## Plugins with no code
 

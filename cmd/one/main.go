@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -38,11 +39,14 @@ import (
 	"github.com/drevantonder/the-one-app/sdk"
 )
 
-const version = "0.1.0-dev"
+// version is set at build time; see `one update`.
+var version = "dev"
 
 const usage = `one: TheOneApp
 
   one serve [--addr ADDR] [--data DIR]   run this device's node
+  one update                              update every device's node: from this checkout, or the latest release
+  one release vX.Y.Z                      tag, publish to GitHub and update every device
   one mcp                                 MCP over stdio, relayed to this device's node
   one plugins [list]                      list plugins
   one plugins enable|disable|reload ID    manage a plugin
@@ -69,7 +73,14 @@ func main() {
 	var err error
 	switch os.Args[1] {
 	case "serve":
-		err = serve(os.Args[2:])
+		bin := self()
+		if err = serve(os.Args[2:], bin); errors.Is(err, errRestart) {
+			err = reexec(bin)
+		}
+	case "update":
+		err = update(os.Args[2:])
+	case "release":
+		err = release(os.Args[2:])
 	case "mcp":
 		err = mcpStdio()
 	case "plugin-host":
@@ -105,7 +116,7 @@ func defaultAddr() string {
 	return "127.0.0.1:4747"
 }
 
-func serve(args []string) error {
+func serve(args []string, bin string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", defaultAddr(), "listen address")
 	data := fs.String("data", defaultData(), "data directory")
@@ -124,6 +135,8 @@ func serve(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var restarting atomic.Bool
+	restart := func() { restarting.Store(true); stop() }
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
@@ -150,6 +163,7 @@ func serve(args []string) error {
 	mux.Handle("/", surface.Handler(node, version))
 	m.Routes(mux)
 	b.Routes(mux)
+	updateRoutes(mux, bin, restart)
 	if !*local {
 		if err := m.Start(ctx, mux); err != nil {
 			return err
@@ -165,6 +179,10 @@ func serve(args []string) error {
 	log.Info("TheOneApp node running", "device", st.Device(), "api", "http://"+ln.Addr().String(), "mcp", "http://"+ln.Addr().String()+"/mcp", "data", *data)
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	if restarting.Load() {
+		node.Stop()
+		return errRestart
 	}
 	return nil
 }
