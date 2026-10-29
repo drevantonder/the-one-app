@@ -108,7 +108,7 @@ func (h *mcpHub) install(s *mcp.Server, old installed) installed {
 			if len(args) == 0 {
 				args = json.RawMessage("{}")
 			}
-			res, err := h.node.Call(ctx, op.Plugin, op.Name, args, mcpCaller())
+			res, err := h.node.Call(ctx, op.Plugin, op.Name, args, mcpCaller(req))
 			if err != nil {
 				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: errText(err)}}}, nil
 			}

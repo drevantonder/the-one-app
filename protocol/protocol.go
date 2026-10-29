@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the plugin protocol version. Bump it on breaking changes.
-const Version = 7
+const Version = 8
 
 // Core → plugin methods.
 const (
@@ -161,6 +161,7 @@ type ApplyParams struct {
 type Caller struct {
 	Actor  string `json:"actor"`
 	Device string `json:"device"`
+	Agent  string `json:"agent,omitempty"` // the MCP client calling, e.g. claude-code
 }
 
 type CallParams struct {

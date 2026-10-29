@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/drevantonder/the-one-app/internal/core"
 	"github.com/drevantonder/the-one-app/protocol"
 )
@@ -87,7 +89,19 @@ func callerOf(r *http.Request) protocol.Caller {
 	return protocol.Caller{Actor: "owner"}
 }
 
-func mcpCaller() protocol.Caller { return protocol.Caller{Actor: "owner"} }
+// AgentMeta names the agent behind a relayed MCP call, as `one mcp` passes
+// it on: the relay is the node's client, not the agent.
+const AgentMeta = "dev.theoneapp/agent"
+
+func mcpCaller(req *mcp.CallToolRequest) protocol.Caller {
+	c := protocol.Caller{Actor: "owner"}
+	if a, ok := req.Params.Meta[AgentMeta].(string); ok && a != "" {
+		c.Agent = a
+	} else if p := req.Session.InitializeParams(); p != nil && p.ClientInfo != nil {
+		c.Agent = p.ClientInfo.Name
+	}
+	return c
+}
 
 func nonNil[T any](s []T) []T {
 	if s == nil {

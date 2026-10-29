@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/drevantonder/the-one-app/internal/surface"
 )
 
 // mcpStdio serves MCP over stdin/stdout by relaying to this device's node, so
@@ -46,7 +48,11 @@ func mcpStdio() error {
 		for _, t := range tools {
 			name := t.Name
 			server.AddTool(t, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				return remote.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: req.Params.Arguments})
+				params := &mcp.CallToolParams{Name: name, Arguments: req.Params.Arguments}
+				if p := req.Session.InitializeParams(); p != nil && p.ClientInfo != nil {
+					params.Meta = mcp.Meta{surface.AgentMeta: p.ClientInfo.Name}
+				}
+				return remote.CallTool(ctx, params)
 			})
 			names = append(names, name)
 		}
