@@ -39,7 +39,14 @@ final class LiveWidget: ObservableObject, Identifiable {
     }
 
     var context: WidgetContext {
-        WidgetContext(run: { [weak self] action in try await self?.act(action) })
+        var ctx = WidgetContext(run: { [weak self] action in try await self?.act(action) })
+        if let d = description {
+            let client = client
+            ctx.runLater = { action in
+                _ = try await client.request("tools/call", ["name": d.tool(action.op), "arguments": (action.input ?? [:]).mapValues(\.any)])
+            }
+        }
+        return ctx
     }
 
     private func act(_ action: WidgetAction) async throws {

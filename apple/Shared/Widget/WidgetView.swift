@@ -9,6 +9,8 @@ typealias WidgetRun = (WidgetAction) async throws -> Void
 
 struct WidgetContext {
     var run: WidgetRun?
+    /// Runs an action after the widget is gone, as when a page it opened closes.
+    var runLater: WidgetRun?
     var images: [String: Image] = [:]
     /// On a home screen, actions run as app intents instead.
     var homeScreen = false
@@ -120,7 +122,7 @@ struct NodeView: View {
             let content = StackView(stack: Stack.column(p.children), ctx: ctx)
             if let url = URL(string: p.url), let popout = ctx.popout {
                 Button {
-                    let run = ctx.run
+                    let run = ctx.runLater ?? ctx.run
                     popout(url, p.title, p.close.map { action in { Task { try? await run?(action) } } })
                 } label: { content.contentShape(Rectangle()) }.buttonStyle(Pressable())
             } else if let url = URL(string: p.url) {

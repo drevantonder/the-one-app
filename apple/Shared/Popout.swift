@@ -339,7 +339,9 @@ struct PopoutCover: ViewModifier {
         content.fullScreenCover(item: $popouts.shown, onDismiss: { closed?(); closed = nil }) { item in
             NavigationStack {
                 WebHost(web: item.web).ignoresSafeArea(edges: .bottom)
+                    .background(Color(uiColor: .systemBackground))
                     .navigationTitle(item.id).navigationBarTitleDisplayMode(.inline)
+                    .toolbarBackground(.visible, for: .navigationBar)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { closed = item.onClose; popouts.shown = nil } } }
             }
         }
