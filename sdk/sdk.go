@@ -57,6 +57,7 @@ type Plugin struct {
 	Name      string // shown to people, e.g. "iMessage"; the ID if empty
 	Version   string
 	Platforms []string // GOOS values the plugin runs on; empty means all
+	Secrets   []string // the user's secrets the plugin reads with Call.Secret, like OPENCODE_API_KEY
 	Setup     func(*Ctx) error
 }
 
@@ -397,6 +398,21 @@ func (call *Call) Invoke(plugin, op string, input any) (Result, error) {
 	return res, err
 }
 
+// ErrNoSecret means the user hasn't set a secret the plugin reads.
+var ErrNoSecret = errors.New("secret not set")
+
+// Secret is the value of one of the user's secrets, named in Plugin.Secrets.
+// The user sets them with secrets_set; read it on each use, since it can
+// change.
+func (call *Call) Secret(name string) (string, error) {
+	var v string
+	err := call.ctx.conn.Call(call.Context, protocol.MethodSecret, protocol.SecretParams{Name: name}, &v)
+	if e, ok := errors.AsType[*rpc.Error](err); ok && e.Code == protocol.ErrCodeNoSecret {
+		return "", fmt.Errorf("%w: %s; set it with secrets_set", ErrNoSecret, name)
+	}
+	return v, err
+}
+
 // PutFile stores the file at path in the bucket as name, encrypted. Each
 // plugin has its own names.
 func (call *Call) PutFile(name, path string) error {
@@ -474,7 +490,7 @@ func (c *Ctx) handle(p Plugin) rpc.Handler {
 			for h := range c.hooks {
 				hooks = append(hooks, h)
 			}
-			return protocol.Manifest{Protocol: protocol.Version, ID: p.ID, Name: p.Name, Version: p.Version, Entries: c.entries, Operations: c.ops, Transforms: names, Schedules: c.schedules, Hooks: hooks, Platforms: p.Platforms, Resources: c.resources}, nil
+			return protocol.Manifest{Protocol: protocol.Version, ID: p.ID, Name: p.Name, Version: p.Version, Entries: c.entries, Operations: c.ops, Transforms: names, Schedules: c.schedules, Hooks: hooks, Platforms: p.Platforms, Resources: c.resources, Secrets: p.Secrets}, nil
 		case protocol.MethodReset:
 			c.last = nil
 			for _, fn := range c.reset {

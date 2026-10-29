@@ -216,7 +216,9 @@ they sync. `habits_check_in` is then an MCP tool,
 `one habits check_in run` a CLI command, and `POST /v1/call/habits/check_in`
 an API endpoint. A plugin can also run other plugins' operations
 (`call.Invoke`) and keep files in the bucket, encrypted (`call.PutFile`,
-`GetFile`, `Files`, `DeleteFile`). See [`examples/habits`](examples/habits), and
+`GetFile`, `Files`, `DeleteFile`), and read the user's secrets, such as API
+keys, that it names in `Plugin.Secrets` (`call.Secret`). The user sets those
+once with `one secrets_set`; agents can set them but never read them. See [`examples/habits`](examples/habits), and
 [`examples/jobs`](examples/jobs) for jobs and consistent entries.
 
 ## Views

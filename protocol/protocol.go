@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the plugin protocol version. Bump it on breaking changes.
-const Version = 8
+const Version = 9
 
 // Core → plugin methods.
 const (
@@ -34,6 +34,9 @@ const (
 	MethodInvoke = "invoke"
 	// MethodFiles stores the plugin's files in the bucket, encrypted.
 	MethodFiles = "files"
+	// MethodSecret gives the value of one of the user's secrets that the
+	// plugin's manifest names.
+	MethodSecret = "secret"
 )
 
 // Transform names a plugin can register.
@@ -68,6 +71,9 @@ type Manifest struct {
 	// Resources are MCP resources, such as MCP Apps views. Each URI starts
 	// with ui://<id>/.
 	Resources []Resource `json:"resources,omitempty"`
+	// Secrets names the user's secrets the plugin reads, such as
+	// OPENCODE_API_KEY.
+	Secrets []string `json:"secrets,omitempty"`
 }
 
 // MIMEApp is the MIME type of an MCP Apps view.
@@ -104,6 +110,13 @@ type Schedule struct {
 	Name    string `json:"name"`
 	EveryMs int64  `json:"everyMs"`
 }
+
+type SecretParams struct {
+	Name string `json:"name"`
+}
+
+// ErrCodeNoSecret is the error code for a secret that isn't set.
+const ErrCodeNoSecret = -32012
 
 type RunParams struct {
 	Schedule string `json:"schedule"`

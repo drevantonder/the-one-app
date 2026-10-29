@@ -103,6 +103,7 @@ func New(st *store.Store, dataDir string, builtins []string, log *slog.Logger) (
 		ctx:      context.Background(),
 	}
 	n.addCoreViews()
+	n.addSecretOps()
 	for _, id := range builtins {
 		n.sources[id] = &source{id: id, builtin: true}
 	}
@@ -474,6 +475,16 @@ func (n *Node) pluginHandler(id string) rpc.Handler {
 				return nil, err
 			}
 			return n.files(ctx, id, in)
+		case protocol.MethodSecret:
+			var in protocol.SecretParams
+			if err := json.Unmarshal(params, &in); err != nil {
+				return nil, err
+			}
+			v, err := n.secret(id, in.Name)
+			if errors.Is(err, errNoSecret) {
+				return nil, &rpc.Error{Code: protocol.ErrCodeNoSecret, Message: err.Error()}
+			}
+			return v, err
 		case protocol.MethodLog:
 			var in protocol.LogParams
 			_ = json.Unmarshal(params, &in)
