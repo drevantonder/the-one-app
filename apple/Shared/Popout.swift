@@ -1,10 +1,10 @@
 import SwiftUI
 import WebKit
 
-// Popouts are live web pages a widget opens in windows of their own, such as
-// a Space's desktop. On a Mac they float over every app, laid out one of
-// three ways the user switches between; on iPhone and iPad one fills the
-// screen.
+// Popouts are live web pages a widget opens, such as a Space's desktop. In
+// the app one fills the window, to use; on a Mac it can float over every
+// app instead, to watch, laid out one of three ways the user switches
+// between. Opened from the menu bar, it floats.
 
 struct PopoutItem: Identifiable {
     let id: String // its title: opening one already shown brings it back
@@ -47,6 +47,9 @@ final class Popouts: ObservableObject {
     }
 
     @Published private(set) var items: [PopoutItem] = []
+    /// The page shown big in the app's window.
+    @Published var big: PopoutItem?
+    weak var appWindow: NSWindow?
     @Published var focus: String?
     @Published var driving: Set<String> = [] // clicks and typing go through
     @Published var layout = Layout(rawValue: UserDefaults.standard.string(forKey: "popoutLayout") ?? "") ?? .separate {
@@ -58,10 +61,29 @@ final class Popouts: ObservableObject {
     private var panels: [PopoutPanel] = []
 
     func open(_ url: URL, _ title: String, _ onClose: (@MainActor () -> Void)?) {
+        if let w = appWindow, w.isKeyWindow, !items.contains(where: { $0.id == title }) {
+            closeBig()
+            big = PopoutItem(id: title, url: url, web: webView(url), onClose: onClose)
+            return
+        }
         if !items.contains(where: { $0.id == title }) {
             items.append(PopoutItem(id: title, url: url, web: webView(url), onClose: onClose))
         }
         focus = title
+        arrange()
+    }
+
+    func closeBig() {
+        big?.onClose?()
+        big = nil
+    }
+
+    /// Moves the big page out of the app, to float.
+    func float() {
+        guard let item = big else { return }
+        big = nil
+        items.append(item)
+        focus = item.id
         arrange()
     }
 
@@ -116,6 +138,29 @@ final class Popouts: ObservableObject {
     }
 }
 
+/// Shows the big page over the app's window.
+struct PopoutCover: ViewModifier {
+    @ObservedObject var popouts = Popouts.shared
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if let item = popouts.big {
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        Text(item.id).font(.headline).lineLimit(1)
+                        Spacer()
+                        Button("Picture in Picture", systemImage: "pip.enter") { popouts.float() }
+                        Button("Done") { popouts.closeBig() }.keyboardShortcut(.cancelAction)
+                    }
+                    .padding(.horizontal, 14).frame(height: 44).background(.bar)
+                    WebHost(web: item.web)
+                }
+                .background(.background)
+            }
+        }
+    }
+}
+
 /// A borderless panel that can still take typing, for taking over.
 final class PopoutPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -131,7 +176,7 @@ struct WebHost: NSViewRepresentable {
 struct PopoutPane: View {
     let item: PopoutItem
     @ObservedObject var popouts: Popouts
-    var compact = false
+    var bar = true // its own controls on hover; off where a header has them
     @State private var hover = false
 
     var body: some View {
@@ -141,15 +186,11 @@ struct PopoutPane: View {
             if !driving {
                 Color.clear.contentShape(Rectangle()) // watching: clicks don't reach the page
             }
-            if hover || driving {
+            if bar && (hover || driving) {
                 HStack(spacing: 8) {
                     Text(item.id).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 4)
-                    if !compact {
-                        Button(driving ? "Give back" : "Take over") { popouts.toggleDriving(item.id) }
-                            .buttonStyle(.borderedProminent).controlSize(.small)
-                    }
-                    Button { popouts.close(item.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                    PaneControls(item: item, popouts: popouts)
                 }
                 .padding(.horizontal, 8).padding(.vertical, 5)
                 .background(.ultraThinMaterial)
@@ -157,6 +198,18 @@ struct PopoutPane: View {
         }
         .overlay { if driving { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor, lineWidth: 2) } }
         .onHover { hover = $0 }
+    }
+}
+
+struct PaneControls: View {
+    let item: PopoutItem
+    @ObservedObject var popouts: Popouts
+
+    var body: some View {
+        let driving = popouts.driving.contains(item.id)
+        Button(driving ? "Give back" : "Take over") { popouts.toggleDriving(item.id) }
+            .buttonStyle(.borderedProminent).controlSize(.small)
+        Button { popouts.close(item.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
     }
 }
 
@@ -172,7 +225,6 @@ struct LayoutSwitch: View {
                 .buttonStyle(.borderless).help(l.name)
             }
         }
-        .padding(.horizontal, 8).frame(height: 28)
     }
 }
 
@@ -182,9 +234,14 @@ struct PopoutTile: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text(item.id).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1); Spacer(); LayoutSwitch(popouts: popouts) }
-                .padding(.leading, 10).background(.bar)
-            PopoutPane(item: item, popouts: popouts)
+            HStack(spacing: 8) {
+                Text(item.id).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                Spacer()
+                LayoutSwitch(popouts: popouts)
+                PaneControls(item: item, popouts: popouts)
+            }
+            .padding(.horizontal, 10).frame(height: 30).background(.bar)
+            PopoutPane(item: item, popouts: popouts, bar: false)
         }
     }
 }
@@ -194,7 +251,7 @@ struct PopoutGrid: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Spacer(); LayoutSwitch(popouts: popouts) }.background(.bar)
+            HStack { Spacer(); LayoutSwitch(popouts: popouts) }.padding(.horizontal, 10).frame(height: 30).background(.bar)
             GeometryReader { geo in
                 let cols = max(1, Int(ceil(Double(popouts.items.count).squareRoot())))
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: cols), spacing: 4) {
@@ -219,7 +276,7 @@ struct PopoutFocus: View {
     var body: some View {
         let big = popouts.items.first { $0.id == popouts.focus } ?? popouts.items.first
         VStack(spacing: 4) {
-            HStack { Spacer(); LayoutSwitch(popouts: popouts) }.background(.bar)
+            HStack { Spacer(); LayoutSwitch(popouts: popouts) }.padding(.horizontal, 10).frame(height: 30).background(.bar)
             if let big { PopoutPane(item: big, popouts: popouts) }
             let rest = popouts.items.filter { $0.id != big?.id }
             if !rest.isEmpty {
