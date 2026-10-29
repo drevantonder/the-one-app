@@ -21,11 +21,11 @@ func path() string {
 }
 
 func command(ctx context.Context, name string, args ...string) *exec.Cmd {
+	if p, err := which(name); err == nil {
+		name = p
+	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = append(os.Environ(), "PATH="+path())
-	if p, err := which(name); err == nil {
-		cmd.Path = p
-	}
 	return cmd
 }
 
