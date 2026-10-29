@@ -75,8 +75,9 @@ addEventListener('message', event => {
   }
 });
 
-new ResizeObserver(() => send({ method: 'ui/notifications/size-changed', params: { height: document.documentElement.scrollHeight } }))
-  .observe(document.documentElement);
+// The content's height, not the document's: that never drops below the frame's, so it couldn't shrink.
+new ResizeObserver(() => send({ method: 'ui/notifications/size-changed', params: { height: Math.ceil(document.body.getBoundingClientRect().height) } }))
+  .observe(document.body);
 request('ui/initialize', { appInfo: { name: 'The One App devices', version: '1' }, appCapabilities: {}, protocolVersion: '2026-01-26' })
   .then(result => {
     if (result?.hostContext?.theme) document.documentElement.dataset.theme = result.hostContext.theme;
