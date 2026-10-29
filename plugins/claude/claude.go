@@ -43,18 +43,14 @@ type finishIn struct {
 type plugin struct {
 	mu     sync.Mutex
 	coding []string
-	self   string
 	login  *login
 }
 
-// me is this device's name, once the node knows it.
+// me is this device's name. It isn't kept: it is the hostname until the
+// node joins the tailnet.
 func (p *plugin) me(call *sdk.Call) string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.self == "" {
-		p.self, _ = selfName(call)
-	}
-	return p.self
+	name, _ := selfName(call)
+	return name
 }
 
 func (p *plugin) isCoding(name string) bool {
