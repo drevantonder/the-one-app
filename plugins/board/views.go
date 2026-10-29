@@ -48,8 +48,7 @@ func widgetPosts(space widget.Space) (n, lines int) {
 	}
 }
 
-// Widget shows the newest posts. Its text's first line is the newest post,
-// which the menu bar shows.
+// Widget shows the newest posts.
 func (b *Board) Widget(space widget.Space) (widget.Node, string) {
 	n, lines := widgetPosts(space)
 	posts := b.latest(n, "", true)

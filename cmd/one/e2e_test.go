@@ -104,7 +104,12 @@ func TestNodeOverMCP(t *testing.T) {
 		}
 	}
 	raw, _ := json.Marshal(bar.StructuredContent)
-	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Items) < 3 || len(doc.Items) > 4 || len(doc.Items) == 4 && doc.Items[3].ID != "spaces" || doc.Items[0].ID != "devices" || doc.Items[1].ID != "one.plugins" || doc.Items[2].ID != "board" || !doc.Items[2].Bar {
+	err = json.Unmarshal(raw, &doc)
+	var ids []string
+	for _, item := range doc.Items {
+		ids = append(ids, item.ID)
+	}
+	if err != nil || len(ids) == 0 || !slices.Equal(ids, []string{"devices", "one.plugins", "headlines"}) && !slices.Equal(ids, []string{"devices", "one.plugins", "spaces", "headlines"}) || !doc.Items[len(ids)-1].Bar {
 		t.Fatalf("menubar items: %s", raw)
 	}
 	for _, item := range doc.Items {
