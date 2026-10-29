@@ -78,17 +78,21 @@ type pool struct {
 	used  map[string]time.Time
 	rooms []room // every device's, as last asked
 	asked time.Time
+	urls  map[string]viewLink   // live views, by Space
+	sites map[string]loginSites // by login
 	kick  chan struct{}
 	take  sync.Mutex // one borrow at a time on this device
 }
 
 func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*sdk.Call)) *pool {
-	p := &pool{t: t, located: located, locate: locate, lent: map[string]borrowed{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
+	p := &pool{t: t, located: located, locate: locate, lent: map[string]borrowed{}, used: map[string]time.Time{}, sites: map[string]loginSites{}, kick: make(chan struct{}, 1)}
 	t.used = p.touch
 	c.Entry("borrowed", sdk.Available)
 	c.Entry("returned", sdk.Available)
 	c.Entry("spare", sdk.Available) // no longer written
-	c.OnReset(func() { p.mu.Lock(); clear(p.lent); p.mu.Unlock() })
+	c.Entry("sites", sdk.Available)
+	c.OnReset(func() { p.mu.Lock(); clear(p.lent); clear(p.sites); p.mu.Unlock() })
+	sdk.Handle(c, "sites", func(_ sdk.Entry, in loginSites) error { p.mu.Lock(); p.sites[in.Login] = in; p.mu.Unlock(); return nil })
 	sdk.Handle(c, "borrowed", func(_ sdk.Entry, in borrowed) error { p.mu.Lock(); p.lent[in.Space] = in; p.mu.Unlock(); return nil })
 	sdk.Handle(c, "returned", func(_ sdk.Entry, in released) error { p.mu.Lock(); delete(p.lent, in.Name); p.mu.Unlock(); return nil })
 	c.OnReady(func(call *sdk.Call) { go p.keep(call.Detached()) })
@@ -114,30 +118,8 @@ func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*s
 		}
 		return sdk.Result{Text: text + " Give it back with give_back when done.", Data: b}, nil
 	})
-	sdk.Op(c, "sign_in", "Sign in to sites, for agents to use: opens a browser with a saved login (or a new one) in a Space of its own and gives a link to it. Sign in to as many sites as you like; the login is saved when given back with give_back, or when the time is up.", sdk.Write, func(call *sdk.Call, in signInIn) (sdk.Result, error) {
-		login := cmp(in.Login, "default")
-		if !validName.MatchString(login) {
-			return sdk.Result{}, errors.New("a login's name is lowercase letters, digits and dashes")
-		}
-		minutes := min(max(in.Minutes, 1), 240)
-		if in.Minutes == 0 {
-			minutes = 30
-		}
-		b, fwd, err := p.borrow(call, "sign_in", borrowIn{Login: login, Here: in.Here}, borrowed{Login: login, SignIn: true, For: "Signing in to sites", Until: time.Now().Add(time.Duration(minutes) * time.Minute)})
-		if err != nil || fwd != nil {
-			return deref(fwd), err
-		}
-		s, err := find(call.Context, b.Space)
-		if err != nil {
-			return sdk.Result{}, err
-		}
-		url, err := viewURL(call.Context, s, minutes)
-		if err != nil {
-			return sdk.Result{}, err
-		}
-		text := fmt.Sprintf("Sign in to sites in the %s login here:\n%s\nIt is saved in %d minutes, or as soon as you give back Space %q (give_back).", login, url, minutes, b.Space)
-		return sdk.Result{Text: text, Data: map[string]any{"space": b.Space, "login": login, "url": url, "until": b.Until}}, nil
-	})
+	sdk.Op(c, "sign_in", "Sign in to sites, for agents to use: opens a browser with a saved login (or a new one) in a Space of its own and gives a link to it. Sign in to as many sites as you like; the login is saved when given back with give_back, or when the time is up.", sdk.Write, p.signIn)
+	setupPage(c, p)
 	sdk.Op(c, "give_back", "Give back a borrowed Space: it is deleted with everything in it. A sign_in Space's login is saved first.", sdk.Write, func(call *sdk.Call, in giveBackIn) (sdk.Result, error) {
 		if res, ok, err := t.elsewhere(call, in.Space, "give_back", in); ok {
 			return res, err
@@ -202,6 +184,31 @@ func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*s
 		return sdk.Text(fmt.Sprintf("Forgot the %s login.", in.Login)), nil
 	})
 	return p
+}
+
+func (p *pool) signIn(call *sdk.Call, in signInIn) (sdk.Result, error) {
+	login := cmp(in.Login, "default")
+	if !validName.MatchString(login) {
+		return sdk.Result{}, errors.New("a login's name is lowercase letters, digits and dashes")
+	}
+	minutes := min(max(in.Minutes, 1), 240)
+	if in.Minutes == 0 {
+		minutes = 30
+	}
+	b, fwd, err := p.borrow(call, "sign_in", borrowIn{Login: login, Here: in.Here}, borrowed{Login: login, SignIn: true, For: "Signing in to sites", Until: time.Now().Add(time.Duration(minutes) * time.Minute)})
+	if err != nil || fwd != nil {
+		return deref(fwd), err
+	}
+	s, err := find(call.Context, b.Space)
+	if err != nil {
+		return sdk.Result{}, err
+	}
+	url, err := viewURL(call.Context, s, minutes)
+	if err != nil {
+		return sdk.Result{}, err
+	}
+	text := fmt.Sprintf("Sign in to sites in the %s login here:\n%s\nIt is saved in %d minutes, or as soon as you give back Space %q (give_back).", login, url, minutes, b.Space)
+	return sdk.Result{Text: text, Data: map[string]any{"space": b.Space, "login": login, "url": url, "until": b.Until}}, nil
 }
 
 // status says what a pool's Space is doing, for list.
@@ -416,8 +423,12 @@ func (p *pool) prepare(call *sdk.Call, s space, b borrowed) error {
 func (p *pool) giveBack(call *sdk.Call, b borrowed) error {
 	s, err := find(call.Context, b.Space)
 	if err == nil && b.SignIn {
-		if err := saveLogin(call, s, b.Login); err != nil {
+		sites, err := saveLogin(call, s, b.Login)
+		if err != nil {
 			return fmt.Errorf("not given back: saving the %s login failed: %w", b.Login, err)
+		}
+		if _, err := call.Append("sites", sites); err != nil {
+			return err
 		}
 	}
 	if err == nil {
@@ -445,12 +456,14 @@ func savedLogins(call *sdk.Call, login string) ([]sdk.FileInfo, error) {
 }
 
 // saveLogin closes the browsers in the Space, so their profiles are
-// written out, and stores the login's profile, keeping the last few.
-func saveLogin(call *sdk.Call, s space, login string) error {
+// written out, and stores the login's profile, keeping the last few. It
+// gives the sites the login is signed in to.
+func saveLogin(call *sdk.Call, s space, login string) (loginSites, error) {
 	closeBrowsers(call.Context, s)
+	out := loginSites{Login: login, At: time.Now().UTC()}
 	tmp, err := os.CreateTemp("", "one-login-*.tar.gz")
 	if err != nil {
-		return err
+		return out, err
 	}
 	defer os.Remove(tmp.Name())
 	args := []string{"tar", "-C", profiles + login, "--warning=no-file-changed"}
@@ -461,22 +474,25 @@ func saveLogin(call *sdk.Call, s space, login string) error {
 	tmp.Close()
 	var exit *exec.ExitError
 	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) {
-		return err
+		return out, err
+	}
+	if out.Sites, out.Others, err = sitesIn(tmp.Name()); err != nil {
+		call.Logf("spaces: reading the %s login's sites: %v", login, err)
 	}
 	name := fmt.Sprintf("%s%s/%s.tar.gz", loginFiles, login, time.Now().UTC().Format("20060102T150405Z"))
 	if err := call.PutFile(name, tmp.Name()); err != nil {
-		return err
+		return out, err
 	}
 	all, err := savedLogins(call, login)
 	if err != nil {
-		return err
+		return out, err
 	}
 	for _, old := range all[min(keepBackups, len(all)):] {
 		if err := call.DeleteFile(old.Name); err != nil {
 			call.Logf("dropping old login %s: %v", old.Name, err)
 		}
 	}
-	return nil
+	return out, nil
 }
 
 // keep gives back this device's borrowed Spaces when idle or their time is
