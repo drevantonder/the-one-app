@@ -290,9 +290,42 @@ type pageIn struct {
 
 // Page adds a page to the app's sidebar, titled title with an SF Symbol
 // icon. It lists items, and draws the one chosen with render, for a person
-// in loc. It adds operations name, which draws an item as a widget, and
-// name_items.
+// in loc; with no items, render draws the whole page, for item "". It adds
+// operations name, which draws an item as a widget, and name_items.
 func (c *Ctx) Page(name, title, icon, description string, items func(*Call) ([]PageItem, error), render func(call *Call, item string, loc *time.Location) (widget.Node, string, error)) {
+	c.pageOp(name, title, description, render)
+	page := protocol.Page{ID: c.id + "." + name, Title: title, Icon: icon, Tool: c.id + "_" + name}
+	if items != nil {
+		page.Items = c.id + "_" + name + "_items"
+		c.pageItems(name, title, items)
+	}
+	c.pages = append(c.pages, page)
+	c.transforms[protocol.TransformPages] = func(d, _ json.RawMessage) (any, error) {
+		var doc protocol.PagesDoc
+		if err := json.Unmarshal(d, &doc); err != nil {
+			return nil, err
+		}
+		doc.Pages = append(doc.Pages, c.pages...)
+		return doc, nil
+	}
+}
+
+// PageSettings gives page name settings, drawn by render behind a gear. It
+// adds the operation name_settings.
+func (c *Ctx) PageSettings(name string, render func(call *Call, loc *time.Location) (widget.Node, string, error)) {
+	for i, p := range c.pages {
+		if p.ID == c.id+"."+name {
+			c.pageOp(name+"_settings", p.Title+" settings", "Draw the "+p.Title+" page's settings.", func(call *Call, _ string, loc *time.Location) (widget.Node, string, error) {
+				return render(call, loc)
+			})
+			c.pages[i].Settings = c.id + "_" + name + "_settings"
+			return
+		}
+	}
+	panic(fmt.Sprintf("%s: PageSettings: no page %q", c.id, name))
+}
+
+func (c *Ctx) pageItems(name, title string, items func(*Call) ([]PageItem, error)) {
 	Op(c, name+"_items", "List the items of the "+title+" page.", Read, func(call *Call, _ struct{}) (Result, error) {
 		list, err := items(call)
 		if err != nil {
@@ -307,6 +340,9 @@ func (c *Ctx) Page(name, title, icon, description string, items func(*Call) ([]P
 		}
 		return Result{Text: strings.Join(lines, "\n"), Data: map[string]any{"items": list}}, nil
 	})
+}
+
+func (c *Ctx) pageOp(name, title, description string, render func(call *Call, item string, loc *time.Location) (widget.Node, string, error)) {
 	Op(c, name, description, Read, func(call *Call, in pageIn) (Result, error) {
 		loc, err := time.LoadLocation(in.TZ)
 		if err != nil {
@@ -325,15 +361,6 @@ func (c *Ctx) Page(name, title, icon, description string, items func(*Call) ([]P
 		}}, nil
 	})
 	c.ops[len(c.ops)-1].UI = &protocol.OperationUI{ResourceURI: protocol.WidgetView}
-	c.pages = append(c.pages, protocol.Page{ID: c.id + "." + name, Title: title, Icon: icon, Tool: c.id + "_" + name, Items: c.id + "_" + name + "_items"})
-	c.transforms[protocol.TransformPages] = func(d, _ json.RawMessage) (any, error) {
-		var doc protocol.PagesDoc
-		if err := json.Unmarshal(d, &doc); err != nil {
-			return nil, err
-		}
-		doc.Pages = append(doc.Pages, c.pages...)
-		return doc, nil
-	}
 }
 
 // Logf writes to the core's log.

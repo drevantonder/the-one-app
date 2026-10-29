@@ -41,10 +41,15 @@ type Space struct {
 // Stack lays out a row or column. Grow takes the free space along the
 // parent's axis; W fixes the width; Dim draws it faded, as for something
 // offline.
+//
+// Aspect fixes its width over height; Border (solid or dashed) outlines it,
+// with corners of Radius.
 type Stack struct {
 	Gap, Pad, W    float64
 	Align, Justify string // align: start center end stretch; justify: start center end between
 	Grow, Dim      bool
+	Aspect, Radius float64
+	Border         string
 }
 
 // Style is how text looks. Size is xl (28), lg (20), md (15), sm (13) or
@@ -109,6 +114,9 @@ func stack(t string, s Stack, children []Node) Node {
 	put(n, "align", s.Align)
 	put(n, "justify", s.Justify)
 	put(n, "grow", s.Grow)
+	put(n, "aspect", s.Aspect)
+	put(n, "radius", s.Radius)
+	put(n, "border", s.Border)
 	return put(n, "dim", s.Dim)
 }
 
@@ -121,6 +129,29 @@ func nonNil(c []Node) []Node {
 
 func Row(s Stack, children ...Node) Node { return stack("row", s, children) }
 func Col(s Stack, children ...Node) Node { return stack("col", s, children) }
+
+// Grid lays its children out in as many columns as fit, each at least min
+// points wide.
+func Grid(min, gap float64, children ...Node) Node {
+	return put(Node{"t": "grid", "min": min, "c": nonNil(children)}, "gap", gap)
+}
+
+// Popout opens url, a live web page, in a window of its own titled title
+// when its children are tapped: floating over other windows where the
+// renderer can.
+func Popout(url, title string, children ...Node) Node {
+	return Node{"t": "popout", "url": url, "title": title, "c": nonNil(children)}
+}
+
+// Img shows a picture from src, an https or data URL. With aspect (width
+// over height) it fills the width it is given; otherwise it is w by h.
+func Img(src string, w, h, aspect, radius float64) Node {
+	n := Node{"t": "img", "src": src}
+	put(n, "w", w)
+	put(n, "h", h)
+	put(n, "aspect", aspect)
+	return put(n, "radius", radius)
+}
 
 // Link opens to when its children are tapped.
 func Link(to string, children ...Node) Node {

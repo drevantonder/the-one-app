@@ -258,14 +258,16 @@ type PagesDoc struct {
 
 // Page is a page of the app: Items (an MCP tool name) lists what it holds
 // as {"items": [PageItem]}, and choosing one draws the widget Tool returns
-// for {"item": its ID, "tz": the device's IANA time zone}. Icon is an SF
-// Symbol name.
+// for {"item": its ID, "tz": the device's IANA time zone}. Without Items,
+// Tool's widget is the whole page. Settings, a tool too, draws the page's
+// settings, behind a gear. Icon is an SF Symbol name.
 type Page struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Icon  string `json:"icon,omitempty"`
-	Tool  string `json:"tool"`
-	Items string `json:"items"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Icon     string `json:"icon,omitempty"`
+	Tool     string `json:"tool"`
+	Items    string `json:"items,omitempty"`
+	Settings string `json:"settings,omitempty"`
 }
 
 // PageItem is one entry in a page's list, Depth levels in under the one

@@ -102,7 +102,7 @@ func TestNodeOverMCP(t *testing.T) {
 		}
 	}
 	raw, _ := json.Marshal(bar.StructuredContent)
-	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Items) != 3 || doc.Items[0].ID != "devices" || doc.Items[1].ID != "one.plugins" || doc.Items[2].ID != "board" || !doc.Items[2].Bar {
+	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Items) < 3 || len(doc.Items) > 4 || len(doc.Items) == 4 && doc.Items[3].ID != "spaces" || doc.Items[0].ID != "devices" || doc.Items[1].ID != "one.plugins" || doc.Items[2].ID != "board" || !doc.Items[2].Bar {
 		t.Fatalf("menubar items: %s", raw)
 	}
 	for _, item := range doc.Items {
@@ -124,11 +124,25 @@ func TestNodeOverMCP(t *testing.T) {
 		t.Fatalf("pages: %v %+v", err, pages)
 	}
 	var pdoc struct {
-		Pages []struct{ ID, Title, Tool, Items string }
+		Pages []struct{ ID, Title, Tool, Items, Settings string }
 	}
 	raw, _ = json.Marshal(pages.StructuredContent)
-	if err := json.Unmarshal(raw, &pdoc); err != nil || len(pdoc.Pages) != 1 || pdoc.Pages[0].Tool != "board_channel" || pdoc.Pages[0].Items != "board_channel_items" {
+	if err := json.Unmarshal(raw, &pdoc); err != nil || len(pdoc.Pages) < 1 || pdoc.Pages[0].Tool != "board_channel" || pdoc.Pages[0].Items != "board_channel_items" {
 		t.Fatalf("pages: %s", raw)
+	}
+	// Spaces, where Podman is, has a page with no items, only its widget,
+	// and settings.
+	if len(pdoc.Pages) > 1 {
+		p := pdoc.Pages[1]
+		if p.Tool != "spaces_page" || p.Items != "" || p.Settings != "spaces_page_settings" {
+			t.Fatalf("pages: %s", raw)
+		}
+		for _, tool := range []string{p.Tool, p.Settings} {
+			res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: map[string]any{}})
+			if raw, _ := json.Marshal(res.StructuredContent); err != nil || res.IsError || !strings.Contains(string(raw), `"root"`) {
+				t.Fatalf("%s: %v %s", tool, err, raw)
+			}
+		}
 	}
 	items, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "board_channel_items", Arguments: map[string]any{}})
 	if raw, _ = json.Marshal(items.StructuredContent); err != nil || !strings.Contains(string(raw), `"title":"general"`) {

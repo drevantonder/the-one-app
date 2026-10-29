@@ -59,6 +59,7 @@ struct Stack: Decodable {
     let c: [Skippable<Node>]
     let gap: CGFloat?, pad: CGFloat?, w: CGFloat?, grow: Bool?, dim: Bool?
     let align: String?, justify: String?
+    var aspect: CGFloat? = nil, radius: CGFloat? = nil, border: String? = nil
     var vertical: Bool { t == "col" }
     var children: [Node] { c.compactMap(\.value) }
 
@@ -93,6 +94,21 @@ struct ImageNode: Decodable {
     let w: CGFloat?, h: CGFloat?
     let round: Bool?, radius: CGFloat?
     let alt: String?
+    var aspect: CGFloat? = nil
+}
+
+struct GridNode: Decodable {
+    let min: CGFloat
+    let gap: CGFloat?
+    let c: [Skippable<Node>]
+    var children: [Node] { c.compactMap(\.value) }
+}
+
+struct PopoutNode: Decodable {
+    let url: String
+    let title: String
+    let c: [Skippable<Node>]
+    var children: [Node] { c.compactMap(\.value) }
 }
 
 struct Item: Decodable {
@@ -119,7 +135,7 @@ struct DotNode: Decodable { let color: String? }
 indirect enum Node: Decodable {
     case stack(Stack), link(LinkNode), text(TextNode), time(TimeNode), image(ImageNode), spacer(SpacerNode)
     case stat(StatNode), list(ListNode), chart(ChartNode), button(ButtonNode), toggle(ToggleNode), progress(ProgressNode)
-    case gauge(GaugeNode), spark(SparkNode), icon(IconNode), dot(DotNode), unknown
+    case gauge(GaugeNode), spark(SparkNode), icon(IconNode), dot(DotNode), grid(GridNode), popout(PopoutNode), unknown
 
     private enum Key: String, CodingKey { case t }
 
@@ -141,6 +157,8 @@ indirect enum Node: Decodable {
         case "spark": self = .spark(try SparkNode(from: decoder))
         case "icon": self = .icon(try IconNode(from: decoder))
         case "dot": self = .dot(try DotNode(from: decoder))
+        case "grid": self = .grid(try GridNode(from: decoder))
+        case "popout": self = .popout(try PopoutNode(from: decoder))
         default: self = .unknown
         }
     }

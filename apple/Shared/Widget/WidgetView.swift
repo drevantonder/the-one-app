@@ -14,6 +14,10 @@ struct WidgetContext {
     var homeScreen = false
     /// The widget's plugin, whose operations its actions name.
     var app = ""
+    /// Opens a live web page in a window of its own; nil where that can't happen.
+    var popout: (@MainActor (URL, String) -> Void)? = WidgetContext.popouts
+    /// How the app opens popouts; home-screen widgets have none.
+    nonisolated(unsafe) static var popouts: (@MainActor (URL, String) -> Void)?
 
     func tool(_ op: String) -> String { app == "one" ? op : "\(app)_\(op)" }
 }
@@ -106,6 +110,19 @@ struct NodeView: View {
         case .spark(let s): SparkView(node: s)
         case .icon(let i): IconView(node: i)
         case .dot(let d): Circle().fill(widgetColor(d.color ?? "green")).frame(width: 7, height: 7)
+        case .grid(let g):
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: g.min), spacing: g.gap ?? 12, alignment: .top)], alignment: .leading, spacing: g.gap ?? 12) {
+                ForEach(Array(g.children.enumerated()), id: \.offset) { _, child in NodeView(node: child, axis: .vertical, ctx: ctx) }
+            }
+        case .popout(let p):
+            let content = StackView(stack: Stack.column(p.children), ctx: ctx)
+            if let url = URL(string: p.url), let popout = ctx.popout {
+                Button { popout(url, p.title) } label: { content.contentShape(Rectangle()) }.buttonStyle(.plain)
+            } else if let url = URL(string: p.url) {
+                Link(destination: url) { content }.buttonStyle(.plain)
+            } else {
+                content
+            }
         case .unknown: EmptyView()
         }
     }
@@ -127,6 +144,7 @@ struct StackView: View {
         }
         .padding(stack.pad ?? 0)
         .frame(width: stack.w)
+        .modifier(Box(aspect: stack.aspect, radius: stack.radius ?? 0, border: stack.border))
         .opacity(stack.dim == true ? 0.5 : 1)
     }
 
@@ -154,6 +172,29 @@ struct StackView: View {
     /// Columns stretch their children across by default; any node with `grow` takes the free space along its parent's axis.
     private func fillsWidth(_ axis: Axis, _ child: Node) -> Bool {
         axis == .horizontal ? stack.grow(child) : (stack.align ?? "stretch") == "stretch"
+    }
+}
+
+/// Gives a stack a fixed shape and an outline.
+struct Box: ViewModifier {
+    let aspect: CGFloat?
+    let radius: CGFloat
+    let border: String?
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let sized = Group {
+            if let aspect {
+                Color.clear.aspectRatio(aspect, contentMode: .fit).overlay { content }
+            } else {
+                content
+            }
+        }
+        switch border {
+        case "dashed": sized.clipShape(shape).overlay { shape.strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])) }
+        case "solid": sized.clipShape(shape).overlay { shape.strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1) }
+        default: sized.clipShape(shape)
+        }
     }
 }
 
@@ -198,8 +239,10 @@ struct ImageView: View {
     let image: Image?
 
     var body: some View {
-        Group {
+        let picture = Group {
             if let image {
+                image.resizable().scaledToFill()
+            } else if let data = dataURL(node.src), let image = platformImage(data) {
                 image.resizable().scaledToFill()
             } else if let url = URL(string: node.src) {
                 AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Color.secondary.opacity(0.15) }
@@ -207,10 +250,31 @@ struct ImageView: View {
                 Color.secondary.opacity(0.15)
             }
         }
-        .frame(width: node.w ?? 28, height: node.h ?? 28)
-        .clipShape(RoundedRectangle(cornerRadius: node.round == true ? 1000 : node.radius ?? 0, style: .continuous))
+        let shape = RoundedRectangle(cornerRadius: node.round == true ? 1000 : node.radius ?? 0, style: .continuous)
+        Group {
+            if let aspect = node.aspect {
+                Color.clear.aspectRatio(aspect, contentMode: .fit).overlay { picture }
+            } else {
+                picture.frame(width: node.w ?? 28, height: node.h ?? 28)
+            }
+        }
+        .clipShape(shape)
         .accessibilityLabel(node.alt ?? "")
     }
+}
+
+/// The bytes of a base64 data: URL.
+func dataURL(_ src: String) -> Data? {
+    guard src.hasPrefix("data:"), let comma = src.firstIndex(of: ",") else { return nil }
+    return Data(base64Encoded: String(src[src.index(after: comma)...]))
+}
+
+func platformImage(_ data: Data) -> Image? {
+    #if os(macOS)
+    NSImage(data: data).map(Image.init(nsImage:))
+    #else
+    UIImage(data: data).map(Image.init(uiImage:))
+    #endif
 }
 
 /// Shows as many items as fit, then "+N more"; when some are hidden the shown rows spread to fill the height.
