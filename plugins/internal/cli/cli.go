@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -39,7 +40,25 @@ func Command(ctx context.Context, name string, args ...string) *exec.Cmd {
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = append(os.Environ(), "PATH="+Path())
+	cmd.Env = append(cmd.Env, userSession()...)
 	return cmd
+}
+
+// userSession is what tools need to reach the user's systemd and D-Bus
+// when the node was started without it, as a system service is.
+func userSession() []string {
+	if runtime.GOOS != "linux" || os.Getenv("XDG_RUNTIME_DIR") != "" {
+		return nil
+	}
+	dir := fmt.Sprintf("/run/user/%d", os.Getuid())
+	if _, err := os.Stat(dir); err != nil {
+		return nil
+	}
+	env := []string{"XDG_RUNTIME_DIR=" + dir}
+	if os.Getenv("DBUS_SESSION_BUS_ADDRESS") == "" {
+		env = append(env, "DBUS_SESSION_BUS_ADDRESS=unix:path="+dir+"/bus")
+	}
+	return env
 }
 
 // Run runs a tool and returns its combined output; on failure the error
