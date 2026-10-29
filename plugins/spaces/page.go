@@ -93,7 +93,7 @@ func (p *pool) tiles() []tile {
 		case strings.HasPrefix(n, poolPrefix) && !lent:
 			t.free = true
 		case lent && b.SignIn:
-			t.title, t.who, t.since, t.order = "Signing in to sites", "You", b.Since, 1
+			t.title, t.since, t.order = "Signing in to sites", b.Since, 1
 		case lent:
 			t.title, t.who, t.since = cmp(b.For, "Borrowed"), cmp(b.Agent, "An agent"), b.Since
 		default:
@@ -177,19 +177,15 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 		if got[i].pic == "" {
 			pic = widget.Col(widget.Stack{Aspect: 16.0 / 10, Radius: 10, Border: "solid"})
 		}
-		var meta []string
+		var line []widget.Node
 		if t.who != "" {
-			meta = append(meta, t.who)
+			line = append(line, widget.Text(t.who, widget.Style{Size: "sm", Tone: "muted", Lines: 1}))
+		}
+		if u, ok := uses[t.name]; ok && !small {
+			line = append(line, p.meters(t.name, u, spaceMemory)...)
 		}
 		if !small {
-			meta = append(meta, t.host)
-			if u, ok := uses[t.name]; ok {
-				meta = append(meta, size(u.Mem), fmt.Sprintf("%.0f%% CPU", u.CPU))
-			}
-		}
-		line := []widget.Node{widget.Text(strings.Join(meta, " · "), widget.Style{Size: "sm", Tone: "muted", Lines: 1})}
-		if !t.since.IsZero() {
-			line = append(line, widget.Time(t.since, "relative", widget.Style{Size: "sm", Tone: "muted"}))
+			line = append(line, widget.Spacer(0), widget.Text(t.host, widget.Style{Size: "sm", Tone: "muted"}))
 		}
 		titleSize := "md"
 		if small {
@@ -217,8 +213,8 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 		}
 		return widget.Grid(min, 12, cells...), strings.Join(lines, "\n"), nil
 	}
-	head, text := summary(rooms, len(cells)-1)
-	return widget.Col(widget.Stack{Gap: 28}, head, widget.Grid(min, 20, cells...)), strings.Join(append(lines, text), "\n"), nil
+	head, text := p.summary(rooms, len(cells)-1)
+	return widget.Col(widget.Stack{Gap: 20}, head, widget.Grid(min, 20, cells...)), strings.Join(append(lines, text), "\n"), nil
 }
 
 // freeTile is the Space ready for the next agent, or why there is none.
@@ -237,35 +233,69 @@ func (p *pool) freeTile(call *sdk.Call, host string) widget.Node {
 		widget.Text(sub, widget.Style{Size: "sm", Tone: "muted"}))
 }
 
-// summary is what the Spaces use together, and how full each device that
-// runs them is.
-func summary(rooms []room, running int) (widget.Node, string) {
-	var mem int64
+// summary is one small line: how many Spaces run, what they use together,
+// and how full each device that runs them is.
+func (p *pool) summary(rooms []room, running int) (widget.Node, string) {
+	var mem, limit int64
 	var cpu float64
-	measured := false
-	var bars []widget.Node
+	items := []widget.Node{widget.Text(fmt.Sprintf("%d running", running), widget.Style{Size: "sm", Tone: "muted"})}
+	text := fmt.Sprintf("%d running", running)
+	var devices []widget.Node
 	for _, r := range rooms {
 		if len(r.Spaces) == 0 || r.Total == 0 {
 			continue
 		}
-		measured = true
 		for _, u := range r.Spaces {
 			mem += u.Mem
 			cpu += u.CPU
+			limit += spaceMemory
 		}
 		inUse := r.Total - r.Free
-		bars = append(bars, widget.Row(widget.Stack{Gap: 10},
-			widget.Text(strings.Split(r.Host, ".")[0], widget.Style{Size: "sm", Tone: "muted"}),
-			widget.Progress(float64(inUse)/float64(r.Total), "", 180, "blue"),
-			widget.Text(fmt.Sprintf("%s of %s", size(inUse), size(r.Total)), widget.Style{Size: "sm", Tone: "muted"})))
+		devices = append(devices, widget.Text(strings.Split(r.Host, ".")[0], widget.Style{Size: "sm", Tone: "muted"}),
+			widget.Progress(float64(inUse)/float64(r.Total), "", 44, level(float64(inUse)/float64(r.Total))),
+			widget.Text(fmt.Sprintf("%s of %s", size(inUse), size(r.Total)), widget.Style{Size: "sm", Tone: "muted"}))
 	}
-	stats := []widget.Node{widget.Stat(fmt.Sprint(running), "Running")}
-	text := fmt.Sprintf("%d running", running)
-	if measured {
-		stats = append(stats, widget.Stat(size(mem), "Memory"), widget.Stat(fmt.Sprintf("%.0f%%", cpu), "CPU"))
+	if limit > 0 {
+		items = append(items, p.meters("", usage{CPU: cpu, Mem: mem}, limit)...)
 		text += fmt.Sprintf("; using %s and %.0f%% CPU", size(mem), cpu)
 	}
-	return widget.Col(widget.Stack{Gap: 14}, append([]widget.Node{widget.Row(widget.Stack{Gap: 40}, stats...)}, bars...)...), text
+	if len(devices) > 0 {
+		items = append(items, widget.Spacer(6))
+		items = append(items, devices...)
+	}
+	return widget.Row(widget.Stack{Gap: 8}, items...), text
+}
+
+// meters are a ring for memory, of limit, and a line of recent CPU, as on
+// the Devices widget; name "" is all the Spaces together.
+func (p *pool) meters(name string, u usage, limit int64) []widget.Node {
+	p.mu.Lock()
+	cpu := slices.Clone(p.cpu[name])
+	p.mu.Unlock()
+	if len(cpu) == 0 {
+		cpu = []float64{u.CPU}
+	}
+	top := 100.0
+	for _, v := range cpu {
+		top = max(top, v)
+	}
+	share := float64(u.Mem) / float64(limit)
+	return []widget.Node{
+		widget.Gauge(share, level(share), 14),
+		widget.Text(size(u.Mem), widget.Style{Size: "sm", Tone: "muted"}),
+		widget.Spark(cpu, top, "blue", 32, 12),
+		widget.Text(fmt.Sprintf("%.0f%%", u.CPU), widget.Style{Size: "sm", Tone: "muted"}),
+	}
+}
+
+func level(share float64) string {
+	switch {
+	case share >= 0.85:
+		return "red"
+	case share >= 0.6:
+		return "orange"
+	}
+	return "green"
 }
 
 // settings lists the sites agents are signed in to, and the backups.

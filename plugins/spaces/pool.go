@@ -79,13 +79,14 @@ type pool struct {
 	rooms []room // every device's, as last asked
 	asked time.Time
 	urls  map[string]viewLink   // live views, by Space
+	cpu   map[string][]float64  // recent CPU, by Space; "" for all of them
 	sites map[string]loginSites // by login
 	kick  chan struct{}
 	take  sync.Mutex // one borrow at a time on this device
 }
 
 func setupPool(c *sdk.Ctx, t *tools, located func(string) string, locate func(*sdk.Call)) *pool {
-	p := &pool{t: t, located: located, locate: locate, lent: map[string]borrowed{}, used: map[string]time.Time{}, sites: map[string]loginSites{}, kick: make(chan struct{}, 1)}
+	p := &pool{t: t, located: located, locate: locate, lent: map[string]borrowed{}, used: map[string]time.Time{}, sites: map[string]loginSites{}, cpu: map[string][]float64{}, kick: make(chan struct{}, 1)}
 	t.used = p.touch
 	c.Entry("borrowed", sdk.Available)
 	c.Entry("returned", sdk.Available)
@@ -641,7 +642,7 @@ func here(call *sdk.Call) (room, error) {
 // every 20 seconds.
 func (p *pool) roomsAll(call *sdk.Call) []room {
 	p.mu.Lock()
-	if time.Since(p.asked) < 20*time.Second {
+	if time.Since(p.asked) < 4*time.Second {
 		defer p.mu.Unlock()
 		return p.rooms
 	}
@@ -686,6 +687,24 @@ func (p *pool) roomsAll(call *sdk.Call) []room {
 	slices.SortFunc(rooms, func(a, b room) int { return strings.Compare(a.Host, b.Host) })
 	p.mu.Lock()
 	p.rooms, p.asked = rooms, time.Now()
+	add := func(name string, v float64) {
+		p.cpu[name] = append(p.cpu[name], v)
+		if n := len(p.cpu[name]); n > 30 {
+			p.cpu[name] = p.cpu[name][n-30:]
+		}
+	}
+	var all float64
+	measured := false
+	for _, r := range rooms {
+		for n, u := range r.Spaces {
+			add(n, u.CPU)
+			all += u.CPU
+			measured = true
+		}
+	}
+	if measured {
+		add("", all)
+	}
 	p.mu.Unlock()
 	return rooms
 }
