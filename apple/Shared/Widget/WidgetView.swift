@@ -122,7 +122,7 @@ struct NodeView: View {
                 Button {
                     let run = ctx.run
                     popout(url, p.title, p.close.map { action in { Task { try? await run?(action) } } })
-                } label: { content.contentShape(Rectangle()) }.buttonStyle(.plain)
+                } label: { content.contentShape(Rectangle()) }.buttonStyle(Pressable())
             } else if let url = URL(string: p.url) {
                 Link(destination: url) { content }.buttonStyle(.plain)
             } else {
@@ -180,6 +180,20 @@ struct StackView: View {
     }
 }
 
+/// Dims a tappable widget part under the pointer and while pressed.
+struct Pressable: ButtonStyle {
+    @State private var hover = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : hover ? 0.85 : 1)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.15), value: hover)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .onHover { hover = $0 }
+    }
+}
+
 /// Gives a stack a fixed shape and an outline.
 struct Box: ViewModifier {
     let aspect: CGFloat?
@@ -196,6 +210,7 @@ struct Box: ViewModifier {
             }
         }
         switch border {
+        case "well": sized.background(Color.primary.opacity(0.05), in: shape)
         case "dashed": sized.clipShape(shape).overlay { shape.strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])) }
         case "solid": sized.clipShape(shape).overlay { shape.strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1) }
         default: sized.clipShape(shape)
@@ -258,7 +273,10 @@ struct ImageView: View {
         let shape = RoundedRectangle(cornerRadius: node.round == true ? 1000 : node.radius ?? 0, style: .continuous)
         Group {
             if let aspect = node.aspect {
+                // A screenshot: a faint edge keeps it apart from the page.
                 Color.clear.aspectRatio(aspect, contentMode: .fit).overlay { picture }
+                    .clipShape(shape)
+                    .overlay { shape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 1) }
             } else {
                 picture.frame(width: node.w ?? 28, height: node.h ?? 28)
             }

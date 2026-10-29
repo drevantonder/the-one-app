@@ -97,7 +97,7 @@ func (p *pool) tiles() []tile {
 		case lent:
 			t.title, t.who, t.since = cmp(b.For, "Borrowed"), cmp(b.Agent, "An agent"), b.Since
 		default:
-			t.title, t.who, t.order = strings.ToUpper(n[:1])+n[1:], "Yours", 2
+			t.title, t.order = strings.ToUpper(n[:1])+n[1:], 2
 		}
 		out = append(out, t)
 	}
@@ -134,15 +134,9 @@ func (p *pool) link(call *sdk.Call, t tile) string {
 }
 
 // grid draws the Spaces as pictures at least min points wide; with all,
-// the user's own, a free one and what they all use too. Sign-ins aren't
-// Spaces to watch: they show in the app's own window, and in settings.
+// the ones always on, a free one and what they all use too.
 func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string, error) {
-	var tiles []tile
-	for _, t := range p.tiles() {
-		if t.order != 1 {
-			tiles = append(tiles, t)
-		}
-	}
+	tiles := p.tiles()
 	rooms := p.roomsAll(call)
 	uses := map[string]usage{}
 	for _, r := range rooms {
@@ -170,114 +164,108 @@ func (p *pool) grid(call *sdk.Call, min float64, all bool) (widget.Node, string,
 	small := min < 200
 	var cells []widget.Node
 	var lines []string
-	anyFree := false
+	free := ""
 	for i, t := range tiles {
 		if t.free {
-			anyFree = true
+			free = t.host
 			continue
 		}
 		if !all && t.order == 2 {
 			continue
 		}
-		pic := widget.Img(got[i].pic, 0, 0, 1.6, 8)
+		pic := widget.Img(got[i].pic, 0, 0, 16.0/10, 10)
 		if got[i].pic == "" {
-			pic = widget.Col(widget.Stack{Aspect: 1.6, Radius: 8, Border: "solid", Align: "center", Justify: "center"}, widget.Text("…", widget.Style{Tone: "muted"}))
+			pic = widget.Col(widget.Stack{Aspect: 16.0 / 10, Radius: 10, Border: "solid"})
 		}
-		sub := []widget.Node{widget.Text(t.who, widget.Style{Size: "xs", Tone: "muted"})}
+		var meta []string
+		if t.who != "" {
+			meta = append(meta, t.who)
+		}
+		if !small {
+			meta = append(meta, t.host)
+			if u, ok := uses[t.name]; ok {
+				meta = append(meta, size(u.Mem), fmt.Sprintf("%.0f%% CPU", u.CPU))
+			}
+		}
+		line := []widget.Node{widget.Text(strings.Join(meta, " · "), widget.Style{Size: "sm", Tone: "muted", Lines: 1})}
 		if !t.since.IsZero() {
-			sub = append(sub, widget.Time(t.since, "relative", widget.Style{Size: "xs", Tone: "muted"}))
+			line = append(line, widget.Time(t.since, "relative", widget.Style{Size: "sm", Tone: "muted"}))
 		}
-		if !small && t.host != "" {
-			sub = append(sub, widget.Text(t.host, widget.Style{Size: "xs", Tone: "muted"}))
+		titleSize := "md"
+		if small {
+			titleSize = "sm"
 		}
-		if u, ok := uses[t.name]; ok && !small {
-			sub = append(sub, widget.Spacer(0), widget.Text(fmt.Sprintf("%s · %.0f%% CPU", size(u.Mem), u.CPU), widget.Style{Size: "xs", Tone: "muted"}))
-		}
-		cell := widget.Col(widget.Stack{Gap: 3}, pic,
-			widget.Text(t.title, widget.Style{Size: "sm", Weight: "bold", Lines: 1}),
-			widget.Row(widget.Stack{Gap: 5}, sub...))
+		cell := widget.Col(widget.Stack{Gap: 2}, pic, widget.Spacer(6),
+			widget.Text(t.title, widget.Style{Size: titleSize, Weight: "medium", Lines: 1}),
+			widget.Row(widget.Stack{Gap: 6}, line...))
 		if got[i].url != "" {
-			cell = widget.Popout(got[i].url, t.title, nil, cell)
+			var done *widget.Action
+			if t.order == 1 {
+				done = &finish
+			}
+			cell = widget.Popout(got[i].url, t.title, done, cell)
 		}
 		cells = append(cells, cell)
 		lines = append(lines, fmt.Sprintf("%s: %s", t.title, t.who))
 	}
 	if all {
-		cells = append(cells, p.freeTile(call, anyFree, uses))
+		cells = append(cells, p.freeTile(call, free))
 	}
 	if !all {
-		me, _ := tailnetName(call.Context)
-		cells = append(cells, widget.Popout(fmt.Sprintf("http://%s:4747/hooks/spaces/sign_in", me), "Signing in to sites", &finish,
-			widget.Col(widget.Stack{Aspect: 1.6, Radius: 8, Border: "dashed", Align: "center", Justify: "center"},
-				widget.Text("＋ Sign in", widget.Style{Size: "xs", Tone: "muted"}))))
-		if len(lines) == 0 {
-			lines = append(lines, "No Spaces in use.")
+		if len(cells) == 0 {
+			return widget.Text("No agent is using a Space.", widget.Style{Size: "sm", Tone: "muted"}), "No Spaces in use.", nil
 		}
-	}
-	if !all {
 		return widget.Grid(min, 12, cells...), strings.Join(lines, "\n"), nil
 	}
-	head, used := usageSummary(rooms)
-	return widget.Col(widget.Stack{Gap: 16}, head, widget.Grid(min, 12, cells...)), strings.Join(append(lines, used), "\n"), nil
+	head, text := summary(rooms, len(cells)-1)
+	return widget.Col(widget.Stack{Gap: 28}, head, widget.Grid(min, 20, cells...)), strings.Join(append(lines, text), "\n"), nil
 }
 
-// usageSummary is what all the Spaces use, and how full each device that
+// freeTile is the Space ready for the next agent, or why there is none.
+func (p *pool) freeTile(call *sdk.Call, host string) widget.Node {
+	title, sub := "Free", host
+	if host == "" {
+		if best := p.best(call); best != nil {
+			sub = "starting on " + strings.Split(best.Host, ".")[0]
+		} else {
+			title, sub = "No room", "every device is short of memory"
+		}
+	}
+	return widget.Col(widget.Stack{Gap: 2},
+		widget.Col(widget.Stack{Aspect: 16.0 / 10, Radius: 10, Border: "well"}), widget.Spacer(6),
+		widget.Text(title, widget.Style{Size: "md", Weight: "medium", Tone: "muted"}),
+		widget.Text(sub, widget.Style{Size: "sm", Tone: "muted"}))
+}
+
+// summary is what the Spaces use together, and how full each device that
 // runs them is.
-func usageSummary(rooms []room) (widget.Node, string) {
+func summary(rooms []room, running int) (widget.Node, string) {
 	var mem int64
 	var cpu float64
-	var rows []widget.Node
+	measured := false
+	var bars []widget.Node
 	for _, r := range rooms {
 		if len(r.Spaces) == 0 || r.Total == 0 {
 			continue
 		}
-		var m int64
+		measured = true
 		for _, u := range r.Spaces {
-			m += u.Mem
+			mem += u.Mem
 			cpu += u.CPU
 		}
-		mem += m
 		inUse := r.Total - r.Free
-		rows = append(rows, widget.Row(widget.Stack{Gap: 10},
-			widget.Text(strings.Split(r.Host, ".")[0], widget.Style{Size: "xs", Weight: "medium"}),
-			widget.Progress(float64(inUse)/float64(r.Total), "", 160, "blue"),
-			widget.Text(fmt.Sprintf("Spaces %s · %s of %s in use", size(m), size(inUse), size(r.Total)), widget.Style{Size: "xs", Tone: "muted"})))
+		bars = append(bars, widget.Row(widget.Stack{Gap: 10},
+			widget.Text(strings.Split(r.Host, ".")[0], widget.Style{Size: "sm", Tone: "muted"}),
+			widget.Progress(float64(inUse)/float64(r.Total), "", 180, "blue"),
+			widget.Text(fmt.Sprintf("%s of %s", size(inUse), size(r.Total)), widget.Style{Size: "sm", Tone: "muted"})))
 	}
-	text := fmt.Sprintf("Spaces use %s of memory and %.0f%% of a CPU", size(mem), cpu)
-	return widget.Col(widget.Stack{Gap: 6}, append([]widget.Node{widget.Text(text, widget.Style{Size: "sm", Tone: "muted"})}, rows...)...), text
-}
-
-// freeTile says a Space is free, is being got ready, or why there is none.
-func (p *pool) freeTile(call *sdk.Call, free bool, uses map[string]usage) widget.Node {
-	title, sub := "Free", "starting one…"
-	if free {
-		for _, t := range p.tiles() {
-			if t.free {
-				sub = "ready on " + t.host
-				if u, ok := uses[t.name]; ok {
-					sub += " · " + size(u.Mem)
-				}
-				break
-			}
-		}
-	} else if p.best(call) == nil {
-		title = "No room"
-		sub = "no device can spare the memory"
-		var most *room
-		for _, r := range p.roomsAll(call) {
-			if most == nil || r.Free > most.Free {
-				most = &r
-			}
-		}
-		if most != nil {
-			sub = fmt.Sprintf("%s is using %s of %s", strings.Split(most.Host, ".")[0], size(most.Total-most.Free), size(most.Total))
-		}
+	stats := []widget.Node{widget.Stat(fmt.Sprint(running), "Running")}
+	text := fmt.Sprintf("%d running", running)
+	if measured {
+		stats = append(stats, widget.Stat(size(mem), "Memory"), widget.Stat(fmt.Sprintf("%.0f%%", cpu), "CPU"))
+		text += fmt.Sprintf("; using %s and %.0f%% CPU", size(mem), cpu)
 	}
-	return widget.Col(widget.Stack{Gap: 3},
-		widget.Col(widget.Stack{Aspect: 1.6, Radius: 8, Border: "dashed", Align: "center", Justify: "center"},
-			widget.Text(strings.ToLower(title), widget.Style{Size: "xs", Tone: "muted"})),
-		widget.Text(title, widget.Style{Size: "sm", Weight: "bold", Tone: "muted"}),
-		widget.Text(sub, widget.Style{Size: "xs", Tone: "muted"}))
+	return widget.Col(widget.Stack{Gap: 14}, append([]widget.Node{widget.Row(widget.Stack{Gap: 40}, stats...)}, bars...)...), text
 }
 
 // settings lists the sites agents are signed in to, and the backups.

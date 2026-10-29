@@ -66,6 +66,7 @@ struct PluginPage: View {
                 ToolbarItem { Button("Settings", systemImage: "gearshape") { showSettings = true } }
             }
         }
+        .onReceive(Popouts.shared.opened) { showSettings = false }
         .sheet(isPresented: $showSettings) {
             if let settings = page.settings {
                 NavigationStack {

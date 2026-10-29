@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import WebKit
 
@@ -50,6 +51,8 @@ final class Popouts: ObservableObject {
     /// The page shown big in the app's window.
     @Published var big: PopoutItem?
     weak var appWindow: NSWindow?
+    /// Fires as a page opens, so sheets over the app close for it.
+    let opened = PassthroughSubject<Void, Never>()
     @Published var focus: String?
     @Published var driving: Set<String> = [] // clicks and typing go through
     @Published var layout = Layout(rawValue: UserDefaults.standard.string(forKey: "popoutLayout") ?? "") ?? .separate {
@@ -61,9 +64,12 @@ final class Popouts: ObservableObject {
     private var panels: [PopoutPanel] = []
 
     func open(_ url: URL, _ title: String, _ onClose: (@MainActor () -> Void)?) {
-        if let w = appWindow, w.isKeyWindow, !items.contains(where: { $0.id == title }) {
+        if let w = appWindow, NSApp.keyWindow === w || NSApp.keyWindow?.sheetParent === w, !items.contains(where: { $0.id == title }) {
             closeBig()
-            big = PopoutItem(id: title, url: url, web: webView(url), onClose: onClose)
+            opened.send()
+            withAnimation(.easeOut(duration: 0.2)) {
+                big = PopoutItem(id: title, url: url, web: webView(url), onClose: onClose)
+            }
             return
         }
         if !items.contains(where: { $0.id == title }) {
@@ -75,7 +81,7 @@ final class Popouts: ObservableObject {
 
     func closeBig() {
         big?.onClose?()
-        big = nil
+        withAnimation(.easeOut(duration: 0.2)) { big = nil }
     }
 
     /// Moves the big page out of the app, to float.
@@ -156,6 +162,7 @@ struct PopoutCover: ViewModifier {
                     WebHost(web: item.web)
                 }
                 .background(.background)
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
         }
     }
@@ -303,9 +310,17 @@ struct PopoutFocus: View {
 final class Popouts: ObservableObject {
     static let shared = Popouts()
     @Published var shown: PopoutItem?
+    /// Fires as a page opens, so sheets over the app close for it.
+    let opened = PassthroughSubject<Void, Never>()
 
     func open(_ url: URL, _ title: String, _ onClose: (@MainActor () -> Void)?) {
-        shown = PopoutItem(id: title, url: url, web: webView(url), onClose: onClose)
+        let item = PopoutItem(id: title, url: url, web: webView(url), onClose: onClose)
+        opened.send()
+        // A sheet closing for it has to be gone before the page can cover the app.
+        Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            shown = item
+        }
     }
 }
 
