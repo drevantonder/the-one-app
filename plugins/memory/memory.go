@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/drevantonder/the-one-app/sdk"
+	"github.com/drevantonder/the-one-app/sdk/optmem"
 )
 
 type (
@@ -60,28 +61,40 @@ To find an old memory, search with ` + "`memory_recall`" + `, or open a #a-b sum
 
 If you are a subagent, never write memories: you cannot judge what is already known. When you spawn a subagent, tell it: "You are a subagent. Don't write memories."`
 
+var words = optmem.Words{
+	One: "memory", Many: "memories", Log: "the memory", Write: "note", Title: "Your memory",
+	Empty: "No memories yet. Record the first with memory_note.",
+	Again: "call memory_wake again",
+	Nap: func(b string) string {
+		return fmt.Sprintf(`memory_nap with block "%s" and text "<your line>" (CLI: one memory nap %s "<your line>")`, b, b)
+	},
+	Next: func(part, at int) string {
+		return fmt.Sprintf("Call memory_wake with part %d and at %d (CLI: one memory wake %d %d)", part, at, part, at)
+	},
+}
+
 func setup(c *sdk.Ctx) error {
-	m := New()
+	m := optmem.New(words)
 
 	c.Entry("note", sdk.Available)
 	c.Entry("summary", sdk.Available)
 	c.Entry("forget", sdk.Available)
-	c.OnReset(func() { m = New() })
+	c.OnReset(func() { m = optmem.New(words) })
 	sdk.Handle(c, "note", func(e sdk.Entry, in noteEntry) error {
 		m.Add(e.ID, in.Date, in.Text)
 		return nil
 	})
 	sdk.Handle(c, "summary", func(_ sdk.Entry, in summaryEntry) error {
-		m.PutSummary(block{in.Lo, in.Hi}, in.Digest, in.Text)
+		m.PutSummary(optmem.Block{Lo: in.Lo, Hi: in.Hi}, in.Digest, in.Text)
 		return nil
 	})
 	sdk.Handle(c, "forget", func(_ sdk.Entry, in forgetEntry) error {
-		m.Forget(block{in.Lo, in.Hi})
+		m.Forget(optmem.Block{Lo: in.Lo, Hi: in.Hi})
 		return nil
 	})
 
 	sdk.Op(c, "note", "Record one memory: one line, at most 280 bytes.", sdk.Write, func(call *sdk.Call, in noteIn) (sdk.Result, error) {
-		text, err := CheckText(in.Text)
+		text, err := words.Check(in.Text)
 		if err != nil {
 			return sdk.Result{}, err
 		}
@@ -98,7 +111,7 @@ func setup(c *sdk.Ctx) error {
 	sdk.Op(c, "nap", "Answer a compression request; with no arguments, show the next one.", sdk.Write, func(call *sdk.Call, in napIn) (sdk.Result, error) {
 		var out []string
 		if in.Block != "" || in.Text != "" {
-			b, err := ParseBlock(in.Block)
+			b, err := optmem.ParseBlock(in.Block)
 			if err != nil {
 				return sdk.Result{}, err
 			}
@@ -113,7 +126,7 @@ func setup(c *sdk.Ctx) error {
 				}
 				return sdk.Result{}, fmt.Errorf("wrong block %s: blocks are compressed in order, and the next is %s", b, todo[0])
 			default:
-				text, err := CheckText(in.Text)
+				text, err := words.Check(in.Text)
 				if err != nil {
 					return sdk.Result{}, err
 				}
@@ -137,7 +150,7 @@ func setup(c *sdk.Ctx) error {
 	})
 
 	sdk.Op(c, "zoom", "Open a #a-b summary into its two halves, down to the raw memories.", sdk.Read, func(_ *sdk.Call, in blockIn) (sdk.Result, error) {
-		b, err := ParseBlock(in.Block)
+		b, err := optmem.ParseBlock(in.Block)
 		if err != nil {
 			return sdk.Result{}, err
 		}
@@ -146,7 +159,7 @@ func setup(c *sdk.Ctx) error {
 	})
 
 	sdk.Op(c, "forget", "Drop a wrong summary and every summary built on it; they are asked for again. Memories themselves are never lost.", sdk.Write, func(call *sdk.Call, in blockIn) (sdk.Result, error) {
-		b, err := ParseBlock(in.Block)
+		b, err := optmem.ParseBlock(in.Block)
 		if err != nil {
 			return sdk.Result{}, err
 		}
@@ -160,7 +173,7 @@ func setup(c *sdk.Ctx) error {
 	})
 
 	sdk.Op(c, "wake", "Read your memory. Call this first in every session and do what it says, to the end of its output.", sdk.Read, func(_ *sdk.Call, in wakeIn) (sdk.Result, error) {
-		s, err := m.Wake(in.Part, in.At)
+		s, err := m.Wake(in.Part, in.At, "You are awake.")
 		return sdk.Text(s), err
 	})
 	c.Instructions(func(text string) string { return text + "\n\n" + protocolText })
