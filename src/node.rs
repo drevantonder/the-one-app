@@ -171,6 +171,22 @@ impl Node {
         &self.0.providers
     }
 
+    /// Registers a provider and, where its description is new, announces it to every space this device is in.
+    pub async fn provide(&self, app: &str, describe: Value) -> Result<()> {
+        let describe = self.0.providers.register(app, describe);
+        for space in self.spaces() {
+            let known = {
+                let spaces = self.0.spaces.lock().unwrap();
+                let Some(s) = spaces.get(&space).filter(|s| s.members.current(&self.0.id).is_some()) else { continue };
+                crate::providers::announced(&s.members, &s.store.ordered()?, &s.person).into_iter().any(|(d, v)| d == self.0.id && v == describe)
+            };
+            if !known {
+                self.append(space, crate::providers::announcement(&describe)).await?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.0.events.subscribe()
     }
@@ -379,6 +395,14 @@ impl Node {
         let mut apps = self.0.apps.describe().await?;
         apps.extend(self.0.native.iter().map(|n| (n.describe)()));
         apps.extend(self.0.providers.describe());
+        let spaces = self.0.spaces.lock().unwrap();
+        for s in spaces.values() {
+            for (_, describe) in crate::providers::announced(&s.members, &s.store.ordered()?, &s.person) {
+                if !apps.iter().any(|a| a["name"] == describe["name"]) {
+                    apps.push(describe);
+                }
+            }
+        }
         Ok(apps)
     }
 

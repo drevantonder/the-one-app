@@ -12,7 +12,8 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::apps::Me;
-use crate::entry::Content;
+use crate::entry::{Content, Entry, Key};
+use crate::space::Members;
 
 /// A provider that hasn't asked for calls in this long is gone.
 const GONE_AFTER: Duration = Duration::from_secs(60);
@@ -40,12 +41,14 @@ pub struct Providers {
 }
 
 impl Providers {
-    pub fn register(&self, app: &str, mut describe: Value) {
+    /// Registers `app` and returns its description as the space sees it.
+    pub fn register(&self, app: &str, mut describe: Value) -> Value {
         describe["name"] = json!(app);
         describe["runs"] = json!("here");
         let (calls, rx) = mpsc::unbounded_channel();
-        let p = Provider { describe, calls, waiting: tokio::sync::Mutex::new(rx), replies: Mutex::new(HashMap::new()), seen: Mutex::new(Instant::now()) };
+        let p = Provider { describe: describe.clone(), calls, waiting: tokio::sync::Mutex::new(rx), replies: Mutex::new(HashMap::new()), seen: Mutex::new(Instant::now()) };
         self.by_app.lock().unwrap().insert(app.to_string(), std::sync::Arc::new(p));
+        describe
     }
 
     fn get(&self, app: &str) -> Option<std::sync::Arc<Provider>> {
@@ -99,4 +102,23 @@ impl Providers {
         let _ = tx.send(reply);
         Ok(())
     }
+}
+
+/// A device announces each provider it runs, so its person's other devices list it too (SPEC.md, "Providers").
+pub fn announcement(describe: &Value) -> Content {
+    Content { app: crate::release::APP.into(), kind: "provides".into(), data: describe.clone() }
+}
+
+/// The newest description each of `person`'s devices announced for each app, in fold order.
+pub fn announced(members: &Members, entries: &[Entry], person: &str) -> Vec<(Key, Value)> {
+    let mut newest: HashMap<(Key, String), Value> = HashMap::new();
+    for e in entries.iter().filter(|e| e.content.app == crate::release::APP && e.content.kind == "provides") {
+        let Some(name) = e.content.data["name"].as_str() else { continue };
+        if members.active(&e.author(), e.order()).is_some_and(|m| m.person == person) {
+            newest.insert((e.author(), name.to_string()), e.content.data.clone());
+        }
+    }
+    let mut out: Vec<(Key, Value)> = newest.into_iter().map(|((device, _), d)| (device, d)).collect();
+    out.sort_by(|a, b| (a.0, a.1["name"].as_str()).cmp(&(b.0, b.1["name"].as_str())));
+    out
 }

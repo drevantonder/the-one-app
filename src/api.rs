@@ -174,7 +174,7 @@ async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> R
 }
 
 async fn register(State(node): State<Node>, axum::extract::Path(app): axum::extract::Path<String>, Json(describe): Json<Value>) -> Reply {
-    node.providers().register(&app, describe);
+    node.provide(&app, describe).await?;
     Ok(Json(json!({})))
 }
 

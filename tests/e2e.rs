@@ -66,7 +66,12 @@ async fn a_provider_answers_calls_from_another_device() {
     eventually("b to become a member", async || b.state()["spaces"][0]["member"] == true).await;
 
     // b runs a provider for "echo", as a Swift or Go program would over the local API.
-    b.providers().register("echo", json!({ "title": "Echo", "ops": [{ "name": "say", "description": "", "input": {} }], "widgets": [] }));
+    let echo = json!({ "title": "Echo", "ops": [{ "name": "say", "description": "", "input": {} }], "widgets": [] });
+    b.provide("echo", echo.clone()).await.unwrap();
+    let entries = b.state()["spaces"][0]["entries"].clone();
+    b.provide("echo", echo).await.unwrap();
+    assert_eq!(b.state()["spaces"][0]["entries"], entries, "registering again announces nothing new");
+    eventually("a to list b's provider", async || a.apps().await.unwrap().iter().any(|app| app["name"] == "echo" && app["runs"] == "here")).await;
     let serving = b.clone();
     tokio::spawn(async move {
         while let Ok(Some(call)) = serving.providers().next("echo").await {

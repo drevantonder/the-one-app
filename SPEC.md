@@ -1,6 +1,6 @@
 # Protocol
 
-Version 1. Everything here is what two devices must agree on.
+Version 2. Everything here is what two devices must agree on.
 
 ## Keys
 
@@ -58,6 +58,10 @@ A blob is bytes named by their BLAKE3 hash. A member sends a hash (64 hex charac
 ## Releases
 
 A release of the node is an entry with app `node` and kind `release`: `{ commit, target, blob, size }`, where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin count. A node whose own build differs from the newest release for its target fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead.
+
+## Providers
+
+A device announces each provider registered with it (see "Local API") as an entry with app `node` and kind `provides`: the app's description, as `GET /v1/apps` gives it. It writes one only when the description differs from the last it announced. Every device lists the newest description each of its own person's devices announced, and calls the app on a device that announced it.
 
 ## Clients (ALPN `one/client/1`)
 
