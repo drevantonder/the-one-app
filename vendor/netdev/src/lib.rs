@@ -1,3 +1,5 @@
+// Vendored (see Cargo.toml): not our code to tidy.
+#![allow(warnings)]
 //! Cross-platform library for enumerating network interfaces with metadata.
 //!
 //! `netdev` provides a unified API for discovering local network interfaces

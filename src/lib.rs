@@ -8,3 +8,4 @@ pub mod sync;
 pub mod api;
 pub mod apps;
 pub mod node;
+pub mod release;

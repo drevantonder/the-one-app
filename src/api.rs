@@ -27,6 +27,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/join", post(join))
         .route("/v1/device", post(rename))
         .route("/v1/remove", post(remove))
+        .route("/v1/release", post(release))
         .route("/v1/events", get(events))
         .route("/hooks/{app}/{name}", post(hook))
         .with_state(node)
@@ -153,6 +154,20 @@ async fn hook(State(node): State<Node>, axum::extract::Path((app, name)): axum::
         Ok(other) => other.to_string().into_response(),
         Err(err) => (StatusCode::BAD_REQUEST, format!("{err:#}")).into_response(),
     }
+}
+
+#[derive(Deserialize)]
+struct ReleaseRequest {
+    space: Option<String>,
+    path: String,
+    commit: String,
+    target: String,
+}
+
+async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> Reply {
+    let space = node.find_space(req.space.as_deref())?;
+    let r = node.publish(space, std::path::Path::new(&req.path), &req.commit, &req.target).await?;
+    Ok(Json(json!(r)))
 }
 
 async fn events(State(node): State<Node>) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {

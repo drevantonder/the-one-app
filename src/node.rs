@@ -16,6 +16,7 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::apps::{Apps, Folded, Me};
 use crate::entry::{Content, Entry, Key, Order, SPACE_LOG, hex, short, unhex};
+use crate::release::{self, Release};
 use crate::space::{self, Members, Role};
 use crate::store::Store;
 use crate::sync::{self, Msg};
@@ -23,6 +24,7 @@ use crate::sync::{self, Msg};
 const JOIN_ALPN: &[u8] = b"one/join/1";
 const CALL_ALPN: &[u8] = b"one/call/1";
 pub const CLIENT_ALPN: &[u8] = b"one/client/1";
+const BLOB_ALPN: &[u8] = b"one/blob/1";
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
@@ -137,8 +139,12 @@ impl Node {
             .accept(JOIN_ALPN, JoinHandler(node.clone()))
             .accept(CALL_ALPN, CallHandler(node.clone()))
             .accept(CLIENT_ALPN, ClientHandler(node.clone()))
+            .accept(BLOB_ALPN, BlobHandler(node.clone()))
             .spawn();
         tokio::spawn(node.clone().dial_loop());
+        for space in node.spaces() {
+            node.consider_update(space);
+        }
         Ok((node, router))
     }
 
@@ -233,6 +239,9 @@ impl Node {
             let apps: Vec<String> = new.iter().map(|e| e.content.app.clone()).collect();
             (folded, rebuild, apps)
         };
+        if new.iter().any(|e| e.content.app == release::APP) {
+            self.consider_update(space);
+        }
         self.0.apps.fold(space, folded, rebuild).await?;
         self.emit(Event::Changed { space: hex(&space), apps });
         Ok(())
@@ -704,11 +713,109 @@ fn sorted(entries: &[Entry]) -> Vec<Entry> {
     v
 }
 
+impl Node {
+    /// Publishes `binary` (a build of this node for `target`) as the space's newest release. Admins only.
+    pub async fn publish(&self, space: Key, binary: &Path, commit: &str, target: &str) -> Result<Release> {
+        {
+            let spaces = self.0.spaces.lock().unwrap();
+            let s = spaces.get(&space).context("no such space")?;
+            ensure!(s.members.current(&self.0.id).is_some_and(|m| m.role == Role::Admin), "only admins publish releases");
+        }
+        let bytes = std::fs::read(binary).with_context(|| format!("read {}", binary.display()))?;
+        let blob = release::put_blob(&self.0.dir, &bytes)?;
+        let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64 };
+        self.append(space, release::content(&r)).await?;
+        Ok(r)
+    }
+
+    /// Updates this node if an admin published a newer build for its platform.
+    fn consider_update(&self, space: Key) {
+        let latest = {
+            let spaces = self.0.spaces.lock().unwrap();
+            let Some(s) = spaces.get(&space) else { return };
+            match s.store.ordered() {
+                Ok(entries) => release::latest(&s.members, &entries, crate::brand::TARGET),
+                Err(_) => return,
+            }
+        };
+        let Some((r, author)) = latest else { return };
+        let marker = self.0.dir.join("release");
+        if r.commit == crate::brand::BUILD || std::fs::read_to_string(&marker).is_ok_and(|m| m.trim() == r.blob) {
+            return;
+        }
+        let node = self.clone();
+        tokio::spawn(async move {
+            match node.apply(space, &r, author).await {
+                Ok(exe) => {
+                    let _ = std::fs::write(&marker, &r.blob);
+                    tracing::info!("updated {} to {}; restarting", exe.display(), r.commit);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    std::process::exit(0);
+                }
+                Err(err) => tracing::warn!("update to {}: {err:#}", r.commit),
+            }
+        });
+    }
+
+    async fn apply(&self, space: Key, r: &Release, author: Key) -> Result<PathBuf> {
+        let path = release::blob_path(&self.0.dir, &r.blob)?;
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => {
+                let mut peers = vec![author];
+                peers.extend(self.peers(space).into_iter().filter(|p| *p != author));
+                let mut last = anyhow!("no device had it");
+                let mut found = None;
+                for peer in peers {
+                    match self.fetch_blob(peer, &r.blob).await {
+                        Ok(b) => {
+                            found = Some(b);
+                            break;
+                        }
+                        Err(err) => last = err,
+                    }
+                }
+                let bytes = found.ok_or(last)?;
+                release::put_blob(&self.0.dir, &bytes)?;
+                bytes
+            }
+        };
+        release::install(&bytes)
+    }
+
+    fn peers(&self, space: Key) -> Vec<Key> {
+        let spaces = self.0.spaces.lock().unwrap();
+        spaces.get(&space).map(|s| s.members.current_devices().map(|m| m.device).filter(|d| *d != self.0.id).collect()).unwrap_or_default()
+    }
+
+    async fn fetch_blob(&self, peer: Key, hash: &str) -> Result<Vec<u8>> {
+        let conn = self.0.endpoint.connect(EndpointId::from_bytes(&peer)?, BLOB_ALPN).await?;
+        let (mut send, mut recv) = conn.open_bi().await?;
+        send.write_all(hash.as_bytes()).await?;
+        send.finish()?;
+        let bytes = recv.read_to_end(1 << 30).await?;
+        ensure!(blake3::hash(&bytes).to_hex().as_str() == hash, "the blob didn't match its hash");
+        Ok(bytes)
+    }
+
+    async fn accept_blob(&self, conn: Connection) -> Result<()> {
+        let remote = *conn.remote_id().as_bytes();
+        ensure!(self.is_member_anywhere(&remote), "not a member");
+        let (mut send, mut recv) = conn.accept_bi().await?;
+        let hash = String::from_utf8(recv.read_to_end(64).await?)?;
+        let bytes = std::fs::read(release::blob_path(&self.0.dir, &hash)?).context("no such blob here")?;
+        send.write_all(&bytes).await?;
+        send.finish()?;
+        conn.closed().await;
+        Ok(())
+    }
+}
+
 /// The entries app folds see: by members, minus membership itself.
 fn to_fold(members: &Members, entries: &[Entry]) -> Vec<Folded> {
     entries
         .iter()
-        .filter(|e| e.content.app != space::APP)
+        .filter(|e| e.content.app != space::APP && e.content.app != release::APP)
         .filter_map(|e| {
             let m = members.active(&e.author(), e.order())?;
             Some(Folded {
@@ -761,6 +868,14 @@ struct JoinHandler(Node);
 struct CallHandler(Node);
 #[derive(Clone, Debug)]
 struct ClientHandler(Node);
+#[derive(Clone, Debug)]
+struct BlobHandler(Node);
+
+impl ProtocolHandler for BlobHandler {
+    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
+        self.0.accept_blob(conn).await.map_err(accept_err)
+    }
+}
 
 impl ProtocolHandler for ClientHandler {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {

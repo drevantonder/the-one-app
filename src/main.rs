@@ -20,6 +20,8 @@ Usage:
   {CLI} remove <device>             remove a device from the space (admins)
   {CLI} apps                        every app and its operations
   {CLI} <app> <op> [--key value]    run an operation, e.g. {CLI} board post --text hi
+  {CLI} release [binary]            publish a build; every node on its platform updates (admins)
+  {CLI} version                     this build
   {CLI} mcp                         serve MCP over stdio, for agents
 
 Any command takes --space <name> when the device is in more than one space."
@@ -86,6 +88,18 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/remove", json!({ "space": space, "device": found["device"] }))?;
             println!("Removed {}.", found["name"].as_str().unwrap_or(device));
         }
+        ["release", rest @ ..] => {
+            // A release is this binary, or one built for another platform: --target <triple> --commit <hash>.
+            let path = match rest {
+                [path] => std::fs::canonicalize(path)?,
+                _ => std::env::current_exe()?,
+            };
+            let target = flags.get("target").and_then(Value::as_str).unwrap_or(one::brand::TARGET);
+            let commit = flags.get("commit").and_then(Value::as_str).unwrap_or(one::brand::BUILD);
+            let r = post("/v1/release", json!({ "space": space, "path": path, "commit": commit, "target": target }))?;
+            println!("Released {} for {}. Every node on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
+        }
+        ["version"] => println!("{} {} ({})", NAME, one::brand::BUILD, one::brand::TARGET),
         ["rename", name @ ..] if !name.is_empty() => {
             post("/v1/device", json!({ "name": name.join(" ") }))?;
             println!("This device is now {}.", name.join(" "));

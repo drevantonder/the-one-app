@@ -1,3 +1,5 @@
+// Vendored (see Cargo.toml): not our code to tidy.
+#![allow(warnings)]
 //! Networking related utilities
 
 pub mod interfaces;

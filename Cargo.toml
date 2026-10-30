@@ -17,6 +17,7 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+blake3 = "1"
 axum = "0.8"
 ciborium = "0.2"
 data-encoding = "2"
