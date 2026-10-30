@@ -1,0 +1,6 @@
+# The brand this build ships as. Copy and change it to make the app your own
+# ("ptc" / "The PTC App"); nothing else in the code names the product.
+name = "The One App"
+cli = "one"
+port = 4747
+accent = "#3A6E8C"
