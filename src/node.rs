@@ -336,9 +336,29 @@ impl Node {
         Ok(Me { space: hex(space), device: hex(device), person: m.person.clone(), name })
     }
 
-    /// Runs an app operation on this device, appending whatever entries it asks for.
+    /// Runs an app operation, appending whatever entries it asks for: here, or, for a device feature
+    /// that only another of this person's devices provides, on that device.
     pub async fn call(&self, space: Key, app: &str, op: &str, input: Value) -> Result<Value> {
+        let here = self.0.apps_names.iter().any(|a| a == app) || self.0.native.iter().any(|n| n.name == app) || self.0.providers.has(app);
+        if !here {
+            if let Some(device) = self.provider_of(space, app)? {
+                return self.call_on(device, space, app, op, input).await;
+            }
+        }
         self.call_as(space, self.0.id, app, op, input).await
+    }
+
+    /// Another of this person's devices that provides `app`, preferring one that's online.
+    fn provider_of(&self, space: Key, app: &str) -> Result<Option<Key>> {
+        let spaces = self.0.spaces.lock().unwrap();
+        let s = spaces.get(&space).context("no such space")?;
+        let mut devices: Vec<Key> = crate::providers::announced(&s.members, &s.store.ordered()?, &s.person)
+            .into_iter()
+            .filter(|(d, v)| *d != self.0.id && v["name"] == app && s.members.current(d).is_some())
+            .map(|(d, _)| d)
+            .collect();
+        devices.sort_by_key(|d| !s.sessions.contains_key(d));
+        Ok(devices.first().copied())
     }
 
     /// Runs an operation on this device for `caller`, another device in the space.
