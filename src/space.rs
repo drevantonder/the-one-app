@@ -27,6 +27,9 @@ pub struct Member {
     pub role: Role,
     /// A device that keeps no log (a phone): others ask it nothing and don't sync with it.
     pub client: bool,
+    /// Every name it had, from when: folds see the name a device had when it wrote.
+    #[serde(skip)]
+    pub names: Vec<(Order, String)>,
     #[serde(skip)]
     pub since: Order,
     #[serde(skip)]
@@ -41,6 +44,13 @@ fn ser_hex<S: serde::Serializer>(k: &Key, s: S) -> Result<S::Ok, S::Error> {
 pub struct Members {
     pub name: String,
     pub devices: BTreeMap<Key, Member>,
+}
+
+impl Member {
+    /// The name this device had at `order`.
+    pub fn name_at(&self, order: Order) -> &str {
+        self.names.iter().rev().find(|(since, _)| *since <= order).map_or(&self.name, |(_, n)| n)
+    }
 }
 
 impl Members {
@@ -71,7 +81,8 @@ impl Members {
                 self.name = name;
                 let person = text("person")?;
                 let device_name = text("device_name")?;
-                self.devices.insert(author, Member { device: author, person, name: device_name, role: Role::Admin, client: false, since: entry.order(), until: None });
+                let names = vec![(entry.order(), device_name.clone())];
+                self.devices.insert(author, Member { device: author, person, name: device_name, role: Role::Admin, client: false, names, since: entry.order(), until: None });
             }
             "admit" => {
                 let by = self.active(&author, entry.order()).context("admitter is not a member")?.clone();
@@ -84,7 +95,9 @@ impl Members {
                 }
                 let name = text("name")?;
                 let client = data["client"].as_bool().unwrap_or(false);
-                self.devices.insert(device, Member { device, person, name, role, client, since: entry.order(), until: None });
+                ensure!(!self.devices.contains_key(&device), "a removed device can't come back; it joins again with a new key");
+                let names = vec![(entry.order(), name.clone())];
+                self.devices.insert(device, Member { device, person, name, role, client, names, since: entry.order(), until: None });
             }
             "remove" => {
                 let by = self.active(&author, entry.order()).context("remover is not a member")?;
@@ -100,6 +113,7 @@ impl Members {
                 ensure!(device == author || by == Role::Admin, "not allowed to rename");
                 let name = text("name")?;
                 if let Some(m) = self.devices.get_mut(&device) {
+                    m.names.push((entry.order(), name.clone()));
                     m.name = name;
                 }
             }
@@ -231,6 +245,29 @@ mod tests {
         assert!(m.current(&phone.id()).is_none());
         assert!(m.active(&phone.id(), (5, phone.id(), 0)).is_some(), "what it wrote before removal still counts");
         assert!(m.active(&phone.id(), (11, phone.id(), 0)).is_none(), "nothing it writes after does");
+    }
+
+    #[test]
+    fn a_removed_device_cant_be_admitted_again() {
+        let (_, space, mut admin, mut entries) = setup();
+        let phone = Dev::new(3);
+        entries.push(admin.write(space, 2, admit(&phone.id(), "andre", "phone", Role::Member)));
+        entries.push(admin.write(space, 3, remove(&phone.id())));
+        entries.push(admin.write(space, 4, admit(&phone.id(), "andre", "phone", Role::Member)));
+        let m = Members::fold(&space, &entries);
+        assert!(m.current(&phone.id()).is_none());
+        assert!(m.active(&phone.id(), (2, phone.id(), 9)).is_some(), "what it wrote while a member still counts");
+    }
+
+    #[test]
+    fn folds_see_the_name_a_device_had_when_it_wrote() {
+        let (_, space, mut admin, mut entries) = setup();
+        entries.push(admin.write(space, 5, rename(&admin.id(), "new name")));
+        let m = Members::fold(&space, &entries);
+        let me = m.current(&admin.id()).unwrap();
+        assert_eq!(me.name_at((3, admin.id(), 0)), "mac");
+        assert_eq!(me.name_at((6, admin.id(), 0)), "new name");
+        assert_eq!(me.name, "new name");
     }
 
     #[test]

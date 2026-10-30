@@ -259,15 +259,17 @@ impl Node {
         let (folded, rebuild, apps) = {
             let mut spaces = self.0.spaces.lock().unwrap();
             let s = spaces.get_mut(&space).context("no such space")?;
+            let membership = new.iter().any(|e| e.content.app == space::APP);
+            if membership {
+                s.members = Members::fold(&space, &s.store.ordered()?);
+                let members = &s.members;
+                s.sessions.retain(|peer, _| members.current(peer).is_some());
+            }
             let msg = sync::entries(space, new);
             for (peer, tx) in &s.sessions {
                 if Some(*peer) != from {
                     let _ = tx.send(msg.clone());
                 }
-            }
-            let membership = new.iter().any(|e| e.content.app == space::APP);
-            if membership {
-                s.members = Members::fold(&space, &s.store.ordered()?);
             }
             let earliest = new.iter().map(Entry::order).min().unwrap();
             let rebuild = membership || s.folded.is_some_and(|f| earliest <= f);
@@ -489,6 +491,9 @@ impl Node {
                 Ok(s) => s,
                 Err(_) => return Ok(()),
             };
+            if !self.is_member_anywhere(&caller) {
+                return Ok(());
+            }
             let node = self.clone();
             tokio::spawn(async move {
                 let result = async {
@@ -497,6 +502,16 @@ impl Node {
                     if path == "/v1/events" {
                         let mut events = node.subscribe();
                         while let Ok(event) = events.recv().await {
+                            if !node.is_member_anywhere(&caller) {
+                                break;
+                            }
+                            let space = match &event {
+                                Event::Changed { space, .. } | Event::Peers { space } => Some(space.clone()),
+                                Event::Spaces => None,
+                            };
+                            if space.is_some_and(|s| node.state_for(caller)["spaces"].as_array().is_none_or(|l| !l.iter().any(|x| x["id"] == s))) {
+                                continue;
+                            }
                             send.write_all(format!("{}\n", serde_json::to_string(&event)?).as_bytes()).await?;
                         }
                         return anyhow::Ok(());
@@ -574,7 +589,11 @@ impl Node {
     fn invite_for(&self, space: Key, caller: Key) -> Result<String> {
         let person = {
             let spaces = self.0.spaces.lock().unwrap();
-            spaces[&space].members.current(&caller).context("not a member")?.person.clone()
+            let s = &spaces[&space];
+            let person = s.members.current(&caller).context("not a member")?.person.clone();
+            let me = s.members.current(&self.0.id).context("this device is not a member")?;
+            ensure!(me.role == Role::Admin || me.person == person, "this device can't admit that person's devices; ask one of theirs, or an admin's");
+            person
         };
         let secret: [u8; 16] = rand::random();
         self.add_invite(secret, Invite { space, person: Some(person), until: now_ms() + INVITE_LIFE })?;
@@ -644,6 +663,11 @@ impl Node {
         let person = invite.person.unwrap_or_else(new_person);
         let admit = if request.client { space::admit_client(&remote, &person, &request.name) } else { space::admit(&remote, &person, &request.name, Role::Member) };
         self.append(invite.space, admit).await?;
+        if self.0.spaces.lock().unwrap()[&invite.space].members.current(&remote).is_none() {
+            send.write_all(br#"{"error":"this device can no longer admit that one"}"#).await?;
+            send.finish()?;
+            return Ok(());
+        }
         let space_name = self.0.spaces.lock().unwrap()[&invite.space].members.name.clone();
         send.write_all(&serde_json::to_vec(&JoinReply { space_name, person })?).await?;
         send.finish()?;
@@ -755,7 +779,10 @@ impl Node {
         let _write = self.0.writes.lock().await;
         let (new, reply) = {
             let spaces = self.0.spaces.lock().unwrap();
-            sync::handle(&spaces.get(&space).context("no such space")?.store, msg, now_ms())?
+            let s = spaces.get(&space).context("no such space")?;
+            let joining = s.members.current(&self.0.id).is_none();
+            ensure!(s.members.current(&peer).is_some() || (joining && s.inviter == Some(peer)), "{} is no longer a member", short(&peer));
+            sync::handle(&s.store, msg, now_ms())?
         };
         self.after(space, &new, Some(peer)).await?;
         Ok(reply)
@@ -960,7 +987,7 @@ fn to_fold(members: &Members, entries: &[Entry]) -> Vec<Folded> {
                 kind: e.content.kind.clone(),
                 author: hex(&e.author()),
                 person: m.person.clone(),
-                name: m.name.clone(),
+                name: m.name_at(e.order()).to_string(),
                 time: e.time(),
                 id: format!("{}:{}", short(&e.author()), e.seq()),
                 data: e.content.data.clone(),
