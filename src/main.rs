@@ -95,20 +95,25 @@ fn run(args: Vec<String>) -> Result<()> {
                 _ => std::env::current_exe()?,
             };
             // The binary knows what it is; ask it, unless it's for another platform and can't run here.
-            let version = std::process::Command::new(&path).arg("version").output().ok().filter(|o| o.status.success());
-            let words: Vec<String> = version.map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().map(str::to_string).collect()).unwrap_or_default();
-            let (ran_commit, ran_target) = match words.as_slice() {
-                [.., commit, target] => (Some(commit.clone()), Some(target.trim_matches(|c| c == '(' || c == ')').to_string())),
-                _ => (None, None),
-            };
+            let version: Value = std::process::Command::new(&path)
+                .args(["version", "--json"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| serde_json::from_slice(&o.stdout).ok())
+                .unwrap_or_default();
+            let ran_commit = version["commit"].as_str().map(str::to_string);
+            let ran_target = version["target"].as_str().map(str::to_string);
+            let committed = flags.get("committed").and_then(Value::as_u64).or(version["committed"].as_u64()).context("say when the commit was made with --committed (seconds since 1970)")?;
             let commit = flags.get("commit").and_then(Value::as_str).map(str::to_string).or(ran_commit).context("say which commit this is with --commit")?;
             let target = flags.get("target").and_then(Value::as_str).map(str::to_string).or(ran_target).context("say which platform this is for with --target")?;
             if commit.ends_with("+dirty") {
                 bail!("that build has uncommitted changes; commit, build again, then release");
             }
-            let r = post("/v1/release", json!({ "space": space, "path": path, "commit": commit, "target": target }))?;
+            let r = post("/v1/release", json!({ "space": space, "path": path, "commit": commit, "target": target, "committed": committed }))?;
             println!("Released {} for {}. Every node on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
         }
+        ["version"] if flags.contains_key("json") => println!("{}", json!({ "commit": one::brand::BUILD, "target": one::brand::TARGET, "committed": one::brand::COMMITTED })),
         ["version"] => println!("{} {} ({})", NAME, one::brand::BUILD, one::brand::TARGET),
         ["rename", name @ ..] if !name.is_empty() => {
             post("/v1/device", json!({ "name": name.join(" ") }))?;

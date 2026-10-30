@@ -30,7 +30,14 @@ fn main() {
             println!("cargo:rerun-if-changed={}", String::from_utf8_lossy(&o.stdout).trim());
         }
     }
-    let out = format!("{out}pub const BUILD: &str = {commit:?};\npub const TARGET: &str = {:?};\n", std::env::var("TARGET").unwrap());
+    // When that commit was made, so releases only ever move devices forward.
+    let committed: u64 = std::process::Command::new("git")
+        .args(["log", "-1", "--format=%ct"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+        .unwrap_or(0);
+    let out = format!("{out}pub const COMMITTED: u64 = {committed};\npub const BUILD: &str = {commit:?};\npub const TARGET: &str = {:?};\n", std::env::var("TARGET").unwrap());
     let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("brand.rs");
     std::fs::write(dest, out).unwrap();
 }

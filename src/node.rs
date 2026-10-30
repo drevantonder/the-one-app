@@ -878,7 +878,7 @@ fn sorted(entries: &[Entry]) -> Vec<Entry> {
 
 impl Node {
     /// Publishes `binary` (a build of this node for `target`) as the space's newest release. Admins only.
-    pub async fn publish(&self, space: Key, binary: &Path, commit: &str, target: &str) -> Result<Release> {
+    pub async fn publish(&self, space: Key, binary: &Path, commit: &str, target: &str, committed: u64) -> Result<Release> {
         {
             let spaces = self.0.spaces.lock().unwrap();
             let s = spaces.get(&space).context("no such space")?;
@@ -886,7 +886,7 @@ impl Node {
         }
         let bytes = std::fs::read(binary).with_context(|| format!("read {}", binary.display()))?;
         let blob = release::put_blob(&self.0.dir, &bytes)?;
-        let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64 };
+        let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64, committed };
         self.append(space, release::content(&r)).await?;
         Ok(r)
     }
@@ -920,7 +920,8 @@ impl Node {
         };
         let Some((r, author)) = latest else { return };
         let marker = self.0.dir.join("release");
-        if r.commit == crate::brand::BUILD || std::fs::read_to_string(&marker).is_ok_and(|m| m.trim() == r.blob) {
+        let older = r.committed < crate::brand::COMMITTED;
+        if r.commit == crate::brand::BUILD || older || std::fs::read_to_string(&marker).is_ok_and(|m| m.trim() == r.blob) {
             return;
         }
         let node = self.clone();

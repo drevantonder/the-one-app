@@ -17,6 +17,9 @@ pub struct Release {
     pub target: String,
     pub blob: String,
     pub size: u64,
+    /// When the commit was made, in seconds since 1970. A device never takes a release older than its build.
+    #[serde(default)]
+    pub committed: u64,
 }
 
 pub fn content(release: &Release) -> Content {

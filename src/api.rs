@@ -177,11 +177,13 @@ struct ReleaseRequest {
     path: String,
     commit: String,
     target: String,
+    #[serde(default)]
+    committed: u64,
 }
 
 async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> Reply {
     let space = node.find_space(req.space.as_deref())?;
-    let r = node.publish(space, std::path::Path::new(&req.path), &req.commit, &req.target).await?;
+    let r = node.publish(space, std::path::Path::new(&req.path), &req.commit, &req.target, req.committed).await?;
     Ok(Json(json!(r)))
 }
 

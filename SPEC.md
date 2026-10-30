@@ -57,7 +57,7 @@ A blob is bytes named by their BLAKE3 hash. A member sends a hash (64 hex charac
 
 ## Releases
 
-The app `node` is the node's own, and other apps' folds never see it. A release of the node is an entry with kind `release`: `{ commit, target, blob, size }`, where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin count. A node whose own build differs from the newest release for its target fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead. Each node also writes `running { commit, target }` once per build, so everyone can see what each device runs.
+The app `node` is the node's own, and other apps' folds never see it. A release of the node is an entry with kind `release`: `{ commit, target, blob, size, committed }`, where `committed` is when the commit was made (seconds since 1970), where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin count. A node whose own build differs from the newest release for its target, and isn't newer than it, fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead. Each node also writes `running { commit, target }` once per build, so everyone can see what each device runs.
 
 ## Providers
 
