@@ -60,10 +60,15 @@ pub enum Event {
     Spaces,
 }
 
+#[derive(Serialize, Deserialize)]
 struct Invite {
     space: Key,
     person: Option<String>,
+    /// Milliseconds since 1970 after which it no longer works.
+    until: u64,
 }
+
+const INVITE_LIFE: u64 = 7 * 86_400_000;
 
 #[derive(Serialize, Deserialize)]
 struct Ticket {
@@ -76,6 +81,8 @@ struct Ticket {
 struct JoinRequest {
     secret: [u8; 16],
     name: String,
+    #[serde(default)]
+    client: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -126,7 +133,7 @@ impl Node {
             apps,
             native: crate::native::all(),
             spaces: Mutex::new(HashMap::new()),
-            invites: Mutex::new(HashMap::new()),
+            invites: Mutex::new(load_invites(dir)),
             events,
             writes: tokio::sync::Mutex::new(()),
         }));
@@ -383,7 +390,7 @@ impl Node {
                     .current_devices()
                     .map(|m| {
                         json!({
-                            "device": hex(&m.device), "name": m.name, "person": m.person, "role": m.role,
+                            "device": hex(&m.device), "name": m.name, "person": m.person, "role": m.role, "client": m.client,
                             "me": m.device == viewer, "host": m.device == self.0.id,
                             "online": m.device == self.0.id || m.device == viewer || s.sessions.contains_key(&m.device),
                         })
@@ -511,7 +518,7 @@ impl Node {
             mine.then(|| s.person.clone())
         };
         let secret: [u8; 16] = rand::random();
-        self.0.invites.lock().unwrap().insert(secret, Invite { space, person });
+        self.add_invite(secret, Invite { space, person, until: now_ms() + INVITE_LIFE })?;
         let ticket = Ticket { space, inviter: self.0.endpoint.addr(), secret };
         let mut bytes = Vec::new();
         ciborium::into_writer(&ticket, &mut bytes)?;
@@ -525,11 +532,32 @@ impl Node {
             spaces[&space].members.current(&caller).context("not a member")?.person.clone()
         };
         let secret: [u8; 16] = rand::random();
-        self.0.invites.lock().unwrap().insert(secret, Invite { space, person: Some(person) });
+        self.add_invite(secret, Invite { space, person: Some(person), until: now_ms() + INVITE_LIFE })?;
         let ticket = Ticket { space, inviter: self.0.endpoint.addr(), secret };
         let mut bytes = Vec::new();
         ciborium::into_writer(&ticket, &mut bytes)?;
         Ok(data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase())
+    }
+
+    /// Invites are kept in a file, so a ticket still works after its inviter restarts.
+    fn add_invite(&self, secret: [u8; 16], invite: Invite) -> Result<()> {
+        let mut invites = self.0.invites.lock().unwrap();
+        invites.retain(|_, i| i.until > now_ms());
+        invites.insert(secret, invite);
+        self.save_invites(&invites)
+    }
+
+    fn take_invite(&self, secret: &[u8; 16]) -> Result<Option<Invite>> {
+        let mut invites = self.0.invites.lock().unwrap();
+        let invite = invites.remove(secret);
+        self.save_invites(&invites)?;
+        Ok(invite)
+    }
+
+    fn save_invites(&self, invites: &HashMap<[u8; 16], Invite>) -> Result<()> {
+        let list: Vec<(String, &Invite)> = invites.iter().map(|(k, v)| (data_encoding::HEXLOWER.encode(k), v)).collect();
+        std::fs::write(self.0.dir.join("invites.json"), serde_json::to_vec(&list)?)?;
+        Ok(())
     }
 
     pub async fn join(&self, ticket: &str) -> Result<Key> {
@@ -538,7 +566,7 @@ impl Node {
         ensure!(!self.0.spaces.lock().unwrap().contains_key(&ticket.space), "this device is already in that space");
         let conn = self.0.endpoint.connect(ticket.inviter.clone(), JOIN_ALPN).await.context("reach the inviting device")?;
         let (mut send, mut recv) = conn.open_bi().await?;
-        send.write_all(&serde_json::to_vec(&JoinRequest { secret: ticket.secret, name: self.device_name() })?).await?;
+        send.write_all(&serde_json::to_vec(&JoinRequest { secret: ticket.secret, name: self.device_name(), client: false })?).await?;
         send.finish()?;
         let reply: Value = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
         if let Some(err) = reply.get("error") {
@@ -562,14 +590,15 @@ impl Node {
         let remote = *conn.remote_id().as_bytes();
         let (mut send, mut recv) = conn.accept_bi().await?;
         let request: JoinRequest = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
-        let invite = self.0.invites.lock().unwrap().remove(&request.secret);
+        let invite = self.take_invite(&request.secret)?.filter(|i| i.until > now_ms());
         let Some(invite) = invite else {
             send.write_all(br#"{"error":"this invite was already used or has expired"}"#).await?;
             send.finish()?;
             return Ok(());
         };
         let person = invite.person.unwrap_or_else(new_person);
-        self.append(invite.space, space::admit(&remote, &person, &request.name, Role::Member)).await?;
+        let admit = if request.client { space::admit_client(&remote, &person, &request.name) } else { space::admit(&remote, &person, &request.name, Role::Member) };
+        self.append(invite.space, admit).await?;
         let space_name = self.0.spaces.lock().unwrap()[&invite.space].members.name.clone();
         send.write_all(&serde_json::to_vec(&JoinReply { space_name, person })?).await?;
         send.finish()?;
@@ -586,7 +615,7 @@ impl Node {
                     .flat_map(|(space, s)| {
                         s.members
                             .current_devices()
-                            .filter(|m| m.device != self.0.id && !s.sessions.contains_key(&m.device))
+                            .filter(|m| m.device != self.0.id && !m.client && !s.sessions.contains_key(&m.device))
                             .map(|m| (*space, m.device))
                             .collect::<Vec<_>>()
                     })
@@ -874,6 +903,13 @@ fn to_fold(members: &Members, entries: &[Entry]) -> Vec<Folded> {
                 data: e.content.data.clone(),
             })
         })
+        .collect()
+}
+
+fn load_invites(dir: &Path) -> HashMap<[u8; 16], Invite> {
+    let list: Vec<(String, Invite)> = std::fs::read(dir.join("invites.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    list.into_iter()
+        .filter_map(|(k, v)| Some((data_encoding::HEXLOWER.decode(k.as_bytes()).ok()?.try_into().ok()?, v)))
         .collect()
 }
 

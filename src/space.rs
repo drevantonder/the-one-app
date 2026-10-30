@@ -25,6 +25,8 @@ pub struct Member {
     pub person: String,
     pub name: String,
     pub role: Role,
+    /// A device that keeps no log (a phone): others ask it nothing and don't sync with it.
+    pub client: bool,
     #[serde(skip)]
     pub since: Order,
     #[serde(skip)]
@@ -69,7 +71,7 @@ impl Members {
                 self.name = name;
                 let person = text("person")?;
                 let device_name = text("device_name")?;
-                self.devices.insert(author, Member { device: author, person, name: device_name, role: Role::Admin, since: entry.order(), until: None });
+                self.devices.insert(author, Member { device: author, person, name: device_name, role: Role::Admin, client: false, since: entry.order(), until: None });
             }
             "admit" => {
                 let by = self.active(&author, entry.order()).context("admitter is not a member")?.clone();
@@ -81,7 +83,8 @@ impl Members {
                     return Ok(());
                 }
                 let name = text("name")?;
-                self.devices.insert(device, Member { device, person, name, role, since: entry.order(), until: None });
+                let client = data["client"].as_bool().unwrap_or(false);
+                self.devices.insert(device, Member { device, person, name, role, client, since: entry.order(), until: None });
             }
             "remove" => {
                 let by = self.active(&author, entry.order()).context("remover is not a member")?;
@@ -135,6 +138,13 @@ pub fn genesis(root: &SigningKey, device: &Key, name: &str, person: &str, device
 
 pub fn admit(device: &Key, person: &str, name: &str, role: Role) -> Content {
     Content { app: APP.into(), kind: "admit".into(), data: json!({ "device": hex(device), "person": person, "name": name, "role": role }) }
+}
+
+/// Admits a device that keeps no log, such as a phone.
+pub fn admit_client(device: &Key, person: &str, name: &str) -> Content {
+    let mut c = admit(device, person, name, Role::Member);
+    c.data["client"] = json!(true);
+    c
 }
 
 pub fn remove(device: &Key) -> Content {

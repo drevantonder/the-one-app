@@ -28,7 +28,7 @@ The **fold order** is `(time, author, seq)`, compared as integers, then key byte
 Membership is the fold of entries whose app is `space`:
 
 - `genesis`: `{ name, root_sig }`. The first entry of a space. `root_sig` is the space key's signature over `author ‖ name`. The author becomes an admin.
-- `admit`: `{ device, person, name, role }`. Valid when written by an admin, or by a member admitting a device for their own `person`. `role` is `admin` or `member`.
+- `admit`: `{ device, person, name, role, client? }`. `client` marks a device that keeps no log (a phone); nobody syncs with it. Valid when written by an admin, or by a member admitting a device for their own `person`. `role` is `admin` or `member`.
 - `remove`: `{ device }`. Valid when written by an admin. Entries the removed device writes after the `remove` (in fold order) are ignored.
 - `rename`: `{ device, name }`. Valid when written by that device or an admin.
 
@@ -45,7 +45,7 @@ Each side sends `Hello`, then sends every entry the other's frontier lacks, then
 
 ## Join (ALPN `one/join/1`)
 
-An invite is a ticket: `{ space, inviter: EndpointAddr, secret: [u8; 16] }` in CBOR, encoded as lowercase base32. The inviter remembers, for each secret, whose device it is for: one of its own person's, or a new person's. The joiner opens the stream and sends `{ secret, name }`; the inviter appends an `admit` and answers `{ space_name, person }`. The joiner then syncs as a member. A secret works once and only until the inviter restarts.
+An invite is a ticket: `{ space, inviter: EndpointAddr, secret: [u8; 16] }` in CBOR, encoded as lowercase base32. The inviter remembers, for each secret, whose device it is for: one of its own person's, or a new person's. The joiner opens the stream and sends `{ secret, name, client? }`; the inviter appends an `admit` and answers `{ space_name, person }`. The joiner then syncs as a member. A secret works once, for seven days.
 
 ## Calls (ALPN `one/call/1`)
 

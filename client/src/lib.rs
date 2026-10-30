@@ -76,7 +76,7 @@ impl Client {
         let conn = self.endpoint.connect(ticket.inviter.clone(), JOIN_ALPN).await.context("couldn't reach the inviting device")?;
         let (mut send, mut recv) = conn.open_bi().await?;
         let name = self.saved.lock().unwrap().name.clone();
-        send.write_all(&serde_json::to_vec(&json!({ "secret": ticket.secret, "name": name }))?).await?;
+        send.write_all(&serde_json::to_vec(&json!({ "secret": ticket.secret, "name": name, "client": true }))?).await?;
         send.finish()?;
         let reply: Value = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
         if let Some(err) = reply.get("error") {
