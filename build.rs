@@ -21,8 +21,11 @@ fn main() {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|| "dev".into());
+    // A build with uncommitted changes isn't that commit; say so, so it can't be released as it.
+    let dirty = std::process::Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).output().is_ok_and(|o| !o.stdout.is_empty());
+    let commit = if dirty { format!("{commit}+dirty") } else { commit };
     // Rebuild when HEAD moves; in a worktree .git is a file, so ask git where HEAD lives.
-    for what in ["HEAD", "refs/heads"] {
+    for what in ["HEAD", "refs/heads", "index"] {
         if let Ok(o) = std::process::Command::new("git").args(["rev-parse", "--git-path", what]).output() {
             println!("cargo:rerun-if-changed={}", String::from_utf8_lossy(&o.stdout).trim());
         }

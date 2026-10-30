@@ -103,6 +103,9 @@ fn run(args: Vec<String>) -> Result<()> {
             };
             let commit = flags.get("commit").and_then(Value::as_str).map(str::to_string).or(ran_commit).context("say which commit this is with --commit")?;
             let target = flags.get("target").and_then(Value::as_str).map(str::to_string).or(ran_target).context("say which platform this is for with --target")?;
+            if commit.ends_with("+dirty") {
+                bail!("that build has uncommitted changes; commit, build again, then release");
+            }
             let r = post("/v1/release", json!({ "space": space, "path": path, "commit": commit, "target": target }))?;
             println!("Released {} for {}. Every node on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
         }
