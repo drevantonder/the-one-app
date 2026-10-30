@@ -201,7 +201,7 @@ fn status(state: &Value) {
 #[tokio::main]
 async fn serve() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn,iroh=error,noq_proto=error".into()))
         .init();
     let dir = home();
     let (node, router) = Node::start(&dir, one::builtin::all()).await?;
