@@ -148,3 +148,89 @@ pub fn rename(device: &Key, name: &str) -> Content {
 pub fn as_json(members: &Members) -> Value {
     json!({ "name": members.name, "devices": members.current_devices().collect::<Vec<_>>() })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entry::Entry;
+
+    struct Dev {
+        key: SigningKey,
+        last: Option<Entry>,
+        time: u64,
+    }
+
+    impl Dev {
+        fn new(seed: u8) -> Self {
+            Dev { key: SigningKey::from([seed; 32]), last: None, time: 0 }
+        }
+        fn id(&self) -> Key {
+            *self.key.verifying_key().as_bytes()
+        }
+        fn write(&mut self, space: Key, at: u64, content: Content) -> Entry {
+            self.time = self.time.max(at);
+            let e = Entry::create(&self.key, space, self.time, self.last.as_ref(), content);
+            self.last = Some(e.clone());
+            e
+        }
+    }
+
+    fn setup() -> (SigningKey, Key, Dev, Vec<Entry>) {
+        let root = SigningKey::from([9; 32]);
+        let space = *root.verifying_key().as_bytes();
+        let mut admin = Dev::new(1);
+        let id = admin.id();
+        let g = admin.write(space, 1, genesis(&root, &id, "Home", "andre", "mac"));
+        (root, space, admin, vec![g])
+    }
+
+    #[test]
+    fn genesis_needs_the_space_key() {
+        let (_, space, _, _) = setup();
+        let mut impostor = Dev::new(2);
+        let id = impostor.id();
+        let fake = impostor.write(space, 1, genesis(&SigningKey::from([7; 32]), &id, "Home", "x", "y"));
+        assert!(Members::fold(&space, &[fake]).devices.is_empty());
+    }
+
+    #[test]
+    fn admins_admit_people_and_members_admit_only_their_own_devices() {
+        let (_, space, mut admin, mut entries) = setup();
+        let (mut phone, mut stranger, laptop) = (Dev::new(3), Dev::new(4), Dev::new(5));
+        entries.push(admin.write(space, 2, admit(&phone.id(), "andre", "phone", Role::Member)));
+        entries.push(admin.write(space, 3, admit(&stranger.id(), "sam", "sam's", Role::Member)));
+        // The phone may add another of Andre's devices, but not someone else's, and not an admin.
+        entries.push(phone.write(space, 4, admit(&laptop.id(), "andre", "laptop", Role::Member)));
+        entries.push(phone.write(space, 5, admit(&Dev::new(6).id(), "eve", "eve's", Role::Member)));
+        entries.push(stranger.write(space, 6, admit(&Dev::new(7).id(), "sam", "sam's admin", Role::Admin)));
+        let m = Members::fold(&space, &entries);
+        let names: Vec<&str> = m.current_devices().map(|d| d.name.as_str()).collect();
+        assert_eq!(m.current_devices().count(), 4, "{names:?}");
+        assert!(m.current(&laptop.id()).is_some());
+        assert!(m.current(&Dev::new(6).id()).is_none());
+        assert!(m.current(&Dev::new(7).id()).is_none());
+    }
+
+    #[test]
+    fn a_removed_device_is_cut_off_from_then_on() {
+        let (_, space, mut admin, mut entries) = setup();
+        let phone = Dev::new(3);
+        entries.push(admin.write(space, 2, admit(&phone.id(), "andre", "phone", Role::Member)));
+        entries.push(admin.write(space, 10, remove(&phone.id())));
+        let m = Members::fold(&space, &entries);
+        assert!(m.current(&phone.id()).is_none());
+        assert!(m.active(&phone.id(), (5, phone.id(), 0)).is_some(), "what it wrote before removal still counts");
+        assert!(m.active(&phone.id(), (11, phone.id(), 0)).is_none(), "nothing it writes after does");
+    }
+
+    #[test]
+    fn fold_order_doesnt_depend_on_arrival_order() {
+        let (_, space, mut admin, mut entries) = setup();
+        entries.push(admin.write(space, 2, admit(&Dev::new(3).id(), "andre", "phone", Role::Member)));
+        entries.push(admin.write(space, 3, rename(&Dev::new(3).id(), "Andre's phone")));
+        let forwards = Members::fold(&space, &entries);
+        entries.reverse();
+        let backwards = Members::fold(&space, &entries);
+        assert_eq!(format!("{:?}", forwards.devices), format!("{:?}", backwards.devices));
+    }
+}
