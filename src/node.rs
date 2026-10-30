@@ -51,6 +51,8 @@ struct Space {
     inviter: Option<Key>,
     /// The build each device last said it runs.
     builds: HashMap<Key, String>,
+    /// What each of this person's devices announced it provides (SPEC.md, "Providers").
+    provides: Vec<(Key, Value)>,
     folded: Option<Order>,
     /// Senders to every live sync session for this space, by peer device.
     sessions: HashMap<Key, mpsc::UnboundedSender<Msg>>,
@@ -186,7 +188,7 @@ impl Node {
             let known = {
                 let spaces = self.0.spaces.lock().unwrap();
                 let Some(s) = spaces.get(&space).filter(|s| s.members.current(&self.0.id).is_some()) else { continue };
-                crate::providers::announced(&s.members, &s.store.ordered()?, &s.person).into_iter().any(|(d, v)| d == self.0.id && v == describe)
+                s.provides.iter().any(|(d, v)| *d == self.0.id && *v == describe)
             };
             if !known {
                 self.append(space, crate::providers::announcement(&describe)).await?;
@@ -213,7 +215,7 @@ impl Node {
         let store = Store::open(&dir.join("entries.db"), space)?;
         let members = Members::fold(&space, &store.ordered()?);
         let inviter = file.inviter.and_then(|h| unhex(&h).ok());
-        self.0.spaces.lock().unwrap().insert(space, Space { store, members, person: file.person, inviter, builds: HashMap::new(), folded: None, sessions: HashMap::new() });
+        self.0.spaces.lock().unwrap().insert(space, Space { store, members, person: file.person, inviter, builds: HashMap::new(), provides: Vec::new(), folded: None, sessions: HashMap::new() });
         Ok(())
     }
 
@@ -272,6 +274,9 @@ impl Node {
                 s.sessions.retain(|peer, _| members.current(peer).is_some());
             }
             s.builds.extend(release::builds(new));
+            if membership || new.iter().any(|e| e.content.app == release::APP && e.content.kind == "provides") {
+                s.provides = crate::providers::announced(&s.members, &s.store.ordered()?, &s.person);
+            }
             let msg = sync::entries(space, new);
             for (peer, tx) in &s.sessions {
                 if Some(*peer) != from {
@@ -320,6 +325,7 @@ impl Node {
             let entries = s.store.ordered()?;
             s.folded = entries.iter().map(Entry::order).max();
             s.builds = release::builds(&entries);
+            s.provides = crate::providers::announced(&s.members, &entries, &s.person);
             to_fold(&s.members, &entries)
         };
         let jobs = self.0.apps_names.iter().map(|app| FoldJob { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() }).collect();
@@ -352,11 +358,7 @@ impl Node {
     fn provider_of(&self, space: Key, app: &str) -> Result<Option<Key>> {
         let spaces = self.0.spaces.lock().unwrap();
         let s = spaces.get(&space).context("no such space")?;
-        let mut devices: Vec<Key> = crate::providers::announced(&s.members, &s.store.ordered()?, &s.person)
-            .into_iter()
-            .filter(|(d, v)| *d != self.0.id && v["name"] == app && s.members.current(d).is_some())
-            .map(|(d, _)| d)
-            .collect();
+        let mut devices: Vec<Key> = s.provides.iter().filter(|(d, v)| *d != self.0.id && v["name"] == app && s.members.current(d).is_some()).map(|(d, _)| *d).collect();
         devices.sort_by_key(|d| !s.sessions.contains_key(d));
         Ok(devices.first().copied())
     }
@@ -441,7 +443,7 @@ impl Node {
         apps.extend(self.0.providers.describe());
         let spaces = self.0.spaces.lock().unwrap();
         for s in spaces.values() {
-            for (_, describe) in crate::providers::announced(&s.members, &s.store.ordered()?, &s.person) {
+            for (_, describe) in s.provides.clone() {
                 if !apps.iter().any(|a| a["name"] == describe["name"]) {
                     apps.push(describe);
                 }
