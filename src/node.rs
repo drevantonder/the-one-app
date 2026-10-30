@@ -214,7 +214,7 @@ impl Node {
     fn save_space(&self, space: &Key, file: &SpaceFile) -> Result<()> {
         let dir = self.space_dir(space);
         std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join("space.json"), serde_json::to_vec_pretty(file)?)?;
+        write_private(&dir.join("space.json"), &serde_json::to_vec_pretty(file)?)?;
         Ok(())
     }
 
@@ -561,7 +561,7 @@ impl Node {
         let path = self.0.dir.join("device.json");
         let mut file: DeviceFile = serde_json::from_slice(&std::fs::read(&path)?)?;
         file.name = name.to_string();
-        std::fs::write(&path, serde_json::to_vec_pretty(&file)?)?;
+        write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
         for space in self.spaces() {
             self.append(space, space::rename(&self.0.id, name)).await?;
         }
@@ -620,7 +620,7 @@ impl Node {
 
     fn save_invites(&self, invites: &HashMap<[u8; 16], Invite>) -> Result<()> {
         let list: Vec<(String, &Invite)> = invites.iter().map(|(k, v)| (data_encoding::HEXLOWER.encode(k), v)).collect();
-        std::fs::write(self.0.dir.join("invites.json"), serde_json::to_vec(&list)?)?;
+        write_private(&self.0.dir.join("invites.json"), &serde_json::to_vec(&list)?)?;
         Ok(())
     }
 
@@ -918,7 +918,7 @@ impl Node {
                 let mut last = anyhow!("no device had it");
                 let mut found = None;
                 for peer in peers {
-                    match self.fetch_blob(peer, &r.blob).await {
+                    match self.fetch_blob(peer, &r.blob, r.size).await {
                         Ok(b) => {
                             found = Some(b);
                             break;
@@ -952,12 +952,12 @@ impl Node {
         spaces.get(&space).map(|s| s.members.current_devices().map(|m| m.device).filter(|d| *d != self.0.id).collect()).unwrap_or_default()
     }
 
-    async fn fetch_blob(&self, peer: Key, hash: &str) -> Result<Vec<u8>> {
+    async fn fetch_blob(&self, peer: Key, hash: &str, size: u64) -> Result<Vec<u8>> {
         let conn = self.0.endpoint.connect(EndpointId::from_bytes(&peer)?, BLOB_ALPN).await?;
         let (mut send, mut recv) = conn.open_bi().await?;
         send.write_all(hash.as_bytes()).await?;
         send.finish()?;
-        let bytes = recv.read_to_end(1 << 30).await?;
+        let bytes = recv.read_to_end(size as usize).await?;
         ensure!(blake3::hash(&bytes).to_hex().as_str() == hash, "the blob didn't match its hash");
         Ok(bytes)
     }
@@ -996,6 +996,17 @@ fn to_fold(members: &Members, entries: &[Entry]) -> Vec<Folded> {
         .collect()
 }
 
+/// Writes a file only this user can read: device keys, invite secrets.
+fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    std::fs::write(path, bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
 fn load_invites(dir: &Path) -> HashMap<[u8; 16], Invite> {
     let list: Vec<(String, Invite)> = std::fs::read(dir.join("invites.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     list.into_iter()
@@ -1013,12 +1024,7 @@ fn load_device(dir: &Path) -> Result<DeviceFile> {
         return Ok(serde_json::from_slice(&bytes)?);
     }
     let file = DeviceFile { secret: hex(&rand::random::<[u8; 32]>()), name: hostname() };
-    std::fs::write(&path, serde_json::to_vec_pretty(&file)?)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
     Ok(file)
 }
 

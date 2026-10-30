@@ -40,9 +40,13 @@ fn state(entries: &[Folded]) -> (String, BTreeMap<String, BTreeMap<String, Strin
         match e.kind.as_str() {
             "agentsmd" => text = e.data["text"].as_str().unwrap_or("").to_string(),
             "skill" => {
+                // Checked here, not only in the operation: any member can sign an entry by hand.
                 let files: BTreeMap<String, String> = serde_json::from_value(e.data["files"].clone()).unwrap_or_default();
-                if let Some(name) = e.data["name"].as_str() {
-                    skills.insert(name.to_string(), files);
+                match e.data["name"].as_str() {
+                    Some(name) if valid(name, &files).is_ok() => {
+                        skills.insert(name.to_string(), files);
+                    }
+                    _ => tracing::warn!("ignored a skill with a bad name or path"),
                 }
             }
             "skill_removed" => {
@@ -60,8 +64,13 @@ fn content(kind: &str, data: Value) -> Content {
     Content { app: "agents".into(), kind: kind.into(), data }
 }
 
-fn valid_name(name: &str) -> Result<()> {
+/// A skill's name is one folder, and its files stay inside it.
+fn valid(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
     ensure!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'), "skill names are lowercase words joined by -");
+    ensure!(files.contains_key("SKILL.md"), "a skill needs a SKILL.md");
+    for path in files.keys() {
+        ensure!(!path.starts_with('/') && !path.contains('\\') && !path.split('/').any(|p| p.is_empty() || p == "." || p == ".."), "{path} isn't a path inside the skill");
+    }
     Ok(())
 }
 
@@ -85,12 +94,8 @@ pub fn call(op: String, input: Value, _caller: Me, entries: Vec<Folded>) -> Repl
             }
             "skill_set" => {
                 let n = name()?;
-                valid_name(&n)?;
                 let files: BTreeMap<String, String> = serde_json::from_value(input["files"].clone()).context("files is path → text")?;
-                ensure!(files.contains_key("SKILL.md"), "a skill needs a SKILL.md");
-                for path in files.keys() {
-                    ensure!(!path.starts_with('/') && !path.split('/').any(|p| p == ".." || p.is_empty()), "{path} isn't a path inside the skill");
-                }
+                valid(&n, &files)?;
                 (json!(format!("{n} is set on every device.")), vec![content("skill", json!({ "name": n, "files": files }))])
             }
             "skill_remove" => {
@@ -193,7 +198,7 @@ impl Written {
         let hash = |s: &str| blake3::hash(s.as_bytes()).to_hex().to_string();
         let untouched = match &now {
             None => true,
-            Some(now) => now == text || self.hashes.get(&key).is_some_and(|h| *h == hash(now)) || !self.hashes.contains_key(&key),
+            Some(now) => now == text || self.hashes.get(&key).is_some_and(|h| *h == hash(now)),
         };
         if !untouched {
             tracing::info!("left {} alone: it was edited on this device", file.display());

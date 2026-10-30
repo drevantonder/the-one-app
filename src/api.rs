@@ -33,7 +33,19 @@ pub fn router(node: Node) -> Router {
         .route("/v1/providers/{app}", post(register))
         .route("/v1/providers/{app}/calls", get(next_call))
         .route("/v1/providers/{app}/calls/{id}", post(reply))
+        .layer(axum::middleware::from_fn(only_this_device))
         .with_state(node)
+}
+
+/// Browsers send an Origin, and a page that rebinds its DNS to 127.0.0.1 still sends its own Host:
+/// refuse both, so no web page can drive this device's node.
+async fn only_this_device(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let host = req.headers().get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let local = host.split(':').next().is_some_and(|h| matches!(h, "127.0.0.1" | "localhost" | "[::1]"));
+    if req.headers().contains_key(axum::http::header::ORIGIN) || !local {
+        return (StatusCode::FORBIDDEN, "only this device's own programs may use this").into_response();
+    }
+    next.run(req).await
 }
 
 struct Error(anyhow::Error);

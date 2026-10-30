@@ -174,8 +174,12 @@ thread_local! {
     static CURRENT: RefCell<Option<Current>> = const { RefCell::new(None) };
 }
 
+/// How long one call into an app may run before it's stopped.
+const TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 struct Engine {
     _runtime: Runtime,
+    deadline: std::sync::Arc<std::sync::Mutex<std::time::Instant>>,
     context: Context,
     dir: PathBuf,
     names: Vec<String>,
@@ -186,6 +190,9 @@ impl Engine {
     fn new(dir: PathBuf) -> Result<Self> {
         let runtime = Runtime::new()?;
         runtime.set_memory_limit(256 << 20);
+        let deadline = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now() + TIME_LIMIT));
+        let watch = deadline.clone();
+        runtime.set_interrupt_handler(Some(Box::new(move || std::time::Instant::now() > *watch.lock().unwrap())));
         let context = Context::full(&runtime)?;
         let mut names = Vec::new();
         context.with(|ctx| -> Result<()> {
@@ -197,7 +204,7 @@ impl Engine {
             }
             Ok(())
         })?;
-        Ok(Engine { _runtime: runtime, context, dir, names, views: HashMap::new() })
+        Ok(Engine { _runtime: runtime, deadline, context, dir, names, views: HashMap::new() })
     }
 
     fn serve(mut self, mut rx: mpsc::UnboundedReceiver<Job>) {
@@ -235,6 +242,8 @@ impl Engine {
             let existed = path.exists();
             let db = Connection::open(&path)?;
             db.execute_batch("pragma journal_mode = wal; pragma synchronous = off;")?;
+            // An app reaches only its own views: no attaching another app's database, or the log.
+            db.set_limit(rusqlite::limits::Limit::SQLITE_LIMIT_ATTACHED, 0)?;
             if !existed {
                 let schema: String = self.context.with(|ctx| -> Result<String> {
                     let f: Function = ctx.globals().get("__schema")?;
@@ -328,6 +337,7 @@ impl Engine {
     }
 
     fn with_current<T>(&self, current: Current, f: impl FnOnce(&Ctx) -> Result<T>) -> (Result<T>, Vec<Content>) {
+        *self.deadline.lock().unwrap() = std::time::Instant::now() + TIME_LIMIT;
         CURRENT.with(|c| *c.borrow_mut() = Some(current));
         let result = self.context.with(|ctx| f(&ctx));
         let appends = CURRENT.with(|c| c.borrow_mut().take()).map(|c| c.appends).unwrap_or_default();

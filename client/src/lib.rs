@@ -59,6 +59,11 @@ impl Client {
 
     fn save(&self) -> Result<()> {
         std::fs::write(&self.path, serde_json::to_vec_pretty(&*self.saved.lock().unwrap())?)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))?;
+        }
         Ok(())
     }
 
