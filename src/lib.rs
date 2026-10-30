@@ -8,6 +8,7 @@ pub mod sync;
 pub mod agents;
 pub mod api;
 pub mod apps;
+pub mod models;
 pub mod native;
 pub mod node;
 pub mod release;

@@ -27,6 +27,7 @@ pub fn all() -> Vec<Native> {
     vec![
         Native { name: "shell", describe: shell_describe, call: shell_call, sync: None },
         Native { name: "agents", describe: crate::agents::describe, call: crate::agents::call, sync: Some(crate::agents::sync) },
+        Native { name: "models", describe: crate::models::describe, call: crate::models::call, sync: None },
     ]
 }
 
