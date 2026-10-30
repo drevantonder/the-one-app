@@ -7,5 +7,6 @@ pub mod store;
 pub mod sync;
 pub mod api;
 pub mod apps;
+pub mod native;
 pub mod node;
 pub mod release;

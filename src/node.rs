@@ -91,6 +91,7 @@ pub struct Inner {
     name: Mutex<String>,
     endpoint: Endpoint,
     apps: Apps,
+    native: Vec<crate::native::Native>,
     spaces: Mutex<HashMap<Key, Space>>,
     invites: Mutex<HashMap<[u8; 16], Invite>>,
     events: broadcast::Sender<Event>,
@@ -123,6 +124,7 @@ impl Node {
             name: Mutex::new(device.name),
             endpoint: endpoint.clone(),
             apps,
+            native: crate::native::all(),
             spaces: Mutex::new(HashMap::new()),
             invites: Mutex::new(HashMap::new()),
             events,
@@ -276,6 +278,14 @@ impl Node {
     /// Runs an operation on this device for `caller`, another device in the space.
     pub async fn call_as(&self, space: Key, caller: Key, app: &str, op: &str, input: Value) -> Result<Value> {
         let me = self.me_of(&space, &caller)?;
+        if let Some(native) = self.0.native.iter().find(|n| n.name == app) {
+            ensure!(me.person == self.me_of(&space, &self.0.id)?.person, "{app} runs only for this device's own person's devices");
+            let (result, appends) = (native.call)(op.to_string(), input, me).await?;
+            for content in appends {
+                self.append(space, content).await?;
+            }
+            return Ok(result);
+        }
         let outcome = self.0.apps.call(space, app, op, input, me, now_ms()).await?;
         for content in outcome.appends {
             self.append(space, content).await?;
@@ -336,7 +346,9 @@ impl Node {
     }
 
     pub async fn apps(&self) -> Result<Vec<Value>> {
-        self.0.apps.describe().await
+        let mut apps = self.0.apps.describe().await?;
+        apps.extend(self.0.native.iter().map(|n| (n.describe)()));
+        Ok(apps)
     }
 
     pub fn spaces(&self) -> Vec<Key> {
@@ -688,6 +700,18 @@ impl Node {
         send.finish()?;
         conn.closed().await;
         Ok(())
+    }
+
+    /// Finds a device in a space by name or id prefix.
+    pub fn find_device(&self, space: Key, name: &str) -> Result<Key> {
+        let spaces = self.0.spaces.lock().unwrap();
+        let s = spaces.get(&space).context("no such space")?;
+        let found: Vec<Key> = s.members.current_devices().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.device).starts_with(name)).map(|m| m.device).collect();
+        match found.as_slice() {
+            [one] => Ok(*one),
+            [] => bail!("no device called {name}"),
+            _ => bail!("several devices match {name}"),
+        }
     }
 
     /// Finds a space by id, name or id prefix.

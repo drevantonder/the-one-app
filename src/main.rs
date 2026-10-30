@@ -263,6 +263,9 @@ fn tools() -> Result<Vec<Value>, Value> {
             if several {
                 schema["properties"]["space"] = json!({ "type": "string", "description": "which space; this device is in several" });
             }
+            if app["runs"] == "here" {
+                schema["properties"]["device"] = json!({ "type": "string", "description": "which of your devices, by name; default is this one" });
+            }
             tools.push(json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": schema }));
         }
     }
@@ -273,10 +276,11 @@ fn call_tool(params: &Value) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let mut input = params["arguments"].as_object().cloned().unwrap_or_default();
     let space = input.remove("space");
+    let device = input.remove("device");
     let Some((app, op)) = name.split_once('_') else {
         return json!({ "isError": true, "content": [{ "type": "text", "text": format!("no tool {name}") }] });
     };
-    match post("/v1/call", json!({ "space": space, "app": app, "op": op, "input": input })) {
+    match post("/v1/call", json!({ "space": space, "device": device, "app": app, "op": op, "input": input })) {
         Ok(r) => {
             let text = match &r["ok"] {
                 Value::String(s) => s.clone(),

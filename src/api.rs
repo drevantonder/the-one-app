@@ -71,7 +71,7 @@ async fn call(State(node): State<Node>, Json(req): Json<CallRequest>) -> Reply {
     let space = node.find_space(req.space.as_deref())?;
     let input = if req.input.is_null() { json!({}) } else { req.input };
     let result = match req.device {
-        Some(device) => node.call_on(unhex(&device)?, space, &req.app, &req.op, input).await?,
+        Some(device) => node.call_on(node.find_device(space, &device)?, space, &req.app, &req.op, input).await?,
         None => node.call(space, &req.app, &req.op, input).await?,
     };
     Ok(Json(json!({ "ok": result })))
