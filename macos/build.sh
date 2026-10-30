@@ -20,6 +20,10 @@ ts=--timestamp=none
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp macos/Info.plist "$app/Contents/Info.plist"
+# Finder and the Dock name an app after its file. They show a localized name
+# instead only if Info.plist's CFBundleDisplayName matches the file name.
+mkdir -p "$app/Contents/Resources/en.lproj"
+echo '"CFBundleDisplayName" = "The One App";' >"$app/Contents/Resources/en.lproj/InfoPlist.strings"
 cp macos/MenuBarIcon.png macos/MenuBarIcon@2x.png "$app/Contents/Resources/"
 iconset=build/AppIcon.iconset
 rm -rf "$iconset" && mkdir -p "$iconset"

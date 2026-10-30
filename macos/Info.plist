@@ -4,7 +4,9 @@
 <dict>
 	<key>CFBundleIdentifier</key><string>dev.theoneapp</string>
 	<key>CFBundleName</key><string>The One App</string>
-	<key>CFBundleDisplayName</key><string>The One App</string>
+	<key>CFBundleDisplayName</key><string>TheOneApp</string>
+	<key>CFBundleDevelopmentRegion</key><string>en</string>
+	<key>LSHasLocalizedDisplayName</key><true/>
 	<key>CFBundleExecutable</key><string>TheOneApp</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
