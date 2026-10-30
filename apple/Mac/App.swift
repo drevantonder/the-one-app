@@ -10,6 +10,7 @@ struct MacApp: App {
         store.startNode = NodeLauncher.start
         store.preferredDeviceName = Host.current().localizedName
         Task { await store.run() }
+        Providers.start()
         _store = State(initialValue: store)
         if !UserDefaults.standard.bool(forKey: "loginItemSet") {
             UserDefaults.standard.set(true, forKey: "loginItemSet")

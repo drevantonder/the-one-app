@@ -31,6 +31,11 @@ targets:
         NodePort: "${BRAND_PORT}"
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # Asked for on the first call that needs each (Mac/Providers).
+        NSRemindersFullAccessUsageDescription: Your agents and other devices read and change your reminders through this Mac.
+        NSCalendarsFullAccessUsageDescription: Your agents and other devices read and change your calendars through this Mac.
+        NSContactsUsageDescription: Your agents and other devices look up your contacts through this Mac.
+        NSAppleEventsUsageDescription: Your agents send iMessages you ask them to through Messages on this Mac.
 
   # The iPhone keeps no log: it links the client library (build-client.sh) and asks a member device.
   Phone:

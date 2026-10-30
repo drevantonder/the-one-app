@@ -29,7 +29,7 @@ A node runs on every device that can keep a log: laptops, the home box, servers.
 - `src/native.rs` (the type), `src/shell.rs`, `src/agents.rs`, `src/models.rs`: device features in Rust. `src/providers.rs`: the same for features written outside the node (the Mac app's Swift, Go), over the local API.
 - `apps/`: the apps every build ships with. They use nothing a user's app couldn't.
 - `client/`: the library phones link (Rust, with a C interface in `one_client.h`).
-- `apple/`: the Mac app now, and the iPhone app's shared views.
+- `apple/`: the Mac app now, and the iPhone app's shared views. The Mac app provides Reminders, Calendar, Contacts and iMessage (`apple/Mac/Providers`), since macOS grants their permissions to it.
 - `brand.toml`: the product's name, CLI name, port and accent. Nothing else names the product.
 - `vendor/`: two iroh dependencies patched so the client builds for iPhone; drop them when upstream builds there.
 
