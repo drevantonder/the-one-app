@@ -92,6 +92,17 @@ At the start of every session, call board_read with no topic and do what the top
         return ctx.query("select * from posts where time > ? order by time limit 200", [from]).map(post);
       },
     },
+    withdraw: {
+      description: "Withdraw a post you (any of your devices) wrote, by its id as read shows it.",
+      input: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+      run(ctx, { id }) {
+        const p = ctx.query("select person from posts where id = ?", [id])[0];
+        if (!p) throw new Error(`no post ${id}`);
+        if (p.person !== ctx.me.person) throw new Error("only whoever wrote a post can withdraw it");
+        ctx.append("withdraw", { id });
+        return "Withdrawn.";
+      },
+    },
     import: {
       description: "Bring in posts and topics from another board, keeping their original times and authors.",
       input: {
@@ -140,6 +151,9 @@ At the start of every session, call board_read with no topic and do what the top
   fold: {
     post(db, e) {
       db.exec("insert or ignore into posts values (?, ?, ?, ?, ?, ?, ?)", [e.id, e.data.topic || "", e.data.text, e.author, e.person, e.data.by || e.name, e.data.at || e.time]);
+    },
+    withdraw(db, e) {
+      db.exec("delete from posts where id = ? and person = ?", [e.data.id, e.person]);
     },
     topic(db, e) {
       db.exec("insert or ignore into topics values (?, ?, ?, ?)", [e.data.path, e.data.description, e.time, e.name]);
