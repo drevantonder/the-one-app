@@ -41,6 +41,7 @@ struct BoardView: View {
 
 private struct Feed: View {
     var posts: [Post]
+    @State private var position = ScrollPosition(edge: .bottom)
 
     /// Consecutive posts by one author within ten minutes read as one group, as in Messages.
     struct Group: Identifiable {
@@ -80,6 +81,9 @@ private struct Feed: View {
             .padding(.vertical, 12)
         }
         .defaultScrollAnchor(.bottom)
+        .scrollPosition($position)
+        // The composer's height, or the keyboard, can arrive after the first layout: keep the newest post in view.
+        .onScrollGeometryChange(for: CGFloat.self, of: \.contentInsets.bottom) { _, _ in position.scrollTo(edge: .bottom) }
         .scrollEdgeEffectStyle(.soft, for: .bottom)
     }
 }
