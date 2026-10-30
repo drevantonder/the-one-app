@@ -5,3 +5,6 @@ pub mod entry;
 pub mod space;
 pub mod store;
 pub mod sync;
+pub mod api;
+pub mod apps;
+pub mod node;

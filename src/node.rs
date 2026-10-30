@@ -1,0 +1,651 @@
+//! A node: this device's spaces, their stores and views, and its iroh endpoint.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
+use iroh::endpoint::{Connection, presets};
+use iroh::protocol::{AcceptError, ProtocolHandler, Router};
+use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey};
+use p2panda_core::SigningKey;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use tokio::sync::{broadcast, mpsc};
+
+use crate::apps::{Apps, Folded, Me};
+use crate::entry::{Content, Entry, Key, Order, SPACE_LOG, hex, short, unhex};
+use crate::space::{self, Members, Role};
+use crate::store::Store;
+use crate::sync::{self, Msg};
+
+const JOIN_ALPN: &[u8] = b"one/join/1";
+const CALL_ALPN: &[u8] = b"one/call/1";
+
+pub fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+}
+
+#[derive(Serialize, Deserialize)]
+struct DeviceFile {
+    secret: String,
+    name: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SpaceFile {
+    person: String,
+    #[serde(default)]
+    root: Option<String>,
+}
+
+struct Space {
+    store: Store,
+    members: Members,
+    person: String,
+    folded: Option<Order>,
+    /// Senders to every live sync session for this space, by peer device.
+    sessions: HashMap<Key, mpsc::UnboundedSender<Msg>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum Event {
+    Changed { space: String, apps: Vec<String> },
+    Peers { space: String },
+    Spaces,
+}
+
+struct Invite {
+    space: Key,
+    person: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Ticket {
+    space: Key,
+    inviter: EndpointAddr,
+    secret: [u8; 16],
+}
+
+#[derive(Serialize, Deserialize)]
+struct JoinRequest {
+    secret: [u8; 16],
+    name: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct JoinReply {
+    space_name: String,
+    person: String,
+}
+
+pub struct Inner {
+    dir: PathBuf,
+    key: SigningKey,
+    id: Key,
+    name: Mutex<String>,
+    endpoint: Endpoint,
+    apps: Apps,
+    spaces: Mutex<HashMap<Key, Space>>,
+    invites: Mutex<HashMap<[u8; 16], Invite>>,
+    events: broadcast::Sender<Event>,
+    writes: tokio::sync::Mutex<()>,
+}
+
+#[derive(Clone)]
+pub struct Node(Arc<Inner>);
+
+impl std::fmt::Debug for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Node({})", short(&self.0.id))
+    }
+}
+
+impl Node {
+    pub async fn start(dir: &Path) -> Result<(Node, Router)> {
+        std::fs::create_dir_all(dir)?;
+        let device = load_device(dir)?;
+        let secret = unhex(&device.secret)?;
+        let key = SigningKey::from(secret);
+        let id = *key.verifying_key().as_bytes();
+        let endpoint = Endpoint::builder(presets::N0).secret_key(SecretKey::from_bytes(&secret)).bind().await?;
+        let apps = Apps::start(dir.join("views"))?;
+        let (events, _) = broadcast::channel(256);
+        let node = Node(Arc::new(Inner {
+            dir: dir.to_path_buf(),
+            key,
+            id,
+            name: Mutex::new(device.name),
+            endpoint: endpoint.clone(),
+            apps,
+            spaces: Mutex::new(HashMap::new()),
+            invites: Mutex::new(HashMap::new()),
+            events,
+            writes: tokio::sync::Mutex::new(()),
+        }));
+        for entry in std::fs::read_dir(dir.join("spaces")).into_iter().flatten().flatten() {
+            if let Ok(space) = unhex(&entry.file_name().to_string_lossy()) {
+                node.open_space(space).with_context(|| format!("open space {}", short(&space)))?;
+                node.refold(space).await?;
+            }
+        }
+        let router = Router::builder(endpoint)
+            .accept(sync::ALPN, SyncHandler(node.clone()))
+            .accept(JOIN_ALPN, JoinHandler(node.clone()))
+            .accept(CALL_ALPN, CallHandler(node.clone()))
+            .spawn();
+        tokio::spawn(node.clone().dial_loop());
+        Ok((node, router))
+    }
+
+    pub fn id(&self) -> Key {
+        self.0.id
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<Event> {
+        self.0.events.subscribe()
+    }
+
+    fn emit(&self, event: Event) {
+        let _ = self.0.events.send(event);
+    }
+
+    fn space_dir(&self, space: &Key) -> PathBuf {
+        self.0.dir.join("spaces").join(hex(space))
+    }
+
+    fn open_space(&self, space: Key) -> Result<()> {
+        let dir = self.space_dir(&space);
+        let file: SpaceFile = serde_json::from_slice(&std::fs::read(dir.join("space.json"))?)?;
+        let store = Store::open(&dir.join("entries.db"), space)?;
+        let members = Members::fold(&space, &store.ordered()?);
+        self.0.spaces.lock().unwrap().insert(space, Space { store, members, person: file.person, folded: None, sessions: HashMap::new() });
+        Ok(())
+    }
+
+    fn save_space(&self, space: &Key, file: &SpaceFile) -> Result<()> {
+        let dir = self.space_dir(space);
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(dir.join("space.json"), serde_json::to_vec_pretty(file)?)?;
+        Ok(())
+    }
+
+    pub fn device_name(&self) -> String {
+        self.0.name.lock().unwrap().clone()
+    }
+
+    /// Creates a space with this device as its first admin.
+    pub async fn create_space(&self, name: &str) -> Result<Key> {
+        let root = SigningKey::generate();
+        let space = *root.verifying_key().as_bytes();
+        let person = new_person();
+        self.save_space(&space, &SpaceFile { person: person.clone(), root: Some(hex(root.as_bytes())) })?;
+        self.open_space(space)?;
+        let genesis = space::genesis(&root, &self.0.id, name, &person, &self.device_name());
+        self.append(space, genesis).await?;
+        self.emit(Event::Spaces);
+        Ok(space)
+    }
+
+    /// Writes an entry to this device's log in `space`.
+    pub async fn append(&self, space: Key, content: Content) -> Result<Entry> {
+        let _write = self.0.writes.lock().await;
+        let entry = {
+            let spaces = self.0.spaces.lock().unwrap();
+            let s = spaces.get(&space).context("no such space")?;
+            let time = now_ms().max(s.store.max_time()? + 1);
+            let prev = s.store.last(&self.0.id, SPACE_LOG)?;
+            let entry = Entry::create(&self.0.key, space, time, prev.as_ref(), content);
+            s.store.insert(&entry)?;
+            entry
+        };
+        self.after(space, std::slice::from_ref(&entry), None).await?;
+        Ok(entry)
+    }
+
+    /// Folds new entries and passes them on to every session but the one they came from.
+    async fn after(&self, space: Key, new: &[Entry], from: Option<Key>) -> Result<()> {
+        if new.is_empty() {
+            return Ok(());
+        }
+        let (folded, rebuild, apps) = {
+            let mut spaces = self.0.spaces.lock().unwrap();
+            let s = spaces.get_mut(&space).context("no such space")?;
+            let msg = sync::entries(space, new);
+            for (peer, tx) in &s.sessions {
+                if Some(*peer) != from {
+                    let _ = tx.send(msg.clone());
+                }
+            }
+            let membership = new.iter().any(|e| e.content.app == space::APP);
+            if membership {
+                s.members = Members::fold(&space, &s.store.ordered()?);
+            }
+            let earliest = new.iter().map(Entry::order).min().unwrap();
+            let rebuild = membership || s.folded.is_some_and(|f| earliest <= f);
+            let entries = if rebuild { s.store.ordered()? } else { sorted(new) };
+            let folded = to_fold(&s.members, &entries);
+            s.folded = s.folded.max(entries.iter().map(Entry::order).max());
+            let apps: Vec<String> = new.iter().map(|e| e.content.app.clone()).collect();
+            (folded, rebuild, apps)
+        };
+        self.0.apps.fold(space, folded, rebuild).await?;
+        self.emit(Event::Changed { space: hex(&space), apps });
+        Ok(())
+    }
+
+    async fn refold(&self, space: Key) -> Result<()> {
+        let folded = {
+            let mut spaces = self.0.spaces.lock().unwrap();
+            let s = spaces.get_mut(&space).context("no such space")?;
+            let entries = s.store.ordered()?;
+            s.folded = entries.iter().map(Entry::order).max();
+            to_fold(&s.members, &entries)
+        };
+        self.0.apps.fold(space, folded, true).await
+    }
+
+    pub fn me(&self, space: &Key) -> Result<Me> {
+        let spaces = self.0.spaces.lock().unwrap();
+        let s = spaces.get(space).context("no such space")?;
+        Ok(Me { space: hex(space), device: hex(&self.0.id), person: s.person.clone(), name: self.device_name() })
+    }
+
+    /// Runs an app operation on this device, appending whatever entries it asks for.
+    pub async fn call(&self, space: Key, app: &str, op: &str, input: Value) -> Result<Value> {
+        let me = self.me(&space)?;
+        {
+            let spaces = self.0.spaces.lock().unwrap();
+            ensure!(spaces[&space].members.current(&self.0.id).is_some(), "this device is not a member of the space yet");
+        }
+        let outcome = self.0.apps.call(space, app, op, input, me, now_ms()).await?;
+        for content in outcome.appends {
+            self.append(space, content).await?;
+        }
+        Ok(outcome.result)
+    }
+
+    /// Runs an operation on another device in the space.
+    pub async fn call_on(&self, device: Key, space: Key, app: &str, op: &str, input: Value) -> Result<Value> {
+        if device == self.0.id {
+            return self.call(space, app, op, input).await;
+        }
+        let conn = self.0.endpoint.connect(EndpointId::from_bytes(&device)?, CALL_ALPN).await?;
+        let (mut send, mut recv) = conn.open_bi().await?;
+        let request = serde_json::to_vec(&json!({ "space": hex(&space), "app": app, "op": op, "input": input }))?;
+        send.write_all(&request).await?;
+        send.finish()?;
+        let reply: Value = serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?;
+        match reply.get("error") {
+            Some(err) => bail!("{}", err.as_str().unwrap_or("remote error")),
+            None => Ok(reply["ok"].clone()),
+        }
+    }
+
+    pub async fn widgets(&self, space: Key) -> Result<Vec<Value>> {
+        let me = self.me(&space)?;
+        let mut out = Vec::new();
+        for app in self.0.apps.describe().await? {
+            let name = app["name"].as_str().unwrap_or_default().to_string();
+            for w in app["widgets"].as_array().into_iter().flatten() {
+                let widget = w["name"].as_str().unwrap_or_default();
+                match self.0.apps.widget(space, &name, widget, me.clone(), now_ms()).await {
+                    Ok(root) => out.push(json!({ "app": name, "widget": widget, "title": w["title"], "root": root })),
+                    Err(err) => tracing::warn!("{name} widget {widget}: {err:#}"),
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn apps(&self) -> Result<Vec<Value>> {
+        self.0.apps.describe().await
+    }
+
+    pub fn spaces(&self) -> Vec<Key> {
+        let mut keys: Vec<Key> = self.0.spaces.lock().unwrap().keys().copied().collect();
+        keys.sort();
+        keys
+    }
+
+    /// Everything a shell needs to draw this device's spaces.
+    pub fn state(&self) -> Value {
+        let spaces = self.0.spaces.lock().unwrap();
+        let mut list: Vec<Value> = spaces
+            .iter()
+            .map(|(key, s)| {
+                let devices: Vec<Value> = s
+                    .members
+                    .current_devices()
+                    .map(|m| {
+                        json!({
+                            "device": hex(&m.device), "name": m.name, "person": m.person, "role": m.role,
+                            "me": m.device == self.0.id, "online": m.device == self.0.id || s.sessions.contains_key(&m.device),
+                        })
+                    })
+                    .collect();
+                json!({
+                    "id": hex(key), "name": s.members.name, "person": s.person,
+                    "member": s.members.current(&self.0.id).is_some(),
+                    "role": s.members.current(&self.0.id).map(|m| m.role.clone()),
+                    "devices": devices, "entries": s.store.count().unwrap_or(0),
+                })
+            })
+            .collect();
+        list.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        json!({
+            "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT },
+            "device": { "id": hex(&self.0.id), "name": self.device_name() },
+            "spaces": list,
+        })
+    }
+
+    pub async fn rename_device(&self, name: &str) -> Result<()> {
+        *self.0.name.lock().unwrap() = name.to_string();
+        let path = self.0.dir.join("device.json");
+        let mut file: DeviceFile = serde_json::from_slice(&std::fs::read(&path)?)?;
+        file.name = name.to_string();
+        std::fs::write(&path, serde_json::to_vec_pretty(&file)?)?;
+        for space in self.spaces() {
+            self.append(space, space::rename(&self.0.id, name)).await?;
+        }
+        Ok(())
+    }
+
+    /// Makes a one-time ticket another device can join `space` with.
+    pub fn invite(&self, space: Key, mine: bool) -> Result<String> {
+        let person = {
+            let spaces = self.0.spaces.lock().unwrap();
+            let s = spaces.get(&space).context("no such space")?;
+            let me = s.members.current(&self.0.id).context("this device is not a member")?;
+            ensure!(mine || me.role == Role::Admin, "only admins invite other people; invite your own device instead");
+            mine.then(|| s.person.clone())
+        };
+        let secret: [u8; 16] = rand::random();
+        self.0.invites.lock().unwrap().insert(secret, Invite { space, person });
+        let ticket = Ticket { space, inviter: self.0.endpoint.addr(), secret };
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&ticket, &mut bytes)?;
+        Ok(data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase())
+    }
+
+    pub async fn join(&self, ticket: &str) -> Result<Key> {
+        let bytes = data_encoding::BASE32_NOPAD.decode(ticket.trim().to_uppercase().as_bytes()).context("not a ticket")?;
+        let ticket: Ticket = ciborium::from_reader(bytes.as_slice()).context("not a ticket")?;
+        ensure!(!self.0.spaces.lock().unwrap().contains_key(&ticket.space), "this device is already in that space");
+        let conn = self.0.endpoint.connect(ticket.inviter.clone(), JOIN_ALPN).await.context("reach the inviting device")?;
+        let (mut send, mut recv) = conn.open_bi().await?;
+        send.write_all(&serde_json::to_vec(&JoinRequest { secret: ticket.secret, name: self.device_name() })?).await?;
+        send.finish()?;
+        let reply: Value = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
+        if let Some(err) = reply.get("error") {
+            bail!("{}", err.as_str().unwrap_or("the invite was refused"));
+        }
+        let reply: JoinReply = serde_json::from_value(reply)?;
+        self.save_space(&ticket.space, &SpaceFile { person: reply.person, root: None })?;
+        self.open_space(ticket.space)?;
+        let inviter = ticket.inviter.id;
+        let node = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = node.connect_sync(ticket.space, *inviter.as_bytes()).await {
+                tracing::warn!("first sync after joining: {err:#}");
+            }
+        });
+        self.emit(Event::Spaces);
+        Ok(ticket.space)
+    }
+
+    async fn accept_join(&self, conn: Connection) -> Result<()> {
+        let remote = *conn.remote_id().as_bytes();
+        let (mut send, mut recv) = conn.accept_bi().await?;
+        let request: JoinRequest = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
+        let invite = self.0.invites.lock().unwrap().remove(&request.secret);
+        let Some(invite) = invite else {
+            send.write_all(br#"{"error":"this invite was already used or has expired"}"#).await?;
+            send.finish()?;
+            return Ok(());
+        };
+        let person = invite.person.unwrap_or_else(new_person);
+        self.append(invite.space, space::admit(&remote, &person, &request.name, Role::Member)).await?;
+        let space_name = self.0.spaces.lock().unwrap()[&invite.space].members.name.clone();
+        send.write_all(&serde_json::to_vec(&JoinReply { space_name, person })?).await?;
+        send.finish()?;
+        conn.closed().await;
+        Ok(())
+    }
+
+    async fn dial_loop(self) {
+        loop {
+            let wanted: Vec<(Key, Key)> = {
+                let spaces = self.0.spaces.lock().unwrap();
+                spaces
+                    .iter()
+                    .flat_map(|(space, s)| {
+                        s.members
+                            .current_devices()
+                            .filter(|m| m.device != self.0.id && !s.sessions.contains_key(&m.device))
+                            .map(|m| (*space, m.device))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect()
+            };
+            for (space, device) in wanted {
+                let node = self.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = node.connect_sync(space, device).await {
+                        tracing::debug!("sync with {}: {err:#}", short(&device));
+                    }
+                });
+            }
+            tokio::time::sleep(Duration::from_secs(15)).await;
+        }
+    }
+
+    async fn connect_sync(&self, space: Key, device: Key) -> Result<()> {
+        let conn = tokio::time::timeout(Duration::from_secs(20), self.0.endpoint.connect(EndpointId::from_bytes(&device)?, sync::ALPN))
+            .await
+            .context("timed out")??;
+        let (send, recv) = conn.open_bi().await?;
+        self.session(space, device, send, recv, None).await
+    }
+
+    async fn accept_sync(&self, conn: Connection) -> Result<()> {
+        let remote = *conn.remote_id().as_bytes();
+        let (send, mut recv) = conn.accept_bi().await?;
+        let first = sync::read(&mut recv).await?;
+        let Msg::Hello { space, .. } = &first else { bail!("expected hello") };
+        let space = *space;
+        {
+            let spaces = self.0.spaces.lock().unwrap();
+            let s = spaces.get(&space).context("not in that space")?;
+            ensure!(s.members.current(&remote).is_some(), "{} is not a member", short(&remote));
+        }
+        self.session(space, remote, send, recv, Some(first)).await
+    }
+
+    /// Runs one sync session until the connection drops.
+    async fn session(&self, space: Key, peer: Key, mut send: iroh::endpoint::SendStream, mut recv: iroh::endpoint::RecvStream, first: Option<Msg>) -> Result<()> {
+        let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
+        {
+            let mut spaces = self.0.spaces.lock().unwrap();
+            let s = spaces.get_mut(&space).context("no such space")?;
+            tx.send(sync::hello(&s.store)?).ok();
+            s.sessions.insert(peer, tx.clone());
+        }
+        self.emit(Event::Peers { space: hex(&space) });
+        tracing::info!("syncing {} with {}", short(&space), short(&peer));
+        let writer = async {
+            while let Some(msg) = rx.recv().await {
+                sync::write(&mut send, &msg).await?;
+            }
+            anyhow::Ok(())
+        };
+        let hellos = async {
+            loop {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let hello = { sync::hello(&self.0.spaces.lock().unwrap()[&space].store)? };
+                tx.send(hello).map_err(|_| anyhow!("session closed"))?;
+            }
+        };
+        let reader = async {
+            if let Some(msg) = first {
+                if let Some(reply) = self.handle(space, peer, msg).await? {
+                    tx.send(reply).map_err(|_| anyhow!("session closed"))?;
+                }
+            }
+            loop {
+                let msg = sync::read(&mut recv).await?;
+                if let Some(reply) = self.handle(space, peer, msg).await? {
+                    tx.send(reply).map_err(|_| anyhow!("session closed"))?;
+                }
+            }
+        };
+        let result: Result<()> = tokio::select! { r = writer => r, r = hellos => r, r = reader => r };
+        {
+            let mut spaces = self.0.spaces.lock().unwrap();
+            if let Some(s) = spaces.get_mut(&space) {
+                if s.sessions.get(&peer).is_some_and(|t| t.same_channel(&tx)) {
+                    s.sessions.remove(&peer);
+                }
+            }
+        }
+        self.emit(Event::Peers { space: hex(&space) });
+        result
+    }
+
+    async fn handle(&self, space: Key, peer: Key, msg: Msg) -> Result<Option<Msg>> {
+        let _write = self.0.writes.lock().await;
+        let (new, reply) = {
+            let spaces = self.0.spaces.lock().unwrap();
+            sync::handle(&spaces.get(&space).context("no such space")?.store, msg)?
+        };
+        self.after(space, &new, Some(peer)).await?;
+        Ok(reply)
+    }
+
+    async fn accept_call(&self, conn: Connection) -> Result<()> {
+        let remote = *conn.remote_id().as_bytes();
+        let (mut send, mut recv) = conn.accept_bi().await?;
+        let request: Value = serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?;
+        let result = async {
+            let space = unhex(request["space"].as_str().context("no space")?)?;
+            {
+                let spaces = self.0.spaces.lock().unwrap();
+                ensure!(spaces.get(&space).and_then(|s| s.members.current(&remote)).is_some(), "not a member");
+            }
+            let (app, op) = (request["app"].as_str().unwrap_or_default(), request["op"].as_str().unwrap_or_default());
+            self.call(space, app, op, request["input"].clone()).await
+        }
+        .await;
+        let reply = match result {
+            Ok(ok) => json!({ "ok": ok }),
+            Err(err) => json!({ "error": format!("{err:#}") }),
+        };
+        send.write_all(&serde_json::to_vec(&reply)?).await?;
+        send.finish()?;
+        conn.closed().await;
+        Ok(())
+    }
+
+    /// Finds a space by id, name or id prefix.
+    pub fn find_space(&self, name: Option<&str>) -> Result<Key> {
+        let spaces = self.0.spaces.lock().unwrap();
+        let mut matches: Vec<Key> = match name {
+            None => spaces.keys().copied().collect(),
+            Some(n) => spaces.iter().filter(|(k, s)| s.members.name.eq_ignore_ascii_case(n) || hex(k).starts_with(n)).map(|(k, _)| *k).collect(),
+        };
+        matches.sort();
+        match matches.as_slice() {
+            [one] => Ok(*one),
+            [] if name.is_none() => bail!("this device is in no space yet: create one, or join with a ticket"),
+            [] => bail!("no space called {}", name.unwrap()),
+            _ => bail!("this device is in several spaces: say which"),
+        }
+    }
+}
+
+fn sorted(entries: &[Entry]) -> Vec<Entry> {
+    let mut v = entries.to_vec();
+    v.sort_by_key(Entry::order);
+    v
+}
+
+/// The entries app folds see: by members, minus membership itself.
+fn to_fold(members: &Members, entries: &[Entry]) -> Vec<Folded> {
+    entries
+        .iter()
+        .filter(|e| e.content.app != space::APP)
+        .filter_map(|e| {
+            let m = members.active(&e.author(), e.order())?;
+            Some(Folded {
+                app: e.content.app.clone(),
+                kind: e.content.kind.clone(),
+                author: hex(&e.author()),
+                person: m.person.clone(),
+                name: m.name.clone(),
+                time: e.time(),
+                id: format!("{}:{}", short(&e.author()), e.seq()),
+                data: e.content.data.clone(),
+            })
+        })
+        .collect()
+}
+
+fn new_person() -> String {
+    data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>())
+}
+
+fn load_device(dir: &Path) -> Result<DeviceFile> {
+    let path = dir.join("device.json");
+    if let Ok(bytes) = std::fs::read(&path) {
+        return Ok(serde_json::from_slice(&bytes)?);
+    }
+    let file = DeviceFile { secret: hex(&rand::random::<[u8; 32]>()), name: hostname() };
+    std::fs::write(&path, serde_json::to_vec_pretty(&file)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
+}
+
+fn hostname() -> String {
+    std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "device".into())
+}
+
+#[derive(Clone, Debug)]
+struct SyncHandler(Node);
+#[derive(Clone, Debug)]
+struct JoinHandler(Node);
+#[derive(Clone, Debug)]
+struct CallHandler(Node);
+
+fn accept_err(err: anyhow::Error) -> AcceptError {
+    AcceptError::from_boxed(err.into())
+}
+
+impl ProtocolHandler for SyncHandler {
+    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
+        self.0.accept_sync(conn).await.map_err(accept_err)
+    }
+}
+
+impl ProtocolHandler for JoinHandler {
+    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
+        self.0.accept_join(conn).await.map_err(accept_err)
+    }
+}
+
+impl ProtocolHandler for CallHandler {
+    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
+        self.0.accept_call(conn).await.map_err(accept_err)
+    }
+}
