@@ -26,6 +26,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/invite", post(invite))
         .route("/v1/join", post(join))
         .route("/v1/device", post(rename))
+        .route("/v1/remove", post(remove))
         .route("/v1/events", get(events))
         .with_state(node)
 }
@@ -81,7 +82,7 @@ struct SpaceQuery {
 
 async fn widgets(State(node): State<Node>, Query(q): Query<SpaceQuery>) -> Reply {
     let space = node.find_space(q.space.as_deref())?;
-    Ok(Json(json!(node.widgets(space).await?)))
+    Ok(Json(json!(node.widgets(space, node.id()).await?)))
 }
 
 #[derive(Deserialize)]
@@ -127,6 +128,18 @@ struct RenameRequest {
 
 async fn rename(State(node): State<Node>, Json(req): Json<RenameRequest>) -> Reply {
     node.rename_device(req.name.trim()).await?;
+    Ok(Json(json!({})))
+}
+
+#[derive(Deserialize)]
+struct RemoveRequest {
+    space: Option<String>,
+    device: String,
+}
+
+async fn remove(State(node): State<Node>, Json(req): Json<RemoveRequest>) -> Reply {
+    let space = node.find_space(req.space.as_deref())?;
+    node.remove_device(space, unhex(&req.device)?).await?;
     Ok(Json(json!({})))
 }
 

@@ -61,6 +61,13 @@ impl Entry {
         Ok(Entry { header, body: body.to_vec(), content })
     }
 
+    /// Decodes an entry this device already checked when it arrived.
+    pub fn decode_trusted(header: &[u8], body: &[u8]) -> Result<Self> {
+        let header = Header::<Ext>::decode(header).context("decode header")?;
+        let content: Content = serde_json::from_slice(body).context("decode body")?;
+        Ok(Entry { header, body: body.to_vec(), content })
+    }
+
     pub fn encode(&self) -> (Vec<u8>, Vec<u8>) {
         (self.header.encode(), self.body.clone())
     }

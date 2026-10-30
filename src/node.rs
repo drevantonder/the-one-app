@@ -22,6 +22,7 @@ use crate::sync::{self, Msg};
 
 const JOIN_ALPN: &[u8] = b"one/join/1";
 const CALL_ALPN: &[u8] = b"one/call/1";
+pub const CLIENT_ALPN: &[u8] = b"one/client/1";
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
@@ -135,6 +136,7 @@ impl Node {
             .accept(sync::ALPN, SyncHandler(node.clone()))
             .accept(JOIN_ALPN, JoinHandler(node.clone()))
             .accept(CALL_ALPN, CallHandler(node.clone()))
+            .accept(CLIENT_ALPN, ClientHandler(node.clone()))
             .spawn();
         tokio::spawn(node.clone().dial_loop());
         Ok((node, router))
@@ -247,19 +249,24 @@ impl Node {
         self.0.apps.fold(space, folded, true).await
     }
 
-    pub fn me(&self, space: &Key) -> Result<Me> {
+    /// Who `device` is in `space`, as apps see them.
+    pub fn me_of(&self, space: &Key, device: &Key) -> Result<Me> {
         let spaces = self.0.spaces.lock().unwrap();
         let s = spaces.get(space).context("no such space")?;
-        Ok(Me { space: hex(space), device: hex(&self.0.id), person: s.person.clone(), name: self.device_name() })
+        ensure!(s.members.current(&self.0.id).is_some(), "this device is not a member of the space yet");
+        let m = s.members.current(device).context("not a member of this space")?;
+        let name = if *device == self.0.id { self.device_name() } else { m.name.clone() };
+        Ok(Me { space: hex(space), device: hex(device), person: m.person.clone(), name })
     }
 
     /// Runs an app operation on this device, appending whatever entries it asks for.
     pub async fn call(&self, space: Key, app: &str, op: &str, input: Value) -> Result<Value> {
-        let me = self.me(&space)?;
-        {
-            let spaces = self.0.spaces.lock().unwrap();
-            ensure!(spaces[&space].members.current(&self.0.id).is_some(), "this device is not a member of the space yet");
-        }
+        self.call_as(space, self.0.id, app, op, input).await
+    }
+
+    /// Runs an operation on this device for `caller`, another device in the space.
+    pub async fn call_as(&self, space: Key, caller: Key, app: &str, op: &str, input: Value) -> Result<Value> {
+        let me = self.me_of(&space, &caller)?;
         let outcome = self.0.apps.call(space, app, op, input, me, now_ms()).await?;
         for content in outcome.appends {
             self.append(space, content).await?;
@@ -284,8 +291,8 @@ impl Node {
         }
     }
 
-    pub async fn widgets(&self, space: Key) -> Result<Vec<Value>> {
-        let me = self.me(&space)?;
+    pub async fn widgets(&self, space: Key, viewer: Key) -> Result<Vec<Value>> {
+        let me = self.me_of(&space, &viewer)?;
         let mut out = Vec::new();
         for app in self.0.apps.describe().await? {
             let name = app["name"].as_str().unwrap_or_default().to_string();
@@ -312,9 +319,16 @@ impl Node {
 
     /// Everything a shell needs to draw this device's spaces.
     pub fn state(&self) -> Value {
+        self.state_for(self.0.id)
+    }
+
+    /// The state as `viewer`, a device in some of this node's spaces, sees it.
+    pub fn state_for(&self, viewer: Key) -> Value {
+        let viewer_name = if viewer == self.0.id { self.device_name() } else { self.name_of(&viewer) };
         let spaces = self.0.spaces.lock().unwrap();
         let mut list: Vec<Value> = spaces
             .iter()
+            .filter(|(_, s)| viewer == self.0.id || s.members.current(&viewer).is_some())
             .map(|(key, s)| {
                 let devices: Vec<Value> = s
                     .members
@@ -322,14 +336,15 @@ impl Node {
                     .map(|m| {
                         json!({
                             "device": hex(&m.device), "name": m.name, "person": m.person, "role": m.role,
-                            "me": m.device == self.0.id, "online": m.device == self.0.id || s.sessions.contains_key(&m.device),
+                            "me": m.device == viewer, "host": m.device == self.0.id,
+                            "online": m.device == self.0.id || m.device == viewer || s.sessions.contains_key(&m.device),
                         })
                     })
                     .collect();
                 json!({
                     "id": hex(key), "name": s.members.name, "person": s.person,
-                    "member": s.members.current(&self.0.id).is_some(),
-                    "role": s.members.current(&self.0.id).map(|m| m.role.clone()),
+                    "member": s.members.current(&viewer).is_some(),
+                    "role": s.members.current(&viewer).map(|m| m.role.clone()),
                     "devices": devices, "entries": s.store.count().unwrap_or(0),
                 })
             })
@@ -337,8 +352,92 @@ impl Node {
         list.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
         json!({
             "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT },
-            "device": { "id": hex(&self.0.id), "name": self.device_name() },
+            "device": { "id": hex(&viewer), "name": viewer_name },
+            "host": { "id": hex(&self.0.id), "name": self.device_name() },
             "spaces": list,
+        })
+    }
+
+    /// Removes a device from a space. Admins only, as SPEC.md says.
+    pub async fn remove_device(&self, space: Key, device: Key) -> Result<()> {
+        {
+            let spaces = self.0.spaces.lock().unwrap();
+            let s = spaces.get(&space).context("no such space")?;
+            ensure!(s.members.current(&self.0.id).is_some_and(|m| m.role == Role::Admin), "only admins remove devices");
+            ensure!(s.members.current(&device).is_some(), "that device isn't in the space");
+        }
+        self.append(space, space::remove(&device)).await?;
+        Ok(())
+    }
+
+    fn name_of(&self, device: &Key) -> String {
+        let spaces = self.0.spaces.lock().unwrap();
+        spaces.values().find_map(|s| s.members.current(device).map(|m| m.name.clone())).unwrap_or_default()
+    }
+
+    fn is_member_anywhere(&self, device: &Key) -> bool {
+        self.0.spaces.lock().unwrap().values().any(|s| s.members.current(device).is_some())
+    }
+
+    /// Serves a client device (a phone) that keeps no log of its own: one JSON request per stream.
+    async fn accept_client(&self, conn: Connection) -> Result<()> {
+        let caller = *conn.remote_id().as_bytes();
+        tracing::debug!("client {} connected", short(&caller));
+        ensure!(self.is_member_anywhere(&caller), "{} is not a member of any space here", short(&caller));
+        loop {
+            let (mut send, mut recv) = match conn.accept_bi().await {
+                Ok(s) => s,
+                Err(_) => return Ok(()),
+            };
+            let node = self.clone();
+            tokio::spawn(async move {
+                let result = async {
+                    let request: Value = serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?;
+                    let (method, path) = (request["method"].as_str().unwrap_or("GET"), request["path"].as_str().unwrap_or(""));
+                    if path == "/v1/events" {
+                        let mut events = node.subscribe();
+                        while let Ok(event) = events.recv().await {
+                            send.write_all(format!("{}\n", serde_json::to_string(&event)?).as_bytes()).await?;
+                        }
+                        return anyhow::Ok(());
+                    }
+                    let reply = match node.client_request(caller, method, path, request["body"].clone()).await {
+                        Ok(ok) => ok,
+                        Err(err) => json!({ "error": format!("{err:#}") }),
+                    };
+                    send.write_all(&serde_json::to_vec(&reply)?).await?;
+                    send.finish()?;
+                    Ok(())
+                }
+                .await;
+                if let Err(err) = result {
+                    tracing::debug!("client request: {err:#}");
+                }
+            });
+        }
+    }
+
+    async fn client_request(&self, caller: Key, method: &str, path: &str, body: Value) -> Result<Value> {
+        let space = |body: &Value| -> Result<Key> {
+            let key = self.find_space(body["space"].as_str())?;
+            ensure!(self.0.spaces.lock().unwrap()[&key].members.current(&caller).is_some(), "not a member of that space");
+            Ok(key)
+        };
+        Ok(match (method, path) {
+            ("GET", "/v1/state") => self.state_for(caller),
+            ("GET", "/v1/apps") => json!(self.apps().await?),
+            ("GET", "/v1/widgets") => json!(self.widgets(space(&body)?, caller).await?),
+            ("POST", "/v1/call") => {
+                let input = if body["input"].is_null() { json!({}) } else { body["input"].clone() };
+                let ok = self.call_as(space(&body)?, caller, body["app"].as_str().unwrap_or(""), body["op"].as_str().unwrap_or(""), input).await?;
+                json!({ "ok": ok })
+            }
+            ("POST", "/v1/invite") => {
+                let key = space(&body)?;
+                ensure!(body["mine"] == true, "phones invite only their person's own devices for now");
+                json!({ "ticket": self.invite_for(key, caller)? })
+            }
+            _ => bail!("no such request: {method} {path}"),
         })
     }
 
@@ -365,6 +464,20 @@ impl Node {
         };
         let secret: [u8; 16] = rand::random();
         self.0.invites.lock().unwrap().insert(secret, Invite { space, person });
+        let ticket = Ticket { space, inviter: self.0.endpoint.addr(), secret };
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&ticket, &mut bytes)?;
+        Ok(data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase())
+    }
+
+    /// A ticket for another device of `caller`'s person.
+    fn invite_for(&self, space: Key, caller: Key) -> Result<String> {
+        let person = {
+            let spaces = self.0.spaces.lock().unwrap();
+            spaces[&space].members.current(&caller).context("not a member")?.person.clone()
+        };
+        let secret: [u8; 16] = rand::random();
+        self.0.invites.lock().unwrap().insert(secret, Invite { space, person: Some(person) });
         let ticket = Ticket { space, inviter: self.0.endpoint.addr(), secret };
         let mut bytes = Vec::new();
         ciborium::into_writer(&ticket, &mut bytes)?;
@@ -536,7 +649,7 @@ impl Node {
                 ensure!(spaces.get(&space).and_then(|s| s.members.current(&remote)).is_some(), "not a member");
             }
             let (app, op) = (request["app"].as_str().unwrap_or_default(), request["op"].as_str().unwrap_or_default());
-            self.call(space, app, op, request["input"].clone()).await
+            self.call_as(space, remote, app, op, request["input"].clone()).await
         }
         .await;
         let reply = match result {
@@ -627,6 +740,14 @@ struct SyncHandler(Node);
 struct JoinHandler(Node);
 #[derive(Clone, Debug)]
 struct CallHandler(Node);
+#[derive(Clone, Debug)]
+struct ClientHandler(Node);
+
+impl ProtocolHandler for ClientHandler {
+    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
+        self.0.accept_client(conn).await.map_err(accept_err)
+    }
+}
 
 fn accept_err(err: anyhow::Error) -> AcceptError {
     AcceptError::from_boxed(err.into())

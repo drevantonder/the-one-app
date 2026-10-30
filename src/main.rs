@@ -17,6 +17,7 @@ Usage:
   {CLI} invite [--mine]             a one-time ticket for another device (--mine: one of yours)
   {CLI} join <ticket>               join a space with a ticket
   {CLI} rename <name>               rename this device
+  {CLI} remove <device>             remove a device from the space (admins)
   {CLI} apps                        every app and its operations
   {CLI} <app> <op> [--key value]    run an operation, e.g. {CLI} board post --text hi
   {CLI} mcp                         serve MCP over stdio, for agents
@@ -76,6 +77,14 @@ fn run(args: Vec<String>) -> Result<()> {
         ["join", ticket] => {
             post("/v1/join", json!({ "ticket": ticket }))?;
             println!("Joined. Syncing now; {CLI} status shows progress.");
+        }
+        ["remove", device] => {
+            let state = get("/v1/state")?;
+            let found = state["spaces"].as_array().into_iter().flatten().flat_map(|s| s["devices"].as_array().cloned().unwrap_or_default())
+                .find(|d| d["name"].as_str() == Some(device) || d["device"].as_str().is_some_and(|id| id.starts_with(device)))
+                .with_context(|| format!("no device called {device}"))?;
+            post("/v1/remove", json!({ "space": space, "device": found["device"] }))?;
+            println!("Removed {}.", found["name"].as_str().unwrap_or(device));
         }
         ["rename", name @ ..] if !name.is_empty() => {
             post("/v1/device", json!({ "name": name.join(" ") }))?;

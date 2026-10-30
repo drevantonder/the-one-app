@@ -69,7 +69,7 @@ impl Store {
                 |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)),
             )
             .optional()?;
-        row.map(|(h, b)| Entry::decode(&h, &b)).transpose()
+        row.map(|(h, b)| Entry::decode_trusted(&h, &b)).transpose()
     }
 
     pub fn last(&self, author: &Key, log: &str) -> Result<Option<Entry>> {
@@ -109,7 +109,7 @@ impl Store {
         let rows = stmt.query_map(params![author, log, from], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
         rows.map(|r| {
             let (h, b) = r?;
-            Entry::decode(&h, &b)
+            Entry::decode_trusted(&h, &b)
         })
         .collect()
     }
@@ -120,7 +120,7 @@ impl Store {
         let rows = stmt.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
         rows.map(|r| {
             let (h, b) = r?;
-            Entry::decode(&h, &b)
+            Entry::decode_trusted(&h, &b)
         })
         .collect()
     }

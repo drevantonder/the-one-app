@@ -145,7 +145,7 @@ fn deliver(rng: &mut StdRng, net: &mut Net, devices: &mut [Device]) {
 
 #[test]
 fn converges() {
-    let seeds: u64 = std::env::var("SIM_SEEDS").ok().and_then(|s| s.parse().ok()).unwrap_or(40);
+    let seeds: u64 = std::env::var("SIM_SEEDS").ok().and_then(|s| s.parse().ok()).unwrap_or(if cfg!(debug_assertions) { 40 } else { 400 });
     let start: u64 = std::env::var("SIM_START").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
     for seed in start..start + seeds {
         run(seed);

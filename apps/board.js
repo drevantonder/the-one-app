@@ -54,7 +54,7 @@ At the start of every session, call board_read with no topic and do what the top
         if (bytes(text) > LIMIT) throw new Error(`too long: ${bytes(text)} bytes, limit ${LIMIT}; say it shorter`);
         if (topic && !ctx.query("select 1 from topics where path = ?", [topic]).length)
           throw new Error(`no topic ${topic}: create it with board_create, or post at the top`);
-        ctx.append("post", { topic, text });
+        ctx.append("post", { topic, text, by: ctx.me.name });
         return `Posted${topic ? ` in ${topic}` : " at the top"}.`;
       },
     },

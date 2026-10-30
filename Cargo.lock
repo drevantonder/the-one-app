@@ -2314,6 +2314,7 @@ dependencies = [
  "ciborium",
  "data-encoding",
  "iroh",
+ "one-client",
  "p2panda-core",
  "rand 0.8.8",
  "rquickjs",
@@ -2326,6 +2327,21 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq",
+]
+
+[[package]]
+name = "one-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ciborium",
+ "data-encoding",
+ "iroh",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]
