@@ -47,7 +47,7 @@ final class Store {
         }
     }
 
-    init(node: NodeClient = .local) {
+    init(node: NodeClient) {
         self.node = node
         spaceID = UserDefaults.standard.string(forKey: "space")
     }
@@ -61,31 +61,44 @@ final class Store {
 
     func run() async {
         while !Task.isCancelled {
-            await connect()
-            do {
-                for try await event in node.events() { await handle(event) }
-            } catch {}
-            try? await Task.sleep(for: .seconds(1))
+            if await connect() {
+                do {
+                    for try await event in node.events() { await handle(event) }
+                } catch {}
+            }
+            try? await Task.sleep(for: .seconds(phase == .ready ? 1 : 3))
         }
     }
 
-    private func connect() async {
-        if (try? await refreshState()) != nil { return }
+    /// Whether the node answered.
+    private func connect() async -> Bool {
+        let failure: Error
+        do {
+            try await refreshState()
+            return true
+        } catch {
+            failure = error
+        }
+        guard let startNode else {
+            phase = .unreachable(failure.localizedDescription)
+            return false
+        }
         if phase != .ready { phase = .connecting }
         do {
-            try await startNode?()
+            try await startNode()
         } catch {
             phase = .unreachable(error.localizedDescription)
         }
         for _ in 0..<40 {
-            if (try? await refreshState()) != nil { return }
+            if (try? await refreshState()) != nil { return true }
             try? await Task.sleep(for: .milliseconds(500))
         }
-        if case .unreachable = phase { return }
-        phase = .unreachable("The node isn't answering on \(node.base.host() ?? ""):\(node.base.port ?? 0).")
+        if case .unreachable = phase { return false }
+        phase = .unreachable(node.transport.unreachable)
+        return false
     }
 
-    private func refreshState() async throws {
+    func refreshState() async throws {
         let state = try await node.state()
         let first = self.state == nil
         self.state = state
@@ -173,6 +186,11 @@ final class Store {
         try await node.join(ticket.trimmingCharacters(in: .whitespacesAndNewlines))
         try await refreshState()
         if let new = spaces.first(where: { !before.contains($0.id) }) { spaceID = new.id }
+    }
+
+    func renameDevice(_ name: String) async throws {
+        try await node.renameDevice(name.trimmingCharacters(in: .whitespacesAndNewlines))
+        try await refreshState()
     }
 
     func invite(mine: Bool) async throws -> String {

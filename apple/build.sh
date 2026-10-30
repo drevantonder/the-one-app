@@ -3,18 +3,12 @@
 # BRAND=path/to/brand.toml builds another brand.
 set -euo pipefail
 cd "$(dirname "$0")"
-root=$(cd .. && pwd)
-brand=$(cd "$(dirname "${BRAND:-$root/brand.toml}")" && pwd)/$(basename "${BRAND:-brand.toml}")
-field() { sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$brand"; }
-export BRAND_NAME=$(field name) BRAND_CLI=$(field cli) BRAND_PORT=$(field port) BRAND_ACCENT=$(field accent)
-export BUNDLE_ID=app.$BRAND_CLI.mac
+. ./project.sh
+BUNDLE_ID=app.$BRAND_CLI.mac
 label=$BUNDLE_ID.node
 
 (cd "$root" && BRAND=$brand cargo build --release)
 
-mkdir -p build
-swift icon.swift "$BRAND_ACCENT" build/AppIcon.icns
-xcodegen generate --quiet
 xcodebuild -project Shells.xcodeproj -scheme Mac -configuration Release -destination generic/platform=macOS -derivedDataPath build/derived build -quiet
 
 app="build/derived/Build/Products/Release/$BRAND_NAME.app"

@@ -6,7 +6,7 @@ struct MacApp: App {
     @State private var store: Store
 
     init() {
-        let store = Store()
+        let store = Store(node: .local)
         store.startNode = NodeLauncher.start
         store.preferredDeviceName = Host.current().localizedName
         Task { await store.run() }

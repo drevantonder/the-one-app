@@ -1,10 +1,6 @@
 import CoreImage.CIFilterBuiltins
 import SwiftUI
-#if canImport(AppKit)
 import AppKit
-#else
-import UIKit
-#endif
 
 struct SheetView: View {
     var sheet: Sheet
@@ -134,12 +130,8 @@ struct InviteSheet: View {
 
     private func copy() {
         guard let ticket else { return }
-        #if canImport(AppKit)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(ticket, forType: .string)
-        #else
-        UIPasteboard.general.string = ticket
-        #endif
         copied = true
     }
 
@@ -182,11 +174,7 @@ struct JoinSheet: View {
             .disabled(ticket.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || joining)
         }
         .onAppear {
-            #if canImport(AppKit)
             let clip = NSPasteboard.general.string(forType: .string) ?? ""
-            #else
-            let clip = UIPasteboard.general.string ?? ""
-            #endif
             let trimmed = clip.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.count > 60, trimmed.allSatisfy({ $0.isLetter || $0.isNumber }) { ticket = trimmed }
         }

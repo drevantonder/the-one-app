@@ -125,20 +125,3 @@ private struct SpaceSwitcher: View {
         .menuIndicator(.hidden)
     }
 }
-
-/// A space's mark: its initial on the brand accent.
-struct SpaceMark: View {
-    var name: String
-    var size: CGFloat
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
-            .fill(.tint)
-            .overlay {
-                Text(name.first.map { String($0).uppercased() } ?? "")
-                    .font(.system(size: size * 0.5, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: size, height: size)
-    }
-}

@@ -30,11 +30,6 @@ struct RootView: View {
     }
 }
 
-/// The app's name before the node tells us its brand.
-var appName: String {
-    Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? ""
-}
-
 private struct MainView: View {
     @Environment(Store.self) private var store
 

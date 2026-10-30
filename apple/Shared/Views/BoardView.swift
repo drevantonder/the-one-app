@@ -25,7 +25,7 @@ struct BoardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .safeAreaBar(edge: .bottom, spacing: 0) {
             Composer(topic: topic)
         }
         .navigationTitle(topic.isEmpty ? "Board" : (topic.split(separator: "/").last.map(String.init) ?? topic))
@@ -76,7 +76,7 @@ private struct Feed: View {
             }
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 28)
+            .padding(.horizontal, margin)
             .padding(.vertical, 12)
         }
         .defaultScrollAnchor(.bottom)
@@ -135,9 +135,13 @@ private struct PostGroup: View {
     }
 }
 
-func displayName(_ name: String) -> String {
-    name.hasSuffix(".local") ? String(name.dropLast(6)) : name
-}
+#if os(iOS)
+private let margin: CGFloat = 16
+private let bottom: CGFloat = 8
+#else
+private let margin: CGFloat = 28
+private let bottom: CGFloat = 18
+#endif
 
 private struct Composer: View {
     @Environment(Store.self) private var store
@@ -165,6 +169,7 @@ private struct Composer: View {
                     .font(.body)
                     .lineLimit(1...6)
                     .focused($focused)
+                    .submitLabel(.send)
                     .onSubmit(send)
                     .padding(.vertical, 9)
                     .padding(.leading, 16)
@@ -190,13 +195,24 @@ private struct Composer: View {
         }
         .frame(maxWidth: 720)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, margin - 4)
         .padding(.top, 6)
-        .padding(.bottom, 18)
+        .padding(.bottom, bottom)
         .animation(.snappy, value: error)
-        .onChange(of: text) { if error != nil { error = nil } }
+        .onChange(of: text) {
+            if error != nil { error = nil }
+            #if os(iOS)
+            // A multi-line field on iOS types Return as a newline; a post is one line, so Return sends it.
+            if text.contains("\n") {
+                text = text.replacingOccurrences(of: "\n", with: "")
+                send()
+            }
+            #endif
+        }
         .onChange(of: topic) { error = nil }
+        #if os(macOS)
         .onAppear { focused = true }
+        #endif
     }
 
     private func send() {

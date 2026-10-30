@@ -1,14 +1,14 @@
-# The native shells. build.sh fills in the brand from brand.toml and runs xcodegen.
+# The native shells. project.sh fills in the brand from brand.toml and runs xcodegen.
 name: Shells
 options:
   deploymentTarget:
     macOS: "26.0"
+    iOS: "26.0"
 settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: 0.1.0
     CURRENT_PROJECT_VERSION: 1
-    CODE_SIGNING_ALLOWED: NO
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 targets:
   Mac:
@@ -18,7 +18,8 @@ targets:
     settings:
       base:
         PRODUCT_NAME: ${BRAND_NAME}
-        PRODUCT_BUNDLE_IDENTIFIER: ${BUNDLE_ID}
+        PRODUCT_BUNDLE_IDENTIFIER: app.${BRAND_CLI}.mac
+        CODE_SIGNING_ALLOWED: NO
     info:
       path: build/Info.plist
       properties:
@@ -30,3 +31,61 @@ targets:
         NodePort: "${BRAND_PORT}"
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+
+  # The iPhone keeps no log: it links the client library (build-client.sh) and asks a member device.
+  Phone:
+    type: application
+    platform: iOS
+    sources: [Shared, Phone, Widget/Newest.swift, build/Phone.xcassets]
+    dependencies:
+      - framework: build/OneClient.xcframework
+        embed: false
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
+      - target: Widgets
+    settings:
+      base:
+        PRODUCT_NAME: ${BRAND_NAME}
+        PRODUCT_BUNDLE_IDENTIFIER: app.${BRAND_CLI}.phone
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${APPLE_TEAM}
+    entitlements:
+      path: build/Phone.entitlements
+      properties:
+        com.apple.security.application-groups: ["group.app.${BRAND_CLI}"]
+    info:
+      path: build/Phone-Info.plist
+      properties:
+        CFBundleDisplayName: ${BRAND_NAME}
+        BrandAccent: ${BRAND_ACCENT}
+        BrandCLI: ${BRAND_CLI}
+        AppGroup: group.app.${BRAND_CLI}
+        NSCameraUsageDescription: Scan the code another device shows to join its space.
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+
+  Widgets:
+    type: app-extension
+    platform: iOS
+    sources: [Widget, Shared/Views/Style.swift]
+    settings:
+      base:
+        PRODUCT_NAME: Widgets
+        PRODUCT_BUNDLE_IDENTIFIER: app.${BRAND_CLI}.phone.widgets
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${APPLE_TEAM}
+    entitlements:
+      path: build/Widgets.entitlements
+      properties:
+        com.apple.security.application-groups: ["group.app.${BRAND_CLI}"]
+    info:
+      path: build/Widgets-Info.plist
+      properties:
+        CFBundleDisplayName: ${BRAND_NAME}
+        BrandAccent: ${BRAND_ACCENT}
+        AppGroup: group.app.${BRAND_CLI}
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension

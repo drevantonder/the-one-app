@@ -13,6 +13,8 @@ struct NodeState: Codable, Sendable, Equatable {
     }
     var brand: Brand
     var device: Device
+    /// The device that answered: this one, or for a phone, the member device acting for it.
+    var host: Device?
     var spaces: [Space]
 }
 
@@ -91,14 +93,70 @@ struct NodeError: LocalizedError, Sendable {
     }
 }
 
+/// How a shell reaches a node: HTTP to this device's own, or, on a phone, the client library to a member device's.
+protocol NodeTransport: Sendable {
+    /// Sends a request and returns the local API's JSON reply, or throws its error.
+    func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data
+    /// The node's events, until the connection drops.
+    func events() -> AsyncThrowingStream<NodeEvent, Error>
+    /// What to say when nothing answers.
+    var unreachable: String { get }
+}
+
 /// The node's local HTTP API.
-struct NodeClient: Sendable {
+struct HTTPNode: NodeTransport {
     var base: URL
 
-    static let local: NodeClient = {
+    var unreachable: String { "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." }
+
+    func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data {
+        var request = URLRequest(url: base.appending(path: path), timeoutInterval: timeout)
+        request.httpMethod = method
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if (response as? HTTPURLResponse)?.statusCode != 200 {
+            struct Failure: Decodable { var error: String? }
+            let error = (try? JSONDecoder().decode(Failure.self, from: data))?.error
+            throw NodeError(error ?? "The node answered \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        }
+        return data
+    }
+
+    func events() -> AsyncThrowingStream<NodeEvent, Error> {
+        let url = base.appending(path: "v1/events")
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    var request = URLRequest(url: url, timeoutInterval: 60)
+                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    let (bytes, _) = try await URLSession.shared.bytes(for: request)
+                    for try await line in bytes.lines where line.hasPrefix("data:") {
+                        let json = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                        if let event = try? JSONDecoder().decode(NodeEvent.self, from: Data(json.utf8)) {
+                            continuation.yield(event)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+
+/// The local API, typed, over whichever transport reaches a node.
+struct NodeClient: Sendable {
+    var transport: any NodeTransport
+
+    static var local: NodeClient {
         let port = Bundle.main.object(forInfoDictionaryKey: "NodePort") as! String
-        return NodeClient(base: URL(string: "http://127.0.0.1:\(port)")!)
-    }()
+        return NodeClient(transport: HTTPNode(base: URL(string: "http://127.0.0.1:\(port)")!))
+    }
 
     private struct Reply<T: Decodable>: Decodable {
         var ok: T?
@@ -115,17 +173,7 @@ struct NodeClient: Sendable {
     }
 
     private func send<T: Decodable>(_ method: String, _ path: String, _ body: (any Encodable & Sendable)? = nil, timeout: TimeInterval = 10) async throws -> T {
-        var request = URLRequest(url: base.appending(path: path), timeoutInterval: timeout)
-        request.httpMethod = method
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONEncoder().encode(body)
-        }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if (response as? HTTPURLResponse)?.statusCode != 200 {
-            let error = (try? JSONDecoder().decode(Reply<Empty>.self, from: data))?.error
-            throw NodeError(error ?? "The node answered \((response as? HTTPURLResponse)?.statusCode ?? 0)")
-        }
+        let data = try await transport.send(method, path, body: try body.map { try JSONEncoder().encode($0) }, timeout: timeout)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
@@ -160,28 +208,8 @@ struct NodeClient: Sendable {
         let _: Empty = try await send("POST", "v1/device", Body(name: name))
     }
 
-    /// The node's server-sent events, until the connection drops.
     func events() -> AsyncThrowingStream<NodeEvent, Error> {
-        let url = base.appending(path: "v1/events")
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    var request = URLRequest(url: url, timeoutInterval: 60)
-                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    let (bytes, _) = try await URLSession.shared.bytes(for: request)
-                    for try await line in bytes.lines where line.hasPrefix("data:") {
-                        let json = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
-                        if let event = try? JSONDecoder().decode(NodeEvent.self, from: Data(json.utf8)) {
-                            continuation.yield(event)
-                        }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        transport.events()
     }
 }
 

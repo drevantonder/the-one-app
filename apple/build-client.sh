@@ -3,6 +3,8 @@
 set -eu
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
+# The C and assembly in the client's dependencies, built for the iPhone app's oldest iOS (project.yml).
+export IPHONEOS_DEPLOYMENT_TARGET=26.0
 for target in aarch64-apple-ios aarch64-apple-ios-sim; do
 	cargo build --release -p one-client --lib --target "$target"
 done

@@ -75,3 +75,29 @@ extension Date {
         return formatted(date: .abbreviated, time: .omitted)
     }
 }
+
+func displayName(_ name: String) -> String {
+    name.hasSuffix(".local") ? String(name.dropLast(6)) : name
+}
+
+/// The app's name before the node tells us its brand.
+var appName: String {
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? ""
+}
+
+/// A space's mark: its initial on the brand accent.
+struct SpaceMark: View {
+    var name: String
+    var size: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+            .fill(.tint)
+            .overlay {
+                Text(name.first.map { String($0).uppercased() } ?? "")
+                    .font(.system(size: size * 0.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: size, height: size)
+    }
+}
