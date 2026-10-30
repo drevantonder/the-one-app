@@ -5,6 +5,8 @@ members = [".", "client"]
 # Drop this once iroh moves to a netdev that builds for iOS.
 [patch.crates-io]
 netdev = { path = "vendor/netdev" }
+# Same story for netwatch's routing socket constants, which libc gives only to macOS.
+netwatch = { path = "vendor/netwatch" }
 
 [package]
 name = "one"
