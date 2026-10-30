@@ -44,6 +44,7 @@ pub(crate) mod rtlibc {
     pub const RTAX_MAX: c_int = 8;
     pub const RTA_IFP: c_int = 0x10;
     pub const RTF_GATEWAY: c_int = 0x2;
+    pub const RTF_IFSCOPE: c_int = 0x1000000;
 }
 #[cfg(not(all(target_vendor = "apple", not(target_os = "macos"))))]
 #[allow(unused_imports)]
