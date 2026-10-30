@@ -30,6 +30,9 @@ pub fn router(node: Node) -> Router {
         .route("/v1/release", post(release))
         .route("/v1/events", get(events))
         .route("/hooks/{app}/{name}", post(hook))
+        .route("/v1/providers/{app}", post(register))
+        .route("/v1/providers/{app}/calls", get(next_call))
+        .route("/v1/providers/{app}/calls/{id}", post(reply))
         .with_state(node)
 }
 
@@ -168,6 +171,23 @@ async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> R
     let space = node.find_space(req.space.as_deref())?;
     let r = node.publish(space, std::path::Path::new(&req.path), &req.commit, &req.target).await?;
     Ok(Json(json!(r)))
+}
+
+async fn register(State(node): State<Node>, axum::extract::Path(app): axum::extract::Path<String>, Json(describe): Json<Value>) -> Reply {
+    node.providers().register(&app, describe);
+    Ok(Json(json!({})))
+}
+
+async fn next_call(State(node): State<Node>, axum::extract::Path(app): axum::extract::Path<String>) -> Result<Response, Error> {
+    Ok(match node.providers().next(&app).await? {
+        Some(call) => Json(json!(call)).into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    })
+}
+
+async fn reply(State(node): State<Node>, axum::extract::Path((app, id)): axum::extract::Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
+    node.providers().reply(&app, id, body)?;
+    Ok(Json(json!({})))
 }
 
 async fn events(State(node): State<Node>) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {

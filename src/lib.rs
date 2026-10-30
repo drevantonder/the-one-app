@@ -11,4 +11,5 @@ pub mod apps;
 pub mod models;
 pub mod native;
 pub mod node;
+pub mod providers;
 pub mod release;

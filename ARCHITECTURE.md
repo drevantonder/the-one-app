@@ -25,6 +25,7 @@ A node runs on every device that can keep a log: laptops, the home box, servers.
 - `src/sync.rs`: what two devices say to each other. Pure: no I/O, so the simulator can drive it.
 - `src/node.rs`: the only place with state and I/O: stores, sessions, invites, calls, hooks.
 - `src/apps.rs`: one thread owns QuickJS and every view database. Folds can't read the clock or randomness, and can only write their own views; operations can only append entries.
+- `src/native.rs`, `src/agents.rs`, `src/models.rs`: device features in Rust. `src/providers.rs`: the same for features written outside the node (the Mac app's Swift, Go), over the local API.
 - `apps/`: the apps every build ships with. They use nothing a user's app couldn't.
 - `client/`: the library phones link (Rust, with a C interface in `one_client.h`).
 - `apple/`: the Mac app now, and the iPhone app's shared views.

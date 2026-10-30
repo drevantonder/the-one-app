@@ -73,6 +73,7 @@ Each node serves HTTP on `127.0.0.1:<brand port>` for its own device's shells, C
 - `GET /v1/widgets?space=`: every widget, rendered.
 - `POST /v1/spaces { name }`, `POST /v1/invite { space?, mine }` → `{ ticket }`, `POST /v1/join { ticket }`, `POST /v1/device { name }`, `POST /v1/remove { space?, device }`.
 - `GET /v1/events`: server-sent events `changed { space, apps }`, `peers { space }` and `spaces`.
+- Providers, for device features written outside the node (Swift, Go): `POST /v1/providers/<app>` with the app's description registers it; `GET /v1/providers/<app>/calls` waits up to 25 seconds for a call `{ id, op, input, caller }` (204 if none); `POST /v1/providers/<app>/calls/<id>` answers `{ ok, entries?: [{ kind, data }] }` or `{ error }`. A provider that stops asking for calls for a minute is gone. Providers run only for their device's own person's devices.
 - `POST /hooks/<app>/<name>`: for agent harnesses' hooks. The body is the hook's JSON; the reply is plain text for the agent. The node remembers per `session_id` when the hook last ran and passes it to the app as `since` (null on a session's first call).
 
 ## Apps

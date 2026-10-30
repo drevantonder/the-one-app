@@ -99,6 +99,7 @@ pub struct Inner {
     endpoint: Endpoint,
     apps: Apps,
     native: Vec<crate::native::Native>,
+    pub providers: crate::providers::Providers,
     spaces: Mutex<HashMap<Key, Space>>,
     invites: Mutex<HashMap<[u8; 16], Invite>>,
     events: broadcast::Sender<Event>,
@@ -132,6 +133,7 @@ impl Node {
             endpoint: endpoint.clone(),
             apps,
             native: crate::native::all(),
+            providers: Default::default(),
             spaces: Mutex::new(HashMap::new()),
             invites: Mutex::new(load_invites(dir)),
             events,
@@ -162,6 +164,10 @@ impl Node {
 
     pub fn id(&self) -> Key {
         self.0.id
+    }
+
+    pub fn providers(&self) -> &crate::providers::Providers {
+        &self.0.providers
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
@@ -301,6 +307,14 @@ impl Node {
             }
             return Ok(result);
         }
+        if self.0.providers.has(app) {
+            ensure!(me.person == self.me_of(&space, &self.0.id)?.person, "{app} runs only for this device's own person's devices");
+            let (result, appends) = self.0.providers.call(app, op, input, me).await?;
+            for content in appends {
+                self.append(space, content).await?;
+            }
+            return Ok(result);
+        }
         let outcome = self.0.apps.call(space, app, op, input, me, now_ms()).await?;
         for content in outcome.appends {
             self.append(space, content).await?;
@@ -363,6 +377,7 @@ impl Node {
     pub async fn apps(&self) -> Result<Vec<Value>> {
         let mut apps = self.0.apps.describe().await?;
         apps.extend(self.0.native.iter().map(|n| (n.describe)()));
+        apps.extend(self.0.providers.describe());
         Ok(apps)
     }
 
