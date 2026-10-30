@@ -27,12 +27,12 @@ The **fold order** is `(time, author, seq)`, compared as integers, then key byte
 
 Membership is the fold of entries whose app is `space`:
 
-- `genesis`: `{ name, root_sig }`. The first entry of a space. `root_sig` is the space key's signature over `author ‖ name`. The author becomes an admin.
-- `admit`: `{ device, person, name, role, client? }`. `client` marks a device that keeps no log (a phone); nobody syncs with it. Valid when written by an admin, or by a member admitting a device for their own `person`. `role` is `admin` or `member`.
+- `genesis`: `{ name, root_sig, person, device_name }`. The first entry of a space. `root_sig` is the space key's signature over `author ‖ name`. The author becomes an admin, with that person and device name.
+- `admit`: `{ device, person, name, role, client? }`. `client` marks a device that keeps no log (a phone); nobody syncs with it. Valid when written by an admin, or by a member admitting a device for their own `person` as a `member`. `role` is `admin` or `member`. A removed device is never admitted again; it joins with a new key.
 - `remove`: `{ device }`. Valid when written by an admin. Entries the removed device writes after the `remove` (in fold order) are ignored.
 - `rename`: `{ device, name }`. Valid when written by that device or an admin.
 
-Folds of other apps only see entries whose author was a member when they were written.
+Folds of other apps only see entries whose author was a member when they were written, under the name it had then.
 
 ## Sync (ALPN `one/sync/1`)
 
@@ -41,7 +41,7 @@ One bidirectional stream of length-prefixed CBOR messages:
 - `Hello { space, frontier: [(author, log, next_seq)] }`
 - `Entries { space, entries: [(header, body)] }`
 
-Each side sends `Hello`, then sends every entry the other's frontier lacks, then sends new entries as they are written. `Hello` repeats every 30 seconds to repair gaps. Only members' devices may open the stream. Receiving an entry twice is harmless.
+Each side sends `Hello`, then sends every entry the other's frontier lacks (in batches of at most 200), then sends new entries as they are written. `Hello` repeats every 30 seconds; a device that receives an entry before the one it follows answers with `Hello` at once, so the gap is filled. Entries timed more than an hour ahead of the receiver's clock, or in a log other than `space`, are refused. Only members' devices may sync, checked on every message; a joining device may sync with its inviter. Receiving an entry twice is harmless.
 
 ## Join (ALPN `one/join/1`)
 
@@ -57,7 +57,7 @@ A blob is bytes named by their BLAKE3 hash. A member sends a hash (64 hex charac
 
 ## Releases
 
-A release of the node is an entry with app `node` and kind `release`: `{ commit, target, blob, size }`, where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin count. A node whose own build differs from the newest release for its target fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead.
+The app `node` is the node's own, and other apps' folds never see it. A release of the node is an entry with kind `release`: `{ commit, target, blob, size }`, where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin count. A node whose own build differs from the newest release for its target fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead. Each node also writes `running { commit, target }` once per build, so everyone can see what each device runs.
 
 ## Providers
 
@@ -65,20 +65,21 @@ A device announces each provider registered with it (see "Local API") as an entr
 
 ## Clients (ALPN `one/client/1`)
 
-A device that keeps no log (a phone) is still a member: it joins with a ticket like any device. It then asks any member device that does keep logs to act for it. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`. `GET /v1/events` instead streams events as JSON lines until the stream closes. Operations run for the asking device: `ctx.me` is the client, and the entries they append are written by the device that ran them. Only members may ask.
+A device that keeps no log (a phone) is still a member: it joins with a ticket like any device. It then asks any member device that does keep logs to act for it. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`. Clients may ask `GET /v1/state`, `GET /v1/apps`, `GET /v1/widgets` (with `space` in the body), `POST /v1/call` and `POST /v1/invite`. `GET /v1/events` instead streams events as JSON lines until the stream closes. Operations run for the asking device: `ctx.me` is the client, and the entries they append are written by the device that ran them. Only members may ask.
 
 ## Local API
 
-Each node serves HTTP on `127.0.0.1:<brand port>` for its own device's shells, CLI and MCP:
+Each node serves HTTP on `127.0.0.1:<brand port>` for its own device's shells, CLI and MCP. It refuses requests with an `Origin` header or a `Host` other than this machine, so no web page can use it.
 
 - `GET /v1/state`: the brand, this device, and each space with its devices and whether they're online.
 - `GET /v1/apps`: every app's name, title, icon, instructions, operations and widgets.
 - `POST /v1/call { space?, device?, app, op, input }` → `{ ok }`.
 - `GET /v1/widgets?space=`: every widget, rendered.
 - `POST /v1/spaces { name }`, `POST /v1/invite { space?, mine }` → `{ ticket }`, `POST /v1/join { ticket }`, `POST /v1/device { name }`, `POST /v1/remove { space?, device }`.
+- `POST /v1/release { space?, path, commit, target }`: publishes the binary at `path` (admins).
 - `GET /v1/events`: server-sent events `changed { space, apps }`, `peers { space }` and `spaces`.
 - Providers, for device features written outside the node (Swift, Go): `POST /v1/providers/<app>` with the app's description registers it; `GET /v1/providers/<app>/calls` waits up to 25 seconds for a call `{ id, op, input, caller }` (204 if none); `POST /v1/providers/<app>/calls/<id>` answers `{ ok, entries?: [{ kind, data }] }` or `{ error }`. A provider that stops asking for calls for a minute is gone. Providers run only for their device's own person's devices.
-- `POST /hooks/<app>/<name>`: for agent harnesses' hooks. The body is the hook's JSON; the reply is plain text for the agent. The node remembers per `session_id` when the hook last ran and passes it to the app as `since` (null on a session's first call).
+- `POST /hooks/<app>/<name>`: for agent harnesses' hooks. The body is the hook's JSON; the reply is plain text for the agent. The node remembers per `session_id` when the hook last ran and passes it to the app as `since` (null on a session's first call). Hooks need the device to be in exactly one space.
 
 ## Apps
 
@@ -95,7 +96,7 @@ An app is JavaScript: one module whose default export is
 }
 ```
 
-`ctx` has `append(kind, data)`, `query(sql, params)`, `me` and `now()`. A fold handler gets `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ author, person, name, time, data }`.
+`ctx` has `append(kind, data)`, `query(sql, params)`, `me` (who asked: `{ space, device, person, name }`) and `now()`. A fold handler gets `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, app, kind, author, person, name, time, data }`, where `id` is `<first 8 hex of author>:<seq>`. Entries an operation appends are written by the device that ran it. A call into an app stops after 10 seconds, and an app's views can't attach other databases.
 
 ## Widgets
 

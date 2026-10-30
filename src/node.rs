@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::apps::{Apps, Folded, Me};
+use crate::apps::{Apps, FoldJob, Folded, Me};
 use crate::entry::{Content, Entry, Key, Order, SPACE_LOG, hex, short, unhex};
 use crate::release::{self, Release};
 use crate::space::{self, Members, Role};
@@ -49,6 +49,8 @@ struct Space {
     members: Members,
     person: String,
     inviter: Option<Key>,
+    /// The build each device last said it runs.
+    builds: HashMap<Key, String>,
     folded: Option<Order>,
     /// Senders to every live sync session for this space, by peer device.
     sessions: HashMap<Key, mpsc::UnboundedSender<Msg>>,
@@ -100,6 +102,7 @@ pub struct Inner {
     name: Mutex<String>,
     endpoint: Endpoint,
     apps: Apps,
+    apps_names: Vec<String>,
     native: Vec<crate::native::Native>,
     pub providers: crate::providers::Providers,
     spaces: Mutex<HashMap<Key, Space>>,
@@ -118,14 +121,16 @@ impl std::fmt::Debug for Node {
 }
 
 impl Node {
-    pub async fn start(dir: &Path) -> Result<(Node, Router)> {
+    /// Starts this device's node with the apps it runs: JavaScript ones and native ones.
+    pub async fn start(dir: &Path, builtin: crate::native::Builtin) -> Result<(Node, Router)> {
         std::fs::create_dir_all(dir)?;
         let device = load_device(dir)?;
         let secret = unhex(&device.secret)?;
         let key = SigningKey::from(secret);
         let id = *key.verifying_key().as_bytes();
         let endpoint = Endpoint::builder(presets::N0).secret_key(SecretKey::from_bytes(&secret)).bind().await?;
-        let apps = Apps::start(dir.join("views"))?;
+        let apps_names: Vec<String> = builtin.apps.iter().map(|(n, _)| n.clone()).collect();
+        let apps = Apps::start(dir.join("views"), builtin.apps)?;
         let (events, _) = broadcast::channel(256);
         let node = Node(Arc::new(Inner {
             dir: dir.to_path_buf(),
@@ -134,7 +139,8 @@ impl Node {
             name: Mutex::new(device.name),
             endpoint: endpoint.clone(),
             apps,
-            native: crate::native::all(),
+            apps_names,
+            native: builtin.native,
             providers: Default::default(),
             spaces: Mutex::new(HashMap::new()),
             invites: Mutex::new(load_invites(dir)),
@@ -207,7 +213,7 @@ impl Node {
         let store = Store::open(&dir.join("entries.db"), space)?;
         let members = Members::fold(&space, &store.ordered()?);
         let inviter = file.inviter.and_then(|h| unhex(&h).ok());
-        self.0.spaces.lock().unwrap().insert(space, Space { store, members, person: file.person, inviter, folded: None, sessions: HashMap::new() });
+        self.0.spaces.lock().unwrap().insert(space, Space { store, members, person: file.person, inviter, builds: HashMap::new(), folded: None, sessions: HashMap::new() });
         Ok(())
     }
 
@@ -256,7 +262,7 @@ impl Node {
         if new.is_empty() {
             return Ok(());
         }
-        let (folded, rebuild, apps) = {
+        let (jobs, apps) = {
             let mut spaces = self.0.spaces.lock().unwrap();
             let s = spaces.get_mut(&space).context("no such space")?;
             let membership = new.iter().any(|e| e.content.app == space::APP);
@@ -265,19 +271,34 @@ impl Node {
                 let members = &s.members;
                 s.sessions.retain(|peer, _| members.current(peer).is_some());
             }
+            s.builds.extend(release::builds(new));
             let msg = sync::entries(space, new);
             for (peer, tx) in &s.sessions {
                 if Some(*peer) != from {
                     let _ = tx.send(msg.clone());
                 }
             }
-            let earliest = new.iter().map(Entry::order).min().unwrap();
-            let rebuild = membership || s.folded.is_some_and(|f| earliest <= f);
-            let entries = if rebuild { s.store.ordered()? } else { sorted(new) };
-            let folded = to_fold(&s.members, &entries);
-            s.folded = s.folded.max(entries.iter().map(Entry::order).max());
-            let apps: Vec<String> = new.iter().map(|e| e.content.app.clone()).collect();
-            (folded, rebuild, apps)
+            // Membership changes who counts, so every view is rebuilt. Otherwise an app is rebuilt only
+            // if an entry arrived late (before something already folded); the rest just fold what's new.
+            let late: std::collections::BTreeSet<String> =
+                new.iter().filter(|e| membership || s.folded.is_some_and(|f| e.order() <= f)).map(|e| e.content.app.clone()).collect();
+            let all = if membership || !late.is_empty() { to_fold(&s.members, &s.store.ordered()?) } else { Vec::new() };
+            let fresh = to_fold(&s.members, &sorted(new));
+            let mut apps: Vec<String> = new.iter().map(|e| e.content.app.clone()).collect();
+            apps.sort();
+            apps.dedup();
+            let jobs: Vec<FoldJob> = if membership {
+                self.0.apps_names.iter().map(|app| FoldJob { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() }).collect()
+            } else {
+                apps.iter()
+                    .map(|app| match late.contains(app) {
+                        true => FoldJob { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() },
+                        false => FoldJob { app: app.clone(), fresh: false, entries: fresh.iter().filter(|e| &e.app == app).cloned().collect() },
+                    })
+                    .collect()
+            };
+            s.folded = s.folded.max(new.iter().map(Entry::order).max());
+            (jobs, apps)
         };
         if new.iter().any(|e| e.content.app == release::APP) {
             self.consider_update(space);
@@ -287,20 +308,22 @@ impl Node {
                 self.sync_native(space, native.name);
             }
         }
-        self.0.apps.fold(space, folded, rebuild).await?;
+        self.0.apps.fold(space, jobs).await?;
         self.emit(Event::Changed { space: hex(&space), apps });
         Ok(())
     }
 
     async fn refold(&self, space: Key) -> Result<()> {
-        let folded = {
+        let all = {
             let mut spaces = self.0.spaces.lock().unwrap();
             let s = spaces.get_mut(&space).context("no such space")?;
             let entries = s.store.ordered()?;
             s.folded = entries.iter().map(Entry::order).max();
+            s.builds = release::builds(&entries);
             to_fold(&s.members, &entries)
         };
-        self.0.apps.fold(space, folded, true).await
+        let jobs = self.0.apps_names.iter().map(|app| FoldJob { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() }).collect();
+        self.0.apps.fold(space, jobs).await
     }
 
     /// Who `device` is in `space`, as apps see them.
@@ -321,17 +344,13 @@ impl Node {
     /// Runs an operation on this device for `caller`, another device in the space.
     pub async fn call_as(&self, space: Key, caller: Key, app: &str, op: &str, input: Value) -> Result<Value> {
         let me = self.me_of(&space, &caller)?;
-        if let Some(native) = self.0.native.iter().find(|n| n.name == app) {
+        let native = self.0.native.iter().find(|n| n.name == app);
+        if native.is_some() || self.0.providers.has(app) {
             ensure!(me.person == self.me_of(&space, &self.0.id)?.person, "{app} runs only for this device's own person's devices");
-            let (result, appends) = (native.call)(op.to_string(), input, me, self.app_entries(space, app)?).await?;
-            for content in appends {
-                self.append(space, content).await?;
-            }
-            return Ok(result);
-        }
-        if self.0.providers.has(app) {
-            ensure!(me.person == self.me_of(&space, &self.0.id)?.person, "{app} runs only for this device's own person's devices");
-            let (result, appends) = self.0.providers.call(app, op, input, me).await?;
+            let (result, appends) = match native {
+                Some(n) => (n.call)(op.to_string(), input, me, if n.entries { self.app_entries(space, app)? } else { vec![] }).await?,
+                None => self.0.providers.call(app, op, input, me).await?,
+            };
             for content in appends {
                 self.append(space, content).await?;
             }
@@ -430,7 +449,7 @@ impl Node {
             .iter()
             .filter(|(_, s)| viewer == self.0.id || s.members.current(&viewer).is_some())
             .map(|(key, s)| {
-                let builds = s.store.ordered().map(|e| release::builds(&e)).unwrap_or_default();
+                let builds = &s.builds;
                 let devices: Vec<Value> = s
                     .members
                     .current_devices()
@@ -549,8 +568,7 @@ impl Node {
             }
             ("POST", "/v1/invite") => {
                 let key = space(&body)?;
-                ensure!(body["mine"] == true, "phones invite only their person's own devices for now");
-                json!({ "ticket": self.invite_for(key, caller)? })
+                json!({ "ticket": self.invite_as(key, caller, body["mine"] == true)? })
             }
             _ => bail!("no such request: {method} {path}"),
         })
@@ -569,34 +587,25 @@ impl Node {
     }
 
     /// Makes a one-time ticket another device can join `space` with.
+    /// Makes a one-time ticket another device can join `space` with.
     pub fn invite(&self, space: Key, mine: bool) -> Result<String> {
+        self.invite_as(space, self.0.id, mine)
+    }
+
+    /// A ticket asked for by `asker` (this device, or a phone it serves): for one of the asker's own
+    /// person's devices if `mine`, else for someone new, which only admins may invite.
+    fn invite_as(&self, space: Key, asker: Key, mine: bool) -> Result<String> {
         let person = {
             let spaces = self.0.spaces.lock().unwrap();
             let s = spaces.get(&space).context("no such space")?;
             let me = s.members.current(&self.0.id).context("this device is not a member")?;
-            ensure!(mine || me.role == Role::Admin, "only admins invite other people; invite your own device instead");
-            mine.then(|| s.person.clone())
+            let theirs = s.members.current(&asker).context("not a member")?.person.clone();
+            ensure!(mine || (me.role == Role::Admin && asker == self.0.id), "only admins invite other people; invite your own device instead");
+            ensure!(!mine || me.role == Role::Admin || me.person == theirs, "this device can't admit that person's devices; ask one of theirs, or an admin's");
+            mine.then_some(theirs)
         };
         let secret: [u8; 16] = rand::random();
         self.add_invite(secret, Invite { space, person, until: now_ms() + INVITE_LIFE })?;
-        let ticket = Ticket { space, inviter: self.0.endpoint.addr(), secret };
-        let mut bytes = Vec::new();
-        ciborium::into_writer(&ticket, &mut bytes)?;
-        Ok(data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase())
-    }
-
-    /// A ticket for another device of `caller`'s person.
-    fn invite_for(&self, space: Key, caller: Key) -> Result<String> {
-        let person = {
-            let spaces = self.0.spaces.lock().unwrap();
-            let s = &spaces[&space];
-            let person = s.members.current(&caller).context("not a member")?.person.clone();
-            let me = s.members.current(&self.0.id).context("this device is not a member")?;
-            ensure!(me.role == Role::Admin || me.person == person, "this device can't admit that person's devices; ask one of theirs, or an admin's");
-            person
-        };
-        let secret: [u8; 16] = rand::random();
-        self.add_invite(secret, Invite { space, person: Some(person), until: now_ms() + INVITE_LIFE })?;
         let ticket = Ticket { space, inviter: self.0.endpoint.addr(), secret };
         let mut bytes = Vec::new();
         ciborium::into_writer(&ticket, &mut bytes)?;

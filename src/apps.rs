@@ -14,8 +14,6 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::entry::{Content, Key, hex};
 
-/// The apps every build ships with. They use only what any app can.
-pub const BUILT_IN: &[(&str, &str)] = &[("board", include_str!("../apps/board.js"))];
 
 const PRELUDE: &str = r#"
 const RealDate = Date;
@@ -90,8 +88,15 @@ pub struct Outcome {
     pub appends: Vec<Content>,
 }
 
+/// One app's part of a fold: its new entries, or all of them into a fresh view.
+pub struct FoldJob {
+    pub app: String,
+    pub fresh: bool,
+    pub entries: Vec<Folded>,
+}
+
 enum Job {
-    Fold { space: Key, entries: Vec<Folded>, rebuild: bool, reply: oneshot::Sender<Result<()>> },
+    Fold { space: Key, jobs: Vec<FoldJob>, reply: oneshot::Sender<Result<()>> },
     Call { space: Key, app: String, op: String, input: Value, me: Me, now: u64, reply: oneshot::Sender<Result<Outcome>> },
     Widget { space: Key, app: String, name: String, me: Me, now: u64, reply: oneshot::Sender<Result<Value>> },
     Describe { reply: oneshot::Sender<Vec<Value>> },
@@ -104,11 +109,12 @@ pub struct Apps {
 }
 
 impl Apps {
-    pub fn start(dir: PathBuf) -> Result<Self> {
+    /// Starts the engine with these apps: (name, JavaScript source).
+    pub fn start(dir: PathBuf, apps: Vec<(String, String)>) -> Result<Self> {
         let (jobs, rx) = mpsc::unbounded_channel();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         std::thread::Builder::new().name("apps".into()).spawn(move || {
-            match Engine::new(dir) {
+            match Engine::new(dir, apps) {
                 Ok(engine) => {
                     let _ = ready_tx.send(Ok(()));
                     engine.serve(rx);
@@ -122,9 +128,9 @@ impl Apps {
         Ok(Apps { jobs })
     }
 
-    pub async fn fold(&self, space: Key, entries: Vec<Folded>, rebuild: bool) -> Result<()> {
+    pub async fn fold(&self, space: Key, jobs: Vec<FoldJob>) -> Result<()> {
         let (reply, rx) = oneshot::channel();
-        self.jobs.send(Job::Fold { space, entries, rebuild, reply }).map_err(|_| anyhow!("apps stopped"))?;
+        self.jobs.send(Job::Fold { space, jobs, reply }).map_err(|_| anyhow!("apps stopped"))?;
         rx.await?
     }
 
@@ -158,7 +164,7 @@ impl Apps {
 
 /// What the host functions act on during one call into JavaScript.
 struct Current {
-    db: *const Connection,
+    db: Connection,
     mode: Mode,
     appends: Vec<Content>,
     app: String,
@@ -187,7 +193,7 @@ struct Engine {
 }
 
 impl Engine {
-    fn new(dir: PathBuf) -> Result<Self> {
+    fn new(dir: PathBuf, apps: Vec<(String, String)>) -> Result<Self> {
         let runtime = Runtime::new()?;
         runtime.set_memory_limit(256 << 20);
         let deadline = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now() + TIME_LIMIT));
@@ -198,9 +204,9 @@ impl Engine {
         context.with(|ctx| -> Result<()> {
             install_host(&ctx)?;
             ctx.eval::<(), _>(PRELUDE).catch(&ctx).map_err(|e| anyhow!("prelude: {e}"))?;
-            for (name, source) in BUILT_IN {
+            for (name, source) in &apps {
                 load(&ctx, name, source)?;
-                names.push(name.to_string());
+                names.push(name.clone());
             }
             Ok(())
         })?;
@@ -210,8 +216,8 @@ impl Engine {
     fn serve(mut self, mut rx: mpsc::UnboundedReceiver<Job>) {
         while let Some(job) = rx.blocking_recv() {
             match job {
-                Job::Fold { space, entries, rebuild, reply } => {
-                    let _ = reply.send(self.fold(space, entries, rebuild));
+                Job::Fold { space, jobs, reply } => {
+                    let _ = reply.send(self.fold(space, jobs));
                 }
                 Job::Call { space, app, op, input, me, now, reply } => {
                     let _ = reply.send(self.call(space, &app, &op, &input, &me, now));
@@ -229,98 +235,103 @@ impl Engine {
         }
     }
 
-    fn view(&mut self, space: Key, app: &str, fresh: bool) -> Result<&Connection> {
+    /// Takes an app's view database out to work on; `put` returns it.
+    fn take(&mut self, space: Key, app: &str, fresh: bool) -> Result<Connection> {
         let key = (space, app.to_string());
+        let path = self.path(space, app);
         if fresh {
             self.views.remove(&key);
-            let path = self.path(space, app);
             let _ = std::fs::remove_file(&path);
         }
-        if !self.views.contains_key(&key) {
-            let path = self.path(space, app);
-            std::fs::create_dir_all(path.parent().unwrap())?;
-            let existed = path.exists();
-            let db = Connection::open(&path)?;
-            db.execute_batch("pragma journal_mode = wal; pragma synchronous = off;")?;
-            // An app reaches only its own views: no attaching another app's database, or the log.
-            db.set_limit(rusqlite::limits::Limit::SQLITE_LIMIT_ATTACHED, 0)?;
-            if !existed {
-                let schema: String = self.context.with(|ctx| -> Result<String> {
-                    let f: Function = ctx.globals().get("__schema")?;
-                    f.call((app,)).catch(&ctx).map_err(|e| anyhow!("{e}"))
-                })?;
-                db.execute_batch(&schema).with_context(|| format!("{app} schema"))?;
-            }
-            self.views.insert(key.clone(), db);
+        if let Some(db) = self.views.remove(&key) {
+            return Ok(db);
         }
-        Ok(&self.views[&key])
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        let existed = path.exists();
+        let db = Connection::open(&path)?;
+        db.execute_batch("pragma journal_mode = wal; pragma synchronous = off;")?;
+        // An app reaches only its own views: no attaching another app's database, or the log.
+        db.set_limit(rusqlite::limits::Limit::SQLITE_LIMIT_ATTACHED, 0)?;
+        if !existed {
+            let schema: String = self.context.with(|ctx| -> Result<String> {
+                let f: Function = ctx.globals().get("__schema")?;
+                f.call((app,)).catch(&ctx).map_err(|e| anyhow!("{e}"))
+            })?;
+            db.execute_batch(&schema).with_context(|| format!("{app} schema"))?;
+        }
+        Ok(db)
+    }
+
+    fn put(&mut self, space: Key, app: &str, db: Connection) {
+        self.views.insert((space, app.to_string()), db);
     }
 
     fn path(&self, space: Key, app: &str) -> PathBuf {
         self.dir.join(hex(&space)).join(format!("{app}.db"))
     }
 
-    fn fold(&mut self, space: Key, entries: Vec<Folded>, rebuild: bool) -> Result<()> {
-        let names = self.names.clone();
-        for app in &names {
-            let db: *const Connection = self.view(space, app, rebuild)?;
-            let mine: Vec<&Folded> = entries.iter().filter(|e| &e.app == app).collect();
-            if mine.is_empty() {
+    fn fold(&mut self, space: Key, jobs: Vec<FoldJob>) -> Result<()> {
+        for job in jobs {
+            if !self.names.contains(&job.app) || (job.entries.is_empty() && !job.fresh) {
                 continue;
             }
-            unsafe { &*db }.execute_batch("begin")?;
-            for entry in mine {
+            let mut db = self.take(space, &job.app, job.fresh)?;
+            db.execute_batch("begin")?;
+            for entry in &job.entries {
                 let entry_json = serde_json::to_string(entry)?;
-                let result = self.with_current(Current { db, mode: Mode::Fold, appends: Vec::new(), app: app.clone() }, |ctx| {
+                let (result, current) = self.with_current(Current { db, mode: Mode::Fold, appends: Vec::new(), app: job.app.clone() }, |ctx| {
                     let f: Function = ctx.globals().get("__fold")?;
-                    f.call::<_, ()>((app.as_str(), entry.kind.as_str(), entry_json.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))
+                    f.call::<_, ()>((job.app.as_str(), entry.kind.as_str(), entry_json.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))
                 });
-                if let Err(err) = result.0 {
-                    tracing::warn!("{app} fold of {} failed: {err:#}", entry.kind);
+                db = current.db;
+                if let Err(err) = result {
+                    tracing::warn!("{} fold of {} failed: {err:#}", job.app, entry.kind);
                 }
             }
-            unsafe { &*db }.execute_batch("commit")?;
+            db.execute_batch("commit")?;
+            self.put(space, &job.app, db);
         }
         Ok(())
     }
 
-    fn call(&mut self, space: Key, app: &str, op: &str, input: &Value, me: &Me, now: u64) -> Result<Outcome> {
+    /// Runs one of an app's functions (`__run`, `__widget`, `__hook`) with its views to read.
+    fn op(&mut self, space: Key, app: &str, now: u64, f: impl FnOnce(&Ctx) -> Result<Value>) -> Result<Outcome> {
         if !self.names.iter().any(|n| n == app) {
             bail!("no app named {app}");
         }
-        let db: *const Connection = self.view(space, app, false)?;
+        let db = self.take(space, app, false)?;
+        let (result, current) = self.with_current(Current { db, mode: Mode::Op(now), appends: Vec::new(), app: app.into() }, f);
+        self.put(space, app, current.db);
+        Ok(Outcome { result: result?, appends: current.appends })
+    }
+
+    fn call(&mut self, space: Key, app: &str, op: &str, input: &Value, me: &Me, now: u64) -> Result<Outcome> {
         let (input, me) = (serde_json::to_string(input)?, serde_json::to_string(me)?);
-        let (result, appends) = self.with_current(Current { db, mode: Mode::Op(now), appends: Vec::new(), app: app.into() }, |ctx| {
+        self.op(space, app, now, |ctx| {
             let f: Function = ctx.globals().get("__run")?;
             let out: String = f.call((app, op, input.as_str(), me.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))?;
             Ok(serde_json::from_str(&out)?)
-        });
-        Ok(Outcome { result: result?, appends })
+        })
     }
 
     fn widget(&mut self, space: Key, app: &str, name: &str, me: &Me, now: u64) -> Result<Value> {
-        let db: *const Connection = self.view(space, app, false)?;
         let me = serde_json::to_string(me)?;
-        self.with_current(Current { db, mode: Mode::Op(now), appends: Vec::new(), app: app.into() }, |ctx| {
+        let outcome = self.op(space, app, now, |ctx| {
             let f: Function = ctx.globals().get("__widget")?;
             let out: String = f.call((app, name, me.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))?;
             Ok(serde_json::from_str(&out)?)
-        })
-        .0
+        })?;
+        Ok(outcome.result)
     }
 
     fn hook(&mut self, space: Key, app: &str, name: &str, input: &Value, me: &Me, now: u64) -> Result<Value> {
-        if !self.names.iter().any(|n| n == app) {
-            bail!("no app named {app}");
-        }
-        let db: *const Connection = self.view(space, app, false)?;
         let (input, me) = (serde_json::to_string(input)?, serde_json::to_string(me)?);
-        self.with_current(Current { db, mode: Mode::Op(now), appends: Vec::new(), app: app.into() }, |ctx| {
+        let outcome = self.op(space, app, now, |ctx| {
             let f: Function = ctx.globals().get("__hook")?;
             let out: String = f.call((app, name, input.as_str(), me.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))?;
             Ok(serde_json::from_str(&out)?)
-        })
-        .0
+        })?;
+        Ok(outcome.result)
     }
 
     fn describe(&self) -> Vec<Value> {
@@ -336,12 +347,13 @@ impl Engine {
         })
     }
 
-    fn with_current<T>(&self, current: Current, f: impl FnOnce(&Ctx) -> Result<T>) -> (Result<T>, Vec<Content>) {
+    /// Runs `f` with `current` where the host functions can reach it, and hands it back.
+    fn with_current<T>(&self, current: Current, f: impl FnOnce(&Ctx) -> Result<T>) -> (Result<T>, Current) {
         *self.deadline.lock().unwrap() = std::time::Instant::now() + TIME_LIMIT;
         CURRENT.with(|c| *c.borrow_mut() = Some(current));
         let result = self.context.with(|ctx| f(&ctx));
-        let appends = CURRENT.with(|c| c.borrow_mut().take()).map(|c| c.appends).unwrap_or_default();
-        (result, appends)
+        let current = CURRENT.with(|c| c.borrow_mut().take()).expect("current is set for the call");
+        (result, current)
     }
 }
 
@@ -367,8 +379,7 @@ fn install_host(ctx: &Ctx) -> Result<()> {
                 if c.mode != Mode::Fold {
                     bail!("only fold handlers write views; operations append entries");
                 }
-                let db = unsafe { &*c.db };
-                db.execute(&sql, rusqlite::params_from_iter(to_sql(&params)?))?;
+                c.db.execute(&sql, rusqlite::params_from_iter(to_sql(&params)?))?;
                 Ok(())
             })
         }),
@@ -406,8 +417,7 @@ fn host<T>(f: impl FnOnce(&mut Current) -> Result<T>) -> rquickjs::Result<T> {
 }
 
 fn query(c: &Current, sql: &str, params: &str) -> Result<String> {
-    let db = unsafe { &*c.db };
-    let mut stmt = db.prepare(sql)?;
+    let mut stmt = c.db.prepare(sql)?;
     if !stmt.readonly() {
         bail!("query only reads; fold handlers write with db.exec");
     }

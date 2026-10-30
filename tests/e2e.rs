@@ -29,8 +29,8 @@ async fn texts(node: &Node, space: [u8; 32]) -> Vec<String> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn devices_and_a_phone_share_a_board() {
-    let (a, _ra) = Node::start(&temp("a")).await.unwrap();
-    let (b, _rb) = Node::start(&temp("b")).await.unwrap();
+    let (a, _ra) = Node::start(&temp("a"), one::builtin::all()).await.unwrap();
+    let (b, _rb) = Node::start(&temp("b"), one::builtin::all()).await.unwrap();
 
     let space = a.create_space("Test").await.unwrap();
     a.call(space, "board", "post", json!({ "text": "from a" })).await.unwrap();
@@ -59,8 +59,8 @@ async fn devices_and_a_phone_share_a_board() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_provider_answers_calls_from_another_device() {
-    let (a, _ra) = Node::start(&temp("pa")).await.unwrap();
-    let (b, _rb) = Node::start(&temp("pb")).await.unwrap();
+    let (a, _ra) = Node::start(&temp("pa"), one::builtin::all()).await.unwrap();
+    let (b, _rb) = Node::start(&temp("pb"), one::builtin::all()).await.unwrap();
     let space = a.create_space("Test").await.unwrap();
     b.join(&a.invite(space, true).unwrap()).await.unwrap();
     eventually("b to become a member", async || b.state()["spaces"][0]["member"] == true).await;

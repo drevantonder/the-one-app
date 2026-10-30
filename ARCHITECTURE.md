@@ -14,7 +14,7 @@ A node runs on every device that can keep a log: laptops, the home box, servers.
                       │
           entry (src/entry.rs): p2panda-core operations, signed, hash-linked per device
           space (src/space.rs): membership, folded from `space` entries
-          sync (src/sync.rs): pure protocol; tests/sim.rs runs it on a hostile simulated network
+          sync (src/sync.rs): the protocol, with no clock or network; tests/sim.rs runs it on a hostile simulated network
 ```
 
 ## Where to look
@@ -22,10 +22,11 @@ A node runs on every device that can keep a log: laptops, the home box, servers.
 - `SPEC.md` is the contract between devices. If two devices must agree on it, it's there.
 - `src/entry.rs`: what an entry is, and the fold order `(time, author, seq)`.
 - `src/space.rs`: who's in a space. Pure: entries in, members out.
-- `src/sync.rs`: what two devices say to each other. Pure: no I/O, so the simulator can drive it.
+- `src/sync.rs`: what two devices say to each other. It reads and writes the store but has no clock or network, so the simulator can drive it.
 - `src/node.rs`: the only place with state and I/O: stores, sessions, invites, calls, hooks.
 - `src/apps.rs`: one thread owns QuickJS and every view database. Folds can't read the clock or randomness, and can only write their own views; operations can only append entries.
-- `src/native.rs`, `src/agents.rs`, `src/models.rs`: device features in Rust. `src/providers.rs`: the same for features written outside the node (the Mac app's Swift, Go), over the local API.
+- `src/builtin.rs`: the apps this build ships with, handed to the node by the binary; the core names none.
+- `src/native.rs` (the type), `src/shell.rs`, `src/agents.rs`, `src/models.rs`: device features in Rust. `src/providers.rs`: the same for features written outside the node (the Mac app's Swift, Go), over the local API.
 - `apps/`: the apps every build ships with. They use nothing a user's app couldn't.
 - `client/`: the library phones link (Rust, with a C interface in `one_client.h`).
 - `apple/`: the Mac app now, and the iPhone app's shared views.

@@ -36,7 +36,7 @@ pub struct Client {
     endpoint: Endpoint,
     path: PathBuf,
     saved: Mutex<Saved>,
-    events: Mutex<Option<mpsc::UnboundedReceiver<Value>>>,
+    events: tokio::sync::Mutex<Option<mpsc::UnboundedReceiver<Value>>>,
 }
 
 impl Client {
@@ -52,7 +52,7 @@ impl Client {
         }
         let secret: [u8; 32] = data_encoding::HEXLOWER.decode(saved.secret.as_bytes())?.try_into().map_err(|_| anyhow::anyhow!("bad key"))?;
         let endpoint = Endpoint::builder(presets::N0).secret_key(SecretKey::from_bytes(&secret)).bind().await?;
-        let client = Client { endpoint, path, saved: Mutex::new(saved), events: Mutex::new(None) };
+        let client = Client { endpoint, path, saved: Mutex::new(saved), events: tokio::sync::Mutex::new(None) };
         client.save()?;
         Ok(client)
     }
@@ -104,7 +104,7 @@ impl Client {
         let me = self.endpoint.id();
         let mut saved = self.saved.lock().unwrap();
         for space in state["spaces"].as_array().into_iter().flatten() {
-            for d in space["devices"].as_array().into_iter().flatten() {
+            for d in space["devices"].as_array().into_iter().flatten().filter(|d| d["client"] != true) {
                 let Some(id) = d["device"].as_str().and_then(|h| data_encoding::HEXLOWER.decode(h.as_bytes()).ok()) else { continue };
                 let Ok(id) = <[u8; 32]>::try_from(id.as_slice()) else { continue };
                 let Ok(id) = EndpointId::from_bytes(&id) else { continue };
@@ -237,7 +237,7 @@ pub unsafe extern "C" fn one_request(method: *const c_char, path: *const c_char,
 pub extern "C" fn one_next_event(timeout_ms: u64) -> *mut c_char {
     out(runtime().block_on(async {
         let c = client()?;
-        let mut guard = c.events.lock().unwrap();
+        let mut guard = c.events.lock().await;
         if guard.is_none() {
             let (tx, rx) = mpsc::unbounded_channel();
             *guard = Some(rx);

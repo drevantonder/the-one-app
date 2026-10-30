@@ -199,7 +199,7 @@ async fn serve() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
     let dir = home();
-    let (node, router) = Node::start(&dir).await?;
+    let (node, router) = Node::start(&dir, one::builtin::all()).await?;
     let listener = tokio::net::TcpListener::bind(addr()).await.with_context(|| format!("listen on {}", addr()))?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
     let http = axum::serve(listener, api::router(node));
