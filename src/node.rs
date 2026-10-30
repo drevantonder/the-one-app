@@ -386,7 +386,7 @@ impl Node {
     /// Runs an operation on another device in the space.
     pub async fn call_on(&self, device: Key, space: Key, app: &str, op: &str, input: Value) -> Result<Value> {
         if device == self.0.id {
-            return self.call(space, app, op, input).await;
+            return self.call_as(space, self.0.id, app, op, input).await;
         }
         let conn = self.0.endpoint.connect(EndpointId::from_bytes(&device)?, CALL_ALPN).await?;
         let (mut send, mut recv) = conn.open_bi().await?;
