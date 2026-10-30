@@ -29,5 +29,5 @@ Environment=HOME=$HOME
 WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
-sudo systemctl enable --now one-whatsapp
+sudo systemctl enable one-whatsapp
 sudo systemctl restart one-whatsapp'
