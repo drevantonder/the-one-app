@@ -53,6 +53,8 @@ impl Entry {
     pub fn decode(header: &[u8], body: &[u8]) -> Result<Self> {
         let header = Header::<Ext>::decode(header).context("decode header")?;
         ensure!(header.verify(), "bad signature");
+        ensure!(header.extensions.log == SPACE_LOG, "unknown log {}", header.extensions.log);
+        ensure!(header.extensions.time <= i64::MAX as u64, "time out of range");
         ensure!(header.payload_size as usize == body.len(), "body size mismatch");
         if !body.is_empty() {
             ensure!(header.payload_hash == Some(Body::from_bytes(body).hash()), "body hash mismatch");

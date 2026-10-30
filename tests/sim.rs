@@ -134,8 +134,8 @@ fn deliver(rng: &mut StdRng, net: &mut Net, devices: &mut [Device]) {
     if rng.gen_ratio(1, 20) {
         net.queue.push_back((from, to, msg.clone())); // duplicated
     }
-    let (new, reply) = sync::handle(&devices[to].store, msg).unwrap();
-    if let Some(reply) = reply {
+    let (new, replies) = sync::handle(&devices[to].store, msg, u64::MAX / 2).unwrap();
+    for reply in replies {
         net.queue.push_back((to, from, reply));
     }
     if !new.is_empty() {

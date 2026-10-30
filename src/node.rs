@@ -39,14 +39,16 @@ struct DeviceFile {
 #[derive(Serialize, Deserialize)]
 struct SpaceFile {
     person: String,
+    /// The device that invited this one, to sync with until this device sees itself admitted.
     #[serde(default)]
-    root: Option<String>,
+    inviter: Option<String>,
 }
 
 struct Space {
     store: Store,
     members: Members,
     person: String,
+    inviter: Option<Key>,
     folded: Option<Order>,
     /// Senders to every live sync session for this space, by peer device.
     sessions: HashMap<Key, mpsc::UnboundedSender<Msg>>,
@@ -204,7 +206,8 @@ impl Node {
         let file: SpaceFile = serde_json::from_slice(&std::fs::read(dir.join("space.json"))?)?;
         let store = Store::open(&dir.join("entries.db"), space)?;
         let members = Members::fold(&space, &store.ordered()?);
-        self.0.spaces.lock().unwrap().insert(space, Space { store, members, person: file.person, folded: None, sessions: HashMap::new() });
+        let inviter = file.inviter.and_then(|h| unhex(&h).ok());
+        self.0.spaces.lock().unwrap().insert(space, Space { store, members, person: file.person, inviter, folded: None, sessions: HashMap::new() });
         Ok(())
     }
 
@@ -224,7 +227,7 @@ impl Node {
         let root = SigningKey::generate();
         let space = *root.verifying_key().as_bytes();
         let person = new_person();
-        self.save_space(&space, &SpaceFile { person: person.clone(), root: Some(hex(root.as_bytes())) })?;
+        self.save_space(&space, &SpaceFile { person: person.clone(), inviter: None })?;
         self.open_space(space)?;
         let genesis = space::genesis(&root, &self.0.id, name, &person, &self.device_name());
         self.append(space, genesis).await?;
@@ -238,7 +241,7 @@ impl Node {
         let entry = {
             let spaces = self.0.spaces.lock().unwrap();
             let s = spaces.get(&space).context("no such space")?;
-            let time = now_ms().max(s.store.max_time()? + 1);
+            let time = now_ms().max(s.store.max_time()?.saturating_add(1));
             let prev = s.store.last(&self.0.id, SPACE_LOG)?;
             let entry = Entry::create(&self.0.key, space, time, prev.as_ref(), content);
             s.store.insert(&entry)?;
@@ -615,7 +618,7 @@ impl Node {
             bail!("{}", err.as_str().unwrap_or("the invite was refused"));
         }
         let reply: JoinReply = serde_json::from_value(reply)?;
-        self.save_space(&ticket.space, &SpaceFile { person: reply.person, root: None })?;
+        self.save_space(&ticket.space, &SpaceFile { person: reply.person, inviter: Some(hex(ticket.inviter.id.as_bytes())) })?;
         self.open_space(ticket.space)?;
         let inviter = ticket.inviter.id;
         let node = self.clone();
@@ -655,11 +658,12 @@ impl Node {
                 spaces
                     .iter()
                     .flat_map(|(space, s)| {
-                        s.members
-                            .current_devices()
-                            .filter(|m| m.device != self.0.id && !m.client && !s.sessions.contains_key(&m.device))
-                            .map(|m| (*space, m.device))
-                            .collect::<Vec<_>>()
+                        let mut devices: Vec<Key> = s.members.current_devices().filter(|m| m.device != self.0.id && !m.client).map(|m| m.device).collect();
+                        // Still joining: only the inviter knows we're in.
+                        if s.members.current(&self.0.id).is_none() {
+                            devices.extend(s.inviter);
+                        }
+                        devices.into_iter().filter(|d| !s.sessions.contains_key(d)).map(|d| (*space, d)).collect::<Vec<_>>()
                     })
                     .collect()
             };
@@ -723,13 +727,13 @@ impl Node {
         };
         let reader = async {
             if let Some(msg) = first {
-                if let Some(reply) = self.handle(space, peer, msg).await? {
+                for reply in self.handle(space, peer, msg).await? {
                     tx.send(reply).map_err(|_| anyhow!("session closed"))?;
                 }
             }
             loop {
                 let msg = sync::read(&mut recv).await?;
-                if let Some(reply) = self.handle(space, peer, msg).await? {
+                for reply in self.handle(space, peer, msg).await? {
                     tx.send(reply).map_err(|_| anyhow!("session closed"))?;
                 }
             }
@@ -747,11 +751,11 @@ impl Node {
         result
     }
 
-    async fn handle(&self, space: Key, peer: Key, msg: Msg) -> Result<Option<Msg>> {
+    async fn handle(&self, space: Key, peer: Key, msg: Msg) -> Result<Vec<Msg>> {
         let _write = self.0.writes.lock().await;
         let (new, reply) = {
             let spaces = self.0.spaces.lock().unwrap();
-            sync::handle(&spaces.get(&space).context("no such space")?.store, msg)?
+            sync::handle(&spaces.get(&space).context("no such space")?.store, msg, now_ms())?
         };
         self.after(space, &new, Some(peer)).await?;
         Ok(reply)

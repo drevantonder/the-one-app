@@ -1,5 +1,6 @@
 //! Sync: what two devices say to each other. See SPEC.md, "Sync".
-//! The protocol is pure; `net.rs` carries it over iroh and `tests/sim.rs` over a simulated network.
+//! The protocol has no clock and no network of its own; `node.rs` carries it over iroh and
+//! `tests/sim.rs` over a simulated network.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,10 @@ use crate::store::{Frontier, Store};
 
 pub const ALPN: &[u8] = b"one/sync/1";
 const MAX_MESSAGE: usize = 16 << 20;
+/// Missing entries go in batches this big, so no message nears MAX_MESSAGE.
+const BATCH: usize = 200;
+/// Entries timed further ahead than this are refused: a wrong clock mustn't drag everyone's forward.
+pub const FUTURE: u64 = 3_600_000;
 
 pub type Wire = (Vec<u8>, Vec<u8>);
 
@@ -27,24 +32,36 @@ pub fn entries(space: Key, entries: &[Entry]) -> Msg {
     Msg::Entries { space, entries: entries.iter().map(Entry::encode).collect() }
 }
 
-/// Handles one message. Returns the entries that were new to `store`, and a reply to send.
-pub fn handle(store: &Store, msg: Msg) -> Result<(Vec<Entry>, Option<Msg>)> {
+/// Handles one message at time `now`. Returns the entries that were new to `store`, and replies to send.
+pub fn handle(store: &Store, msg: Msg, now: u64) -> Result<(Vec<Entry>, Vec<Msg>)> {
     match msg {
         Msg::Hello { space, frontier } if space == store.space() => {
             let missing = store.missing(&frontier)?;
-            let reply = (!missing.is_empty()).then(|| entries(space, &missing));
-            Ok((Vec::new(), reply))
+            Ok((Vec::new(), missing.chunks(BATCH).map(|batch| entries(space, batch)).collect()))
         }
         Msg::Entries { space, entries } if space == store.space() => {
-            let mut new = Vec::new();
+            let (mut new, mut gap) = (Vec::new(), false);
             for (header, body) in entries {
-                match Entry::decode(&header, &body).and_then(|e| store.insert(&e).map(|n| (e, n))) {
-                    Ok((entry, true)) => new.push(entry),
-                    Ok((_, false)) => {}
+                let entry = match Entry::decode(&header, &body) {
+                    Ok(e) if e.time() <= now.saturating_add(FUTURE) => e,
+                    Ok(_) => {
+                        tracing::debug!("dropped an entry from the future");
+                        continue;
+                    }
+                    Err(err) => {
+                        tracing::debug!("dropped entry: {err:#}");
+                        continue;
+                    }
+                };
+                match store.insert(&entry) {
+                    Ok(true) => new.push(entry),
+                    Ok(false) => {}
+                    Err(_) if store.lacks_predecessor(&entry)? => gap = true,
                     Err(err) => tracing::debug!("dropped entry: {err:#}"),
                 }
             }
-            Ok((new, None))
+            // An entry arrived before the one it follows: say what we have, so the sender fills the gap now.
+            Ok((new, if gap { vec![hello(store)?] } else { vec![] }))
         }
         _ => anyhow::bail!("message for another space"),
     }

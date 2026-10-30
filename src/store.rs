@@ -60,6 +60,11 @@ impl Store {
         Ok(true)
     }
 
+    /// Whether `entry` can't be added yet because the one before it in its log hasn't arrived.
+    pub fn lacks_predecessor(&self, entry: &Entry) -> Result<bool> {
+        Ok(entry.seq() > 0 && self.get(&entry.author(), entry.log(), entry.seq() - 1)?.is_none())
+    }
+
     pub fn get(&self, author: &Key, log: &str, seq: u32) -> Result<Option<Entry>> {
         let row = self
             .db
