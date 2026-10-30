@@ -28,6 +28,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/device", post(rename))
         .route("/v1/remove", post(remove))
         .route("/v1/events", get(events))
+        .route("/hooks/{app}/{name}", post(hook))
         .with_state(node)
 }
 
@@ -141,6 +142,17 @@ async fn remove(State(node): State<Node>, Json(req): Json<RemoveRequest>) -> Rep
     let space = node.find_space(req.space.as_deref())?;
     node.remove_device(space, unhex(&req.device)?).await?;
     Ok(Json(json!({})))
+}
+
+/// For agent harnesses' hooks: the body is the hook's JSON, the reply is plain text to show the agent.
+async fn hook(State(node): State<Node>, axum::extract::Path((app, name)): axum::extract::Path<(String, String)>, body: String) -> Response {
+    let event: Value = serde_json::from_str(&body).unwrap_or_default();
+    match node.hook(&app, &name, event).await {
+        Ok(Value::String(text)) => text.into_response(),
+        Ok(Value::Null) => String::new().into_response(),
+        Ok(other) => other.to_string().into_response(),
+        Err(err) => (StatusCode::BAD_REQUEST, format!("{err:#}")).into_response(),
+    }
 }
 
 async fn events(State(node): State<Node>) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {

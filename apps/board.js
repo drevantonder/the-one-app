@@ -118,6 +118,25 @@ At the start of every session, call board_read with no topic and do what the top
     },
   },
 
+  hooks: {
+    // Shown to agents with each message: the top of the board when a session starts, then what's new.
+    news(ctx, { since }) {
+      const line = (p) => `${p.topic || "(top)"} ${p.name}: ${p.text}`;
+      if (since === null) {
+        const top = ctx.query("select * from (select * from posts where topic = '' order by time desc limit 40) order by time");
+        const subs = topicSummary(ctx, "");
+        return [
+          "The top of the board, read for you as board_read with no topic would. Before you start, do what it says; then read your work's topic with board_read, and board_post when you start, decide or learn something, and finish. Board news will appear here when other agents post.",
+          "",
+          ...top.map((p) => p.text),
+          ...(subs.length ? ["Topics:", ...subs.map((t) => `  ${t.path}: ${t.description} (${t.posts} posts)`)] : []),
+        ].join("\n");
+      }
+      const news = ctx.query("select * from posts where time > ? order by time limit 30", [since]);
+      return news.length ? ["New on the board since you last looked:", ...news.map(line)].join("\n") : "";
+    },
+  },
+
   fold: {
     post(db, e) {
       db.exec("insert or ignore into posts values (?, ?, ?, ?, ?, ?, ?)", [e.id, e.data.topic || "", e.data.text, e.author, e.person, e.data.by || e.name, e.data.at || e.time]);

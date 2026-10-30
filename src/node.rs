@@ -307,6 +307,25 @@ impl Node {
         Ok(out)
     }
 
+    /// Runs an app's hook for an agent harness on this device (SPEC.md, "Hooks"). The node remembers,
+    /// per session, when the hook last ran, and tells the app as `since` (null on a session's first call).
+    pub async fn hook(&self, app: &str, name: &str, event: Value) -> Result<Value> {
+        let space = self.find_space(None)?;
+        let session = event["session_id"].as_str().unwrap_or("").to_string();
+        let path = self.0.dir.join("hooks.json");
+        let mut seen: serde_json::Map<String, Value> = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let key = format!("{app}/{name}/{session}");
+        let since = seen.get(&key).cloned().unwrap_or(Value::Null);
+        let now = now_ms();
+        let me = self.me_of(&space, &self.0.id)?;
+        let out = self.0.apps.hook(space, app, name, json!({ "event": event, "since": since }), me, now).await?;
+        seen.insert(key, json!(now));
+        let week_ago = now.saturating_sub(7 * 86_400_000);
+        seen.retain(|_, t| t.as_u64().is_some_and(|t| t > week_ago));
+        std::fs::write(&path, serde_json::to_vec(&seen)?)?;
+        Ok(out)
+    }
+
     pub async fn apps(&self) -> Result<Vec<Value>> {
         self.0.apps.describe().await
     }

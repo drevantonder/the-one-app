@@ -47,6 +47,11 @@ globalThis.__fold = (app, kind, entry) => {
   const f = __apps[app].fold?.[kind];
   if (f) f(db, JSON.parse(entry));
 };
+globalThis.__hook = (app, name, input, me) => {
+  const h = __apps[app].hooks?.[name];
+  if (!h) throw new Error(`${app} has no hook ${name}`);
+  return json(h(ctx(JSON.parse(me)), JSON.parse(input)));
+};
 globalThis.__widget = (app, name, me) => json(__apps[app].widgets[name].render(ctx(JSON.parse(me))));
 globalThis.__describe = (app) => {
   const a = __apps[app];
@@ -90,6 +95,7 @@ enum Job {
     Call { space: Key, app: String, op: String, input: Value, me: Me, now: u64, reply: oneshot::Sender<Result<Outcome>> },
     Widget { space: Key, app: String, name: String, me: Me, now: u64, reply: oneshot::Sender<Result<Value>> },
     Describe { reply: oneshot::Sender<Vec<Value>> },
+    Hook { space: Key, app: String, name: String, input: Value, me: Me, now: u64, reply: oneshot::Sender<Result<Value>> },
 }
 
 #[derive(Clone)]
@@ -132,6 +138,13 @@ impl Apps {
     pub async fn widget(&self, space: Key, app: &str, name: &str, me: Me, now: u64) -> Result<Value> {
         let (reply, rx) = oneshot::channel();
         let job = Job::Widget { space, app: app.into(), name: name.into(), me, now, reply };
+        self.jobs.send(job).map_err(|_| anyhow!("apps stopped"))?;
+        rx.await?
+    }
+
+    pub async fn hook(&self, space: Key, app: &str, name: &str, input: Value, me: Me, now: u64) -> Result<Value> {
+        let (reply, rx) = oneshot::channel();
+        let job = Job::Hook { space, app: app.into(), name: name.into(), input, me, now, reply };
         self.jobs.send(job).map_err(|_| anyhow!("apps stopped"))?;
         rx.await?
     }
@@ -198,6 +211,9 @@ impl Engine {
                 }
                 Job::Widget { space, app, name, me, now, reply } => {
                     let _ = reply.send(self.widget(space, &app, &name, &me, now));
+                }
+                Job::Hook { space, app, name, input, me, now, reply } => {
+                    let _ = reply.send(self.hook(space, &app, &name, &input, &me, now));
                 }
                 Job::Describe { reply } => {
                     let _ = reply.send(self.describe());
@@ -279,6 +295,20 @@ impl Engine {
         self.with_current(Current { db, mode: Mode::Op(now), appends: Vec::new(), app: app.into() }, |ctx| {
             let f: Function = ctx.globals().get("__widget")?;
             let out: String = f.call((app, name, me.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))?;
+            Ok(serde_json::from_str(&out)?)
+        })
+        .0
+    }
+
+    fn hook(&mut self, space: Key, app: &str, name: &str, input: &Value, me: &Me, now: u64) -> Result<Value> {
+        if !self.names.iter().any(|n| n == app) {
+            bail!("no app named {app}");
+        }
+        let db: *const Connection = self.view(space, app, false)?;
+        let (input, me) = (serde_json::to_string(input)?, serde_json::to_string(me)?);
+        self.with_current(Current { db, mode: Mode::Op(now), appends: Vec::new(), app: app.into() }, |ctx| {
+            let f: Function = ctx.globals().get("__hook")?;
+            let out: String = f.call((app, name, input.as_str(), me.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))?;
             Ok(serde_json::from_str(&out)?)
         })
         .0
