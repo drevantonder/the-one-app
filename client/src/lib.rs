@@ -75,6 +75,12 @@ impl Client {
         !self.saved.lock().unwrap().peers.is_empty()
     }
 
+    /// Sets the name this device gives the space it joins next.
+    pub fn set_name(&self, name: &str) -> Result<()> {
+        self.saved.lock().unwrap().name = name.to_string();
+        self.save()
+    }
+
     pub async fn join(&self, ticket: &str) -> Result<Value> {
         let bytes = data_encoding::BASE32_NOPAD.decode(ticket.trim().to_uppercase().as_bytes()).context("that isn't a ticket")?;
         let ticket: Ticket = ciborium::from_reader(bytes.as_slice()).context("that isn't a ticket")?;
@@ -212,10 +218,17 @@ pub unsafe extern "C" fn one_start(dir: *const c_char, name: *const c_char) -> *
     }))
 }
 
+/// Joins the space `ticket` invites this device to, as `name` (or the name it started with, if empty).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn one_join(ticket: *const c_char) -> *mut c_char {
-    let ticket = unsafe { arg(ticket) };
-    out(runtime().block_on(async { client()?.join(&ticket).await }))
+pub unsafe extern "C" fn one_join(ticket: *const c_char, name: *const c_char) -> *mut c_char {
+    let (ticket, name) = unsafe { (arg(ticket), arg(name)) };
+    out(runtime().block_on(async {
+        let c = client()?;
+        if !name.trim().is_empty() {
+            c.set_name(name.trim())?;
+        }
+        c.join(&ticket).await
+    }))
 }
 
 /// Sends `method path` with a JSON `body` (or empty) to the space's devices.

@@ -586,6 +586,10 @@ impl Node {
                 let ok = self.call_as(space(&body)?, caller, body["app"].as_str().unwrap_or(""), body["op"].as_str().unwrap_or(""), input).await?;
                 json!({ "ok": ok })
             }
+            ("POST", "/v1/device") => {
+                self.rename_client(caller, body["name"].as_str().unwrap_or("").trim()).await?;
+                json!({})
+            }
             ("POST", "/v1/invite") => {
                 let key = space(&body)?;
                 json!({ "ticket": self.invite_as(key, caller, body["mine"] == true)? })
@@ -602,6 +606,24 @@ impl Node {
         write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
         for space in self.spaces() {
             self.append(space, space::rename(&self.0.id, name)).await?;
+        }
+        Ok(())
+    }
+
+    /// Renames a client in every space where this device is an admin: a client writes no entries, and SPEC.md lets only it or an admin rename it.
+    async fn rename_client(&self, client: Key, name: &str) -> Result<()> {
+        ensure!(!name.is_empty(), "a device needs a name");
+        let spaces: Vec<Key> = {
+            let spaces = self.0.spaces.lock().unwrap();
+            spaces
+                .iter()
+                .filter(|(_, s)| s.members.current(&client).is_some() && s.members.current(&self.0.id).is_some_and(|m| m.role == Role::Admin))
+                .map(|(key, _)| *key)
+                .collect()
+        };
+        ensure!(!spaces.is_empty(), "only an admin device can rename a phone, and {} isn't one", self.device_name());
+        for space in spaces {
+            self.append(space, space::rename(&client, name)).await?;
         }
         Ok(())
     }

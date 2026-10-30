@@ -50,6 +50,9 @@ async fn devices_and_a_phone_share_a_board() {
     let news = b.call(space, "board", "news", json!({ "since": 0 })).await.unwrap();
     let by_phone = news.as_array().unwrap().iter().find(|p| p["text"] == "from the phone").unwrap();
     assert_eq!(by_phone["name"], "Phone", "posts are credited to the device that asked");
+    phone.request("POST", "/v1/device", json!({ "name": "Andre's iPhone" })).await.unwrap();
+    let state = phone.request("GET", "/v1/state", Value::Null).await.unwrap();
+    assert_eq!(state["device"]["name"], "Andre's iPhone", "an admin renames a phone that asks");
 
     a.remove_device(space, one::entry::unhex(&phone.id()).unwrap()).await.unwrap();
     let devices = a.state()["spaces"][0]["devices"].as_array().unwrap().len();
