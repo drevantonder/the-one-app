@@ -1,6 +1,11 @@
 [workspace]
 members = [".", "client"]
 
+# netdev 0.46 uses a macOS-only libc type on every Apple system, which breaks iPhone builds of the client.
+# Drop this once iroh moves to a netdev that builds for iOS.
+[patch.crates-io]
+netdev = { path = "vendor/netdev" }
+
 [package]
 name = "one"
 version = "0.1.0"
