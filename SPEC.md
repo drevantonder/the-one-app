@@ -51,6 +51,14 @@ An invite is a ticket: `{ space, inviter: EndpointAddr, secret: [u8; 16] }` in C
 
 One stream per call: a JSON request `{ space, app, op, input }`, then a JSON reply `{ ok }` or `{ error }`. Only members may call.
 
+## Blobs (ALPN `one/blob/1`)
+
+A blob is bytes named by their BLAKE3 hash. A member sends a hash (64 hex characters) on one stream and gets the bytes back; it checks them against the hash. Only members may ask.
+
+## Releases
+
+A release of the node is an entry with app `node` and kind `release`: `{ commit, target, blob, size }`, where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin count. A node whose own build differs from the newest release for its target fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead.
+
 ## Clients (ALPN `one/client/1`)
 
 A device that keeps no log (a phone) is still a member: it joins with a ticket like any device. It then asks any member device that does keep logs to act for it. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`. `GET /v1/events` instead streams events as JSON lines until the stream closes. Operations run for the asking device: `ctx.me` is the client, and the entries they append are written by the device that ran them. Only members may ask.
