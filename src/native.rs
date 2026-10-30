@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
-use crate::apps::Me;
+use crate::apps::{Folded, Me};
 use crate::entry::Content;
 
 pub type Reply = Pin<Box<dyn Future<Output = Result<(Value, Vec<Content>)>> + Send>>;
@@ -17,11 +17,17 @@ pub type Reply = Pin<Box<dyn Future<Output = Result<(Value, Vec<Content>)>> + Se
 pub struct Native {
     pub name: &'static str,
     pub describe: fn() -> Value,
-    pub call: fn(op: String, input: Value, caller: Me) -> Reply,
+    /// Runs an operation, given every entry the app has in the space, oldest first.
+    pub call: fn(op: String, input: Value, caller: Me, entries: Vec<Folded>) -> Reply,
+    /// Brings this device in line with the app's entries, after they change and when the node starts.
+    pub sync: Option<fn(entries: &[Folded])>,
 }
 
 pub fn all() -> Vec<Native> {
-    vec![Native { name: "shell", describe: shell_describe, call: shell_call }]
+    vec![
+        Native { name: "shell", describe: shell_describe, call: shell_call, sync: None },
+        Native { name: "agents", describe: crate::agents::describe, call: crate::agents::call, sync: Some(crate::agents::sync) },
+    ]
 }
 
 fn shell_describe() -> Value {
@@ -41,7 +47,7 @@ fn shell_describe() -> Value {
     })
 }
 
-fn shell_call(op: String, input: Value, caller: Me) -> Reply {
+fn shell_call(op: String, input: Value, caller: Me, _entries: Vec<Folded>) -> Reply {
     Box::pin(async move {
         if op != "run" {
             bail!("shell has no operation {op}");

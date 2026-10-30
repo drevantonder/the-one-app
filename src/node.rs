@@ -146,6 +146,9 @@ impl Node {
         tokio::spawn(node.clone().dial_loop());
         for space in node.spaces() {
             node.consider_update(space);
+            for native in node.0.native.iter().filter(|n| n.sync.is_some()) {
+                node.sync_native(space, native.name);
+            }
         }
         Ok((node, router))
     }
@@ -244,6 +247,11 @@ impl Node {
         if new.iter().any(|e| e.content.app == release::APP) {
             self.consider_update(space);
         }
+        for native in &self.0.native {
+            if native.sync.is_some() && new.iter().any(|e| e.content.app == native.name) {
+                self.sync_native(space, native.name);
+            }
+        }
         self.0.apps.fold(space, folded, rebuild).await?;
         self.emit(Event::Changed { space: hex(&space), apps });
         Ok(())
@@ -280,7 +288,7 @@ impl Node {
         let me = self.me_of(&space, &caller)?;
         if let Some(native) = self.0.native.iter().find(|n| n.name == app) {
             ensure!(me.person == self.me_of(&space, &self.0.id)?.person, "{app} runs only for this device's own person's devices");
-            let (result, appends) = (native.call)(op.to_string(), input, me).await?;
+            let (result, appends) = (native.call)(op.to_string(), input, me, self.app_entries(space, app)?).await?;
             for content in appends {
                 self.append(space, content).await?;
             }
@@ -805,6 +813,19 @@ impl Node {
             }
         };
         release::install(&bytes)
+    }
+
+    /// Every entry an app has in a space, by members, oldest first.
+    fn app_entries(&self, space: Key, app: &str) -> Result<Vec<Folded>> {
+        let spaces = self.0.spaces.lock().unwrap();
+        let s = spaces.get(&space).context("no such space")?;
+        Ok(to_fold(&s.members, &s.store.ordered()?).into_iter().filter(|e| e.app == app).collect())
+    }
+
+    fn sync_native(&self, space: Key, app: &'static str) {
+        let Some(sync) = self.0.native.iter().find(|n| n.name == app).and_then(|n| n.sync) else { return };
+        let Ok(entries) = self.app_entries(space, app) else { return };
+        tokio::task::spawn_blocking(move || sync(&entries));
     }
 
     fn peers(&self, space: Key) -> Vec<Key> {
