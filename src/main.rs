@@ -94,8 +94,15 @@ fn run(args: Vec<String>) -> Result<()> {
                 [path] => std::fs::canonicalize(path)?,
                 _ => std::env::current_exe()?,
             };
-            let target = flags.get("target").and_then(Value::as_str).unwrap_or(one::brand::TARGET);
-            let commit = flags.get("commit").and_then(Value::as_str).unwrap_or(one::brand::BUILD);
+            // The binary knows what it is; ask it, unless it's for another platform and can't run here.
+            let version = std::process::Command::new(&path).arg("version").output().ok().filter(|o| o.status.success());
+            let words: Vec<String> = version.map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().map(str::to_string).collect()).unwrap_or_default();
+            let (ran_commit, ran_target) = match words.as_slice() {
+                [.., commit, target] => (Some(commit.clone()), Some(target.trim_matches(|c| c == '(' || c == ')').to_string())),
+                _ => (None, None),
+            };
+            let commit = flags.get("commit").and_then(Value::as_str).map(str::to_string).or(ran_commit).context("say which commit this is with --commit")?;
+            let target = flags.get("target").and_then(Value::as_str).map(str::to_string).or(ran_target).context("say which platform this is for with --target")?;
             let r = post("/v1/release", json!({ "space": space, "path": path, "commit": commit, "target": target }))?;
             println!("Released {} for {}. Every node on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
         }
