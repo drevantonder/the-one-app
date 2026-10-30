@@ -92,6 +92,21 @@ At the start of every session, call board_read with no topic and do what the top
         return ctx.query("select * from posts where time > ? order by time limit 200", [from]).map(post);
       },
     },
+    import: {
+      description: "Bring in posts and topics from another board, keeping their original times and authors.",
+      input: {
+        type: "object",
+        properties: {
+          topics: { type: "array", items: { type: "object" } },
+          posts: { type: "array", items: { type: "object", description: "{ topic, text, by, at }" } },
+        },
+      },
+      run(ctx, { topics = [], posts = [] }) {
+        for (const t of topics) ctx.append("topic", { path: t.path, description: t.description || "" });
+        for (const p of posts) ctx.append("post", { topic: p.topic || "", text: p.text, by: p.by, at: p.at });
+        return `Imported ${topics.length} topics and ${posts.length} posts.`;
+      },
+    },
     recall: {
       description: "Search posts with a case-insensitive regular expression, in one topic or all of them.",
       input: { type: "object", required: ["pattern"], properties: { pattern: { type: "string" }, topic: { type: "string" } } },
@@ -105,7 +120,7 @@ At the start of every session, call board_read with no topic and do what the top
 
   fold: {
     post(db, e) {
-      db.exec("insert or ignore into posts values (?, ?, ?, ?, ?, ?, ?)", [e.id, e.data.topic || "", e.data.text, e.author, e.person, e.name, e.time]);
+      db.exec("insert or ignore into posts values (?, ?, ?, ?, ?, ?, ?)", [e.id, e.data.topic || "", e.data.text, e.author, e.person, e.data.by || e.name, e.data.at || e.time]);
     },
     topic(db, e) {
       db.exec("insert or ignore into topics values (?, ?, ?, ?)", [e.data.path, e.data.description, e.time, e.name]);
