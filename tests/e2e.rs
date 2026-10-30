@@ -56,3 +56,27 @@ async fn devices_and_a_phone_share_a_board() {
     assert_eq!(devices, 2);
     assert!(phone.request("GET", "/v1/state", Value::Null).await.is_err(), "a removed device is refused");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_provider_answers_calls_from_another_device() {
+    let (a, _ra) = Node::start(&temp("pa")).await.unwrap();
+    let (b, _rb) = Node::start(&temp("pb")).await.unwrap();
+    let space = a.create_space("Test").await.unwrap();
+    b.join(&a.invite(space, true).unwrap()).await.unwrap();
+    eventually("b to become a member", async || b.state()["spaces"][0]["member"] == true).await;
+
+    // b runs a provider for "echo", as a Swift or Go program would over the local API.
+    b.providers().register("echo", json!({ "title": "Echo", "ops": [{ "name": "say", "description": "", "input": {} }], "widgets": [] }));
+    let serving = b.clone();
+    tokio::spawn(async move {
+        while let Ok(Some(call)) = serving.providers().next("echo").await {
+            let reply = json!({ "ok": { "heard": call.input["text"], "from": call.caller.name }, "entries": [{ "kind": "said", "data": call.input }] });
+            serving.providers().reply("echo", call.id, reply).unwrap();
+        }
+    });
+
+    let reply = a.call_on(b.id(), space, "echo", "say", json!({ "text": "hi" })).await.unwrap();
+    assert_eq!(reply["heard"], "hi");
+    assert_eq!(reply["from"], a.state()["device"]["name"]);
+    assert!(a.call_on(b.id(), space, "nothing", "here", json!({})).await.is_err());
+}
