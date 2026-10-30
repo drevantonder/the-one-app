@@ -33,7 +33,7 @@ On a Mac, `apple/build.sh` builds the app with the node inside it.
 
 ## Make it yours
 
-The app is whitelabelled: `brand.toml` sets its name, CLI name, port and accent colour, and nothing else in the code names the product. Build with `BRAND=path/to/brand.toml` to ship it as your team's own app.
+The app is whitelabelled: `brand.toml` sets its name, CLI name, port and accent colour, and nothing else in the code names the product. `brands/` has two more: `BRAND=brands/ptc.toml cargo build --release` builds The PTC App; install it under its CLI name (`ptc`). Brands keep their own port, data and device key, so one device can run several side by side.
 
 ## How it works
 

@@ -1,0 +1,4 @@
+name = "The Van Tonders App"
+cli = "vantonders"
+port = 4949
+accent = "#2F7D5B"

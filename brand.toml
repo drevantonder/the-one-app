@@ -3,4 +3,4 @@
 name = "The One App"
 cli = "one"
 port = 4747
-accent = "#3A6E8C"
+accent = "#5E5CE6"

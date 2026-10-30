@@ -1,0 +1,4 @@
+name = "The PTC App"
+cli = "ptc"
+port = 4848
+accent = "#3A6E8C"
