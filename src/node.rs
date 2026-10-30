@@ -155,6 +155,7 @@ impl Node {
         tokio::spawn(node.clone().dial_loop());
         for space in node.spaces() {
             node.consider_update(space);
+            node.say_running(space).await;
             for native in node.0.native.iter().filter(|n| n.sync.is_some()) {
                 node.sync_native(space, native.name);
             }
@@ -400,12 +401,14 @@ impl Node {
             .iter()
             .filter(|(_, s)| viewer == self.0.id || s.members.current(&viewer).is_some())
             .map(|(key, s)| {
+                let builds = s.store.ordered().map(|e| release::builds(&e)).unwrap_or_default();
                 let devices: Vec<Value> = s
                     .members
                     .current_devices()
                     .map(|m| {
                         json!({
                             "device": hex(&m.device), "name": m.name, "person": m.person, "role": m.role, "client": m.client,
+                            "build": builds.get(&m.device),
                             "me": m.device == viewer, "host": m.device == self.0.id,
                             "online": m.device == self.0.id || m.device == viewer || s.sessions.contains_key(&m.device),
                         })
@@ -802,6 +805,23 @@ impl Node {
         let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64 };
         self.append(space, release::content(&r)).await?;
         Ok(r)
+    }
+
+    /// Records this device's build in the space, once per build.
+    async fn say_running(&self, space: Key) {
+        let said = {
+            let spaces = self.0.spaces.lock().unwrap();
+            let Some(s) = spaces.get(&space) else { return };
+            if s.members.current(&self.0.id).is_none() {
+                return;
+            }
+            s.store.ordered().map(|e| release::builds(&e).get(&self.0.id).cloned()).ok().flatten()
+        };
+        if said.as_deref() != Some(crate::brand::BUILD) {
+            if let Err(err) = self.append(space, release::running()).await {
+                tracing::warn!("record build: {err:#}");
+            }
+        }
     }
 
     /// Updates this node if an admin published a newer build for its platform.

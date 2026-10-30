@@ -67,3 +67,19 @@ pub fn install(bytes: &[u8]) -> Result<PathBuf> {
     std::fs::rename(&tmp, &exe).context("replace the binary")?;
     Ok(exe)
 }
+
+/// Says which build a device runs, so everyone can see when a release has landed.
+pub fn running() -> Content {
+    Content { app: APP.into(), kind: "running".into(), data: json!({ "commit": crate::brand::BUILD, "target": crate::brand::TARGET }) }
+}
+
+/// The build each device last said it runs.
+pub fn builds(entries: &[Entry]) -> std::collections::HashMap<Key, String> {
+    let mut out = std::collections::HashMap::new();
+    for e in entries.iter().filter(|e| e.content.app == APP && e.content.kind == "running") {
+        if let Some(c) = e.content.data["commit"].as_str() {
+            out.insert(e.author(), c.to_string());
+        }
+    }
+    out
+}

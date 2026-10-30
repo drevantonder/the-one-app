@@ -184,7 +184,8 @@ fn status(state: &Value) {
         for d in s["devices"].as_array().into_iter().flatten() {
             let dot = if d["online"] == true { "●" } else { "○" };
             let me = if d["me"] == true { " (this device)" } else { "" };
-            println!("  {dot} {}{me}", d["name"].as_str().unwrap_or(""));
+            let build = d["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
+            println!("  {dot} {}{me}{build}", d["name"].as_str().unwrap_or(""));
         }
     }
 }
