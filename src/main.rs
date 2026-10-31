@@ -1,5 +1,4 @@
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use one::brand::{CLI, NAME};
