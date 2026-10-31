@@ -151,7 +151,7 @@ A call runs an operation of an app, or of a driver for an app, as a user. One st
 
 **Scopes first.** The asker names the scopes a call touches before it runs; a client may leave them out, and each server then takes every scope the call may reach (see "Calls" under "Apps"). A server answers `{ elsewhere }` before running anything when it doesn't serve that user, doesn't hold every scope named, isn't ready, or lacks the app's latest deploy or the driver. So failing over to the next server never repeats a side effect. A call that names a scope it may not reach is an error.
 
-A server accepts a call as a user only if that user trusts it, and only from one of that user's clients or a server that user trusts. A call that takes longer than 30 seconds is stopped.
+A server accepts a call as a user only if that user trusts it, and only from one of that user's clients or a server that user trusts. A call that takes longer than 30 seconds is stopped; a driver's, 10 minutes.
 
 **Where calls run.** An app's call as a user runs on a server that user trusts and that holds every scope the call touches; a driver's, on a server whose `Hello` lists that driver for that user. The asker tries them nearest first (its own machine, then the fastest to answer lately), one at a time, never two at once, and tries the next only on a connection error or `elsewhere`. Clients do the same; a server asked by a client for a driver it doesn't run passes the call on to one that does.
 

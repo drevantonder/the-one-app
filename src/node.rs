@@ -27,6 +27,8 @@ pub const CLIENT_ALPN: &[u8] = b"one/client/1";
 const BLOB_ALPN: &[u8] = b"one/blob/1";
 /// How long a call may run before it's stopped.
 const CALL_LIMIT: Duration = Duration::from_secs(30);
+/// A driver's call may take longer, as a browser or a desktop starts: as long as a provider is waited for.
+const DRIVER_LIMIT: Duration = Duration::from_secs(600);
 /// The most a call or a client's request (or its answer) may carry: an email of a claim's receipts, base64, fits.
 const MESSAGE_LIMIT: usize = 64 << 20;
 /// How long a waking server waits for its first round of dialing before it may call itself ready.
@@ -645,18 +647,25 @@ impl Node {
         let request = json!({ "app": req.app, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
         send.write_all(&serde_json::to_vec(&request)?).await?;
         send.finish()?;
-        let reply = tokio::time::timeout(CALL_LIMIT + Duration::from_secs(5), recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
+        let reply = tokio::time::timeout(self.limit(&req.app) + Duration::from_secs(5), recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
         Ok(Reply::from_json(serde_json::from_slice(&reply)?))
     }
 
     /// Runs a call here, for `me`, or says why it can't.
     async fn run(&self, req: &CallRequest, me: &Caller) -> Reply {
-        let result = tokio::time::timeout(CALL_LIMIT, self.run_here(req, me)).await;
+        let limit = self.limit(&req.app);
+        let result = tokio::time::timeout(limit, self.run_here(req, me)).await;
         match result {
             Ok(Ok(reply)) => reply,
             Ok(Err(err)) => Reply::Error(format!("{err:#}")),
-            Err(_) => Reply::Error(format!("it took longer than {}s and was stopped", CALL_LIMIT.as_secs())),
+            Err(_) => Reply::Error(format!("it took longer than {}s and was stopped", limit.as_secs())),
         }
+    }
+
+    /// How long a call to `app` may run: an app's, CALL_LIMIT; a driver's, DRIVER_LIMIT.
+    fn limit(&self, app: &str) -> Duration {
+        let deployed = self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some()))).unwrap_or(true);
+        if deployed || app == members::APP { CALL_LIMIT } else { DRIVER_LIMIT }
     }
 
     async fn run_here(&self, req: &CallRequest, me: &Caller) -> Result<Reply> {
