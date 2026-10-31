@@ -135,6 +135,12 @@ impl Members {
     pub fn current_devices(&self) -> impl Iterator<Item = &Member> {
         self.devices.values().filter(|m| m.until.is_none())
     }
+
+    /// Whether `device` was, at `order`, one of an admin's own devices: a member whose user had an admin device then.
+    pub fn admins(&self, device: &Key, order: Order) -> bool {
+        let Some(m) = self.active(device, order) else { return false };
+        self.devices.keys().filter_map(|d| self.active(d, order)).any(|a| a.role == Role::Admin && a.user == m.user)
+    }
 }
 
 pub fn root_message(device: &Key, name: &str) -> Vec<u8> {
@@ -233,6 +239,19 @@ mod tests {
         assert!(m.current(&laptop.id()).is_some());
         assert!(m.current(&Dev::new(6).id()).is_none());
         assert!(m.current(&Dev::new(7).id()).is_none());
+    }
+
+    #[test]
+    fn an_admins_other_devices_are_theirs_too() {
+        let (_, space, mut admin, mut entries) = setup();
+        let (laptop, stranger) = (Dev::new(3), Dev::new(4));
+        entries.push(admin.write(space, 2, admit(&laptop.id(), "andre", "laptop", Role::Member)));
+        entries.push(admin.write(space, 3, admit(&stranger.id(), "sam", "sam's", Role::Member)));
+        entries.push(admin.write(space, 10, remove(&admin.id())));
+        let m = Members::replay(&space, &entries);
+        assert!(m.admins(&laptop.id(), (5, laptop.id(), 0)));
+        assert!(!m.admins(&stranger.id(), (5, stranger.id(), 0)));
+        assert!(!m.admins(&laptop.id(), (11, laptop.id(), 0)), "not once the user has no admin device");
     }
 
     #[test]

@@ -7,11 +7,13 @@ fn main() {
     let brand: toml::Table = text.parse().expect("parse brand file");
     let get = |key: &str| brand.get(key).unwrap_or_else(|| panic!("brand file lacks {key}")).clone();
     let out = format!(
-        "pub const NAME: &str = {:?};\npub const CLI: &str = {:?};\npub const PORT: u16 = {};\npub const ACCENT: &str = {:?};\n",
+        "pub const NAME: &str = {:?};\npub const CLI: &str = {:?};\npub const PORT: u16 = {};\npub const ACCENT: &str = {:?};\npub const REPO: &str = {:?};\n",
         get("name").as_str().unwrap(),
         get("cli").as_str().unwrap(),
         get("port").as_integer().unwrap(),
         get("accent").as_str().unwrap(),
+        // The GitHub repo releases come from; a brand without one isn't released.
+        brand.get("repo").and_then(|r| r.as_str()).unwrap_or(""),
     );
     // Which build this is, so a node can tell a release apart from itself.
     let commit = std::process::Command::new("git")

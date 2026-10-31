@@ -28,6 +28,8 @@ pub fn router(node: Node) -> Router {
         .route("/v1/device", post(rename))
         .route("/v1/remove", post(remove))
         .route("/v1/release", post(release))
+        .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
+        .route("/v1/blobs/{hash}", get(blob))
         .route("/v1/events", get(events))
         .route("/v1/screens/{app}/{screen}", get(screen))
         .route("/hooks/{app}/{name}", post(hook))
@@ -189,6 +191,14 @@ async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> R
     let space = node.find_space(req.space.as_deref())?;
     let r = node.publish(space, std::path::Path::new(&req.path), &req.commit, &req.target, req.committed).await?;
     Ok(Json(json!(r)))
+}
+
+async fn put_blob(State(node): State<Node>, body: axum::body::Bytes) -> Reply {
+    Ok(Json(json!({ "blob": node.put_blob(&body)?, "size": body.len() })))
+}
+
+async fn blob(State(node): State<Node>, axum::extract::Path(hash): axum::extract::Path<String>) -> Result<Response, Error> {
+    Ok(([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], node.blob(&hash).await?).into_response())
 }
 
 async fn register(State(node): State<Node>, axum::extract::Path(app): axum::extract::Path<String>, Json(describe): Json<Value>) -> Reply {

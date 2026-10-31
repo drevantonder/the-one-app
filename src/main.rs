@@ -6,6 +6,8 @@ use one::brand::{CLI, NAME, PORT};
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
 
+mod update;
+
 fn help() -> String {
     format!(
         "{NAME}: your devices as one place for apps and agents.
@@ -20,7 +22,11 @@ Usage:
   {CLI} remove <device>             remove a device from the space (admins)
   {CLI} apps                        every app and its operations
   {CLI} <app> <op> [--key value]    run an operation, e.g. {CLI} board post --text hi
-  {CLI} release [binary]            publish a build; every node on its platform updates (admins)
+  {CLI} update                      test and build main's tip on this device and the Macs, and run it everywhere
+  {CLI} release <vX.Y.Z>            the same, signed off and published on GitHub for the installer
+  {CLI} publish [binary]            publish a build you made; every node on its platform updates
+  {CLI} blob put <file>             keep a file as a blob any of your devices can get; prints its hash
+  {CLI} blob get <hash> <file>      get a blob from this device or another
   {CLI} version                     this build
   {CLI} mcp                         serve MCP over stdio, for agents
 
@@ -88,30 +94,25 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/remove", json!({ "space": space, "device": found["device"] }))?;
             println!("Removed {}.", found["name"].as_str().unwrap_or(device));
         }
-        ["release", rest @ ..] => {
-            // A release is this binary, or one built for another platform: --target <triple> --commit <hash>.
+        ["update"] => update::run(None, space.as_deref())?,
+        ["release", tag] => update::run(Some(tag), space.as_deref())?,
+        ["publish", rest @ ..] => {
             let path = match rest {
                 [path] => std::fs::canonicalize(path)?,
                 _ => std::env::current_exe()?,
             };
-            // The binary knows what it is; ask it, unless it's for another platform and can't run here.
-            let version: Value = std::process::Command::new(&path)
-                .args(["version", "--json"])
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .and_then(|o| serde_json::from_slice(&o.stdout).ok())
-                .unwrap_or_default();
-            let ran_commit = version["commit"].as_str().map(str::to_string);
-            let ran_target = version["target"].as_str().map(str::to_string);
-            let committed = flags.get("committed").and_then(Value::as_u64).or(version["committed"].as_u64()).context("say when the commit was made with --committed (seconds since 1970)")?;
-            let commit = flags.get("commit").and_then(Value::as_str).map(str::to_string).or(ran_commit).context("say which commit this is with --commit")?;
-            let target = flags.get("target").and_then(Value::as_str).map(str::to_string).or(ran_target).context("say which platform this is for with --target")?;
-            if commit.ends_with("+dirty") {
-                bail!("that build has uncommitted changes; commit, build again, then release");
+            publish(&path, space, &flags)?;
+        }
+        ["blob", "put", file] => {
+            let bytes = std::fs::read(file).with_context(|| format!("read {file}"))?;
+            println!("{}", request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bytes[..]))?["blob"].as_str().unwrap_or(""));
+        }
+        ["blob", "get", hash, file] => {
+            let mut resp = agent().get(format!("http://{}/v1/blobs/{hash}", addr())).call().with_context(|| format!("no node is running here: start one with {CLI} serve"))?;
+            if !resp.status().is_success() {
+                bail!("{}", resp.body_mut().read_json::<Value>()?["error"].as_str().unwrap_or("failed"));
             }
-            let r = post("/v1/release", json!({ "space": space, "path": path, "commit": commit, "target": target, "committed": committed }))?;
-            println!("Released {} for {}. Every node on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
+            std::fs::write(file, resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)?;
         }
         ["version"] if flags.contains_key("json") => println!("{}", json!({ "commit": one::brand::BUILD, "target": one::brand::TARGET, "committed": one::brand::COMMITTED })),
         ["version"] => println!("{} {} ({})", NAME, one::brand::BUILD, one::brand::TARGET),
@@ -133,6 +134,28 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         _ => bail!("unknown command; {CLI} help lists them"),
     }
+    Ok(())
+}
+
+/// Publishes the binary at `path` as a release: this one, or one built for another platform (--target <triple> --commit <hash>
+/// --committed <seconds>).
+fn publish(path: &std::path::Path, space: Option<String>, flags: &Map<String, Value>) -> Result<()> {
+    // The binary knows what it is; ask it, unless it's for another platform and can't run here.
+    let version: Value = std::process::Command::new(path)
+        .args(["version", "--json"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| serde_json::from_slice(&o.stdout).ok())
+        .unwrap_or_default();
+    let committed = flags.get("committed").and_then(Value::as_u64).or(version["committed"].as_u64()).context("say when the commit was made with --committed (seconds since 1970)")?;
+    let commit = flags.get("commit").and_then(Value::as_str).or(version["commit"].as_str()).context("say which commit this is with --commit")?;
+    let target = flags.get("target").and_then(Value::as_str).or(version["target"].as_str()).context("say which platform this is for with --target")?;
+    if commit.ends_with("+dirty") {
+        bail!("that build has uncommitted changes; commit, build again, then publish");
+    }
+    let r = post("/v1/release", json!({ "space": space, "path": path, "commit": commit, "target": target, "committed": committed }))?;
+    println!("Published {} for {}. Every node on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
     Ok(())
 }
 

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::entry::{Content, Entry, Key};
-use crate::space::{Members, Role};
+use crate::space::Members;
 
 pub const APP: &str = "node";
 
@@ -26,12 +26,12 @@ pub fn content(release: &Release) -> Content {
     Content { app: APP.into(), kind: "release".into(), data: json!(release) }
 }
 
-/// The newest release an admin published for `target`, and the device that published it.
+/// The newest release one of an admin's devices published for `target`, and the device that published it.
 pub fn latest(members: &Members, entries: &[Entry], target: &str) -> Option<(Release, Key)> {
     entries
         .iter()
         .filter(|e| e.content.app == APP && e.content.kind == "release")
-        .filter(|e| members.active(&e.author(), e.order()).is_some_and(|m| m.role == Role::Admin))
+        .filter(|e| members.admins(&e.author(), e.order()))
         .filter_map(|e| serde_json::from_value::<Release>(e.content.data.clone()).ok().map(|r| (e.order(), r, e.author())))
         .filter(|(_, r, _)| r.target == target)
         .max_by_key(|(order, _, _)| *order)
@@ -76,12 +76,19 @@ pub fn running() -> Content {
     Content { app: APP.into(), kind: "running".into(), data: json!({ "commit": crate::brand::BUILD, "target": crate::brand::TARGET }) }
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct Running {
+    pub commit: String,
+    #[serde(default)]
+    pub target: String,
+}
+
 /// The build each device last said it runs.
-pub fn builds(entries: &[Entry]) -> std::collections::HashMap<Key, String> {
+pub fn builds(entries: &[Entry]) -> std::collections::HashMap<Key, Running> {
     let mut out = std::collections::HashMap::new();
     for e in entries.iter().filter(|e| e.content.app == APP && e.content.kind == "running") {
-        if let Some(c) = e.content.data["commit"].as_str() {
-            out.insert(e.author(), c.to_string());
+        if let Ok(r) = serde_json::from_value::<Running>(e.content.data.clone()) {
+            out.insert(e.author(), r);
         }
     }
     out

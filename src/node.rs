@@ -50,7 +50,7 @@ struct Space {
     user: String,
     paired_by: Option<Key>,
     /// The build each device last said it runs.
-    builds: HashMap<Key, String>,
+    builds: HashMap<Key, release::Running>,
     /// What each of this user's devices announced it provides (SPEC.md, "Providers").
     provides: Vec<(Key, Value)>,
     replayed: Option<Order>,
@@ -223,7 +223,7 @@ impl Node {
                 .filter(|d| !s.provides.iter().any(|(dev, v)| *dev == self.0.id && v == d))
                 .map(|d| crate::providers::announcement(&d))
                 .collect();
-            if s.builds.get(&self.0.id).map(String::as_str) != Some(crate::brand::BUILD) {
+            if s.builds.get(&self.0.id).map(|r| r.commit.as_str()) != Some(crate::brand::BUILD) {
                 missing.push(release::running());
             }
             missing
@@ -534,7 +534,7 @@ impl Node {
                     .map(|m| {
                         json!({
                             "device": hex(&m.device), "name": m.name, "user": m.user, "role": m.role, "client": m.client,
-                            "build": builds.get(&m.device),
+                            "build": builds.get(&m.device).map(|r| &r.commit), "target": builds.get(&m.device).map(|r| &r.target),
                             "me": m.device == viewer, "host": m.device == self.0.id,
                             "online": m.device == self.0.id || m.device == viewer || s.sessions.contains_key(&m.device),
                         })
@@ -961,12 +961,13 @@ fn sorted(entries: &[Entry]) -> Vec<Entry> {
 }
 
 impl Node {
-    /// Publishes `binary` (a build of this node for `target`) as the space's newest release. Admins only.
+    /// Publishes `binary` (a build of this node for `target`) as the space's newest release. Admins' devices only.
     pub async fn publish(&self, space: Key, binary: &Path, commit: &str, target: &str, committed: u64) -> Result<Release> {
         {
             let spaces = self.0.spaces.lock().unwrap();
             let s = spaces.get(&space).context("no such space")?;
-            ensure!(s.members.current(&self.0.id).is_some_and(|m| m.role == Role::Admin), "only admins publish releases");
+            let me = s.members.current(&self.0.id).context("not a member")?;
+            ensure!(s.members.current_devices().any(|a| a.role == Role::Admin && a.user == me.user), "only an admin's devices publish releases");
         }
         let bytes = std::fs::read(binary).with_context(|| format!("read {}", binary.display()))?;
         let blob = release::put_blob(&self.0.dir, &bytes)?;
@@ -1012,23 +1013,41 @@ impl Node {
             Err(_) => {
                 let mut peers = vec![author];
                 peers.extend(self.peers(space).into_iter().filter(|p| *p != author));
-                let mut last = anyhow!("no device had it");
-                let mut found = None;
-                for peer in peers {
-                    match self.fetch_blob(peer, &r.blob, r.size).await {
-                        Ok(b) => {
-                            found = Some(b);
-                            break;
-                        }
-                        Err(err) => last = err,
-                    }
-                }
-                let bytes = found.ok_or(last)?;
-                release::put_blob(&self.0.dir, &bytes)?;
-                bytes
+                self.fetch_from(peers, &r.blob, r.size).await?
             }
         };
         release::install(&bytes)
+    }
+
+    /// Keeps `bytes` as a blob, which every member may then fetch. See SPEC.md, "Blobs".
+    pub fn put_blob(&self, bytes: &[u8]) -> Result<String> {
+        release::put_blob(&self.0.dir, bytes)
+    }
+
+    /// A blob from this device, else from any device online in one of its spaces.
+    pub async fn blob(&self, hash: &str) -> Result<Vec<u8>> {
+        if let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) {
+            return Ok(bytes);
+        }
+        let mut peers: Vec<Key> = self.0.spaces.lock().unwrap().values().flat_map(|s| s.sessions.keys().copied()).collect();
+        peers.sort();
+        peers.dedup();
+        self.fetch_from(peers, hash, 1 << 30).await
+    }
+
+    /// Fetches a blob from the first of `peers` that has it, and keeps it.
+    async fn fetch_from(&self, peers: Vec<Key>, hash: &str, size: u64) -> Result<Vec<u8>> {
+        let mut last = anyhow!("no device had it");
+        for peer in peers {
+            match self.fetch_blob(peer, hash, size).await {
+                Ok(bytes) => {
+                    release::put_blob(&self.0.dir, &bytes)?;
+                    return Ok(bytes);
+                }
+                Err(err) => last = err,
+            }
+        }
+        Err(last)
     }
 
     /// Every entry an app has in a space, by members, oldest first.

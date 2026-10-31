@@ -1,6 +1,6 @@
 # Protocol
 
-Version 4. Everything here is what two devices must agree on.
+Version 6. Everything here is what two devices must agree on.
 
 ## Keys
 
@@ -57,7 +57,7 @@ A blob is bytes named by their BLAKE3 hash. A member sends a hash (64 hex charac
 
 ## Releases
 
-The app `node` is the node's own, and other apps never see it. A release of the node is an entry with kind `release`: `{ commit, target, blob, size, committed }`, where `committed` is when the commit was made (seconds since 1970), where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin count. A node whose own build differs from the newest release for its target, and isn't newer than it, fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead. Each node also writes `running { commit, target }` once per build, so everyone can see what each device runs.
+The app `node` is the node's own, and other apps never see it. A release of the node is an entry with kind `release`: `{ commit, target, blob, size, committed }`, where `committed` is when the commit was made (seconds since 1970), where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin's devices count: a member whose user has an admin device when it writes. A node whose own build differs from the newest release for its target, and isn't newer than it, fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead. Each node also writes `running { commit, target }` once per build, so everyone can see what each device runs.
 
 ## Providers
 
@@ -77,7 +77,8 @@ Each node serves HTTP on `127.0.0.1:<brand port>` for its own device's shells, C
 - `GET /v1/widgets?space=`: every widget, rendered.
 - `GET /v1/screens/<app>/<screen>?space=&params=`: an app screen as a page (see "Screens").
 - `POST /v1/spaces { name }`, `POST /v1/pair { space?, new_user? }` → `{ code }`, `POST /v1/join { code }`, `POST /v1/device { name }`, `POST /v1/remove { space?, device }`.
-- `POST /v1/release { space?, path, commit, target }`: publishes the binary at `path` (admins).
+- `POST /v1/release { space?, path, commit, target, committed }`: publishes the binary at `path` (an admin's devices).
+- `POST /v1/blobs` with the bytes as the body → `{ blob, size }`: keeps them as a blob. `GET /v1/blobs/<hash>`: a blob, from this device or any member online.
 - `GET /v1/events`: server-sent events `changed { space, apps }`, `peers { space }` and `spaces`.
 - Providers, for device features written outside the node (Swift, Go): `POST /v1/providers/<app>` with the app's description registers it; `GET /v1/providers/<app>/calls` waits up to 25 seconds for a call `{ id, op, input, caller }` (204 if none); `POST /v1/providers/<app>/calls/<id>` answers `{ ok, entries?: [{ kind, data }] }` or `{ error }`. A provider that stops asking for calls for a minute is gone. Providers run only for their device's own user's devices.
 - `POST /hooks/<app>/<name>`: for agent harnesses' hooks. The body is the hook's JSON; the reply is plain text for the agent. The node remembers per `session_id` when the hook last ran and passes it to the app as `since` (null on a session's first call). Hooks need the device to be in exactly one space.

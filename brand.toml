@@ -4,6 +4,8 @@ name = "The One App"
 cli = "one"
 port = 4747
 accent = "#9E6E06"
+# Where `one update` and `one release` get the code, and the installer the releases.
+repo = "drevantonder/the-one-app"
 # Artwork, relative to this file: the app icon (1024px), the menu bar template (18pt, with an @2x),
 # and the logo the apps show inside themselves.
 icon = "brand/AppIcon.png"
