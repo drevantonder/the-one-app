@@ -173,6 +173,8 @@ func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, er
 		return l.send(ctx, in.Chat, in.Text)
 	case "move":
 		return l.move(in.To)
+	case "sign_out":
+		return l.signOut(ctx)
 	}
 	return nil, fmt.Errorf("whatsapp has no operation %s", op)
 }
@@ -301,6 +303,22 @@ func (l *link) signIn(ctx context.Context, number string) (string, error) {
 	}
 	return fmt.Sprintf("On the phone, open WhatsApp > Settings > Linked devices > Link a device, then tap Link with phone number instead and type %s within 2 minutes; "+
 		"or scan this QR code there within 20 seconds (sign_in again for new ones).", code) + after, nil
+}
+
+// signOut unlinks this server from the account and deletes what it kept.
+func (l *link) signOut(ctx context.Context) (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.client.Store.ID == nil {
+		return "", errors.New("WhatsApp isn't linked here")
+	}
+	if err := l.client.Logout(ctx); err != nil {
+		return "", fmt.Errorf("not signed out, and nothing deleted: %w", err)
+	}
+	if err := l.forget(); err != nil {
+		return "", fmt.Errorf("unlinked, but deleting the messages kept here failed: %w", err)
+	}
+	return "Signed out: this server is no longer one of WhatsApp's linked devices, and the messages it kept are deleted.", nil
 }
 
 func (l *link) handle(evt any) {

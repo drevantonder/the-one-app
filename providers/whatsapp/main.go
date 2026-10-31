@@ -176,7 +176,7 @@ var describe = map[string]any{
 	"instructions": "WhatsApp runs on the server linked to the account; calls find it. whatsapp_chats lists recent chats; " +
 		"whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: " +
 		"send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. " +
-		"whatsapp_move moves the link to another server.",
+		"whatsapp_move moves the link to another server; whatsapp_sign_out unlinks it and deletes its messages, only when the user asks.",
 	"ops": []map[string]any{
 		{"name": "status", "description": "Whether WhatsApp is linked and connected here, as which number, and how many messages are kept; or on which of your servers it's linked.",
 			"input": object(map[string]any{})},
@@ -197,6 +197,8 @@ var describe = map[string]any{
 				"text": str("the message")}, "chat", "text")},
 		{"name": "move", "description": "Move the WhatsApp link, with its kept messages, from the server it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted here once the other server has it.",
 			"input": object(map[string]any{"to": str("the server to move it to, by name")}, "to")},
+		{"name": "sign_out", "description": "Unlink WhatsApp: removes this server from the account's linked devices and deletes the messages kept here. Destructive: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
+			"input": object(map[string]any{})},
 	},
 	"widgets": []any{},
 }
