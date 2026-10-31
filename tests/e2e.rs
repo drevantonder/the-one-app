@@ -579,7 +579,8 @@ async fn the_app_store_lists_adds_and_shows_code() {
     a.member("group", json!({ "group": "b000000000000001", "name": "Team" })).await.unwrap();
     assert_eq!(a.state()["brand"]["store"], "apps");
     // The install's settings are the edition's until an admin sets one, and null puts it back.
-    assert_eq!(a.state()["install"]["settings"]["made_here"], "Made here");
+    let edition = one::brand::SETTINGS.iter().find(|(k, _)| *k == "made_here").map_or(serde_json::Value::Null, |(_, v)| json!(v));
+    assert_eq!(a.state()["install"]["settings"]["made_here"], edition);
     a.set_setting(&me, "made_here", Some("Made by the team")).await.unwrap();
     assert_eq!(a.state()["install"]["settings"]["made_here"], "Made by the team");
     let html = a.screen(me.clone(), "apps", "main", json!({}), None).await.unwrap();
@@ -587,7 +588,7 @@ async fn the_app_store_lists_adds_and_shows_code() {
     a.set_setting(&me, "push", Some("")).await.unwrap();
     assert_eq!(a.state()["brand"]["push"], "", "push is off");
     a.set_setting(&me, "made_here", None).await.unwrap();
-    assert_eq!(a.state()["install"]["settings"]["made_here"], "Made here");
+    assert_eq!(a.state()["install"]["settings"]["made_here"], edition);
     let listed = a.call(call("apps", "list", json!({}))).await.unwrap();
     let names: Vec<&str> = listed["apps"].as_array().unwrap().iter().filter(|x| x["installed"].as_array().unwrap().contains(&json!("global"))).map(|x| x["name"].as_str().unwrap()).collect();
     assert!(["board", "repos", "apps", "devices"].iter().all(|n| names.contains(n)), "a new install starts with the brand's apps, for everyone: {names:?}");
