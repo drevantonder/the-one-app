@@ -22,9 +22,6 @@ func (b *browser) run(op string, raw json.RawMessage) (any, error) {
 			return nil, fmt.Errorf("bad input: %w", err)
 		}
 	}
-	if op == "sign_in" {
-		return b.signIn()
-	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	switch op {
@@ -269,15 +266,4 @@ func (b *browser) openChat(want string) (string, error) {
 		return "", fmt.Errorf("no chat or person called %q", want)
 	}
 	return "", fmt.Errorf("no chat or person called exactly %q; Messenger suggests: %s", want, strings.Join(found, "; "))
-}
-
-// signIn opens messenger.com on the saved login, for the person to sign in.
-func (b *browser) signIn() (any, error) {
-	got, err := b.desktops("sign_in", map[string]any{"login": login, "url": home})
-	if err != nil {
-		return nil, err
-	}
-	m, _ := got.(map[string]any)
-	url, _ := m["url"].(string)
-	return fmt.Sprintf("Give the person this link: %s\nThey sign in to Messenger there (tick Keep me signed in), then press Save login on the Desktops page; it's saved by itself after 30 minutes otherwise.", url), nil
 }

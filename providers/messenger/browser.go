@@ -13,9 +13,11 @@ import (
 )
 
 // browser is the browser in a desktop borrowed from the desktops driver,
-// through this device's node, signed in with the saved login.
+// through this device's node, starting with a copy of a browser profile
+// signed in to messenger.com.
 type browser struct {
-	node string
+	node  string
+	login string // the browser profile
 
 	mu      sync.Mutex
 	desktop string // the borrowed desktop; given back when idle
@@ -27,13 +29,12 @@ type browser struct {
 }
 
 const (
-	login = "default" // the saved login signed in to messenger.com
-	home  = "https://www.messenger.com/"
+	home = "https://www.messenger.com/"
 	// idle is how long a borrowed desktop is kept without a call.
 	idle = 5 * time.Minute
 )
 
-var errNotSignedIn = errors.New("Messenger isn't signed in on the desktops' saved login. Ask the person to sign in: messenger_sign_in gives them a link, or they press Sign in to a site on the Desktops page, sign in at messenger.com (with Keep me signed in), and press Save login")
+var errNotSignedIn = errors.New("Messenger isn't signed in on that browser profile. Ask the person to sign in again: messenger_sign_in with the profile gives them a link, where they sign in at messenger.com (with Keep me signed in), then save the profile")
 
 // desktops runs one of the desktops driver's operations, wherever it runs.
 func (b *browser) desktops(op string, input map[string]any) (any, error) {
@@ -58,12 +59,12 @@ func (b *browser) desktops(op string, input map[string]any) (any, error) {
 	return reply.OK, nil
 }
 
-// borrow takes a desktop with the login, unless one is borrowed.
+// borrow takes a desktop with the profile, unless one is borrowed.
 func (b *browser) borrow() error {
 	if b.desktop != "" {
 		return nil
 	}
-	got, err := b.desktops("borrow", map[string]any{"for": "Reading Messenger", "by": "messenger", "login": login})
+	got, err := b.desktops("borrow", map[string]any{"for": "Reading Messenger", "by": "messenger", "login": b.login, "profile": b.login})
 	if err != nil {
 		return err
 	}
@@ -84,14 +85,6 @@ func (b *browser) giveBack() {
 	}
 	b.desktops("give_back", map[string]any{"desktop": b.desktop})
 	b.desktop = ""
-}
-
-func (b *browser) keepGivingBack() {
-	for range time.Tick(time.Minute) {
-		b.mu.Lock()
-		b.giveBack()
-		b.mu.Unlock()
-	}
 }
 
 // tool runs one of the desktop's tools and returns its structured answer,
@@ -155,10 +148,10 @@ func structured(got any) map[string]any {
 	return map[string]any{}
 }
 
-// open starts the desktop's browser on the login and attaches to its tab.
+// open starts the desktop's browser on the profile and attaches to its tab.
 func (b *browser) open() error {
 	b.target, b.tab = "", ""
-	prepared, err := b.tool("browser_prepare", map[string]any{"allow_launch": true, "profile": map[string]any{"mode": "isolated_named", "name": login}})
+	prepared, err := b.tool("browser_prepare", map[string]any{"allow_launch": true, "profile": map[string]any{"mode": "isolated_named", "name": b.login}})
 	if err != nil {
 		return fmt.Errorf("starting the browser: %w", err)
 	}
@@ -317,7 +310,7 @@ func (b *browser) list() (page, error) {
 				return page{}, err
 			}
 			if p.signedOut() {
-				// Its copy of the login stays signed out: borrow afresh next time, after the person signed in.
+				// Its copy of the profile stays signed out: borrow afresh next time, after the person signed in.
 				b.desktops("give_back", map[string]any{"desktop": b.desktop})
 				b.desktop = ""
 				return page{}, errNotSignedIn
