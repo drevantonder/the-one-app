@@ -69,6 +69,7 @@ export default {
 
   ops: {
     list: {
+      reads: true,
       description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; owner, where it's installed (that you can see), forks, and the places you may add it to.",
       input: { type: "object", properties: {} },
       async run(ctx) {
@@ -98,6 +99,7 @@ export default {
       },
     },
     remove: {
+      confirm: true,
       description: "Uninstall an app from a place: user, group:<id> or global.",
       input: { type: "object", required: ["app", "scope"], properties: { app: { type: "string" }, scope: { type: "string" } } },
       async run(ctx, { app, scope }) {
@@ -106,6 +108,7 @@ export default {
       },
     },
     code: {
+      reads: true,
       description: "An app's code as deployed: its files, or with path one of them. Everyone may read every app's code.",
       input: { type: "object", required: ["app"], properties: { app: { type: "string" }, path: { type: "string" } } },
       async run(ctx, { app, path }) {

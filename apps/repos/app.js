@@ -78,6 +78,7 @@ export default {
 
   ops: {
     list: {
+      reads: true,
       description: "Every repo: its owner, where it was forked from, its branches and suggestions, and when it last moved.",
       input: { type: "object", properties: {} },
       async run(ctx) {
@@ -91,6 +92,7 @@ export default {
       },
     },
     get: {
+      reads: true,
       description: "A repo: its owner, branches and suggestions with their heads, forks, and the packs that hold its objects, oldest first.",
       input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
       async run(ctx, { repo }) {
