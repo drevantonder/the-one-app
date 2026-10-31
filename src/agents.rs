@@ -573,9 +573,9 @@ mod tests {
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["hooks"]["UserPromptSubmit"].as_array().unwrap().len(), 1, "the emptied group goes: {out}");
         // Another brand's board hook, on another port, stays.
-        let ptc = "curl -sf --max-time 3 --data-binary @- http://127.0.0.1:4848/hooks/board/news || true";
-        let text = format!("{{\"hooks\":{{\"UserPromptSubmit\":[{{\"hooks\":[{{\"type\":\"command\",\"command\":\"{ptc}\"}}]}}]}}}}");
-        assert_eq!(hooks(&with_hook(&text, HOOK, OURS).unwrap().unwrap()), [ptc, HOOK]);
+        let other = "curl -sf --max-time 3 --data-binary @- http://127.0.0.1:4848/hooks/board/news || true";
+        let text = format!("{{\"hooks\":{{\"UserPromptSubmit\":[{{\"hooks\":[{{\"type\":\"command\",\"command\":\"{other}\"}}]}}]}}}}");
+        assert_eq!(hooks(&with_hook(&text, HOOK, OURS).unwrap().unwrap()), [other, HOOK]);
     }
 
     #[test]

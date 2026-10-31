@@ -1,5 +1,5 @@
-# The brand this build ships as. Copy and change it to make the app your own
-# ("ptc" / "The PTC App"); nothing else in the code names the product.
+# The edition this build is: The One App. Another edition is this code built with its own config.toml
+# (CONFIG=path/to/config.toml), kept in its own repo; nothing else in the code names the product.
 name = "The One App"
 cli = "one"
 port = 4747
@@ -12,7 +12,7 @@ release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNL
 release_signer = "ssh mac \"op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'\""
 # Every folder in apps/ ships built into each release, for any install to add. These are the ones a new install
 # deploys and installs in global; each `one update` deploys the release's version of every one an install has.
-apps = ["apps/board", "apps/repos", "apps/apps", "apps/devices"]
+apps = ["board", "repos", "apps", "devices"]
 # The app the shells' App Store opens: an ordinary app, whose screens add apps to pages with ctx.install.
 store = "apps"
 # The driver phones register their push tokens with, which apps push through (providers/push).
@@ -24,3 +24,4 @@ made_here = "Made here"
 icon = "brand/AppIcon.png"
 menubar = "brand/MenuBarIcon.png"
 logo = "brand/Logo.png"
+

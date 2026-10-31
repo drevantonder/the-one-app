@@ -2,7 +2,7 @@
 
 Version 11. Everything here is what two machines must agree on. What's marked *(not built yet)* is designed but not in the code; what's marked *(for now)* is how the code does it until then.
 
-An **install** is the product as one context runs it (The One App, The PTC App, The Van Tonders App), with its own CLI, port, API and data on each machine. Installs never talk to each other. Inside an install:
+An **install** is the product as one context runs it (The One App, or another edition of it), with its own CLI, port, API and data on each machine. Installs never talk to each other. Inside an install:
 
 - **Users** are the people in it. Each is an admin or a member. **Groups** are sets of users that share data; each member of a group is its admin or a member.
 - **Servers** run the node. Each has owners and users (see "Servers"), and holds what they may read.
@@ -46,7 +46,7 @@ A server **holds**:
 - every scope its owners can read: a user owner reads their own scope and their groups'; a group owner reads its own; `install` reads every scope;
 - the scope of each user who trusts it.
 
-A server owned by `install` holds everything and serves everyone in its users: it is **privileged**. All others are **unprivileged**. A brand may name its privileged servers ("the PTC servers"). A group's data goes only to servers whose owners can read it: its members' servers, servers it owns, and privileged servers. It never follows a user's trust.
+A server owned by `install` holds everything and serves everyone in its users: it is **privileged**. All others are **unprivileged**. A brand may name its privileged servers ("the Acme servers"). A group's data goes only to servers whose owners can read it: its members' servers, servers it owns, and privileged servers. It never follows a user's trust.
 
 Examples: a laptop has owners `[user:you]`, users `[user:you]`. A team box: owners `[group:finance]`, users `[group:finance]`, holding the group's data and that of each member who trusts it. A shared box: owners `[user:carol]`, users `[user:carol, user:dan, user:eve]`.
 

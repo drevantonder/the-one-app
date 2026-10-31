@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use one::brand::{CONFIG_FILE, CLI, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
+use one::brand::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
 use one::{cache, release};
 use serde_json::{Value, json};
 
@@ -26,13 +26,14 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
     let key = release_key()?;
     let src = checkout()?;
+    let (config, config_commit) = config(&src)?;
     let commit = git(&src, &["rev-parse", "HEAD"])?;
     let short = &commit[..12];
     if let Some(tag) = tag {
         ensure!(!quiet(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
     }
     println!("Testing {short}");
-    step(Command::new(cargo()).current_dir(&src).env("CONFIG", src.join(CONFIG_FILE)).arg("test"))?;
+    step(Command::new(cargo()).current_dir(&src).env("CONFIG", &config).arg("test"))?;
     if tag.is_some() {
         step(Command::new("gh").current_dir(&src).args(["signoff", "create", "--commit", &commit]))
             .context("sign off (gh extension install basecamp/gh-signoff)")?;
@@ -47,7 +48,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
             println!("  {name}: offline; run this again when it's back");
             continue;
         }
-        match shell(mac, &mac_job(&commit, tag.is_some()), 60) {
+        match shell(mac, &mac_job(&commit, config_commit.as_deref(), tag.is_some()), 60) {
             Ok(r) if r["exit"] == 0 => started.push((mac.clone(), Instant::now())),
             Ok(r) => println!("  {name}: couldn't start its build: {}", r["stderr"].as_str().unwrap_or("").trim()),
             Err(err) => println!("  {name}: couldn't start its build: {err:#}"),
@@ -55,7 +56,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
 
     println!("Building {short}");
-    step(Command::new(cargo()).current_dir(&src).env("CONFIG", src.join(CONFIG_FILE)).args(["build", "--release"]))?;
+    step(Command::new(cargo()).current_dir(&src).env("CONFIG", &config).args(["build", "--release"]))?;
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     // Which devices to wait for, asked before this device's own node restarts on the new build.
     let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
@@ -180,6 +181,24 @@ fn checkout() -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// The config to build with: this checkout's own, or, for an edition whose config lives in its own repo, that repo's
+/// latest, fetched beside it; and then the commit it's at.
+fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
+    if CONFIG_REPO.is_empty() {
+        let file = src.join(CONFIG_FILE);
+        ensure!(file.exists(), "{} isn't there to build with", file.display());
+        return Ok((file, None));
+    }
+    let dir = cache().join("config");
+    if !dir.join(".git").exists() {
+        step(Command::new("git").args(["clone", "-q", CONFIG_REPO]).arg(&dir))?;
+    }
+    for args in [&["fetch", "-q", "origin", "HEAD"][..], &["checkout", "-q", "--detach", "--force", "FETCH_HEAD"]] {
+        step(Command::new("git").current_dir(&dir).args(args))?;
+    }
+    Ok((dir.join(CONFIG_FILE), Some(git(&dir, &["rev-parse", "HEAD"])?)))
+}
+
 /// Cargo, also where rustup puts it, for a shell that doesn't have it on its PATH.
 fn cargo() -> PathBuf {
     let rustup = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cargo/bin/cargo");
@@ -256,7 +275,17 @@ fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
 /// Shell for a Mac: start a job in its logged-in session (codesign needs the keychain, and the job outlives the node,
 /// which the new app replaces) that builds `commit`'s app in a clean clone and installs it. For a release it also
 /// leaves the app, zipped, and the node binary as blobs, listed in assets.txt.
-fn mac_job(commit: &str, assets: bool) -> String {
+fn mac_job(commit: &str, config_commit: Option<&str>, assets: bool) -> String {
+    // An edition whose config is in its own repo gets that repo too, at the commit this server builds with.
+    let config = match config_commit {
+        None => format!(r#"config="$c/src/{CONFIG_FILE}""#),
+        Some(at) => format!(
+            r#"[ -d "$c/config/.git" ] || git clone -q {CONFIG_REPO} "$c/config"
+git -C "$c/config" fetch -q origin
+git -C "$c/config" checkout -q --detach --force {at}
+config="$c/config/{CONFIG_FILE}""#
+        ),
+    };
     let assets = if assets {
         format!(
             r#"a="$c/assets"; rm -rf "$a"; mkdir "$a"
@@ -286,7 +315,8 @@ cd "$c/src"
 git fetch -q --tags --force origin
 git checkout -q --detach --force {commit}
 git clean -qfdx -e /target -e /apple/build
-CONFIG="$c/src/{CONFIG_FILE}" apple/build.sh{release}
+{config}
+CONFIG="$config" apple/build.sh{release}
 {assets}
 JOB
 cat > update.plist <<PLIST
@@ -337,7 +367,7 @@ mod tests {
     #[test]
     fn the_mac_job_is_shell() {
         for assets in [false, true] {
-            let job = super::mac_job("0123abcd", assets);
+            let job = super::mac_job("0123abcd", assets.then_some("4567cdef"), assets);
             let inner = job.split_once("<<'JOB'\n").unwrap().1.split_once("\nJOB\n").unwrap().0;
             for script in [job.as_str(), inner] {
                 let ok = std::process::Command::new("sh").args(["-n", "-c", script]).status().unwrap().success();
