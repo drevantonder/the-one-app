@@ -31,6 +31,8 @@ targets:
         NodePort: "${BRAND_PORT}"
         BrandAccent: ${BRAND_ACCENT}
         BuildCommit: ${BUILD_COMMIT}
+        SignIn: ${BRAND_SIGN_IN}
+        SignInAccount: ${BRAND_ACCOUNT}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         # <cli>://secret?id=…&scope=…: an agent's request that the person set a secret.
@@ -75,6 +77,8 @@ targets:
         BrandAccent: ${BRAND_ACCENT}
         BrandCLI: ${BRAND_CLI}
         BuildCommit: ${BUILD_COMMIT}
+        SignIn: ${BRAND_SIGN_IN}
+        SignInAccount: ${BRAND_ACCOUNT}
         AppGroup: group.app.${BRAND_CLI}.phone
         NSCameraUsageDescription: Scan the code another device shows to join its space.
         # <cli>://join?code=…&name=…: joining from a link, without the camera; <cli>://secret?id=…&scope=…: an

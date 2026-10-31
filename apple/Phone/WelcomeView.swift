@@ -1,12 +1,16 @@
 import SwiftUI
 import VisionKit
 
-/// The first run: name this iPhone, then join with the pairing code another device shows.
+/// The first run: name this iPhone, then join with the pairing code another device shows. For a brand with one
+/// install, sign in to it instead, a pairing code still there for anyone without the account.
 struct WelcomeView: View {
     @Environment(Phone.self) private var phone
+    @Environment(\.webAuthenticationSession) private var session
     @State private var name = UIDevice.current.name
     @State private var scanning = false
     @State private var typing = false
+    @State private var pairing = false
+    @State private var signingIn = false
 
     private var named: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -20,28 +24,36 @@ struct WelcomeView: View {
                         .accessibilityHidden(true)
                     Text("Welcome to \(appName)")
                         .font(.largeTitle.bold())
-                    Text("On a computer that’s already set up, open Settings, then Devices, and choose Pair a Phone or Computer. Scan its code here.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
+                    Group {
+                        if SignIn.brand == nil {
+                            Text("On a computer that’s already set up, open Settings, then Devices, and choose Pair a Phone or Computer. Scan its code here.")
+                        } else {
+                            Text("Your devices, and your team’s, as one place for apps and agents.")
+                        }
+                    }
+                    .font(.body)
+                    .foregroundStyle(.secondary)
                 }
                 .multilineTextAlignment(.center)
                 .padding(.top, 48)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Name")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 16)
-                    TextField("Name", text: $name, prompt: Text("Your iPhone"))
-                        .textContentType(.name)
-                        .submitLabel(.done)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 13)
-                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
-                    Text("Others see this iPhone by this name.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 16)
+                if SignIn.brand == nil {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Name")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 16)
+                        TextField("Name", text: $name, prompt: Text("Your iPhone"))
+                            .textContentType(.name)
+                            .submitLabel(.done)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 13)
+                            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+                        Text("Others see this iPhone by this name.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                    }
                 }
             }
             .padding(.horizontal, 24)
@@ -56,22 +68,45 @@ struct WelcomeView: View {
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.leading)
                 }
-                Button { scanning = true } label: {
-                    Group {
-                        if phone.joining {
-                            ProgressView()
-                        } else {
-                            Label("Scan Pairing Code", systemImage: "qrcode.viewfinder")
+                if let signIn = SignIn.brand {
+                    Button { start(signIn) } label: {
+                        Group {
+                            if phone.joining || signingIn {
+                                ProgressView()
+                            } else {
+                                Text(signIn.title)
+                            }
                         }
+                        .frame(maxWidth: .infinity, minHeight: 30)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 30)
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.large)
+                    Button("Use a Pairing Code Instead") { pairing = true }
+                        .font(.callout.weight(.medium))
+                        .confirmationDialog("Use a Pairing Code", isPresented: $pairing) {
+                            Button("Scan Pairing Code") { scanning = true }
+                            Button("Enter Pairing Code") { typing = true }
+                        } message: {
+                            Text("On a device that’s already set up, open Settings, then Devices, and choose Pair a Phone or Computer.")
+                        }
+                } else {
+                    Button { scanning = true } label: {
+                        Group {
+                            if phone.joining {
+                                ProgressView()
+                            } else {
+                                Label("Scan Pairing Code", systemImage: "qrcode.viewfinder")
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 30)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.large)
+                    Button("Enter a Pairing Code Instead") { typing = true }
+                        .font(.callout.weight(.medium))
                 }
-                .buttonStyle(.glassProminent)
-                .controlSize(.large)
-                Button("Enter a Pairing Code Instead") { typing = true }
-                    .font(.callout.weight(.medium))
             }
-            .disabled(!named || phone.joining)
+            .disabled(!named || phone.joining || signingIn)
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
         }
@@ -92,6 +127,22 @@ struct WelcomeView: View {
 
     private func join(_ code: String) {
         Task { await phone.join(code, name: name.trimmingCharacters(in: .whitespaces)) }
+    }
+
+    /// Signs in, then joins as "<their first name>’s iPhone".
+    private func start(_ signIn: SignIn) {
+        Task {
+            signingIn = true
+            phone.joinError = nil
+            defer { signingIn = false }
+            do {
+                guard let (code, person) = try await signIn.run(session) else { return }
+                let first = person.split(separator: " ").first.map(String.init) ?? ""
+                await phone.join(code, name: first.isEmpty ? UIDevice.current.name : "\(first)’s \(UIDevice.current.model)")
+            } catch {
+                phone.joinError = error.localizedDescription
+            }
+        }
     }
 }
 

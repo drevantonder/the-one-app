@@ -11,7 +11,9 @@
 //	  "listen": "127.0.0.1:8790", "group": "<group id to invite them to>" }
 //
 // and serves listen at public_url (a reverse proxy, Tailscale Funnel). The
-// Google OAuth client's redirect URI is public_url + "/callback".
+// Google OAuth client's redirect URI is public_url + "/callback". A brand
+// whose shells sign people in has public_url as brand.toml's `sign_in`: the
+// shells open public_url + "/start?app=1", which ends at <cli>://join.
 package main
 
 import (
@@ -39,15 +41,16 @@ func main() {
 		log.Fatal(err)
 	}
 	j := &joiner{dir: dir, node: node}
+	// It serves even while it's off, so the app's sign-in says so; config.json is read on each request.
 	c, err := j.config()
 	if err != nil {
 		log.Printf("off: %v", err)
-	} else {
-		go func() {
-			log.Printf("serving %s for @%s at %s", c.Listen, c.Domain, c.PublicURL)
-			log.Fatal(http.ListenAndServe(c.Listen, j.routes()))
-		}()
 	}
+	go func() {
+		listen := cmpOr(c.Listen, "127.0.0.1:8790")
+		log.Printf("serving %s for @%s at %s", listen, c.Domain, c.PublicURL)
+		log.Fatal(http.ListenAndServe(listen, j.routes()))
+	}()
 	serve(node, j)
 }
 

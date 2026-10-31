@@ -13,6 +13,10 @@ store = "apps"
 # The app the node tells people through (an app stopped for looping, say): an ordinary app with a `notify` op.
 inbox = "inbox"
 made_here = "Made at PTC"
+# PTC has one install: the shells sign people in to it with their PTC Google account at this address, the
+# workjoin driver's on ptc (providers/workjoin), instead of offering to start one. `account` names the account.
+sign_in = "https://ptc.pizzly-chromatic.ts.net:10000"
+account = "PTC"
 icon = "ptc/AppIcon.png"
 menubar = "ptc/MenuBarIcon.png"
 logo = "ptc/Logo.png"

@@ -7,6 +7,8 @@ art() { echo "$(dirname "$brand")/$(field "$1")"; }
 # The commit the shells are built from, which Settings shows at its foot.
 export BUILD_COMMIT=$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 export BRAND_NAME=$(field name) BRAND_CLI=$(field cli) BRAND_PORT=$(field port) BRAND_ACCENT=$(field accent)
+# A brand with one install signs people in to it (SignIn.swift) instead of offering to start one.
+export BRAND_SIGN_IN=$(field sign_in) BRAND_ACCOUNT=$(field account)
 # The iPhone app signs with the team of this Mac's Apple Development certificate, unless APPLE_TEAM names one.
 export APPLE_TEAM=${APPLE_TEAM:-$(security find-certificate -c "Apple Development" -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p')}
 

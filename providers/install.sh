@@ -1,12 +1,23 @@
 #!/bin/sh
 # Builds a provider and installs it as the one-<provider> service on a device,
 # here or over ssh: ./install.sh whatsapp [host]. On Linux it's a systemd
-# service; on a Mac, a launch agent of the user's.
+# service; on a Mac, a launch agent of the user's. BRAND=path/to/brand.toml
+# installs it as <cli>-<provider>, for that brand's node: its port, CLI and
+# data folder (the node service's <CLI>_HOME, if it has one).
 set -eu
+brand=${BRAND:+$(cd "$(dirname "$BRAND")" && pwd)/$(basename "$BRAND")}
 cd "$(dirname "$0")/$1"
-name=one-$1
+provider=$1 name=one-$1 node=one env=
 host=${2:-}
 on() { if [ -n "$host" ]; then ssh "$host" "$@" </dev/null; else sh -c "$*"; fi; }
+if [ -n "$brand" ]; then
+	field() { sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$brand"; }
+	cli=$(field cli) name=$(field cli)-$1 node=$(field cli)
+	upper=$(echo "$cli" | tr a-z A-Z)
+	home=$(on "systemctl show -p Environment $cli 2>/dev/null | tr ' ' '\n' | sed -n 's/^${upper}_HOME=//p'")
+	home=${home:-'$HOME'/.local/share/$cli}
+	env="ONE_ADDR=127.0.0.1:$(field port) ONE_CLI=$cli $(echo "$provider" | tr a-z A-Z)_DATA=$home/$provider"
+fi
 set -- $(on uname -sm)
 os=$(echo "$1" | tr A-Z a-z)
 case $2 in x86_64) arch=amd64 ;; *) arch=arm64 ;; esac
@@ -14,6 +25,7 @@ CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -o "$name" .
 if [ -n "$host" ]; then scp -q "$name" "$host:/tmp/$name"; else cp "$name" "/tmp/$name"; fi
 rm "$name"
 if [ "$os" = darwin ]; then
+[ -z "$brand" ] || { echo "BRAND installs on Linux only, for now" >&2; exit 1; }
 on "name=$name"'
 set -e
 mkdir -p ~/.local/bin ~/Library/LaunchAgents ~/Library/Logs
@@ -43,8 +55,8 @@ mv /tmp/$name ~/.local/bin/$name
 sudo tee /etc/systemd/system/$name.service >/dev/null <<EOF
 [Unit]
 Description=$name
-After=one.service
-Wants=one.service
+After='"$node"'.service
+Wants='"$node"'.service
 
 [Service]
 User=$user
@@ -52,6 +64,7 @@ ExecStart=$HOME/.local/bin/$name
 Restart=always
 RestartSec=2
 Environment=HOME=$HOME
+$(for e in '"$env"'; do echo "Environment=$e"; done)
 
 [Install]
 WantedBy=multi-user.target

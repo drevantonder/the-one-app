@@ -45,11 +45,16 @@ type joiner struct {
 type pending struct {
 	verifier string
 	made     time.Time
+	// app: the sign-in came from the app (`/start?app=1`), so it ends at <cli>://join, which the app catches.
+	app bool
 }
 
-// joined is who joined through it: by email, the name and when.
-type joined map[string]struct {
+// joined is who joined through it, by email: their name, user id and when they first signed in.
+type joined map[string]person
+
+type person struct {
 	Name string `json:"name"`
+	User string `json:"user,omitempty"`
 	Time int64  `json:"time"`
 }
 
@@ -146,8 +151,13 @@ func random() string {
 
 // start sends the person to Google, limited to the domain, with PKCE.
 func (j *joiner) start(w http.ResponseWriter, r *http.Request) {
+	app := r.URL.Query().Get("app") != ""
 	c, err := j.config()
 	if err != nil {
+		if app {
+			j.back(w, r, url.Values{"error": {"Signing in isn't set up for this install yet. Ask an admin, or use a pairing code."}})
+			return
+		}
 		http.Error(w, "joining with a work email is off", http.StatusNotFound)
 		return
 	}
@@ -161,7 +171,7 @@ func (j *joiner) start(w http.ResponseWriter, r *http.Request) {
 			delete(j.pending, s)
 		}
 	}
-	j.pending[state] = pending{verifier: verifier, made: time.Now()}
+	j.pending[state] = pending{verifier: verifier, made: time.Now(), app: app}
 	j.mu.Unlock()
 	sum := sha256.Sum256([]byte(verifier))
 	q := url.Values{
@@ -189,18 +199,30 @@ func (j *joiner) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email, name, err := verify(c, r.URL.Query().Get("code"), p.verifier)
-	if err != nil {
-		j.show(w, view{Error: err.Error()})
+	if err == nil {
+		var code string
+		if code, err = j.admit(c, email, name); err == nil {
+			if p.app {
+				j.back(w, r, url.Values{"code": {code}, "user": {name}})
+				return
+			}
+			link := cli() + "://join?" + url.Values{"code": {code}, "name": {name + "'s iPhone"}}.Encode()
+			j.show(w, view{Code: code, Name: name, Link: link, CLI: cli()})
+			return
+		}
+	}
+	if p.app {
+		j.back(w, r, url.Values{"error": {err.Error()}})
 		return
 	}
-	code, err := j.admit(c, email, name)
-	if err != nil {
-		j.show(w, view{Error: err.Error()})
-		return
-	}
-	cli := cmpOr(os.Getenv("ONE_CLI"), "one")
-	link := cli + "://join?" + url.Values{"code": {code}, "name": {name + "'s iPhone"}}.Encode()
-	j.show(w, view{Code: code, Name: name, Link: link, CLI: cli})
+	j.show(w, view{Error: err.Error()})
+}
+
+func cli() string { return cmpOr(os.Getenv("ONE_CLI"), "one") }
+
+// back ends a sign-in from the app: at <cli>://join, with a pairing code and the person's name, or an error.
+func (j *joiner) back(w http.ResponseWriter, r *http.Request, q url.Values) {
+	http.Redirect(w, r, cli()+"://join?"+q.Encode(), http.StatusFound)
 }
 
 // verify exchanges the code for an ID token and checks it's a verified address
@@ -243,39 +265,63 @@ func verify(c config, code, verifier string) (email, name string, err error) {
 	return strings.ToLower(claims.Email), cmpOr(claims.Name, strings.Split(claims.Email, "@")[0]), nil
 }
 
-// admit asks the node, as its local user (an admin), for a new member's
-// pairing code, once per address; and invites them to the group once they're in.
+// admit asks the node, as its local user (an admin), for a pairing code: for
+// another machine of someone who's in already, or for a new member, whom it
+// invites to the group once they're in. A user who was in before this was on
+// is one an admin wrote into joined.json, with their id.
 func (j *joiner) admit(c config, email, name string) (string, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	people := j.joined()
-	if p, ok := people[email]; ok {
-		return "", fmt.Errorf("%s already joined as %s: add another device from one you have (Settings, Devices, Add)", email, p.Name)
+	var out struct{ Code, User string }
+	if p, ok := people[email]; ok && p.User != "" && j.member(p.User) {
+		if err := post(j.node+"/v1/pair", map[string]any{"user": p.User}, &out); err != nil {
+			return "", fmt.Errorf("the install wouldn't make you a code: %w", err)
+		}
+		return out.Code, nil
 	}
-	var out struct{ Code string }
+	// New, or they never used the code they had.
 	if err := post(j.node+"/v1/pair", map[string]any{"new_user": map[string]any{"name": name, "role": "member"}}, &out); err != nil {
 		return "", fmt.Errorf("the install wouldn't make you a code: %w", err)
 	}
-	people[email] = struct {
-		Name string `json:"name"`
-		Time int64  `json:"time"`
-	}{name, time.Now().UnixMilli()}
+	people[email] = person{Name: name, User: out.User, Time: time.Now().UnixMilli()}
 	b, _ := json.MarshalIndent(people, "", "  ")
 	if err := os.WriteFile(filepath.Join(j.dir, "joined.json"), b, 0o600); err != nil {
 		return "", err
 	}
-	if c.Group != "" {
-		go j.invite(c.Group, name)
+	if c.Group != "" && out.User != "" {
+		go j.invite(c.Group, out.User)
 	}
 	return out.Code, nil
 }
 
+// member says whether the install has this user.
+func (j *joiner) member(user string) bool {
+	resp, err := http.Get(j.node + "/v1/state")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var state struct {
+		Install struct{ Users []struct{ ID string } }
+	}
+	if json.NewDecoder(resp.Body).Decode(&state) != nil {
+		return false
+	}
+	for _, u := range state.Install.Users {
+		if u.ID == user {
+			return true
+		}
+	}
+	return false
+}
+
 // invite waits up to a week for the new user to join, then invites them to
 // the group they land in.
-func (j *joiner) invite(group, name string) {
+func (j *joiner) invite(group, user string) {
 	for range 7 * 24 * 60 {
 		time.Sleep(time.Minute)
-		if err := post(j.node+"/v1/invite", map[string]any{"group": group, "user": name, "role": "member"}, nil); err == nil {
+		if err := post(j.node+"/v1/invite", map[string]any{"group": group, "user": user, "role": "member"}, nil); err == nil {
 			return
 		}
 	}

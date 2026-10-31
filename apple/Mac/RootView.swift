@@ -80,13 +80,15 @@ private struct MainView: View {
     }
 }
 
-/// Creating an install, or joining one with a pairing code.
+/// Creating an install, or joining one with a pairing code; or, for a brand with one install, signing in to it.
 private struct WelcomeView: View {
     @Environment(Store.self) private var store
+    @Environment(\.webAuthenticationSession) private var session
     @State private var name = ""
     @State private var you = NSFullUserName()
     @State private var error: String?
     @State private var recovery: String?
+    @State private var signingIn = false
 
     private var ready: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty && !you.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -98,34 +100,80 @@ private struct WelcomeView: View {
                     .frame(width: 112, height: 112)
                 Text("Welcome to \(store.brand?.name ?? appName)")
                     .font(.largeTitle.weight(.semibold))
-                Text("Your devices, and your team’s, as one place for apps and agents.\nStart it here, or join from another device.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 520)
-            }
-            VStack(spacing: 12) {
-                Form {
-                    TextField("Call it", text: $name, prompt: Text("The Van Tonders"))
-                    TextField("Your name", text: $you)
+                Group {
+                    if SignIn.brand == nil {
+                        Text("Your devices, and your team’s, as one place for apps and agents.\nStart it here, or join from another device.")
+                    } else {
+                        Text("Your devices, and your team’s, as one place for apps and agents.")
+                    }
                 }
-                .formStyle(.columns)
-                .frame(width: 300)
-                .onSubmit(create)
-                Button("Start", action: create)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(!ready)
-                if let error {
-                    Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
-                }
-                Button("Have a pairing code? Join…") { store.sheet = .join }
-                    .buttonStyle(.link)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 520)
             }
+            if let signIn = SignIn.brand { signInForm(signIn) } else { createForm }
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(item: Binding(get: { recovery.map(RecoveryKey.init) }, set: { if $0 == nil { recovery = nil } })) { RecoverySheet(key: $0.key) }
+    }
+
+    private func signInForm(_ signIn: SignIn) -> some View {
+        VStack(spacing: 12) {
+            Button { start(signIn) } label: {
+                Text(signIn.title)
+                    .opacity(signingIn ? 0 : 1)
+                    .overlay { if signingIn { ProgressView().controlSize(.small) } }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(signingIn)
+            if let error {
+                Label(error, systemImage: "exclamationmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: 440)
+            }
+            Button("Have a pairing code? Join…") { store.sheet = .join }
+                .buttonStyle(.link)
+        }
+    }
+
+    private func start(_ signIn: SignIn) {
+        Task {
+            signingIn = true
+            error = nil
+            defer { signingIn = false }
+            do {
+                guard let (code, _) = try await signIn.run(session) else { return }
+                try await store.join(code)
+            } catch let failure as SignInError {
+                error = failure.message
+            } catch {
+                self.error = joinFailure(error)
+            }
+        }
+    }
+
+    private var createForm: some View {
+        VStack(spacing: 12) {
+            Form {
+                TextField("Call it", text: $name, prompt: Text("Your family or team"))
+                TextField("Your name", text: $you)
+            }
+            .formStyle(.columns)
+            .frame(width: 300)
+            .onSubmit(create)
+            Button("Start", action: create)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!ready)
+            if let error {
+                Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+            }
+            Button("Have a pairing code? Join…") { store.sheet = .join }
+                .buttonStyle(.link)
+        }
     }
 
     private func create() {
