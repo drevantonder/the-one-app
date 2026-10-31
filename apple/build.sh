@@ -1,6 +1,6 @@
 #!/bin/bash
-# Builds the Mac app with this checkout's node inside it, signs it ad hoc and installs it to ~/Applications.
-# BRAND=path/to/brand.toml builds another brand.
+# Builds the Mac app with this checkout's node inside it, signs it and installs it to ~/Applications; with --release, it
+# also notarizes it. BRAND=path/to/brand.toml builds another brand.
 set -euo pipefail
 cd "$(dirname "$0")"
 . ./project.sh
@@ -31,12 +31,32 @@ cat > "$app/Contents/Library/LaunchAgents/$label.plist" <<PLIST
 </dict>
 </plist>
 PLIST
-# macOS keeps the permissions it grants (Reminders, Full Disk Access…) for code signed the same way, so sign with
-# this Mac's Apple Development certificate: an ad hoc signature is a new app to macOS every build. Over SSH the
-# keychain is out of reach, so codesign runs as a one-shot job in the logged-in session instead.
-identity=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)
-sign=(codesign --force --sign "${identity:--}" "$PWD/$app/Contents/MacOS/$BRAND_CLI" "$PWD/$app")
-"${sign[@]}" 2>/dev/null || session "${sign[@]}" || { echo "couldn't sign the app as $identity"; exit 1; }
+# Sign with this Mac's Developer ID, with the hardened runtime, so the app opens on any Mac once notarized; and always
+# the same way, since macOS keeps the permissions it grants (Reminders, Full Disk Access…) only for code signed alike.
+# Without a Developer ID it falls back to Apple Development, then ad hoc. Over SSH the keychain is out of reach, so
+# codesign and notarytool run as one-shot jobs in the logged-in session instead.
+keychain() { "$@" 2>/dev/null || session "$@"; }
+identities=$(security find-identity -v -p codesigning)
+identity=$(echo "$identities" | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
+identity=${identity:-$(echo "$identities" | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)}
+sign=(codesign --force --options runtime --sign "${identity:--}")
+[ -z "$identity" ] || sign+=(--timestamp)
+keychain "${sign[@]}" "$PWD/$app/Contents/MacOS/$BRAND_CLI" &&
+	keychain "${sign[@]}" --entitlements "$PWD/Mac.entitlements" "$PWD/$app" || { echo "couldn't sign the app as ${identity:-ad hoc}"; exit 1; }
+
+# A release is notarized, with the ticket stapled to the app, so Gatekeeper lets it open wherever it's downloaded.
+# notarytool's credentials are a keychain profile named after the CLI: xcrun notarytool store-credentials <cli>-notary
+if [ "${1:-}" = --release ]; then
+	case $identity in "Developer ID Application: "*) ;; *) echo "a release needs a Developer ID Application certificate"; exit 1 ;; esac
+	profile=$BRAND_CLI-notary zip=$PWD/build/notarize.zip
+	if keychain xcrun notarytool history --keychain-profile "$profile" >/dev/null; then
+		rm -f "$zip" && ditto -c -k --keepParent "$app" "$zip"
+		keychain xcrun notarytool submit "$zip" --keychain-profile "$profile" --wait
+		keychain xcrun stapler staple "$PWD/$app"
+	else
+		echo "warning: not notarized, so it opens only where it isn't downloaded with a browser: this Mac's keychain has no notarytool profile $profile (xcrun notarytool store-credentials $profile)"
+	fi
+fi
 
 osascript -e "quit app id \"$BUNDLE_ID\"" 2>/dev/null || true
 sleep 1

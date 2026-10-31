@@ -75,7 +75,10 @@ pub fn run(tag: Option<&str>, space: Option<&str>) -> Result<()> {
     for (mac, since) in &started {
         let name = mac["name"].as_str().unwrap_or("");
         match await_mac(&space, mac) {
-            Ok(made) => {
+            Ok((made, warnings)) => {
+                for w in warnings {
+                    println!("  {name}: {w}");
+                }
                 failed |= await_builds(&space, std::slice::from_ref(mac), short, *since, Duration::from_secs(120));
                 if let Some(tag) = tag {
                     for (hash, asset) in made {
@@ -276,7 +279,7 @@ cd "$c/src"
 git fetch -q --tags --force origin
 git checkout -q --detach --force {commit}
 git clean -qfdx -e /target -e /apple/build
-apple/build.sh
+apple/build.sh{release}
 {assets}
 JOB
 cat > update.plist <<PLIST
@@ -286,12 +289,13 @@ cat > update.plist <<PLIST
 </dict></plist>
 PLIST
 launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" update.plist"#
+launchctl bootstrap "gui/$(id -u)" update.plist"#,
+        release = if assets.is_empty() { "" } else { " --release" }
     )
 }
 
-/// Waits for a Mac's job to finish; on success, the assets it left as `(blob, name)`.
-fn await_mac(space: &Value, mac: &Value) -> Result<Vec<(String, String)>> {
+/// Waits for a Mac's job to finish; on success, the assets it left as `(blob, name)`, and the warnings its build gave.
+fn await_mac(space: &Value, mac: &Value) -> Result<(Vec<(String, String)>, Vec<String>)> {
     let deadline = Instant::now() + Duration::from_secs(30 * 60);
     let poll = format!(r#"c="$HOME/Library/Caches/{CLI}"; cat "$c/update.status" 2>/dev/null"#);
     // The Mac's node restarts on the new app part way through, and doesn't answer for a moment.
@@ -304,13 +308,16 @@ fn await_mac(space: &Value, mac: &Value) -> Result<Vec<(String, String)>> {
             break code;
         }
     };
-    let report = shell(space, mac, &format!(r#"c="$HOME/Library/Caches/{CLI}"; launchctl bootout "gui/$(id -u)/app.{CLI}.update" 2>/dev/null; cat "$c/assets.txt" 2>/dev/null; echo ---; tail -n 25 "$c/update.log""#), 30)?;
+    let report = shell(space, mac, &format!(r#"c="$HOME/Library/Caches/{CLI}"; launchctl bootout "gui/$(id -u)/app.{CLI}.update" 2>/dev/null; cat "$c/assets.txt" 2>/dev/null; echo ---; grep '^warning: ' "$c/update.log"; tail -n 25 "$c/update.log""#), 30)?;
     let out = report["stdout"].as_str().unwrap_or("");
     let (made, log) = out.split_once("---\n").unwrap_or(("", out));
     if status != 0 {
         bail!("its build failed:\n{log}");
     }
-    Ok(made.lines().filter_map(|l| l.split_once(' ')).map(|(h, n)| (h.to_string(), n.to_string())).collect())
+    let mut warnings: Vec<String> = log.lines().filter(|l| l.starts_with("warning: ")).map(str::to_string).collect();
+    warnings.sort();
+    warnings.dedup();
+    Ok((made.lines().filter_map(|l| l.split_once(' ')).map(|(h, n)| (h.to_string(), n.to_string())).collect(), warnings))
 }
 
 fn blob(hash: &str) -> Result<Vec<u8>> {
