@@ -1,11 +1,14 @@
-// Turns brand.toml into constants, so the code never names the product.
+// Turns config.toml (or the one CONFIG names) into constants, so the code never names the product.
 fn main() {
-    let path = std::env::var("BRAND").unwrap_or_else(|_| "brand.toml".into());
+    // Builds that still say BRAND= would otherwise build The One App under another edition's name.
+    assert!(std::env::var_os("BRAND").is_none(), "BRAND= is CONFIG= now, naming a config.toml");
+    let path = std::env::var("CONFIG").unwrap_or_else(|_| "config.toml".into());
     println!("cargo:rerun-if-changed={path}");
+    println!("cargo:rerun-if-env-changed=CONFIG");
     println!("cargo:rerun-if-env-changed=BRAND");
-    let text = std::fs::read_to_string(&path).expect("read brand file");
-    let brand: toml::Table = text.parse().expect("parse brand file");
-    let get = |key: &str| brand.get(key).unwrap_or_else(|| panic!("brand file lacks {key}")).clone();
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+    let brand: toml::Table = text.parse().expect("parse config file");
+    let get = |key: &str| brand.get(key).unwrap_or_else(|| panic!("config file lacks {key}")).clone();
     let out = format!(
         "pub const NAME: &str = {:?};\npub const CLI: &str = {:?};\npub const PORT: u16 = {};\npub const ACCENT: &str = {:?};\npub const REPO: &str = {:?};\n",
         get("name").as_str().unwrap(),
@@ -16,11 +19,11 @@ fn main() {
         brand.get("repo").and_then(|r| r.as_str()).unwrap_or(""),
     );
     let optional = |key: &str| brand.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    // The brand file, inside the repo if it is, so `update` builds the same brand from a fresh checkout.
+    // The config file, inside the repo if it is, so `update` builds the same edition from a fresh checkout.
     let manifest = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let file = std::fs::canonicalize(&path).unwrap();
     let file = file.strip_prefix(std::fs::canonicalize(&manifest).unwrap()).unwrap_or(&file).to_string_lossy().to_string();
-    let out = format!("{out}pub const BRAND_FILE: &str = {file:?};\n");
+    let out = format!("{out}pub const CONFIG_FILE: &str = {file:?};\n");
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\npub const STORE: &str = {:?};\npub const PUSH: &str = {:?};\n", optional("release_key"), optional("release_signer"), optional("store"), optional("push_driver"));
     // Every app in this repo's apps/ folder ships built in: each folder's files. The brand's `apps` are the ones a new
     // install deploys and installs in `global`; they must be among them.

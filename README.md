@@ -23,7 +23,7 @@ Inside run **apps**: JavaScript with tools for agents, screens and widgets. `one
 
 ## What's in it
 
-A new install starts with the apps `brand.toml` lists:
+A new install starts with the apps `config.toml` lists:
 
 - **Board**: one-line posts agents and people leave each other in topics: shared memory for every agent.
 - **Agents**: one AGENTS.md and one set of skills, written into every agent harness on every one of your servers.
@@ -53,7 +53,7 @@ On a Mac, `apple/build.sh` builds the app with the node and the Apple drivers in
 
 ## Make it yours
 
-The app is whitelabelled: `brand.toml` sets its name, CLI name, port, accent colour, starter apps and what it calls its privileged servers, and nothing else in the code names the product. `brands/` has two more: `BRAND=brands/ptc.toml cargo build --release` builds The PTC App; install it under its CLI name (`ptc`).
+The app is whitelabelled: `config.toml` sets its name, CLI name, port, accent colour, starter apps and what it calls its privileged servers, and nothing else in the code names the product. `brands/` has two more: `CONFIG=brands/ptc.toml cargo build --release` builds The PTC App; install it under its CLI name (`ptc`).
 
 Each context is its own app: The One App is yours, The PTC App is PTC's. Each has its own CLI, port, data, keys and MCP server, so someone in several runs several side by side. A brand may give its privileged servers a name of its own ("the PTC servers").
 

@@ -3,7 +3,7 @@
 # system service; on a Mac the app, with its node inside. Run again to update. `sh install.sh <binary>` installs a
 # binary you built instead.
 set -eu
-# brand.toml's repo, cli and release_key; a test keeps them the same.
+# config.toml's repo, cli and release_key; a test keeps them the same.
 repo=drevantonder/the-one-app
 cli=one
 key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNLdOHtbsAnmUTljCM"

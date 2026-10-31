@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use one::brand::{BRAND_FILE, CLI, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
+use one::brand::{CONFIG_FILE, CLI, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
 use one::{cache, release};
 use serde_json::{Value, json};
 
@@ -32,7 +32,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         ensure!(!quiet(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
     }
     println!("Testing {short}");
-    step(Command::new(cargo()).current_dir(&src).env("BRAND", src.join(BRAND_FILE)).arg("test"))?;
+    step(Command::new(cargo()).current_dir(&src).env("CONFIG", src.join(CONFIG_FILE)).arg("test"))?;
     if tag.is_some() {
         step(Command::new("gh").current_dir(&src).args(["signoff", "create", "--commit", &commit]))
             .context("sign off (gh extension install basecamp/gh-signoff)")?;
@@ -55,7 +55,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
 
     println!("Building {short}");
-    step(Command::new(cargo()).current_dir(&src).env("BRAND", src.join(BRAND_FILE)).args(["build", "--release"]))?;
+    step(Command::new(cargo()).current_dir(&src).env("CONFIG", src.join(CONFIG_FILE)).args(["build", "--release"]))?;
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     // Which devices to wait for, asked before this device's own node restarts on the new build.
     let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
@@ -163,7 +163,7 @@ pub fn release_key() -> Result<ssh_key::PrivateKey> {
         String::from_utf8_lossy(&out.stderr).trim()
     );
     let key = ssh_key::PrivateKey::from_openssh(&out.stdout).map_err(|_| anyhow::anyhow!("`{RELEASE_SIGNER}` didn't give an OpenSSH private key"))?;
-    ensure!(key.public_key().key_data() == ssh_key::PublicKey::from_openssh(RELEASE_KEY)?.key_data(), "`{RELEASE_SIGNER}` gave a key, but not the release key in brand.toml");
+    ensure!(key.public_key().key_data() == ssh_key::PublicKey::from_openssh(RELEASE_KEY)?.key_data(), "`{RELEASE_SIGNER}` gave a key, but not the release key in config.toml");
     Ok(key)
 }
 
@@ -286,7 +286,7 @@ cd "$c/src"
 git fetch -q --tags --force origin
 git checkout -q --detach --force {commit}
 git clean -qfdx -e /target -e /apple/build
-BRAND="$c/src/{BRAND_FILE}" apple/build.sh{release}
+CONFIG="$c/src/{CONFIG_FILE}" apple/build.sh{release}
 {assets}
 JOB
 cat > update.plist <<PLIST

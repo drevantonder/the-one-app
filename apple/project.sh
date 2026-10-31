@@ -1,9 +1,9 @@
-# Sourced by the build scripts: exports the brand from brand.toml (or $BRAND), turns its artwork into the apps' icons
+# Sourced by the build scripts: exports the brand from config.toml (or $CONFIG), turns its artwork into the apps' icons
 # and images, and generates Shells.xcodeproj.
 root=$(cd .. && pwd)
-brand=$(cd "$(dirname "${BRAND:-$root/brand.toml}")" && pwd)/$(basename "${BRAND:-brand.toml}")
-field() { sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$brand"; }
-art() { echo "$(dirname "$brand")/$(field "$1")"; }
+config=$(cd "$(dirname "${CONFIG:-$root/config.toml}")" && pwd)/$(basename "${CONFIG:-config.toml}")
+field() { sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$config"; }
+art() { echo "$(dirname "$config")/$(field "$1")"; }
 # The commit the shells are built from, which Settings shows at its foot.
 export BUILD_COMMIT=$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 export BRAND_NAME=$(field name) BRAND_CLI=$(field cli) BRAND_PORT=$(field port) BRAND_ACCENT=$(field accent)

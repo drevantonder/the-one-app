@@ -1,7 +1,7 @@
 import SwiftUI
 import AuthenticationServices
 
-/// The brand's own sign-in (brand.toml's `sign_in` and `account`), for a brand with one install: the first run offers
+/// The brand's own sign-in (config.toml's `sign_in` and `account`), for a brand with one install: the first run offers
 /// it instead of starting an install. It's the work-email join driver's page, which signs the person in with their
 /// work account and ends at `<cli>://join?code=…&user=…`, a pairing code for this device and their name.
 struct SignIn {

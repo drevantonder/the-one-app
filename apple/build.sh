@@ -1,13 +1,13 @@
 #!/bin/bash
 # Builds the Mac app with this checkout's node inside it, signs it and installs it to ~/Applications; with --release, it
-# also notarizes it. BRAND=path/to/brand.toml builds another brand.
+# also notarizes it. CONFIG=path/to/config.toml builds another edition.
 set -euo pipefail
 cd "$(dirname "$0")"
 . ./project.sh
 BUNDLE_ID=app.$BRAND_CLI.mac
 label=$BUNDLE_ID.node
 
-(cd "$root" && BRAND=$brand cargo build --release)
+(cd "$root" && CONFIG=$config cargo build --release)
 
 xcodebuild -project Shells.xcodeproj -scheme Mac -configuration Release -destination generic/platform=macOS -derivedDataPath build/derived build -quiet
 

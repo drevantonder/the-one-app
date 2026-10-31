@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds the iPhone app and installs it: on the booted simulator (or $SIMULATOR), or with `device`, signed with
-# your team, on the connected iPhone (or $DEVICE). BRAND=path/to/brand.toml builds another brand.
+# your team, on the connected iPhone (or $DEVICE). CONFIG=path/to/config.toml builds another edition.
 set -euo pipefail
 cd "$(dirname "$0")"
 . ./project.sh

@@ -1,17 +1,17 @@
 #!/bin/sh
 # Builds a provider and installs it as the one-<provider> service on a device,
 # here or over ssh: ./install.sh whatsapp [host]. On Linux it's a systemd
-# service; on a Mac, a launch agent of the user's. BRAND=path/to/brand.toml
-# installs it as <cli>-<provider>, for that brand's node: its port, CLI and
+# service; on a Mac, a launch agent of the user's. CONFIG=path/to/config.toml
+# installs it as <cli>-<provider>, for that edition's node: its port, CLI and
 # data folder (the node service's <CLI>_HOME, if it has one).
 set -eu
-brand=${BRAND:+$(cd "$(dirname "$BRAND")" && pwd)/$(basename "$BRAND")}
+config=${CONFIG:+$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")}
 cd "$(dirname "$0")/$1"
 provider=$1 name=one-$1 node=one env=
 host=${2:-}
 on() { if [ -n "$host" ]; then ssh "$host" "$@" </dev/null; else sh -c "$*"; fi; }
-if [ -n "$brand" ]; then
-	field() { sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$brand"; }
+if [ -n "$config" ]; then
+	field() { sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$config"; }
 	cli=$(field cli) name=$(field cli)-$1 node=$(field cli)
 	upper=$(echo "$cli" | tr a-z A-Z)
 	home=$(on "systemctl show -p Environment $cli 2>/dev/null | tr ' ' '\n' | sed -n 's/^${upper}_HOME=//p'")
@@ -25,7 +25,7 @@ CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -o "$name" .
 if [ -n "$host" ]; then scp -q "$name" "$host:/tmp/$name"; else cp "$name" "/tmp/$name"; fi
 rm "$name"
 if [ "$os" = darwin ]; then
-[ -z "$brand" ] || { echo "BRAND installs on Linux only, for now" >&2; exit 1; }
+[ -z "$config" ] || { echo "CONFIG installs on Linux only, for now" >&2; exit 1; }
 on "name=$name"'
 set -e
 mkdir -p ~/.local/bin ~/Library/LaunchAgents ~/Library/Logs

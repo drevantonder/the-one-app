@@ -12,7 +12,7 @@
 //
 // and serves listen at public_url (a reverse proxy, Tailscale Funnel). The
 // Google OAuth client's redirect URI is public_url + "/callback". A brand
-// whose shells sign people in has public_url as brand.toml's `sign_in`: the
+// whose shells sign people in has public_url as config.toml's `sign_in`: the
 // shells open public_url + "/start?app=1", which ends at <cli>://join.
 package main
 

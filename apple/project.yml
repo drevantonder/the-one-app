@@ -1,4 +1,4 @@
-# The native shells. project.sh fills in the brand from brand.toml and runs xcodegen.
+# The native shells. project.sh fills in the brand from config.toml and runs xcodegen.
 name: Shells
 options:
   deploymentTarget:
