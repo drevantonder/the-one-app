@@ -83,3 +83,16 @@ func TestGist(t *testing.T) {
 		t.Errorf("%q", g)
 	}
 }
+
+func TestSaid(t *testing.T) {
+	r := result{Content: []map[string]any{{"type": "text", "text": `{"refusal":{"code":"session_ended"}}`}}}
+	if !said(r, "session_ended") {
+		t.Error("in the text")
+	}
+	if !said(result{Structured: json.RawMessage(`{"code":"session_ended"}`)}, "session_ended") {
+		t.Error("in the structured content")
+	}
+	if said(result{}, "session_ended") {
+		t.Error("nothing said")
+	}
+}

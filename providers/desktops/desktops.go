@@ -146,16 +146,16 @@ func (ds *desktops) drop(name string) {
 	ds.connMu.Unlock()
 }
 
-// session is the label calls share unless they give their own: the browser
-// tools refuse to act without one.
-const session = "agents"
+// A connection's calls share a session label of its own unless they give
+// theirs: the browser tools refuse to act without one, and a label stays
+// bound to the connection that made it, so a new connection (as after this
+// program restarted) can't take an old one over.
 
 // call runs one of a desktop's tools, dialing again once if the connection is
 // gone, as after the desktop restarted.
 func (ds *desktops) call(ctx context.Context, d desktop, name string, args map[string]any) (result, error) {
-	if _, ok := args["session"]; !ok && ds.takesSession(name) {
-		args["session"] = session
-	}
+	_, given := args["session"]
+	ours := !given && ds.takesSession(name)
 	var r result
 	var err error
 	for attempt := range 2 {
@@ -166,17 +166,23 @@ func (ds *desktops) call(ctx context.Context, d desktop, name string, args map[s
 		if c, err = ds.conn(ctx, d); err != nil {
 			continue
 		}
+		if ours {
+			args["session"] = c.label
+		}
 		if r, err = c.call(ctx, name, args); err != nil {
 			continue
 		}
-		if args["session"] == session && bytes.Contains(r.Structured, []byte(`"session_ended"`)) {
+		if ours && said(r, "session_ended") {
 			// It ended, idle; only start_session revives a name.
-			if _, err = c.call(ctx, "start_session", map[string]any{"session": session}); err != nil {
+			if _, err = c.call(ctx, "start_session", map[string]any{"session": c.label}); err != nil {
 				break
 			}
 			r, err = c.call(ctx, name, args)
 		}
-		if name == "browser_prepare" && bytes.Contains(r.Structured, []byte("browser_endpoint_owner_mismatch")) {
+		if ours && said(r, "session_unavailable") && attempt == 0 {
+			continue // a label of another connection's: dial again, with a new one
+		}
+		if name == "browser_prepare" && said(r, "browser_endpoint_owner_mismatch") {
 			// The profile is open in a browser no session of ours owns.
 			closeBrowsers(ctx, d, false)
 			r, err = c.call(ctx, name, args)
@@ -184,6 +190,20 @@ func (ds *desktops) call(ctx context.Context, d desktop, name string, args map[s
 		break
 	}
 	return r, err
+}
+
+// said reports whether a tool's answer has code in it, in its structured
+// content or its text.
+func said(r result, code string) bool {
+	if bytes.Contains(r.Structured, []byte(code)) {
+		return true
+	}
+	for _, c := range r.Content {
+		if t, _ := c["text"].(string); strings.Contains(t, code) {
+			return true
+		}
+	}
+	return false
 }
 
 func (ds *desktops) takesSession(name string) bool {

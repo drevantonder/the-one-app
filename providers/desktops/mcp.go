@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 type conn struct {
 	url, token string
 	id         string // the session's, from the server
+	label      string // the session label its calls share
 	next       atomic.Int64
 }
 
@@ -31,7 +34,9 @@ type tool struct {
 }
 
 func dial(ctx context.Context, d desktop) (*conn, error) {
-	c := &conn{url: d.local() + "/mcp", token: d.token}
+	b := make([]byte, 3)
+	rand.Read(b)
+	c := &conn{url: d.local() + "/mcp", token: d.token, label: "agents-" + hex.EncodeToString(b)}
 	_, err := c.rpc(ctx, "initialize", map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{},
 		"clientInfo": map[string]any{"name": app, "version": "1"}})
 	if err != nil {
