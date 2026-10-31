@@ -31,6 +31,7 @@ struct RootView: View {
             case .pair: PairSheet()
             case .join: JoinSheet()
             case .pages: PagesEditor()
+            case .secret(let scope, let id): SecretRequestSheet(scope: scope, id: id)
             }
         }
     }

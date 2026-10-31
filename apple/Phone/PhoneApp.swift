@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct PhoneApp: App {
+    @UIApplicationDelegateAdaptor(PhoneDelegate.self) private var delegate
     @State private var phone = Phone()
 
     var body: some Scene {
@@ -10,8 +11,13 @@ struct PhoneApp: App {
                 .environment(phone)
                 .environment(phone.store)
                 .tint(phone.accent)
-                .task { await phone.start() }
+                .task {
+                    delegate.phone = phone
+                    await phone.start()
+                }
                 .onOpenURL { phone.open($0) }
+                .onChange(of: phone.store.inbox?.name, initial: true) { Task { await phone.setUpPush() } }
+                .onChange(of: phone.store.unread) { phone.showBadge(phone.store.unread) }
         }
     }
 }
@@ -38,7 +44,7 @@ final class Phone {
     }
 
     /// In the simulator, NODE_URL points the app at a server's local API instead of joining over the network.
-    private static var nodeURL: URL? {
+    static var nodeURL: URL? {
         #if targetEnvironment(simulator)
         ProcessInfo.processInfo.environment["NODE_URL"].flatMap(URL.init(string:))
         #else
@@ -84,8 +90,10 @@ final class Phone {
         if let current = store.state?.machine.name, current != name { try? await store.rename(name) }
     }
 
-    /// `<cli>://join?code=…&name=…`: joins without the camera, from a link another device gives.
+    /// `<cli>://join?code=…&name=…`: joins without the camera, from a link another device gives. Or a link the
+    /// store opens itself, like an agent's request for a secret.
     func open(_ url: URL) {
+        if store.open(url) { return }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let value = { (name: String) in query.first { $0.name == name }?.value?.trimmingCharacters(in: .whitespaces) }
         guard url.host() == "join", let code = value("code"), !code.isEmpty else { return }

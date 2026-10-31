@@ -32,6 +32,11 @@ targets:
         BrandAccent: ${BRAND_ACCENT}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # <cli>://secret?id=…&scope=…: an agent's request that the person set a secret.
+        CFBundleURLTypes:
+          - CFBundleURLName: app.${BRAND_CLI}.mac
+            CFBundleURLSchemes:
+              - ${BRAND_CLI}
         # Asked for on the first call that needs each (Mac/Providers).
         NSRemindersFullAccessUsageDescription: Your agents and other devices read and change your reminders through this Mac.
         NSCalendarsFullAccessUsageDescription: Your agents and other devices read and change your calendars through this Mac.
@@ -61,6 +66,8 @@ targets:
       path: build/Phone.entitlements
       properties:
         com.apple.security.application-groups: ["group.app.${BRAND_CLI}.phone"]
+        # The inbox's pushes; an App Store build is signed for production instead.
+        aps-environment: development
     info:
       path: build/Phone-Info.plist
       properties:
@@ -69,7 +76,8 @@ targets:
         BrandCLI: ${BRAND_CLI}
         AppGroup: group.app.${BRAND_CLI}.phone
         NSCameraUsageDescription: Scan the code another device shows to join its space.
-        # <cli>://join?code=…&name=…: joining from a link, without the camera.
+        # <cli>://join?code=…&name=…: joining from a link, without the camera; <cli>://secret?id=…&scope=…: an
+        # agent's request that the person set a secret.
         CFBundleURLTypes:
           - CFBundleURLName: app.${BRAND_CLI}.join
             CFBundleURLSchemes:

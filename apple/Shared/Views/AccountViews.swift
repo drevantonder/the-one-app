@@ -267,13 +267,36 @@ struct BackupsView: View {
     }
 }
 
-/// What waits for this user: group invites, and servers offered to them to trust.
+/// What waits for this user: secrets agents asked them for, group invites, and servers offered to them to trust.
 struct RequestsView: View {
     @Environment(Store.self) private var store
     @State private var error: String?
+    @State private var secrets: [SecretRequest] = []
 
     var body: some View {
         Form {
+            if !secrets.isEmpty {
+                Section {
+                    ForEach(secrets) { request in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(store.app(request.app)?.label ?? request.app)’s \(Text(request.name).font(.body.monospaced()))").font(.body.weight(.medium))
+                                Text([request.asker, request.why].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            Button("Set…") { store.sheet = .secret(scope: request.scope, id: request.id) }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    }
+                } header: {
+                    Text("Secrets")
+                } footer: {
+                    Text("Agents ask you for these so they never see them.")
+                }
+            }
             if !store.invites.isEmpty {
                 Section("Invites") {
                     ForEach(store.invites) { group in
@@ -306,7 +329,7 @@ struct RequestsView: View {
                     Text("Servers")
                 }
             }
-            if store.invites.isEmpty && store.trustOffers.isEmpty {
+            if secrets.isEmpty && store.invites.isEmpty && store.trustOffers.isEmpty {
                 Text("Nothing waits for you.").foregroundStyle(.secondary)
             }
             if let error {
@@ -315,6 +338,9 @@ struct RequestsView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Requests")
+        .task(id: store.state?.secretRequests) {
+            secrets = (try? await store.node.secretRequests())?.filter(\.waiting) ?? secrets
+        }
     }
 
     private func run(_ work: @escaping @MainActor (NodeClient) async throws -> Void) {

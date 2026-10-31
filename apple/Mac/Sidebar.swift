@@ -49,7 +49,7 @@ struct Sidebar: View {
     }
 }
 
-/// The cog, kept at the sidebar's foot as a row of its own, with a red dot while a request waits.
+/// The cog, kept at the sidebar's foot as a row of its own, counting unread notifications and waiting requests.
 private struct SettingsRow: View {
     @Environment(Store.self) private var store
 
@@ -60,10 +60,8 @@ private struct SettingsRow: View {
                 Text("Settings")
             } icon: {
                 Image(systemName: "gearshape")
-                    .overlay(alignment: .topTrailing) {
-                        if store.hasRequests { Circle().fill(.red).frame(width: 7, height: 7).offset(x: 3, y: -2) }
-                    }
             }
+            .badge(store.badge)
             .tag(Route.settings)
         }
         .scrollDisabled(true)

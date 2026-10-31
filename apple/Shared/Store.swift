@@ -32,12 +32,13 @@ struct ScreenRoute: Hashable {
 
 /// The settings page's icons.
 enum Setting: String, Hashable, CaseIterable, Identifiable {
-    case store, groups, devices, secrets, access, users, backups, requests
+    case inbox, store, groups, devices, secrets, access, users, backups, requests
 
     var id: Self { self }
 
     var title: String {
         switch self {
+        case .inbox: String(localized: "Inbox")
         case .store: String(localized: "App Store")
         case .groups: String(localized: "Groups")
         case .devices: String(localized: "Devices")
@@ -51,6 +52,7 @@ enum Setting: String, Hashable, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
+        case .inbox: "bell.fill"
         case .store: "bag.fill"
         case .groups: "person.3.fill"
         case .devices: "laptopcomputer.and.iphone"
@@ -67,6 +69,8 @@ enum Sheet: Hashable, Identifiable {
     case pair
     case join
     case pages
+    /// A request that this user set a secret, from a `<cli>://secret?id=…&scope=…` link.
+    case secret(scope: String, id: String)
 
     var id: Self { self }
 }
@@ -96,6 +100,8 @@ final class Store {
     private(set) var apps: [AppInfo] = []
     /// Each page's widgets, rendered for its scope.
     private(set) var widgets: [String: [WidgetInfo]] = [:]
+    /// How many of this user's notifications in the inbox app are unread.
+    private(set) var unread = 0
     /// The Mac's sidebar selection: the page, screen or view at the bottom of `path`.
     var selection: Route? {
         didSet { if selection != oldValue { path = [] } }
@@ -205,13 +211,27 @@ final class Store {
 
     // MARK: Settings
 
-    /// Icons by role: Users and Backups only for admins, Requests only while something waits.
+    /// Icons by role: Users and Backups only for admins, Requests only while something waits, Inbox first wherever
+    /// the brand's inbox app is installed for this user.
     var settings: [Setting] {
         var items: [Setting] = [.store, .groups, .devices, .secrets, .access]
         if isAdmin { items += [.users, .backups] }
-        if !invites.isEmpty || !trustOffers.isEmpty { items.insert(.requests, at: 0) }
+        if requests > 0 { items.insert(.requests, at: 0) }
+        if inbox != nil { items.insert(.inbox, at: 0) }
         return items
     }
+
+    /// The brand's inbox app, if it's installed where this user reads it.
+    var inbox: AppInfo? {
+        guard let name = brand?.inbox, let app = app(name), app.hasScreens, !(app.installed ?? []).isEmpty else { return nil }
+        return app
+    }
+
+    /// What waits for this user: invites, servers to trust and secrets asked for.
+    var requests: Int { invites.count + trustOffers.count + (state?.secretRequests ?? 0) }
+
+    /// The count on Settings' icon: unread notifications and requests.
+    var badge: Int { (inbox == nil ? 0 : unread) + requests }
 
     /// Groups that invited this user.
     var invites: [GroupInfo] {
@@ -229,7 +249,7 @@ final class Store {
         }
     }
 
-    var hasRequests: Bool { settings.contains(.requests) }
+    var hasRequests: Bool { badge > 0 }
 
     // MARK: Connection
 
@@ -288,8 +308,34 @@ final class Store {
             NotificationCenter.default.post(name: .nodeEvent, object: String(decoding: json, as: UTF8.self))
         }
         if ["servers", "install"].contains(event.type) { try? await refreshState() }
-        // Installs, deploys and data all arrive as changes.
-        if event.type == "changed" { await refreshApps() }
+        // Installs, deploys and data all arrive as changes; the node's own entries (a secret request) change no app.
+        if event.type == "changed" {
+            let apps = event.apps ?? []
+            if apps.isEmpty { try? await refreshState() }
+            await refreshApps()
+            if let inbox = brand?.inbox, apps.contains(inbox) { await refreshUnread() }
+        }
+    }
+
+    /// Takes in how many notifications are unread.
+    func refreshUnread() async {
+        guard let inbox else {
+            unread = 0
+            return
+        }
+        let reply = try? await node.call(app: inbox.name, op: "unread", input: Data("{}".utf8))
+        struct Unread: Decodable { var unread: Int }
+        if let count = reply.flatMap({ try? JSONDecoder().decode(Unread.self, from: $0) })?.unread, count != unread { unread = count }
+    }
+
+    /// `<cli>://secret?id=…&scope=…`, which an agent gives a person to set a secret it asked for. Whether it was one.
+    @discardableResult
+    func open(_ url: URL) -> Bool {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let value = { (name: String) in query.first { $0.name == name }?.value ?? "" }
+        guard url.host() == "secret", !value("id").isEmpty, !value("scope").isEmpty else { return false }
+        sheet = .secret(scope: value("scope"), id: value("id"))
+        return true
     }
 
     private func renameIfHostname() async {
@@ -306,7 +352,9 @@ final class Store {
         guard install != nil else { return }
         do {
             let apps = try await node.apps()
+            let first = self.apps.isEmpty
             if apps != self.apps { self.apps = apps }
+            if first { await refreshUnread() }
             // A node that just started lists its deployed apps before it can describe them.
             if apps.contains(where: { ($0.deploys ?? 0) > 0 && $0.title == nil }) { throw NodeError("starting") }
         } catch {

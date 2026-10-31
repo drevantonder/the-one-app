@@ -25,6 +25,9 @@ struct MacApp: App {
                 .environment(store)
                 .tint(accent)
                 .frame(minWidth: 760, minHeight: 500)
+                .onOpenURL { store.open($0) }
+                // Unread notifications and requests on the Dock icon, as Mail counts unread mail.
+                .onChange(of: store.badge, initial: true) { NSApp.dockTile.badgeLabel = store.badge > 0 ? "\(store.badge)" : nil }
         }
         .defaultSize(width: 1000, height: 700)
         .commands {

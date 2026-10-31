@@ -6,6 +6,8 @@ struct Brand: Codable, Sendable, Equatable {
     var accent: String
     /// The app the App Store opens, if the brand names one.
     var store: String?
+    /// The app notifications go to, if the brand names one.
+    var inbox: String?
 }
 
 /// `GET /v1/state` (SPEC.md "Local API"): this machine, its user and the install.
@@ -20,8 +22,10 @@ struct NodeState: Decodable, Sendable, Equatable {
     var install: Install?
     /// Who opened this user's data, and when.
     var opens: [Open]
+    /// How many requests for a secret wait for this user.
+    var secretRequests: Int?
 
-    enum CodingKeys: String, CodingKey { case brand, machine = "me", host = "server", user, install, opens }
+    enum CodingKeys: String, CodingKey { case brand, machine = "me", host = "server", user, install, opens, secretRequests = "secret_requests" }
 }
 
 struct Machine: Codable, Sendable, Equatable {
@@ -247,13 +251,37 @@ struct SecretInfo: Decodable, Sendable, Equatable, Identifiable {
     var id: String { "\(app)/\(name)" }
 }
 
+/// An agent's or person's request that this user set a secret (SPEC.md "Secrets"), so the agent never sees its value.
+struct SecretRequest: Decodable, Sendable, Equatable, Identifiable {
+    var id: String
+    var scope: String
+    /// The scope's owner: a user's name, a group's, or the install's.
+    var scope_name: String
+    var app: String
+    var name: String
+    var hosts: [String]
+    var why: String?
+    /// The user who asked, and the agent they asked through, if one did.
+    var by: String
+    var agent: String?
+    var time: Double
+    /// `waiting`, `set`, `declined` or `expired`.
+    var state: String
+
+    var waiting: Bool { state == "waiting" }
+    var asker: String { agent.flatMap { $0.isEmpty ? nil : $0 } ?? by }
+}
+
 /// The local API, typed, over whichever transport reaches a node.
 struct NodeClient: Sendable {
     var transport: any NodeTransport
+    /// What the node credits this shell's calls to, for apps' insights; a phone's server labels it itself.
+    var client: String?
 
+    /// The Mac's own node.
     static var local: NodeClient {
         let port = Bundle.main.object(forInfoDictionaryKey: "NodePort") as! String
-        return NodeClient(transport: HTTPNode(base: URL(string: "http://127.0.0.1:\(port)")!))
+        return NodeClient(transport: HTTPNode(base: URL(string: "http://127.0.0.1:\(port)")!), client: "mac")
     }
 
     private func json(_ fields: [String: Any?]) throws -> Data {
@@ -283,7 +311,7 @@ struct NodeClient: Sendable {
     /// Runs an app's operation for an app screen: its input and result are JSON, whatever their shape.
     func call(app: String, op: String, input: Data) async throws -> Data {
         let input = try JSONSerialization.jsonObject(with: input, options: .fragmentsAllowed)
-        let data = try await transport.send("POST", "v1/call", body: try json(["app": app, "op": op, "input": input]), timeout: 15)
+        let data = try await transport.send("POST", "v1/call", body: try json(["app": app, "op": op, "input": input, "client": client]), timeout: 15)
         let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         if let error = reply["error"] as? String { throw NodeError(error) }
         return try JSONSerialization.data(withJSONObject: reply["ok"] ?? NSNull(), options: .fragmentsAllowed)
@@ -336,6 +364,19 @@ struct NodeClient: Sendable {
     /// Sets a secret, or with no value deletes it.
     func setSecret(scope: String, app: String, name: String, hosts: [String], value: String?) async throws {
         try await post("v1/secrets", ["scope": scope, "app": app, "name": name, "hosts": hosts, "value": value])
+    }
+
+    /// Requests for a secret this user may answer, newest first: all, or one scope's, or one.
+    func secretRequests(scope: String? = nil, id: String? = nil) async throws -> [SecretRequest] {
+        var query: [String: String] = [:]
+        query["scope"] = scope
+        query["id"] = id
+        return try await get("v1/secrets/requests", query)
+    }
+
+    /// Sets the secret a request asks for, or with no value declines it.
+    func answer(secretRequest id: String, scope: String, value: String?) async throws {
+        try await post("v1/secrets/answer", ["scope": scope, "id": id, "value": value])
     }
 
     func backup(url: String?, accessKey: String = "", secretKey: String = "", key: String = "") async throws {

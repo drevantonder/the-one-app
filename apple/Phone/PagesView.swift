@@ -59,6 +59,7 @@ struct PagesView: View {
             case .pair: PairSheet()
             case .pages: PagesEditor()
             case .join: EmptyView()
+            case .secret(let scope, let id): SecretRequestSheet(scope: scope, id: id)
             }
         }
         .onChange(of: store.pages) {
@@ -72,7 +73,7 @@ struct PagesView: View {
             WidgetCenter.shared.reloadAllTimelines()
         }
         .onChange(of: scenePhase) {
-            if scenePhase == .active { Task { try? await store.refreshState(); await store.refreshApps() } }
+            if scenePhase == .active { Task { try? await store.refreshState(); await store.refreshApps(); await store.refreshUnread() } }
         }
     }
 

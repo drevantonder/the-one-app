@@ -151,10 +151,10 @@ private struct IconGrid: View {
     }
 }
 
-/// A large rounded icon with its name under it, as a home screen's.
+/// A large rounded icon with its name under it, as a home screen's, with a count in a red badge as its icons have.
 struct IconButton<Icon: View>: View {
     var title: String
-    var badge = false
+    var badge = 0
     var action: () -> Void
     @ViewBuilder var icon: Icon
 
@@ -163,8 +163,14 @@ struct IconButton<Icon: View>: View {
             VStack(spacing: 6) {
                 icon
                     .overlay(alignment: .topTrailing) {
-                        if badge {
-                            Circle().fill(.red).frame(width: 14, height: 14).offset(x: 4, y: -4)
+                        if badge > 0 {
+                            Text(badge > 99 ? "99+" : "\(badge)")
+                                .font(.caption.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .frame(minWidth: 22, minHeight: 22)
+                                .background(.red, in: .capsule)
+                                .offset(x: 7, y: -7)
                         }
                     }
                 Text(title)
@@ -220,7 +226,7 @@ struct SettingsPage: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: iconSize + 18, maximum: iconSize + 34), spacing: 10, alignment: .top)],
                           alignment: .leading, spacing: 20) {
                     ForEach(store.settings) { item in
-                        IconButton(title: item.title, badge: item == .requests) { open(.setting(item)) } icon: {
+                        IconButton(title: item.title, badge: badge(item)) { open(.setting(item)) } icon: {
                             SymbolTile(symbol: item.symbol, color: item.color, size: iconSize)
                         }
                     }
@@ -237,6 +243,14 @@ struct SettingsPage: View {
         .groupedBackground()
     }
 
+    private func badge(_ item: Setting) -> Int {
+        switch item {
+        case .inbox: store.unread
+        case .requests: store.requests
+        default: 0
+        }
+    }
+
     private var subtitle: String {
         let who = store.me.map { $0.admin ? String(localized: "\($0.name) · admin") : $0.name } ?? ""
         return [store.install?.name ?? "", who].filter { !$0.isEmpty }.joined(separator: " · ")
@@ -247,6 +261,7 @@ extension Setting {
     /// Its icon's colour, as Settings colours its own.
     var color: Color {
         switch self {
+        case .inbox: .red
         case .store: .blue
         case .groups: .green
         case .devices: .gray
@@ -254,7 +269,7 @@ extension Setting {
         case .access: .purple
         case .users: .teal
         case .backups: .orange
-        case .requests: .red
+        case .requests: .pink
         }
     }
 }
