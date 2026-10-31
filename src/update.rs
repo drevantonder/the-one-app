@@ -314,6 +314,11 @@ mod tests {
     }
 
     #[test]
+    fn the_installer_gets_this_brands_releases() {
+        assert!(include_str!("../install.sh").contains(&format!("\nrepo={} ", super::REPO)));
+    }
+
+    #[test]
     fn version_tags() {
         for good in ["v0.2.0", "v10.0.1", "v1.2.3-rc.1"] {
             assert!(super::version_tag(good), "{good}");

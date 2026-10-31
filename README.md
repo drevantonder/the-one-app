@@ -9,6 +9,10 @@ One app to rule them all, one app to find them,<br>
 one app to bring them all, and in the network bind them.
 </i></p>
 
+```sh
+curl -fsSL theoneapp.drevan.me | sh
+```
+
 Your devices, and your team's, as one place for apps and agents.
 
 Every device you own runs a small node. Together they form a **space**: they find each other by key over [iroh](https://iroh.computer), with no account and no VPN, and keep working when some of them are off. Apps run on your own devices and use their compute; agents reach them over MCP or the CLI; phones join as clients.
@@ -29,7 +33,7 @@ Apps are JavaScript modules (see `apps/board.js`) or, for device features, nativ
 
 ```sh
 cargo build --release
-sh scripts/install-linux.sh target/release/one   # runs the node as a service
+sh install.sh target/release/one                  # runs the node as a service
 one create Home                                   # a space, on your first device
 one pair                                          # a pairing code for your next device
 one join <code>                                   # on that device
