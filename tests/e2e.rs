@@ -786,3 +786,33 @@ async fn the_inbox_notifies_people_and_pushes_through_a_driver() {
     let refused = a.call(call("inbox", "notify", json!({ "title": "x", "to": "bob" }))).await.unwrap_err();
     assert!(format!("{refused:#}").contains("to is me"), "{refused:#}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agents_ask_for_secrets_and_never_see_them() {
+    let (a, _ra) = start("asks").await;
+    a.create("Asks", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: Some("Claude Code".into()) };
+    let mine = one::entry::Scope::User(me.user.clone());
+    let asked = a.request_secret(&me, &mine, "board", "token", vec!["api.example.com".into()], "Your example.com API key, from its settings page").await.unwrap();
+    let id = asked["id"].as_str().unwrap().to_string();
+    assert!(asked["link"].as_str().unwrap().contains(&format!("secret?id={id}")), "{asked}");
+    assert_eq!(a.state()["secret_requests"], 1, "the shell shows a request waiting");
+    let waiting = a.secret_requests(&me, None, Some(&id)).unwrap();
+    assert_eq!(waiting[0]["state"], "waiting");
+    assert_eq!(waiting[0]["agent"], "Claude Code");
+    assert_eq!(waiting[0]["why"], "Your example.com API key, from its settings page");
+
+    a.answer_secret_request(&me, &mine, &id, Some("s3cret".into())).await.unwrap();
+    let done = a.secret_requests(&me, None, Some(&id)).unwrap();
+    assert_eq!(done[0]["state"], "set", "{done:?}");
+    assert!(!format!("{done:?}").contains("s3cret"), "a request never says the value");
+    let set = a.secrets(&me, Some(&mine)).unwrap();
+    assert!(set.iter().any(|s| s["name"] == "token" && s["hosts"] == json!(["api.example.com"])), "{set:?}");
+    assert!(a.answer_secret_request(&me, &mine, &id, Some("again".into())).await.is_err(), "answered once");
+    assert_eq!(a.state()["secret_requests"], 0);
+
+    let other = a.request_secret(&me, &mine, "board", "other", vec!["example.org".into()], "").await.unwrap();
+    let other = other["id"].as_str().unwrap();
+    a.answer_secret_request(&me, &mine, other, None).await.unwrap();
+    assert_eq!(a.secret_requests(&me, None, Some(other)).unwrap()[0]["state"], "declined");
+}

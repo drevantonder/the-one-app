@@ -117,7 +117,7 @@ pub struct Members {
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
-const SCOPE_ONLY: &[&str] = &["ran", "schedule"];
+const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request"];
 
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
@@ -510,6 +510,8 @@ pub struct ScopeState {
     pub runs: BTreeMap<(String, String), Vec<Run>>,
     /// When a schedule's runs first followed a different definition, by (app, schedule): (was, is, when).
     pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
+    /// Agents' requests for a person to set a secret here, by id.
+    pub requests: BTreeMap<String, SecretRequest>,
     /// (opener, server, time)
     /// Who opened this user's data, on which server, when, and through which agent.
     pub opens: Vec<(String, Key, u64, Option<String>)>,
@@ -532,6 +534,20 @@ pub struct Run {
     pub error: Option<String>,
     pub ms: u64,
     pub spec: Value,
+}
+
+/// An agent's request for a person to set one of an app's secrets: what for, who asked, and how it was answered:
+/// (`set` or `declined`, by whom, when).
+#[derive(Clone, Debug)]
+pub struct SecretRequest {
+    pub app: String,
+    pub name: String,
+    pub hosts: Vec<String>,
+    pub why: String,
+    pub user: String,
+    pub agent: Option<String>,
+    pub time: u64,
+    pub answer: Option<(String, String, u64)>,
 }
 
 /// A secret: set, never read. Only the node's outbound requests use its value (see SPEC.md, "Secrets").
@@ -631,9 +647,34 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
                 Some(value) => {
                     let hosts: Vec<String> = data["hosts"].as_array().context("no hosts")?.iter().filter_map(|h| h.as_str().map(str::to_string)).collect();
                     ensure!(!hosts.is_empty() && hosts.iter().all(|h| valid_host(h)), "a secret goes to one host or more");
+                    if let Some(r) = data["request"].as_str().and_then(|id| state.requests.get_mut(id)) {
+                        if r.answer.is_none() && r.app == app && r.name == name {
+                            r.answer = Some(("set".into(), w.to_string(), e.time()));
+                        }
+                    }
                     state.secrets.insert((app, name), Secret { hosts, value: value.to_string(), user: w.to_string(), time: e.time() });
                 }
             }
+        }
+        "secret-request" => {
+            ensure!(manages_scope(m, w, &scope), "not allowed to set secrets there");
+            let data = &e.content.data;
+            let id = data["id"].as_str().filter(|id| is_id(id)).context("no id")?.to_string();
+            if data["declined"] == true {
+                let r = state.requests.get_mut(&id).context("no such request")?;
+                ensure!(r.answer.is_none(), "already answered");
+                r.answer = Some(("declined".into(), w.to_string(), e.time()));
+                return Ok(());
+            }
+            ensure!(!state.requests.contains_key(&id), "that request is already made");
+            let app = data["app"].as_str().context("no app")?.to_string();
+            let name = data["name"].as_str().context("no name")?.to_string();
+            ensure!(m.apps.contains_key(&app) && valid_secret_name(&name), "not an app's secret");
+            let hosts: Vec<String> = data["hosts"].as_array().context("no hosts")?.iter().filter_map(|h| h.as_str().map(str::to_string)).collect();
+            ensure!(!hosts.is_empty() && hosts.iter().all(|h| valid_host(h)), "a secret goes to one host or more");
+            let why = data["why"].as_str().unwrap_or("").to_string();
+            let agent = data["agent"].as_str().map(str::to_string);
+            state.requests.insert(id, SecretRequest { app, name, hosts, why, user: w.to_string(), agent, time: e.time(), answer: None });
         }
         "open" => {
             let Scope::User(_) = &scope else { bail!("only a user's data is opened") };

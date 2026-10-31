@@ -49,6 +49,10 @@ Usage:
                                        never read back
   {CLI} secret list [--scope s]        the secrets you may set: names and hosts, never values
   {CLI} secret remove <app> <name> [--scope s]
+  {CLI} secret request <app> <name> --hosts a,b [--why text] [--scope s]
+                                       ask the person to set a secret: a link to a sheet where they type it, so
+                                       you never see it; secret status <id> says how it went
+  {CLI} secret requests                the requests waiting for you; secret answer <id> [--decline] sets one from stdin
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
@@ -214,6 +218,37 @@ fn run(args: Vec<String>) -> Result<()> {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             post("/v1/install", json!({ "app": app, "scope": scope, "installed": !flags.contains_key("remove") }))?;
             println!("{app} is {} in {scope}.", if flags.contains_key("remove") { "no longer installed" } else { "installed" });
+        }
+        ["secret", "request", app, name] => {
+            let hosts: Vec<&str> = flags.get("hosts").and_then(Value::as_str).context("give the hosts it's sent to: --hosts api.example.com")?.split(',').map(str::trim).collect();
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            let r = post("/v1/secrets/request", json!({ "scope": scope, "app": app, "name": name, "hosts": hosts, "why": flags.get("why"), "agent": agent_from_env() }))?;
+            println!("Open this to set it: {}\nOr: {CLI} secret answer {} < file\n{CLI} secret status {} says how it went.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""));
+        }
+        ["secret", "status", id] => {
+            let r = get(&format!("/v1/secrets/requests?id={id}"))?;
+            let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
+            println!("{}/{} in {}: {}", r["app"].as_str().unwrap_or(""), r["name"].as_str().unwrap_or(""), r["scope"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""));
+        }
+        ["secret", "requests"] => {
+            for r in get("/v1/secrets/requests")?.as_array().into_iter().flatten() {
+                println!("{}  {}/{} in {}  {}  {}", r["id"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["name"].as_str().unwrap_or(""), r["scope"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""), r["why"].as_str().unwrap_or(""));
+            }
+        }
+        ["secret", "answer", id] => {
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            let value = match flags.contains_key("decline") {
+                true => Value::Null,
+                false => {
+                    let mut v = String::new();
+                    std::io::stdin().read_line(&mut v)?;
+                    let v = v.trim_end_matches(['\n', '\r']).to_string();
+                    anyhow::ensure!(!v.is_empty(), "give the secret on stdin, or --decline");
+                    json!(v)
+                }
+            };
+            post("/v1/secrets/answer", json!({ "scope": scope, "id": id, "value": value }))?;
+            println!("{}", if value.is_null() { "Declined." } else { "Set." });
         }
         ["secret", "set", app, name] => {
             let hosts: Vec<&str> = flags.get("hosts").and_then(Value::as_str).context("give the hosts it's sent to: --hosts api.example.com")?.split(',').map(str::trim).collect();
@@ -607,12 +642,24 @@ fn secret_tools() -> Vec<Value> {
         json!({ "name": "secrets_set", "description": "Set (or replace) a secret of an app: it puts {{name}} in a request's headers or body and the node fills it in, only for these hosts. Nobody can read it back.", "inputSchema": { "type": "object", "required": ["app", "name", "value", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "scope": scope } } }),
         json!({ "name": "secrets_list", "description": "The secrets you may set: app, name and hosts, never values.", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": { "readOnlyHint": true } }),
         json!({ "name": "secrets_remove", "annotations": { "destructiveHint": true }, "description": "Delete a secret of an app.", "inputSchema": { "type": "object", "required": ["app", "name"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "scope": scope } } }),
+        json!({ "name": "secrets_request", "description": "Ask the person to set a secret of an app, instead of handling its value yourself: returns a link to give them, which opens a sheet in the app where they type it (and their Settings lists it as a request). You never see the value; poll secrets_status with the id until it's set or declined.", "inputSchema": { "type": "object", "required": ["app", "name", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "why": { "type": "string", "description": "one line the person sees: what it's for and where to find it" }, "scope": scope } } }),
+        json!({ "name": "secrets_status", "description": "How a secret request went: waiting, set, declined or expired, and who answered. Never the value.", "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }, "annotations": { "readOnlyHint": true } }),
     ]
 }
 
-fn secret_tool(op: &str, input: &Map<String, Value>) -> Result<Value> {
+fn secret_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
     let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
     match op {
+        "request" => {
+            let r = post("/v1/secrets/request", json!({ "scope": scope, "app": input.get("app"), "name": input.get("name"), "hosts": input.get("hosts"), "why": input.get("why"), "agent": agent }))?;
+            Ok(json!(format!("Asked. Give the person this link to set it: {}\nIt's also waiting in their Settings, under Requests. Poll secrets_status with id {} until it's set.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""))))
+        }
+        "status" => {
+            let id = input.get("id").and_then(Value::as_str).context("give the request's id")?;
+            let r = get(&format!("/v1/secrets/requests?id={id}"))?;
+            let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
+            Ok(json!({ "state": r["state"], "app": r["app"], "name": r["name"], "answered": r["answered"] }))
+        }
         "set" => post("/v1/secrets", json!({ "scope": scope, "app": input.get("app"), "name": input.get("name"), "hosts": input.get("hosts"), "value": input.get("value") })).map(|_| json!("Set.")),
         "remove" => post("/v1/secrets", json!({ "scope": scope, "app": input.get("app"), "name": input.get("name"), "value": null })).map(|_| json!("Removed.")),
         _ => get(&format!("/v1/secrets{}", input.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default())),
@@ -643,7 +690,7 @@ fn call_tool(params: &Value, agent: Option<&str>) -> Value {
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
     let Some((app, op)) = name.split_once('_') else { return failed(format!("no tool {name}")) };
     if app == "secrets" {
-        return match secret_tool(op, &input) {
+        return match secret_tool(op, &input, agent) {
             Ok(ok) => json!({ "content": ops::mcp_content(&ok) }),
             Err(e) => failed(format!("{e:#}")),
         };

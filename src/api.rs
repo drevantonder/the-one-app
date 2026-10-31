@@ -49,6 +49,9 @@ pub fn router(node: Node) -> Router {
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
         .route("/v1/secrets", get(secrets).post(set_secret))
+        .route("/v1/secrets/requests", get(secret_requests))
+        .route("/v1/secrets/request", post(request_secret))
+        .route("/v1/secrets/answer", post(answer_secret_request))
         .route("/v1/node-release", post(release))
         .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
         .route("/v1/blobs/{hash}", get(blob))
@@ -302,6 +305,35 @@ async fn set_secret(State(node): State<Node>, Json(body): Json<Value>) -> Reply 
     let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
     let hosts = body["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
     node.set_secret(&me, &scope, text(&body, "app")?, text(&body, "name")?, hosts, body["value"].as_str().map(str::to_string)).await?;
+    done()
+}
+
+#[derive(Deserialize)]
+struct RequestsQuery {
+    scope: Option<String>,
+    id: Option<String>,
+}
+
+/// The secret requests this user may answer, with their state; `?id=` for one (an agent polling it).
+async fn secret_requests(State(node): State<Node>, Query(q): Query<RequestsQuery>) -> Reply {
+    let me = local(&node)?;
+    let scope = q.scope.map(|s| node.scope_for(&me, &s)).transpose()?;
+    Ok(Json(json!(node.secret_requests(&me, scope.as_ref(), q.id.as_deref())?)))
+}
+
+/// `{ scope, app, name, hosts, why, agent? }`: asks a person to set a secret → `{ id, link, scope }`.
+async fn request_secret(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    let me = Caller { agent: body["agent"].as_str().map(str::to_string), ..local(&node)? };
+    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
+    let hosts = body["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
+    Ok(Json(node.request_secret(&me, &scope, text(&body, "app")?, text(&body, "name")?, hosts, body["why"].as_str().unwrap_or("")).await?))
+}
+
+/// `{ scope, id, value }` sets what a request asks for; `value: null` declines it.
+async fn answer_secret_request(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    let me = local(&node)?;
+    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
+    node.answer_secret_request(&me, &scope, text(&body, "id")?, body["value"].as_str().map(str::to_string)).await?;
     done()
 }
 

@@ -42,6 +42,8 @@ pub const RATE_LIMIT: u32 = 600;
 const STOPPED_FOR: u64 = 15 * 60_000;
 /// How often a server looks for schedules to run.
 const SCHEDULE_TICK: Duration = Duration::from_secs(10);
+/// How long a secret request waits for its answer.
+const SECRET_REQUEST_LIFE: u64 = 86_400_000;
 /// How long an app's page says a deploy changed or removed one of its schedules.
 const CHANGED_SHOWN: u64 = 14 * 86_400_000;
 
@@ -1104,6 +1106,71 @@ impl Node {
         Ok(())
     }
 
+    /// Asks a person to set one of an app's secrets in `scope`, for `caller` (an agent, say), who never sees it:
+    /// `{ id, link, scope }`. The person's shell opens the link, or lists the request, and they type the value.
+    pub async fn request_secret(&self, caller: &Caller, scope: &Scope, app: &str, name: &str, hosts: Vec<String>, why: &str) -> Result<Value> {
+        let id = new_id();
+        self.with(|i| secret_entry(i, &caller.user, scope, app, name, hosts.clone(), Some(String::new())).map(|_| ()))?;
+        let data = json!({ "id": id, "app": app, "name": name, "hosts": hosts, "why": why, "agent": caller.agent });
+        let by = (caller.key != self.0.id).then_some(caller.key);
+        self.append_as(scope, &caller.user, by, members::node("secret-request", data)).await?;
+        Ok(json!({ "id": id, "scope": scope.to_string(), "link": format!("{}://secret?id={id}&scope={scope}", crate::brand::CLI) }))
+    }
+
+    /// Answers a secret request in `scope`: sets the secret it asks for to `value`, or with none, declines it.
+    pub async fn answer_secret_request(&self, caller: &Caller, scope: &Scope, id: &str, value: Option<String>) -> Result<()> {
+        let content = self.with(|i| {
+            let r = i.views.get(&scope.to_string()).and_then(|(_, s)| s.requests.get(id)).with_context(|| format!("no request {id} in {scope}"))?;
+            ensure!(r.answer.is_none(), "that request was already answered");
+            Ok(match value {
+                Some(value) => {
+                    let mut c = secret_entry(i, &caller.user, scope, &r.app, &r.name, r.hosts.clone(), Some(value))?;
+                    c.data["request"] = json!(id);
+                    c
+                }
+                None => {
+                    ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "you can't set secrets in {scope}");
+                    members::node("secret-request", json!({ "id": id, "declined": true }))
+                }
+            })
+        })?;
+        let by = (caller.key != self.0.id).then_some(caller.key);
+        self.append_as(scope, &caller.user, by, content).await?;
+        Ok(())
+    }
+
+    /// The secret requests `viewer` may answer (here, or in `scope`, or just `id`), newest first, with their state:
+    /// `waiting`, `set`, `declined` or `expired` (a day after it was made). Never a value.
+    pub fn secret_requests(&self, viewer: &Caller, scope: Option<&Scope>, id: Option<&str>) -> Result<Vec<Value>> {
+        let now = now_ms();
+        self.with(|i| {
+            let m = &i.r.members;
+            let name = |u: &str| m.users.get(u).map(|u| u.name.clone()).unwrap_or_default();
+            let mut out = Vec::new();
+            for (log, (_, state)) in &i.views {
+                let Ok(s) = Scope::parse(log) else { continue };
+                if scope.is_some_and(|want| *want != s) || !members::manages_scope(m, &viewer.user, &s) {
+                    continue;
+                }
+                let scope_name = handles(m, std::slice::from_ref(&s), &viewer.user).remove(0).name;
+                for (rid, r) in state.requests.iter().filter(|(rid, _)| id.is_none_or(|want| want == rid.as_str())) {
+                    let state = match &r.answer {
+                        Some((how, ..)) => how.as_str(),
+                        None if now.saturating_sub(r.time) > SECRET_REQUEST_LIFE => "expired",
+                        None => "waiting",
+                    };
+                    let answered = r.answer.as_ref().map(|(_, by, t)| json!({ "by": name(by), "time": t }));
+                    out.push(json!({
+                        "id": rid, "scope": log, "scope_name": scope_name, "app": r.app, "name": r.name, "hosts": r.hosts, "why": r.why,
+                        "by": name(&r.user), "agent": r.agent, "time": r.time, "state": state, "answered": answered,
+                    }));
+                }
+            }
+            out.sort_by_key(|v| std::cmp::Reverse(v["time"].as_u64().unwrap_or(0)));
+            Ok(out)
+        })
+    }
+
     /// The secrets `viewer` may set, here or in `scope`: their app, name and hosts, never their values.
     pub fn secrets(&self, viewer: &Caller, scope: Option<&Scope>) -> Result<Vec<Value>> {
         self.with(|i| {
@@ -1444,6 +1511,7 @@ impl Node {
     /// The state as `viewer`, this server or a client it serves, sees it.
     pub fn state_for(&self, viewer: &Caller) -> Value {
         let ready = self.ready();
+        let waiting = self.secret_requests(viewer, None, None).map(|r| r.iter().filter(|r| r["state"] == "waiting").count()).unwrap_or(0);
         let install = self.0.install.lock().unwrap();
         let viewer_name = if viewer.key == self.0.id { self.server_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
         let user = install.as_ref().and_then(|i| i.r.members.user(&viewer.user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role }));
@@ -1508,6 +1576,8 @@ impl Node {
             "user": user,
             "install": install,
             "opens": opens,
+            // Secret requests waiting for this user to answer (see GET /v1/secrets/requests).
+            "secret_requests": waiting,
         });
         if viewer.key != self.0.id {
             state["client"] = json!({ "key": hex(&viewer.key), "name": viewer_name });
@@ -1717,6 +1787,20 @@ impl Node {
                 let hosts = body["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
                 let (app, name) = (body["app"].as_str().unwrap_or(""), body["name"].as_str().unwrap_or(""));
                 self.set_secret(me, &scope, app, name, hosts, body["value"].as_str().map(str::to_string)).await?;
+                json!({})
+            }
+            ("GET", "/v1/secrets/requests") => {
+                let scope = body["scope"].as_str().map(|s| self.scope_for(me, s)).transpose()?;
+                json!(self.secret_requests(me, scope.as_ref(), body["id"].as_str())?)
+            }
+            ("POST", "/v1/secrets/request") => {
+                let scope = self.scope_for(me, body["scope"].as_str().unwrap_or("user"))?;
+                let hosts = body["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
+                self.request_secret(me, &scope, body["app"].as_str().unwrap_or(""), body["name"].as_str().unwrap_or(""), hosts, body["why"].as_str().unwrap_or("")).await?
+            }
+            ("POST", "/v1/secrets/answer") => {
+                let scope = self.scope_for(me, body["scope"].as_str().unwrap_or("user"))?;
+                self.answer_secret_request(me, &scope, body["id"].as_str().unwrap_or(""), body["value"].as_str().map(str::to_string)).await?;
                 json!({})
             }
             ("POST", "/v1/name") => {

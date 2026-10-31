@@ -121,7 +121,8 @@ These two change only their own scope: unlike `global`'s other node entries, the
 
 ### Secrets
 
-- `secret { app, name, hosts, value }`, in its scope: sets the secret `name` of `app`, sent only to `hosts` (host names). A user's by that user, a group's by its admins, `global`'s by admins. `value: null` deletes it.
+- `secret { app, name, hosts, value, request? }`, in its scope: sets the secret `name` of `app`, sent only to `hosts` (host names). A user's by that user, a group's by its admins, `global`'s by admins. `value: null` deletes it. `request` answers a request for it.
+- `secret-request { id, app, name, hosts, why, agent? }`, in a scope, by someone who sets secrets there (an agent acting for them): asks a person to set that secret, so the agent never handles its value; `why` is one line they see. `secret-request { id, declined: true }` declines it. A request waits a day. Like `ran`, it changes only its own scope.
 
 A secret is set, never read: nothing (CLI, MCP, API, query, view, app or agent) can read its value back; only that it exists, its hosts, and replacing or deleting it. The node keeps it out of every view.
 
@@ -241,7 +242,7 @@ Each object is encrypted with XChaCha20-Poly1305, its random 24-byte nonce first
 
 ## Clients (ALPN `one/client/1`)
 
-A client joins with a pairing code like a server, then asks the servers its user trusts, nearest first, one at a time, as calls do. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`, or `{ elsewhere: why }`. Clients may ask `GET /v1/state`, `GET /v1/apps`, `GET /v1/widgets`, `GET /v1/screen { app, screen, params, scope }`, `GET /v1/source { app, bundle, path }`, `POST /v1/call`, `POST /v1/name`, `POST /v1/pair`, `POST /v1/trust`, `POST /v1/install`, `POST /v1/schedule`, `GET` and `POST /v1/secrets`, `POST /v1/group`, `/v1/invite`, `/v1/accept`, `/v1/member`, `/v1/role` and `/v1/remove` and `GET /v1/blobs/<hash>` (answered `{ blob }`, base64). A server that doesn't serve the client's user answers everything but `GET /v1/state` with `{ elsewhere }`. `GET /v1/events` instead streams events as JSON lines until the stream closes. Calls run for the client: `ctx.me` is the client. Only current clients may ask.
+A client joins with a pairing code like a server, then asks the servers its user trusts, nearest first, one at a time, as calls do. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`, or `{ elsewhere: why }`. Clients may ask `GET /v1/state`, `GET /v1/apps`, `GET /v1/widgets`, `GET /v1/screen { app, screen, params, scope }`, `GET /v1/source { app, bundle, path }`, `POST /v1/call`, `POST /v1/name`, `POST /v1/pair`, `POST /v1/trust`, `POST /v1/install`, `POST /v1/schedule`, `GET` and `POST /v1/secrets`, `GET /v1/secrets/requests`, `POST /v1/secrets/request` and `/v1/secrets/answer`, `POST /v1/group`, `/v1/invite`, `/v1/accept`, `/v1/member`, `/v1/role` and `/v1/remove` and `GET /v1/blobs/<hash>` (answered `{ blob }`, base64). A server that doesn't serve the client's user answers everything but `GET /v1/state` with `{ elsewhere }`. `GET /v1/events` instead streams events as JSON lines until the stream closes. Calls run for the client: `ctx.me` is the client. Only current clients may ask.
 
 ## Local API
 
@@ -259,6 +260,7 @@ Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CL
 - `POST /v1/group { name }` → `{ group }`, `POST /v1/invite { group, user, role }`, `POST /v1/accept { group }`, `POST /v1/member { group, user, role }`.
 - `POST /v1/app { name, owner, from? }`, `POST /v1/deploy { app, bundle }`, `POST /v1/install { app, scope, installed }`, `POST /v1/schedule { app, schedule, scope, on }`. `POST /v1/fork { app, name, owner? }`: a new app `name` from `app`, owned by `owner` (the asker by default), deployed with `app`'s latest bundle.
 - *(Not built yet.)* `POST /v1/driver { server, name, blob }`.
+- `POST /v1/secrets/request { scope, app, name, hosts, why, agent? }` → `{ id, link, scope }`, the link `<cli>://secret?id=<id>&scope=<scope>`, which a shell opens as a sheet saying whose scope it's saved in, where the person types the value. `GET /v1/secrets/requests?scope=&id=`: the requests this user may answer, newest first, each `{ id, scope, app, name, hosts, why, by, agent, time, state, answered }`, `state` being `waiting`, `set`, `declined` or `expired`. `POST /v1/secrets/answer { scope, id, value }` sets what it asks for, or with `value: null` declines it. `GET /v1/state` says how many wait (`secret_requests`).
 - `GET /v1/secrets?scope=`: the secrets this user may set (there): scope, app, name, hosts, who set it and when, never values. `POST /v1/secrets { scope, app, name, hosts, value }`, with `value: null` to delete. `scope` is `user`, `global`, `group:<id>` or a group's name.
 - `POST /v1/node-release { path, commit, target, committed, signature }`: publishes the binary at `path`, if `signature` is the release key's over it.
 - `POST /v1/blobs` with the bytes as the body → `{ blob, size }`. `GET /v1/blobs/<hash>`: a blob, from this server or another.
