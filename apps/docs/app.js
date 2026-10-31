@@ -3,7 +3,7 @@
 // Google's token address, and the browser ends on a 127.0.0.1 address the person pastes back.
 
 const APP = "docs";
-const TITLE = "Docs";
+const TITLE = "Google Docs";
 const OAUTH = "oauth2.googleapis.com";
 const SCOPES = "openid email https://www.googleapis.com/auth/documents";
 const API = "https://docs.googleapis.com/v1/";

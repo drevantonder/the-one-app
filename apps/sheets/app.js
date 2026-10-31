@@ -3,7 +3,7 @@
 // Google's token address, and the browser ends on a 127.0.0.1 address the person pastes back.
 
 const APP = "sheets";
-const TITLE = "Sheets";
+const TITLE = "Google Sheets";
 const OAUTH = "oauth2.googleapis.com";
 const SCOPES = "openid email https://www.googleapis.com/auth/spreadsheets";
 const API = "https://sheets.googleapis.com/v4/";
