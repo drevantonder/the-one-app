@@ -159,6 +159,12 @@ function context(env, body, appends, later) {
     me: body.me,
     /// The app whose ctx.apps made this call, if one did.
     from: body.from ?? null,
+    /// Says what this call spent on AI, { model, usd, input, output }: it shows in the insights of the app that called
+    /// it (ctx.from), or else of this one.
+    cost: (spent) => {
+      if (body.read_only) return;
+      appends.push({ cost: { model: String(spent?.model ?? "?"), usd: Number(spent?.usd) || 0, input: Number(spent?.input) || 0, output: Number(spent?.output) || 0 } });
+    },
     /// Keeps work going after the call returns (an AI read, a copy to Drive), up to 10 minutes: its requests and
     /// calls still go out as this call's, and what it appends is written when it's done.
     waitUntil: (promise) => {

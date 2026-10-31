@@ -44,6 +44,8 @@ const STOPPED_FOR: u64 = 15 * 60_000;
 const SCHEDULE_TICK: Duration = Duration::from_secs(10);
 /// How long a call's work may carry on after it returns (`ctx.waitUntil`).
 const LATER_LIMIT: Duration = Duration::from_secs(600);
+/// How many of an app's failures a server records an hour; the rest are only counted on the next hour's.
+const FAILURES_KEPT: u32 = 30;
 /// How long a secret request waits for its answer.
 const SECRET_REQUEST_LIFE: u64 = 86_400_000;
 /// How long an app's page says a deploy changed or removed one of its schedules.
@@ -240,6 +242,10 @@ pub struct Inner {
     running: Mutex<std::collections::HashSet<String>>,
     /// The calls that returned with work still running (`ctx.waitUntil`), by token: told when it's done.
     later: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
+    /// Who used which app today from which client, as recorded here: (app, user, client, day).
+    seen: Mutex<std::collections::HashSet<(String, String, String, u64)>>,
+    /// How many failures of each app were recorded here each hour.
+    failures: Mutex<HashMap<(String, u64), u32>>,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -263,6 +269,8 @@ pub struct Grant {
     pub puts: Vec<String>,
     /// How many app-to-app calls deep the call is.
     pub depth: u32,
+    /// The app whose `ctx.apps` made the call, if one did.
+    pub from: Option<String>,
 }
 
 /// Holds a grant for as long as its call runs.
@@ -321,6 +329,8 @@ impl Node {
             guard: Mutex::new(Guard::default()),
             running: Mutex::new(Default::default()),
             later: Mutex::new(HashMap::new()),
+            seen: Mutex::new(Default::default()),
+            failures: Mutex::new(HashMap::new()),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -749,22 +759,150 @@ impl Node {
             return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest deploy yet", req.app)));
         }
         if let Some(why) = self.stopped(&req.app) {
+            self.record(&req.app, req, me, Some(&why));
             return Ok(Reply::Error(why));
         }
         let mut ctx = ctx;
         ctx.from = req.from.clone();
         let granted = self.grant(&req.app, me, &mut ctx, req.depth);
-        let outcome = self.0.apps.call(&req.app, &req.op, input, &ctx).await?;
-        self.write_appends(&req.app, outcome.appends, &scopes, me).await?;
+        // Just under the call's own limit, so a call that's stopped is recorded first.
+        let ran = tokio::time::timeout(CALL_LIMIT - Duration::from_secs(1), async {
+            let mut outcome = self.0.apps.call(&req.app, &req.op, input, &ctx).await?;
+            self.write_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
+            anyhow::Ok(outcome)
+        })
+        .await
+        .unwrap_or_else(|_| Err(anyhow!("it took longer than {}s and was stopped", CALL_LIMIT.as_secs())));
+        let outcome = match ran {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                self.record(&req.app, req, me, Some(&format!("{err:#}")));
+                return Err(err);
+            }
+        };
+        self.record(&req.app, req, me, None);
         if outcome.later {
             self.keep_for_later(granted);
         }
         Ok(Reply::Ok(outcome.result))
     }
 
+    // Insights.
+
+    /// Records, for an app's owners, a call that ran here: the first each day by each user from each client
+    /// (`used`), and every failure (`failed`), at most `FAILURES_KEPT` an hour per app on this server. They go in the
+    /// owner's scope when the caller may use it and this server holds it, else in `global`; in the background.
+    fn record(&self, app: &str, req: &CallRequest, me: &Caller, error: Option<&str>) {
+        let now = now_ms();
+        let client = req.client.clone().unwrap_or_else(|| "api".into());
+        let content = match error {
+            None => {
+                let day = now / 86_400_000;
+                if !self.0.seen.lock().unwrap().insert((app.to_string(), me.user.clone(), client.clone(), day)) {
+                    return;
+                }
+                members::node("used", json!({ "app": app, "client": client, "agent": me.agent, "day": day }))
+            }
+            Some(error) => {
+                let hour = now / 3_600_000;
+                let mut failures = self.0.failures.lock().unwrap();
+                let n = failures.entry((app.to_string(), hour)).or_default();
+                *n += 1;
+                if *n > FAILURES_KEPT {
+                    return;
+                }
+                let error: String = error.lines().next().unwrap_or("").chars().take(300).collect();
+                members::node("failed", json!({ "app": app, "op": req.op, "error": error, "client": client, "agent": me.agent }))
+            }
+        };
+        self.write_insight(app, me, content);
+    }
+
+    /// Writes an insight about `app` for `me`'s call: in the app owner's scope when `me` may use it and this server
+    /// holds it, else in `global`; in the background.
+    fn write_insight(&self, app: &str, me: &Caller, content: Content) {
+        let Ok(scope) = self.with(|i| {
+            let m = &i.r.members;
+            let owner = m.apps.get(app).map(|a| a.owner.clone()).context("no such app")?;
+            let own = match owner {
+                Principal::User(u) => Scope::User(u),
+                Principal::Group(g) => Scope::Group(g),
+                _ => Scope::Global,
+            };
+            Ok(if m.may_use(&me.user, &own) && i.r.holds(&own) { own } else { Scope::Global })
+        }) else {
+            return;
+        };
+        let (node, user, by) = (self.clone(), me.user.clone(), (me.key != self.0.id).then_some(me.key));
+        tokio::spawn(async move {
+            if let Err(err) = node.append_as(&scope, &user, by, content).await {
+                tracing::debug!("insights: {err:#}");
+            }
+        });
+    }
+
+    /// What an app's owners see of it, from every scope `viewer` may use here: who used it, when and from what;
+    /// its errors grouped, with counts; and what it spent on AI, by model. Only for someone acting for its owner.
+    fn insights_of(&self, viewer: &Caller, app: &str) -> Result<Option<Value>> {
+        self.with(|i| {
+            let m = &i.r.members;
+            let Some(a) = m.apps.get(app) else { return Ok(None) };
+            if !m.acts_for(&viewer.user, &a.owner) {
+                return Ok(None);
+            }
+            let name = |u: &str| m.users.get(u).map(|u| u.name.clone()).unwrap_or_default();
+            let mut people: BTreeMap<(String, String), (u64, u64, Option<String>)> = BTreeMap::new();
+            let mut errors: BTreeMap<(String, String), (u64, u64, u64, String)> = BTreeMap::new();
+            let mut cost: BTreeMap<String, (f64, u64, u64, u64)> = BTreeMap::new();
+            for (log, (_, state)) in &i.views {
+                let Ok(scope) = Scope::parse(log) else { continue };
+                let Some(ins) = state.insights.get(app).filter(|_| m.may_use(&viewer.user, &scope)) else { continue };
+                for ((user, client), u) in &ins.used {
+                    let p = people.entry((user.clone(), client.clone())).or_default();
+                    p.0 += u.days;
+                    p.1 = p.1.max(u.last);
+                    if u.agent.is_some() {
+                        p.2 = u.agent.clone();
+                    }
+                }
+                for (key, e) in &ins.errors {
+                    let x = errors.entry(key.clone()).or_insert((0, u64::MAX, 0, String::new()));
+                    x.0 += e.count;
+                    x.1 = x.1.min(e.first);
+                    if e.last >= x.2 {
+                        x.2 = e.last;
+                        x.3 = name(&e.user);
+                    }
+                }
+                for (model, c) in &ins.cost {
+                    let x = cost.entry(model.clone()).or_default();
+                    x.0 += c.usd;
+                    x.1 += c.input;
+                    x.2 += c.output;
+                    x.3 += c.calls;
+                }
+            }
+            let mut usage: Vec<Value> = people.into_iter().map(|((u, client), (days, last, agent))| json!({ "user": name(&u), "client": client, "agent": agent, "days": days, "last": last })).collect();
+            usage.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
+            let mut errors: Vec<Value> = errors.into_iter().map(|((op, error), (count, first, last, user))| json!({ "op": op, "error": error, "count": count, "first": first, "last": last, "user": user })).collect();
+            errors.sort_by_key(|v| std::cmp::Reverse(v["last"].as_u64()));
+            let cost: Vec<Value> = cost.into_iter().map(|(model, (usd, input, output, calls))| json!({ "model": model, "usd": usd, "input": input, "output": output, "calls": calls })).collect();
+            Ok(Some(json!({ "usage": usage, "errors": errors, "cost": cost })))
+        })
+    }
+
     /// Writes a call's appends as its caller. Every one is checked before any is written: a call that fails writes
     /// nothing. Installs come last, since installing a built-in app the install doesn't have yet adds it first.
-    async fn write_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller) -> Result<()> {
+    async fn write_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller, from: Option<&str>) -> Result<()> {
+        // What it spent on AI counts against the app that called it, if one did.
+        let (costs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Cost { .. }));
+        for cost in costs {
+            if let Append::Cost { data } = cost {
+                let to = from.unwrap_or(app);
+                let data = json!({ "app": to, "model": data["model"], "usd": data["usd"], "input": data["input"], "output": data["output"], "by": app });
+                self.write_insight(to, me, members::node("cost", data));
+            }
+        }
         let (installs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
         let mut writes = Vec::new();
         for append in appends {
@@ -1027,7 +1165,7 @@ impl Node {
     fn grant(&self, app: &str, caller: &Caller, ctx: &mut Context, depth: u32) -> Granted {
         let token = hex(&rand::random::<[u8; 32]>());
         let scopes = ctx.scopes.iter().filter_map(|s| Scope::parse(&s.id).ok()).collect();
-        let grant = Grant { app: app.to_string(), caller: caller.clone(), scopes, read_only: ctx.read_only, puts: Vec::new(), depth };
+        let grant = Grant { app: app.to_string(), caller: caller.clone(), scopes, read_only: ctx.read_only, puts: Vec::new(), depth, from: ctx.from.clone() };
         self.0.grants.lock().unwrap().insert(token.clone(), grant);
         ctx.token = token.clone();
         Granted(self.clone(), token)
@@ -1391,6 +1529,9 @@ impl Node {
                         info["schedules"] = json!(list);
                         info["activity"] = json!(activity);
                     }
+                    if let Some(insights) = self.insights_of(viewer, &name)? {
+                        info["insights"] = insights;
+                    }
                 }
             }
             out.push(info);
@@ -1531,7 +1672,7 @@ impl Node {
                 ensure!(self.0.later.lock().unwrap().contains_key(token), "only work a call left running after it returned hands in appends later");
                 let req: Value = serde_json::from_slice(&body)?;
                 let appends = crate::apps::appends(&grant.app, &req["appends"])?;
-                self.write_appends(&grant.app, appends, &grant.scopes, &grant.caller).await?;
+                self.write_appends(&grant.app, appends, &grant.scopes, &grant.caller, grant.from.as_deref()).await?;
                 ok(json!({}))
             }
             ("POST", "/done") => {
@@ -2417,7 +2558,7 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
             ensure!(blob.len() == 64 && blob.bytes().all(|b| b.is_ascii_hexdigit()), "a blob is named by its hash");
             (scope, members::node("forget", json!({ "blob": blob.to_lowercase() })))
         }
-        Append::Install { .. } => bail!("installs are checked by install_entries"),
+        Append::Install { .. } | Append::Cost { .. } => bail!("installs and costs are written on their own"),
     })
 }
 

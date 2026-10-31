@@ -129,11 +129,11 @@ export default {
       },
     },
     health: {
-      description: "How an app is doing where it's installed for you: its schedules (when each runs, on or off, as whom, whether a deploy changed or removed it) and their recent runs and failures.",
+      description: "How an app is doing where it's installed for you: for its owners, who used it, when and from what, its errors grouped with counts, and its AI cost; its schedules (when each runs, on or off, as whom, whether a deploy changed or removed it) and their recent runs and failures.",
       input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
       async run(ctx, { app }) {
         const a = await find(ctx, app);
-        return { schedules: a.schedules || [], activity: a.activity || [] };
+        return { schedules: a.schedules || [], activity: a.activity || [], insights: a.insights || null };
       },
     },
     switch: {
@@ -291,6 +291,31 @@ const sections = [
         \${r.ok ? "" : '<div class="sub small error">' + one.esc(r.error || "Failed") + "</div>"}
         <div class="sub small">\${r.ok ? "Ran" : "Failed"} on \${one.esc(r.server || "a server")} as \${one.esc(r.user)} · \${r.ms < 1000 ? r.ms + " ms" : (r.ms / 1000).toFixed(1) + " s"}</div></div></div>\`;
     return '<h2 class="section">Activity' + (failed ? " · " + failed + " failed" : "") + '</h2><div class="list">' + runs.slice(0, 20).map(row).join("") + "</div>";
+  },
+  function usage({ health }) {
+    const list = health?.insights?.usage || [];
+    if (!list.length) return "";
+    const what = { cli: "CLI", mcp: "Agent", phone: "iPhone", mac: "Mac", browser: "Browser", schedule: "Schedule", app: "Another app", node: "The node", api: "Local API" };
+    const row = (u) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(u.user)}</span><span class="when">\${one.ago(u.last)}</span></div>
+        <div class="sub small">\${one.esc(u.agent || what[u.client] || u.client)} · \${u.days} day\${u.days === 1 ? "" : "s"}</div></div></div>\`;
+    return '<h2 class="section">Used by</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>";
+  },
+  function errors({ health }) {
+    const list = health?.insights?.errors || [];
+    if (!list.length) return "";
+    const total = list.reduce((n, e) => n + e.count, 0);
+    const row = (e) => \`<div class="row plain"><div class="main"><div class="title"><span class="error">\${one.esc(e.error || "Failed")}</span><span class="when">\${e.count}×</span></div>
+        <div class="sub small">\${one.esc(e.op)} · last \${one.ago(e.last)} ago\${e.user ? " by " + one.esc(e.user) : ""}</div></div></div>\`;
+    return '<h2 class="section">Errors · ' + total + '</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>";
+  },
+  function cost({ health }) {
+    const list = health?.insights?.cost || [];
+    if (!list.length) return "";
+    const usd = (n) => "$" + (n < 1 ? n.toFixed(4) : n.toFixed(2));
+    const total = list.reduce((n, c) => n + c.usd, 0);
+    const row = (c) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(c.model)}</span><span class="when">\${usd(c.usd)}</span></div>
+        <div class="sub small">\${c.calls} call\${c.calls === 1 ? "" : "s"} · \${c.input.toLocaleString()} tokens in, \${c.output.toLocaleString()} out</div></div></div>\`;
+    return '<h2 class="section">AI cost · ' + usd(total) + '</h2><div class="list">' + list.map(row).join("") + "</div>";
   },
   function code({ code }) {
     return code ? '<h2 class="section">Code</h2>' + folder(code.files, "") : "";

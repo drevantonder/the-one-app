@@ -850,3 +850,44 @@ async fn work_goes_on_after_a_call_returns_and_forgotten_blobs_go() {
     assert!(a.call(call("reader", "get", json!({ "hash": hash }))).await.is_err(), "a forgotten blob is gone");
     assert!(a.blob(&hash).await.is_err(), "deleted from disk");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_apps_owners_see_who_used_it_its_errors_and_its_ai_cost() {
+    let (a, _ra) = start("insights").await;
+    a.create("Insights", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    deploy_module(&a, "brain", r#"export default { name: "brain", ops: { think: { run: (ctx) => { ctx.cost({ model: "gemini-flash", usd: 0.002, input: 1200, output: 80 }); return "thought"; } } } };"#).await;
+    deploy_module(&a, "claimsy", r#"export default {
+  name: "claimsy",
+  uses: { apps: ["brain"] },
+  ops: {
+    ok: { run: () => "fine" },
+    boom: { run: () => { throw new Error("the receipt was blank"); } },
+    read: { run: (ctx) => ctx.apps.brain.think({}) },
+  },
+};"#)
+    .await;
+    a.install(&me, "claimsy", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
+    eventually("claimsy to run", async || a.call(call("claimsy", "ok", json!({}))).await.is_ok()).await;
+    a.call(CallRequest { client: Some("cli".into()), ..call("claimsy", "ok", json!({})) }).await.unwrap();
+    for _ in 0..2 {
+        assert!(a.call(call("claimsy", "boom", json!({}))).await.is_err());
+    }
+    a.call(call("claimsy", "read", json!({}))).await.unwrap();
+    let insights = |n: &Node| {
+        let (n, me) = (n.clone(), me.clone());
+        async move { n.apps(&me).await.unwrap().into_iter().find(|x| x["name"] == "claimsy").unwrap()["insights"].clone() }
+    };
+    eventually("the insights to be written", async || {
+        let i = insights(&a).await;
+        i["errors"].as_array().is_some_and(|e| e.first().is_some_and(|e| e["count"] == 2)) && i["cost"].as_array().is_some_and(|c| !c.is_empty())
+    })
+    .await;
+    let i = insights(&a).await;
+    assert_eq!(i["errors"][0]["error"], "the receipt was blank", "{i}");
+    assert_eq!(i["errors"][0]["op"], "boom");
+    let clients: Vec<&str> = i["usage"].as_array().unwrap().iter().map(|u| u["client"].as_str().unwrap()).collect();
+    assert!(clients.contains(&"cli") && clients.contains(&"api"), "who used it, from what: {i}");
+    assert_eq!(i["cost"][0]["model"], "gemini-flash", "the AI cost counts against the app that asked: {i}");
+    assert_eq!(i["cost"][0]["input"], 1200);
+}

@@ -122,6 +122,7 @@ These two change only their own scope: unlike `global`'s other node entries, the
 ### Secrets
 
 - `secret { app, name, hosts, value, request? }`, in its scope: sets the secret `name` of `app`, sent only to `hosts` (host names). A user's by that user, a group's by its admins, `global`'s by admins. `value: null` deletes it. `request` answers a request for it.
+- `used { app, client, agent?, day }`, `failed { app, op, error, client, agent? }` and `cost { app, model, usd, input, output, by }`: an app's insights, for its owners. The server that ran a call writes, as its caller, the first `used` each day per user and client, each failure (at most 30 an hour per app), and each `cost` a call reported, in the app owner's scope when the caller may use it and the server holds it, else in `global`. `GET /v1/apps` adds them up as `insights` (`usage`, `errors` grouped by op and message with counts, `cost` by model) for whoever acts for the app's owner. Like `ran`, they change only their own scope.
 - `forget { blob }`, in a scope, by anyone who may use it: an app says the scope no longer needs a blob its entries named. A server deletes a blob once every entry it holds that names it is an app's, in a scope that forgot it, and stops serving it. A node entry's blob (a bundle, a release) is never forgotten. Like `ran`, it changes only its own scope.
 - `secret-request { id, app, name, hosts, why, agent? }`, in a scope, by someone who sets secrets there (an agent acting for them): asks a person to set that secret, so the agent never handles its value; `why` is one line they see. `secret-request { id, declined: true }` declines it. A request waits a day. Like `ran`, it changes only its own scope.
 
@@ -195,6 +196,7 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
 - `now()`: the time.
 - `user`, `group(id)` and `global`: the scopes the call named, each `{ id, name, role, query(sql, params), append(kind, data, blobs?), secret(name, value, hosts), forget(blob) }`, or null; `forget` says the scope no longer needs a blob its entries named (a removed receipt's photo); `role` is the caller's there. `groups` lists the groups it named. `query` returns a promise.
 - `from`: the app whose `ctx.apps` made this call, or null.
+- `cost({ model, usd, input, output })`: what the call spent on AI (dollars, tokens in and out), counted in the insights of the app that called it (`from`), or else this one's.
 - `waitUntil(promise)`: work that carries on after the call returns (an AI read, a copy to Drive), for 10 minutes at most. Its requests and calls still go out as the call's, and what it appends is checked and written, as the call's appends are, once it's all settled; if the call itself fails, nothing it appends later is written.
 - `schedule(app, name, scope, on)`: switches one of an app's schedules on or off in a scope (see "Schedules"), with the caller's own rights there.
 - `install(app, scope, installed = true)`: installs (or uninstalls) an app in a scope (`user`, `group:<id>` or `global`), with the caller's own rights there, as the caller could themselves. So an App Store is an ordinary app (`brand.toml`'s `store`).

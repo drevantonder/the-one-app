@@ -117,7 +117,7 @@ pub struct Members {
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
-const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "forget"];
+const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "forget", "used", "failed", "cost"];
 
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
@@ -514,6 +514,8 @@ pub struct ScopeState {
     pub requests: BTreeMap<String, SecretRequest>,
     /// The blobs this scope's apps said they no longer need, though their entries name them.
     pub forgotten: BTreeSet<String>,
+    /// What each app's owners see of it here: who used it, its errors, its AI cost.
+    pub insights: BTreeMap<String, Insights>,
     /// (opener, server, time)
     /// Who opened this user's data, on which server, when, and through which agent.
     pub opens: Vec<(String, Key, u64, Option<String>)>,
@@ -550,6 +552,40 @@ pub struct SecretRequest {
     pub agent: Option<String>,
     pub time: u64,
     pub answer: Option<(String, String, u64)>,
+}
+
+/// An app's insights in one scope.
+#[derive(Clone, Debug, Default)]
+pub struct Insights {
+    /// By (user, client): the days they used it, when last, and the agent last named.
+    pub used: BTreeMap<(String, String), Used>,
+    /// By (op, error): how often, first and last, and by whom last.
+    pub errors: BTreeMap<(String, String), Failed>,
+    /// By model: dollars, tokens in and out, and calls.
+    pub cost: BTreeMap<String, Cost>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Used {
+    pub days: u64,
+    pub last: u64,
+    pub agent: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Failed {
+    pub count: u64,
+    pub first: u64,
+    pub last: u64,
+    pub user: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Cost {
+    pub usd: f64,
+    pub input: u64,
+    pub output: u64,
+    pub calls: u64,
 }
 
 /// A secret: set, never read. Only the node's outbound requests use its value (see SPEC.md, "Secrets").
@@ -655,6 +691,35 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
                         }
                     }
                     state.secrets.insert((app, name), Secret { hosts, value: value.to_string(), user: w.to_string(), time: e.time() });
+                }
+            }
+        }
+        "used" | "failed" | "cost" => {
+            let data = &e.content.data;
+            let app = data["app"].as_str().context("no app")?.to_string();
+            let ins = state.insights.entry(app).or_default();
+            match e.content.kind.as_str() {
+                "used" => {
+                    let u = ins.used.entry((w.to_string(), data["client"].as_str().unwrap_or("api").to_string())).or_default();
+                    u.days += 1;
+                    u.last = u.last.max(e.time());
+                    if let Some(agent) = data["agent"].as_str() {
+                        u.agent = Some(agent.to_string());
+                    }
+                }
+                "failed" => {
+                    let key = (data["op"].as_str().unwrap_or("").to_string(), data["error"].as_str().unwrap_or("").to_string());
+                    let f = ins.errors.entry(key).or_insert(Failed { first: e.time(), ..Default::default() });
+                    f.count += 1;
+                    f.last = e.time();
+                    f.user = w.to_string();
+                }
+                _ => {
+                    let c = ins.cost.entry(data["model"].as_str().unwrap_or("?").to_string()).or_default();
+                    c.usd += data["usd"].as_f64().unwrap_or(0.0).max(0.0);
+                    c.input += data["input"].as_u64().unwrap_or(0);
+                    c.output += data["output"].as_u64().unwrap_or(0);
+                    c.calls += 1;
                 }
             }
         }
