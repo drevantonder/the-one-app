@@ -60,6 +60,27 @@ async function find(ctx, name) {
   return app;
 }
 
+/// A folder of an app's source (src/ in its bundle) for the Code screens, folders first; at the top, the module it
+/// runs as. Runs in the page: the screens include its source.
+function folder(files, dir) {
+  const here = new Map();
+  for (const f of files.filter((f) => f.path.startsWith("src/" + dir))) {
+    const [first, ...rest] = f.path.slice(4 + dir.length).split("/");
+    here.set(rest.length ? first + "/" : first, rest.length ? { dir: dir + first + "/" } : f);
+  }
+  const natural = new Intl.Collator(undefined, { numeric: true }).compare;
+  const names = [...here.keys()].sort((a, b) => b.endsWith("/") - a.endsWith("/") || natural(a, b));
+  const built = files.find((f) => f.path === "app.js");
+  if (!dir && built) names.push("app.js, as it runs"), here.set("app.js, as it runs", built);
+  const row = (n) => {
+    const f = here.get(n);
+    const open = f.dir ? ["code", { app: one.params.app, dir: f.dir }] : ["file", { app: one.params.app, path: f.path }];
+    return `<a class="row plain" onclick="${one.esc(`one.open(${JSON.stringify(open[0])}, ${JSON.stringify(open[1])})`)}">${one.icon(f.dir ? "folder" : "file", "code-icon")}
+      <div class="main"><div class="title"><span>${one.esc(n.replace(/\/$/, ""))}</span><span class="when">${f.dir ? "" : one.size(f.size)}</span></div></div><div class="chev">›</div></a>`;
+  };
+  return '<div class="list code-list">' + names.map(row).join("") + "</div>";
+}
+
 export default {
   name: "apps",
   title: "App Store",
@@ -185,10 +206,12 @@ show();
   .pill.off { background: var(--line); color: var(--accent); }
   .pill:disabled { opacity: 0.4; }
   #error { margin: 8px 4px; }
+  .code-icon { width: 20px; height: 20px; color: var(--muted); }
 </style>
 <div id="app"></div>
 <div id="error" class="error small"></div>
 <script>
+${folder}
 const name = one.params.app;
 one.title(name);
 
@@ -222,10 +245,7 @@ const sections = [
     return a.forks.length ? '<h2 class="section">Forks</h2><div class="list">' + a.forks.map(link).join("") + "</div>" : "";
   },
   function code({ code }) {
-    if (!code) return "";
-    const file = (f) => \`<a class="row plain" onclick='one.open("file", \${JSON.stringify({ app: name, path: f.path })})'>
-        <div class="main"><div class="title"><span>\${one.esc(f.path)}</span><span class="when">\${f.size < 1024 ? f.size + " B" : (f.size / 1024).toFixed(1) + " KB"}</span></div></div><div class="chev">›</div></a>\`;
-    return '<h2 class="section">Code</h2><div class="list">' + code.files.filter((f) => f.path.startsWith("src/")).map(file).join("") + file(code.files.find((f) => f.path === "app.js")) + "</div>";
+    return code ? '<h2 class="section">Code</h2>' + folder(code.files, "") : "";
   },
 ];
 
@@ -253,16 +273,29 @@ one.on("changed", show);
 show();
 </script>`,
     },
+    code: {
+      title: "Code",
+      html: `
+<style>.code-icon { width: 20px; height: 20px; color: var(--muted); } .code-list { margin-top: 8px; }</style>
+<div id="code"></div>
+<script>
+const name = one.params.app;
+one.title(one.params.dir.replace(/\\/$/, "").split("/").pop());
+${folder}
+one.render("#code", async () => folder((await one.call("code", { app: name })).files, one.params.dir), { loading: "Loading code" });
+</script>`,
+    },
     file: {
       title: "Code",
       html: `
-<style>
-  pre { background: var(--card); border-radius: var(--radius); padding: 12px 14px; overflow-x: auto; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 8px 0; }
-</style>
-<pre id="code"></pre>
+<div id="code" style="margin-top: 8px"></div>
 <script>
-one.title(one.params.path);
-one.call("code", { app: one.params.app, path: one.params.path }).then((f) => { document.getElementById("code").textContent = f.text; });
+one.title(one.params.path.split("/").pop());
+one.render("#code", async () => {
+  const f = await one.call("code", { app: one.params.app, path: one.params.path });
+  setTimeout(() => one.code("#code", f.text, { path: f.path }));
+  return "";
+}, { loading: "Loading code" });
 </script>`,
     },
   },
