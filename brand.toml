@@ -12,7 +12,7 @@ release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNL
 release_signer = "ssh mac \"op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'\""
 # Every folder in apps/ ships built into each release, for any install to add. These are the ones a new install
 # deploys and installs in global; each `one update` deploys the release's version of every one an install has.
-apps = ["apps/board", "apps/repos", "apps/apps"]
+apps = ["apps/board", "apps/repos", "apps/apps", "apps/devices"]
 # The app the shells' App Store opens: an ordinary app, whose screens add apps to pages with ctx.install.
 store = "apps"
 # What the App Store calls the apps made in the install, beside the ones built in.

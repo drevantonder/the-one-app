@@ -567,8 +567,8 @@ async fn the_app_store_lists_adds_and_shows_code() {
     a.member("group", json!({ "group": "b000000000000001", "name": "Team" })).await.unwrap();
     assert_eq!(a.state()["brand"]["store"], "apps");
     let listed = a.call(call("apps", "list", json!({}))).await.unwrap();
-    let names: Vec<&str> = listed["apps"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
-    assert!(names.contains(&"board") && names.contains(&"repos") && names.contains(&"apps"), "{names:?}");
+    let names: Vec<&str> = listed["apps"].as_array().unwrap().iter().filter(|x| x["installed"].as_array().unwrap().contains(&json!("global"))).map(|x| x["name"].as_str().unwrap()).collect();
+    assert!(["board", "repos", "apps", "devices"].iter().all(|n| names.contains(n)), "a new install starts with the brand's apps, for everyone: {names:?}");
     let places: Vec<&str> = listed["places"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
     assert_eq!(places, ["You", "Team", "Everyone"]);
 
