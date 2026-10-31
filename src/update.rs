@@ -16,7 +16,7 @@ use crate::{get, post};
 const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin"];
 
 /// Builds the tip of main and has every device run it; with a tag, also signs it off and publishes it on GitHub.
-pub fn run(tag: Option<&str>, space: Option<&str>) -> Result<()> {
+pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this brand names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
     if let Some(tag) = tag {
@@ -37,9 +37,8 @@ pub fn run(tag: Option<&str>, space: Option<&str>) -> Result<()> {
             .context("sign off (gh extension install basecamp/gh-signoff)")?;
     }
 
-    let space = find_space(&get("/v1/state")?, space)?;
     // The Macs build their app themselves, which takes longest, so they start first.
-    let macs: Vec<Value> = devices(&space).into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect();
+    let macs: Vec<Value> = devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect();
     let mut started = Vec::new();
     for mac in &macs {
         let name = mac["name"].as_str().unwrap_or("");
@@ -47,7 +46,7 @@ pub fn run(tag: Option<&str>, space: Option<&str>) -> Result<()> {
             println!("  {name}: offline; run this again when it's back");
             continue;
         }
-        match shell(&space, mac, &mac_job(&commit, tag.is_some()), 60) {
+        match shell(mac, &mac_job(&commit, tag.is_some()), 60) {
             Ok(r) if r["exit"] == 0 => started.push((mac.clone(), Instant::now())),
             Ok(r) => println!("  {name}: couldn't start its build: {}", r["stderr"].as_str().unwrap_or("").trim()),
             Err(err) => println!("  {name}: couldn't start its build: {err:#}"),
@@ -58,10 +57,10 @@ pub fn run(tag: Option<&str>, space: Option<&str>) -> Result<()> {
     step(Command::new(cargo()).current_dir(&src).args(["build", "--release"]))?;
     let binary = src.join("target/release").join(CLI);
     // Which devices to wait for, asked before this device's own node restarts on the new build.
-    let linux: Vec<Value> = devices(&space).into_iter().filter(|d| d["target"] == TARGET).collect();
-    crate::publish(&binary, space["id"].as_str().map(str::to_string), &Default::default(), &key)?;
+    let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
+    crate::publish(&binary, &Default::default(), &key)?;
     let started_at = Instant::now();
-    let mut failed = await_builds(&space, &linux, short, started_at, Duration::from_secs(180));
+    let mut failed = await_builds(&linux, short, started_at, Duration::from_secs(180));
 
     let mut assets = Vec::new();
     if let Some(tag) = tag {
@@ -74,12 +73,12 @@ pub fn run(tag: Option<&str>, space: Option<&str>) -> Result<()> {
     }
     for (mac, since) in &started {
         let name = mac["name"].as_str().unwrap_or("");
-        match await_mac(&space, mac) {
+        match await_mac(mac) {
             Ok((made, warnings)) => {
                 for w in warnings {
                     println!("  {name}: {w}");
                 }
-                failed |= await_builds(&space, std::slice::from_ref(mac), short, *since, Duration::from_secs(120));
+                failed |= await_builds(std::slice::from_ref(mac), short, *since, Duration::from_secs(120));
                 if let Some(tag) = tag {
                     for (hash, asset) in made {
                         let bytes = blob(&hash).with_context(|| format!("get {asset} from {name}"))?;
@@ -187,25 +186,14 @@ fn quiet(cmd: &mut Command) -> bool {
     cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
 }
 
-fn find_space(state: &Value, name: Option<&str>) -> Result<Value> {
-    let spaces: Vec<Value> = state["spaces"].as_array().cloned().unwrap_or_default();
-    let found: Vec<Value> = spaces.into_iter().filter(|s| name.is_none_or(|n| s["name"] == n || s["id"].as_str().is_some_and(|id| id.starts_with(n)))).collect();
-    match found.as_slice() {
-        [one] => Ok(one.clone()),
-        [] => bail!("no such space"),
-        _ => bail!("this device is in several spaces: say which with --space"),
-    }
-}
-
 /// The space's devices that keep a log, as this device sees them now: none while its node restarts.
-fn devices(space: &Value) -> Vec<Value> {
+fn devices() -> Vec<Value> {
     let state = get("/v1/state").unwrap_or_default();
-    let space = state["spaces"].as_array().into_iter().flatten().find(|s| s["id"] == space["id"]);
-    space.and_then(|s| s["devices"].as_array()).into_iter().flatten().filter(|d| d["client"] != true).cloned().collect()
+    state["space"]["devices"].as_array().into_iter().flatten().filter(|d| d["client"] != true).cloned().collect()
 }
 
 /// Waits for each of `wanted` to say it runs `commit`, and reports each. True if any didn't.
-fn await_builds(space: &Value, wanted: &[Value], commit: &str, since: Instant, limit: Duration) -> bool {
+fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit: Duration) -> bool {
     let id = |d: &Value| d["device"].as_str().unwrap_or("").to_string();
     let name = |d: &Value| d["name"].as_str().unwrap_or("").to_string();
     // Only devices offline from the start count as offline: this device's own node restarting loses its sessions a moment.
@@ -216,7 +204,7 @@ fn await_builds(space: &Value, wanted: &[Value], commit: &str, since: Instant, l
     let mut waiting: Vec<(String, String, String)> = online.into_iter().map(|d| (id(d), name(d), d["build"].as_str().unwrap_or("?").into())).collect();
     let deadline = Instant::now() + limit;
     loop {
-        let now = devices(space);
+        let now = devices();
         waiting.retain(|(device, name, was)| {
             let Some(d) = now.iter().find(|d| d["device"] == device.as_str()) else { return true };
             if d["build"] == commit {
@@ -242,8 +230,8 @@ fn await_builds(space: &Value, wanted: &[Value], commit: &str, since: Instant, l
     }
 }
 
-fn shell(space: &Value, device: &Value, command: &str, timeout: u64) -> Result<Value> {
-    let r = post("/v1/call", json!({ "space": space["id"], "device": device["device"], "app": "shell", "op": "run", "input": { "command": command, "timeout": timeout } }))?;
+fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
+    let r = post("/v1/call", json!({ "device": device["device"], "app": "shell", "op": "run", "input": { "command": command, "timeout": timeout } }))?;
     Ok(r["ok"].clone())
 }
 
@@ -295,20 +283,20 @@ launchctl bootstrap "gui/$(id -u)" update.plist"#,
 }
 
 /// Waits for a Mac's job to finish; on success, the assets it left as `(blob, name)`, and the warnings its build gave.
-fn await_mac(space: &Value, mac: &Value) -> Result<(Vec<(String, String)>, Vec<String>)> {
+fn await_mac(mac: &Value) -> Result<(Vec<(String, String)>, Vec<String>)> {
     let deadline = Instant::now() + Duration::from_secs(30 * 60);
     let poll = format!(r#"c="$HOME/Library/Caches/{CLI}"; cat "$c/update.status" 2>/dev/null"#);
     // The Mac's node restarts on the new app part way through, and doesn't answer for a moment.
     let status = loop {
         ensure!(Instant::now() < deadline, "its build took more than 30 minutes");
         std::thread::sleep(Duration::from_secs(5));
-        if let Ok(r) = shell(space, mac, &poll, 30)
+        if let Ok(r) = shell(mac, &poll, 30)
             && let Some(code) = r["stdout"].as_str().and_then(|s| s.trim().parse::<i32>().ok())
         {
             break code;
         }
     };
-    let report = shell(space, mac, &format!(r#"c="$HOME/Library/Caches/{CLI}"; launchctl bootout "gui/$(id -u)/app.{CLI}.update" 2>/dev/null; cat "$c/assets.txt" 2>/dev/null; echo ---; grep '^warning: ' "$c/update.log"; tail -n 25 "$c/update.log""#), 30)?;
+    let report = shell(mac, &format!(r#"c="$HOME/Library/Caches/{CLI}"; launchctl bootout "gui/$(id -u)/app.{CLI}.update" 2>/dev/null; cat "$c/assets.txt" 2>/dev/null; echo ---; grep '^warning: ' "$c/update.log"; tail -n 25 "$c/update.log""#), 30)?;
     let out = report["stdout"].as_str().unwrap_or("");
     let (made, log) = out.split_once("---\n").unwrap_or(("", out));
     if status != 0 {

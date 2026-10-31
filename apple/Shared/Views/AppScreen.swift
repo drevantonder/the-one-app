@@ -152,7 +152,7 @@ private struct ScreenWebView: Representable {
             let route = view.route, node = view.store.node
             Task {
                 do {
-                    let page = try await node.page(space: route.space, app: route.app, screen: route.screen, params: route.params)
+                    let page = try await node.page(app: route.app, screen: route.screen, params: route.params)
                     web.loadHTMLString(page.html, baseURL: page.base)
                 } catch {
                     view.failure = error.localizedDescription
@@ -168,14 +168,14 @@ private struct ScreenWebView: Representable {
             case "call":
                 do {
                     let input = try JSONSerialization.data(withJSONObject: body["input"] ?? [:], options: .fragmentsAllowed)
-                    let result = try await view.store.node.call(space: route.space, app: route.app, op: body["op"] as? String ?? "", input: input)
+                    let result = try await view.store.node.call(app: route.app, op: body["op"] as? String ?? "", input: input)
                     return (try JSONSerialization.jsonObject(with: result, options: .fragmentsAllowed), nil)
                 } catch {
                     return (nil, error.localizedDescription)
                 }
             case "open":
                 let params = (try? JSONSerialization.data(withJSONObject: body["params"] ?? [:])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-                view.store.path.append(.screen(ScreenRoute(space: route.space, app: route.app, screen: body["screen"] as? String ?? "main", params: params)))
+                view.store.path.append(.screen(ScreenRoute(app: route.app, screen: body["screen"] as? String ?? "main", params: params)))
                 return (nil, nil)
             case "title":
                 view.title = body["text"] as? String

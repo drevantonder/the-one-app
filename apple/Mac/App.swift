@@ -29,14 +29,12 @@ struct MacApp: App {
         .defaultSize(width: 1000, height: 700)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Space…") { store.sheet = .newSpace }
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
-                Divider()
                 Button("Pair a Device…") { store.sheet = .pair }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
                     .disabled(store.space == nil)
                 Button("Join with a Pairing Code…") { store.sheet = .join }
                     .keyboardShortcut("j", modifiers: [.command, .shift])
+                    .disabled(store.space != nil)
             }
         }
 

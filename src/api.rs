@@ -80,7 +80,6 @@ async fn apps(State(node): State<Node>) -> Reply {
 
 #[derive(Deserialize)]
 struct CallRequest {
-    space: Option<String>,
     device: Option<String>,
     app: String,
     op: String,
@@ -89,23 +88,16 @@ struct CallRequest {
 }
 
 async fn call(State(node): State<Node>, Json(req): Json<CallRequest>) -> Reply {
-    let space = node.find_space(req.space.as_deref())?;
     let input = if req.input.is_null() { json!({}) } else { req.input };
     let result = match req.device {
-        Some(device) => node.call_on(node.find_device(space, &device)?, space, &req.app, &req.op, input).await?,
-        None => node.call(space, &req.app, &req.op, input).await?,
+        Some(device) => node.call_on(node.find_device(&device)?, &req.app, &req.op, input).await?,
+        None => node.call(&req.app, &req.op, input).await?,
     };
     Ok(Json(json!({ "ok": result })))
 }
 
-#[derive(Deserialize)]
-struct SpaceQuery {
-    space: Option<String>,
-}
-
-async fn widgets(State(node): State<Node>, Query(q): Query<SpaceQuery>) -> Reply {
-    let space = node.find_space(q.space.as_deref())?;
-    Ok(Json(json!(node.widgets(space, node.id()).await?)))
+async fn widgets(State(node): State<Node>) -> Reply {
+    Ok(Json(json!(node.widgets(node.id()).await?)))
 }
 
 #[derive(Deserialize)]
@@ -124,14 +116,12 @@ async fn create(State(node): State<Node>, Json(req): Json<CreateRequest>) -> Rep
 
 #[derive(Deserialize)]
 struct PairRequest {
-    space: Option<String>,
     #[serde(default)]
     new_user: bool,
 }
 
 async fn pair(State(node): State<Node>, Json(req): Json<PairRequest>) -> Reply {
-    let space = node.find_space(req.space.as_deref())?;
-    Ok(Json(json!({ "code": node.pair(space, req.new_user)? })))
+    Ok(Json(json!({ "code": node.pair(req.new_user)? })))
 }
 
 #[derive(Deserialize)]
@@ -156,13 +146,11 @@ async fn rename(State(node): State<Node>, Json(req): Json<RenameRequest>) -> Rep
 
 #[derive(Deserialize)]
 struct RemoveRequest {
-    space: Option<String>,
     device: String,
 }
 
 async fn remove(State(node): State<Node>, Json(req): Json<RemoveRequest>) -> Reply {
-    let space = node.find_space(req.space.as_deref())?;
-    node.remove_device(space, unhex(&req.device)?).await?;
+    node.remove_device(unhex(&req.device)?).await?;
     Ok(Json(json!({})))
 }
 
@@ -179,7 +167,6 @@ async fn hook(State(node): State<Node>, axum::extract::Path((app, name)): axum::
 
 #[derive(Deserialize)]
 struct ReleaseRequest {
-    space: Option<String>,
     path: String,
     commit: String,
     target: String,
@@ -189,8 +176,7 @@ struct ReleaseRequest {
 }
 
 async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> Reply {
-    let space = node.find_space(req.space.as_deref())?;
-    let r = node.publish(space, std::path::Path::new(&req.path), &req.commit, &req.target, req.committed, &req.signature).await?;
+    let r = node.publish(std::path::Path::new(&req.path), &req.commit, &req.target, req.committed, &req.signature).await?;
     Ok(Json(json!(r)))
 }
 
@@ -221,15 +207,13 @@ async fn reply(State(node): State<Node>, axum::extract::Path((app, id)): axum::e
 
 #[derive(Deserialize)]
 struct ScreenQuery {
-    space: Option<String>,
     params: Option<String>,
 }
 
 /// An app screen as a page, for shells' web views and for a browser on this device.
 async fn screen(State(node): State<Node>, axum::extract::Path((app, name)): axum::extract::Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
-    let space = node.find_space(q.space.as_deref())?;
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    let html = node.screen(space, node.id(), &app, &name, params).await?;
+    let html = node.screen(node.id(), &app, &name, params).await?;
     Ok(axum::response::Html(html).into_response())
 }
 

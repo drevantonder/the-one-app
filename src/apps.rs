@@ -1,5 +1,5 @@
 //! Apps run in workerd, Cloudflare's open-source Workers runtime, which the node starts beside itself.
-//! Each app is an ES module inside `runtime/shim.js`: a Worker with a Durable Object per space that
+//! Each app is an ES module inside `runtime/shim.js`: a Worker with a Durable Object that
 //! holds the app's views in SQLite. The node replays entries into them and asks them to run operations.
 
 use std::io::Write as _;
@@ -12,7 +12,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::Digest;
 
-use crate::entry::{Content, Key, hex};
+use crate::entry::Content;
 
 /// The workerd build every node runs, and each platform's npm package of it with its sha512.
 const WORKERD: &str = "1.20261031.1";
@@ -28,7 +28,6 @@ const TIME_LIMIT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Me {
-    pub space: String,
     pub device: String,
     pub user: String,
     pub name: String,
@@ -120,14 +119,11 @@ impl Apps {
         &self.0.names
     }
 
-    async fn ask(&self, app: &str, what: &str, space: Option<Key>, body: Value) -> Result<(Value, Vec<Content>)> {
+    async fn ask(&self, app: &str, what: &str, body: Value) -> Result<(Value, Vec<Content>)> {
         if !self.0.names.iter().any(|n| n == app) {
             bail!("no app named {app}");
         }
-        let url = match space {
-            Some(s) => format!("{}/{app}/{what}?space={}", self.0.base, hex(&s)),
-            None => format!("{}/{app}/{what}", self.0.base),
-        };
+        let url = format!("{}/{app}/{what}", self.0.base);
         let runtime = self.0.clone();
         let reply: Value = tokio::task::spawn_blocking(move || -> Result<Value> {
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(TIME_LIMIT)).build().into();
@@ -153,41 +149,41 @@ impl Apps {
         Ok((reply["ok"].clone(), appends))
     }
 
-    pub async fn replay(&self, space: Key, jobs: Vec<Replay>) -> Result<()> {
+    pub async fn replay(&self, jobs: Vec<Replay>) -> Result<()> {
         for job in jobs {
             if job.entries.is_empty() && !job.fresh {
                 continue;
             }
-            if let Err(err) = self.ask(&job.app, "replay", Some(space), json!({ "fresh": job.fresh, "entries": job.entries })).await {
+            if let Err(err) = self.ask(&job.app, "replay", json!({ "fresh": job.fresh, "entries": job.entries })).await {
                 tracing::warn!("{} replay: {err:#}", job.app);
             }
         }
         Ok(())
     }
 
-    pub async fn call(&self, space: Key, app: &str, op: &str, input: Value, me: Me, now: u64) -> Result<Outcome> {
-        let (result, appends) = self.ask(app, "call", Some(space), json!({ "op": op, "input": input, "me": me, "now": now })).await?;
+    pub async fn call(&self, app: &str, op: &str, input: Value, me: Me, now: u64) -> Result<Outcome> {
+        let (result, appends) = self.ask(app, "call", json!({ "op": op, "input": input, "me": me, "now": now })).await?;
         Ok(Outcome { result, appends })
     }
 
-    pub async fn widget(&self, space: Key, app: &str, name: &str, me: Me, now: u64) -> Result<Value> {
-        Ok(self.ask(app, "widget", Some(space), json!({ "name": name, "me": me, "now": now })).await?.0)
+    pub async fn widget(&self, app: &str, name: &str, me: Me, now: u64) -> Result<Value> {
+        Ok(self.ask(app, "widget", json!({ "name": name, "me": me, "now": now })).await?.0)
     }
 
-    pub async fn hook(&self, space: Key, app: &str, name: &str, input: Value, me: Me, now: u64) -> Result<Value> {
-        Ok(self.ask(app, "hook", Some(space), json!({ "name": name, "input": input, "me": me, "now": now })).await?.0)
+    pub async fn hook(&self, app: &str, name: &str, input: Value, me: Me, now: u64) -> Result<Value> {
+        Ok(self.ask(app, "hook", json!({ "name": name, "input": input, "me": me, "now": now })).await?.0)
     }
 
     /// A screen's HTML, as the app wrote it.
     pub async fn screen(&self, app: &str, name: &str) -> Result<String> {
-        let (html, _) = self.ask(app, &format!("screen?name={name}"), None, json!({})).await?;
+        let (html, _) = self.ask(app, &format!("screen?name={name}"), json!({})).await?;
         html.as_str().map(str::to_string).context("the screen isn't text")
     }
 
     pub async fn describe(&self) -> Result<Vec<Value>> {
         let mut out = Vec::new();
         for app in self.0.names.clone() {
-            match self.ask(&app, "describe", None, json!({})).await {
+            match self.ask(&app, "describe", json!({})).await {
                 Ok((d, _)) => out.push(d),
                 Err(err) => tracing::warn!("{app}: {err:#}"),
             }

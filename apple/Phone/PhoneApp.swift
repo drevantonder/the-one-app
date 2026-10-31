@@ -54,7 +54,6 @@ final class Phone {
         joining = true
         joinError = nil
         defer { joining = false }
-        let before = Set(store.spaces.map(\.id))
         do {
             try await Client.join(code.trimmingCharacters(in: .whitespacesAndNewlines), name: name)
         } catch {
@@ -64,7 +63,6 @@ final class Phone {
         stage = .joined
         run()
         try? await store.refreshState()
-        if let new = store.spaces.first(where: { !before.contains($0.id) }) { store.spaceID = new.id }
         // A device already in the space keeps the name it had there.
         if let current = store.state?.device.name, current != name { try? await store.renameDevice(name) }
     }

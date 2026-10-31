@@ -34,7 +34,7 @@ Apps are JavaScript modules (see `apps/board.js`) or, for device features, nativ
 ```sh
 cargo build --release
 sh install.sh target/release/one                  # runs the node as a service
-one create Home                                   # a space, on your first device
+one create Home                                   # this app's space, on your first device
 one pair                                          # a pairing code for your next device
 one join <code>                                   # on that device
 one board post --text "hello from here"
@@ -46,7 +46,9 @@ On a Mac, `apple/build.sh` builds the app with the node inside it.
 
 ## Make it yours
 
-The app is whitelabelled: `brand.toml` sets its name, CLI name, port and accent colour, and nothing else in the code names the product. `brands/` has two more: `BRAND=brands/ptc.toml cargo build --release` builds The PTC App; install it under its CLI name (`ptc`). Brands keep their own port, data and device key, so one device can run several side by side.
+The app is whitelabelled: `brand.toml` sets its name, CLI name, port and accent colour, and nothing else in the code names the product. `brands/` has two more: `BRAND=brands/ptc.toml cargo build --release` builds The PTC App; install it under its CLI name (`ptc`).
+
+Each app holds one space, so each context gets its own app: The One App is your own space, The PTC App is PTC's. Brands keep their own port, data, device key and MCP server, so a person in several contexts runs several apps side by side, and agents see each as its own server.
 
 ## How it works
 

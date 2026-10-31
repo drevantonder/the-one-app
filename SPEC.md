@@ -1,12 +1,14 @@
 # Protocol
 
-Version 7. Everything here is what two devices must agree on.
+Version 8. Everything here is what two devices must agree on.
 
 ## Keys
 
 Every device has one Ed25519 key. It is the device's iroh endpoint id and signs everything the device writes.
 
 A **space** is identified by the public half of a space key, made when the space is created. Its secret stays on the device that created it.
+
+A node holds one space, under one brand (its name, CLI, port and data). A device in several contexts runs each context's app, each with its own key, data and node; so does a phone.
 
 ## Entries
 
@@ -17,7 +19,7 @@ An entry is a p2panda-core operation:
   - `time` is a hybrid clock in milliseconds: never less than the author's previous entry's, and never less than any entry the author had seen.
 - **Body:** UTF-8 JSON, `{ "app": string, "kind": string, "data": any }`.
 
-Each device writes one log per space and audience. Its entries are numbered from 0, and each one links to the hash of the previous. An entry is valid when its signature verifies, its backlink matches, and its `space` is the space it arrived for.
+Each device writes one log per audience. Its entries are numbered from 0, and each one links to the hash of the previous. An entry is valid when its signature verifies, its backlink matches, and its `space` is the space it arrived for.
 
 ## Order
 
@@ -69,23 +71,23 @@ A device announces each provider registered with it (see "Local API") as an entr
 
 ## Clients (ALPN `one/client/1`)
 
-A device that keeps no log (a phone) is still a member: it joins with a pairing code like any device. It then asks any member device that does keep logs to act for it. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`. Clients may ask `GET /v1/state`, `GET /v1/apps`, `GET /v1/widgets` and `GET /v1/screen` (with `space` in the body), `POST /v1/call` and `POST /v1/pair`. `GET /v1/events` instead streams events as JSON lines until the stream closes. Operations run for the asking device: `ctx.me` is the client, and the entries they append are written by the device that ran them. Only members may ask.
+A device that keeps no log (a phone) is still a member: it joins with a pairing code like any device. It then asks any member device that does keep logs to act for it. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`. Clients may ask `GET /v1/state`, `GET /v1/apps`, `GET /v1/widgets`, `GET /v1/screen`, `POST /v1/call`, `POST /v1/device` and `POST /v1/pair`; the space is the node's. `GET /v1/events` instead streams events as JSON lines until the stream closes. Operations run for the asking device: `ctx.me` is the client, and the entries they append are written by the device that ran them. Only members may ask.
 
 ## Local API
 
 Each node serves HTTP on `127.0.0.1:<brand port>` for its own device's shells, CLI and MCP. It refuses requests with an `Origin` header or a `Host` other than this machine, so no web page can use it.
 
-- `GET /v1/state`: the brand, this device, and each space with its devices and whether they're online.
+- `GET /v1/state`: the brand, this device, and its `space` (null until it creates or joins one) with its devices and whether they're online.
 - `GET /v1/apps`: every app's name, title, icon, instructions, operations and widgets.
-- `POST /v1/call { space?, device?, app, op, input }` → `{ ok }`.
-- `GET /v1/widgets?space=`: every widget, rendered.
-- `GET /v1/screens/<app>/<screen>?space=&params=`: an app screen as a page (see "Screens").
-- `POST /v1/spaces { name }`, `POST /v1/pair { space?, new_user? }` → `{ code }`, `POST /v1/join { code }`, `POST /v1/device { name }`, `POST /v1/remove { space?, device }`.
-- `POST /v1/release { space?, path, commit, target, committed, signature }`: publishes the binary at `path`, if `signature` is the release key's over it.
+- `POST /v1/call { device?, app, op, input }` → `{ ok }`.
+- `GET /v1/widgets`: every widget, rendered.
+- `GET /v1/screens/<app>/<screen>?params=`: an app screen as a page (see "Screens").
+- `POST /v1/spaces { name }`, `POST /v1/pair { new_user? }` → `{ code }`, `POST /v1/join { code }`, `POST /v1/device { name }`, `POST /v1/remove { device }`. Creating or joining a space is refused once the node holds one.
+- `POST /v1/release { path, commit, target, committed, signature }`: publishes the binary at `path`, if `signature` is the release key's over it.
 - `POST /v1/blobs` with the bytes as the body → `{ blob, size }`: keeps them as a blob. `GET /v1/blobs/<hash>`: a blob, from this device or any member online.
-- `GET /v1/events`: server-sent events `changed { space, apps }`, `peers { space }` and `spaces`.
+- `GET /v1/events`: server-sent events `changed { apps }`, `peers` and `space` (this device created or joined its space).
 - Providers, for device features written outside the node (Swift, Go): `POST /v1/providers/<app>` with the app's description registers it; `GET /v1/providers/<app>/calls` waits up to 25 seconds for a call `{ id, op, input, caller }` (204 if none); `POST /v1/providers/<app>/calls/<id>` answers `{ ok, entries?: [{ kind, data }] }` or `{ error }`. A provider that stops asking for calls for a minute is gone. Providers run only for their device's own user's devices.
-- `POST /hooks/<app>/<name>`: for agent harnesses' hooks. The body is the hook's JSON; the reply is plain text for the agent. The node remembers per `session_id` when the hook last ran and passes it to the app as `since` (null on a session's first call). Hooks need the device to be in exactly one space.
+- `POST /hooks/<app>/<name>`: for agent harnesses' hooks. The body is the hook's JSON; the reply is plain text for the agent. The node remembers per `session_id` when the hook last ran and passes it to the app as `since` (null on a session's first call).
 
 ## Apps
 
@@ -103,7 +105,7 @@ An app is JavaScript: one ES module, run in workerd (Cloudflare's open-source Wo
 }
 ```
 
-`ctx` has `append(kind, data)`, `query(sql, params)`, `me` (who asked: `{ space, device, user, name }`) and `now()`. For each of the app's entries, in replay order, `on[entry.kind]` gets `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, app, kind, author, user, name, time, data }`, where `id` is `<first 8 hex of author>:<seq>`. Entries an operation appends are written by the device that ran it. Each app keeps its views in a Durable Object per space, in SQLite. A call that takes longer than 30 seconds stops the runtime, which starts again.
+`ctx` has `append(kind, data)`, `query(sql, params)`, `me` (who asked: `{ device, user, name }`) and `now()`. For each of the app's entries, in replay order, `on[entry.kind]` gets `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, app, kind, author, user, name, time, data }`, where `id` is `<first 8 hex of author>:<seq>`. Entries an operation appends are written by the device that ran it. Each app keeps its views in a Durable Object, in SQLite. A call that takes longer than 30 seconds stops the runtime, which starts again.
 
 ## Screens
 
@@ -112,10 +114,10 @@ An app's screens are HTML. The node serves each as a whole page: the app's HTML 
 - `one.call(op, input)`: runs one of this app's operations for the device looking, and resolves to its result.
 - `one.open(screen, params)`: opens another of this app's screens; the shell pushes it with its own navigation.
 - `one.title(text)`: the screen's title, shown by the shell.
-- `one.on("changed", fn)`: called when this app's data in this space changes.
-- `one.params`, `one.me`, `one.space`, and helpers `one.esc`, `one.ago`, `one.avatar`.
+- `one.on("changed", fn)`: called when this app's data changes.
+- `one.params`, `one.me`, and helpers `one.esc`, `one.ago`, `one.avatar`.
 
-A shell answers the bridge itself: in WKWebView, the page posts `{ type: "call" | "open" | "title", … }` to the `one` message handler and awaits the reply; the shell passes node events to `one.__event(event)`. In a plain browser on the device, the bridge talks to the node directly. Shells get pages from `GET /v1/screens/<app>/<screen>?space=&params=` (local API) or `GET /v1/screen { space, app, screen, params }` (clients). A page the node served may call the node it came from.
+A shell answers the bridge itself: in WKWebView, the page posts `{ type: "call" | "open" | "title", … }` to the `one` message handler and awaits the reply; the shell passes node events to `one.__event(event)`. In a plain browser on the device, the bridge talks to the node directly. Shells get pages from `GET /v1/screens/<app>/<screen>?params=` (local API) or `GET /v1/screen { app, screen, params }` (clients). A page the node served may call the node it came from.
 
 ## Widgets
 

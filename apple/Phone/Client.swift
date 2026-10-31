@@ -44,9 +44,9 @@ struct ClientTransport: NodeTransport {
         }
     }
 
-    func page(space: String, app: String, screen: String, params: String) async throws -> (html: String, base: URL?) {
+    func page(app: String, screen: String, params: String) async throws -> (html: String, base: URL?) {
         let params = (try? JSONSerialization.jsonObject(with: Data(params.utf8))) ?? [String: Any]()
-        let body = try JSONSerialization.data(withJSONObject: ["space": space, "app": app, "screen": screen, "params": params])
+        let body = try JSONSerialization.data(withJSONObject: ["app": app, "screen": screen, "params": params])
         let reply = try JSONSerialization.jsonObject(with: try await send("GET", "v1/screen", body: body, timeout: 15)) as? [String: Any]
         return (reply?["html"] as? String ?? "", nil)
     }

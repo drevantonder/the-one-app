@@ -8,7 +8,6 @@ enum Route: Hashable {
 }
 
 struct ScreenRoute: Hashable {
-    var space: String
     var app: String
     var screen = "main"
     /// The screen's params, as JSON.
@@ -18,7 +17,6 @@ struct ScreenRoute: Hashable {
 enum Sheet: Hashable, Identifiable {
     case pair
     case join
-    case newSpace
 
     var id: Self { self }
 }
@@ -54,30 +52,21 @@ final class Store {
     /// What's been pushed on top of it, by app screens or the shell.
     var path: [Route] = []
     var sheet: Sheet?
-    var spaceID: String? {
-        didSet {
-            guard spaceID != oldValue else { return }
-            UserDefaults.standard.set(spaceID, forKey: "space")
-            widgets = []; path = []; selection = nil
-            Task { await refreshSpace() }
-        }
-    }
 
     init(node: NodeClient) {
         self.node = node
-        spaceID = UserDefaults.standard.string(forKey: "space")
     }
 
     var brand: Brand? { state?.brand }
-    var spaces: [Space] { state?.spaces ?? [] }
-    var space: Space? { spaces.first { $0.id == spaceID } }
+    /// The app's one space, once this device creates or joins it.
+    var space: Space? { state?.space }
     /// The apps with screens, which shells list.
     var screenApps: [AppInfo] { apps.filter(\.hasScreens) }
 
     func app(_ name: String) -> AppInfo? { apps.first { $0.name == name } }
 
-    /// An app's first screen, in this space.
-    func main(_ app: AppInfo) -> Route { .screen(ScreenRoute(space: spaceID ?? "", app: app.name)) }
+    /// An app's first screen.
+    func main(_ app: AppInfo) -> Route { .screen(ScreenRoute(app: app.name)) }
 
     // MARK: Connection
 
@@ -123,10 +112,10 @@ final class Store {
     func refreshState() async throws {
         let state = try await node.state()
         let first = self.state == nil
+        let arrived = self.state?.space?.member != true && state.space?.member == true
         self.state = state
         phase = .ready
-        if space == nil { spaceID = state.spaces.first?.id }
-        if first || apps.isEmpty {
+        if first || arrived || apps.isEmpty {
             if first { await renameIfHostname() }
             await refreshSpace()
         }
@@ -136,8 +125,8 @@ final class Store {
         if let json = try? JSONEncoder().encode(event) {
             NotificationCenter.default.post(name: .nodeEvent, object: String(decoding: json, as: UTF8.self))
         }
-        if event.type == "changed", event.space == spaceID { await refreshWidgets() }
-        if ["changed", "peers", "spaces"].contains(event.type) { try? await refreshState() }
+        if event.type == "changed" { await refreshWidgets() }
+        if ["changed", "peers", "space"].contains(event.type) { try? await refreshState() }
     }
 
     private func renameIfHostname() async {
@@ -150,7 +139,7 @@ final class Store {
 
     // MARK: Apps
 
-    /// The apps and widgets of the space shown.
+    /// The space's apps and widgets.
     func refreshSpace() async {
         if let apps = try? await node.apps() {
             self.apps = apps
@@ -160,25 +149,21 @@ final class Store {
     }
 
     func refreshWidgets() async {
-        guard let id = spaceID, space?.member == true else { return }
-        let widgets = try? await node.widgets(space: id)
-        if let widgets, id == spaceID, widgets != self.widgets { self.widgets = widgets }
+        guard space?.member == true else { return }
+        let widgets = try? await node.widgets()
+        if let widgets, widgets != self.widgets { self.widgets = widgets }
     }
 
-    // MARK: Spaces
+    // MARK: The space
 
     func createSpace(_ name: String) async throws {
-        let before = Set(spaces.map(\.id))
         try await node.createSpace(name)
         try await refreshState()
-        if let new = spaces.first(where: { !before.contains($0.id) }) { spaceID = new.id }
     }
 
     func join(_ code: String) async throws {
-        let before = Set(spaces.map(\.id))
         try await node.join(code.trimmingCharacters(in: .whitespacesAndNewlines))
         try await refreshState()
-        if let new = spaces.first(where: { !before.contains($0.id) }) { spaceID = new.id }
     }
 
     func renameDevice(_ name: String) async throws {
@@ -187,7 +172,6 @@ final class Store {
     }
 
     func pair(newUser: Bool) async throws -> String {
-        guard let spaceID else { throw NodeError("Choose a space first") }
-        return try await node.pair(space: spaceID, newUser: newUser)
+        try await node.pair(newUser: newUser)
     }
 }

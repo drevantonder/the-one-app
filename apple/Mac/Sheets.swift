@@ -9,7 +9,6 @@ struct SheetView: View {
         switch sheet {
         case .pair: PairSheet()
         case .join: JoinSheet()
-        case .newSpace: NewSpaceSheet()
         }
     }
 }
@@ -176,34 +175,6 @@ struct JoinSheet: View {
             let clip = NSPasteboard.general.string(forType: .string) ?? ""
             let trimmed = clip.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.count > 60, trimmed.allSatisfy({ $0.isLetter || $0.isNumber }) { code = trimmed }
-        }
-    }
-}
-
-struct NewSpaceSheet: View {
-    @Environment(Store.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var error: String?
-
-    var body: some View {
-        SheetLayout(title: "New Space", message: "A space holds devices, their apps and their agents. Start with your own, then pair others.") {
-            TextField("Name", text: $name, prompt: Text("Home"))
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(create)
-            ErrorLine(error: error)
-        } actions: {
-            Button("Cancel", role: .cancel) { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button("Create", action: create)
-                .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-        }
-    }
-
-    private func create() {
-        Task {
-            do { try await store.createSpace(name); dismiss() } catch { self.error = error.localizedDescription }
         }
     }
 }

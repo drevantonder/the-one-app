@@ -1,5 +1,5 @@
 // Every app runs inside this shim, in workerd. The app module (./app.js) is the app's code; this turns
-// it into a Worker whose Durable Object, one per space, holds the app's views in SQLite and answers
+// it into a Worker whose Durable Object holds the app's views in SQLite and answers
 // the node: replays, operations, widgets and hooks. See SPEC.md, "Apps".
 import app from "./app.js";
 import { DurableObject } from "cloudflare:workers";
@@ -101,8 +101,6 @@ export default {
       const screen = app.screens?.[url.searchParams.get("name")];
       return screen ? json({ ok: screen.html }) : json({ error: `${app.name} has no screen ${url.searchParams.get("name")}` }, 404);
     }
-    const space = url.searchParams.get("space");
-    if (!space) return json({ error: "which space?" }, 400);
-    return env.VIEWS.get(env.VIEWS.idFromName(space)).fetch(req);
+    return env.VIEWS.get(env.VIEWS.idFromName("views")).fetch(req);
   },
 };

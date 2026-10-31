@@ -15,7 +15,8 @@ struct NodeState: Codable, Sendable, Equatable {
     var device: Device
     /// The device that answered: this one, or for a phone, the member device acting for it.
     var host: Device?
-    var spaces: [Space]
+    /// The one space this app holds, once it creates or joins one.
+    var space: Space?
 }
 
 struct Space: Codable, Sendable, Equatable, Identifiable {
@@ -65,7 +66,6 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
 
 struct NodeEvent: Codable, Sendable {
     var type: String
-    var space: String?
     var apps: [String]?
 }
 
@@ -86,7 +86,7 @@ protocol NodeTransport: Sendable {
     /// Sends a request and returns the local API's JSON reply, or throws its error.
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data
     /// An app screen's page (SPEC.md "Screens"), and the address it may call back to.
-    func page(space: String, app: String, screen: String, params: String) async throws -> (html: String, base: URL?)
+    func page(app: String, screen: String, params: String) async throws -> (html: String, base: URL?)
     /// The node's events, until the connection drops.
     func events() -> AsyncThrowingStream<NodeEvent, Error>
     /// What to say when nothing answers.
@@ -101,7 +101,7 @@ struct HTTPNode: NodeTransport {
 
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data {
         var url = base.appending(path: path)
-        // A GET's body goes in its query: `{ space }` becomes `?space=`.
+        // A GET's body goes in its query: `{ params }` becomes `?params=`.
         if method == "GET", let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
             url.append(queryItems: fields.compactMap { k, v in (v as? String).map { URLQueryItem(name: k, value: $0) } })
         }
@@ -120,8 +120,8 @@ struct HTTPNode: NodeTransport {
         return data
     }
 
-    func page(space: String, app: String, screen: String, params: String) async throws -> (html: String, base: URL?) {
-        let query = try JSONEncoder().encode(["space": space, "params": params])
+    func page(app: String, screen: String, params: String) async throws -> (html: String, base: URL?) {
+        let query = try JSONEncoder().encode(["params": params])
         return (String(decoding: try await send("GET", "v1/screens/\(app)/\(screen)", body: query, timeout: 10), as: UTF8.self), base)
     }
 
@@ -173,22 +173,22 @@ struct NodeClient: Sendable {
         try await send("GET", "v1/apps")
     }
 
-    func widgets(space: String) async throws -> [WidgetInfo] {
-        try await send("GET", "v1/widgets", ["space": space])
+    func widgets() async throws -> [WidgetInfo] {
+        try await send("GET", "v1/widgets")
     }
 
     /// Runs an app's operation for an app screen: its input and result are JSON, whatever their shape.
-    func call(space: String, app: String, op: String, input: Data) async throws -> Data {
+    func call(app: String, op: String, input: Data) async throws -> Data {
         let input = try JSONSerialization.jsonObject(with: input, options: .fragmentsAllowed)
-        let body = try JSONSerialization.data(withJSONObject: ["space": space, "app": app, "op": op, "input": input])
+        let body = try JSONSerialization.data(withJSONObject: ["app": app, "op": op, "input": input])
         let data = try await transport.send("POST", "v1/call", body: body, timeout: 15)
         let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         if let error = reply["error"] as? String { throw NodeError(error) }
         return try JSONSerialization.data(withJSONObject: reply["ok"] ?? NSNull(), options: .fragmentsAllowed)
     }
 
-    func page(space: String, app: String, screen: String, params: String) async throws -> (html: String, base: URL?) {
-        try await transport.page(space: space, app: app, screen: screen, params: params)
+    func page(app: String, screen: String, params: String) async throws -> (html: String, base: URL?) {
+        try await transport.page(app: app, screen: screen, params: params)
     }
 
     func createSpace(_ name: String) async throws {
@@ -196,9 +196,9 @@ struct NodeClient: Sendable {
         let _: [String: String] = try await send("POST", "v1/spaces", Body(name: name))
     }
 
-    func pair(space: String, newUser: Bool) async throws -> String {
-        struct Body: Encodable, Sendable { var space: String; var new_user: Bool }
-        let reply: [String: String] = try await send("POST", "v1/pair", Body(space: space, new_user: newUser))
+    func pair(newUser: Bool) async throws -> String {
+        struct Body: Encodable, Sendable { var new_user: Bool }
+        let reply: [String: String] = try await send("POST", "v1/pair", Body(new_user: newUser))
         return reply["code"] ?? ""
     }
 

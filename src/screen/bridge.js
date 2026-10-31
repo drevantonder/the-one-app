@@ -12,14 +12,14 @@
       const r = await fetch("/v1/call", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ space: ctx.space, app: message.app, op: message.op, input: message.input }),
+        body: JSON.stringify({ app: message.app, op: message.op, input: message.input }),
       });
       const body = await r.json();
       if (body.error) throw new Error(body.error);
       return body.ok;
     }
     if (message.type === "open") {
-      const q = new URLSearchParams({ space: ctx.space, params: JSON.stringify(message.params || {}) });
+      const q = new URLSearchParams({ params: JSON.stringify(message.params || {}) });
       location.href = `/v1/screens/${ctx.app}/${message.screen}?${q}`;
     }
     if (message.type === "title") document.title = message.text;
@@ -33,14 +33,14 @@
   const colors = ["#5e5ce6", "#ff9f0a", "#30b0c7", "#ff375f", "#34c759", "#af52de", "#0a84ff", "#a2845e"];
 
   window.one = {
-    app: ctx.app, screen: ctx.screen, params: ctx.params, space: ctx.space, me: ctx.me,
+    app: ctx.app, screen: ctx.screen, params: ctx.params, me: ctx.me,
     call: (op, input = {}) => host({ type: "call", app: ctx.app, op, input }),
     open: (screen, params = {}) => host({ type: "open", screen, params }),
     title: (text) => host({ type: "title", text }),
     on: (event, fn) => (handlers[event] ||= []).push(fn),
     // The shell calls this with node events.
     __event(e) {
-      if (e.type === "changed" && e.space === ctx.space && (e.apps || []).includes(ctx.app)) handlers.changed.forEach((f) => f(e));
+      if (e.type === "changed" && (e.apps || []).includes(ctx.app)) handlers.changed.forEach((f) => f(e));
     },
     esc: (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]),
     ago(ms, now = Date.now()) {

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The apps this space has screens for, then the shell's own views.
+/// The apps the space has screens for, then the shell's own views.
 struct Sidebar: View {
     @Environment(Store.self) private var store
 
@@ -17,53 +17,33 @@ struct Sidebar: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            SpaceSwitcher()
+            SpaceHeader()
                 .padding(.horizontal, 10)
                 .padding(.bottom, 6)
         }
     }
 }
 
-private struct SpaceSwitcher: View {
+/// The app's one space: another context is another app.
+private struct SpaceHeader: View {
     @Environment(Store.self) private var store
 
     var body: some View {
-        @Bindable var store = store
-        Menu {
-            Picker("Space", selection: $store.spaceID) {
-                ForEach(store.spaces) { space in
-                    Text(space.title).tag(Optional(space.id))
+        HStack(spacing: 10) {
+            SpaceMark(name: store.space?.title ?? "", size: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(store.space?.title ?? "")
+                    .font(.headline)
+                    .lineLimit(1)
+                if let space = store.space {
+                    Text(space.devices.count == 1 ? "1 device" : "\(space.devices.count) devices")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .pickerStyle(.inline)
-            .labelsHidden()
-            Divider()
-            Button("New Space…", systemImage: "plus") { store.sheet = .newSpace }
-            Button("Join with a Pairing Code…", systemImage: "qrcode.viewfinder") { store.sheet = .join }
-        } label: {
-            HStack(spacing: 10) {
-                SpaceMark(name: store.space?.title ?? "", size: 30)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(store.space?.title ?? "")
-                        .font(.headline)
-                        .lineLimit(1)
-                    if let space = store.space {
-                        Text(space.devices.count == 1 ? "1 device" : "\(space.devices.count) devices")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .contentShape(.rect(cornerRadius: 10))
+            Spacer(minLength: 4)
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
     }
 }

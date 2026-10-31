@@ -82,6 +82,9 @@ impl Client {
     }
 
     pub async fn join(&self, code: &str) -> Result<Value> {
+        if self.joined() {
+            bail!("this phone is already in a space, and an app holds one; for another, install that context's own app");
+        }
         let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).context("that isn't a pairing code")?;
         let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
         let conn = self.endpoint.connect(code.from.clone(), JOIN_ALPN).await.context("couldn't reach the device that made the pairing code")?;
@@ -109,14 +112,12 @@ impl Client {
     fn learn(&self, state: &Value) {
         let me = self.endpoint.id();
         let mut saved = self.saved.lock().unwrap();
-        for space in state["spaces"].as_array().into_iter().flatten() {
-            for d in space["devices"].as_array().into_iter().flatten().filter(|d| d["client"] != true) {
-                let Some(id) = d["device"].as_str().and_then(|h| data_encoding::HEXLOWER.decode(h.as_bytes()).ok()) else { continue };
-                let Ok(id) = <[u8; 32]>::try_from(id.as_slice()) else { continue };
-                let Ok(id) = EndpointId::from_bytes(&id) else { continue };
-                if id != me && !saved.peers.iter().any(|p| p.id == id) {
-                    saved.peers.push(EndpointAddr::new(id));
-                }
+        for d in state["space"]["devices"].as_array().into_iter().flatten().filter(|d| d["client"] != true) {
+            let Some(id) = d["device"].as_str().and_then(|h| data_encoding::HEXLOWER.decode(h.as_bytes()).ok()) else { continue };
+            let Ok(id) = <[u8; 32]>::try_from(id.as_slice()) else { continue };
+            let Ok(id) = EndpointId::from_bytes(&id) else { continue };
+            if id != me && !saved.peers.iter().any(|p| p.id == id) {
+                saved.peers.push(EndpointAddr::new(id));
             }
         }
     }
@@ -155,7 +156,7 @@ impl Client {
         Ok(serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?)
     }
 
-    /// Streams the node's events (`changed`, `peers`, `spaces`) until the connection drops.
+    /// Streams the node's events (`changed`, `peers`, `space`) until the connection drops.
     pub async fn watch(&self, tx: mpsc::UnboundedSender<Value>) -> Result<()> {
         let peer = self.saved.lock().unwrap().peers.first().cloned().context("join a space first")?;
         let conn = self.endpoint.connect(peer, CLIENT_ALPN).await?;

@@ -20,7 +20,7 @@ struct RootView: View {
                         .controlSize(.small)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            } else if store.spaces.isEmpty {
+            } else if store.space == nil {
                 WelcomeView()
             } else {
                 MainView()
@@ -58,8 +58,6 @@ private struct MainView: View {
             }
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button("Join with a Pairing Code", systemImage: "qrcode.viewfinder") { store.sheet = .join }
-                        .help("Join a space with a pairing code from another device")
                     Button("Pair a Device", systemImage: "qrcode") { store.sheet = .pair }
                         .help("Show a pairing code that brings another device into this space")
                 }

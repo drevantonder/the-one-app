@@ -30,16 +30,10 @@ struct SettingsView: View {
 
                 if let space = store.space {
                     Section("Space") {
-                        if store.spaces.count > 1 {
-                            Picker("Space", selection: $store.spaceID) {
-                                ForEach(store.spaces) { Text($0.title).tag(Optional($0.id)) }
-                            }
-                        } else {
-                            LabeledContent("Name") {
-                                HStack(spacing: 8) {
-                                    SpaceMark(name: space.title, size: 22)
-                                    Text(space.title)
-                                }
+                        LabeledContent("Name") {
+                            HStack(spacing: 8) {
+                                SpaceMark(name: space.title, size: 22)
+                                Text(space.title)
                             }
                         }
                         LabeledContent("Role", value: space.role == "admin" ? String(localized: "Admin") : String(localized: "Member"))

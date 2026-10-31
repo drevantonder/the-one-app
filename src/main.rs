@@ -14,8 +14,8 @@ fn help() -> String {
 
 Usage:
   {CLI} serve                       run this device's node
-  {CLI} status                      this device, its spaces and their devices
-  {CLI} create <name>               create a space
+  {CLI} status                      this device, its space and its devices
+  {CLI} create <name>               create this device's space
   {CLI} pair [--new-user]           a pairing code for another of your devices (or a new user's)
   {CLI} join <code>                 join a space with a pairing code
   {CLI} rename <name>               rename this device
@@ -30,7 +30,7 @@ Usage:
   {CLI} version                     this build
   {CLI} mcp                         serve MCP over stdio, for agents
 
-Any command takes --space <name> when the device is in more than one space."
+{NAME} holds one space. For another context, run that context's own app."
     )
 }
 
@@ -60,7 +60,6 @@ fn main() {
 
 fn run(args: Vec<String>) -> Result<()> {
     let (positional, flags) = parse(&args);
-    let space = flags.get("space").and_then(Value::as_str).map(str::to_string);
     match positional.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         [] | ["help"] => println!("{}", help()),
         ["serve"] => serve()?,
@@ -79,7 +78,7 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("Created {}. Add your other devices with: {CLI} pair", name.join(" "));
         }
         ["pair"] => {
-            let r = post("/v1/pair", json!({ "space": space, "new_user": flags.contains_key("new-user") }))?;
+            let r = post("/v1/pair", json!({ "new_user": flags.contains_key("new-user") }))?;
             println!("On the other device, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for a week.", r["code"].as_str().unwrap_or(""));
         }
         ["join", code] => {
@@ -88,20 +87,20 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["remove", device] => {
             let state = get("/v1/state")?;
-            let found = state["spaces"].as_array().into_iter().flatten().flat_map(|s| s["devices"].as_array().cloned().unwrap_or_default())
+            let found = state["space"]["devices"].as_array().into_iter().flatten()
                 .find(|d| d["name"].as_str() == Some(device) || d["device"].as_str().is_some_and(|id| id.starts_with(device)))
                 .with_context(|| format!("no device called {device}"))?;
-            post("/v1/remove", json!({ "space": space, "device": found["device"] }))?;
+            post("/v1/remove", json!({ "device": found["device"] }))?;
             println!("Removed {}.", found["name"].as_str().unwrap_or(device));
         }
-        ["update"] => update::run(None, space.as_deref())?,
-        ["release", tag] => update::run(Some(tag), space.as_deref())?,
+        ["update"] => update::run(None)?,
+        ["release", tag] => update::run(Some(tag))?,
         ["publish", rest @ ..] => {
             let path = match rest {
                 [path] => std::fs::canonicalize(path)?,
                 _ => std::env::current_exe()?,
             };
-            publish(&path, space, &flags, &update::release_key()?)?;
+            publish(&path, &flags, &update::release_key()?)?;
         }
         ["blob", "put", file] => {
             let bytes = std::fs::read(file).with_context(|| format!("read {file}"))?;
@@ -122,9 +121,8 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         [app, op] => {
             let mut input = flags.clone();
-            input.remove("space");
             let device = input.remove("device");
-            let r = post("/v1/call", json!({ "space": space, "device": device, "app": app, "op": op, "input": input }))?;
+            let r = post("/v1/call", json!({ "device": device, "app": app, "op": op, "input": input }))?;
             match &r["ok"] {
                 ok if ok["content"].is_array() => print_content(app, op, &ok["content"])?,
                 Value::String(s) => println!("{s}"),
@@ -139,7 +137,7 @@ fn run(args: Vec<String>) -> Result<()> {
 
 /// Publishes the binary at `path` as a release, signed with `key`: this one, or one built for another platform
 /// (--target <triple> --commit <hash> --committed <seconds>).
-fn publish(path: &std::path::Path, space: Option<String>, flags: &Map<String, Value>, key: &ssh_key::PrivateKey) -> Result<()> {
+fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::PrivateKey) -> Result<()> {
     // The binary knows what it is; ask it, unless it's for another platform and can't run here.
     let version: Value = std::process::Command::new(path)
         .args(["version", "--json"])
@@ -155,7 +153,7 @@ fn publish(path: &std::path::Path, space: Option<String>, flags: &Map<String, Va
         bail!("that build has uncommitted changes; commit, build again, then publish");
     }
     let signature = one::release::sign(key, &std::fs::read(path)?)?;
-    let r = post("/v1/release", json!({ "space": space, "path": path, "commit": commit, "target": target, "committed": committed, "signature": signature }))?;
+    let r = post("/v1/release", json!({ "path": path, "commit": commit, "target": target, "committed": committed, "signature": signature }))?;
     println!("Published {} for {}. Every node on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
     Ok(())
 }
@@ -225,18 +223,17 @@ fn post(path: &str, body: Value) -> Result<Value> {
 
 fn status(state: &Value) {
     println!("{} ({})", state["device"]["name"].as_str().unwrap_or(""), &state["device"]["id"].as_str().unwrap_or("")[..8]);
-    let spaces = state["spaces"].as_array().cloned().unwrap_or_default();
-    if spaces.is_empty() {
+    let s = &state["space"];
+    if s.is_null() {
         println!("\nIn no space yet. Create one with {CLI} create <name>, or join with a pairing code.");
+        return;
     }
-    for s in spaces {
-        println!("\n{}  {} entries", s["name"].as_str().unwrap_or("(joining)"), s["entries"]);
-        for d in s["devices"].as_array().into_iter().flatten() {
-            let dot = if d["online"] == true { "●" } else { "○" };
-            let me = if d["me"] == true { " (this device)" } else { "" };
-            let build = d["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
-            println!("  {dot} {}{me}{build}", d["name"].as_str().unwrap_or(""));
-        }
+    println!("\n{}  {} entries", s["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("(joining)"), s["entries"]);
+    for d in s["devices"].as_array().into_iter().flatten() {
+        let dot = if d["online"] == true { "●" } else { "○" };
+        let me = if d["me"] == true { " (this device)" } else { "" };
+        let build = d["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
+        println!("  {dot} {}{me}{build}", d["name"].as_str().unwrap_or(""));
     }
 }
 
@@ -302,7 +299,6 @@ fn instructions() -> String {
 
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
-    let several = get("/v1/state").ok().and_then(|s| s["spaces"].as_array().map(|a| a.len() > 1)).unwrap_or(false);
     let mut tools = Vec::new();
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
@@ -310,9 +306,6 @@ fn tools() -> Result<Vec<Value>, Value> {
             let mut schema = op["input"].clone();
             if !schema.is_object() {
                 schema = json!({ "type": "object", "properties": {} });
-            }
-            if several {
-                schema["properties"]["space"] = json!({ "type": "string", "description": "which space; this device is in several" });
             }
             if app["runs"] == "here" {
                 schema["properties"]["device"] = json!({ "type": "string", "description": "which of your devices, by name; default is this one" });
@@ -326,12 +319,11 @@ fn tools() -> Result<Vec<Value>, Value> {
 fn call_tool(params: &Value) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let mut input = params["arguments"].as_object().cloned().unwrap_or_default();
-    let space = input.remove("space");
     let device = input.remove("device");
     let Some((app, op)) = name.split_once('_') else {
         return json!({ "isError": true, "content": [{ "type": "text", "text": format!("no tool {name}") }] });
     };
-    match post("/v1/call", json!({ "space": space, "device": device, "app": app, "op": op, "input": input })) {
+    match post("/v1/call", json!({ "device": device, "app": app, "op": op, "input": input })) {
         Ok(r) => match &r["ok"] {
             ok if ok["content"].is_array() => json!({ "content": ok["content"] }),
             Value::String(s) => json!({ "content": [{ "type": "text", "text": s }] }),
