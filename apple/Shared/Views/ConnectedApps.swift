@@ -116,6 +116,7 @@ struct ConnectedAppsView: View {
                     if let add = store.settingsRoute(for: app, on: page, add: true) {
                         Button { open(add) } label: {
                             Label("Add Account", systemImage: "plus")
+                                .foregroundStyle(Color.accentColor)
                         }
                         .buttonStyle(.borderless)
                     }
@@ -130,6 +131,7 @@ struct ConnectedAppsView: View {
                 Section {
                     Button { open(route) } label: {
                         Label("Add a Connected App", systemImage: "plus.app")
+                            .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.borderless)
                 }
