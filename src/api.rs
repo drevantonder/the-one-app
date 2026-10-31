@@ -17,6 +17,11 @@ use crate::entry::hex;
 use crate::members::Role;
 use crate::node::{CallRequest, Caller, Node};
 
+/// Where this machine's node serves its local API: the brand's port, or `<CLI>_ADDR`.
+pub fn addr() -> String {
+    std::env::var(format!("{}_ADDR", crate::brand::CLI.to_uppercase())).unwrap_or_else(|_| format!("127.0.0.1:{}", crate::brand::PORT))
+}
+
 pub fn router(node: Node) -> Router {
     Router::new()
         .route("/v1/state", get(state))
@@ -40,7 +45,9 @@ pub fn router(node: Node) -> Router {
         .route("/v1/app", post(app))
         .route("/v1/deploy", post(deploy))
         .route("/v1/install", post(install))
+        .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
+        .route("/v1/secrets", get(secrets).post(set_secret))
         .route("/v1/node-release", post(release))
         .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
         .route("/v1/blobs/{hash}", get(blob))
@@ -256,13 +263,42 @@ async fn source(State(node): State<Node>, Path(app): Path<String>, Query(q): Que
 }
 
 /// `{ app, scope, installed }`: `scope` is `user`, `group:<id>` (or a group's name) or `global`.
+/// Installing an app also installs the apps it uses.
 async fn install(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let scope = match text(&body, "scope")? {
-        "user" => crate::entry::Scope::User(node.user()?),
-        s => crate::entry::Scope::parse(s).or_else(|_| node.find_group(s).map(crate::entry::Scope::Group))?,
+    let me = local(&node)?;
+    let scope = node.scope_for(&me, text(&body, "scope")?)?;
+    node.install(&me, text(&body, "app")?, &scope, body["installed"] != false).await?;
+    done()
+}
+
+/// `{ app, name, owner? }`: a new app called `name`, from `app`, with data of its own. `owner` as for `/v1/app`.
+async fn fork(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    let owner = match body["owner"].as_str() {
+        Some(o) => Some(crate::members::Principal::parse(o).map(|p| p.to_string()).or_else(|_| node.find_group(o).map(|g| format!("group:{g}")))?),
+        None => None,
     };
-    let kind = if body["installed"] == false { "uninstall" } else { "install" };
-    node.append(&scope, crate::members::node(kind, json!({ "app": text(&body, "app")? }))).await?;
+    node.fork(&local(&node)?, text(&body, "app")?, text(&body, "name")?, owner.as_deref()).await?;
+    done()
+}
+
+#[derive(Deserialize)]
+struct SecretsQuery {
+    scope: Option<String>,
+}
+
+/// The secrets this user may set (there): app, name and hosts, never values.
+async fn secrets(State(node): State<Node>, Query(q): Query<SecretsQuery>) -> Reply {
+    let me = local(&node)?;
+    let scope = q.scope.map(|s| node.scope_for(&me, &s)).transpose()?;
+    Ok(Json(json!(node.secrets(&me, scope.as_ref())?)))
+}
+
+/// `{ scope, app, name, hosts, value }`, with `value: null` to delete it. `scope` is `user` by default.
+async fn set_secret(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    let me = local(&node)?;
+    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
+    let hosts = body["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
+    node.set_secret(&me, &scope, text(&body, "app")?, text(&body, "name")?, hosts, body["value"].as_str().map(str::to_string)).await?;
     done()
 }
 

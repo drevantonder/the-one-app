@@ -14,6 +14,8 @@ pub mod deploy;
 pub mod models;
 pub mod native;
 pub mod node;
+pub mod outbound;
 pub mod providers;
 pub mod release;
+pub mod secrets;
 pub mod shell;

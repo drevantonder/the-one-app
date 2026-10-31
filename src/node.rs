@@ -192,7 +192,31 @@ pub struct Inner {
     changed: tokio::sync::Notify,
     /// The bundle each app runs here.
     bundles: Mutex<BTreeMap<String, String>>,
+    /// The calls, widgets and hooks running now, by the token their requests carry.
+    grants: Mutex<HashMap<String, Grant>>,
+    /// The port apps' requests go out through.
+    outbound: u16,
     woke: Instant,
+}
+
+/// What a running call may do through the node: whose it is, which app's, and which scopes it reaches.
+#[derive(Clone, Debug)]
+pub struct Grant {
+    pub app: String,
+    pub caller: Caller,
+    pub scopes: Vec<Scope>,
+    pub read_only: bool,
+    /// The blobs it kept, which it may read back before any entry names them.
+    pub puts: Vec<String>,
+}
+
+/// Holds a grant for as long as its call runs.
+struct Granted(Node, String);
+
+impl Drop for Granted {
+    fn drop(&mut self) {
+        self.0.0.grants.lock().unwrap().remove(&self.1);
+    }
 }
 
 #[derive(Clone)]
@@ -213,7 +237,8 @@ impl Node {
         let key = SigningKey::from(secret);
         let id = *key.verifying_key().as_bytes();
         let endpoint = Endpoint::builder(presets::N0).secret_key(SecretKey::from_bytes(&secret)).bind().await?;
-        let apps = Apps::start(dir.join("runtime")).await?;
+        let outbound = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let apps = Apps::start(dir.join("runtime"), outbound.local_addr()?.port()).await?;
         let (events, _) = broadcast::channel(256);
         let node = Node(Arc::new(Inner {
             dir: dir.to_path_buf(),
@@ -230,8 +255,16 @@ impl Node {
             writes: tokio::sync::Mutex::new(()),
             changed: tokio::sync::Notify::new(),
             bundles: Mutex::new(BTreeMap::new()),
+            grants: Mutex::new(HashMap::new()),
+            outbound: outbound.local_addr()?.port(),
             woke: Instant::now(),
         }));
+        let outbound_router = crate::outbound::router(node.clone());
+        tokio::spawn(async move {
+            if let Err(err) = axum::serve(outbound, outbound_router).await {
+                tracing::warn!("apps' outbound requests stopped: {err:#}");
+            }
+        });
         if dir.join("install").join("install.json").exists() {
             node.open_install().context("open the install")?;
             node.replay_all().await?;
@@ -609,11 +642,19 @@ impl Node {
         if deployed_here.is_none() || deployed_here != latest {
             return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest deploy yet", req.app)));
         }
+        let mut ctx = ctx;
+        let _granted = self.grant(&req.app, me, &mut ctx);
         let outcome = self.0.apps.call(&req.app, &req.op, input, &ctx).await?;
         // Every append is checked before any is written: a call that fails writes nothing.
         let mut writes = Vec::new();
         for append in outcome.appends {
-            writes.push(self.with(|i| check_append(i, append, &scopes, me))?);
+            match append {
+                Append::Install { app, scope, installed } => {
+                    let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
+                    writes.extend(self.install_entries(me, &app, &scope, installed).await?);
+                }
+                append => writes.push(self.with(|i| check_append(i, &req.app, append, &scopes, me))?),
+            }
         }
         let by = (me.key != self.0.id).then_some(me.key);
         for (scope, content) in writes {
@@ -659,6 +700,74 @@ impl Node {
         }
     }
 
+    /// Lets the requests of a call, widget or hook of `app` through the node as `caller`'s, while it runs.
+    fn grant(&self, app: &str, caller: &Caller, ctx: &mut Context) -> Granted {
+        let token = hex(&rand::random::<[u8; 32]>());
+        let scopes = ctx.scopes.iter().filter_map(|s| Scope::parse(&s.id).ok()).collect();
+        let grant = Grant { app: app.to_string(), caller: caller.clone(), scopes, read_only: ctx.read_only, puts: Vec::new() };
+        self.0.grants.lock().unwrap().insert(token.clone(), grant);
+        ctx.token = token.clone();
+        Granted(self.clone(), token)
+    }
+
+    /// The ports this node serves on this machine: its local API, workerd, and apps' outbound requests.
+    pub fn own_ports(&self) -> Vec<u16> {
+        let api = crate::api::addr().rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(crate::brand::PORT);
+        vec![api, self.0.apps.port(), self.0.outbound]
+    }
+
+    /// The grant of a call running now.
+    pub fn grant_of(&self, token: &str) -> Option<Grant> {
+        self.0.grants.lock().unwrap().get(token).cloned()
+    }
+
+    /// The secret `name` a call's request names, as (hosts, value): its app's in the caller's own scope, else in
+    /// `global`; or with `<group id>/name`, in that group's.
+    pub fn secret_for(&self, grant: &Grant, name: &str) -> Option<(Vec<String>, String)> {
+        self.with(|i| {
+            let look = |scope: &Scope, name: &str| {
+                let state = &i.views.get(&scope.to_string())?.1;
+                state.secrets.get(&(grant.app.clone(), name.to_string())).map(|s| (s.hosts.clone(), s.value.clone()))
+            };
+            Ok(match name.split_once('/') {
+                Some((group, name)) => {
+                    let scope = Scope::Group(group.to_string());
+                    if i.r.members.may_use(&grant.caller.user, &scope) { look(&scope, name) } else { None }
+                }
+                None => look(&Scope::User(grant.caller.user.clone()), name).or_else(|| look(&Scope::Global, name)),
+            })
+        })
+        .ok()
+        .flatten()
+    }
+
+    /// Sets (or with no value, deletes) a secret of `app` in `scope`, for `caller`. Nothing reads it back.
+    pub async fn set_secret(&self, caller: &Caller, scope: &Scope, app: &str, name: &str, hosts: Vec<String>, value: Option<String>) -> Result<()> {
+        let content = self.with(|i| secret_entry(i, &caller.user, scope, app, name, hosts, value))?;
+        let by = (caller.key != self.0.id).then_some(caller.key);
+        self.append_as(scope, &caller.user, by, content).await?;
+        Ok(())
+    }
+
+    /// The secrets `viewer` may set, here or in `scope`: their app, name and hosts, never their values.
+    pub fn secrets(&self, viewer: &Caller, scope: Option<&Scope>) -> Result<Vec<Value>> {
+        self.with(|i| {
+            let m = &i.r.members;
+            let mut out = Vec::new();
+            for (log, (_, state)) in &i.views {
+                let Ok(s) = Scope::parse(log) else { continue };
+                if scope.is_some_and(|want| *want != s) || !members::manages_scope(m, &viewer.user, &s) {
+                    continue;
+                }
+                for ((app, name), secret) in &state.secrets {
+                    out.push(json!({ "scope": log, "app": app, "name": name, "hosts": secret.hosts, "user": secret.user, "time": secret.time }));
+                }
+            }
+            out.sort_by_key(|v| (v["scope"].to_string(), v["app"].to_string(), v["name"].to_string()));
+            Ok(out)
+        })
+    }
+
     /// Who a caller is, as apps see them.
     fn me_for(&self, caller: &Caller) -> Result<Me> {
         self.with(|i| Ok(node_me(self, &i.r.members, caller)))
@@ -670,7 +779,7 @@ impl Node {
         self.with(|i| {
             let reach = reachable(i, app, &viewer.user);
             let scopes: Vec<Scope> = reach.into_iter().filter(|s| i.r.holds(s)).collect();
-            Ok(Context { me, now: now_ms(), scopes: handles(&i.r.members, &scopes, &viewer.user), read_only: true })
+            Ok(Context { me, now: now_ms(), scopes: handles(&i.r.members, &scopes, &viewer.user), read_only: true, token: String::new() })
         })
     }
 
@@ -685,6 +794,7 @@ impl Node {
         let mut out = Vec::new();
         for app in self.0.apps.names() {
             let mut ctx = self.read_context(&app, &viewer)?;
+            let _granted = self.grant(&app, &viewer, &mut ctx);
             if let Some(scope) = &scope {
                 let installed = self.with(|i| Ok(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&app))))?;
                 ctx.scopes.retain(|s| installed && s.id == scope.to_string());
@@ -713,7 +823,9 @@ impl Node {
         let key = format!("{app}/{name}/{session}");
         let since = seen.get(&key).cloned().unwrap_or(Value::Null);
         let now = now_ms();
-        let ctx = self.read_context(app, &Caller { key: self.0.id, user: self.user()? })?;
+        let caller = Caller { key: self.0.id, user: self.user()? };
+        let mut ctx = self.read_context(app, &caller)?;
+        let _granted = self.grant(app, &caller, &mut ctx);
         let out = self.0.apps.hook(app, name, json!({ "event": event, "since": since }), &ctx).await?;
         seen.insert(key, json!(now));
         let week_ago = now.saturating_sub(7 * 86_400_000);
@@ -742,36 +854,7 @@ impl Node {
     /// Every app in the install, with what each does for `viewer` where it's installed for them; and the drivers
     /// that serve them.
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
-        let listed = self.with(|i| {
-            let m = &i.r.members;
-            Ok(m.apps
-                .values()
-                .map(|a| {
-                    let installed: Vec<String> = i
-                        .views
-                        .iter()
-                        .filter(|(scope, (_, s))| s.installed.contains(&a.name) && Scope::parse(scope).is_ok_and(|s| m.may_use(&viewer.user, &s)))
-                        .map(|(scope, _)| scope.clone())
-                        .collect();
-                    let reach = reachable(i, &a.name, &viewer.user);
-                    let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
-                    let info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed });
-                    (a.name.clone(), info, !reach.is_empty())
-                })
-                .collect::<Vec<_>>())
-        })?;
-        let mut out = Vec::new();
-        for (name, mut info, mine) in listed {
-            if mine && self.0.apps.has(&name) {
-                if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
-                    // A fork's module may still give its first name; the install's name for it is the one that counts.
-                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name") {
-                        info[k] = v;
-                    }
-                }
-            }
-            out.push(info);
-        }
+        let mut out = self.catalog(viewer).await?;
         if viewer.user == self.user()? {
             out.extend(self.0.native.iter().map(|n| (n.describe)()));
             out.extend(self.0.providers.describe());
@@ -787,6 +870,143 @@ impl Node {
             }
         }
         Ok(out)
+    }
+
+    /// Every app in the install: owner, `from`, forks, deploys, the scopes `viewer` may use it's installed in, its
+    /// title and icon; and for those installed for them, what it does (operations, widgets, screens, instructions).
+    pub async fn catalog(&self, viewer: &Caller) -> Result<Vec<Value>> {
+        let listed = self.with(|i| {
+            let m = &i.r.members;
+            Ok(m.apps
+                .values()
+                .map(|a| {
+                    let installed: Vec<String> = i
+                        .views
+                        .iter()
+                        .filter(|(scope, (_, s))| s.installed.contains(&a.name) && Scope::parse(scope).is_ok_and(|s| m.may_use(&viewer.user, &s)))
+                        .map(|(scope, _)| scope.clone())
+                        .collect();
+                    let reach = reachable(i, &a.name, &viewer.user);
+                    let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
+                    let forks: Vec<&String> = m.apps.values().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
+                    let info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed });
+                    (a.name.clone(), info, !reach.is_empty())
+                })
+                .collect::<Vec<_>>())
+        })?;
+        let mut out = Vec::new();
+        for (name, mut info, mine) in listed {
+            if self.0.apps.has(&name) {
+                if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
+                    // A fork's module may still give its first name; the install's name for it is the one that counts.
+                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && (mine || matches!(k.as_str(), "title" | "icon" | "uses"))) {
+                        info[k] = v;
+                    }
+                }
+            }
+            out.push(info);
+        }
+        Ok(out)
+    }
+
+    /// What an app's latest deploy says it uses: (apps, drivers). Waits a while for this server to run that deploy.
+    async fn uses(&self, app: &str) -> (Vec<String>, Vec<String>) {
+        let started = Instant::now();
+        while started.elapsed() < CALL_LIMIT {
+            let latest = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone()))).ok().flatten();
+            if latest.is_none() || self.0.bundles.lock().unwrap().get(app) == latest.as_ref() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let d = if self.0.apps.has(app) { self.0.apps.describe(app).await.unwrap_or_default() } else { Value::Null };
+        let list = |k: &str| d["uses"][k].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        (list("apps"), list("drivers"))
+    }
+
+    /// The entries that install (or uninstall) `app` in `scope` for `caller`, with their own rights there. Installing
+    /// also installs each app it uses, and each they use, that isn't installed there yet.
+    async fn install_entries(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool) -> Result<Vec<(Scope, Content)>> {
+        let mut wanted = vec![app.to_string()];
+        let mut i = 0;
+        while installed && i < wanted.len() {
+            for used in self.uses(&wanted[i]).await.0 {
+                if !wanted.contains(&used) {
+                    wanted.push(used);
+                }
+            }
+            i += 1;
+        }
+        self.with(|i| {
+            let m = &i.r.members;
+            ensure!(members::manages_scope(m, &caller.user, scope), "you can't install apps in {scope}");
+            ensure!(i.r.holds(scope), "this server doesn't hold {scope}");
+            let here = i.views.get(&scope.to_string()).map(|(_, s)| s.installed.clone()).unwrap_or_default();
+            let mut out = Vec::new();
+            for (n, name) in wanted.iter().enumerate().rev() {
+                ensure!(m.apps.contains_key(name), "no app named {name}{}", if n > 0 { format!(", which {app} uses") } else { String::new() });
+                if n == 0 || !here.contains(name) {
+                    out.push((scope.clone(), members::node(if installed { "install" } else { "uninstall" }, json!({ "app": name }))));
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    /// Installs (or uninstalls) `app` in `scope` for `caller`, and what it uses.
+    pub async fn install(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool) -> Result<()> {
+        let by = (caller.key != self.0.id).then_some(caller.key);
+        for (scope, content) in self.install_entries(caller, app, scope, installed).await? {
+            self.append_as(&scope, &caller.user, by, content).await?;
+        }
+        Ok(())
+    }
+
+    /// Forks `app` as a new app called `name`, owned by `owner` (by default the caller), with data of its own; it
+    /// runs `app`'s latest deploy until it's deployed itself.
+    pub async fn fork(&self, caller: &Caller, app: &str, name: &str, owner: Option<&str>) -> Result<()> {
+        let bundle = self.with(|i| {
+            let m = &i.r.members;
+            ensure!(!m.apps.contains_key(name), "there's already an app called {name}");
+            m.apps.get(app).with_context(|| format!("no app named {app}"))?.bundle.clone().with_context(|| format!("{app} has no deploy to fork"))
+        })?;
+        let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
+        self.member_as(caller, "app", json!({ "name": name, "owner": owner, "from": app })).await?;
+        self.member_content(caller, deploy(name, &bundle)).await
+    }
+
+    /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs an
+    /// operation of an app or driver the calling app uses, as its caller; `POST /blob` keeps a blob, `GET
+    /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the install's apps.
+    pub async fn internal(&self, token: &str, method: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
+        use axum::response::IntoResponse;
+        let grant = &self.grant_of(token).context("only a running call asks the node")?;
+        let ok = |v: Value| axum::Json(v).into_response();
+        Ok(match (method, path) {
+            ("POST", "/call") => {
+                ensure!(!grant.read_only, "this call only reads: it can't run other apps' operations");
+                let req: Value = serde_json::from_slice(&body)?;
+                let (app, op) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
+                let (apps, drivers) = self.uses(&grant.app).await;
+                ensure!(apps.iter().chain(&drivers).any(|u| u == app), "{} doesn't use {app}", grant.app);
+                let call = CallRequest { app: app.into(), op: op.into(), input: req["input"].clone(), ..Default::default() };
+                ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
+            }
+            ("POST", "/blob") => {
+                let hash = self.put_blob(&body)?;
+                if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
+                    g.puts.push(hash.clone());
+                }
+                ok(json!({ "blob": hash }))
+            }
+            ("GET", p) if p.starts_with("/blob/") => {
+                let hash = &p["/blob/".len()..];
+                ensure!(grant.puts.iter().any(|h| h == hash) || self.blob_named_for(hash, &grant.caller.user)?, "no such blob for you");
+                self.blob(hash).await?.into_response()
+            }
+            ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller).await?)),
+            _ => bail!("the node has no {method} {path}"),
+        })
     }
 
     /// Everything a shell needs to draw this server and its install, for this server's local user.
@@ -1007,6 +1227,17 @@ impl Node {
                 }
             }
             ("GET", "/v1/source") => self.source(body["app"].as_str().unwrap_or(""), body["bundle"].as_str(), body["path"].as_str()).await?,
+            ("GET", "/v1/secrets") => {
+                let scope = body["scope"].as_str().map(|s| self.scope_for(me, s)).transpose()?;
+                json!(self.secrets(me, scope.as_ref())?)
+            }
+            ("POST", "/v1/secrets") => {
+                let scope = self.scope_for(me, body["scope"].as_str().unwrap_or("user"))?;
+                let hosts = body["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
+                let (app, name) = (body["app"].as_str().unwrap_or(""), body["name"].as_str().unwrap_or(""));
+                self.set_secret(me, &scope, app, name, hosts, body["value"].as_str().map(str::to_string)).await?;
+                json!({})
+            }
             ("POST", "/v1/name") => {
                 let name = body["name"].as_str().unwrap_or("").trim();
                 self.member_as(me, "rename", json!({ "key": hex(&me.key), "name": name })).await?;
@@ -1348,6 +1579,14 @@ impl Node {
         }
     }
 
+    /// A scope as someone gives it: `user` (their own), `global`, `group:<id>`, or a group's name or id.
+    pub fn scope_for(&self, caller: &Caller, scope: &str) -> Result<Scope> {
+        Ok(match scope {
+            "user" => Scope::User(caller.user.clone()),
+            s => Scope::parse(s).or_else(|_| self.find_group(s).map(Scope::Group))?,
+        })
+    }
+
     /// Finds a group by name or id.
     pub fn find_group(&self, name: &str) -> Result<String> {
         let found: Vec<String> = self.with(|i| Ok(i.r.members.groups.values().filter(|g| g.id == name || g.name.eq_ignore_ascii_case(name)).map(|g| g.id.clone()).collect()))?;
@@ -1479,7 +1718,7 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
         let open = i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.opens.iter().any(|(by, server, t)| by == &me.user && *server == here && now_ms() < t + members::OPEN_FOR));
         ensure!(open, "that user's data isn't open for you on {}", node.server_name());
         let caller = Caller { key: me.key, user: target.clone() };
-        let ctx = Context { me: node_me(node, m, &caller), now: now_ms(), scopes: handles(m, std::slice::from_ref(&scope), target), read_only: true };
+        let ctx = Context { me: node_me(node, m, &caller), now: now_ms(), scopes: handles(m, std::slice::from_ref(&scope), target), read_only: true, token: String::new() };
         return Ok(Ok((ctx, vec![scope])));
     }
     if !m.serves(&here, &me.user) {
@@ -1504,7 +1743,7 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("{} doesn't hold {s}", node.server_name())));
     }
-    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false };
+    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new() };
     Ok(Ok((ctx, scopes)))
 }
 
@@ -1513,9 +1752,9 @@ fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
     Me { key: hex(&caller.key), user: caller.user.clone(), name, role: m.user(&caller.user).map(|u| u.role) }
 }
 
-/// Checks one of a call's appends: into a scope it named, or an install with the caller's own rights.
-fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller) -> Result<(Scope, Content)> {
-    let m = &i.r.members;
+/// Checks one of a call's appends: into a scope it named, or a secret of the calling app's in a scope it named, which
+/// the caller may set.
+fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &Caller) -> Result<(Scope, Content)> {
     Ok(match append {
         Append::Entry { scope, content } => {
             let scope = Scope::parse(&scope)?;
@@ -1523,19 +1762,24 @@ fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller) -> R
             ensure!(content.app != members::APP, "apps don't write the node's entries");
             (scope, content)
         }
-        Append::Install { app, scope, installed } => {
-            let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
-            let allowed = match &scope {
-                Scope::User(u) => *u == me.user,
-                Scope::Group(g) => m.group_role(&me.user, g) == Some(Role::Admin),
-                Scope::Global => m.is_admin(&me.user),
-            };
-            ensure!(allowed, "you can't install apps in {scope}");
-            ensure!(m.apps.contains_key(&app), "no app named {app}");
-            ensure!(i.r.holds(&scope), "this server doesn't hold {scope}");
-            (scope, members::node(if installed { "install" } else { "uninstall" }, json!({ "app": app })))
+        Append::Secret { scope, name, value, hosts } => {
+            let scope = Scope::parse(&scope)?;
+            ensure!(scopes.contains(&scope), "the call didn't name {scope}");
+            (scope.clone(), secret_entry(i, &me.user, &scope, app, &name, hosts, value)?)
         }
+        Append::Install { .. } => bail!("installs are checked by install_entries"),
     })
+}
+
+/// A `secret` entry `user` may write in `scope`, setting (or with no value, deleting) a secret of `app`.
+fn secret_entry(i: &Install, user: &str, scope: &Scope, app: &str, name: &str, hosts: Vec<String>, value: Option<String>) -> Result<Content> {
+    let m = &i.r.members;
+    ensure!(members::manages_scope(m, user, scope), "you can't set secrets in {scope}");
+    ensure!(m.apps.contains_key(app), "no app named {app}");
+    ensure!(members::valid_secret_name(name), "a secret's name is letters, digits, _, - and .");
+    ensure!(value.is_none() || (!hosts.is_empty() && hosts.iter().all(|h| members::valid_host(h))), "give the hosts it's sent to, as host names (api.example.com)");
+    ensure!(i.r.holds(scope), "this server doesn't hold {scope}");
+    Ok(members::node("secret", json!({ "app": app, "name": name, "hosts": hosts, "value": value })))
 }
 
 /// A deploy of `app`: the bundle at blob `bundle`.

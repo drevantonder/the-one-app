@@ -258,3 +258,160 @@ async fn deploys_build_with_bun_keep_their_source_and_roll_back() {
     let refused = bob.deploy(&bob_me, "hello", &first).await.unwrap_err();
     assert!(format!("{refused:#}").contains("only someone acting for hello's owner"), "{refused:#}");
 }
+
+/// Deploys a plain module as `app`, made by this server's user if it's new, and installs it in their scope.
+async fn deploy_module(node: &Node, app: &str, source: &str) {
+    let bundle = one::bundle::pack(&[("app.js".into(), source.as_bytes().to_vec()), ("src/app.js".into(), source.as_bytes().to_vec())]).unwrap();
+    let blob = node.put_blob(&bundle).unwrap();
+    let me = one::node::Caller { key: node.id(), user: node.user().unwrap() };
+    if node.source(app, None, None).await.is_err() {
+        node.member("app", json!({ "name": app, "owner": format!("user:{}", me.user) })).await.unwrap();
+    }
+    node.deploy(&me, app, &blob).await.unwrap();
+}
+
+/// A server that answers every request with what it got: `{ host, authorization, body }`.
+async fn echo() -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let router = axum::Router::new().fallback(|headers: axum::http::HeaderMap, body: String| async move {
+        let h = |n: &str| headers.get(n).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        axum::Json(json!({ "host": h("host"), "authorization": h("authorization"), "body": body }))
+    });
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    port
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn secrets_are_set_never_read_and_go_only_to_their_hosts() {
+    let (a, _ra) = start("secrets").await;
+    a.create("Secrets", "Andre").await.unwrap();
+    let port = echo().await;
+    deploy_module(&a, "keeper", r#"export default {
+  name: "keeper",
+  ops: {
+    send: { run: async (ctx, { url, auth, body }) => {
+      const r = await fetch(url, { method: "POST", headers: { authorization: auth }, body });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    } },
+    keep: { run: (ctx, { value }) => { ctx.user.secret("kept", value, ["127.0.0.1"]); return null; } },
+    status: { run: async (ctx, { url }) => (await fetch(url)).status },
+  },
+};"#)
+    .await;
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap() };
+    a.set_secret(&me, &one::entry::Scope::User(me.user.clone()), "keeper", "token", vec!["127.0.0.1".into()], Some("s3cret".into())).await.unwrap();
+    a.append(&one::entry::Scope::User(me.user.clone()), one::members::node("install", json!({ "app": "keeper" }))).await.unwrap();
+    let send = |url: String, auth: &str, body: &str| call("keeper", "send", json!({ "url": url, "auth": auth, "body": body }));
+
+    // Filled in for its host, in headers and bodies.
+    let got = a.call(send(format!("http://127.0.0.1:{port}/x"), "Bearer {{token}}", "key={{token}}&other={{nothing}}")).await.unwrap();
+    assert_eq!(got["authorization"], "Bearer s3cret");
+    assert_eq!(got["body"], "key=s3cret&other={{nothing}}", "a placeholder no secret has stays as it is");
+    // Refused for any other host, though it's the same server.
+    let refused = a.call(send(format!("http://localhost:{port}/x"), "Bearer {{token}}", "")).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("sent only to 127.0.0.1"), "{refused:#}");
+
+    assert_eq!(a.call(call("keeper", "status", json!({ "url": "https://github.com/" }))).await.unwrap(), 200, "https goes out as https (github.com redirects http)");
+
+    // Nothing reads it back: not the list, the state, the apps, nor the app itself.
+    let listed = a.secrets(&me, None).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["name"], "token");
+    assert_eq!(listed[0]["hosts"], json!(["127.0.0.1"]));
+    for shown in [json!(listed), a.state(), json!(a.apps(&me).await.unwrap())] {
+        assert!(!shown.to_string().contains("s3cret"), "a secret's value never shows: {shown}");
+    }
+
+    // A call sets its own app's secret, which it can use but not read.
+    a.call(call("keeper", "keep", json!({ "value": "given" }))).await.unwrap();
+    let got = a.call(send(format!("http://127.0.0.1:{port}/"), "{{kept}}", "")).await.unwrap();
+    assert_eq!(got["authorization"], "given");
+
+    // Deleted, it's no longer filled in; and only someone who manages a scope sets secrets there.
+    a.set_secret(&me, &one::entry::Scope::User(me.user.clone()), "keeper", "token", vec![], None).await.unwrap();
+    let got = a.call(send(format!("http://127.0.0.1:{port}/"), "Bearer {{token}}", "")).await.unwrap();
+    assert_eq!(got["authorization"], "Bearer {{token}}");
+    let other = one::node::Caller { key: a.id(), user: "0123456789abcdef".into() };
+    assert!(a.set_secret(&other, &one::entry::Scope::Global, "keeper", "x", vec!["a.com".into()], Some("v".into())).await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn apps_install_in_several_scopes_use_each_other_and_fork() {
+    let (a, _ra) = start("apps").await;
+    a.create("Apps", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap() };
+    let mine = one::entry::Scope::User(me.user.clone());
+    a.member("group", json!({ "group": "a000000000000001", "name": "Team" })).await.unwrap();
+    let team = one::entry::Scope::Group("a000000000000001".into());
+    let notes = r#"export default {
+  name: "notes",
+  title: "Notes",
+  schema: Object.fromEntries(["user", "group", "global"].map((k) => [k, "create table notes (text text)"])),
+  ops: {
+    add: { run: (ctx, { text, scope }) => { (scope ? ctx.group(scope) : ctx.user).append("note", { text }); return null; } },
+    list: { run: async (ctx, { scope }) => (await (scope ? ctx.group(scope) : ctx.user).query("select text from notes")).map((n) => n.text) },
+  },
+  on: { note: (db, e) => db.exec("insert into notes values (?)", [e.data.text]) },
+};"#;
+    deploy_module(&a, "notes", notes).await;
+    deploy_module(&a, "journal", r#"export default {
+  name: "journal",
+  uses: { apps: ["notes"], drivers: ["shell"] },
+  ops: {
+    jot: { run: async (ctx, { text }) => { await ctx.apps.notes.add({ text }); return ctx.apps.notes.list({}); } },
+    sneak: { run: (ctx) => ctx.apps.board.read({}) },
+    echo: { run: (ctx) => ctx.drivers.shell.run({ command: "echo from a driver" }) },
+    keep: { run: async (ctx, { text }) => { const hash = await ctx.blob.put(new TextEncoder().encode(text)); return new TextDecoder().decode(await ctx.blob.get(hash)); } },
+    catalog: { run: async (ctx) => (await ctx.catalog()).map((a) => a.name) },
+    share: { run: (ctx, { scope }) => { ctx.install("journal", scope); return null; } },
+  },
+};"#)
+    .await;
+
+    // Installing an app installs what it uses; it calls it as the same user.
+    a.install(&me, "journal", &mine, true).await.unwrap();
+    let installed = |name: &str| {
+        let a = a.clone();
+        let (name, me) = (name.to_string(), me.clone());
+        async move { a.apps(&me).await.unwrap().into_iter().find(|x| x["name"] == name.as_str()).map(|x| x["installed"].clone()).unwrap_or_default() }
+    };
+    assert_eq!(installed("notes").await, json!([mine.to_string()]), "journal's install brought notes");
+    eventually("journal to run", async || a.call(call("journal", "jot", json!({ "text": "first" }))).await.is_ok_and(|r| r == json!(["first"]))).await;
+    let refused = a.call(call("journal", "sneak", json!({}))).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("doesn't use board"), "{refused:#}");
+    let echoed = a.call(call("journal", "echo", json!({}))).await.unwrap();
+    assert!(echoed.to_string().contains("from a driver"), "{echoed}");
+    assert_eq!(a.call(call("journal", "keep", json!({ "text": "in a blob" }))).await.unwrap(), "in a blob");
+    let names = a.call(call("journal", "catalog", json!({}))).await.unwrap();
+    assert!(names.as_array().unwrap().contains(&json!("notes")), "{names}");
+
+    // The same app in another scope: one version, data per scope.
+    a.install(&me, "notes", &team, true).await.unwrap();
+    a.call(call("notes", "add", json!({ "text": "for the team", "scope": "a000000000000001" }))).await.unwrap();
+    assert_eq!(a.call(call("notes", "list", json!({ "scope": "a000000000000001" }))).await.unwrap(), json!(["for the team"]));
+    assert_eq!(a.call(call("notes", "list", json!({}))).await.unwrap(), json!(["first"]));
+    let mut where_ = installed("notes").await.as_array().unwrap().clone();
+    where_.sort_by_key(|v| v.to_string());
+    assert_eq!(json!(where_), json!([team.to_string(), mine.to_string()]));
+
+    // ctx.install, with the caller's rights: an admin may install for everyone.
+    a.call(call("journal", "share", json!({ "scope": "global" }))).await.unwrap();
+    let global = installed("journal").await;
+    assert!(global.as_array().unwrap().contains(&json!("global")), "{global}");
+    a.install(&me, "journal", &one::entry::Scope::Global, false).await.unwrap();
+    assert!(!installed("journal").await.as_array().unwrap().contains(&json!("global")), "uninstalled");
+
+    // A fork: a new name, its own data, and a link to where it came from.
+    a.fork(&me, "notes", "jottings", None).await.unwrap();
+    a.install(&me, "jottings", &mine, true).await.unwrap();
+    eventually("the fork to run", async || a.call(call("jottings", "list", json!({}))).await.is_ok_and(|r| r == json!([]))).await;
+    a.call(call("jottings", "add", json!({ "text": "forked" }))).await.unwrap();
+    assert_eq!(a.call(call("notes", "list", json!({}))).await.unwrap(), json!(["first"]), "a fork's data is its own");
+    let apps = a.apps(&me).await.unwrap();
+    let find = |n: &str| apps.iter().find(|x| x["name"] == n).unwrap().clone();
+    assert_eq!(find("jottings")["from"], "notes");
+    assert_eq!(find("notes")["forks"], json!(["jottings"]));
+    assert_eq!(find("jottings")["title"], "Notes");
+}

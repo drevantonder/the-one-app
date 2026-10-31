@@ -482,6 +482,7 @@ impl Members {
                 app.deploys += 1;
                 app.history.push((bundle, e.time(), w.clone()));
             }
+            "secret" => ensure!(self.is_admin(&w), "admins only"),
             "install" | "uninstall" | "node-release" | "running" => {}
             other => bail!("unknown kind {other}"),
         }
@@ -493,12 +494,49 @@ pub fn valid_app_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && name != APP
 }
 
-/// What a scope's own node entries add up to: the apps installed in it, and every `open` of it.
+/// What a scope's own node entries add up to: the apps installed in it, every `open` of it, and its secrets.
 #[derive(Clone, Debug, Default)]
 pub struct ScopeState {
     pub installed: BTreeSet<String>,
     /// (opener, server, time)
     pub opens: Vec<(String, Key, u64)>,
+    /// Each app's secrets here, by (app, name).
+    pub secrets: BTreeMap<(String, String), Secret>,
+}
+
+/// A secret: set, never read. Only the node's outbound requests use its value (see SPEC.md, "Secrets").
+#[derive(Clone)]
+pub struct Secret {
+    pub hosts: Vec<String>,
+    pub value: String,
+    pub user: String,
+    pub time: u64,
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Secret {{ hosts: {:?}, set by {} at {} }}", self.hosts, self.user, self.time)
+    }
+}
+
+/// Whether `user` installs apps and sets secrets in `scope`: their own, a group's they're an admin of, and `global`
+/// if they're an admin.
+pub fn manages_scope(m: &Members, user: &str, scope: &Scope) -> bool {
+    match scope {
+        Scope::User(u) => u == user,
+        Scope::Group(g) => m.group_role(user, g) == Some(Role::Admin),
+        Scope::Global => m.is_admin(user),
+    }
+}
+
+/// A secret's name: letters, digits, `_`, `-` and `.`.
+pub fn valid_secret_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+}
+
+/// A host a secret is sent to: a lowercase host name or IP address, without scheme or port.
+pub fn valid_host(host: &str) -> bool {
+    !host.is_empty() && host.len() <= 253 && host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-'))
 }
 
 /// Whether a node entry in a user or group scope counts, by its kind's rules, and what it changes.
@@ -507,18 +545,31 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
     let w = e.user();
     match e.content.kind.as_str() {
         "install" | "uninstall" => {
-            let allowed = match &scope {
-                Scope::User(u) => u == w,
-                Scope::Group(g) => m.group_role(w, g) == Some(Role::Admin),
-                Scope::Global => m.is_admin(w),
-            };
-            ensure!(allowed, "not allowed to install there");
+            ensure!(manages_scope(m, w, &scope), "not allowed to install there");
             let app = e.content.data["app"].as_str().context("no app")?.to_string();
             if e.content.kind == "install" {
                 ensure!(m.apps.contains_key(&app), "no such app");
                 state.installed.insert(app);
             } else {
                 state.installed.remove(&app);
+            }
+        }
+        "secret" => {
+            ensure!(manages_scope(m, w, &scope), "not allowed to set secrets there");
+            let data = &e.content.data;
+            let app = data["app"].as_str().context("no app")?.to_string();
+            let name = data["name"].as_str().context("no name")?.to_string();
+            ensure!(m.apps.contains_key(&app), "no such app");
+            ensure!(valid_secret_name(&name), "not a secret's name");
+            match data["value"].as_str() {
+                None => {
+                    state.secrets.remove(&(app, name));
+                }
+                Some(value) => {
+                    let hosts: Vec<String> = data["hosts"].as_array().context("no hosts")?.iter().filter_map(|h| h.as_str().map(str::to_string)).collect();
+                    ensure!(!hosts.is_empty() && hosts.iter().all(|h| valid_host(h)), "a secret goes to one host or more");
+                    state.secrets.insert((app, name), Secret { hosts, value: value.to_string(), user: w.to_string(), time: e.time() });
+                }
             }
         }
         "open" => {
@@ -552,7 +603,7 @@ pub fn replay_from(root: Option<Hash>, member_entries: &[Entry], scope_entries: 
         }
         let counted = if is_member_entry(e) {
             members.next_if(|me| me.order() == order);
-            m.step(e) && (!matches!(e.content.kind.as_str(), "install" | "uninstall") || apply_in_scope(&m, &mut state, e).is_ok())
+            m.step(e) && (!matches!(e.content.kind.as_str(), "install" | "uninstall" | "secret") || apply_in_scope(&m, &mut state, e).is_ok())
         } else if m.counts(e) {
             e.content.app != APP || apply_in_scope(&m, &mut state, e).is_ok()
         } else {

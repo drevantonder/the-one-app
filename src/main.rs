@@ -2,7 +2,7 @@ use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use one::brand::{CLI, NAME, PORT};
+use one::brand::{CLI, NAME};
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
 
@@ -38,7 +38,16 @@ Usage:
   {CLI} deploys <app>                  an app's deploys, newest last
   {CLI} source <app> [path] [--bundle <hash>]
                                        an app's code as deployed: its files, or one of them
-  {CLI} install <app> [--scope user|global|<group>] [--remove]
+  {CLI} install <app> [--scope user|global|<group>]
+                                       install an app, and the apps it uses, for you, a group you admin or everyone
+  {CLI} uninstall <app> [--scope s]
+  {CLI} fork <app> <name> [--owner <owner>]
+                                       a new app from <app>'s code, with data of its own
+  {CLI} secret set <app> <name> --hosts a,b [--scope user|global|<group>]
+                                       set an app's secret, read from stdin: it's sent only to those hosts, and
+                                       never read back
+  {CLI} secret list [--scope s]        the secrets you may set: names and hosts, never values
+  {CLI} secret remove <app> <name> [--scope s]
   {CLI} <app> <op> [--key value]       run an operation, e.g. {CLI} board post --text hi
                                        --server <name> runs it there; --scopes a,b names the scopes it touches
   {CLI} update                         test and build main's tip on this machine and the Macs, and run it everywhere
@@ -66,7 +75,7 @@ fn dirs_home() -> PathBuf {
 }
 
 fn addr() -> String {
-    std::env::var(format!("{}_ADDR", CLI.to_uppercase())).unwrap_or_else(|_| format!("127.0.0.1:{PORT}"))
+    api::addr()
 }
 
 fn main() {
@@ -86,7 +95,10 @@ fn run(args: Vec<String>) -> Result<()> {
         ["status"] => status(&get("/v1/state")?),
         ["apps"] => {
             for app in get("/v1/apps")?.as_array().into_iter().flatten() {
-                println!("{} ({})", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
+                let from = app["from"].as_str().map(|f| format!(", a fork of {f}")).unwrap_or_default();
+                let installed: Vec<&str> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                let installed = if installed.is_empty() { String::new() } else { format!(", installed in {}", installed.join(", ")) };
+                println!("{} ({}{from}{installed})", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
                 for op in app["ops"].as_array().into_iter().flatten() {
                     println!("  {:<10} {}", op["name"].as_str().unwrap_or(""), op["description"].as_str().unwrap_or(""));
                 }
@@ -179,10 +191,46 @@ fn run(args: Vec<String>) -> Result<()> {
                 _ => bail!("that file isn't text"),
             }
         }
+        ["uninstall", app] => {
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            post("/v1/install", json!({ "app": app, "scope": scope, "installed": false }))?;
+            println!("{app} is no longer installed in {scope}.");
+        }
+        ["fork", app, name] => {
+            post("/v1/fork", json!({ "app": app, "name": name, "owner": flags.get("owner") }))?;
+            println!("Forked {app} as {name}; deploy your changes with {CLI} deploy <dir> --name {name}.");
+        }
         ["install", app] => {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             post("/v1/install", json!({ "app": app, "scope": scope, "installed": !flags.contains_key("remove") }))?;
             println!("{app} is {} in {scope}.", if flags.contains_key("remove") { "no longer installed" } else { "installed" });
+        }
+        ["secret", "set", app, name] => {
+            let hosts: Vec<&str> = flags.get("hosts").and_then(Value::as_str).context("give the hosts it's sent to: --hosts api.example.com")?.split(',').map(str::trim).collect();
+            let value = match flags.get("value").and_then(Value::as_str) {
+                Some(v) => v.to_string(),
+                None => {
+                    let mut v = String::new();
+                    std::io::stdin().read_line(&mut v)?;
+                    v.trim_end_matches(['\n', '\r']).to_string()
+                }
+            };
+            anyhow::ensure!(!value.is_empty(), "give the secret on stdin");
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            post("/v1/secrets", json!({ "scope": scope, "app": app, "name": name, "hosts": hosts, "value": value }))?;
+            println!("{app}'s secret {name} is set in {scope}; it's sent only to {}.", hosts.join(", "));
+        }
+        ["secret", "list"] => {
+            let q = flags.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default();
+            for s in get(&format!("/v1/secrets{q}"))?.as_array().into_iter().flatten() {
+                let hosts: Vec<&str> = s["hosts"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                println!("{}  {}/{}  → {}", s["scope"].as_str().unwrap_or(""), s["app"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), hosts.join(", "));
+            }
+        }
+        ["secret", "remove", app, name] => {
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            post("/v1/secrets", json!({ "scope": scope, "app": app, "name": name, "value": null }))?;
+            println!("{app}'s secret {name} is gone from {scope}.");
         }
         ["update"] => update::run(None)?,
         ["release", tag] => update::run(Some(tag))?,
@@ -454,9 +502,28 @@ fn instructions() -> String {
     text
 }
 
+/// Secrets are the node's, not an app's: agents set, replace and delete them, and list their names, never values.
+fn secret_tools() -> Vec<Value> {
+    let scope = json!({ "type": "string", "description": "user (yours, the default), global, or a group's name or id" });
+    vec![
+        json!({ "name": "secrets_set", "description": "Set (or replace) a secret of an app: it puts {{name}} in a request's headers or body and the node fills it in, only for these hosts. Nobody can read it back.", "inputSchema": { "type": "object", "required": ["app", "name", "value", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "scope": scope } } }),
+        json!({ "name": "secrets_list", "description": "The secrets you may set: app, name and hosts, never values.", "inputSchema": { "type": "object", "properties": { "scope": scope } } }),
+        json!({ "name": "secrets_remove", "description": "Delete a secret of an app.", "inputSchema": { "type": "object", "required": ["app", "name"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "scope": scope } } }),
+    ]
+}
+
+fn secret_tool(op: &str, input: &Map<String, Value>) -> Result<Value> {
+    let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
+    match op {
+        "set" => post("/v1/secrets", json!({ "scope": scope, "app": input.get("app"), "name": input.get("name"), "hosts": input.get("hosts"), "value": input.get("value") })).map(|_| json!("Set.")),
+        "remove" => post("/v1/secrets", json!({ "scope": scope, "app": input.get("app"), "name": input.get("name"), "value": null })).map(|_| json!("Removed.")),
+        _ => get(&format!("/v1/secrets{}", input.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default())),
+    }
+}
+
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
-    let mut tools = Vec::new();
+    let mut tools = secret_tools();
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
         for op in app["ops"].as_array().into_iter().flatten() {
@@ -480,7 +547,11 @@ fn call_tool(params: &Value) -> Value {
     let Some((app, op)) = name.split_once('_') else {
         return json!({ "isError": true, "content": [{ "type": "text", "text": format!("no tool {name}") }] });
     };
-    match post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input })) {
+    let result = match app {
+        "secrets" => secret_tool(op, &input).map(|ok| json!({ "ok": ok })),
+        _ => post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input })),
+    };
+    match result {
         Ok(r) => match &r["ok"] {
             ok if ok["content"].is_array() => json!({ "content": ok["content"] }),
             Value::String(s) => json!({ "content": [{ "type": "text", "text": s }] }),

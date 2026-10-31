@@ -3,6 +3,18 @@
 // widgets, hooks and screens. See SPEC.md, "Apps".
 import app from "./app.js";
 import { DurableObject } from "cloudflare:workers";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+// Every request goes out through the node (the Worker's global outbound), carrying the token of the call it's made
+// in, so the node knows whose it is: it fills in that call's secrets, and refuses them to other hosts.
+const calls = new AsyncLocalStorage();
+const fetchOut = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+  const req = new Request(input, init);
+  const token = calls.getStore();
+  if (token) req.headers.set("x-one-call", token);
+  return fetchOut(req);
+};
 
 const json = (v, status = 200) => new Response(JSON.stringify(v ?? null), { status, headers: { "content-type": "application/json" } });
 
@@ -12,6 +24,7 @@ function describe() {
     ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {} })),
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => ({ name, title: w.title || name })),
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
+    uses: { apps: app.uses?.apps || [], drivers: app.uses?.drivers || [] },
   };
 }
 
@@ -85,8 +98,32 @@ function context(env, body, appends) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ scope: s.id, kind, data: data ?? null, blobs });
     },
+    /// Sets one of this app's secrets in this scope (null deletes it): never read back, only sent to `hosts`.
+    secret: (name, value, hosts = []) => {
+      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+      appends.push({ secret: name, scope: s.id, value: value ?? null, hosts });
+    },
   });
   const scopes = body.scopes.map(handle);
+  // What the node does for a call: other apps' and drivers' operations, blobs, the install's apps.
+  const ask = async (path, init = {}) => {
+    const r = await fetchOut(new Request(`http://one.internal/${path}`, { ...init, headers: { "x-one-call": body.token } }));
+    if (!r.ok) throw new Error(await r.text());
+    return r;
+  };
+  // `ctx.apps.<name>.<op>(input)`, for exactly the apps (or drivers) the app says it uses.
+  const used = (kind) => new Proxy({}, {
+    get(_, name) {
+      if (typeof name !== "string" || name === "then") return undefined;
+      if (!(app.uses?.[kind] || []).includes(name)) throw new Error(`${app.name} doesn't use ${name}: add it to uses.${kind}`);
+      return new Proxy({}, {
+        get(_, op) {
+          if (typeof op !== "string" || op === "then") return undefined;
+          return async (input = {}) => (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, op, input }) })).json()).ok;
+        },
+      });
+    },
+  });
   const find = (id) => scopes.find((s) => s.id === id) || null;
   return {
     me: body.me,
@@ -95,6 +132,14 @@ function context(env, body, appends) {
     global: find("global"),
     groups: scopes.filter((s) => s.id.startsWith("group:")),
     group: (id) => find(id.startsWith("group:") ? id : `group:${id}`),
+    apps: used("apps"),
+    drivers: used("drivers"),
+    blob: {
+      put: async (bytes) => (await (await ask("blob", { method: "POST", body: bytes })).json()).blob,
+      get: async (hash) => new Uint8Array(await (await ask(`blob/${hash}`)).arrayBuffer()),
+    },
+    /// Every app in the install, as `GET /v1/apps` gives them to the caller.
+    catalog: async () => (await ask("catalog")).json(),
     /// Installs (or with `installed: false`, uninstalls) an app in a scope, with the caller's own rights there.
     install: (name, scope, installed = true) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
@@ -124,20 +169,21 @@ export default {
       }
       const appends = [];
       const ctx = context(env, body, appends);
-      let result;
+      let run;
       if (what === "call") {
         const op = app.ops?.[body.op];
         if (!op) throw new Error(`${app.name} has no operation ${body.op}`);
-        result = await op.run(ctx, body.input ?? {});
+        run = () => op.run(ctx, body.input ?? {});
       } else if (what === "widget") {
-        result = await app.widgets[body.name].render(ctx);
+        run = () => app.widgets[body.name].render(ctx);
       } else if (what === "hook") {
         const hook = app.hooks?.[body.name];
         if (!hook) throw new Error(`${app.name} has no hook ${body.name}`);
-        result = await hook(ctx, body.input);
+        run = () => hook(ctx, body.input);
       } else {
         throw new Error(`no such request ${what}`);
       }
+      const result = await calls.run(body.token, run);
       return json({ ok: result, appends: what === "call" ? appends : [] });
     } catch (err) {
       return json({ error: String(err?.message ?? err) }, 400);

@@ -109,15 +109,13 @@ A user's **role** in a scope is their role in the install for `global`, in the g
 
 - `app { name, owner, from? }`: makes an app called `name`, unique in the install (the first in replay order wins), owned by `owner` (`user:<id>`, `group:<id>` or `admins`), by anyone acting for it. Written again by someone acting for the current owner, it gives the app a new owner. A **fork** is a new app with its own name and data, and `from`, the app it came from.
 - `deploy { app, bundle }`: by someone acting for the app's owner, with `bundle` among its `blobs`. `bundle` is a blob: a tar (ustar) holding `app.js`, the built ES module, and `src/`, the files it was built from, as written. Every server runs each app's latest deploy, and nothing else: rolling back is deploying an older bundle again.
-- `install { app }` and `uninstall { app }`, in the scope they install in: a user's by that user, a group's by its admins, `global` by admins. A scope's installs are what a shell shows as that scope's page. An app is **installed for** a user when it is installed in their scope, a group of theirs, or `global`. The same app may be installed in several scopes: it is still one app at one version, with data per scope. Installing an app also installs, in the same scope, each app it uses that isn't installed there *(not built yet)*.
+- `install { app }` and `uninstall { app }`, in the scope they install in: a user's by that user, a group's by its admins, `global` by admins. A scope's installs are what a shell shows as that scope's page. An app is **installed for** a user when it is installed in their scope, a group of theirs, or `global`. The same app may be installed in several scopes: it is still one app at one version, with data per scope. Installing an app also installs, in the same scope, each app it uses (and each they use) that isn't installed there.
 
 ### Drivers
 
 - *(not built yet)* `driver { server, name, blob }`, in `global`: someone acting for an owner of `server` installs a driver there. `blob` holds its executable for that server's target, or is null to remove it.
 
 ### Secrets
-
-*(Not built yet.)*
 
 - `secret { app, name, hosts, value }`, in its scope: sets the secret `name` of `app`, sent only to `hosts` (host names). A user's by that user, a group's by its admins, `global`'s by admins. `value: null` deletes it.
 
@@ -184,15 +182,16 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
 
 - `me`: `{ key, user, name, role }`, the client or server that asked, and its user's role in the install.
 - `now()`: the time.
-- `user`, `group(id)` and `global`: the scopes the call named, each `{ id, name, role, query(sql, params), append(kind, data, blobs?), secret(name, value, hosts) }`, or null; `role` is the caller's there. `groups` lists the groups it named. `query` returns a promise. *(`secret` not built yet.)*
+- `user`, `group(id)` and `global`: the scopes the call named, each `{ id, name, role, query(sql, params), append(kind, data, blobs?), secret(name, value, hosts) }`, or null; `role` is the caller's there. `groups` lists the groups it named. `query` returns a promise.
 - `install(app, scope, installed = true)`: installs (or uninstalls) an app in a scope (`user`, `group:<id>` or `global`), with the caller's own rights there, as the caller could themselves. So an App Store is an ordinary app (`brand.toml`'s `store`).
-- `blob.put(bytes)` → hash, and `blob.get(hash)` → bytes.
-- `apps.<name>.<op>(input)` and `drivers.<name>.<op>(input)`: what `uses` names, as the same user. Nothing else is wired to it. *(Not built yet.)*
-- `fetch`, as in any Worker: the internet is open to every app.
+- `blob.put(bytes)` → hash, and `blob.get(hash)` → bytes: a blob an entry names in a scope the caller may use, or one the call put.
+- `catalog()`: every app in the install, as `GET /v1/apps` lists them for the caller (without drivers).
+- `apps.<name>.<op>(input)` and `drivers.<name>.<op>(input)`: what `uses` names, as the same user, run where they'd run if the user called them. Nothing else is wired to it. A read-only call (a widget, a hook, opened data) can't.
+- `fetch`, as in any Worker: the internet is open to every app, but not the node's own ports on its machine (its local API, its runtime, its outbound port).
 
 A call may reach the caller's own scope, each of their groups the app is installed for (in that group or in `global`; a group whose installs the server can't see counts), and `global` if it is installed there. It reaches the ones it named, every one it may reach if it named none. `append` buffers: when `run` returns, the entries are written by the server that ran it, as the caller, with `by` if the caller isn't that server, and replayed there before the result returns. Queries in the same call don't see them. A call that fails or is stopped writes nothing.
 
-**Secrets in calls.** *(Not built yet.)* An app puts a placeholder where a secret goes, `Authorization: "Bearer {{gmail_token}}"`, in the headers or body of a `fetch`. Every outbound fetch goes through the node, which fills it in on the way out, and only if the request goes to one of the secret's hosts; otherwise it refuses the request. `{{name}}` is the app's secret in the caller's scope, else in `global`; `{{<group id>/name}}` is a group's. `secret(name, value, hosts)` lets a call set (never read) one of its app's secrets, if its caller may set secrets in that scope, so an app can keep a token it was given.
+**Secrets in calls.** An app puts a placeholder where a secret goes, `Authorization: "Bearer {{gmail_token}}"`, in the headers or body of a `fetch`. Every outbound fetch goes through the node, which fills it in on the way out, and only if the request goes to one of the secret's hosts; otherwise it refuses the request. `{{name}}` is the app's secret in the caller's scope, else in `global`; `{{<group id>/name}}` is a group's. `secret(name, value, hosts)` lets a call set (never read) one of its app's secrets, if its caller may set secrets in that scope, so an app can keep a token it was given. A redirect is never followed by the node: it goes back to the app, whose next request is checked again. A placeholder no secret has is left as written.
 
 ## Drivers
 
@@ -231,7 +230,7 @@ A client joins with a pairing code like a server, then asks the servers its user
 Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CLI, MCP, git helpers and drivers, acting as its local user. It refuses requests with an `Origin` header or a `Host` other than this machine, so no web page can use it.
 
 - `GET /v1/state`: the brand (with its `store` app), `me` (who's asking: key, name, user; also as `client` when a client asks), this `server` (and whether it's ready), the asker's `user` (id, name, role), every `open` of their data (`opens`), and the `install` (null until it creates or joins one): its users, groups, servers (online, owners, users, privileged, who trusts each, whether each serves me, build, target, drivers) and clients (`asked`: when each last asked this server, milliseconds, or null); and every `open` of this user's data.
-- `GET /v1/apps`: every app in the install (owner, `from`, its running `bundle`, every deploy as `history`, where installed), with title, icon, instructions, operations, widgets and screens for each installed for this user.
+- `GET /v1/apps`: every app in the install (owner, `from`, its `forks`, its running `bundle`, every deploy as `history`, where installed, title, icon and `uses`), with instructions, operations, widgets and screens for each installed for this user.
 - `GET /v1/source/<app>?bundle=&path=`: an app's code as deployed, its latest deploy's or, with `bundle` (or its first characters), an earlier one's: `{ files: [{ path, size }] }`, or with `path` that file, `{ path, text }` (`base64` if it isn't text).
 - `POST /v1/call { app, op, input, scopes?, server?, as? }` → `{ ok }`. `server` (a name or key prefix) runs it there; otherwise it runs on the nearest server that can.
 - `GET /v1/widgets?scope=`: every widget, rendered; with `scope` (`user`, `group:<id>` or `global`), those of the apps installed there, each reaching only that scope, for a shell's page of it.
@@ -240,8 +239,9 @@ Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CL
 - `POST /v1/name { name }`, `POST /v1/remove { key | user }`, `POST /v1/role { user, role }`, `POST /v1/relays { urls }`, `POST /v1/recovery` → `{ recovery }` *(not built yet)*. Users, groups and servers may be given by name.
 - `POST /v1/acl { server, owners, users }`, `POST /v1/trust { server, trust }`, `POST /v1/open { user, server }`.
 - `POST /v1/group { name }` → `{ group }`, `POST /v1/invite { group, user, role }`, `POST /v1/accept { group }`, `POST /v1/member { group, user, role }`.
-- `POST /v1/app { name, owner, from? }`, `POST /v1/deploy { app, bundle }`, `POST /v1/install { app, scope, installed }`.
-- *(Not built yet.)* `POST /v1/driver { server, name, blob }`. `GET /v1/secrets?scope=`: the secrets this user may set there: app, name, hosts, never values. `POST /v1/secrets { scope, app, name, hosts, value }`, with `value: null` to delete.
+- `POST /v1/app { name, owner, from? }`, `POST /v1/deploy { app, bundle }`, `POST /v1/install { app, scope, installed }`. `POST /v1/fork { app, name, owner? }`: a new app `name` from `app`, owned by `owner` (the asker by default), deployed with `app`'s latest bundle.
+- *(Not built yet.)* `POST /v1/driver { server, name, blob }`.
+- `GET /v1/secrets?scope=`: the secrets this user may set (there): scope, app, name, hosts, who set it and when, never values. `POST /v1/secrets { scope, app, name, hosts, value }`, with `value: null` to delete. `scope` is `user`, `global`, `group:<id>` or a group's name.
 - `POST /v1/node-release { path, commit, target, committed, signature }`: publishes the binary at `path`, if `signature` is the release key's over it.
 - `POST /v1/blobs` with the bytes as the body → `{ blob, size }`. `GET /v1/blobs/<hash>`: a blob, from this server or another.
 - *(Not built yet.)* `POST /v1/backup { url, access_key, secret_key, key }` or `{ url: null }`. `POST /v1/restore { url, access_key, secret_key, key, recovery?, user?, name }`.

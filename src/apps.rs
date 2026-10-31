@@ -2,6 +2,8 @@
 //! Each deployed app is an ES module inside `runtime/shim.js`: a Worker with a Durable Object per scope that holds the
 //! app's store of that scope in SQLite. The node replays entries into them and asks them to run operations.
 //! When the deploys change, the node writes the config again and restarts workerd; the stores stay on disk.
+//! Every request an app makes (its `fetch`es, and the shim's asks of the node) goes to the node's outbound port,
+//! `src/outbound.rs`, carrying the token of the call it's made in.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -71,12 +73,16 @@ pub struct Context {
     pub scopes: Vec<ScopeHandle>,
     /// A call on data opened for its caller: appends fail.
     pub read_only: bool,
+    /// What the call's requests carry, so the node knows whose they are (see `src/outbound.rs`).
+    pub token: String,
 }
 
 /// What a call asks the node to write once it returns.
 pub enum Append {
     Entry { scope: String, content: Content },
     Install { app: String, scope: String, installed: bool },
+    /// Sets (or with no value, deletes) one of the calling app's secrets in a scope.
+    Secret { scope: String, name: String, value: Option<String>, hosts: Vec<String> },
 }
 
 pub struct Outcome {
@@ -98,6 +104,8 @@ pub struct Apps(Arc<Runtime>);
 struct Runtime {
     dir: PathBuf,
     base: String,
+    /// The node's port that apps' requests go out through.
+    outbound: u16,
     /// The apps loaded, (name, module source), and how many times the runtime was configured.
     loaded: Mutex<(Vec<(String, String)>, u64)>,
     /// The running workerd's process id, so a hung one can be stopped and started again.
@@ -105,18 +113,19 @@ struct Runtime {
 }
 
 impl Apps {
-    /// Starts workerd with no apps yet, keeping its files in `dir`.
-    pub async fn start(dir: PathBuf) -> Result<Self> {
-        tokio::task::spawn_blocking(move || Apps::start_blocking(&dir)).await?
+    /// Starts workerd with no apps yet, keeping its files in `dir`; apps' requests go out through the node's
+    /// `outbound` port.
+    pub async fn start(dir: PathBuf, outbound: u16) -> Result<Self> {
+        tokio::task::spawn_blocking(move || Apps::start_blocking(&dir, outbound)).await?
     }
 
-    fn start_blocking(dir: &Path) -> Result<Self> {
+    fn start_blocking(dir: &Path, outbound: u16) -> Result<Self> {
         let workerd = workerd()?;
         std::fs::create_dir_all(dir.join("storage"))?;
         stop_previous(dir);
         let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
-        let config = write_config(dir, &[], port, 0)?;
-        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), loaded: Mutex::new((Vec::new(), 0)), pid: Mutex::new(None) });
+        let config = write_config(dir, &[], port, outbound, 0)?;
+        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), 0)), pid: Mutex::new(None) });
         let watch = runtime.clone();
         let (dir, log) = (dir.to_path_buf(), dir.join("workerd.log"));
         std::thread::Builder::new().name("workerd".into()).spawn(move || loop {
@@ -158,7 +167,7 @@ impl Apps {
                 }
                 loaded.1 += 1;
                 let port = runtime.base.rsplit(':').next().unwrap().parse()?;
-                write_config(&runtime.dir, &apps, port, loaded.1)?;
+                write_config(&runtime.dir, &apps, port, runtime.outbound, loaded.1)?;
                 loaded.0 = apps;
                 loaded.1
             };
@@ -166,6 +175,11 @@ impl Apps {
             runtime.wait_ready(generation)
         })
         .await?
+    }
+
+    /// The port workerd serves the node on.
+    pub fn port(&self) -> u16 {
+        self.0.base.rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(0)
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -221,10 +235,17 @@ impl Apps {
     }
 
     pub async fn call(&self, app: &str, op: &str, input: Value, ctx: &Context) -> Result<Outcome> {
-        let reply = self.ask(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only })).await?;
+        let reply = self.ask(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token })).await?;
         let mut appends = Vec::new();
         for a in reply["appends"].as_array().into_iter().flatten() {
             let scope = a["scope"].as_str().unwrap_or("").to_string();
+            if let Some(name) = a["secret"].as_str() {
+                let hosts = a["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
+                let value = a["value"].as_str().map(str::to_string);
+                ensure!(value.is_some() || a["value"].is_null(), "a secret's value is text");
+                appends.push(Append::Secret { scope, name: name.into(), value, hosts });
+                continue;
+            }
             match a["install"].as_str() {
                 Some(name) => appends.push(Append::Install { app: name.into(), scope, installed: a["installed"] != false }),
                 None => {
@@ -238,11 +259,11 @@ impl Apps {
     }
 
     pub async fn widget(&self, app: &str, name: &str, ctx: &Context) -> Result<Value> {
-        Ok(self.ask(app, "widget", json!({ "name": name, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true })).await?["ok"].clone())
+        Ok(self.ask(app, "widget", json!({ "name": name, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
     }
 
     pub async fn hook(&self, app: &str, name: &str, input: Value, ctx: &Context) -> Result<Value> {
-        Ok(self.ask(app, "hook", json!({ "name": name, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true })).await?["ok"].clone())
+        Ok(self.ask(app, "hook", json!({ "name": name, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
     }
 
     /// A screen's HTML, as the app wrote it.
@@ -327,7 +348,7 @@ pub fn pinned(dir: &str, bin: &str, url: &str, integrity: &str) -> Result<PathBu
 }
 
 /// Writes each app's modules and the workerd config that runs them all behind one router.
-fn write_config(dir: &Path, apps: &[(String, String)], port: u16, generation: u64) -> Result<PathBuf> {
+fn write_config(dir: &Path, apps: &[(String, String)], port: u16, outbound: u16, generation: u64) -> Result<PathBuf> {
     let modules = dir.join("apps");
     let _ = std::fs::remove_dir_all(&modules);
     std::fs::create_dir_all(&modules)?;
@@ -336,6 +357,8 @@ fn write_config(dir: &Path, apps: &[(String, String)], port: u16, generation: u6
     let mut services = vec![
         "(name = \"router\", worker = .router)".to_string(),
         format!("(name = \"storage\", disk = (path = {}, writable = true))", quote(&dir.join("storage").to_string_lossy())),
+        // Every request an app makes goes to the node, which makes it (filling in secrets) or answers it itself.
+        format!("(name = \"outbound\", external = (address = \"127.0.0.1:{outbound}\", http = (style = host, forwardedProtoHeader = \"x-forwarded-proto\")))"),
     ];
     let mut bindings = Vec::new();
     let mut workers = Vec::new();
@@ -348,7 +371,7 @@ fn write_config(dir: &Path, apps: &[(String, String)], port: u16, generation: u6
         services.push(format!("(name = {}, worker = .app{i})", quote(&format!("app-{name}"))));
         bindings.push(format!("(name = {}, service = {})", quote(name), quote(&format!("app-{name}"))));
         workers.push(format!(
-            "const app{i} :Workerd.Worker = (\n  modules = [(name = \"shim.js\", esModule = embed {}), (name = \"app.js\", esModule = embed {})],\n  compatibilityDate = \"{COMPATIBILITY_DATE}\",\n  bindings = [(name = \"STORES\", durableObjectNamespace = \"Store\")],\n  durableObjectNamespaces = [(className = \"Store\", uniqueKey = {}, enableSql = true)],\n  durableObjectStorage = (localDisk = \"storage\"),\n);",
+            "const app{i} :Workerd.Worker = (\n  modules = [(name = \"shim.js\", esModule = embed {}), (name = \"app.js\", esModule = embed {})],\n  compatibilityDate = \"{COMPATIBILITY_DATE}\",\n  compatibilityFlags = [\"nodejs_als\"],\n  globalOutbound = \"outbound\",\n  bindings = [(name = \"STORES\", durableObjectNamespace = \"Store\")],\n  durableObjectNamespaces = [(className = \"Store\", uniqueKey = {}, enableSql = true)],\n  durableObjectStorage = (localDisk = \"storage\"),\n);",
             quote(&format!("apps/{name}/shim.js")),
             quote(&format!("apps/{name}/app.js")),
             quote(name),
