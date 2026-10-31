@@ -754,7 +754,9 @@ impl Node {
                         .map(|(scope, _)| scope.clone())
                         .collect();
                     let reach = reachable(i, &a.name, &viewer.user);
-                    (a.name.clone(), json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "deploys": a.deploys, "installed": installed }), !reach.is_empty())
+                    let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
+                    let info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed });
+                    (a.name.clone(), info, !reach.is_empty())
                 })
                 .collect::<Vec<_>>())
         })?;
@@ -762,7 +764,8 @@ impl Node {
         for (name, mut info, mine) in listed {
             if mine && self.0.apps.has(&name) {
                 if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
-                    for (k, v) in d {
+                    // A fork's module may still give its first name; the install's name for it is the one that counts.
+                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name") {
                         info[k] = v;
                     }
                 }
@@ -866,13 +869,47 @@ impl Node {
     }
 
     async fn member_as(&self, caller: &Caller, kind: &str, data: Value) -> Result<()> {
-        let content = members::node(kind, data);
+        self.member_content(caller, members::node(kind, data)).await
+    }
+
+    async fn member_content(&self, caller: &Caller, content: Content) -> Result<()> {
+        let kind = content.kind.clone();
         let by = (caller.key != self.0.id).then_some(caller.key);
         // One that wouldn't count would change nothing anywhere: refuse it instead.
         let counts = self.with(|i| i.r.would_count(&caller.user, by, content.clone(), now_ms()))?;
         ensure!(counts, "that changes nothing: you may not {kind} that");
         self.append_as(&Scope::Global, &caller.user, by, content).await?;
         Ok(())
+    }
+
+    /// Deploys `bundle` as `app`'s code, for someone acting for its owner. Deploying an older bundle again rolls back.
+    /// `bundle` may be the start of an earlier deploy's.
+    pub async fn deploy(&self, caller: &Caller, app: &str, bundle: &str) -> Result<()> {
+        let bundle = self.with(|i| {
+            let m = &i.r.members;
+            let a = m.apps.get(app).with_context(|| format!("no app named {app}"))?;
+            ensure!(m.acts_for(&caller.user, &a.owner), "only someone acting for {app}'s owner ({}) deploys it", a.owner);
+            Ok(match a.history.iter().find(|(h, ..)| bundle.len() >= 8 && h.starts_with(bundle)) {
+                Some((h, ..)) => h.clone(),
+                None => bundle.to_string(),
+            })
+        })?;
+        crate::bundle::module(&self.blob(&bundle).await?)?;
+        self.member_content(caller, deploy(app, &bundle)).await
+    }
+
+    /// An app's code as deployed, its latest or an earlier deploy's: its files, or one of them. Everyone may read
+    /// every app's code.
+    pub async fn source(&self, app: &str, bundle: Option<&str>, path: Option<&str>) -> Result<Value> {
+        let history = self.with(|i| Ok(i.r.members.apps.get(app).with_context(|| format!("no app named {app}"))?.history.clone()))?;
+        let bundle = match bundle {
+            Some(b) => history.iter().find(|(h, ..)| h.starts_with(b)).with_context(|| format!("{app} has no deploy {b}"))?.0.clone(),
+            None => history.last().with_context(|| format!("{app} has no deploy yet"))?.0.clone(),
+        };
+        let mut out = crate::deploy::show(&self.blob(&bundle).await?, path)?;
+        out["app"] = json!(app);
+        out["bundle"] = json!(bundle);
+        Ok(out)
     }
 
     pub async fn rename_server(&self, name: &str) -> Result<()> {
@@ -969,6 +1006,7 @@ impl Node {
                     },
                 }
             }
+            ("GET", "/v1/source") => self.source(body["app"].as_str().unwrap_or(""), body["bundle"].as_str(), body["path"].as_str()).await?,
             ("POST", "/v1/name") => {
                 let name = body["name"].as_str().unwrap_or("").trim();
                 self.member_as(me, "rename", json!({ "key": hex(&me.key), "name": name })).await?;

@@ -181,3 +181,80 @@ async fn users_groups_trust_and_privileged_servers() {
     bob.member("member", json!({ "group": "f000000000000001", "user": bob.user().unwrap(), "role": null })).await.unwrap();
     assert!(texts(&bob, "group:f000000000000001").await.is_empty(), "a server deletes a scope it no longer holds");
 }
+
+/// Serves a node's local API on a port of its own, as `one serve` does, for the CLI and git.
+async fn serve_api(node: &Node) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let router = one::api::router(node.clone());
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    addr
+}
+
+/// Runs the CLI against the node serving `addr`, in `dir`; its output, or what went wrong.
+async fn cli(addr: &str, dir: &std::path::Path, args: &[&str]) -> Result<String, String> {
+    let (addr, dir) = (addr.to_string(), dir.to_path_buf());
+    let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+    tokio::task::spawn_blocking(move || {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_one")).args(&args).current_dir(&dir).env(format!("{}_ADDR", one::brand::CLI.to_uppercase()), &addr).output().unwrap();
+        match out.status.success() {
+            true => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
+            false => Err(String::from_utf8_lossy(&out.stderr).to_string()),
+        }
+    })
+    .await
+    .unwrap()
+}
+
+fn call(app: &str, op: &str, input: Value) -> CallRequest {
+    CallRequest { app: app.into(), op: op.into(), input, ..Default::default() }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deploys_build_with_bun_keep_their_source_and_roll_back() {
+    let (a, _ra) = start("deployer").await;
+    let (bob, _rb) = start("bob").await;
+    a.create("Deploys", "Andre").await.unwrap();
+    let api = serve_api(&a).await;
+
+    // An app with an npm package and a module of its own, in TypeScript.
+    let dir = temp("hello").join("hello");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("package.json"), r#"{ "name": "hello", "dependencies": { "escape-html": "1.0.3" } }"#).unwrap();
+    std::fs::write(dir.join("greet.ts"), "export const greet = (who: string): string => `hello ${who}`;\n").unwrap();
+    let app = |word: &str| {
+        format!("import escape from \"escape-html\";\nimport {{ greet }} from \"./greet\";\nexport default {{\n  name: \"hello\",\n  title: \"Hello\",\n  ops: {{ hi: {{ description: \"\", input: {{}}, run: () => escape(greet(\"<{word}>\")) }} }},\n}};\n")
+    };
+    std::fs::write(dir.join("app.ts"), app("one")).unwrap();
+    let out = cli(&api, &dir, &["deploy", "."]).await.unwrap();
+    assert!(out.contains("Deployed hello"), "{out}");
+    cli(&api, &dir, &["install", "hello"]).await.unwrap();
+    eventually("the first deploy to run", async || a.call(call("hello", "hi", json!({}))).await.is_ok_and(|r| r == "hello &lt;one&gt;")).await;
+
+    // Its source is readable as written, with the lockfile Bun made.
+    let files = a.source("hello", None, None).await.unwrap();
+    let paths: Vec<&str> = files["files"].as_array().unwrap().iter().map(|f| f["path"].as_str().unwrap()).collect();
+    assert!(paths.contains(&"app.js") && paths.contains(&"src/app.ts") && paths.contains(&"src/greet.ts") && paths.contains(&"src/bun.lock"), "{paths:?}");
+    assert!(!paths.iter().any(|p| p.contains("node_modules")), "{paths:?}");
+    assert_eq!(a.source("hello", None, Some("src/app.ts")).await.unwrap()["text"], app("one"));
+    let shown = cli(&api, &dir, &["source", "hello", "src/greet.ts"]).await.unwrap();
+    assert!(shown.contains("export const greet"), "{shown}");
+
+    // A new deploy, then a rollback to the first.
+    std::fs::write(dir.join("app.ts"), app("two")).unwrap();
+    cli(&api, &dir, &["deploy", "."]).await.unwrap();
+    eventually("the second deploy to run", async || a.call(call("hello", "hi", json!({}))).await.is_ok_and(|r| r == "hello &lt;two&gt;")).await;
+    let first = files["bundle"].as_str().unwrap().to_string();
+    cli(&api, &dir, &["deploy", "hello", "--bundle", &first[..12]]).await.unwrap();
+    eventually("the rollback to run", async || a.call(call("hello", "hi", json!({}))).await.is_ok_and(|r| r == "hello &lt;one&gt;")).await;
+    let deploys = cli(&api, &dir, &["deploys", "hello"]).await.unwrap();
+    assert_eq!(deploys.lines().count(), 3, "{deploys}");
+    assert!(deploys.lines().last().unwrap().starts_with(&first[..12]) && deploys.contains("(running)"), "{deploys}");
+
+    // Only someone acting for its owner deploys it.
+    bob.join(&a.pair(Some(("Bob".into(), one::members::Role::Member))).unwrap()).await.unwrap();
+    eventually("bob to know the app", async || bob.source("hello", None, None).await.is_ok()).await;
+    let bob_me = one::node::Caller { key: bob.id(), user: bob.user().unwrap() };
+    let refused = bob.deploy(&bob_me, "hello", &first).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("only someone acting for hello's owner"), "{refused:#}");
+}

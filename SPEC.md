@@ -1,6 +1,6 @@
 # Protocol
 
-Version 10. Everything here is what two machines must agree on. What's marked *(not built yet)* is designed but not in the code; what's marked *(for now)* is how the code does it until then.
+Version 11. Everything here is what two machines must agree on. What's marked *(not built yet)* is designed but not in the code; what's marked *(for now)* is how the code does it until then.
 
 An **install** is the product as one context runs it (The One App, The PTC App, The Van Tonders App), with its own CLI, port, API and data on each machine. Installs never talk to each other. Inside an install:
 
@@ -224,14 +224,15 @@ Each object is encrypted with XChaCha20-Poly1305, its random 24-byte nonce first
 
 ## Clients (ALPN `one/client/1`)
 
-A client joins with a pairing code like a server, then asks the servers its user trusts, nearest first, one at a time, as calls do. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`, or `{ elsewhere: why }`. Clients may ask `GET /v1/state`, `GET /v1/apps`, `GET /v1/widgets`, `GET /v1/screen { app, screen, params, scope }`, `POST /v1/call`, `POST /v1/name`, `POST /v1/pair`, `POST /v1/trust` and `GET /v1/blobs/<hash>` (answered `{ blob }`, base64). A server that doesn't serve the client's user answers everything but `GET /v1/state` with `{ elsewhere }`. `GET /v1/events` instead streams events as JSON lines until the stream closes. Calls run for the client: `ctx.me` is the client. Only current clients may ask.
+A client joins with a pairing code like a server, then asks the servers its user trusts, nearest first, one at a time, as calls do. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`, or `{ elsewhere: why }`. Clients may ask `GET /v1/state`, `GET /v1/apps`, `GET /v1/widgets`, `GET /v1/screen { app, screen, params, scope }`, `GET /v1/source { app, bundle, path }`, `POST /v1/call`, `POST /v1/name`, `POST /v1/pair`, `POST /v1/trust` and `GET /v1/blobs/<hash>` (answered `{ blob }`, base64). A server that doesn't serve the client's user answers everything but `GET /v1/state` with `{ elsewhere }`. `GET /v1/events` instead streams events as JSON lines until the stream closes. Calls run for the client: `ctx.me` is the client. Only current clients may ask.
 
 ## Local API
 
 Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CLI, MCP, git helpers and drivers, acting as its local user. It refuses requests with an `Origin` header or a `Host` other than this machine, so no web page can use it.
 
 - `GET /v1/state`: the brand (with its `store` app), `me` (who's asking: key, name, user; also as `client` when a client asks), this `server` (and whether it's ready), the asker's `user` (id, name, role), every `open` of their data (`opens`), and the `install` (null until it creates or joins one): its users, groups, servers (online, owners, users, privileged, who trusts each, whether each serves me, build, target, drivers) and clients (`asked`: when each last asked this server, milliseconds, or null); and every `open` of this user's data.
-- `GET /v1/apps`: every app in the install (owner, `from`, deploys, where installed), with title, icon, instructions, operations, widgets and screens for each installed for this user.
+- `GET /v1/apps`: every app in the install (owner, `from`, its running `bundle`, every deploy as `history`, where installed), with title, icon, instructions, operations, widgets and screens for each installed for this user.
+- `GET /v1/source/<app>?bundle=&path=`: an app's code as deployed, its latest deploy's or, with `bundle` (or its first characters), an earlier one's: `{ files: [{ path, size }] }`, or with `path` that file, `{ path, text }` (`base64` if it isn't text).
 - `POST /v1/call { app, op, input, scopes?, server?, as? }` → `{ ok }`. `server` (a name or key prefix) runs it there; otherwise it runs on the nearest server that can.
 - `GET /v1/widgets?scope=`: every widget, rendered; with `scope` (`user`, `group:<id>` or `global`), those of the apps installed there, each reaching only that scope, for a shell's page of it.
 - `GET /v1/screens/<app>/<screen>?params=&scope=`: an app screen as a page (see "Screens").

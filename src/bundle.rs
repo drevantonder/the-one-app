@@ -5,15 +5,12 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
 
-/// Makes a bundle from an app's folder. An app with no build step is its own `app.js`.
-pub fn from_dir(dir: &Path) -> Result<Vec<u8>> {
-    let module = std::fs::read(dir.join("app.js")).with_context(|| format!("{} has no app.js", dir.display()))?;
-    let mut files = vec![("app.js".to_string(), module)];
-    let mut sources = Vec::new();
-    walk(dir, dir, &mut sources)?;
-    sources.sort();
-    files.extend(sources.into_iter().map(|(path, bytes)| (format!("src/{path}"), bytes)));
-    pack(&files)
+/// An app folder's files, as written: everything but `node_modules` and dot files, sorted.
+pub fn sources(dir: &Path) -> Result<Vec<(String, Vec<u8>)>> {
+    let mut files = Vec::new();
+    walk(dir, dir, &mut files)?;
+    files.sort();
+    Ok(files)
 }
 
 fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) -> Result<()> {
@@ -43,9 +40,14 @@ pub fn module(bundle: &[u8]) -> Result<String> {
 pub fn pack(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     for (path, bytes) in files {
-        ensure!(!path.is_empty() && path.len() < 100, "{path}: paths in a bundle are under 100 bytes");
+        // ustar keeps a path of up to 255 bytes as a prefix of up to 155 and a name of up to 100, split at a `/`.
+        let split = if path.len() < 100 { Some(0) } else { path.match_indices('/').map(|(i, _)| i).find(|&i| i <= 155 && path.len() - i - 1 < 100) };
+        let split = split.with_context(|| format!("{path}: too long for a bundle"))?;
+        ensure!(!path.is_empty(), "a file in a bundle needs a path");
+        let (prefix, name) = if split == 0 { ("", path.as_str()) } else { (&path[..split], &path[split + 1..]) };
         let mut header = [0u8; 512];
-        header[..path.len()].copy_from_slice(path.as_bytes());
+        header[..name.len()].copy_from_slice(name.as_bytes());
+        header[345..345 + prefix.len()].copy_from_slice(prefix.as_bytes());
         header[100..107].copy_from_slice(b"0000644");
         header[108..115].copy_from_slice(b"0000000");
         header[116..123].copy_from_slice(b"0000000");
@@ -96,4 +98,6 @@ fn round_trips() {
     let packed = pack(&files).unwrap();
     assert_eq!(unpack(&packed).unwrap(), files);
     assert_eq!(pack(&files).unwrap(), packed, "the same files make the same bundle");
+    let long = vec![(format!("src/{}/app.js", "a".repeat(120)), b"x".to_vec())];
+    assert_eq!(unpack(&pack(&long).unwrap()).unwrap(), long, "long paths keep a prefix");
 }

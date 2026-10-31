@@ -10,6 +10,7 @@ pub mod api;
 pub mod apps;
 pub mod builtin;
 pub mod bundle;
+pub mod deploy;
 pub mod models;
 pub mod native;
 pub mod node;

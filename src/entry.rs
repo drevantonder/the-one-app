@@ -8,7 +8,7 @@ use p2panda_core::{Body, Hash, Header, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL: u32 = 10;
+pub const PROTOCOL: u32 = 11;
 
 pub type Key = [u8; 32];
 

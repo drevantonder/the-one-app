@@ -40,6 +40,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/app", post(app))
         .route("/v1/deploy", post(deploy))
         .route("/v1/install", post(install))
+        .route("/v1/source/{app}", get(source))
         .route("/v1/node-release", post(release))
         .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
         .route("/v1/blobs/{hash}", get(blob))
@@ -223,8 +224,14 @@ async fn member(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
+/// `{ name, owner, from? }`: `owner` is `user:<id>`, `group:<id>`, `admins`, or a group's name.
 async fn app(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let mut data = json!({ "name": text(&body, "name")?, "owner": text(&body, "owner")? });
+    let owner = text(&body, "owner")?;
+    let owner = match crate::members::Principal::parse(owner) {
+        Ok(p) => p.to_string(),
+        Err(_) => format!("group:{}", node.find_group(owner)?),
+    };
+    let mut data = json!({ "name": text(&body, "name")?, "owner": owner });
     if let Some(from) = body["from"].as_str() {
         data["from"] = json!(from);
     }
@@ -233,10 +240,19 @@ async fn app(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 }
 
 async fn deploy(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let (app, bundle) = (text(&body, "app")?, text(&body, "bundle")?);
-    crate::bundle::module(&node.blob(bundle).await?)?;
-    node.append(&crate::entry::Scope::Global, crate::node::deploy(app, bundle)).await?;
+    node.deploy(&local(&node)?, text(&body, "app")?, text(&body, "bundle")?).await?;
     done()
+}
+
+#[derive(Deserialize)]
+struct SourceQuery {
+    bundle: Option<String>,
+    path: Option<String>,
+}
+
+/// An app's deployed code: its files, or with `path` one of them; with `bundle`, an earlier deploy's.
+async fn source(State(node): State<Node>, Path(app): Path<String>, Query(q): Query<SourceQuery>) -> Reply {
+    Ok(Json(node.source(&app, q.bundle.as_deref(), q.path.as_deref()).await?))
 }
 
 /// `{ app, scope, installed }`: `scope` is `user`, `group:<id>` (or a group's name) or `global`.

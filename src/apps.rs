@@ -296,28 +296,34 @@ fn workerd() -> Result<PathBuf> {
         .iter()
         .find(|(target, _, _)| *target == crate::brand::TARGET)
         .ok_or_else(|| anyhow!("apps can't run on {} yet: workerd has no build for it", crate::brand::TARGET))?;
-    let cache = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache"));
-    let dir = cache.join(crate::brand::CLI).join(format!("workerd-{WORKERD}"));
-    let bin = dir.join("workerd");
-    if bin.exists() {
-        return Ok(bin);
-    }
-    tracing::info!("downloading the app runtime (workerd {WORKERD}, about 50 MB)");
     let url = format!("https://registry.npmjs.org/@cloudflare/workerd-{package}/-/workerd-{package}-{WORKERD}.tgz");
-    let tarball = ureq::get(&url).call()?.body_mut().with_config().limit(400 << 20).read_to_vec()?;
+    pinned(&format!("workerd-{WORKERD}"), "workerd", &url, integrity)
+}
+
+/// A program from an npm package's tarball (`package/bin/<bin>`), downloaded once into `~/.cache/<cli>/<dir>` and
+/// checked against the package's pinned sha512.
+pub fn pinned(dir: &str, bin: &str, url: &str, integrity: &str) -> Result<PathBuf> {
+    let cache = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache"));
+    let dir = cache.join(crate::brand::CLI).join(dir);
+    let path = dir.join(bin);
+    if path.exists() {
+        return Ok(path);
+    }
+    tracing::info!("downloading {url}");
+    let tarball = ureq::get(url).call()?.body_mut().with_config().limit(400 << 20).read_to_vec()?;
     let digest = data_encoding::BASE64.encode(&sha2::Sha512::digest(&tarball)[..]);
-    ensure!(digest == *integrity, "the downloaded runtime doesn't match its pinned hash");
+    ensure!(digest == *integrity, "the download of {bin} doesn't match its pinned hash");
     // Unpack into a folder of our own and move the binary into place in one step,
-    // so nodes starting at the same time can't see a half-written runtime.
+    // so nodes starting at the same time can't see a half-written one.
     let tmp = dir.with_extension(format!("{}.part", std::process::id()));
     std::fs::create_dir_all(&tmp)?;
     std::fs::File::create(tmp.join("package.tgz"))?.write_all(&tarball)?;
-    let ok = std::process::Command::new("tar").args(["-xzf", "package.tgz", "--strip-components=2", "package/bin/workerd"]).current_dir(&tmp).status()?;
-    ensure!(ok.success(), "couldn't unpack the runtime");
+    let ok = std::process::Command::new("tar").args(["-xzf", "package.tgz", "--strip-components=2", &format!("package/bin/{bin}")]).current_dir(&tmp).status()?;
+    ensure!(ok.success(), "couldn't unpack {bin}");
     std::fs::create_dir_all(&dir)?;
-    std::fs::rename(tmp.join("workerd"), &bin)?;
+    std::fs::rename(tmp.join(bin), &path)?;
     let _ = std::fs::remove_dir_all(&tmp);
-    Ok(bin)
+    Ok(path)
 }
 
 /// Writes each app's modules and the workerd config that runs them all behind one router.

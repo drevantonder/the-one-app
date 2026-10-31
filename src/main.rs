@@ -31,7 +31,13 @@ Usage:
   {CLI} trust <server> | untrust <server>
   {CLI} open <user> <server>           read a user's data on a server you own, for an hour; they see it
   {CLI} apps                           every app and its operations
-  {CLI} deploy <dir> [--owner <owner>] deploy the app in <dir> (its app.js), making it if it's new
+  {CLI} deploy <dir> [--name <app>] [--owner <owner>]
+                                       build the app in <dir> (app.ts or app.js, and its npm packages) with Bun and
+                                       deploy it, with its source; makes the app if it's new (owner: you, a group or admins)
+  {CLI} deploy <app> --bundle <hash>   deploy an earlier bundle again: a rollback
+  {CLI} deploys <app>                  an app's deploys, newest last
+  {CLI} source <app> [path] [--bundle <hash>]
+                                       an app's code as deployed: its files, or one of them
   {CLI} install <app> [--scope user|global|<group>] [--remove]
   {CLI} <app> <op> [--key value]       run an operation, e.g. {CLI} board post --text hi
                                        --server <name> runs it there; --scopes a,b names the scopes it touches
@@ -144,7 +150,35 @@ fn run(args: Vec<String>) -> Result<()> {
             let r = post("/v1/open", json!({ "user": user, "server": server }))?;
             println!("{}", r["ok"].as_str().unwrap_or("Opened."));
         }
+        ["deploy", app] if flags.contains_key("bundle") => {
+            let bundle = flags["bundle"].as_str().context("give --bundle <hash>")?;
+            post("/v1/deploy", json!({ "app": app, "bundle": bundle }))?;
+            println!("Deployed {app} ({bundle}) again. Every server runs it now.");
+        }
         ["deploy", dir] => deploy(std::path::Path::new(dir), &flags)?,
+        ["deploys", app] => {
+            let apps = get("/v1/apps")?;
+            let found = apps.as_array().into_iter().flatten().find(|a| a["name"] == *app).with_context(|| format!("no app named {app}"))?;
+            for d in found["history"].as_array().into_iter().flatten() {
+                let current = if d["bundle"] == found["bundle"] { "  (running)" } else { "" };
+                println!("{}  {}{current}", &d["bundle"].as_str().unwrap_or("")[..12], ago(d["time"].as_u64().unwrap_or(0)));
+            }
+        }
+        ["source", app, rest @ ..] => {
+            let mut q = Vec::new();
+            if let Some(b) = flags.get("bundle").and_then(Value::as_str) {
+                q.push(format!("bundle={b}"));
+            }
+            if let [path] = rest {
+                q.push(format!("path={path}"));
+            }
+            let r = get(&format!("/v1/source/{app}?{}", q.join("&")))?;
+            match (&r["text"], &r["files"]) {
+                (Value::String(text), _) => print!("{text}"),
+                (_, Value::Array(files)) => files.iter().for_each(|f| println!("{:>8}  {}", f["size"], f["path"].as_str().unwrap_or(""))),
+                _ => bail!("that file isn't text"),
+            }
+        }
         ["install", app] => {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             post("/v1/install", json!({ "app": app, "scope": scope, "installed": !flags.contains_key("remove") }))?;
@@ -216,11 +250,14 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
     Ok(())
 }
 
-/// Deploys the app in `dir`: bundles its app.js with its source, makes the app if the install hasn't one by that
+/// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the install hasn't one by that
 /// name, and deploys it. Every server runs it now.
 fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
-    let name = dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string();
-    let bundle = one::bundle::from_dir(dir)?;
+    let name = match flags.get("name").and_then(Value::as_str) {
+        Some(name) => name.to_string(),
+        None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
+    };
+    let bundle = one::deploy::build(dir)?;
     let blob = request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
     let apps = get("/v1/apps")?;
     if !apps.as_array().into_iter().flatten().any(|a| a["name"] == name.as_str()) {

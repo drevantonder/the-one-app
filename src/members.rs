@@ -97,6 +97,8 @@ pub struct App {
     /// Its latest deploy's bundle, a blob.
     pub bundle: Option<String>,
     pub deploys: u32,
+    /// Every deploy: (bundle, time, user), oldest first.
+    pub history: Vec<(String, u64, String)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -465,7 +467,7 @@ impl Members {
                     }
                     None => {
                         let from = data["from"].as_str().map(str::to_string);
-                        self.apps.insert(name.clone(), App { name, owner, from, bundle: None, deploys: 0 });
+                        self.apps.insert(name.clone(), App { name, owner, from, bundle: None, deploys: 0, history: Vec::new() });
                     }
                 }
             }
@@ -476,8 +478,9 @@ impl Members {
                 ensure!(self.acts_for(&w, &owner), "only someone acting for the app's owner deploys it");
                 ensure!(e.content.blobs.contains(&bundle), "a deploy names its bundle among its blobs");
                 let app = self.apps.get_mut(&name).unwrap();
-                app.bundle = Some(bundle);
+                app.bundle = Some(bundle.clone());
                 app.deploys += 1;
+                app.history.push((bundle, e.time(), w.clone()));
             }
             "install" | "uninstall" | "node-release" | "running" => {}
             other => bail!("unknown kind {other}"),
