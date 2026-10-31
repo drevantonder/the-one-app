@@ -24,7 +24,7 @@ Usage:
   {CLI} <app> <op> [--key value]    run an operation, e.g. {CLI} board post --text hi
   {CLI} update                      test and build main's tip on this device and the Macs, and run it everywhere
   {CLI} release <vX.Y.Z>            the same, signed off and published on GitHub for the installer
-  {CLI} publish [binary]            publish a build you made; every node on its platform updates
+  {CLI} publish [binary]            sign and publish a build you made; every node on its platform updates
   {CLI} blob put <file>             keep a file as a blob any of your devices can get; prints its hash
   {CLI} blob get <hash> <file>      get a blob from this device or another
   {CLI} version                     this build
@@ -101,7 +101,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 [path] => std::fs::canonicalize(path)?,
                 _ => std::env::current_exe()?,
             };
-            publish(&path, space, &flags)?;
+            publish(&path, space, &flags, &update::release_key()?)?;
         }
         ["blob", "put", file] => {
             let bytes = std::fs::read(file).with_context(|| format!("read {file}"))?;
@@ -137,9 +137,9 @@ fn run(args: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-/// Publishes the binary at `path` as a release: this one, or one built for another platform (--target <triple> --commit <hash>
-/// --committed <seconds>).
-fn publish(path: &std::path::Path, space: Option<String>, flags: &Map<String, Value>) -> Result<()> {
+/// Publishes the binary at `path` as a release, signed with `key`: this one, or one built for another platform
+/// (--target <triple> --commit <hash> --committed <seconds>).
+fn publish(path: &std::path::Path, space: Option<String>, flags: &Map<String, Value>, key: &ssh_key::PrivateKey) -> Result<()> {
     // The binary knows what it is; ask it, unless it's for another platform and can't run here.
     let version: Value = std::process::Command::new(path)
         .args(["version", "--json"])
@@ -154,7 +154,8 @@ fn publish(path: &std::path::Path, space: Option<String>, flags: &Map<String, Va
     if commit.ends_with("+dirty") {
         bail!("that build has uncommitted changes; commit, build again, then publish");
     }
-    let r = post("/v1/release", json!({ "space": space, "path": path, "commit": commit, "target": target, "committed": committed }))?;
+    let signature = one::release::sign(key, &std::fs::read(path)?)?;
+    let r = post("/v1/release", json!({ "space": space, "path": path, "commit": commit, "target": target, "committed": committed, "signature": signature }))?;
     println!("Published {} for {}. Every node on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
     Ok(())
 }

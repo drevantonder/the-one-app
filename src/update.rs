@@ -6,7 +6,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use one::brand::{CLI, NAME, REPO, TARGET};
+use one::brand::{CLI, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
+use one::release;
 use serde_json::{Value, json};
 
 use crate::{get, post};
@@ -22,6 +23,7 @@ pub fn run(tag: Option<&str>, space: Option<&str>) -> Result<()> {
         ensure!(version_tag(tag), "a release is named like v1.2.3");
         ensure!(quiet(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     }
+    let key = release_key()?;
     let src = checkout()?;
     let commit = git(&src, &["rev-parse", "HEAD"])?;
     let short = &commit[..12];
@@ -57,7 +59,7 @@ pub fn run(tag: Option<&str>, space: Option<&str>) -> Result<()> {
     let binary = src.join("target/release").join(CLI);
     // Which devices to wait for, asked before this device's own node restarts on the new build.
     let linux: Vec<Value> = devices(&space).into_iter().filter(|d| d["target"] == TARGET).collect();
-    crate::publish(&binary, space["id"].as_str().map(str::to_string), &Default::default())?;
+    crate::publish(&binary, space["id"].as_str().map(str::to_string), &Default::default(), &key)?;
     let started_at = Instant::now();
     let mut failed = await_builds(&space, &linux, short, started_at, Duration::from_secs(180));
 
@@ -100,11 +102,11 @@ pub fn run(tag: Option<&str>, space: Option<&str>) -> Result<()> {
         }
     }
     let dir = cache().join("release").join(tag);
-    assets.sort();
-    let sums = Command::new("sha256sum").current_dir(&dir).args(&assets).output().context("sha256sum")?;
-    ensure!(sums.status.success(), "sha256sum failed");
-    std::fs::write(dir.join("checksums.txt"), sums.stdout)?;
-    assets.push("checksums.txt".into());
+    // Each file comes with its signature, which the installer checks.
+    for asset in std::mem::take(&mut assets) {
+        std::fs::write(dir.join(format!("{asset}.sig")), release::sign(&key, &std::fs::read(dir.join(&asset))?)?)?;
+        assets.extend([format!("{asset}.sig"), asset]);
+    }
     println!("Publishing {tag} on GitHub");
     let mut gh = Command::new("gh");
     gh.current_dir(&dir).args(["release", "create", tag, "--repo", REPO, "--target", &commit, "--generate-notes"]).args(&assets);
@@ -121,9 +123,24 @@ fn version_tag(tag: &str) -> bool {
     parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// What the Mac app is published as: the brand's name, without spaces, which GitHub won't keep in a file name.
+/// What the Mac app is published as.
 fn app_zip() -> String {
-    format!("{}-macos.zip", NAME.replace(' ', ""))
+    format!("{CLI}-macos.zip")
+}
+
+/// The release key's private half, from the publisher's password manager by way of the brand's release_signer, kept
+/// only in memory. It must be the key every build checks releases against.
+pub fn release_key() -> Result<ssh_key::PrivateKey> {
+    ensure!(!RELEASE_KEY.is_empty() && !RELEASE_SIGNER.is_empty(), "this brand has no release key, so nothing it builds can be released");
+    let out = Command::new("sh").args(["-c", RELEASE_SIGNER]).stdin(std::process::Stdio::null()).output().context("run release_signer")?;
+    ensure!(
+        out.status.success(),
+        "couldn't get the release key with `{RELEASE_SIGNER}`: {}\nIs the password manager it reads reachable, and unlocked?",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
+    let key = ssh_key::PrivateKey::from_openssh(&out.stdout).map_err(|_| anyhow::anyhow!("`{RELEASE_SIGNER}` didn't give an OpenSSH private key"))?;
+    ensure!(key.public_key().key_data() == ssh_key::PublicKey::from_openssh(RELEASE_KEY)?.key_data(), "`{RELEASE_SIGNER}` gave a key, but not the release key in brand.toml");
+    Ok(key)
 }
 
 fn cache() -> PathBuf {
@@ -316,8 +333,11 @@ mod tests {
     }
 
     #[test]
-    fn the_installer_gets_this_brands_releases() {
-        assert!(include_str!("../install.sh").contains(&format!("\nrepo={} ", super::REPO)));
+    fn the_installer_gets_this_brands_releases_and_checks_them_with_its_key() {
+        let script = include_str!("../install.sh");
+        for line in [format!("repo={}", super::REPO), format!("cli={}", super::CLI), format!("key=\"{}\"", super::RELEASE_KEY)] {
+            assert!(script.contains(&format!("\n{line}\n")), "install.sh lacks {line}");
+        }
     }
 
     #[test]

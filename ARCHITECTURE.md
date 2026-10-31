@@ -27,11 +27,11 @@ A node runs on every device that can keep a log: laptops, the home box, servers.
 - `src/apps.rs`: apps run in workerd, which the node downloads (pinned, hash-checked), configures and supervises. `src/runtime/shim.js` makes each app a Worker with one Durable Object per space holding its views in SQLite; its `on` handlers see no clock or randomness, and operations can only append entries.
 - `src/builtin.rs`: the apps this build ships with, handed to the node by the binary; the core names none.
 - `src/native.rs` (the type), `src/shell.rs`, `src/agents.rs`, `src/models.rs`: device features in Rust. `src/providers.rs`: the same for features written outside the node (the Mac app's Swift, Go), over the local API.
-- `src/update.rs`: `one update` and `one release`, which build main's tip on your own devices (the Macs build their app through the shell app) and publish it as a release; `install.sh` installs GitHub's latest.
+- `src/update.rs`: `one update` and `one release`, which build main's tip on your own devices (the Macs build their app through the shell app) and publish it as a release, signed with the brand's release key; `install.sh` installs GitHub's latest, if signed with it.
 - `apps/`: the apps every build ships with. They use nothing a user's app couldn't.
 - `client/`: the library phones link (Rust, with a C interface in `one_client.h`).
 - `apple/`: the Mac app now, and the iPhone app's shared views. The Mac app provides Reminders, Calendar, Contacts and iMessage (`apple/Mac/Providers`), since macOS grants their permissions to it.
-- `brand.toml`: the product's name, CLI name, port and accent. Nothing else names the product.
+- `brand.toml`: the product's name, CLI name, port, accent and release key. Nothing else names the product.
 - `vendor/`: two iroh dependencies patched so the client builds for iPhone; drop them when upstream builds there.
 
 ## Invariants

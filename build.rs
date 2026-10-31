@@ -15,6 +15,8 @@ fn main() {
         // The GitHub repo releases come from; a brand without one isn't released.
         brand.get("repo").and_then(|r| r.as_str()).unwrap_or(""),
     );
+    let optional = |key: &str| brand.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\n", optional("release_key"), optional("release_signer"));
     // Which build this is, so a node can tell a release apart from itself.
     let commit = std::process::Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])

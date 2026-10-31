@@ -1,24 +1,27 @@
 #!/bin/sh
-# Installs the latest release for this machine, checked against its checksums.txt: on Linux the node, run as a
+# Installs the latest release for this machine, if its signature is the release key's: on Linux the node, run as a
 # system service; on a Mac the app, with its node inside. Run again to update. `sh install.sh <binary>` installs a
 # binary you built instead.
 set -eu
-repo=drevantonder/the-one-app # brand.toml's repo; a test keeps them the same
+# brand.toml's repo, cli and release_key; a test keeps them the same.
+repo=drevantonder/the-one-app
+cli=one
+key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNLdOHtbsAnmUTljCM"
 url=https://github.com/$repo/releases/latest/download
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$HOME/.local/bin"
 
-get() { curl -fsSL "$url/$1" -o "$tmp/$1"; }
-# The release's file for this machine: the one in checksums.txt whose name ends in $1, checked.
+# Downloads the release's file $1 and checks its signature, $1.sig, with OpenSSH, which macOS and Linux both have.
 fetch() {
-	get checksums.txt
-	asset=$(sed -n "s/^[0-9a-f]*  \(.*$1\)$/\1/p" "$tmp/checksums.txt" | head -1)
-	[ -n "$asset" ] || { echo "the latest release has nothing for this machine ($1)" >&2; exit 1; }
-	echo "Downloading $asset"
-	get "$asset"
-	if command -v sha256sum >/dev/null; then sum=sha256sum; else sum="shasum -a 256"; fi
-	(cd "$tmp" && grep "  $asset\$" checksums.txt | $sum -c - >/dev/null) || { echo "$asset doesn't match checksums.txt" >&2; exit 1; }
+	command -v ssh-keygen >/dev/null || { echo "checking the download needs ssh-keygen: install OpenSSH (openssh-client on Debian and Ubuntu)" >&2; exit 1; }
+	echo "Downloading $1"
+	for f in "$1" "$1.sig"; do
+		curl -fsSL "$url/$f" -o "$tmp/$f" || { echo "the latest release has nothing for this machine ($1)" >&2; exit 1; }
+	done
+	echo "release namespaces=\"release\" $key" > "$tmp/signers"
+	ssh-keygen -Y verify -f "$tmp/signers" -I release -n release -s "$tmp/$1.sig" < "$tmp/$1" >/dev/null 2>&1 ||
+		{ echo "$1 isn't signed with the release key, so it isn't installed" >&2; exit 1; }
 }
 
 case $(uname -m) in
@@ -28,10 +31,9 @@ aarch64 | arm64) arch=aarch64 ;;
 esac
 
 if [ "$(uname -s)" = Darwin ]; then
-	fetch -macos.zip
-	ditto -x -k "$tmp/$asset" "$tmp/app"
+	fetch "$cli-macos.zip"
+	ditto -x -k "$tmp/$cli-macos.zip" "$tmp/app"
 	app=$(cd "$tmp/app" && ls -d -- *.app | head -1)
-	cli=$(ls "$tmp/app/$app/Contents/Library/LaunchAgents" | sed -n 's/^app\.\(.*\)\.mac\.node\.plist$/\1/p')
 	osascript -e "quit app id \"app.$cli.mac\"" 2>/dev/null || true
 	mkdir -p "$HOME/Applications"
 	rm -rf "$HOME/Applications/$app"
@@ -45,8 +47,8 @@ else
 	if [ $# -gt 0 ]; then
 		bin=$1 cli=$(basename "$1")
 	else
-		fetch "-$arch-unknown-linux-gnu"
-		bin=$tmp/$asset cli=${asset%-"$arch"-unknown-linux-gnu}
+		fetch "$cli-$arch-unknown-linux-gnu"
+		bin=$tmp/$cli-$arch-unknown-linux-gnu
 		chmod +x "$bin"
 	fi
 	name=$("$bin" help | head -1 | cut -d: -f1)

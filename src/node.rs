@@ -961,35 +961,30 @@ fn sorted(entries: &[Entry]) -> Vec<Entry> {
 }
 
 impl Node {
-    /// Publishes `binary` (a build of this node for `target`) as the space's newest release. Admins' devices only.
-    pub async fn publish(&self, space: Key, binary: &Path, commit: &str, target: &str, committed: u64) -> Result<Release> {
-        {
-            let spaces = self.0.spaces.lock().unwrap();
-            let s = spaces.get(&space).context("no such space")?;
-            let me = s.members.current(&self.0.id).context("not a member")?;
-            ensure!(s.members.current_devices().any(|a| a.role == Role::Admin && a.user == me.user), "only an admin's devices publish releases");
-        }
+    /// Publishes `binary` (a build of this node for `target`, with the release key's `signature` over it) as the space's
+    /// newest release.
+    pub async fn publish(&self, space: Key, binary: &Path, commit: &str, target: &str, committed: u64, signature: &str) -> Result<Release> {
         let bytes = std::fs::read(binary).with_context(|| format!("read {}", binary.display()))?;
+        release::verify(crate::brand::RELEASE_KEY, &bytes, signature).context("no node would take it")?;
         let blob = release::put_blob(&self.0.dir, &bytes)?;
-        let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64, committed };
+        let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64, committed, signature: signature.into() };
         self.append(space, release::content(&r)).await?;
         Ok(r)
     }
 
-    /// Updates this node if an admin published a newer build for its platform.
+    /// Updates this node if a newer build for its platform was published, signed with the release key.
     fn consider_update(&self, space: Key) {
         let latest = {
             let spaces = self.0.spaces.lock().unwrap();
             let Some(s) = spaces.get(&space) else { return };
             match s.store.ordered() {
-                Ok(entries) => release::latest(&s.members, &entries, crate::brand::TARGET),
+                Ok(entries) => release::latest(crate::brand::RELEASE_KEY, &entries, crate::brand::TARGET),
                 Err(_) => return,
             }
         };
         let Some((r, author)) = latest else { return };
         let marker = self.0.dir.join("release");
-        let older = r.committed < crate::brand::COMMITTED;
-        if r.commit == crate::brand::BUILD || older || std::fs::read_to_string(&marker).is_ok_and(|m| m.trim() == r.blob) {
+        if !release::wanted(&r, crate::brand::BUILD, crate::brand::COMMITTED) || std::fs::read_to_string(&marker).is_ok_and(|m| m.trim() == r.blob) {
             return;
         }
         let node = self.clone();
@@ -1001,7 +996,7 @@ impl Node {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     std::process::exit(0);
                 }
-                Err(err) => tracing::warn!("update to {}: {err:#}", r.commit),
+                Err(err) => tracing::warn!("ignoring the release of {}: {err:#}", r.commit),
             }
         });
     }
@@ -1016,7 +1011,8 @@ impl Node {
                 self.fetch_from(peers, &r.blob, r.size).await?
             }
         };
-        release::install(&bytes)
+        release::verify(crate::brand::RELEASE_KEY, &bytes, &r.signature)?;
+        release::install(r, &bytes)
     }
 
     /// Keeps `bytes` as a blob, which every member may then fetch. See SPEC.md, "Blobs".

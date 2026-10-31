@@ -185,11 +185,12 @@ struct ReleaseRequest {
     target: String,
     #[serde(default)]
     committed: u64,
+    signature: String,
 }
 
 async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> Reply {
     let space = node.find_space(req.space.as_deref())?;
-    let r = node.publish(space, std::path::Path::new(&req.path), &req.commit, &req.target, req.committed).await?;
+    let r = node.publish(space, std::path::Path::new(&req.path), &req.commit, &req.target, req.committed, &req.signature).await?;
     Ok(Json(json!(r)))
 }
 

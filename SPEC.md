@@ -1,6 +1,6 @@
 # Protocol
 
-Version 6. Everything here is what two devices must agree on.
+Version 7. Everything here is what two devices must agree on.
 
 ## Keys
 
@@ -57,7 +57,11 @@ A blob is bytes named by their BLAKE3 hash. A member sends a hash (64 hex charac
 
 ## Releases
 
-The app `node` is the node's own, and other apps never see it. A release of the node is an entry with kind `release`: `{ commit, target, blob, size, committed }`, where `committed` is when the commit was made (seconds since 1970), where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin's devices count: a member whose user has an admin device when it writes. A node whose own build differs from the newest release for its target, and isn't newer than it, fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead. Each node also writes `running { commit, target }` once per build, so everyone can see what each device runs.
+The app `node` is the node's own, and other apps never see it. A release of the node is an entry with kind `release`: `{ commit, target, blob, size, committed, signature }`, where `target` is a Rust target triple, `blob` holds the binary, `committed` is when the commit was made (seconds since 1970), and `signature` is the publisher's signature over the binary.
+
+What runs is the publisher's to decide, not the space's: each brand has a **release key**, Ed25519, whose public half every build carries and whose secret only the publisher holds. A signature is OpenSSH's (`ssh-keygen -Y sign -n release`: the armored "sshsig" format, namespace `release`, SHA-512). Any member's device may publish or pass on a release; who wrote the entry doesn't matter. A node takes the newest release for its target whose signature is by its release key, and ignores newer ones that aren't. If its own build differs and isn't newer, it fetches the blob (from the author, else any member) and checks the signature over it; then, since the entry's other fields aren't signed, it checks that the binary itself says (`version --json`) it's that commit, for its target, and no older than its own build. Only then does it replace its binary and exit; its service manager starts the new one. Nodes inside an app bundle update with the app instead. Each node also writes `running { commit, target }` once per build, so everyone can see what each device runs.
+
+On GitHub, each file of a release comes with `<file>.sig`, its signature; the installer checks it with the key it carries, and installs nothing that fails.
 
 ## Providers
 
@@ -77,7 +81,7 @@ Each node serves HTTP on `127.0.0.1:<brand port>` for its own device's shells, C
 - `GET /v1/widgets?space=`: every widget, rendered.
 - `GET /v1/screens/<app>/<screen>?space=&params=`: an app screen as a page (see "Screens").
 - `POST /v1/spaces { name }`, `POST /v1/pair { space?, new_user? }` → `{ code }`, `POST /v1/join { code }`, `POST /v1/device { name }`, `POST /v1/remove { space?, device }`.
-- `POST /v1/release { space?, path, commit, target, committed }`: publishes the binary at `path` (an admin's devices).
+- `POST /v1/release { space?, path, commit, target, committed, signature }`: publishes the binary at `path`, if `signature` is the release key's over it.
 - `POST /v1/blobs` with the bytes as the body → `{ blob, size }`: keeps them as a blob. `GET /v1/blobs/<hash>`: a blob, from this device or any member online.
 - `GET /v1/events`: server-sent events `changed { space, apps }`, `peers { space }` and `spaces`.
 - Providers, for device features written outside the node (Swift, Go): `POST /v1/providers/<app>` with the app's description registers it; `GET /v1/providers/<app>/calls` waits up to 25 seconds for a call `{ id, op, input, caller }` (204 if none); `POST /v1/providers/<app>/calls/<id>` answers `{ ok, entries?: [{ kind, data }] }` or `{ error }`. A provider that stops asking for calls for a minute is gone. Providers run only for their device's own user's devices.
