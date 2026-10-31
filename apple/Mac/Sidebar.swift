@@ -22,6 +22,14 @@ struct Sidebar: View {
                             .accessibilityLabel(app.label)
                             .tag(store.open(app, from: page))
                     }
+                    let connected = store.connectedApps(on: page)
+                    if !connected.isEmpty {
+                        FolderTile(apps: connected, size: 24)
+                            .frame(maxWidth: .infinity)
+                            .help("Connected Apps")
+                            .accessibilityLabel("Connected Apps")
+                            .tag(Route.connected(page.scope))
+                    }
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {
                         Text(initials(page.title))
@@ -58,6 +66,16 @@ struct Sidebar: View {
                         }
                         .badge(store.appBadge(app.name, on: page) ?? 0)
                         .tag(store.open(app, from: page))
+                    }
+                    // Its connected apps, in one row, as the page has them in one folder.
+                    let connected = store.connectedApps(on: page)
+                    if !connected.isEmpty {
+                        Label {
+                            Text("Connected Apps")
+                        } icon: {
+                            FolderTile(apps: connected, size: 20)
+                        }
+                        .tag(Route.connected(page.scope))
                     }
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {

@@ -478,7 +478,8 @@ final class Store {
     private func stillThere(_ route: Route) -> Route? {
         switch route {
         case .page(let scope): pages.contains { $0.scope == scope } ? route : nil
-        case .screen(let screen): app(screen.app) != nil ? route : nil
+        // A screen the app no longer has (Gmail's main, once it was a connected app) isn't; one not described yet may be.
+        case .screen(let screen): app(screen.app).map { $0.screens == nil || $0.has(screen: screen.screen) } == true ? route : nil
         case .group(let id): install?.group(id) != nil ? route : nil
         case .connected(let scope): page(scope) != nil ? route : nil
         case .settings, .setting: route
