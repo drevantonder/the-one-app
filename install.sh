@@ -86,6 +86,8 @@ EOF
 	fi
 fi
 
+# The same binary is git's remote helper for $cli://<repo> URLs.
+ln -sf "$HOME/.local/bin/$cli" "$HOME/.local/bin/git-remote-$cli"
 case :$PATH: in *:"$HOME/.local/bin":*) ;; *) echo "Add ~/.local/bin to your PATH." ;; esac
 echo "
 Next, on your first device:  $cli create <name>

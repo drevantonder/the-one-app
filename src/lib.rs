@@ -2,6 +2,7 @@ pub mod brand {
     include!(concat!(env!("OUT_DIR"), "/brand.rs"));
 }
 pub mod entry;
+pub mod git;
 pub mod members;
 pub mod store;
 pub mod sync;
