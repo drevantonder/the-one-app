@@ -318,7 +318,8 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     let bundle = one::deploy::build(dir)?;
     let blob = request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
     let apps = get("/v1/apps")?;
-    if !apps.as_array().into_iter().flatten().any(|a| a["name"] == name.as_str()) {
+    // A driver of the same name is listed too, without an owner: the app is still to be made.
+    if !apps.as_array().into_iter().flatten().any(|a| a["name"] == name.as_str() && !a["owner"].is_null()) {
         let owner = match flags.get("owner").and_then(Value::as_str) {
             Some(owner) => owner.to_string(),
             None => format!("user:{}", get("/v1/state")?["install"]["user"].as_str().unwrap_or("")),
