@@ -331,11 +331,10 @@ fn workerd() -> Result<PathBuf> {
     pinned(&format!("workerd-{WORKERD}"), "workerd", &url, integrity)
 }
 
-/// A program from an npm package's tarball (`package/bin/<bin>`), downloaded once into `~/.cache/<cli>/<dir>` and
-/// checked against the package's pinned sha512.
+/// A program from an npm package's tarball (`package/bin/<bin>`), downloaded once into the node's cache and checked
+/// against the package's pinned sha512.
 pub fn pinned(dir: &str, bin: &str, url: &str, integrity: &str) -> Result<PathBuf> {
-    let cache = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache"));
-    let dir = cache.join(crate::brand::CLI).join(dir);
+    let dir = crate::cache().join(dir);
     let path = dir.join(bin);
     if path.exists() {
         return Ok(path);

@@ -62,18 +62,6 @@ Usage:
     )
 }
 
-fn home() -> PathBuf {
-    if let Ok(dir) = std::env::var(format!("{}_HOME", CLI.to_uppercase())) {
-        return dir.into();
-    }
-    let base = std::env::var("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|_| dirs_home().join(".local/share"));
-    base.join(CLI)
-}
-
-fn dirs_home() -> PathBuf {
-    std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| ".".into())
-}
-
 fn addr() -> String {
     api::addr()
 }
@@ -453,7 +441,7 @@ async fn serve() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn,iroh=error,noq_proto=error".into()))
         .init();
-    let dir = home();
+    let dir = one::home();
     let (node, router) = Node::start(&dir, one::builtin::all()).await?;
     let listener = tokio::net::TcpListener::bind(addr()).await.with_context(|| format!("listen on {}", addr()))?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());

@@ -1,6 +1,29 @@
 pub mod brand {
     include!(concat!(env!("OUT_DIR"), "/brand.rs"));
 }
+
+use std::path::PathBuf;
+
+/// Where this machine's node keeps its data: `<CLI>_HOME`, else `~/.local/share/<cli>`.
+pub fn home() -> PathBuf {
+    match std::env::var_os(format!("{}_HOME", brand::CLI.to_uppercase())) {
+        Some(dir) => dir.into(),
+        None => std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| user_home().join(".local/share")).join(brand::CLI),
+    }
+}
+
+/// Where it keeps what it can download or build again: inside a home given with `<CLI>_HOME`, so a node given one
+/// writes nowhere else; otherwise `~/.cache/<cli>`.
+pub fn cache() -> PathBuf {
+    match std::env::var_os(format!("{}_HOME", brand::CLI.to_uppercase())) {
+        Some(dir) => PathBuf::from(dir).join("cache"),
+        None => std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| user_home().join(".cache")).join(brand::CLI),
+    }
+}
+
+fn user_home() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| ".".into())
+}
 pub mod entry;
 pub mod git;
 pub mod members;

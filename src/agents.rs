@@ -12,8 +12,13 @@ use crate::apps::{AppEntry, Me};
 use crate::entry::Content;
 use crate::native::Reply;
 
-/// Marks a skill folder as this app's to replace. `.theoneapp` is what earlier versions left.
-const MARKERS: [&str; 2] = [".synced", ".theoneapp"];
+/// Marks a skill folder as this brand's to replace, so the nodes of two brands on one machine leave each other's alone.
+fn marker() -> String {
+    format!(".synced-{}", crate::brand::CLI)
+}
+
+/// What earlier versions marked their folders with: taken over by the next write, never removed.
+const OLD_MARKERS: [&str; 2] = [".synced", ".theoneapp"];
 
 pub fn describe() -> Value {
     let name = json!({ "type": "string", "description": "the skill's folder name, like writing-for-agents" });
@@ -121,7 +126,7 @@ pub fn sync(entries: &[AppEntry]) {
     }
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return };
     let (text, skills) = state(entries);
-    let mut written = Written::load(&home);
+    let mut written = Written::load();
     let codex = std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
     if !text.is_empty() {
         for dir in [codex, home.join(".config/amp"), home.join(".config/opencode")] {
@@ -152,15 +157,15 @@ pub fn sync(entries: &[AppEntry]) {
 }
 
 fn ours(dir: &Path) -> bool {
-    MARKERS.iter().any(|m| dir.join(m).is_file())
+    dir.join(marker()).is_file()
 }
 
 fn write_skill(dir: &Path, files: &BTreeMap<String, String>) -> Result<()> {
-    if dir.exists() && !ours(dir) {
+    if dir.exists() && !ours(dir) && !OLD_MARKERS.iter().any(|m| dir.join(m).is_file()) {
         tracing::info!("left {} alone: it isn't a synced skill", dir.display());
         return Ok(());
     }
-    let same = files.iter().all(|(p, t)| std::fs::read_to_string(dir.join(p)).is_ok_and(|now| &now == t)) && dir.join(MARKERS[0]).is_file();
+    let same = files.iter().all(|(p, t)| std::fs::read_to_string(dir.join(p)).is_ok_and(|now| &now == t)) && ours(dir);
     if same {
         return Ok(());
     }
@@ -171,7 +176,7 @@ fn write_skill(dir: &Path, files: &BTreeMap<String, String>) -> Result<()> {
         std::fs::create_dir_all(file.parent().unwrap())?;
         std::fs::write(&file, text)?;
     }
-    std::fs::write(tmp.join(MARKERS[0]), "This skill is kept the same on every device. Change it with agents_skill_set; delete this file to take the folder over.\n")?;
+    std::fs::write(tmp.join(marker()), "This skill is kept the same on every device. Change it with agents_skill_set; delete this file to take the folder over.\n")?;
     if dir.exists() {
         std::fs::remove_dir_all(dir)?;
     }
@@ -186,8 +191,8 @@ struct Written {
 }
 
 impl Written {
-    fn load(home: &Path) -> Self {
-        let path = home.join(".local/share").join(crate::brand::CLI).join("agents-written.json");
+    fn load() -> Self {
+        let path = crate::home().join("agents-written.json");
         let hashes = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         Written { path, hashes }
     }
