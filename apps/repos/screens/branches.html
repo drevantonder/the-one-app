@@ -1,0 +1,28 @@
+<div id="page"></div>
+<script>
+one.title("Branches");
+
+function row(b) {
+  return `<a class="row plain branch-row" onclick="${go("repo", { repo: P.repo, ref: b.branch, path: P.path || "" })}">
+    ${one.icon("branch", "row-icon")}
+    <div class="main">
+      <div class="title"><span class="branch-name">${esc(b.branch)}${b.branch === "main" ? ' <span class="badge">Default</span>' : ""}</span><span class="when">${one.ago(b.time)}</span></div>
+      <div class="sub">${b.subject ? `${esc(b.subject)} · ${esc(b.author)}` : `<code>${short(b.head)}</code> · ${esc(b.pushed_by)}`}</div>
+    </div>
+    <div class="chev">›</div>
+  </a>`;
+}
+
+async function show() {
+  const all = await one.call("branches", { repo: P.repo });
+  if (!all.length) return one.empty({ icon: "branch", title: "No branches yet.", text: `Push one with <code>git push one://${esc(P.repo)} main</code>` });
+  const bare = all.filter((b) => !b.branch.includes("@")).sort((a, b) => (b.branch === "main") - (a.branch === "main") || b.time - a.time);
+  const sugg = all.filter((b) => b.branch.includes("@")).sort((a, b) => b.time - a.time);
+  return `<h2 class="section">Branches</h2><div class="list">${bare.map(row).join("") || '<div class="empty small">None</div>'}</div>` +
+    (sugg.length ? `<h2 class="section">Suggestions</h2><div class="list">${sugg.map(row).join("")}</div><p class="muted small note">Suggestions are branches people push as <code>main@their-name</code>; only the repo's owner moves main.</p>` : "");
+}
+
+const draw = () => one.render("#page", show, { loading: "Loading branches" });
+one.on("changed", draw);
+draw();
+</script>

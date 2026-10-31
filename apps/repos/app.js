@@ -1,9 +1,22 @@
 // Repos: git hosting as an ordinary app. Installed in global, so every repo is visible to everyone. Local git builds
 // packs and `git-remote-one` keeps them as blobs; this app only moves branches: a push moves a branch iff its base is
-// the branch's head. No git runs here.
+// the branch's head. No git runs here: pages read the packs themselves (browse.js, git.js).
 //
 // A repo has an owner (user:<id>, group:<id> or admins). Only someone acting for it moves bare branches (`main`);
 // anyone pushes `<branch>@<their name>`, a suggestion, which then belongs to them.
+
+import * as browse from "./browse.js";
+import css from "./screens/repos.css" with { type: "text" };
+import common from "./screens/common.js" with { type: "text" };
+import mainScreen from "./screens/main.html" with { type: "text" };
+import repoScreen from "./screens/repo.html" with { type: "text" };
+import fileScreen from "./screens/file.html" with { type: "text" };
+import historyScreen from "./screens/history.html" with { type: "text" };
+import commitScreen from "./screens/commit.html" with { type: "text" };
+import branchesScreen from "./screens/branches.html" with { type: "text" };
+
+/// A screen: Repos' styles and shared script, then its own HTML.
+const page = (title, html) => ({ title, html: `<style>${css}</style><script>${common}</script>${html}` });
 
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const BRANCH = /^[A-Za-z0-9._\/-]{1,200}(@[a-z0-9._-]{1,64})?$/;
@@ -37,7 +50,7 @@ function refusal(repo, row, e, branch) {
 
 /// What to call an owner, as far as the caller can tell: you, a group of theirs, admins.
 function ownerName(ctx, owner) {
-  if (owner === `user:${ctx.me.user}`) return "you";
+  if (owner === `user:${ctx.me.user}`) return ctx.user?.name || "you";
   if (owner === "admins") return "admins";
   const group = ctx.groups.find((g) => g.id === owner);
   if (group) return group.name;
@@ -82,13 +95,14 @@ export default {
       description: "Every repo: its owner, where it was forked from, its branches and suggestions, and when it last moved.",
       input: { type: "object", properties: {} },
       async run(ctx) {
-        return global(ctx).query(
+        const repos = await global(ctx).query(
           `select r.name, r.owner, r."from", r.created,
                   (select count(*) from branches b where b.repo = r.name and b.branch not like '%@%') as branches,
                   (select count(*) from branches b where b.repo = r.name and b.branch like '%@%') as suggestions,
                   (select max(time) from branches b where b.repo = r.name) as updated
              from repos r order by coalesce(updated, r.created) desc`,
         );
+        return repos.map((r) => ({ ...r, owner_name: ownerName(ctx, r.owner) }));
       },
     },
     get: {
@@ -105,6 +119,51 @@ export default {
         const pushes = await g.query("select * from pushes where repo = ? order by time desc limit 30", [repo]);
         return { ...r, owner_name: ownerName(ctx, r.owner), branches, packs, forks, pushes };
       },
+    },
+    tree: {
+      reads: true,
+      description: "A folder of a repo at a branch or commit (main if none): its files and folders, its README, and the latest commit.",
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" }, ref: { type: "string" }, path: { type: "string" } } },
+      async run(ctx, input) {
+        const t = await browse.tree(ctx, global(ctx), input);
+        return { ...t, owner_name: ownerName(ctx, t.owner) };
+      },
+    },
+    file: {
+      reads: true,
+      description: "A file of a repo at a branch or commit: its text, or whether it's binary or too big to show.",
+      input: { type: "object", required: ["repo", "path"], properties: { repo: { type: "string" }, ref: { type: "string" }, path: { type: "string" } } },
+      run: (ctx, input) => browse.file(ctx, global(ctx), input),
+    },
+    log: {
+      reads: true,
+      description: "A repo's history, newest first, 25 commits a page (page 0 is the newest), of the whole repo or of one path.",
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" }, ref: { type: "string" }, path: { type: "string" }, page: { type: "integer" } } },
+      run: (ctx, input) => browse.log(ctx, global(ctx), input),
+    },
+    commit: {
+      reads: true,
+      description: "A commit: its message, author, parents, and each file it changed with +/- counts and diff hunks (big diffs are left for diff).",
+      input: { type: "object", required: ["repo", "sha"], properties: { repo: { type: "string" }, sha: { type: "string" } } },
+      run: (ctx, input) => browse.commit(ctx, global(ctx), input),
+    },
+    diff: {
+      reads: true,
+      description: "One file's whole diff in a commit.",
+      input: { type: "object", required: ["repo", "sha", "path"], properties: { repo: { type: "string" }, sha: { type: "string" }, path: { type: "string" } } },
+      run: (ctx, input) => browse.diff(ctx, global(ctx), input),
+    },
+    latest: {
+      reads: true,
+      description: "The last commit that changed each entry of a folder, by name.",
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" }, ref: { type: "string" }, path: { type: "string" } } },
+      run: (ctx, input) => browse.latest(ctx, global(ctx), input),
+    },
+    branches: {
+      reads: true,
+      description: "A repo's branches and suggestions, each with its head commit's subject and author.",
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
+      run: (ctx, input) => browse.branches(ctx, global(ctx), input),
     },
     create: {
       description: "Create a repo, owned by you (the default), a group you're an admin of (group:<id>), or admins.",
@@ -187,61 +246,12 @@ export default {
   },
 
   screens: {
-    main: {
-      title: "Repos",
-      html: `
-<div id="list"></div>
-<script>
-async function show() {
-  const repos = await one.call("list");
-  const row = (r) => \`<a class="row" onclick='one.open("repo", \${JSON.stringify({ repo: r.name })})'>
-    <div class="icon\${r.from ? " grey" : ""}">\${one.esc(r.name[0].toUpperCase())}</div>
-    <div class="main">
-      <div class="title"><span>\${one.esc(r.name)}</span><span class="when">\${r.updated ? one.ago(r.updated) : ""}</span></div>
-      <div class="sub">\${r.branches} branch\${r.branches === 1 ? "" : "es"}\${r.suggestions ? \` · \${r.suggestions} suggestion\${r.suggestions === 1 ? "" : "s"}\` : ""}\${r.from ? " · fork of " + one.esc(r.from) : ""}</div>
-    </div>
-    <div class="chev">›</div>
-  </a>\`;
-  document.getElementById("list").innerHTML = repos.length
-    ? \`<div class="list">\${repos.map(row).join("")}</div>\`
-    : '<div class="empty">No repos yet.<br><span class="small">Push one: git push one://&lt;name&gt; main</span></div>';
-}
-one.on("changed", show);
-show();
-</script>`,
-    },
-    repo: {
-      title: "Repo",
-      html: `
-<div id="repo"></div>
-<script>
-const name = one.params.repo;
-one.title(name);
-async function show() {
-  const r = await one.call("get", { repo: name });
-  const branch = (b) => \`<div class="row plain"><div class="main">
-      <div class="title"><span>\${one.esc(b.branch)}</span><span class="when">\${one.ago(b.time)}</span></div>
-      <div class="sub"><code>\${b.head.slice(0, 12)}</code> · \${one.esc(b.name)}</div>
-    </div></div>\`;
-  const bare = r.branches.filter((b) => !b.branch.includes("@")), suggested = r.branches.filter((b) => b.branch.includes("@"));
-  const push = (p) => \`<div class="row plain"><div class="main">
-      <div class="title"><span>\${one.esc(p.branch)}</span><span class="when">\${one.ago(p.time)}</span></div>
-      <div class="sub">\${p.head ? "<code>" + (p.base ? p.base.slice(0, 7) + "…" : "") + p.head.slice(0, 7) + "</code>" : "deleted"} · \${one.esc(p.name)}</div>
-    </div></div>\`;
-  const fork = (f) => \`<a class="row plain" onclick='one.open("repo", \${JSON.stringify({ repo: f })})'><div class="main"><div class="title"><span>\${one.esc(f)}</span></div></div><div class="chev">›</div></a>\`;
-  document.getElementById("repo").innerHTML = \`
-    <p class="muted small">Owned by \${one.esc(r.owner_name)}\${r.from ? " · fork of " + one.esc(r.from) : ""}</p>
-    <div class="list"><div class="row plain"><div class="main"><div class="sub">git clone one://\${one.esc(r.name)}</div></div></div></div>
-    <h2 class="section">Branches</h2>
-    <div class="list">\${bare.map(branch).join("") || '<div class="empty">No branches yet</div>'}</div>
-    \${suggested.length ? '<h2 class="section">Suggestions</h2><div class="list">' + suggested.map(branch).join("") + "</div>" : ""}
-    \${r.forks.length ? '<h2 class="section">Forks</h2><div class="list">' + r.forks.map(fork).join("") + "</div>" : ""}
-    \${r.pushes.length ? '<h2 class="section">Pushes</h2><div class="list">' + r.pushes.map(push).join("") + "</div>" : ""}\`;
-}
-one.on("changed", show);
-show();
-</script>`,
-    },
+    main: page("Repos", mainScreen),
+    repo: page("Repo", repoScreen),
+    file: page("File", fileScreen),
+    history: page("History", historyScreen),
+    commit: page("Commit", commitScreen),
+    branches: page("Branches", branchesScreen),
   },
 
   widgets: {

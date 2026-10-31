@@ -1,0 +1,31 @@
+<div id="page"></div>
+<script>
+one.title(P.path.split("/").pop());
+const markdown = /\.(md|mdx|markdown)$/i.test(P.path);
+let view = markdown ? "preview" : "code";
+
+async function show() {
+  const d = await one.call("file", { repo: P.repo, ref: P.ref, path: P.path });
+  let body;
+  if (d.submodule) body = one.empty({ icon: "submodule", title: "This is a submodule.", text: `It points at commit <code>${short(d.submodule)}</code> of another repo.` });
+  else if (d.binary) body = one.empty({ icon: "file", title: "Binary files cannot be previewed.", text: one.size(d.size) });
+  else if (d.too_big) body = one.empty({ icon: "file", title: "This file is too big to preview.", text: `It's ${one.size(d.size)}. Clone the repo to read it.` });
+  else body = `${markdown ? `<div class="segmented narrow"><button data-view="preview">Preview</button><button data-view="code">Code</button></div>` : ""}<div id="file"></div>`;
+  setTimeout(() => d.text !== undefined && paint(d), 0);
+  return `${pathBar(d, { file: true })}<div class="code-box">${commitCard(d.latest, { ...d, path: P.path })}</div>${body}`;
+}
+
+function paint(d) {
+  const el = document.getElementById("file");
+  document.querySelectorAll("[data-view]").forEach((b) => {
+    b.classList.toggle("on", b.dataset.view === view);
+    b.onclick = () => ((view = b.dataset.view), paint(d));
+  });
+  if (view === "preview") {
+    const text = d.text.split("\n").filter((l) => !/\.mdx$/i.test(P.path) || (!/^\s*(import|export)\s/.test(l) && !/^\s*<\/?[A-Z][\w.]*[^>]*\/?>\s*$/.test(l))).join("\n");
+    el.innerHTML = `<div class="readme"><div class="readme-head"><span>${plural(d.text.split("\n").length, "line", "lines")} · ${one.size(d.size)}</span>${one.copyButton(d.text, { cls: "tool" })}</div><div class="readme-body">${one.markdown(text)}</div></div>`;
+  } else one.code(el, d.text, { path: P.path });
+}
+
+one.render("#page", show, { loading: "Loading file" });
+</script>

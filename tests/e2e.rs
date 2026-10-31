@@ -532,8 +532,31 @@ async fn repos_clone_push_and_take_suggestions_with_real_git() {
     assert_eq!(std::fs::read_to_string(work.join("fork/app.js")).unwrap(), "// mine\n");
     let r = a.call(call("repos", "get", json!({ "repo": "hello" }))).await.unwrap();
     assert_eq!(r["forks"], json!(["hello-too"]));
+
+    // Its pages read the packs: folders, files, history and diffs, as git has them.
+    let tree = a.call(call("repos", "tree", json!({ "repo": "hello" }))).await.unwrap();
+    let names: Vec<&str> = tree["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["app.js", "README"]);
+    assert_eq!(tree["readme"]["text"], "hi\n");
+    assert_eq!(tree["commit"]["subject"], "third");
+    let file = a.call(call("repos", "file", json!({ "repo": "hello", "path": "app.js" }))).await.unwrap();
+    assert_eq!(file["text"], "// mine\n");
+    let log = a.call(call("repos", "log", json!({ "repo": "hello" }))).await.unwrap();
+    let subjects: Vec<&str> = log["commits"].as_array().unwrap().iter().map(|c| c["subject"].as_str().unwrap()).collect();
+    assert_eq!(subjects, ["third", "second", "first"]);
+    let head = log["commits"][0]["sha"].as_str().unwrap();
+    assert_eq!(head, git(&api_a, &src, &["rev-parse", "main"]).await.unwrap().trim());
+    let commit = a.call(call("repos", "commit", json!({ "repo": "hello", "sha": head }))).await.unwrap();
+    assert_eq!(commit["files"][0]["path"], "app.js");
+    assert_eq!(commit["files"][0]["hunks"][0]["lines"], json!(["-export default { name: \"hello\" };", "+// mine"]));
+    let branches = a.call(call("repos", "branches", json!({ "repo": "hello" }))).await.unwrap();
+    assert!(branches.as_array().unwrap().iter().any(|b| b["branch"] == "main@bob" && b["subject"] == "idea"), "{branches}");
+    let missing = a.call(call("repos", "file", json!({ "repo": "hello", "path": "nope" }))).await.unwrap_err();
+    assert!(format!("{missing:#}").contains("There's no file nope"), "{missing:#}");
     let html = a.screen(one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None }, "repos", "repo", json!({ "repo": "hello" }), None).await.unwrap();
-    assert!(html.contains("one.call(\"get\""), "repos has screens");
+    assert!(html.contains("one.call(\"tree\""), "repos has screens");
+    let html = a.screen(one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None }, "repos", "nope", json!({}), None).await.unwrap();
+    assert!(html.contains("one.notFound()"), "a screen that isn't there says so");
 }
 
 #[tokio::test(flavor = "multi_thread")]

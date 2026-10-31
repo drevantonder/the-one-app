@@ -1,0 +1,8 @@
+{
+  "name": "repos",
+  "private": true,
+  "dependencies": {
+    "diff": "9.0.0",
+    "pako": "2.1.0"
+  }
+}

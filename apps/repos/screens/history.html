@@ -1,0 +1,37 @@
+<div id="page"></div>
+<script>
+const page = Number(P.page) || 0;
+one.title(P.path ? `History of ${P.path.split("/").pop()}` : "History");
+const day = (ms) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+function row(d, c) {
+  return `<a class="row plain commit-row" onclick="${go("commit", { repo: d.repo, sha: c.sha })}">
+    <div class="main">
+      <div class="commit-subject">${esc(c.subject)}</div>
+      <div class="commit-by">${avatar(c, "tiny")}<strong>${esc(c.author)}</strong> committed ${one.ago(c.time, { long: true })}</div>
+    </div>
+    <span class="commit-sha"><code>${short(c.sha)}</code>${one.copyButton(c.sha, { label: "" })}</span>
+  </a>`;
+}
+
+async function show() {
+  const d = await one.call("log", { repo: P.repo, ref: P.ref, path: P.path || "", page });
+  if (!d.commits.length) return pathBar(d) + one.empty({ icon: "history", title: page ? "No older commits." : "No commits yet." });
+  const groups = [];
+  for (const c of d.commits) {
+    const k = day(c.time);
+    if (groups[groups.length - 1]?.day !== k) groups.push({ day: k, commits: [] });
+    groups[groups.length - 1].commits.push(c);
+  }
+  const at = { repo: d.repo, ref: P.ref, path: P.path || "" };
+  return `${pathBar(d)}${groups.map((g) => `<h2 class="section day-head">${one.icon("commit")} Commits on ${esc(g.day)}</h2><div class="list">${g.commits.map((c) => row(d, c)).join("")}</div>`).join("")}
+    <div class="pager">
+      <button class="button" ${page ? `onclick="${go("history", { ...at, page: page - 1 })}"` : "disabled"}>Newer</button>
+      <button class="button" ${d.more ? `onclick="${go("history", { ...at, page: page + 1 })}"` : "disabled"}>Older</button>
+    </div>`;
+}
+
+const draw = () => one.render("#page", show, { loading: "Loading history" });
+one.on("changed", draw);
+draw();
+</script>

@@ -1,0 +1,83 @@
+<div id="page"></div>
+<script>
+const at = P.path || "";
+one.title(at ? at.split("/").pop() : P.repo);
+
+const icons = { tree: "folder", blob: "file", commit: "submodule" };
+
+function entry(d, e) {
+  const path = (at ? at + "/" : "") + e.name;
+  const open = e.type === "tree" ? go("repo", { repo: d.repo, ref: refOf(d), path }) : e.type === "blob" ? go("file", { repo: d.repo, ref: refOf(d), path }) : "";
+  return `<a class="row plain entry ${e.type}" data-name="${esc(e.name)}" onclick="${open}">
+    ${one.icon(icons[e.type], "entry-icon")}
+    <span class="entry-name">${esc(e.name)}${e.type === "commit" ? ` <span class="muted">@ ${short(e.sha)}</span>` : ""}</span>
+    <span class="entry-commit"></span><span class="entry-when"></span>
+  </a>`;
+}
+
+// GitHub's README card; MDX's import and export lines, and lines that are only a component, are left out.
+function readme(d) {
+  if (!d.readme) return "";
+  let text = d.readme.text;
+  if (/\.mdx$/i.test(d.readme.name)) text = text.split("\n").filter((l) => !/^\s*(import|export)\s/.test(l) && !/^\s*<\/?[A-Z][\w.]*[^>]*\/?>\s*$/.test(l)).join("\n");
+  const base = at ? at + "/" : "";
+  const body = /\.(md|mdx|markdown)$/i.test(d.readme.name)
+    ? one.markdown(text, {
+        link: (href) => {
+          const p = new URL(href, "file:///" + base).pathname.slice(1).replace(/\/$/, "");
+          const path = decodeURIComponent(p);
+          return `one.open(${/\.[\w]+$/.test(path) ? '"file"' : '"repo"'}, ${JSON.stringify({ repo: d.repo, ref: refOf(d), path })})`;
+        },
+      })
+    : `<pre class="plain-readme">${esc(text)}</pre>`;
+  return `<div class="readme" id="readme"><div class="readme-head">${one.icon("book")}<span>${esc(d.readme.name)}</span></div><div class="readme-body">${body}</div></div>`;
+}
+
+function head(d) {
+  if (at) return "";
+  const clone = `git clone one://${d.repo}`;
+  return `<div class="repo-head">
+      <div class="repo-title"><span class="repo-icon">${one.icon("book")}</span><div>
+        <div class="repo-owner">${esc(d.owner_name)}</div><h1>${esc(d.repo)}</h1>
+        ${d.from ? `<div class="muted small">Forked from <a onclick="${go("repo", { repo: d.from })}">${esc(d.from)}</a></div>` : ""}</div></div>
+      <div class="clone"><code>${esc(clone)}</code>${one.copyButton(clone)}</div>
+    </div>`;
+}
+
+function more(d) {
+  if (at || d.empty) return "";
+  const bare = d.branches.filter((b) => !b.includes("@")).length, sugg = d.branches.length - bare;
+  return `<div class="list repo-links">
+      <a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("branch", "row-icon")}<div class="main"><div class="title"><span>Branches</span><span class="when">${bare}</span></div></div><div class="chev">›</div></a>
+      ${sugg ? `<a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("diff", "row-icon")}<div class="main"><div class="title"><span>Suggestions</span><span class="when">${sugg}</span></div></div><div class="chev">›</div></a>` : ""}
+      <a class="row plain" onclick="${go("history", { repo: d.repo, ref: refOf(d) })}">${one.icon("history", "row-icon")}<div class="main"><div class="title"><span>Commits</span></div></div><div class="chev">›</div></a>
+    </div>`;
+}
+
+async function show() {
+  const d = await one.call("tree", { repo: P.repo, ref: P.ref, path: at });
+  if (d.file) return one.open("file", { repo: d.repo, ref: refOf(d), path: at });
+  if (d.empty)
+    return head(d) + one.empty({ icon: "code", title: "No code yet.", text: `Push some with <code>git push one://${esc(d.repo)} main</code>` });
+  const list = d.entries.length
+    ? `<div class="list files">${at ? `<a class="row plain entry up" onclick="${go("repo", { repo: d.repo, ref: refOf(d), path: at.split("/").slice(0, -1).join("/") })}">${one.icon("folder", "entry-icon")}<span class="entry-name">..</span></a>` : ""}${d.entries.map((e) => entry(d, e)).join("")}</div>`
+    : one.empty({ icon: "folder", title: "This folder is empty." });
+  setTimeout(() => wide() && fill(d), 0);
+  return `${head(d)}${pathBar(d)}<div class="code-box">${commitCard(d.latest, d)}${list}</div>${readme(d)}${more(d)}`;
+}
+
+// Each row's last commit, on windows wide enough to show it.
+async function fill(d) {
+  const latest = await one.call("latest", { repo: d.repo, ref: refOf(d), path: at }).catch(() => ({}));
+  for (const row of document.querySelectorAll(".entry[data-name]")) {
+    const c = latest[row.dataset.name];
+    if (!c) continue;
+    row.querySelector(".entry-commit").innerHTML = `<a onclick="event.stopPropagation();${go("commit", { repo: d.repo, sha: c.sha })}">${esc(c.subject)}</a>`;
+    row.querySelector(".entry-when").textContent = one.ago(c.time, { long: true });
+  }
+}
+
+const draw = () => one.render("#page", show, { loading: "Loading files" });
+one.on("changed", draw);
+draw();
+</script>

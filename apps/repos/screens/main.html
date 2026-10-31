@@ -1,0 +1,33 @@
+<div id="find"></div>
+<div id="page"></div>
+<script>
+let query = "";
+let repos = null;
+
+function row(r) {
+  return `<a class="row repo-row" onclick="${go("repo", { repo: r.name })}">
+    <div class="icon${r.from ? " grey" : ""}">${one.icon("book")}</div>
+    <div class="main">
+      <div class="title"><span>${esc(r.name)}</span><span class="when">${one.ago(r.updated || r.created)}</span></div>
+      <div class="sub">${esc(r.owner_name)}${r.from ? " · fork of " + esc(r.from) : ""} · ${plural(r.branches, "branch", "branches")}${r.suggestions ? " · " + plural(r.suggestions, "suggestion", "suggestions") : ""}</div>
+    </div>
+    <div class="chev">›</div>
+  </a>`;
+}
+
+function list() {
+  if (!repos.length) {
+    document.getElementById("find").hidden = true;
+    return one.empty({ icon: "book", title: "No repos yet.", text: `Push one from any machine with a node:<br><code>git push one://&lt;name&gt; main</code>` });
+  }
+  document.getElementById("find").hidden = false;
+  const q = query.toLowerCase();
+  const shown = repos.filter((r) => !q || r.name.includes(q) || (r.from || "").includes(q));
+  return shown.length ? `<div class="list">${shown.map(row).join("")}</div>` : one.empty({ icon: "search", title: "No repos match." });
+}
+
+one.search("#find", { placeholder: "Find a repo", onSearch: (q) => ((query = q), (document.getElementById("page").innerHTML = list())) });
+const draw = () => one.render("#page", async () => ((repos = await one.call("list")), list()), { loading: "Loading repos" });
+one.on("changed", draw);
+draw();
+</script>
