@@ -1393,7 +1393,7 @@ impl Node {
     /// installed there, for a shell's page of that scope, each reaching only it.
     pub async fn widgets(&self, viewer: Caller, scope: Option<&str>) -> Result<Vec<Value>> {
         let mut out = Vec::new();
-        for (app, ctx) in self.page_contexts(&viewer, scope)? {
+        for (app, ctx, _granted) in self.page_contexts(&viewer, scope)? {
             let describe = self.0.apps.describe(&app).await?;
             for w in describe["widgets"].as_array().into_iter().flatten() {
                 let widget = w["name"].as_str().unwrap_or_default();
@@ -1414,7 +1414,7 @@ impl Node {
     /// are left out.
     pub async fn badges(&self, viewer: Caller, scope: Option<&str>) -> Result<Value> {
         let mut out = serde_json::Map::new();
-        for (app, ctx) in self.page_contexts(&viewer, scope)? {
+        for (app, ctx, _granted) in self.page_contexts(&viewer, scope)? {
             if self.0.apps.describe(&app).await?["badge"] != true {
                 continue;
             }
@@ -1428,8 +1428,8 @@ impl Node {
     }
 
     /// The apps a page shows and the context each renders with: with `scope`, those installed there, each reaching
-    /// only it; without, every app, reaching all it may.
-    fn page_contexts(&self, viewer: &Caller, scope: Option<&str>) -> Result<Vec<(String, Context)>> {
+    /// only it; without, every app, reaching all it may. Each comes with its grant, which lasts as long as it's kept.
+    fn page_contexts(&self, viewer: &Caller, scope: Option<&str>) -> Result<Vec<(String, Context, Granted)>> {
         let scope = match scope {
             Some("user") => Some(Scope::User(viewer.user.clone())),
             Some(s) => Some(Scope::parse(s)?),
@@ -1438,13 +1438,13 @@ impl Node {
         let mut out = Vec::new();
         for app in self.0.apps.names().into_iter().filter(|a| !self.deleted(a)) {
             let mut ctx = self.read_context(&app, viewer)?;
-            let _granted = self.grant(&app, viewer, &mut ctx, 0);
+            let granted = self.grant(&app, viewer, &mut ctx, 0);
             if let Some(scope) = &scope {
                 let installed = self.with(|i| Ok(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&app))))?;
                 ctx.scopes.retain(|s| installed && s.id == scope.to_string());
             }
             if !ctx.scopes.is_empty() {
-                out.push((app, ctx));
+                out.push((app, ctx, granted));
             }
         }
         Ok(out)
