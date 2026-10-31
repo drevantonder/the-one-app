@@ -237,6 +237,8 @@ pub struct Inner {
     built_in: BTreeMap<String, String>,
     /// Each bundle's `icon.png` as a data URL, once read, or none.
     images: Mutex<HashMap<String, Option<String>>>,
+    /// The logos of the sites apps and drivers connect to.
+    logos: crate::logos::Logos,
     /// The calls, widgets and hooks running now, by the token their requests carry.
     grants: Mutex<HashMap<String, Grant>>,
     /// The port apps' requests go out through.
@@ -331,6 +333,7 @@ impl Node {
             bundles: Mutex::new(BTreeMap::new()),
             built_in,
             images: Mutex::new(HashMap::new()),
+            logos: crate::logos::Logos::open(dir),
             grants: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             woke: Instant::now(),
@@ -387,6 +390,9 @@ impl Node {
 
     /// Registers a provider; the node advertises it to the servers it syncs with.
     pub async fn provide(&self, app: &str, describe: Value) -> Result<()> {
+        if let Some(domain) = describe["domain"].as_str() {
+            self.logo(domain, app);
+        }
         self.0.providers.register(app, describe);
         self.say_hello();
         Ok(())
@@ -1504,6 +1510,11 @@ impl Node {
             if describe["screens"].as_array().is_some_and(|s| !s.is_empty()) && describe["installed"].is_null() {
                 describe["installed"] = json!([Scope::User(viewer.user.clone()).to_string()]);
             }
+            if let (Value::Null, Some(domain), Some(name)) = (&describe["image"], describe["domain"].as_str(), describe["name"].as_str()) {
+                if let Some(image) = self.logo(domain, name) {
+                    describe["image"] = json!(image);
+                }
+            }
             out.push(describe);
         }
         Ok(out)
@@ -1556,7 +1567,7 @@ impl Node {
                 if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
                     // A fork's module may still give its first name; the install's name for it is the one that counts.
                     let declared = Schedule::all(&Value::Object(d.clone()));
-                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "description" | "uses"))) {
+                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "description" | "uses"))) {
                         info[k] = v;
                     }
                     if mine {
@@ -1575,9 +1586,37 @@ impl Node {
         for info in &mut out {
             if let Some(image) = info["bundle"].as_str().or(info["built_in"].as_str()).and_then(|b| self.image(b)) {
                 info["image"] = json!(image);
+            } else if let (Some(domain), Some(name)) = (info["domain"].as_str(), info["name"].as_str()) {
+                if let Some(image) = self.logo(domain, name) {
+                    info["image"] = json!(image);
+                }
             }
         }
         Ok(out)
+    }
+
+    /// The logo of `domain`, the site `app` connects to, as a data URL, once this server has fetched it. Fetches it
+    /// in the background when it hasn't, or did a week ago, then tells shells `app` changed.
+    fn logo(&self, domain: &str, app: &str) -> Option<String> {
+        let (url, due) = self.0.logos.get(&self.0.dir, domain, now_ms());
+        if due && self.0.logos.begin(domain) {
+            let (node, domain, app) = (self.clone(), domain.to_string(), app.to_string());
+            tokio::spawn(async move {
+                let d = domain.clone();
+                let logo = match tokio::task::spawn_blocking(move || crate::logos::fetch(&d)).await {
+                    Ok(Ok(logo)) => Some(logo),
+                    Ok(Err(err)) => {
+                        tracing::warn!("{app}'s logo: {err:#}");
+                        None
+                    }
+                    Err(_) => None,
+                };
+                if node.0.logos.finish(&node.0.dir, &domain, logo, now_ms()) {
+                    node.emit(Event::Changed { apps: vec![app] });
+                }
+            });
+        }
+        url
     }
 
     /// The picture a bundle's app shows on its tile instead of its symbol: `icon.png` in its folder, as a data URL.

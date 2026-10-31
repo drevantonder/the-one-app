@@ -175,7 +175,7 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
 
 ```js
 {
-  name, title, icon, color, description, instructions,  // description: one line on what it's for
+  name, title, icon, color, domain, description, instructions,  // description: one line on what it's for
   uses: { apps: [name], drivers: [name] },
   schema: { user, group, global },  // SQL run on each empty store of that scope
   ops: { name: { description, input, reads?, confirm?, run(ctx, input) } },  // reads: only reads; confirm: can't be undone
@@ -188,7 +188,7 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
 }
 ```
 
-**Icons.** A shell draws an app's tile as its `icon` (an SF Symbol's name) in white on its `color` (`"#rrggbb"`), or on a colour it picks by the app's name when it declares none. An app whose folder holds `icon.png` (a square picture, opaque or on white) shows that instead: `GET /v1/apps` and `catalog()` give it as `image`, a data URL, from bundles the server has.
+**Icons.** A shell draws an app's tile as its `icon` (an SF Symbol's name) in white on its `color` (`"#rrggbb"`), or on a colour it picks by the app's name when it declares none. An app whose folder holds `icon.png` (a square picture, opaque or on white) shows that instead: `GET /v1/apps` and `catalog()` give it as `image`, a data URL, from bundles the server has. An app or driver with no `icon.png` that names the site it connects to as `domain` (`"messenger.com"`) shows that site's logo: a server fetches it itself, as a browser finds a site's icon (the page's apple-touch-icon, then `/apple-touch-icon.png`, then the largest icon the page links to, then `/favicon.ico`; an ICO's largest picture becomes a PNG; SVG is skipped), keeps it as a blob, fetches it again weekly, and gives it as `image`, so devices never ask the site. A shell insets a picture with clear corners, as on white.
 
 **Connected apps.** An app that only connects accounts, for the person's agents and other apps (Gmail, a chat's linked phone), has the operations `accounts`, `sign_in` and `sign_out`, and a `settings` screen but no `main` one. A shell keeps such apps in one Connected Apps folder at the end of each page they're installed on, listing each app's accounts, rather than giving each an icon; drivers may follow it too. Every connected app takes several accounts:
 

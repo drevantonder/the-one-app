@@ -40,6 +40,8 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
+# A site's favicon.ico becomes a PNG for shells (src/logos.rs); ureq already brings it in.
+flate2 = "1"
 jsonc-parser = { version = "0.34", features = ["cst", "serde"] }
 toml_edit = "0.25"
 

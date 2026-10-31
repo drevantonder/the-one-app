@@ -86,7 +86,13 @@ struct AppTile: View {
         let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
         Group {
             if let picture = image.flatMap(Self.picture) {
-                shape.fill(.white).overlay { picture.resizable().interpolation(.high).scaledToFill() }.clipShape(shape)
+                // A logo with clear corners (a site's icon) sits inset on white, as one drawn on white would.
+                shape.fill(.white)
+                    .overlay {
+                        picture.image.resizable().interpolation(.high).aspectRatio(contentMode: picture.clear ? .fit : .fill)
+                            .padding(picture.clear ? size * 0.16 : 0)
+                    }
+                    .clipShape(shape)
                     .overlay { shape.strokeBorder(.black.opacity(0.1), lineWidth: 0.5) }
             } else {
                 let (r, g, b) = brandRGB(color ?? Self.colors[steadyHash(seed) % Self.colors.count], dark: false)
@@ -104,21 +110,40 @@ struct AppTile: View {
         .shadow(color: .black.opacity(0.12), radius: size * 0.08, y: size * 0.04)
     }
 
-    nonisolated(unsafe) private static let pictures = NSCache<NSString, PlatformImage>()
+    /// An app's picture, and whether its corners are clear.
+    private final class Picture {
+        let image: Image
+        let clear: Bool
+        init(_ image: Image, clear: Bool) { self.image = image; self.clear = clear }
+    }
+
+    nonisolated(unsafe) private static let pictures = NSCache<NSString, Picture>()
 
     /// An app's picture, from the data URL its server gives.
-    private static func picture(_ url: String) -> Image? {
-        let image = pictures.object(forKey: url as NSString) ?? {
-            guard let comma = url.firstIndex(of: ","), let data = Data(base64Encoded: String(url[url.index(after: comma)...])),
-                  let image = PlatformImage(data: data) else { return nil }
-            pictures.setObject(image, forKey: url as NSString)
-            return image
-        }()
+    private static func picture(_ url: String) -> Picture? {
+        if let picture = pictures.object(forKey: url as NSString) { return picture }
+        guard let comma = url.firstIndex(of: ","), let data = Data(base64Encoded: String(url[url.index(after: comma)...])),
+              let image = PlatformImage(data: data) else { return nil }
         #if canImport(AppKit)
-        return image.map { Image(nsImage: $0) }
+        let picture = Picture(Image(nsImage: image), clear: image.cgImage(forProposedRect: nil, context: nil, hints: nil).map(clearCorners) ?? false)
         #else
-        return image.map { Image(uiImage: $0) }
+        let picture = Picture(Image(uiImage: image), clear: image.cgImage.map(clearCorners) ?? false)
         #endif
+        pictures.setObject(picture, forKey: url as NSString)
+        return picture
+    }
+
+    /// Whether any of a picture's corners is see-through.
+    private static func clearCorners(_ image: CGImage) -> Bool {
+        var pixels = [UInt8](repeating: 0, count: 8 * 8 * 4)
+        let drawn = pixels.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.interpolationQuality = .medium
+            context.draw(image, in: CGRect(x: 0, y: 0, width: 8, height: 8))
+            return true
+        }
+        return drawn && [0, 7, 56, 63].contains { pixels[$0 * 4 + 3] < 128 }
     }
 }
 

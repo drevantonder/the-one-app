@@ -37,6 +37,7 @@ pub mod bundle;
 pub mod deploy;
 pub mod models;
 pub mod load;
+pub mod logos;
 pub mod native;
 pub mod node;
 pub mod outbound;
