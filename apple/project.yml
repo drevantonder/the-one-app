@@ -14,7 +14,7 @@ targets:
   Mac:
     type: application
     platform: macOS
-    sources: [Shared, Mac]
+    sources: [Shared, Mac, build/Brand.xcassets]
     settings:
       base:
         PRODUCT_NAME: ${BRAND_NAME}
@@ -41,7 +41,7 @@ targets:
   Phone:
     type: application
     platform: iOS
-    sources: [Shared, Phone, Widget/Newest.swift, build/Phone.xcassets]
+    sources: [Shared, Phone, Widget/Newest.swift, build/Phone.xcassets, build/Brand.xcassets]
     dependencies:
       - framework: build/OneClient.xcframework
         embed: false
@@ -74,7 +74,7 @@ targets:
   Widgets:
     type: app-extension
     platform: iOS
-    sources: [Widget, Shared/Views/Style.swift]
+    sources: [Widget, Shared/Views/Style.swift, build/Brand.xcassets]
     settings:
       base:
         PRODUCT_NAME: Widgets

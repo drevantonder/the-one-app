@@ -3,7 +3,7 @@
 name = "The One App"
 cli = "one"
 port = 4747
-accent = "#5E5CE6"
+accent = "#9E6E06"
 # Artwork, relative to this file: the app icon (1024px), the menu bar template (18pt, with an @2x),
 # and the logo the apps show inside themselves.
 icon = "brand/AppIcon.png"
