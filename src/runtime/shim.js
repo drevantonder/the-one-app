@@ -158,7 +158,7 @@ export default {
     if (what === "describe") return json({ ok: describe() });
     if (what === "screen") {
       const screen = app.screens?.[url.searchParams.get("name")];
-      return screen ? json({ ok: screen.html }) : json({ error: `${app.name} has no screen ${url.searchParams.get("name")}` }, 404);
+      return json({ ok: screen ? screen.html : null });
     }
     const body = await req.json();
     try {

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context as _, Result, anyhow, bail, ensure};
+use anyhow::{Result, anyhow, bail, ensure};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::Digest;
@@ -282,10 +282,10 @@ impl Apps {
         Ok(self.ask(app, "hook", json!({ "name": name, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
     }
 
-    /// A screen's HTML, as the app wrote it.
-    pub async fn screen(&self, app: &str, name: &str) -> Result<String> {
+    /// A screen's HTML, as the app wrote it, or None if the app has no such screen.
+    pub async fn screen(&self, app: &str, name: &str) -> Result<Option<String>> {
         let reply = self.ask(app, &format!("screen?name={name}"), json!({})).await?;
-        reply["ok"].as_str().map(str::to_string).context("the screen isn't text")
+        Ok(reply["ok"].as_str().map(str::to_string))
     }
 
     pub async fn describe(&self, app: &str) -> Result<Value> {

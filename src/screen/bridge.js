@@ -24,6 +24,7 @@
       location.href = `/v1/screens/${ctx.app}/${message.screen}?${q}`;
     }
     if (message.type === "title") document.title = message.text;
+    if (message.type === "copy") return navigator.clipboard.writeText(message.text);
   }
 
   // Browser only: the node's events, to refresh when this app's data changes.
@@ -42,14 +43,44 @@
     call: (op, input = {}) => host({ type: "call", app: ctx.app, op, input }),
     open: (screen, params = {}) => host({ type: "open", screen, params }),
     title: (text) => host({ type: "title", text }),
+    // Copies text: through the shell (which a page's clipboard can't always reach), else the browser's clipboard.
+    async copy(text) {
+      try {
+        await host({ type: "copy", text: String(text) });
+      } catch {
+        const t = Object.assign(document.createElement("textarea"), { value: String(text) });
+        document.body.append(t);
+        t.select();
+        document.execCommand("copy");
+        t.remove();
+      }
+    },
+    // A haptic on a phone: "selection" (a press), "medium" (a long press), "success" or "error". Elsewhere, nothing.
+    tap: (style = "selection") => shell?.postMessage({ type: "haptic", style }).catch(() => {}),
     on: (event, fn) => (handlers[event] ||= []).push(fn),
     // The shell calls this with node events.
     __event(e) {
       if (e.type === "changed" && (e.apps || []).includes(ctx.app)) handlers.changed.forEach((f) => f(e));
     },
     esc: (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]),
-    ago(ms, now = Date.now()) {
+    // How long ago: short ("5 min", "Tue", "3 Oct") for tight rows, or with `{ long: true }` for where there's room
+    // ("5 minutes ago", "3 days ago", "2 years ago").
+    ago(ms, opts = {}) {
+      const now = typeof opts === "number" ? opts : opts.now ?? Date.now();
       const s = Math.max(0, (now - ms) / 1000);
+      if (opts.long) {
+        const steps = [[60, "second"], [60, "minute"], [24, "hour"], [30.44, "day"], [12, "month"], [Infinity, "year"]];
+        if (s < 45) return "just now";
+        let n = s;
+        for (const [size, unit] of steps) {
+          if (n < size) {
+            const k = Math.max(1, Math.round(n));
+            if (k > 1) return `${k} ${unit}s ago`;
+            return { minute: "a minute ago", hour: "an hour ago", day: "yesterday", month: "last month", year: "last year" }[unit];
+          }
+          n /= size;
+        }
+      }
       if (s < 60) return "now";
       if (s < 3600) return `${Math.floor(s / 60)} min`;
       if (s < 86400) return `${Math.floor(s / 3600)} h`;

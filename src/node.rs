@@ -901,7 +901,8 @@ impl Node {
     pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>) -> Result<String> {
         let deployed = self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some())))?;
         let body = match deployed {
-            true => self.0.apps.screen(app, name).await?,
+            // A screen the app doesn't have (an old or mistyped link) is a page that says so.
+            true => self.0.apps.screen(app, name).await?.unwrap_or_else(|| "<div id=\"missing\"></div><script>missing.innerHTML = one.notFound()</script>".into()),
             // A driver's screen, for now: its `_screen` operation gives the body, wherever the driver runs.
             false => {
                 let input = json!({ "name": name, "params": params });
@@ -920,7 +921,7 @@ impl Node {
              <style>{kit}:root{{--accent:{accent}}}</style><script>window.__one={context};{bridge}</script></head><body>{body}</body></html>",
             kit = include_str!("screen/kit.css"),
             accent = crate::brand::ACCENT,
-            bridge = include_str!("screen/bridge.js"),
+            bridge = concat!(include_str!("screen/bridge.js"), include_str!("screen/kit.js"), include_str!("screen/code.js"), include_str!("screen/markdown.js")),
         ))
     }
 

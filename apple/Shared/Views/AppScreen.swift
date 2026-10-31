@@ -161,7 +161,7 @@ private struct ScreenWebView: Representable {
             }
         }
 
-        /// The bridge: `{ type: "call" | "open" | "title" | "icon", … }`. A page only ever calls its own app.
+        /// The bridge: `{ type: "call" | "open" | "title" | "icon" | "copy" | "haptic", … }`. A page only ever calls its own app.
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
             guard let body = message.body as? [String: Any] else { return (nil, "Not a message") }
             let route = view.route
@@ -184,6 +184,25 @@ private struct ScreenWebView: Representable {
             case "icon":
                 let tile = AppTile(symbol: symbol(body["symbol"] as? String), seed: body["seed"] as? String ?? "", size: body["size"] as? Double ?? 36)
                 return (Self.png(tile), nil)
+            case "copy":
+                let text = body["text"] as? String ?? ""
+                #if os(macOS)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                #else
+                UIPasteboard.general.string = text
+                #endif
+                return (nil, nil)
+            case "haptic":
+                #if os(iOS)
+                switch body["style"] as? String {
+                case "medium": UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                case "success": UINotificationFeedbackGenerator().notificationOccurred(.success)
+                case "error": UINotificationFeedbackGenerator().notificationOccurred(.error)
+                default: UISelectionFeedbackGenerator().selectionChanged()
+                }
+                #endif
+                return (nil, nil)
             default:
                 return (nil, "Unknown message")
             }
