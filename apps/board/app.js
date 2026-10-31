@@ -542,18 +542,43 @@ show();
   widgets: {
     latest: {
       title: "Board",
+      size: "medium",
+      sizes: ["small", "medium", "large", "xl"],
       async render(ctx) {
-        const p = (await board(ctx).query("select * from posts order by time desc limit 1"))[0];
-        if (!p) return { t: "col", c: [{ t: "text", text: "Nothing on the board yet", tone: "muted" }] };
+        const many = { small: 1, medium: 2, large: 5, xl: 5 }[ctx.size] || 2;
+        const posts = await board(ctx).query("select * from posts order by time desc limit ?", [many]);
+        if (!posts.length) return { t: "text", text: "Nothing on the board yet", size: "sm", tone: "muted" };
+        // Who wrote it: the agent and its machine, or the person.
+        const who = (p) => (p.agent ? `${p.agent} · ${p.name}` : p.user_name || p.name);
+        const topic = (p) => (p.topic || "top").split("/").pop();
+        const link = (p) => ({ screen: "topic", params: { path: p.topic || "" } });
+        if (ctx.size === "small") {
+          const p = posts[0];
+          return {
+            t: "col", gap: 3, link: link(p),
+            c: [
+              { t: "row", gap: 4, c: [{ t: "text", text: topic(p), size: "xs", weight: "medium", tone: "accent" }, { t: "time", at: p.time, size: "xs", tone: "muted" }] },
+              { t: "text", text: p.text, size: "sm", lines: 4 },
+              { t: "col", grow: true, c: [] },
+              { t: "text", text: who(p), size: "xs", tone: "muted", lines: 1 },
+            ],
+          };
+        }
         return {
-          t: "col",
-          gap: 4,
-          // Tapping it opens the post's topic.
-          link: { screen: "topic", params: { path: p.topic || "" } },
-          c: [
-            { t: "row", gap: 6, c: [{ t: "text", text: p.name, size: "sm", weight: "medium" }, { t: "text", text: p.topic || "top", size: "sm", tone: "muted" }, { t: "time", at: p.time, size: "sm", tone: "muted" }] },
-            { t: "text", text: p.text, lines: 3 },
-          ],
+          // Spread out to fill the widget.
+          t: "col", gap: 6,
+          c: posts.flatMap((p, i) => [...(i ? [{ t: "col", grow: true, c: [] }] : []), {
+            t: "col", gap: 2, link: link(p),
+            c: [
+              { t: "row", gap: 5, c: [
+                { t: "text", text: who(p), size: "xs", weight: "medium", lines: 1 },
+                { t: "text", text: topic(p), size: "xs", tone: "accent", lines: 1 },
+                { t: "col", grow: true, c: [] },
+                { t: "time", at: p.time, size: "xs", tone: "muted" },
+              ] },
+              { t: "text", text: p.text, size: "sm", lines: 2 },
+            ],
+          }]),
         };
       },
     },

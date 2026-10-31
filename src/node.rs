@@ -1368,11 +1368,22 @@ impl Node {
             let describe = self.0.apps.describe(&app).await?;
             for w in describe["widgets"].as_array().into_iter().flatten() {
                 let widget = w["name"].as_str().unwrap_or_default();
-                match self.0.apps.widget(&app, widget, &ctx).await {
-                    Ok(root) => out.push(json!({ "app": app, "widget": widget, "title": w["title"], "size": w["size"], "root": root })),
+                let size = w["size"].as_str().unwrap_or("medium");
+                match self.0.apps.widget(&app, widget, size, &ctx).await {
+                    Ok(root) => {
+                        // Each other size it draws, as its own tree; one that fails is left out, and shells draw `root`.
+                        let mut sizes = serde_json::Map::new();
+                        for other in w["sizes"].as_array().into_iter().flatten().filter_map(|s| s.as_str()).filter(|s| *s != size) {
+                            if let Ok(tree) = self.0.apps.widget(&app, widget, other, &ctx).await {
+                                sizes.insert(other.to_string(), tree);
+                            }
+                        }
+                        sizes.insert(size.to_string(), root.clone());
+                        out.push(json!({ "app": app, "widget": widget, "title": w["title"], "size": size, "sizes": sizes, "root": root }))
+                    }
                     // A shell that knows `error` says the widget is broken; one that doesn't still draws `root`.
                     Err(err) => out.push(json!({
-                        "app": app, "widget": widget, "title": w["title"], "size": w["size"], "error": format!("{err:#}"),
+                        "app": app, "widget": widget, "title": w["title"], "size": size, "error": format!("{err:#}"),
                         "root": { "t": "text", "text": "This widget stopped working.", "tone": "muted" },
                     })),
                 }

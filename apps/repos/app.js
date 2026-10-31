@@ -258,19 +258,55 @@ export default {
   widgets: {
     latest: {
       title: "Repos",
+      size: "small",
+      sizes: ["small", "medium", "large", "xl"],
       async render(ctx) {
         if (!ctx.global) return { t: "col", c: [] };
-        const b = (await ctx.global.query("select repo, branch, name, time from branches order by time desc limit 1"))[0];
-        if (!b) return { t: "col", c: [{ t: "text", text: "No repos yet", tone: "muted" }] };
+        const many = { small: 1, medium: 3, large: 6, xl: 6 }[ctx.size] || 3;
+        // The branches pushed to last, each with its head commit's subject.
+        const pushed = await ctx.global.query("select repo, branch, head, name, time from branches order by time desc limit ?", [many]);
+        if (!pushed.length) return { t: "text", text: "No repos yet", size: "sm", tone: "muted" };
+        for (const b of pushed) b.subject = await subject(ctx, b.repo, b.head);
+        const link = (b) => ({ screen: "commit", params: { repo: b.repo, sha: b.head } });
+        if (ctx.size === "small") {
+          const b = pushed[0];
+          return {
+            t: "col", gap: 3, link: link(b),
+            c: [
+              { t: "row", gap: 4, c: [{ t: "text", text: b.repo, size: "xs", weight: "medium", tone: "accent", lines: 1 }, { t: "time", at: b.time, size: "xs", tone: "muted" }] },
+              { t: "text", text: b.subject || `Pushed ${b.branch}`, size: "sm", lines: 4 },
+              { t: "col", grow: true, c: [] },
+              { t: "text", text: `${b.name} · ${b.branch}`, size: "xs", tone: "muted", lines: 1 },
+            ],
+          };
+        }
         return {
-          t: "col",
-          gap: 4,
-          c: [
-            { t: "row", gap: 6, c: [{ t: "text", text: b.repo, size: "sm", weight: "medium" }, { t: "text", text: b.branch, size: "sm", tone: "muted" }, { t: "time", at: b.time, size: "sm", tone: "muted" }] },
-            { t: "text", text: `${b.name} pushed`, lines: 1 },
-          ],
+          // Spread out to fill the widget.
+          t: "col", gap: 4,
+          c: pushed.flatMap((b, i) => [...(i ? [{ t: "col", grow: true, c: [] }] : []), {
+            t: "col", gap: 2, link: link(b),
+            c: [
+              { t: "row", gap: 5, c: [
+                { t: "text", text: b.repo, size: "xs", weight: "medium", lines: 1 },
+                { t: "text", text: b.branch, size: "xs", tone: "accent", lines: 1 },
+                { t: "col", grow: true, c: [] },
+                { t: "time", at: b.time, size: "xs", tone: "muted" },
+              ] },
+              { t: "text", text: b.subject ? (ctx.size === "medium" ? b.subject : `${b.subject} · ${b.name}`) : `${b.name} pushed`, size: "sm", lines: 1 },
+            ],
+          }]),
         };
       },
     },
   },
 };
+
+/// A commit's subject, read from its repo's packs; none if they can't be read.
+async function subject(ctx, repo, sha) {
+  try {
+    const { o } = await browse.open(ctx, ctx.global, repo, sha);
+    return browse.summary(o.commit(sha)).subject;
+  } catch {
+    return null;
+  }
+}

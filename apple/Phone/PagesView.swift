@@ -178,13 +178,13 @@ extension Store {
         let items = pages.flatMap { page in
             widgets(on: page, hidden: true).map { w in
                 WidgetCache.Item(app: w.app, widget: w.widget, scope: page.scope, page: page.title, title: w.title ?? app(w.app)?.label ?? w.widget,
-                                 icon: symbol(app(w.app)?.icon), error: w.error, root: w.root)
+                                 icon: symbol(app(w.app)?.icon), error: w.error, root: w.root, sizes: w.sizes)
             }
         }
         guard !items.isEmpty else { return }
         WidgetCache(install: install?.name, widgets: items).save()
         WidgetCenter.shared.reloadAllTimelines()
-        let images = items.flatMap(\.root.imageURLs)
+        let images = items.flatMap { [$0.root] + ($0.sizes ?? [:]).values }.flatMap(\.imageURLs)
         if !images.isEmpty {
             await WidgetImages.save(images)
             WidgetCenter.shared.reloadAllTimelines()

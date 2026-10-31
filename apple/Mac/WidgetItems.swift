@@ -153,7 +153,7 @@ private struct WidgetPopover: View {
             }
             if let widget = shown.widget {
                 TimelineView(.everyMinute) { context in
-                    WidgetTree(node: widget.root, now: context.date)
+                    WidgetTree(node: widget.tree("medium"), now: context.date)
                 }
                 .environment(\.widgetHost, WidgetHost(app: widget.app, run: { op, input in await WidgetItems.shared.run(app: widget.app, op: op, input: input) },
                                                       open: { link in

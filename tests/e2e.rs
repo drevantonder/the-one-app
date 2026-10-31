@@ -153,7 +153,9 @@ async fn users_groups_trust_and_privileged_servers() {
     assert!(andre.widgets(me.clone(), Some("group:f000000000000001")).await.unwrap().is_empty());
     andre.append(&one::entry::Scope::Group("f000000000000001".into()), one::members::node("install", json!({ "app": "board" }))).await.unwrap();
     let widgets = andre.widgets(me, Some("group:f000000000000001")).await.unwrap();
-    assert_eq!(widgets[0]["root"]["c"][1]["text"], "hi family", "a group's page shows its board: {widgets:?}");
+    assert_eq!(widgets[0]["root"]["c"][0]["c"][1]["text"], "hi family", "a group's page shows its board: {widgets:?}");
+    // It draws each size it lists, the small one its own way.
+    assert_eq!(widgets[0]["sizes"]["small"]["c"][1]["text"], "hi family", "{widgets:?}");
 
     // A phone-only user needs a server that serves them.
     let carol_code = andre.pair(Some(("Carol".into(), one::members::Role::Member))).unwrap();

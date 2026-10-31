@@ -165,7 +165,7 @@ private struct PanelWidget: View {
                     .foregroundStyle(.orange)
             } else {
                 TimelineView(.everyMinute) { context in
-                    WidgetTree(node: widget.root, now: context.date)
+                    WidgetTree(node: widget.tree("medium"), now: context.date)
                         .font(.callout)
                 }
                 .environment(\.widgetHost, WidgetHost(app: widget.app, scope: nil, run: { [store] op, input in await store.run(app: widget.app, op: op, input: input) },
@@ -176,7 +176,7 @@ private struct PanelWidget: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.fill.quaternary, in: .rect(cornerRadius: 10, style: .continuous))
         .contentShape(.rect)
-        .onTapGesture { follow(widget.root.link) }
+        .onTapGesture { follow(widget.tree("medium").link) }
     }
 
     /// A web link in the browser; a screen, or the app's first, in the window.

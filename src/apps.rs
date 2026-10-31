@@ -311,8 +311,9 @@ impl Apps {
         Ok(self.ask(app, "badge", json!({ "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
     }
 
-    pub async fn widget(&self, app: &str, name: &str, ctx: &Context) -> Result<Value> {
-        Ok(self.ask(app, "widget", json!({ "name": name, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
+    /// A widget's tree at `size` (`small`, `medium`, `large` or `xl`), which its render sees as `ctx.size`.
+    pub async fn widget(&self, app: &str, name: &str, size: &str, ctx: &Context) -> Result<Value> {
+        Ok(self.ask(app, "widget", json!({ "name": name, "size": size, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
     }
 
     pub async fn hook(&self, app: &str, name: &str, input: Value, ctx: &Context) -> Result<Value> {

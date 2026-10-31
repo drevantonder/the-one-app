@@ -6,13 +6,54 @@ struct WidgetInfo: Codable, Sendable, Equatable, Identifiable {
     var app: String
     var widget: String
     var title: String?
-    /// The size its app gives it: `small`, `medium` or `large`.
+    /// The size a page starts it at: `small`, `medium`, `large` or `xl`.
     var size: String?
+    /// Its tree at each size it draws; `root` is the one at `size`.
+    var sizes: [String: WidgetNode]?
     /// Why its render failed, if it did; `root` then says so for shells that don't know this.
     var error: String?
     var root: WidgetNode
 
     var id: String { "\(app).\(widget)" }
+
+    /// The sizes it draws, smallest first: every size, from a server that renders each widget once.
+    var supported: [String] { WidgetSize.all.filter { sizes?[$0] != nil || sizes == nil } }
+
+    /// Its tree at `size`, or at its own size if it doesn't draw that one.
+    func tree(_ size: String) -> WidgetNode { sizes?[size] ?? root }
+}
+
+/// The sizes of an iPhone's Home Screen widgets, in its grid's cells: small 2×2, medium 4×2, large 4×4, and xl 8×4,
+/// where a page is wide enough.
+enum WidgetSize {
+    static let all = ["small", "medium", "large", "xl"]
+
+    static func cells(_ size: String) -> (w: Int, h: Int) {
+        switch size {
+        case "small": (2, 2)
+        case "large": (4, 4)
+        case "xl": (8, 4)
+        default: (4, 2)
+        }
+    }
+
+    static func title(_ size: String) -> String {
+        switch size {
+        case "small": String(localized: "Small")
+        case "large": String(localized: "Large")
+        case "xl": String(localized: "Extra Large")
+        default: String(localized: "Medium")
+        }
+    }
+
+    static func symbol(_ size: String) -> String {
+        switch size {
+        case "small": "square"
+        case "large": "square.grid.2x2"
+        case "xl": "rectangle.split.2x1"
+        default: "rectangle"
+        }
+    }
 }
 
 /// Any JSON value: an operation's input, as a widget gives it.
@@ -151,6 +192,12 @@ struct WidgetNode: Codable, Sendable, Equatable {
     var on: Bool?
     var anim: Bool?
     var next: Double?
+    var grow: Bool?
+    var align: String?
+    var dim: Bool?
+    var badge: String?
+    /// On the root, false: the tree labels itself, so no title goes over it.
+    var header: Bool?
 
     init(t: String, gap: Double? = nil, c: [WidgetNode]? = nil, text: String? = nil, size: String? = nil, weight: String? = nil,
          tone: String? = nil, lines: Int? = nil, at: Double? = nil, value: JSONValue? = nil, label: String? = nil) {
@@ -169,7 +216,7 @@ struct WidgetNode: Codable, Sendable, Equatable {
 
     private enum Key: String, CodingKey {
         case t, gap, c, text, size, weight, tone, lines, at, style, value, max, label, unit, values, labels, kind, title, subtitle,
-             trailing, icon, name, url, w, h, round, empty, link, op, input, on, anim, next
+             trailing, icon, name, url, w, h, round, empty, link, op, input, on, anim, next, grow, align, dim, badge, header
     }
 
     /// Decodes what it can: a field of the wrong shape is left out, and so is a child that isn't a node.
@@ -182,7 +229,8 @@ struct WidgetNode: Codable, Sendable, Equatable {
         values = get(.values); labels = get(.labels); kind = get(.kind); title = get(.title); subtitle = get(.subtitle)
         trailing = get(.trailing); icon = get(.icon); name = get(.name); url = get(.url); w = get(.w); h = get(.h)
         round = get(.round); empty = get(.empty); link = get(.link); op = get(.op); input = get(.input); on = get(.on)
-        anim = get(.anim); next = get(.next)
+        anim = get(.anim); next = get(.next); grow = get(.grow); align = get(.align); dim = get(.dim); badge = get(.badge)
+        header = get(.header)
         let children: [Skippable]? = get(.c)
         c = children?.compactMap(\.node)
     }
@@ -251,9 +299,13 @@ struct WidgetTree: View {
     @ViewBuilder private var content: some View {
         switch node.t {
         case "col":
-            VStack(alignment: .leading, spacing: node.gap.map { CGFloat($0) } ?? 4) { children(inRow: false) }
+            VStack(alignment: node.align == "center" ? .center : .leading, spacing: node.gap.map { CGFloat($0) } ?? 4) { children(inRow: false) }
+                .frame(width: node.w.map { CGFloat($0) })
+                .opacity(node.dim == true ? 0.5 : 1)
         case "row":
             HStack(alignment: .center, spacing: node.gap.map { CGFloat($0) } ?? 6) { children(inRow: true) }
+                .frame(width: node.w.map { CGFloat($0) }, alignment: node.align == "center" ? .center : .leading)
+                .opacity(node.dim == true ? 0.5 : 1)
         case "text":
             Changing(text: node.text ?? "", number: nil, anim: node.anim == true) { styled($0) }
         case "time":
@@ -263,17 +315,9 @@ struct WidgetTree: View {
         case "gauge":
             Ring(node: node)
         case "progress":
-            VStack(alignment: .leading, spacing: 4) {
-                if let label = node.label { Text(label).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                ProgressView(value: fraction).tint(toneColor(node.tone))
-            }
+            Bar(node: node, fraction: fraction)
         case "spark":
-            Chart(Array((node.values ?? []).enumerated()), id: \.offset) { i, v in
-                LineMark(x: .value("", i), y: .value("", v)).interpolationMethod(.catmullRom)
-            }
-            .chartXAxis(.hidden).chartYAxis(.hidden).chartLegend(.hidden)
-            .foregroundStyle(toned(node.tone, otherwise: .tint))
-            .frame(height: node.h.map { CGFloat($0) } ?? 28)
+            Spark(node: node)
         case "chart":
             BarsOrLine(node: node)
         case "list":
@@ -283,9 +327,7 @@ struct WidgetTree: View {
         case "image":
             WidgetImage(node: node)
         case "icon":
-            Image(systemName: symbol(node.name))
-                .font(node.size.map { _ in font } ?? nil)
-                .foregroundStyle(toned(node.tone, otherwise: .tint))
+            Icon(node: node, font: font)
         case "dot":
             Circle().fill(toned(node.tone, otherwise: .green)).frame(width: 8, height: 8)
         case "link":
@@ -320,9 +362,12 @@ struct WidgetTree: View {
     }
 
     private func children(inRow: Bool) -> some View {
-        // In a row, earlier nodes keep their room first.
+        // In a row, earlier nodes keep their room first; a node that grows takes what its parent has left.
         ForEach(Array((node.c ?? []).enumerated()), id: \.offset) { i, child in
-            AnyView(WidgetTree(node: child, now: now, inRow: inRow)).layoutPriority(inRow ? -Double(i) : 0)
+            AnyView(WidgetTree(node: child, now: now, inRow: inRow))
+                .frame(maxWidth: child.grow == true && inRow ? .infinity : nil, maxHeight: child.grow == true && !inRow ? .infinity : nil,
+                       alignment: .topLeading)
+                .layoutPriority(inRow ? -Double(i) : 0)
         }
     }
 
@@ -359,7 +404,8 @@ func widgetFont(_ size: String?) -> Font? {
     switch size {
     case "xl": .title2
     case "lg": .headline
-    case "sm": .caption
+    case "sm": .footnote
+    case "xs": .caption2
     default: nil
     }
 }
@@ -372,6 +418,8 @@ func toned(_ tone: String?, otherwise: some ShapeStyle = .primary) -> AnyShapeSt
     case "good": AnyShapeStyle(.green)
     case "warn": AnyShapeStyle(.orange)
     case "bad": AnyShapeStyle(.red)
+    case "blue": AnyShapeStyle(.blue)
+    case "purple": AnyShapeStyle(.purple)
     default: AnyShapeStyle(otherwise)
     }
 }
@@ -383,6 +431,8 @@ func toneColor(_ tone: String?) -> Color? {
     case "good": .green
     case "warn": .orange
     case "bad": .red
+    case "blue": .blue
+    case "purple": .purple
     default: nil
     }
 }
@@ -430,19 +480,120 @@ private struct Ring: View {
     var body: some View {
         let max = node.max ?? 1
         let fraction = max > 0 ? min(1, Swift.max(0, (node.value?.number ?? 0) / max)) : 0
+        let size = CGFloat(node.w ?? 46), line = min(5, size / 6)
         ZStack {
-            Circle().stroke(.quaternary, lineWidth: 5)
+            Circle().stroke(.quaternary, lineWidth: line)
             Circle().trim(from: 0, to: fraction)
-                .stroke(toned(node.tone, otherwise: .tint), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .stroke(toned(node.tone, otherwise: .tint), style: StrokeStyle(lineWidth: line, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text(node.label ?? "\(Int((fraction * 100).rounded()))%")
-                .font(.caption2.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
-                .padding(6)
+            if node.label != "" {
+                Text(node.label ?? "\(Int((fraction * 100).rounded()))%")
+                    .font(.caption2.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                    .padding(6)
+            }
         }
-        .frame(width: CGFloat(node.w ?? 46), height: CGFloat(node.w ?? 46))
+        .padding(line / 2)
+        .frame(width: size, height: size)
         .accessibilityElement()
         .accessibilityLabel(node.label ?? "")
         .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
+    }
+}
+
+/// A bar filled `fraction` of the way, with its label over it.
+private struct Bar: View {
+    var node: WidgetNode
+    var fraction: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let label = node.label { Text(label).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary)
+                    Capsule().fill(toned(node.tone, otherwise: .tint)).frame(width: Swift.max(6, geo.size.width * fraction))
+                }
+            }
+            .frame(width: node.w.map { CGFloat($0) }, height: 6)
+        }
+        .accessibilityElement()
+        .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
+    }
+}
+
+/// A line through numbers from 0 to `max`, shaded under; a dashed line when there are none.
+private struct Spark: View {
+    var node: WidgetNode
+
+    var body: some View {
+        let values = node.values ?? []
+        Canvas { context, size in
+            guard !values.isEmpty else {
+                var line = Path()
+                line.move(to: CGPoint(x: 2, y: size.height / 2))
+                line.addLine(to: CGPoint(x: size.width - 2, y: size.height / 2))
+                context.stroke(line, with: .style(.quaternary), style: StrokeStyle(lineWidth: 1.5, dash: [2, 3]))
+                return
+            }
+            let data = values.count == 1 ? [values[0], values[0]] : values
+            let top = node.max ?? Swift.max(1, data.max() ?? 1)
+            let points = data.enumerated().map { i, v in
+                CGPoint(x: CGFloat(i) / CGFloat(data.count - 1) * size.width,
+                        y: size.height - 1 - CGFloat(Swift.min(Swift.max(v, 0), top) / top) * (size.height - 2))
+            }
+            var line = Path()
+            line.addLines(points)
+            var area = line
+            area.addLine(to: CGPoint(x: size.width, y: size.height))
+            area.addLine(to: CGPoint(x: 0, y: size.height))
+            area.closeSubpath()
+            let style = toned(node.tone, otherwise: .tint)
+            context.fill(area, with: .style(style.opacity(0.2)))
+            context.stroke(line, with: .style(style), style: StrokeStyle(lineWidth: 1.4, lineJoin: .round))
+        }
+        .frame(width: node.w.map { CGFloat($0) }, height: node.h.map { CGFloat($0) } ?? 28)
+        .accessibilityElement()
+        .accessibilityValue(values.last.map { "\(Int($0))" } ?? "")
+    }
+}
+
+/// An icon, `w` points across or as big as its font, with its badge (an SVG path) at its bottom trailing corner and
+/// the icon cut away around it.
+private struct Icon: View {
+    var node: WidgetNode
+    var font: Font?
+
+    var body: some View {
+        let style = toned(node.tone, otherwise: .tint)
+        if let w = node.w.map({ CGFloat($0) }) {
+            ZStack {
+                Image(systemName: symbol(node.name))
+                    .resizable()
+                    .scaledToFit()
+                    .fontWeight(.light)
+                    .padding(node.badge == nil ? 0 : w / 12)
+                    .foregroundStyle(style)
+                    .mask {
+                        if node.badge != nil {
+                            Rectangle()
+                                .overlay(Circle().frame(width: w * 14 / 24, height: w * 14 / 24).offset(x: w * 9 / 24, y: w * 9 / 24).blendMode(.destinationOut))
+                                .compositingGroup()
+                        } else {
+                            Rectangle()
+                        }
+                    }
+                if let badge = node.badge {
+                    SVGShape(badge).fill(style)
+                        .frame(width: w * 11 / 24, height: w * 11 / 24)
+                        .offset(x: w * 9 / 24, y: w * 9 / 24)
+                }
+            }
+            .frame(width: w, height: w)
+        } else {
+            Image(systemName: symbol(node.name))
+                .font(node.size.map { _ in font } ?? nil)
+                .foregroundStyle(style)
+        }
     }
 }
 

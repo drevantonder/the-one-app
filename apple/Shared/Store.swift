@@ -250,8 +250,10 @@ final class Store {
     private(set) var hiddenWidgets = Set(UserDefaults.standard.stringArray(forKey: "pageHiddenWidgets") ?? [])
     private(set) var widgetSizes = UserDefaults.standard.dictionary(forKey: "widgetSizes") as? [String: String] ?? [:]
 
+    /// The size someone gave a widget on a page, if it still draws that size; else its own.
     func size(of widget: WidgetInfo, on page: Page) -> String {
-        widgetSizes["\(page.scope)/\(widget.id)"] ?? widget.size ?? "medium"
+        let chosen = widgetSizes["\(page.scope)/\(widget.id)"]
+        return chosen.flatMap { widget.supported.contains($0) ? $0 : nil } ?? widget.size ?? "medium"
     }
 
     func setSize(_ size: String, of widget: WidgetInfo, on page: Page) {

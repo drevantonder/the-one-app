@@ -16,7 +16,7 @@ struct PagesWidget: Widget {
         }
         .configurationDisplayName(appName)
         .description("A widget from one of your pages.")
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryRectangular, .accessoryInline])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge, .accessoryRectangular, .accessoryInline])
     }
 }
 
@@ -109,8 +109,14 @@ struct EntryView: View {
     var entry: Entry
     @Environment(\.widgetFamily) private var family
 
-    private var accent: Color {
-        Color(brandHex: Bundle.main.object(forInfoDictionaryKey: "BrandAccent") as? String ?? "")
+    /// The page size drawn at this family: the same tree the app's pages show at that size.
+    private var size: String {
+        switch family {
+        case .systemSmall: "small"
+        case .systemLarge: "large"
+        case .systemExtraLarge: "xl"
+        default: "medium"
+        }
     }
 
     var body: some View {
@@ -122,27 +128,23 @@ struct EntryView: View {
                 } else if widget.error != nil {
                     Broken(title: widget.title, text: "This widget stopped working. Open \(appName) to see why.")
                 } else {
+                    let tree = widget.tree(size)
                     VStack(alignment: .leading, spacing: 6) {
-                        if family != .accessoryRectangular {
-                            HStack(spacing: 6) {
-                                Image("Logo")
-                                    .resizable()
-                                    .frame(width: 18, height: 18)
-                                Text(widget.title)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(accent)
-                                    .lineLimit(1)
-                            }
+                        if family != .accessoryRectangular, tree.header != false {
+                            Text(widget.title)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
-                        WidgetTree(node: widget.root, now: entry.date)
-                            .font(family == .systemSmall ? .footnote : .subheadline)
+                        WidgetTree(node: tree, now: entry.date)
+                            .font(.footnote)
                             .environment(\.widgetHost, host)
-                        Spacer(minLength: 0)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
-            .widgetURL((widget.root.link ?? .screen("main", params: nil)).url(app: host.app, scope: host.scope))
+            .widgetURL((widget.tree(size).link ?? .screen("main", params: nil)).url(app: host.app, scope: host.scope))
         } else if let missing = entry.missing {
             Broken(title: appName, text: "\(missing.split(separator: "/").last.map(String.init) ?? missing) isn’t on your pages any more. Touch and hold to choose another.")
         } else if family == .accessoryInline {

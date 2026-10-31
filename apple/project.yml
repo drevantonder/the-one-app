@@ -94,7 +94,7 @@ targets:
   Widgets:
     type: app-extension
     platform: iOS
-    sources: [Widget, Shared/Views/Style.swift, Shared/Views/WidgetTree.swift, build/Brand.xcassets]
+    sources: [Widget, Shared/Views/Style.swift, Shared/Views/WidgetTree.swift, Shared/Views/SVGPath.swift, build/Brand.xcassets]
     settings:
       base:
         PRODUCT_NAME: Widgets

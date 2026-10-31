@@ -22,7 +22,10 @@ function describe() {
   return {
     name: app.name, title: app.title, icon: app.icon, color: app.color, description: app.description || "", instructions: app.instructions || "",
     ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}) })),
-    widgets: Object.entries(app.widgets || {}).map(([name, w]) => ({ name, title: w.title || name, size: w.size || "medium" })),
+    widgets: Object.entries(app.widgets || {}).map(([name, w]) => {
+      const size = w.size || "medium";
+      return { name, title: w.title || name, size, sizes: w.sizes?.length ? w.sizes : [size] };
+    }),
     badge: typeof app.badge === "function",
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
     uses: { apps: app.uses?.apps || [], drivers: app.uses?.drivers || [] },
@@ -234,6 +237,7 @@ export default {
         if (!op) throw new Error(`${app.name} has no operation ${body.op}`);
         run = () => op.run(ctx, body.input ?? {});
       } else if (what === "widget") {
+        ctx.size = body.size || app.widgets[body.name].size || "medium";
         run = () => app.widgets[body.name].render(ctx);
       } else if (what === "badge") {
         run = () => app.badge(ctx);

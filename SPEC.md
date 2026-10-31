@@ -180,7 +180,7 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
   schema: { user, group, global },  // SQL run on each empty store of that scope
   ops: { name: { description, input, reads?, confirm?, run(ctx, input) } },  // reads: only reads; confirm: can't be undone
   on: { kind(db, entry) },          // no clock, no randomness, no I/O
-  widgets: { name: { title, size, render(ctx) } },  // size: "small" | "medium" (the default) | "large"
+  widgets: { name: { title, size, sizes, render(ctx) } },  // size: the one a page starts it at; sizes: those it draws (see Widgets)
   badge(ctx),                       // the count its icon shows, of things waiting; 0 shows none
   schedules: { name: { description, op, input?, every } | { description, op, input?, at, tz?, days? } },
   hooks: { name(ctx, { event, since }) },  // returns text for the agent
@@ -270,7 +270,7 @@ Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CL
 - `GET /v1/source/<app>?bundle=&path=`: an app's code as deployed, its latest deploy's or, with `bundle` (or its first characters), an earlier one's: `{ files: [{ path, size }] }`, or with `path` that file, `{ path, text }` (`base64` if it isn't text).
 - `POST /v1/call { app, op, input, scopes?, server?, as?, agent? }` → `{ ok }`. `server` (a name or key prefix) runs it there, or `all`, a driver's call on every server that runs it for you, answering `{ <server>: answer | { error } }`; otherwise it runs on the nearest server that can. `agent` names the agent asking (an MCP client's name), for apps to credit.
 - `GET /v1/badges?scope=`: `{ <app>: count }`, each app's `badge` where it isn't 0, reaching scopes as widgets do.
-- `GET /v1/widgets?scope=`: every widget, rendered, as `{ app, widget, title, size, root }`; one whose render failed has `error` too, and a `root` that says so. With `scope` (`user`, `group:<id>` or `global`), those of the apps installed there, each reaching only that scope, for a shell's page of it.
+- `GET /v1/widgets?scope=`: every widget, rendered, as `{ app, widget, title, size, sizes, root }` (`root` at `size`, `sizes` a tree for each size it draws); one whose render failed has `error` too, and a `root` that says so. With `scope` (`user`, `group:<id>` or `global`), those of the apps installed there, each reaching only that scope, for a shell's page of it.
 - `GET /v1/screens/<app>/<screen>?params=&scope=`: an app screen as a page (see "Screens").
 - `POST /v1/create { name, user_name }` → `{ recovery }`, the recovery key's secret, given once, for 1Password. `POST /v1/pair { new_user?: { name, role }, user? }` → `{ code, user }`, `user` being the id of the user the code admits a machine for: the asker's, a new user's (chosen now), or, for an admin, the existing `user` given. `POST /v1/join { code }`. Creating, joining or restoring is refused once the server belongs to an install.
 - `POST /v1/name { name }`, `POST /v1/remove { key | user }`, `POST /v1/role { user, role }`, `POST /v1/relays { urls }`, `POST /v1/settings { name, value }`, `POST /v1/recovery` → `{ recovery }` *(not built yet)*. Users, groups and servers may be given by name.
@@ -308,21 +308,23 @@ A shell answers the bridge itself: in WKWebView, the page posts `{ type: "call" 
 
 A widget renders to a tree of nodes, drawn natively by each shell and as HTML in chats. Every field but `t` is optional.
 
-- `{ t: "col" | "row", gap, c: [nodes] }`
-- `{ t: "text", text, size: "xl" | "lg" | "md" | "sm", weight: "medium" | "bold", tone, lines, anim }`: one line in a row unless `lines` says otherwise.
+A widget comes in the sizes of an iPhone's Home Screen widgets, which shells draw it at on their pages too: `small` (square, two side by side), `medium` (as wide as two smalls, as tall as one), `large` (two smalls square) and `xl` (two larges side by side, on wider screens). It lists the ones it draws in `sizes` (`[size]` if none), each a tree of its own: its render sees which as `ctx.size`. Shells label a widget with its title, small and muted, above its tree, unless the root says `header: false`, when the tree labels itself.
+
+- `{ t: "col" | "row", gap, c: [nodes], w, grow, align, dim }`: `w` fixes its width in points, `grow` takes the room its parent has left, `align: "center"` centres what's in it, and `dim` fades it, as for something offline.
+- `{ t: "text", text, size: "xl" | "lg" | "md" | "sm" | "xs", weight: "medium" | "bold", tone, lines, anim }`: one line in a row unless `lines` says otherwise.
 - `{ t: "time", at, style, size, tone }`: a time in milliseconds, as `style` says: `ago` (the default: "now", "5 min", "3 h", then the day), `relative` ("in 5 minutes", "2 hours ago"), `timer` (counting each second: 12:04), `date` (30 Oct) or `clock` (2:15 pm).
 - `{ t: "stat", value, label, unit, tone, anim }`: a number (or short text) set large, with a label under it.
-- `{ t: "gauge", value, max, label, tone }`: a ring filled `value / max` (`max` 1 by default), with `label` inside.
-- `{ t: "progress", value, max, label, tone }`: a bar filled `value / max`.
-- `{ t: "spark", values, tone }`: a line through numbers, as wide as its place.
+- `{ t: "gauge", value, max, label, tone, w }`: a ring filled `value / max` (`max` 1 by default), `w` points across (46 by default), with `label` inside (the percentage if none; `""` for nothing).
+- `{ t: "progress", value, max, label, tone, w }`: a bar filled `value / max`, `w` points wide or as wide as its place.
+- `{ t: "spark", values, max, tone, w, h }`: a line through numbers, shaded under, from 0 to `max` (the largest, if not given), `w` by `h` points (as wide as its place, and 28 tall, if not given).
 - `{ t: "chart", kind: "bar" | "line", values, labels, tone }`: bars (the default) or a line, with a label under each value.
 - `{ t: "list", c: [items], empty }` of `{ t: "item", title, subtitle, trailing, icon, tone, link }`: rows, with `empty` shown when there are none.
 - `{ t: "image", url, w, h, round }`: an `https` image, `w` by `h` points (as wide as its place, if not given).
-- `{ t: "icon", name, tone, size }`: an icon, named as an app's `icon` is; `{ t: "dot", tone }`: a small round status light.
+- `{ t: "icon", name, tone, size, w, badge }`: an icon, named as an app's `icon` is, `w` points across; `badge` is an SVG path in a 24-point box (a logo), filled at its bottom trailing corner, with the icon cut away around it. `{ t: "dot", tone }`: a small round status light.
 - `{ t: "link", text, link }`: text that opens `link`.
 - `{ t: "button", label, icon, op, input, tone }`: runs the app's operation `op` with `input`, as the user looking, then the widget redraws. `{ t: "toggle", label, on, op, input }`: runs `op` with `input` and `on`, the new value.
 - `{ t: "divider" }`.
 
-`tone` is `muted`, `accent`, `good`, `warn` or `bad`. Any node may have `link`, what tapping it opens: an `https` URL, or `{ screen, params }`, one of the app's screens; a widget's root's link is where tapping the widget goes (its app's `main` screen if none). `anim: true` on a text or stat says its changes are worth showing: a number rolls to its new value, other text crossfades. The root may have `next`, a time in milliseconds: the shell renders the widget again then, at least a minute and at most fifteen from now, as well as whenever the app's data changes.
+`tone` is `muted`, `accent`, `good`, `warn` or `bad`, or a colour: `blue` or `purple`. Any node may have `link`, what tapping it opens: an `https` URL, or `{ screen, params }`, one of the app's screens; a widget's root's link is where tapping the widget goes (its app's `main` screen if none). `anim: true` on a text or stat says its changes are worth showing: a number rolls to its new value, other text crossfades. The root may have `next`, a time in milliseconds: the shell renders the widget again then, at least a minute and at most fifteen from now, as well as whenever the app's data changes.
 
 Renderers skip node types and fields they don't know, so a widget for a newer shell still draws, less fully, in an older one.

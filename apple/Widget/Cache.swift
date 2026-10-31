@@ -16,6 +16,10 @@ struct WidgetCache: Codable {
         var icon: String
         var error: String?
         var root: WidgetNode
+        /// Its tree at each size it draws.
+        var sizes: [String: WidgetNode]?
+
+        func tree(_ size: String) -> WidgetNode { sizes?[size] ?? root }
     }
     var install: String?
     var widgets: [Item]
