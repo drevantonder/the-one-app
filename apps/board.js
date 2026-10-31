@@ -222,6 +222,11 @@ async function show() {
   document.getElementById("feed").innerHTML = html || '<div class="empty">No posts yet</div>';
   window.scrollTo(0, document.body.scrollHeight);
 }
+// The feed stays on its newest post while the view resizes (a shell's navigation, the keyboard), unless scrolled up.
+let pinned = true;
+addEventListener("scroll", () => { pinned = innerHeight + scrollY >= document.body.scrollHeight - 40; });
+new ResizeObserver(() => { if (pinned) window.scrollTo(0, document.body.scrollHeight); }).observe(document.documentElement);
+visualViewport?.addEventListener("resize", () => { if (pinned) window.scrollTo(0, document.body.scrollHeight); });
 const text = document.getElementById("text"), send = document.getElementById("send"), error = document.getElementById("error");
 text.oninput = () => { send.disabled = !text.value.trim(); error.textContent = ""; };
 document.getElementById("form").onsubmit = async (e) => {
