@@ -93,6 +93,15 @@ async fn servers_and_a_phone_share_a_deployed_board() {
     phone.request("POST", "/v1/name", json!({ "name": "Andre's iPhone" })).await.unwrap();
     let state = phone.request("GET", "/v1/state", Value::Null).await.unwrap();
     assert_eq!(state["me"]["name"], "Andre's iPhone", "a phone renames itself");
+    // A phone manages what its user may: installs, groups, secrets.
+    let reply = phone.request("POST", "/v1/install", json!({ "app": "board", "scope": "user" })).await.unwrap();
+    assert!(reply.get("error").is_none(), "{reply}");
+    let group = phone.request("POST", "/v1/group", json!({ "name": "Phone's" })).await.unwrap();
+    assert!(group["group"].is_string(), "{group}");
+    let reply = phone.request("POST", "/v1/secrets", json!({ "scope": "user", "app": "board", "name": "t", "hosts": ["example.com"], "value": "v" })).await.unwrap();
+    assert!(reply.get("error").is_none(), "{reply}");
+    let listed = phone.request("GET", "/v1/secrets", json!({ "scope": "user" })).await.unwrap();
+    assert_eq!(listed[0]["name"], "t", "{listed}");
     let shown = a.state()["install"]["clients"][0].clone();
     assert!(shown["asked"].is_u64(), "a phone shows when it last asked: {shown}");
 

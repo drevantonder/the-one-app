@@ -1227,6 +1227,46 @@ impl Node {
                 }
             }
             ("GET", "/v1/source") => self.source(body["app"].as_str().unwrap_or(""), body["bundle"].as_str(), body["path"].as_str()).await?,
+            ("POST", "/v1/install") => {
+                let scope = self.scope_for(me, body["scope"].as_str().unwrap_or("user"))?;
+                self.install(me, body["app"].as_str().unwrap_or(""), &scope, body["installed"] != false).await?;
+                json!({})
+            }
+            ("POST", "/v1/group") => {
+                let group = new_id();
+                let name = body["name"].as_str().unwrap_or("").trim();
+                ensure!(!name.is_empty(), "give the group a name");
+                self.member_as(me, "group", json!({ "group": group, "name": name })).await?;
+                json!({ "group": group })
+            }
+            ("POST", "/v1/invite") | ("POST", "/v1/member") => {
+                let group = self.find_group(body["group"].as_str().unwrap_or(""))?;
+                let user = self.find_user(body["user"].as_str().unwrap_or(""))?;
+                let role = match (path, &body["role"]) {
+                    ("/v1/invite", Value::Null) => json!("member"),
+                    (_, role) => role.clone(),
+                };
+                let _: Option<Role> = serde_json::from_value(role.clone())?;
+                self.member_as(me, &path["/v1/".len()..], json!({ "group": group, "user": user, "role": role })).await?;
+                json!({})
+            }
+            ("POST", "/v1/accept") => {
+                self.member_as(me, "accept", json!({ "group": self.find_group(body["group"].as_str().unwrap_or(""))? })).await?;
+                json!({})
+            }
+            ("POST", "/v1/role") => {
+                let role: Role = serde_json::from_value(body["role"].clone())?;
+                self.member_as(me, "role", json!({ "user": self.find_user(body["user"].as_str().unwrap_or(""))?, "role": role })).await?;
+                json!({})
+            }
+            ("POST", "/v1/remove") => {
+                let data = match body["user"].as_str() {
+                    Some(user) => json!({ "user": self.find_user(user)? }),
+                    None => json!({ "key": hex(&self.find_machine(body["key"].as_str().unwrap_or(""))?) }),
+                };
+                self.member_as(me, "remove", data).await?;
+                json!({})
+            }
             ("GET", "/v1/secrets") => {
                 let scope = body["scope"].as_str().map(|s| self.scope_for(me, s)).transpose()?;
                 json!(self.secrets(me, scope.as_ref())?)
@@ -1566,6 +1606,16 @@ impl Node {
             [one] => Ok(*one),
             [] => bail!("no server called {name}"),
             _ => bail!("several servers match {name}"),
+        }
+    }
+
+    /// Finds a server or client of the install by name or key prefix.
+    pub fn find_machine(&self, name: &str) -> Result<Key> {
+        let found: Vec<Key> = self.with(|i| Ok(i.r.members.machines.values().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).map(|m| m.key).collect()))?;
+        match found.as_slice() {
+            [one] => Ok(*one),
+            [] => bail!("no server or client called {name}"),
+            _ => bail!("several servers or clients match {name}"),
         }
     }
 

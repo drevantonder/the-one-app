@@ -147,14 +147,7 @@ async fn name(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 async fn remove(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     match body["user"].as_str() {
         Some(user) => node.member("remove", json!({ "user": node.find_user(user)? })).await?,
-        None => {
-            let key = text(&body, "key")?;
-            let found = node.state()["install"]["clients"].as_array().into_iter().flatten().chain(node.state()["install"]["servers"].as_array().into_iter().flatten())
-                .find(|m| m["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(key)) || m["key"].as_str().is_some_and(|k| k.starts_with(key)))
-                .and_then(|m| m["key"].as_str().map(str::to_string))
-                .ok_or_else(|| anyhow::anyhow!("no server or client called {key}"))?;
-            node.member("remove", json!({ "key": found })).await?;
-        }
+        None => node.member("remove", json!({ "key": hex(&node.find_machine(text(&body, "key")?)?) })).await?,
     }
     done()
 }
