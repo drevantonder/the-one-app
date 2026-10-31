@@ -6,6 +6,7 @@ use one::brand::{CLI, NAME};
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
 
+mod mcp_apps;
 mod ops;
 mod update;
 
@@ -579,14 +580,21 @@ fn mcp() -> Result<()> {
                 }
                 json!({
                 "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
-                "capabilities": { "tools": {} },
+                "capabilities": { "tools": {}, "resources": {} },
                 "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
                 "instructions": instructions(),
                 })
             }),
             "ping" => Ok(json!({})),
-            "tools/list" => tools().map(|t| json!({ "tools": t })),
-            "tools/call" => Ok(call_tool(&msg["params"], agent.as_deref())),
+            "tools/list" => tools().map(|mut t| {
+                t.extend(mcp_apps::tools());
+                json!({ "tools": t })
+            }),
+            "tools/call" => Ok(mcp_apps::call(msg["params"]["name"].as_str().unwrap_or(""), &msg["params"]["arguments"])
+                .unwrap_or_else(|| call_tool(&msg["params"], agent.as_deref()))),
+            // Apps' widgets and screens, as MCP Apps (src/mcp_apps.rs).
+            "resources/list" => Ok(json!({ "resources": mcp_apps::resources() })),
+            "resources/read" => mcp_apps::read(msg["params"]["uri"].as_str().unwrap_or("")),
             other => Err(json!({ "code": -32601, "message": format!("unknown method {other}") })),
         };
         let reply = match result {

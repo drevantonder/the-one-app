@@ -1,0 +1,264 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- The MCP Apps view `one mcp` serves (src/mcp_apps.rs): widgets drawn from their trees (SPEC.md "Widgets"), or an
+     app's screen in a frame whose bridge this page answers through the chat client. -->
+<style>
+  :root { color-scheme: light dark; --fg: light-dark(#1c1c1e, #f2f2f7); --muted: light-dark(#6e6e73, #98989d); --line: light-dark(#e5e5ea, #38383a);
+    --card: light-dark(#ffffff, #1c1c1e); --fill: light-dark(#e9e9ee, #2c2c2e); --accent: #9e6e06; --good: #34c759; --warn: #ff9f0a; --bad: #ff3b30;
+    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  body { margin: 0; padding: 4px; color: var(--fg); background: transparent; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .card { background: var(--card); border-radius: 16px; padding: 14px; box-shadow: 0 0 0 1px var(--line); }
+  .card > h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .col { display: flex; flex-direction: column; gap: var(--gap, 4px); }
+  .row { display: flex; align-items: center; gap: var(--gap, 6px); min-width: 0; }
+  .row > * { min-width: 0; }
+  .row > .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .xl { font-size: 22px; font-weight: 600; } .lg { font-size: 17px; font-weight: 600; } .sm { font-size: 12px; }
+  .medium { font-weight: 600; } .bold { font-weight: 700; }
+  .muted { color: var(--muted); } .accent { color: var(--accent); } .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .stat b { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; } .stat small { color: var(--muted); font-size: 12px; display: block; }
+  .bar { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; } .bar > i { display: block; height: 100%; background: var(--tone, var(--accent)); }
+  .list > .item { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); } .list > .item:first-child { border-top: 0; }
+  .item .sub { font-size: 12px; color: var(--muted); } .item .end { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone, var(--good)); flex: none; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+  a, .link { color: var(--accent); cursor: pointer; text-decoration: none; }
+  button { font: inherit; border: 0; border-radius: 999px; padding: 5px 12px; background: var(--fill); color: var(--tone, var(--accent)); cursor: pointer; }
+  button:disabled { opacity: .5; }
+  label.toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: 1; }
+  .linked { cursor: pointer; }
+  iframe { border: 0; width: 100%; display: block; min-height: 120px; }
+  .empty { color: var(--muted); padding: 12px; }
+</style>
+</head>
+<body>
+<div id="out" class="empty">Loading…</div>
+<script>
+(() => {
+  let next = 1, frame = null, shown = null;
+  const pending = new Map(), out = document.getElementById("out");
+  const post = (msg) => parent.postMessage({ jsonrpc: "2.0", ...msg }, "*");
+  const request = (method, params) => new Promise((resolve, reject) => { const id = next++; pending.set(id, { resolve, reject }); post({ id, method, params }); });
+  const notify = (method, params) => post(params === undefined ? { method } : { method, params });
+  const call = async (name, args) => {
+    const r = await request("tools/call", { name, arguments: args });
+    if (r.isError) throw new Error((r.content || []).map((c) => c.text).join(" ") || "failed");
+    if (r.structuredContent) return r.structuredContent;
+    const text = (r.content || []).map((c) => c.text || "").join("");
+    try { return JSON.parse(text); } catch { return text; }
+  };
+
+  window.addEventListener("message", (e) => {
+    const m = e.data;
+    if (frame && e.source === frame.contentWindow) return fromScreen(m);
+    if (e.source !== parent || !m || m.jsonrpc !== "2.0") return;
+    if (m.method === undefined) {
+      const p = pending.get(m.id);
+      if (p) { pending.delete(m.id); m.error ? p.reject(new Error(m.error.message)) : p.resolve(m.result); }
+      return;
+    }
+    if (m.method === "ui/notifications/tool-result") show(m.params);
+    if (m.method === "ui/notifications/host-context-changed") theme(m.params);
+    if (m.method === "ui/resource-teardown" && m.id !== undefined) post({ id: m.id, result: {} });
+  });
+
+  function theme(ctx) {
+    if (ctx?.theme) document.documentElement.style.colorScheme = ctx.theme;
+  }
+
+  function show(result) {
+    const s = result?.structuredContent;
+    if (!s) { out.className = "empty"; out.textContent = (result?.content || []).map((c) => c.text || "").join("\n"); return size(); }
+    shown = s;
+    if (s.html !== undefined) return screen(s);
+    out.className = "cards";
+    out.replaceChildren(...(s.widgets || []).map(card));
+    if (!(s.widgets || []).length) { out.className = "empty"; out.textContent = "No widgets."; }
+    size();
+  }
+
+  // A widget, as a card under its title.
+  function card(w) {
+    const el = node("div", "card");
+    el.append(node("h3", "", w.title || w.widget));
+    if (w.error) el.append(node("div", "warn", "This widget stopped working: " + w.error));
+    else el.append(draw(w.root, w));
+    if (w.root?.link) { el.classList.add("linked"); el.onclick = (e) => { if (!e.defaultPrevented) follow(w.root.link, w); }; }
+    return el;
+  }
+
+  function node(tag, cls, text) {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+
+  const tones = { muted: "var(--muted)", accent: "var(--accent)", good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)" };
+  const fmt = (v) => typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? "–");
+
+  function time(n) {
+    const d = new Date(n.at || 0), s = (Date.now() - d) / 1000;
+    if (n.style === "date") return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    if (n.style === "clock") return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    if (n.style === "timer") { const a = Math.abs(Math.round(s)); return `${Math.floor(a / 60)}:${String(a % 60).padStart(2, "0")}`; }
+    if (n.style === "relative") return new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" }).format(...(Math.abs(s) < 3600 ? [-Math.round(s / 60), "minute"] : Math.abs(s) < 86400 ? [-Math.round(s / 3600), "hour"] : [-Math.round(s / 86400), "day"]));
+    if (s < 60) return "now";
+    if (s < 3600) return `${Math.floor(s / 60)} min`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h`;
+    return d.toLocaleDateString(undefined, s < 7 * 86400 ? { weekday: "short" } : { day: "numeric", month: "short" });
+  }
+
+  // A node of a widget's tree; ones it doesn't know draw nothing.
+  function draw(n, w) {
+    if (!n || typeof n !== "object") return document.createTextNode("");
+    const tone = (el) => { if (n.tone) el.classList.add(n.tone); if (tones[n.tone]) el.style.setProperty("--tone", tones[n.tone]); return el; };
+    const kids = (el) => { el.append(...(n.c || []).map((c) => draw(c, w))); if (n.gap != null) el.style.setProperty("--gap", n.gap + "px"); return el; };
+    let el;
+    switch (n.t) {
+      case "col": el = kids(node("div", "col")); break;
+      case "row": el = kids(node("div", "row")); break;
+      case "text": el = tone(node("span", ["text", n.size, n.weight].filter(Boolean).join(" "), n.text ?? "")); break;
+      case "time": el = tone(node("span", ["text", n.size].filter(Boolean).join(" "), time(n))); break;
+      case "stat": {
+        el = tone(node("div", "stat"));
+        const b = node("b", "", fmt(n.value) + (n.unit ? " " + n.unit : ""));
+        el.append(b);
+        if (n.label) el.append(node("small", "", n.label));
+        break;
+      }
+      case "gauge": {
+        const f = Math.max(0, Math.min(1, (Number(n.value) || 0) / (n.max || 1))), r = 18, c = 2 * Math.PI * r;
+        el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        el.setAttribute("viewBox", "0 0 46 46"); el.setAttribute("width", "46"); el.setAttribute("height", "46");
+        el.innerHTML = `<circle cx="23" cy="23" r="${r}" fill="none" stroke="var(--fill)" stroke-width="5"/>
+          <circle cx="23" cy="23" r="${r}" fill="none" stroke="${tones[n.tone] || "var(--accent)"}" stroke-width="5" stroke-linecap="round"
+            stroke-dasharray="${c * f} ${c}" transform="rotate(-90 23 23)"/>
+          <text x="23" y="27" text-anchor="middle" font-size="10" font-weight="600" fill="currentColor"></text>`;
+        el.querySelector("text").textContent = n.label ?? Math.round(f * 100) + "%";
+        break;
+      }
+      case "progress": {
+        el = node("div", "col");
+        if (n.label) el.append(node("span", "sm muted", n.label));
+        const bar = tone(node("div", "bar")), fill = node("i");
+        fill.style.width = Math.max(0, Math.min(1, (Number(n.value) || 0) / (n.max || 1))) * 100 + "%";
+        bar.append(fill); el.append(bar);
+        break;
+      }
+      case "spark": case "chart": {
+        const v = (n.values || []).map(Number), max = Math.max(...v, 1), h = n.h || (n.t === "spark" ? 28 : 70), wd = 240;
+        el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        el.setAttribute("viewBox", `0 0 ${wd} ${h + (n.labels ? 14 : 0)}`); el.setAttribute("width", "100%");
+        const color = tones[n.tone] || "var(--accent)", step = wd / Math.max(v.length, 1);
+        if (n.t === "spark" || n.kind === "line") {
+          const pts = v.map((y, i) => `${(i + 0.5) * step},${h - (y / max) * (h - 4) - 2}`).join(" ");
+          el.innerHTML = `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+        } else {
+          el.innerHTML = v.map((y, i) => `<rect x="${i * step + step * 0.15}" y="${h - (y / max) * h}" width="${step * 0.7}" height="${(y / max) * h}" rx="3" fill="${color}"/>`).join("");
+        }
+        (n.labels || []).forEach((l, i) => { const t = document.createElementNS("http://www.w3.org/2000/svg", "text"); t.setAttribute("x", (i + 0.5) * step); t.setAttribute("y", h + 12); t.setAttribute("text-anchor", "middle"); t.setAttribute("font-size", "10"); t.setAttribute("fill", "var(--muted)"); t.textContent = l; el.append(t); });
+        break;
+      }
+      case "list":
+        el = node("div", "list");
+        if (!(n.c || []).length) el.append(node("div", "muted", n.empty || "Nothing here"));
+        el.append(...(n.c || []).map((c) => draw(c, w)));
+        break;
+      case "item": {
+        el = tone(node("div", "item"));
+        if (n.icon) el.append(tone(node("span", "dot")));
+        const mid = node("div"); mid.append(node("div", "", n.title || ""));
+        if (n.subtitle) mid.append(node("div", "sub", n.subtitle));
+        el.append(mid);
+        if (n.at || n.trailing) el.append(node("span", "end", n.at ? time({ at: n.at }) : n.trailing));
+        break;
+      }
+      case "image": el = node("img"); el.src = n.url || ""; el.alt = ""; el.style.cssText = `width:${n.w ? n.w + "px" : "100%"};height:${n.h ? n.h + "px" : "auto"};object-fit:cover;border-radius:${n.round ? "50%" : "8px"}`; break;
+      case "dot": el = tone(node("span", "dot")); break;
+      case "link": el = node("a", "", n.text || ""); break;
+      case "divider": el = node("hr"); break;
+      case "button": {
+        el = tone(node("button", "", n.label || n.text || ""));
+        el.onclick = (e) => { e.preventDefault(); act(el, w, n.op, n.input || {}); };
+        break;
+      }
+      case "toggle": {
+        el = node("label", "toggle");
+        const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: !!n.on });
+        box.onclick = (e) => e.stopPropagation();
+        box.onchange = () => act(box, w, n.op, { ...(n.input || {}), on: box.checked });
+        el.append(node("span", "", n.label || ""), box);
+        break;
+      }
+      default: return document.createTextNode("");
+    }
+    if (n.link) { el.classList?.add("linked"); el.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); follow(n.link, w); }); }
+    return el;
+  }
+
+  // A button or toggle: runs the app's operation as the person, then draws the widgets again.
+  async function act(el, w, op, input) {
+    el.disabled = true;
+    try {
+      await call(`${w.app}_${op}`, input);
+      const again = await call("widgets_show", { app: shown?.widgets?.length === 1 ? w.app : undefined, widget: shown?.widgets?.length === 1 ? w.widget : undefined });
+      show({ structuredContent: again });
+    } catch (err) {
+      el.title = err.message;
+    } finally {
+      el.disabled = false;
+    }
+  }
+
+  // A link: a web page through the chat, or one of the app's screens, opened here.
+  async function follow(link, w) {
+    if (typeof link === "string") return request("ui/open-link", { url: link }).catch(() => {});
+    show({ structuredContent: await call("screens_open", { app: w.app, screen: link.screen, params: link.params || {} }) });
+  }
+
+  // An app's screen, in a frame whose `one` bridge posts here: its calls go to the app's tools through the chat.
+  function screen(s) {
+    const shim = `<script>(() => { let n = 0; const waiting = {};
+      addEventListener("message", (e) => { const m = e.data || {}; if (m.oneReply !== undefined && waiting[m.oneReply]) { const w = waiting[m.oneReply]; delete waiting[m.oneReply]; m.error ? w[1](new Error(m.error)) : w[0](m.ok); } });
+      window.webkit = { messageHandlers: { one: { postMessage: (msg) => new Promise((ok, fail) => { const id = ++n; waiting[id] = [ok, fail]; parent.postMessage({ one: msg, id }, "*"); }) } } };
+      new ResizeObserver(() => parent.postMessage({ oneHeight: document.documentElement.scrollHeight }, "*")).observe(document.documentElement);
+    })();<\/script>`;
+    frame = document.createElement("iframe");
+    frame.srcdoc = s.html.replace("<head>", "<head>" + shim);
+    out.className = "";
+    out.replaceChildren(frame);
+    size();
+  }
+
+  async function fromScreen(m) {
+    if (m?.oneHeight) { frame.style.height = m.oneHeight + "px"; return size(); }
+    if (!m?.one) return;
+    const reply = (ok, error) => frame.contentWindow.postMessage({ oneReply: m.id, ok, error }, "*");
+    const msg = m.one;
+    try {
+      if (msg.type === "call") return reply(await call(`${shown.app}_${msg.op}`, msg.input || {}));
+      if (msg.type === "open") { show({ structuredContent: await call("screens_open", { app: shown.app, screen: msg.screen, params: msg.params || {} }) }); return; }
+      if (msg.type === "copy") { await navigator.clipboard.writeText(msg.text); return reply(null); }
+      reply(null);
+    } catch (err) {
+      reply(undefined, err.message);
+    }
+  }
+
+  function size() {
+    requestAnimationFrame(() => notify("ui/notifications/size-changed", { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight }));
+  }
+  new ResizeObserver(size).observe(document.body);
+
+  request("ui/initialize", { appInfo: { name: "view", version: "1" }, appCapabilities: {}, protocolVersion: "2026-01-26" })
+    .then((init) => { theme(init?.hostContext); notify("ui/notifications/initialized"); })
+    .catch(() => {});
+})();
+</script>
+</body>
+</html>
