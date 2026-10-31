@@ -111,7 +111,8 @@ function context(env, body, appends) {
     if (!r.ok) throw new Error(await r.text());
     return r;
   };
-  // `ctx.apps.<name>.<op>(input)`, for exactly the apps (or drivers) the app says it uses.
+  // `ctx.apps.<name>.<op>(input, { server })`, for exactly the apps (or drivers) the app says it uses; `server` (a
+  // name) runs it there, like a driver on the machine that has what it needs.
   const used = (kind) => new Proxy({}, {
     get(_, name) {
       if (typeof name !== "string" || name === "then") return undefined;
@@ -119,7 +120,7 @@ function context(env, body, appends) {
       return new Proxy({}, {
         get(_, op) {
           if (typeof op !== "string" || op === "then") return undefined;
-          return async (input = {}) => (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, op, input }) })).json()).ok;
+          return async (input = {}, { server } = {}) => (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, op, input, server }) })).json()).ok;
         },
       });
     },

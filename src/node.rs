@@ -1032,7 +1032,9 @@ impl Node {
                 let (app, op) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
                 let (apps, drivers) = self.uses(&grant.app).await;
                 ensure!(apps.iter().chain(&drivers).any(|u| u == app), "{} doesn't use {app}", grant.app);
-                let call = CallRequest { app: app.into(), op: op.into(), input: req["input"].clone(), ..Default::default() };
+                // An app may say which server runs it, like the one with a local model.
+                let server = req["server"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
+                let call = CallRequest { app: app.into(), op: op.into(), input: req["input"].clone(), server, ..Default::default() };
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
             ("POST", "/blob") => {
