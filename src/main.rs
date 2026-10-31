@@ -49,6 +49,9 @@ Usage:
                                        never read back
   {CLI} secret list [--scope s]        the secrets you may set: names and hosts, never values
   {CLI} secret remove <app> <name> [--scope s]
+  {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
+  {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
+                                       switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's operations
   {CLI} <app> <op> [words] [--input value]
                                        run an operation, e.g. {CLI} board post \"hi there\" --topic x; --help says
@@ -238,6 +241,29 @@ fn run(args: Vec<String>) -> Result<()> {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             post("/v1/secrets", json!({ "scope": scope, "app": app, "name": name, "value": null }))?;
             println!("{app}'s secret {name} is gone from {scope}.");
+        }
+        ["schedules"] => {
+            for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+                for s in app["schedules"].as_array().into_iter().flatten() {
+                    let state = match (&s["invalid"], s["removed"] == true, s["on"] == true) {
+                        (Value::String(why), ..) => format!("doesn't make sense: {why}"),
+                        (_, true, _) => "removed by a deploy".into(),
+                        (_, _, true) => format!("{}, as {}", s["when"].as_str().unwrap_or(""), s["runs_as"].as_str().unwrap_or("nobody")),
+                        _ => "off".into(),
+                    };
+                    let last = match &s["last"] {
+                        Value::Null => String::new(),
+                        l if l["ok"] == true => format!("; ran {}", ago(l["time"].as_u64().unwrap_or(0))),
+                        l => format!("; failed {}: {}", ago(l["time"].as_u64().unwrap_or(0)), l["error"].as_str().unwrap_or("")),
+                    };
+                    println!("{} {}  in {}  {state}{last}", app["name"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), s["scope"].as_str().unwrap_or(""));
+                }
+            }
+        }
+        ["schedule", on @ ("on" | "off"), app, name] => {
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            post("/v1/schedule", json!({ "app": app, "schedule": name, "scope": scope, "on": *on == "on" }))?;
+            println!("{app}'s schedule {name} is {on} in {scope}.");
         }
         ["update"] => update::run(None)?,
         ["release", tag] => update::run(Some(tag))?,
@@ -632,7 +658,7 @@ fn call_tool(params: &Value, agent: Option<&str>) -> Value {
             return failed(format!("{e:#}"));
         }
     }
-    match post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input, "agent": agent })) {
+    match post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input, "agent": agent, "client": "mcp" })) {
         Ok(r) => json!({ "content": ops::mcp_content(&r["ok"]) }),
         Err(e) => failed(format!("{e:#}")),
     }

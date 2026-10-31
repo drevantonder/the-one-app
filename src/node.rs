@@ -18,6 +18,7 @@ use crate::apps::{Append, AppEntry, Apps, Context, Me, Replay, ScopeHandle};
 use crate::entry::{Content, Entry, Key, Order, Scope, hex, new_id, short, unhex};
 use crate::members::{self, Members, Principal, Role, ScopeState};
 use crate::release::{self, Release};
+use crate::schedules::{self, Schedule};
 use crate::store::{Frontier, Store};
 use crate::sync::{self, Driver, Handled, Msg, Replica};
 
@@ -33,6 +34,16 @@ const DRIVER_LIMIT: Duration = Duration::from_secs(600);
 const MESSAGE_LIMIT: usize = 64 << 20;
 /// How long a waking server waits for its first round of dialing before it may call itself ready.
 const FIRST_DIAL: Duration = Duration::from_secs(5);
+/// How many app-to-app calls deep a call may be: a person's call of A, A's of B, B's of C, C's of D.
+pub const MAX_DEPTH: u32 = 3;
+/// How many calls an app may make of other apps, or runs of its schedules, a minute on one server.
+pub const RATE_LIMIT: u32 = 600;
+/// How long an app that looped stays stopped on a server, unless it's deployed again sooner.
+const STOPPED_FOR: u64 = 15 * 60_000;
+/// How often a server looks for schedules to run.
+const SCHEDULE_TICK: Duration = Duration::from_secs(10);
+/// How long an app's page says a deploy changed or removed one of its schedules.
+const CHANGED_SHOWN: u64 = 14 * 86_400_000;
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
@@ -155,6 +166,15 @@ pub struct CallRequest {
     /// The agent that asked (an MCP client's name), credited on the call.
     #[serde(default)]
     pub agent: Option<String>,
+    /// How many app-to-app calls deep it is: 0 when a person, an agent or a schedule made it.
+    #[serde(default)]
+    pub depth: u32,
+    /// The app whose `ctx.apps` made it, if one did.
+    #[serde(default)]
+    pub from: Option<String>,
+    /// What made it, for its app's insights: `cli`, `mcp`, `mac`, `phone`, `browser`, `schedule` or `app`.
+    #[serde(default)]
+    pub client: Option<String>,
 }
 
 /// What a server says to a call.
@@ -210,6 +230,20 @@ pub struct Inner {
     /// The port apps' requests go out through.
     outbound: u16,
     woke: Instant,
+    /// What each app did this minute, and the apps stopped here for looping.
+    guard: Mutex<Guard>,
+    /// The schedules' slots running here now: `<scope>/<app>/<schedule>/<slot>`.
+    running: Mutex<std::collections::HashSet<String>>,
+}
+
+/// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
+/// server is stopped here for `STOPPED_FOR`, or until it's deployed again.
+#[derive(Default)]
+struct Guard {
+    minute: u64,
+    counts: HashMap<(String, &'static str), u32>,
+    /// Each app stopped here: why, until when, and the bundle it was running.
+    stopped: HashMap<String, (String, u64, Option<String>)>,
 }
 
 /// What a running call may do through the node: whose it is, which app's, and which scopes it reaches.
@@ -221,6 +255,8 @@ pub struct Grant {
     pub read_only: bool,
     /// The blobs it kept, which it may read back before any entry names them.
     pub puts: Vec<String>,
+    /// How many app-to-app calls deep the call is.
+    pub depth: u32,
 }
 
 /// Holds a grant for as long as its call runs.
@@ -276,6 +312,8 @@ impl Node {
             grants: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             woke: Instant::now(),
+            guard: Mutex::new(Guard::default()),
+            running: Mutex::new(Default::default()),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -295,6 +333,7 @@ impl Node {
             .accept(BLOB_ALPN, BlobHandler(node.clone()))
             .spawn();
         tokio::spawn(node.clone().dial_loop());
+        tokio::spawn(node.clone().schedule_loop());
         let worker = node.clone();
         tokio::spawn(async move {
             loop {
@@ -646,7 +685,7 @@ impl Node {
     async fn ask_server(&self, server: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
         let conn = tokio::time::timeout(Duration::from_secs(10), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, CALL_ALPN)).await.context("timed out")??;
         let (mut send, mut recv) = conn.open_bi().await?;
-        let request = json!({ "app": req.app, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
+        let request = json!({ "app": req.app, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
         send.write_all(&serde_json::to_vec(&request)?).await?;
         send.finish()?;
         let reply = tokio::time::timeout(self.limit(&req.app) + Duration::from_secs(5), recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
@@ -698,8 +737,12 @@ impl Node {
         if deployed_here.is_none() || deployed_here != latest {
             return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest deploy yet", req.app)));
         }
+        if let Some(why) = self.stopped(&req.app) {
+            return Ok(Reply::Error(why));
+        }
         let mut ctx = ctx;
-        let _granted = self.grant(&req.app, me, &mut ctx);
+        ctx.from = req.from.clone();
+        let _granted = self.grant(&req.app, me, &mut ctx, req.depth);
         let outcome = self.0.apps.call(&req.app, &req.op, input, &ctx).await?;
         // Every append is checked before any is written: a call that fails writes nothing. Installs come last, since
         // installing a built-in app the install doesn't have yet adds it first.
@@ -762,15 +805,232 @@ impl Node {
         }
     }
 
+    // Schedules.
+
+    /// Now and then, runs the schedules this server is next in line for.
+    async fn schedule_loop(self) {
+        loop {
+            tokio::time::sleep(SCHEDULE_TICK).await;
+            if self.has_install() && self.ready() {
+                if let Err(err) = self.run_schedules().await {
+                    tracing::warn!("schedules: {err:#}");
+                }
+            }
+        }
+    }
+
+    /// Each loaded app's schedules, as its latest deploy declares them, with why any don't make sense.
+    async fn declared(&self) -> Vec<(String, Vec<std::result::Result<Schedule, (String, String)>>)> {
+        let mut out = Vec::new();
+        for app in self.0.apps.names() {
+            if let Ok(d) = self.0.apps.describe(&app).await {
+                let list = Schedule::all(&d);
+                if !list.is_empty() {
+                    out.push((app, list));
+                }
+            }
+        }
+        out
+    }
+
+    /// Runs every schedule's slot that's due, hasn't run, and that this server is next in line for: in each scope it
+    /// holds where the app is installed, as whoever installed it there or switched the schedule on since. A server
+    /// waits `GRACE` for each server before it in line that it's connected to; one it can't reach doesn't count.
+    async fn run_schedules(&self) -> Result<()> {
+        let now = now_ms();
+        let declared = self.declared().await;
+        let due = self.with(|i| {
+            let m = &i.r.members;
+            let mut out = Vec::new();
+            for (log, (_, state)) in &i.views {
+                let Ok(scope) = Scope::parse(log) else { continue };
+                for (app, list) in &declared {
+                    if !state.installed.contains(app) || !i.r.holds(&scope) {
+                        continue;
+                    }
+                    for s in list.iter().filter_map(|s| s.as_ref().ok()) {
+                        let Some(user) = runs_as(m, state, &scope, app, &s.name) else { continue };
+                        let Some(slot) = s.slot(now) else { continue };
+                        let installed = state.installers.get(app).map(|(_, t)| *t).unwrap_or(0);
+                        let ran = state.runs.get(&(app.clone(), s.name.clone())).is_some_and(|r| r.iter().any(|r| r.slot == slot));
+                        if slot < installed || ran || !schedules::due(s, slot, now) {
+                            continue;
+                        }
+                        let line = schedules::line(m, &scope, &user, app, &s.name);
+                        let Some(at) = line.iter().position(|k| *k == self.0.id) else { continue };
+                        let ahead = line[..at].iter().filter(|k| i.sessions.contains_key(*k)).count() as u64;
+                        if now - slot >= ahead * schedules::GRACE {
+                            out.push((scope.clone(), app.clone(), s.clone(), slot, user));
+                        }
+                    }
+                }
+            }
+            Ok(out)
+        })?;
+        for (scope, app, schedule, slot, user) in due {
+            let key = format!("{scope}/{app}/{}/{slot}", schedule.name);
+            if !self.0.running.lock().unwrap().insert(key.clone()) {
+                continue;
+            }
+            let node = self.clone();
+            tokio::spawn(async move {
+                if let Err(err) = node.run_schedule(&scope, &app, &schedule, slot, &user).await {
+                    tracing::warn!("{app}'s schedule {}: {err:#}", schedule.name);
+                }
+                node.0.running.lock().unwrap().remove(&key);
+            });
+        }
+        Ok(())
+    }
+
+    /// Runs one slot of a schedule here: an ordinary call as `user`, touching only `scope`; then writes how it went.
+    async fn run_schedule(&self, scope: &Scope, app: &str, schedule: &Schedule, slot: u64, user: &str) -> Result<()> {
+        let started = Instant::now();
+        let reply = match self.count(app, "schedule").await {
+            Err(err) => Reply::Error(format!("{err:#}")),
+            Ok(()) => {
+                let req = CallRequest { app: app.into(), op: schedule.op.clone(), input: schedule.input.clone(), scopes: Some(vec![scope.to_string()]), client: Some("schedule".into()), ..Default::default() };
+                self.run(&req, &Caller { key: self.0.id, user: user.into(), agent: None }).await
+            }
+        };
+        let (ok, error) = match reply {
+            Reply::Ok(_) => (true, None),
+            Reply::Error(e) => (false, Some(e.chars().take(500).collect::<String>())),
+            // Not here yet (not ready, or without the latest deploy): the next tick tries again.
+            Reply::Elsewhere(why) => {
+                tracing::debug!("{app}'s schedule {} waits: {why}", schedule.name);
+                return Ok(());
+            }
+        };
+        let data = json!({ "app": app, "schedule": schedule.name, "slot": slot, "ok": ok, "error": error, "ms": started.elapsed().as_millis() as u64, "spec": schedule.spec() });
+        self.append_as(scope, user, None, members::node("ran", data)).await?;
+        Ok(())
+    }
+
+    /// An app's schedules where it's installed for `viewer` and this server holds the scope: what each runs and when,
+    /// whether it's on, whom it runs as, when it runs next, its last run, and whether a deploy changed or removed it;
+    /// and its runs, newest first.
+    fn schedules_of(&self, viewer: &Caller, app: &str, declared: &[std::result::Result<Schedule, (String, String)>]) -> Result<(Vec<Value>, Vec<Value>)> {
+        let now = now_ms();
+        self.with(|i| {
+            let m = &i.r.members;
+            let user_name = |u: &str| m.users.get(u).map(|u| u.name.clone()).unwrap_or_default();
+            let (mut list, mut activity) = (Vec::new(), Vec::new());
+            for scope in reachable(i, app, &viewer.user) {
+                let Some((_, state)) = i.views.get(&scope.to_string()) else { continue };
+                if !state.installed.contains(app) {
+                    continue;
+                }
+                let scope_name = handles(m, std::slice::from_ref(&scope), &viewer.user).remove(0).name;
+                let base = |name: &str| {
+                    let key = (app.to_string(), name.to_string());
+                    let runs = state.runs.get(&key);
+                    let last = runs.and_then(|r| r.last()).map(|r| json!({ "time": r.time, "ok": r.ok, "error": r.error }));
+                    let changed = state.changed.get(&key).filter(|(.., t)| now.saturating_sub(*t) < CHANGED_SHOWN).map(|(was, is, t)| json!({ "was": schedules::say(was), "is": schedules::say(is), "time": t }));
+                    json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": members::manages_scope(m, &viewer.user, &scope), "last": last, "changed": changed })
+                };
+                for s in declared {
+                    let mut v = match s {
+                        Ok(s) => {
+                            let mut v = base(&s.name);
+                            let user = runs_as(m, state, &scope, app, &s.name);
+                            let switched = state.switches.get(&(app.to_string(), s.name.clone()));
+                            v["description"] = json!(s.description);
+                            v["when"] = json!(s.say());
+                            v["op"] = json!(s.op);
+                            v["on"] = json!(switched.is_none_or(|(on, ..)| *on));
+                            v["switched"] = json!(switched.map(|(on, by, t)| json!({ "on": on, "by": user_name(by), "time": t })));
+                            v["runs_as"] = json!(user.as_deref().map(user_name));
+                            v["next"] = json!(user.and(s.next(now)));
+                            v
+                        }
+                        Err((name, why)) => {
+                            let mut v = base(name);
+                            v["invalid"] = json!(why);
+                            v
+                        }
+                    };
+                    v["removed"] = json!(false);
+                    list.push(v);
+                }
+                // Schedules a deploy removed that ran lately.
+                for ((a, name), runs) in &state.runs {
+                    let gone = a == app && !declared.iter().any(|s| match s {
+                        Ok(s) => &s.name == name,
+                        Err((n, _)) => n == name,
+                    });
+                    if gone && runs.last().is_some_and(|r| now.saturating_sub(r.time) < CHANGED_SHOWN) {
+                        let mut v = base(name);
+                        v["removed"] = json!(true);
+                        v["was"] = json!(runs.last().map(|r| schedules::say(&r.spec)));
+                        list.push(v);
+                    }
+                }
+                for ((a, name), runs) in state.runs.iter().filter(|((a, _), _)| a == app) {
+                    let _ = a;
+                    for r in runs {
+                        activity.push(json!({ "schedule": name, "scope": scope.to_string(), "scope_name": scope_name, "time": r.time, "ok": r.ok, "error": r.error, "ms": r.ms, "server": m.machines.get(&r.server).map(|s| s.name.clone()), "user": user_name(&r.user) }));
+                    }
+                }
+            }
+            activity.sort_by_key(|r| std::cmp::Reverse(r["time"].as_u64().unwrap_or(0)));
+            activity.truncate(50);
+            Ok((list, activity))
+        })
+    }
+
     /// Lets the requests of a call, widget or hook of `app` through the node as `caller`'s, while it runs.
-    fn grant(&self, app: &str, caller: &Caller, ctx: &mut Context) -> Granted {
+    fn grant(&self, app: &str, caller: &Caller, ctx: &mut Context, depth: u32) -> Granted {
         let token = hex(&rand::random::<[u8; 32]>());
         let scopes = ctx.scopes.iter().filter_map(|s| Scope::parse(&s.id).ok()).collect();
-        let grant = Grant { app: app.to_string(), caller: caller.clone(), scopes, read_only: ctx.read_only, puts: Vec::new() };
+        let grant = Grant { app: app.to_string(), caller: caller.clone(), scopes, read_only: ctx.read_only, puts: Vec::new(), depth };
         self.0.grants.lock().unwrap().insert(token.clone(), grant);
         ctx.token = token.clone();
         Granted(self.clone(), token)
     }
+
+    /// Counts one of `app`'s calls of other apps, or one run of its schedules (`kind`). Past `RATE_LIMIT` this minute,
+    /// the app is stopped here: it's looping.
+    async fn count(&self, app: &str, kind: &'static str) -> Result<()> {
+        let minute = now_ms() / 60_000;
+        let tripped = {
+            let mut g = self.0.guard.lock().unwrap();
+            if g.minute != minute {
+                g.minute = minute;
+                g.counts.clear();
+            }
+            let n = g.counts.entry((app.to_string(), kind)).or_default();
+            *n += 1;
+            *n == RATE_LIMIT + 1
+        };
+        if tripped {
+            let what = if kind == "call" { "called other apps" } else { "ran its schedules" };
+            let why = format!("{app} {what} more than {RATE_LIMIT} times in a minute on {}, so it was stopped there: is it looping? It runs again once it's deployed again, or in {} minutes.", self.server_name(), STOPPED_FOR / 60_000);
+            let bundle = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone()))).ok().flatten();
+            self.0.guard.lock().unwrap().stopped.insert(app.to_string(), (why.clone(), now_ms() + STOPPED_FOR, bundle));
+            tracing::warn!("{why}");
+            self.stopped_app(app, &why).await;
+        }
+        match self.stopped(app) {
+            Some(why) => bail!("{why}"),
+            None => Ok(()),
+        }
+    }
+
+    /// Why `app` is stopped here, if it is: it looped, and hasn't been deployed again or waited out its time since.
+    fn stopped(&self, app: &str) -> Option<String> {
+        let latest = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone()))).ok().flatten();
+        let mut g = self.0.guard.lock().unwrap();
+        let (why, until, bundle) = g.stopped.get(app)?;
+        if now_ms() < *until && *bundle == latest {
+            return Some(why.clone());
+        }
+        g.stopped.remove(app);
+        None
+    }
+
+    /// Tells an app's owners it was stopped for looping, and records why.
+    async fn stopped_app(&self, _app: &str, _why: &str) {}
 
     /// The ports this node serves on this machine: its local API, workerd, and apps' outbound requests.
     pub fn own_ports(&self) -> Vec<u16> {
@@ -841,7 +1101,7 @@ impl Node {
         self.with(|i| {
             let reach = reachable(i, app, &viewer.user);
             let scopes: Vec<Scope> = reach.into_iter().filter(|s| i.r.holds(s)).collect();
-            Ok(Context { me, now: now_ms(), scopes: handles(&i.r.members, &scopes, &viewer.user), read_only: true, token: String::new() })
+            Ok(Context { me, now: now_ms(), scopes: handles(&i.r.members, &scopes, &viewer.user), read_only: true, token: String::new(), from: None })
         })
     }
 
@@ -856,7 +1116,7 @@ impl Node {
         let mut out = Vec::new();
         for app in self.0.apps.names() {
             let mut ctx = self.read_context(&app, &viewer)?;
-            let _granted = self.grant(&app, &viewer, &mut ctx);
+            let _granted = self.grant(&app, &viewer, &mut ctx, 0);
             if let Some(scope) = &scope {
                 let installed = self.with(|i| Ok(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&app))))?;
                 ctx.scopes.retain(|s| installed && s.id == scope.to_string());
@@ -887,7 +1147,7 @@ impl Node {
         let now = now_ms();
         let caller = Caller { key: self.0.id, user: self.user()?, agent: None };
         let mut ctx = self.read_context(app, &caller)?;
-        let _granted = self.grant(app, &caller, &mut ctx);
+        let _granted = self.grant(app, &caller, &mut ctx, 0);
         let out = self.0.apps.hook(app, name, json!({ "event": event, "since": since }), &ctx).await?;
         seen.insert(key, json!(now));
         let week_ago = now.saturating_sub(7 * 86_400_000);
@@ -991,8 +1251,14 @@ impl Node {
             if self.0.apps.has(&name) {
                 if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
                     // A fork's module may still give its first name; the install's name for it is the one that counts.
-                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && (mine || matches!(k.as_str(), "title" | "icon" | "description" | "uses"))) {
+                    let declared = Schedule::all(&Value::Object(d.clone()));
+                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "description" | "uses"))) {
                         info[k] = v;
+                    }
+                    if mine {
+                        let (list, activity) = self.schedules_of(viewer, &name, &declared)?;
+                        info["schedules"] = json!(list);
+                        info["activity"] = json!(activity);
                     }
                 }
             }
@@ -1073,6 +1339,14 @@ impl Node {
         Ok(())
     }
 
+    /// Switches one of an app's schedules on or off in `scope`, for `caller`; switching one on makes it run as them.
+    pub async fn switch_schedule(&self, caller: &Caller, app: &str, schedule: &str, scope: &Scope, on: bool) -> Result<()> {
+        let content = self.with(|i| switch_entry(i, &caller.user, scope, app, schedule, on))?;
+        let by = (caller.key != self.0.id).then_some(caller.key);
+        self.append_as(scope, &caller.user, by, content).await?;
+        Ok(())
+    }
+
     /// Forks `app` as a new app called `name`, owned by `owner` (by default the caller), with data of its own; it
     /// runs `app`'s latest deploy until it's deployed itself.
     pub async fn fork(&self, caller: &Caller, app: &str, name: &str, owner: Option<&str>) -> Result<()> {
@@ -1100,9 +1374,11 @@ impl Node {
                 let (app, op) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
                 let (apps, drivers) = self.uses(&grant.app).await;
                 ensure!(apps.iter().chain(&drivers).any(|u| u == app), "{} doesn't use {app}", grant.app);
+                ensure!(grant.depth < MAX_DEPTH, "{} called {app} {} calls deep, and apps call each other at most {MAX_DEPTH} deep: is it looping?", grant.app, grant.depth + 1);
+                self.count(&grant.app, "call").await?;
                 // An app may say which server runs it, like the one with a local model.
                 let server = req["server"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
-                let call = CallRequest { app: app.into(), op: op.into(), input: req["input"].clone(), server, ..Default::default() };
+                let call = CallRequest { app: app.into(), op: op.into(), input: req["input"].clone(), server, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
             ("POST", "/blob") => {
@@ -1340,7 +1616,8 @@ impl Node {
                 json!({ "html": self.screen(me.clone(), app, name, body["params"].clone(), body["scope"].as_str()).await? })
             }
             ("POST", "/v1/call") => {
-                let req: CallRequest = serde_json::from_value(body)?;
+                let mut req: CallRequest = serde_json::from_value(body)?;
+                (req.from, req.depth, req.client) = (None, 0, Some("phone".into()));
                 let me = &Caller { agent: req.agent.clone(), ..me.clone() };
                 let deployed = self.with(|i| Ok(i.r.members.apps.get(&req.app).is_some_and(|a| a.bundle.is_some())))?;
                 // An app's call runs here or the client tries another server; a driver's goes where the driver is.
@@ -1356,6 +1633,11 @@ impl Node {
             ("POST", "/v1/install") => {
                 let scope = self.scope_for(me, body["scope"].as_str().unwrap_or("user"))?;
                 self.install(me, body["app"].as_str().unwrap_or(""), &scope, body["installed"] != false).await?;
+                json!({})
+            }
+            ("POST", "/v1/schedule") => {
+                let scope = self.scope_for(me, body["scope"].as_str().unwrap_or("user"))?;
+                self.switch_schedule(me, body["app"].as_str().unwrap_or(""), body["schedule"].as_str().unwrap_or(""), &scope, body["on"] != false).await?;
                 json!({})
             }
             ("POST", "/v1/group") => {
@@ -1898,7 +2180,7 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
         let open = i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.opens.iter().any(|(by, server, t, _)| by == &me.user && *server == here && now_ms() < t + members::OPEN_FOR));
         ensure!(open, "that user's data isn't open for you on {}", node.server_name());
         let caller = Caller { key: me.key, user: target.clone(), agent: me.agent.clone() };
-        let ctx = Context { me: node_me(node, m, &caller), now: now_ms(), scopes: handles(m, std::slice::from_ref(&scope), target), read_only: true, token: String::new() };
+        let ctx = Context { me: node_me(node, m, &caller), now: now_ms(), scopes: handles(m, std::slice::from_ref(&scope), target), read_only: true, token: String::new(), from: None };
         return Ok(Ok((ctx, vec![scope])));
     }
     if !m.serves(&here, &me.user) {
@@ -1923,7 +2205,7 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("{} doesn't hold {s}", node.server_name())));
     }
-    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new() };
+    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None };
     Ok(Ok((ctx, scopes)))
 }
 
@@ -1955,8 +2237,31 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
             ensure!(scopes.contains(&scope), "the call didn't name {scope}");
             (scope.clone(), secret_entry(i, &me.user, &scope, app, &name, hosts, value)?)
         }
+        Append::Switch { app, schedule, scope, on } => {
+            let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
+            (scope.clone(), switch_entry(i, &me.user, &scope, &app, &schedule, on)?)
+        }
         Append::Install { .. } => bail!("installs are checked by install_entries"),
     })
+}
+
+/// Whom a schedule of `app` in a scope runs as: whoever switched it on last, or else installed the app there, while
+/// they still manage the scope; nobody if it's switched off.
+fn runs_as(m: &Members, state: &ScopeState, scope: &Scope, app: &str, schedule: &str) -> Option<String> {
+    let manages = |u: &String| members::manages_scope(m, u, scope);
+    match state.switches.get(&(app.to_string(), schedule.to_string())) {
+        Some((false, ..)) => None,
+        Some((true, user, _)) if manages(user) => Some(user.clone()),
+        _ => state.installers.get(app).map(|(u, _)| u.clone()).filter(manages),
+    }
+}
+
+/// A `schedule` entry `user` may write in `scope`, switching a schedule of `app` there on or off.
+fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, schedule: &str, on: bool) -> Result<Content> {
+    ensure!(members::manages_scope(&i.r.members, user, scope), "you can't switch schedules in {scope}");
+    ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{app} isn't installed in {scope}");
+    ensure!(i.r.holds(scope), "this server doesn't hold {scope}");
+    Ok(members::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
 }
 
 /// A `secret` entry `user` may write in `scope`, setting (or with no value, deleting) a secret of `app`.

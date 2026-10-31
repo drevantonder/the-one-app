@@ -81,12 +81,16 @@ pub struct Context {
     pub read_only: bool,
     /// What the call's requests carry, so the node knows whose they are (see `src/outbound.rs`).
     pub token: String,
+    /// The app whose `ctx.apps` made the call, if one did.
+    pub from: Option<String>,
 }
 
 /// What a call asks the node to write once it returns.
 pub enum Append {
     Entry { scope: String, content: Content },
     Install { app: String, scope: String, installed: bool },
+    /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
+    Switch { app: String, schedule: String, scope: String, on: bool },
     /// Sets (or with no value, deletes) one of the calling app's secrets in a scope.
     Secret { scope: String, name: String, value: Option<String>, hosts: Vec<String> },
 }
@@ -251,7 +255,7 @@ impl Apps {
     }
 
     pub async fn call(&self, app: &str, op: &str, input: Value, ctx: &Context) -> Result<Outcome> {
-        let reply = self.ask(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token })).await?;
+        let reply = self.ask(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from })).await?;
         let mut appends = Vec::new();
         for a in reply["appends"].as_array().into_iter().flatten() {
             let scope = a["scope"].as_str().unwrap_or("").to_string();
@@ -260,6 +264,10 @@ impl Apps {
                 let value = a["value"].as_str().map(str::to_string);
                 ensure!(value.is_some() || a["value"].is_null(), "a secret's value is text");
                 appends.push(Append::Secret { scope, name: name.into(), value, hosts });
+                continue;
+            }
+            if let Some(schedule) = a["switch"].as_str() {
+                appends.push(Append::Switch { app: a["app"].as_str().unwrap_or("").into(), schedule: schedule.into(), scope, on: a["on"] != false });
                 continue;
             }
             match a["install"].as_str() {

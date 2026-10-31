@@ -56,7 +56,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     if spec.as_ref().is_some_and(|(_, o)| o["confirm"] == true) && !confirmed {
         ask(&format!("{CLI} {app} {op} can't be undone. Go ahead?"), &format!("{app} {op} can't be undone: run it again with --confirm"))?;
     }
-    let r = post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env() }))?;
+    let r = post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" }))?;
     show(app, op, &r["ok"], out.as_deref())
 }
 

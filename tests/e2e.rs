@@ -169,6 +169,7 @@ async fn users_groups_trust_and_privileged_servers() {
     assert!(bob.member("untrust", json!({ "server": key(&cloud) })).await.is_err(), "nobody untrusts a privileged server");
     let carol_code = andre.pair(Some(("Carol".into(), one::members::Role::Member))).unwrap();
     carol.join(&carol_code).await.unwrap();
+    eventually("cloud to know carol's phone", async || cloud.state()["install"]["clients"].as_array().unwrap().iter().any(|c| c["name"] == "Carol's phone")).await;
     let reply = carol.request("POST", "/v1/call", json!({ "app": "board", "op": "post", "input": { "text": "carol here", "scope": "user" } })).await.unwrap();
     assert!(reply.get("ok").is_some(), "the privileged server serves a phone-only user: {reply}");
 
@@ -653,4 +654,89 @@ async fn a_drivers_screen_is_served_wherever_it_runs() {
     .await;
     let html = a.screen(me, "lamps", "main", json!({ "room": "kitchen" }), None).await.unwrap();
     assert!(html.contains("<p>main kitchen</p>") && html.contains("window.one"), "a serves b's driver's screen in the kit and bridge: {html}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn schedules_run_once_per_slot_on_one_server_and_switch_off() {
+    let (a, _ra) = start("sched-a").await;
+    let (b, _rb) = start("sched-b").await;
+    a.create("Schedules", "Andre").await.unwrap();
+    b.join(&a.pair(None).unwrap()).await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    deploy_module(&a, "ticker", r#"export default {
+  name: "ticker",
+  schema: { global: "create table ticks (by text)" },
+  schedules: {
+    tick: { description: "Ticks every minute.", op: "tick", every: "1m" },
+    broken: { op: "tick", every: "5s" },
+  },
+  ops: {
+    tick: { run: (ctx) => { ctx.global.append("tick", { by: ctx.me.name }); return null; } },
+    ticks: { run: async (ctx) => (await ctx.global.query("select by from ticks")).map((t) => t.by) },
+  },
+  on: { tick: (db, e) => db.exec("insert into ticks values (?)", [e.data.by]) },
+};"#)
+    .await;
+    a.install(&me, "ticker", &one::entry::Scope::Global, true).await.unwrap();
+    let ticker = |n: &Node| {
+        let (n, me) = (n.clone(), me.clone());
+        async move { n.apps(&me).await.unwrap().into_iter().find(|x| x["name"] == "ticker").unwrap() }
+    };
+    eventually("b to run ticker", async || b.call(call("ticker", "ticks", json!({}))).await.is_ok()).await;
+    let shown = ticker(&a).await;
+    let tick = shown["schedules"].as_array().unwrap().iter().find(|s| s["name"] == "tick").unwrap().clone();
+    assert_eq!(tick["when"], "every minute");
+    assert_eq!(tick["on"], true);
+    assert_eq!(tick["runs_as"], "Andre", "it runs as whoever installed it");
+    let broken = shown["schedules"].as_array().unwrap().iter().find(|s| s["name"] == "broken").unwrap().clone();
+    assert!(broken["invalid"].as_str().unwrap().contains("once a minute"), "{broken}");
+
+    // The next minute's slot runs once, on one of the two servers.
+    let started = std::time::Instant::now();
+    while started.elapsed() < Duration::from_secs(100) && a.call(call("ticker", "ticks", json!({}))).await.unwrap().as_array().unwrap().is_empty() {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    tokio::time::sleep(Duration::from_secs(25)).await;
+    let ticks = a.call(call("ticker", "ticks", json!({}))).await.unwrap();
+    let activity = ticker(&b).await["activity"].clone();
+    assert!(!activity.as_array().unwrap().is_empty(), "the run shows in the activity: {activity}");
+    let slots_run = activity.as_array().unwrap().len();
+    assert_eq!(ticks.as_array().unwrap().len(), slots_run, "each slot ran once, on one server: {ticks} {activity}");
+    assert_eq!(activity[0]["ok"], true, "{activity}");
+
+    // Switched off, it stops.
+    a.switch_schedule(&me, "ticker", "tick", &one::entry::Scope::Global, false).await.unwrap();
+    let off = ticker(&a).await["schedules"].as_array().unwrap().iter().find(|s| s["name"] == "tick").unwrap().clone();
+    assert_eq!(off["on"], false, "{off}");
+    assert!(off["next"].is_null());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn loop_guards_cap_depth_and_stop_a_looping_app() {
+    let (a, _ra) = start("loops").await;
+    a.create("Loops", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    deploy_module(&a, "pong", r#"export default { name: "pong", ops: { ping: { run: (ctx) => ctx.from } } };"#).await;
+    deploy_module(&a, "loopy", r#"export default {
+  name: "loopy",
+  uses: { apps: ["loopy", "pong"] },
+  ops: {
+    deeper: { run: async (ctx, { n }) => n >= 10 ? n : ctx.apps.loopy.deeper({ n: n + 1 }) },
+    spin: { run: async (ctx) => { for (let i = 0; i < 700; i++) await ctx.apps.pong.ping({}); return "done"; } },
+    from: { run: (ctx) => ctx.apps.pong.ping({}) },
+  },
+};"#)
+    .await;
+    a.install(&me, "loopy", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
+    eventually("loopy to run", async || a.call(call("loopy", "from", json!({}))).await.is_ok()).await;
+    assert_eq!(a.call(call("loopy", "from", json!({}))).await.unwrap(), "loopy", "the callee sees which app called it");
+    let deep = a.call(call("loopy", "deeper", json!({ "n": 0 }))).await.unwrap_err();
+    assert!(format!("{deep:#}").contains("at most 3 deep"), "{deep:#}");
+    let spun = a.call(call("loopy", "spin", json!({}))).await.unwrap_err();
+    assert!(format!("{spun:#}").contains("stopped"), "{spun:#}");
+    let again = a.call(call("loopy", "from", json!({}))).await.unwrap_err();
+    assert!(format!("{again:#}").contains("looping"), "a stopped app stays stopped: {again:#}");
+    // Deployed again, it runs.
+    deploy_module(&a, "loopy", r#"export default { name: "loopy", uses: { apps: ["pong"] }, ops: { from: { run: (ctx) => ctx.apps.pong.ping({}) } } };"#).await;
+    eventually("loopy to run again", async || a.call(call("loopy", "from", json!({}))).await.is_ok()).await;
 }

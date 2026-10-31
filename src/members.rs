@@ -116,9 +116,12 @@ pub struct Members {
     pub apps: BTreeMap<String, App>,
 }
 
+/// Node entries that change only their own scope's state, never the members, so no other scope replays them.
+const SCOPE_ONLY: &[&str] = &["ran", "schedule"];
+
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
-    e.content.app == APP && e.log() == "global"
+    e.content.app == APP && e.log() == "global" && !SCOPE_ONLY.contains(&e.content.kind.as_str())
 }
 
 impl Members {
@@ -494,15 +497,41 @@ pub fn valid_app_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && name != APP
 }
 
-/// What a scope's own node entries add up to: the apps installed in it, every `open` of it, and its secrets.
+/// What a scope's own node entries add up to: the apps installed in it, every `open` of it, its secrets, and its
+/// schedules' switches and runs.
 #[derive(Clone, Debug, Default)]
 pub struct ScopeState {
     pub installed: BTreeSet<String>,
+    /// Who last installed each app here, and when: its schedules run as them, unless someone switched one on since.
+    pub installers: BTreeMap<String, (String, u64)>,
+    /// Each schedule switched on or off here, by (app, schedule): (on, by whom, when).
+    pub switches: BTreeMap<(String, String), (bool, String, u64)>,
+    /// Each schedule's latest runs here, oldest first, by (app, schedule).
+    pub runs: BTreeMap<(String, String), Vec<Run>>,
+    /// When a schedule's runs first followed a different definition, by (app, schedule): (was, is, when).
+    pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
     /// (opener, server, time)
     /// Who opened this user's data, on which server, when, and through which agent.
     pub opens: Vec<(String, Key, u64, Option<String>)>,
     /// Each app's secrets here, by (app, name).
     pub secrets: BTreeMap<(String, String), Secret>,
+}
+
+/// How many runs of each schedule a scope's state keeps.
+pub const RUNS_KEPT: usize = 20;
+
+/// One run of a schedule: the slot it ran for, when, on which server, as whom, how it went, and the definition it
+/// followed.
+#[derive(Clone, Debug)]
+pub struct Run {
+    pub slot: u64,
+    pub time: u64,
+    pub server: Key,
+    pub user: String,
+    pub ok: bool,
+    pub error: Option<String>,
+    pub ms: u64,
+    pub spec: Value,
 }
 
 /// A secret: set, never read. Only the node's outbound requests use its value (see SPEC.md, "Secrets").
@@ -550,9 +579,42 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let app = e.content.data["app"].as_str().context("no app")?.to_string();
             if e.content.kind == "install" {
                 ensure!(m.apps.contains_key(&app), "no such app");
+                state.installers.insert(app.clone(), (w.to_string(), e.time()));
                 state.installed.insert(app);
             } else {
                 state.installed.remove(&app);
+            }
+        }
+        "schedule" => {
+            ensure!(manages_scope(m, w, &scope), "not allowed to switch schedules there");
+            let data = &e.content.data;
+            let app = data["app"].as_str().context("no app")?.to_string();
+            let name = data["schedule"].as_str().context("no schedule")?.to_string();
+            let on = data["on"].as_bool().context("on or off?")?;
+            state.switches.insert((app, name), (on, w.to_string(), e.time()));
+        }
+        "ran" => {
+            let data = &e.content.data;
+            let app = data["app"].as_str().context("no app")?.to_string();
+            let name = data["schedule"].as_str().context("no schedule")?.to_string();
+            let run = Run {
+                slot: data["slot"].as_u64().context("no slot")?,
+                time: e.time(),
+                server: e.author(),
+                user: w.to_string(),
+                ok: data["ok"].as_bool().unwrap_or(false),
+                error: data["error"].as_str().map(str::to_string),
+                ms: data["ms"].as_u64().unwrap_or(0),
+                spec: data["spec"].clone(),
+            };
+            let key = (app, name);
+            let runs = state.runs.entry(key.clone()).or_default();
+            if let Some(last) = runs.last().filter(|l| !l.spec.is_null() && !run.spec.is_null() && l.spec != run.spec) {
+                state.changed.insert(key, (last.spec.clone(), run.spec.clone(), run.time));
+            }
+            runs.push(run);
+            if runs.len() > RUNS_KEPT {
+                runs.remove(0);
             }
         }
         "secret" => {
@@ -605,6 +667,9 @@ pub fn replay_from(root: Option<Hash>, member_entries: &[Entry], scope_entries: 
         let counted = if is_member_entry(e) {
             members.next_if(|me| me.order() == order);
             m.step(e) && (!matches!(e.content.kind.as_str(), "install" | "uninstall" | "secret") || apply_in_scope(&m, &mut state, e).is_ok())
+        } else if e.content.app == APP && e.log() == "global" {
+            // A scope-only node entry of `global`'s.
+            m.counts(e) && apply_in_scope(&m, &mut state, e).is_ok()
         } else if m.counts(e) {
             e.content.app != APP || apply_in_scope(&m, &mut state, e).is_ok()
         } else {

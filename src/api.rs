@@ -45,6 +45,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/app", post(app))
         .route("/v1/deploy", post(deploy))
         .route("/v1/install", post(install))
+        .route("/v1/schedule", post(schedule))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
         .route("/v1/secrets", get(secrets).post(set_secret))
@@ -111,7 +112,16 @@ async fn apps(State(node): State<Node>) -> Reply {
     Ok(Json(json!(node.apps(&local(&node)?).await?)))
 }
 
-async fn call(State(node): State<Node>, Json(req): Json<CallRequest>) -> Reply {
+async fn schedule(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    let me = local(&node)?;
+    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
+    node.switch_schedule(&me, text(&body, "app")?, text(&body, "schedule")?, &scope, body["on"] != false).await?;
+    done()
+}
+
+async fn call(State(node): State<Node>, Json(mut req): Json<CallRequest>) -> Reply {
+    // Only the node says an app made a call, and how deep it is.
+    (req.from, req.depth) = (None, 0);
     Ok(Json(json!({ "ok": node.call(req).await? })))
 }
 

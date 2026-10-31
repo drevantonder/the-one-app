@@ -25,6 +25,7 @@ function describe() {
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => ({ name, title: w.title || name })),
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
     uses: { apps: app.uses?.apps || [], drivers: app.uses?.drivers || [] },
+    schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
   };
 }
 
@@ -128,6 +129,8 @@ function context(env, body, appends) {
   const find = (id) => scopes.find((s) => s.id === id) || null;
   return {
     me: body.me,
+    /// The app whose ctx.apps made this call, if one did.
+    from: body.from ?? null,
     now: () => body.now,
     user: scopes.find((s) => s.id.startsWith("user:")) || null,
     global: find("global"),
@@ -147,6 +150,11 @@ function context(env, body, appends) {
     install: (name, scope, installed = true) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ install: name, scope, installed });
+    },
+    /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
+    schedule: (name, schedule, scope, on = true) => {
+      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+      appends.push({ switch: schedule, app: name, scope, on });
     },
   };
 }

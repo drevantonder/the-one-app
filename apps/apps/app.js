@@ -128,6 +128,22 @@ export default {
         return `Removed ${app}.`;
       },
     },
+    health: {
+      description: "How an app is doing where it's installed for you: its schedules (when each runs, on or off, as whom, whether a deploy changed or removed it) and their recent runs and failures.",
+      input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
+      async run(ctx, { app }) {
+        const a = await find(ctx, app);
+        return { schedules: a.schedules || [], activity: a.activity || [] };
+      },
+    },
+    switch: {
+      description: "Switch one of an app's schedules on or off in a place where it's installed (user, group:<id> or global); switched on, it runs as you.",
+      input: { type: "object", required: ["app", "schedule", "scope", "on"], properties: { app: { type: "string" }, schedule: { type: "string" }, scope: { type: "string" }, on: { type: "boolean" } } },
+      async run(ctx, { app, schedule, scope, on }) {
+        ctx.schedule(app, schedule, scope, on);
+        return `${schedule} is ${on ? "on" : "off"}.`;
+      },
+    },
     code: {
       reads: true,
       description: "An app's code as deployed: its files, or with path one of them. Everyone may read every app's code.",
@@ -244,6 +260,38 @@ const sections = [
   function forks({ a }) {
     return a.forks.length ? '<h2 class="section">Forks</h2><div class="list">' + a.forks.map(link).join("") + "</div>" : "";
   },
+  function schedules({ health }) {
+    const list = health?.schedules || [];
+    if (!list.length) return "";
+    const places = new Set(list.map((s) => s.scope)).size > 1;
+    const row = (s) => {
+      const notes = [];
+      if (s.invalid) notes.push('<span class="error">' + one.esc(s.invalid) + "</span>");
+      else if (s.removed) notes.push("Removed by a deploy" + (s.was ? ": it ran " + one.esc(s.was) : "") + ".");
+      else {
+        notes.push(one.esc(cap(s.when)) + (places ? " · " + one.esc(s.scope_name) : ""));
+        if (s.changed) notes.push("A deploy changed it " + one.ago(s.changed.time) + " ago; it ran " + one.esc(s.changed.was) + " before.");
+        if (s.on && s.runs_as) notes.push("Runs as " + one.esc(s.runs_as) + (s.next ? ", next " + soon(s.next) : ""));
+        else if (s.on) notes.push("Nobody can run it: whoever added it here can't any more. Switch it on to run it as you.");
+        else if (s.switched) notes.push("Switched off by " + one.esc(s.switched.by) + " " + one.ago(s.switched.time) + " ago");
+        if (s.last && !s.last.ok) notes.push('<span class="error">Its last run failed ' + one.ago(s.last.time) + " ago: " + one.esc(s.last.error || "") + "</span>");
+      }
+      const live = !s.invalid && !s.removed;
+      const toggle = live ? \`<input type="checkbox" class="switch"\${s.on && s.runs_as ? " checked" : ""}\${s.may_switch ? "" : " disabled"} onchange='switchIt(this, \${JSON.stringify({ schedule: s.name, scope: s.scope })})'>\` : "";
+      return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(s.description || s.name)}</span></div>
+        \${notes.map((n) => '<div class="sub small">' + n + "</div>").join("")}</div>\${toggle}</div>\`;
+    };
+    return '<h2 class="section">Schedules</h2><div class="list">' + list.map(row).join("") + "</div>";
+  },
+  function activity({ health }) {
+    const runs = health?.activity || [];
+    if (!runs.length) return "";
+    const failed = runs.filter((r) => !r.ok).length;
+    const row = (r) => \`<div class="row plain"><div class="main"><div class="title"><span>\${r.ok ? "✓" : '<span class="error">✕</span>'} \${one.esc(r.schedule)}</span><span class="when">\${one.ago(r.time)}</span></div>
+        \${r.ok ? "" : '<div class="sub small error">' + one.esc(r.error || "Failed") + "</div>"}
+        <div class="sub small">\${r.ok ? "Ran" : "Failed"} on \${one.esc(r.server || "a server")} as \${one.esc(r.user)} · \${r.ms < 1000 ? r.ms + " ms" : (r.ms / 1000).toFixed(1) + " s"}</div></div></div>\`;
+    return '<h2 class="section">Activity' + (failed ? " · " + failed + " failed" : "") + '</h2><div class="list">' + runs.slice(0, 20).map(row).join("") + "</div>";
+  },
   function code({ code }) {
     return code ? '<h2 class="section">Code</h2>' + folder(code.files, "") : "";
   },
@@ -254,10 +302,26 @@ function link(n) {
 }
 
 async function show() {
-  const [{ apps, places, admin }, code] = await Promise.all([one.call("list"), one.call("code", { app: name }).catch(() => null)]);
+  const [{ apps, places, admin }, code, health] = await Promise.all([one.call("list"), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null)]);
   const a = apps.find((x) => x.name === name);
   one.title(a.title);
-  document.getElementById("app").innerHTML = sections.map((s) => s({ a, places, admin, code })).join("");
+  document.getElementById("app").innerHTML = sections.map((s) => s({ a, places, admin, code, health })).join("");
+}
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+/// When a time in the next while is: "in 7m", "in 3h", "tomorrow".
+function soon(ms) {
+  const m = Math.max(0, Math.round((ms - Date.now()) / 60000));
+  return m < 1 ? "now" : m < 60 ? "in " + m + "m" : m < 1440 ? "in " + Math.round(m / 60) + "h" : "in " + Math.round(m / 1440) + "d";
+}
+async function switchIt(box, { schedule, scope }) {
+  box.disabled = true;
+  document.getElementById("error").textContent = "";
+  try {
+    await one.call("switch", { app: name, schedule, scope, on: box.checked });
+  } catch (err) {
+    document.getElementById("error").textContent = err.message;
+  }
+  show();
 }
 async function toggle(button, scope, on) {
   button.disabled = true;

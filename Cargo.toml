@@ -22,6 +22,8 @@ axum = "0.8"
 ciborium = "0.2"
 data-encoding = "2"
 iroh = "1.4"
+# Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
+jiff = "0.2"
 # So workerd dies with its node on Linux (prctl PR_SET_PDEATHSIG).
 libc = "0.2"
 p2panda-core = "0.7"
