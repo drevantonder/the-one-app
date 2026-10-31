@@ -286,9 +286,14 @@ fn harnesses(home: &Path, written: &mut Written) {
     // Another brand's node on this machine has a hook of its own, on its own port.
     let port = format!(":{}{HOOK_PATH}", addr.rsplit(':').next().unwrap_or_default());
     let server = server_name();
-    // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update.
+    // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
+    // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
     let installed = home.join(".local/bin").join(crate::brand::CLI);
-    let cli = if installed.exists() { installed.to_string_lossy().to_string() } else { crate::brand::CLI.to_string() };
+    let exe = std::env::current_exe().and_then(|e| e.canonicalize()).ok();
+    let cli = match exe {
+        Some(exe) if installed.canonicalize().ok() != Some(exe.clone()) => exe.to_string_lossy().to_string(),
+        _ => installed.to_string_lossy().to_string(),
+    };
     let plugin = |text: &str| text.replace("{{name}}", crate::brand::NAME).replace("{{cli}}", crate::brand::CLI).replace("{{addr}}", &addr);
     let s = |v: &str| CstInputValue::String(v.to_string());
     if claude.is_dir() {
