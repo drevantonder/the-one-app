@@ -38,15 +38,15 @@ Every server has an ACL, a `global` entry:
 
 - `acl { server, owners, users }`: `owners` and `users` are lists of `user:<id>`, `group:<id>` or `install`. Written by anyone acting for one of its current owners. Only admins may make `install` an owner. A server without one has its local user as its only owner and user. An owner is always a user too.
 
-A user **trusts** a server they are a user of when they are directly one of its owners, or they wrote `trust { server }` (members of an owning group, and listed users, opt in this way), or it is privileged and they haven't written `untrust { server }`. Both are `global` entries by that user. An `untrust` of a privileged server counts only if they trust another server, which then holds their data; if a user is ever left trusting no server, they trust every privileged server they are a user of again.
+A user **trusts** a server they are a user of when they are directly one of its owners, or they wrote `trust { server }` (members of an owning group, and listed users, opt in this way), or it is privileged: everyone trusts every privileged server, and can't untrust one. `trust` and `untrust` are `global` entries by that user.
 
 A server **holds**:
 
 - `global`;
-- every scope its owners can read: a user owner reads their own scope and their groups'; a group owner reads its own; `install` reads every group's;
+- every scope its owners can read: a user owner reads their own scope and their groups'; a group owner reads its own; `install` reads every scope;
 - the scope of each user who trusts it.
 
-A server owned by `install` holds every group's data and, by default, every user's, and serves everyone in its users: it is **privileged**. All others are **unprivileged**. A brand may name its privileged servers ("the PTC servers"). A group's data goes only to servers whose owners can read it: its members' servers, servers it owns, and privileged servers. It never follows a user's trust.
+A server owned by `install` holds everything and serves everyone in its users: it is **privileged**. All others are **unprivileged**. A brand may name its privileged servers ("the PTC servers"). A group's data goes only to servers whose owners can read it: its members' servers, servers it owns, and privileged servers. It never follows a user's trust.
 
 Examples: a laptop has owners `[user:you]`, users `[user:you]`. A team box: owners `[group:finance]`, users `[group:finance]`, holding the group's data and that of each member who trusts it. A shared box: owners `[user:carol]`, users `[user:carol, user:dan, user:eve]`.
 
