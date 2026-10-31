@@ -23,7 +23,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/call", post(call))
         .route("/v1/widgets", get(widgets))
         .route("/v1/spaces", post(create))
-        .route("/v1/invite", post(invite))
+        .route("/v1/pair", post(pair))
         .route("/v1/join", post(join))
         .route("/v1/device", post(rename))
         .route("/v1/remove", post(remove))
@@ -121,24 +121,24 @@ async fn create(State(node): State<Node>, Json(req): Json<CreateRequest>) -> Rep
 }
 
 #[derive(Deserialize)]
-struct InviteRequest {
+struct PairRequest {
     space: Option<String>,
     #[serde(default)]
-    mine: bool,
+    new_user: bool,
 }
 
-async fn invite(State(node): State<Node>, Json(req): Json<InviteRequest>) -> Reply {
+async fn pair(State(node): State<Node>, Json(req): Json<PairRequest>) -> Reply {
     let space = node.find_space(req.space.as_deref())?;
-    Ok(Json(json!({ "ticket": node.invite(space, req.mine)? })))
+    Ok(Json(json!({ "code": node.pair(space, req.new_user)? })))
 }
 
 #[derive(Deserialize)]
 struct JoinRequest {
-    ticket: String,
+    code: String,
 }
 
 async fn join(State(node): State<Node>, Json(req): Json<JoinRequest>) -> Reply {
-    let space = node.join(&req.ticket).await?;
+    let space = node.join(&req.code).await?;
     Ok(Json(json!({ "id": hex(&space) })))
 }
 

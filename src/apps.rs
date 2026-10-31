@@ -30,7 +30,7 @@ const TIME_LIMIT: Duration = Duration::from_secs(30);
 pub struct Me {
     pub space: String,
     pub device: String,
-    pub person: String,
+    pub user: String,
     pub name: String,
 }
 
@@ -40,7 +40,7 @@ pub struct Folded {
     pub app: String,
     pub kind: String,
     pub author: String,
-    pub person: String,
+    pub user: String,
     pub name: String,
     pub time: u64,
     pub id: String,

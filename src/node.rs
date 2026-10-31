@@ -38,20 +38,20 @@ struct DeviceFile {
 
 #[derive(Serialize, Deserialize)]
 struct SpaceFile {
-    person: String,
-    /// The device that invited this one, to sync with until this device sees itself admitted.
+    user: String,
+    /// The device whose pairing code this one joined with, to sync with until it sees itself admitted.
     #[serde(default)]
-    inviter: Option<String>,
+    paired_by: Option<String>,
 }
 
 struct Space {
     store: Store,
     members: Members,
-    person: String,
-    inviter: Option<Key>,
+    user: String,
+    paired_by: Option<Key>,
     /// The build each device last said it runs.
     builds: HashMap<Key, String>,
-    /// What each of this person's devices announced it provides (SPEC.md, "Providers").
+    /// What each of this user's devices announced it provides (SPEC.md, "Providers").
     provides: Vec<(Key, Value)>,
     folded: Option<Order>,
     /// Senders to every live sync session for this space, by peer device.
@@ -67,19 +67,19 @@ pub enum Event {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Invite {
+struct Pairing {
     space: Key,
-    person: Option<String>,
+    user: Option<String>,
     /// Milliseconds since 1970 after which it no longer works.
     until: u64,
 }
 
-const INVITE_LIFE: u64 = 7 * 86_400_000;
+const PAIRING_LIFE: u64 = 7 * 86_400_000;
 
 #[derive(Serialize, Deserialize)]
-struct Ticket {
+struct PairingCode {
     space: Key,
-    inviter: EndpointAddr,
+    from: EndpointAddr,
     secret: [u8; 16],
 }
 
@@ -94,7 +94,7 @@ struct JoinRequest {
 #[derive(Serialize, Deserialize)]
 struct JoinReply {
     space_name: String,
-    person: String,
+    user: String,
 }
 
 pub struct Inner {
@@ -108,7 +108,7 @@ pub struct Inner {
     native: Vec<crate::native::Native>,
     pub providers: crate::providers::Providers,
     spaces: Mutex<HashMap<Key, Space>>,
-    invites: Mutex<HashMap<[u8; 16], Invite>>,
+    pairings: Mutex<HashMap<[u8; 16], Pairing>>,
     events: broadcast::Sender<Event>,
     writes: tokio::sync::Mutex<()>,
 }
@@ -147,7 +147,7 @@ impl Node {
             native: builtin.native,
             providers: Default::default(),
             spaces: Mutex::new(HashMap::new()),
-            invites: Mutex::new(load_invites(dir)),
+            pairings: Mutex::new(load_pairings(dir)),
             events,
             writes: tokio::sync::Mutex::new(()),
         }));
@@ -216,8 +216,8 @@ impl Node {
         let file: SpaceFile = serde_json::from_slice(&std::fs::read(dir.join("space.json"))?)?;
         let store = Store::open(&dir.join("entries.db"), space)?;
         let members = Members::fold(&space, &store.ordered()?);
-        let inviter = file.inviter.and_then(|h| unhex(&h).ok());
-        self.0.spaces.lock().unwrap().insert(space, Space { store, members, person: file.person, inviter, builds: HashMap::new(), provides: Vec::new(), folded: None, sessions: HashMap::new() });
+        let paired_by = file.paired_by.and_then(|h| unhex(&h).ok());
+        self.0.spaces.lock().unwrap().insert(space, Space { store, members, user: file.user, paired_by, builds: HashMap::new(), provides: Vec::new(), folded: None, sessions: HashMap::new() });
         Ok(())
     }
 
@@ -236,10 +236,10 @@ impl Node {
     pub async fn create_space(&self, name: &str) -> Result<Key> {
         let root = SigningKey::generate();
         let space = *root.verifying_key().as_bytes();
-        let person = new_person();
-        self.save_space(&space, &SpaceFile { person: person.clone(), inviter: None })?;
+        let user = new_user();
+        self.save_space(&space, &SpaceFile { user: user.clone(), paired_by: None })?;
         self.open_space(space)?;
-        let genesis = space::genesis(&root, &self.0.id, name, &person, &self.device_name());
+        let genesis = space::genesis(&root, &self.0.id, name, &user, &self.device_name());
         self.append(space, genesis).await?;
         self.emit(Event::Spaces);
         Ok(space)
@@ -277,7 +277,7 @@ impl Node {
             }
             s.builds.extend(release::builds(new));
             if membership || new.iter().any(|e| e.content.app == release::APP && e.content.kind == "provides") {
-                s.provides = crate::providers::announced(&s.members, &s.store.ordered()?, &s.person);
+                s.provides = crate::providers::announced(&s.members, &s.store.ordered()?, &s.user);
             }
             let msg = sync::entries(space, new);
             for (peer, tx) in &s.sessions {
@@ -327,7 +327,7 @@ impl Node {
             let entries = s.store.ordered()?;
             s.folded = entries.iter().map(Entry::order).max();
             s.builds = release::builds(&entries);
-            s.provides = crate::providers::announced(&s.members, &entries, &s.person);
+            s.provides = crate::providers::announced(&s.members, &entries, &s.user);
             to_fold(&s.members, &entries)
         };
         let jobs = self.0.apps_names.iter().map(|app| FoldJob { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() }).collect();
@@ -341,11 +341,11 @@ impl Node {
         ensure!(s.members.current(&self.0.id).is_some(), "this device is not a member of the space yet");
         let m = s.members.current(device).context("not a member of this space")?;
         let name = if *device == self.0.id { self.device_name() } else { m.name.clone() };
-        Ok(Me { space: hex(space), device: hex(device), person: m.person.clone(), name })
+        Ok(Me { space: hex(space), device: hex(device), user: m.user.clone(), name })
     }
 
     /// Runs an app operation, appending whatever entries it asks for: here, or, for a device feature
-    /// that only another of this person's devices provides, on that device.
+    /// that only another of this user's devices provides, on that device.
     pub async fn call(&self, space: Key, app: &str, op: &str, input: Value) -> Result<Value> {
         let here = self.0.apps_names.iter().any(|a| a == app) || self.0.native.iter().any(|n| n.name == app) || self.0.providers.has(app);
         if !here {
@@ -356,7 +356,7 @@ impl Node {
         self.call_as(space, self.0.id, app, op, input).await
     }
 
-    /// Another of this person's devices that provides `app`, preferring one that's online.
+    /// Another of this user's devices that provides `app`, preferring one that's online.
     fn provider_of(&self, space: Key, app: &str) -> Result<Option<Key>> {
         let spaces = self.0.spaces.lock().unwrap();
         let s = spaces.get(&space).context("no such space")?;
@@ -370,7 +370,7 @@ impl Node {
         let me = self.me_of(&space, &caller)?;
         let native = self.0.native.iter().find(|n| n.name == app);
         if native.is_some() || self.0.providers.has(app) {
-            ensure!(me.person == self.me_of(&space, &self.0.id)?.person, "{app} runs only for this device's own person's devices");
+            ensure!(me.user == self.me_of(&space, &self.0.id)?.user, "{app} runs only for this device's own user's devices");
             let (result, appends) = match native {
                 Some(n) => (n.call)(op.to_string(), input, me, if n.entries { self.app_entries(space, app)? } else { vec![] }).await?,
                 None => self.0.providers.call(app, op, input, me).await?,
@@ -495,7 +495,7 @@ impl Node {
                     .current_devices()
                     .map(|m| {
                         json!({
-                            "device": hex(&m.device), "name": m.name, "person": m.person, "role": m.role, "client": m.client,
+                            "device": hex(&m.device), "name": m.name, "user": m.user, "role": m.role, "client": m.client,
                             "build": builds.get(&m.device),
                             "me": m.device == viewer, "host": m.device == self.0.id,
                             "online": m.device == self.0.id || m.device == viewer || s.sessions.contains_key(&m.device),
@@ -503,7 +503,7 @@ impl Node {
                     })
                     .collect();
                 json!({
-                    "id": hex(key), "name": s.members.name, "person": s.person,
+                    "id": hex(key), "name": s.members.name, "user": s.user,
                     "member": s.members.current(&viewer).is_some(),
                     "role": s.members.current(&viewer).map(|m| m.role.clone()),
                     "devices": devices, "entries": s.store.count().unwrap_or(0),
@@ -614,9 +614,9 @@ impl Node {
                 self.rename_client(caller, body["name"].as_str().unwrap_or("").trim()).await?;
                 json!({})
             }
-            ("POST", "/v1/invite") => {
+            ("POST", "/v1/pair") => {
                 let key = space(&body)?;
-                json!({ "ticket": self.invite_as(key, caller, body["mine"] == true)? })
+                json!({ "code": self.pair_as(key, caller, body["new_user"] == true)? })
             }
             _ => bail!("no such request: {method} {path}"),
         })
@@ -652,99 +652,99 @@ impl Node {
         Ok(())
     }
 
-    /// Makes a one-time ticket another device can join `space` with.
-    /// Makes a one-time ticket another device can join `space` with.
-    pub fn invite(&self, space: Key, mine: bool) -> Result<String> {
-        self.invite_as(space, self.0.id, mine)
+    /// Makes a one-time pairing code another device joins `space` with.
+    pub fn pair(&self, space: Key, new_user: bool) -> Result<String> {
+        self.pair_as(space, self.0.id, new_user)
     }
 
-    /// A ticket asked for by `asker` (this device, or a phone it serves): for one of the asker's own
-    /// person's devices if `mine`, else for someone new, which only admins may invite.
-    fn invite_as(&self, space: Key, asker: Key, mine: bool) -> Result<String> {
-        let person = {
+    /// A pairing code asked for by `asker` (this device, or a phone it serves): for another of the
+    /// asker's user's devices, or, if `new_user`, for someone new, which only admins may add.
+    fn pair_as(&self, space: Key, asker: Key, new_user: bool) -> Result<String> {
+        let mine = !new_user;
+        let user = {
             let spaces = self.0.spaces.lock().unwrap();
             let s = spaces.get(&space).context("no such space")?;
             let me = s.members.current(&self.0.id).context("this device is not a member")?;
-            let theirs = s.members.current(&asker).context("not a member")?.person.clone();
-            ensure!(mine || (me.role == Role::Admin && asker == self.0.id), "only admins invite other people; invite your own device instead");
-            ensure!(!mine || me.role == Role::Admin || me.person == theirs, "this device can't admit that person's devices; ask one of theirs, or an admin's");
+            let theirs = s.members.current(&asker).context("not a member")?.user.clone();
+            ensure!(mine || (me.role == Role::Admin && asker == self.0.id), "only admins add new users; pair one of your own devices instead");
+            ensure!(!mine || me.role == Role::Admin || me.user == theirs, "this device can't admit that user's devices; ask one of theirs, or an admin's");
             mine.then_some(theirs)
         };
         let secret: [u8; 16] = rand::random();
-        self.add_invite(secret, Invite { space, person, until: now_ms() + INVITE_LIFE })?;
-        let ticket = Ticket { space, inviter: self.0.endpoint.addr(), secret };
+        self.add_pairing(secret, Pairing { space, user, until: now_ms() + PAIRING_LIFE })?;
+        let code = PairingCode { space, from: self.0.endpoint.addr(), secret };
         let mut bytes = Vec::new();
-        ciborium::into_writer(&ticket, &mut bytes)?;
+        ciborium::into_writer(&code, &mut bytes)?;
         Ok(data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase())
     }
 
-    /// Invites are kept in a file, so a ticket still works after its inviter restarts.
-    fn add_invite(&self, secret: [u8; 16], invite: Invite) -> Result<()> {
-        let mut invites = self.0.invites.lock().unwrap();
-        invites.retain(|_, i| i.until > now_ms());
-        invites.insert(secret, invite);
-        self.save_invites(&invites)
+    /// Pairing codes are kept in a file, so one still works after the device that made it restarts.
+    fn add_pairing(&self, secret: [u8; 16], pairing: Pairing) -> Result<()> {
+        let mut pairings = self.0.pairings.lock().unwrap();
+        pairings.retain(|_, p| p.until > now_ms());
+        pairings.insert(secret, pairing);
+        self.save_pairings(&pairings)
     }
 
-    fn take_invite(&self, secret: &[u8; 16]) -> Result<Option<Invite>> {
-        let mut invites = self.0.invites.lock().unwrap();
-        let invite = invites.remove(secret);
-        self.save_invites(&invites)?;
-        Ok(invite)
+    fn take_pairing(&self, secret: &[u8; 16]) -> Result<Option<Pairing>> {
+        let mut pairings = self.0.pairings.lock().unwrap();
+        let pairing = pairings.remove(secret);
+        self.save_pairings(&pairings)?;
+        Ok(pairing)
     }
 
-    fn save_invites(&self, invites: &HashMap<[u8; 16], Invite>) -> Result<()> {
-        let list: Vec<(String, &Invite)> = invites.iter().map(|(k, v)| (data_encoding::HEXLOWER.encode(k), v)).collect();
-        write_private(&self.0.dir.join("invites.json"), &serde_json::to_vec(&list)?)?;
+    fn save_pairings(&self, pairings: &HashMap<[u8; 16], Pairing>) -> Result<()> {
+        let list: Vec<(String, &Pairing)> = pairings.iter().map(|(k, v)| (data_encoding::HEXLOWER.encode(k), v)).collect();
+        write_private(&self.0.dir.join("pairings.json"), &serde_json::to_vec(&list)?)?;
         Ok(())
     }
 
-    pub async fn join(&self, ticket: &str) -> Result<Key> {
-        let bytes = data_encoding::BASE32_NOPAD.decode(ticket.trim().to_uppercase().as_bytes()).context("not a ticket")?;
-        let ticket: Ticket = ciborium::from_reader(bytes.as_slice()).context("not a ticket")?;
-        ensure!(!self.0.spaces.lock().unwrap().contains_key(&ticket.space), "this device is already in that space");
-        let conn = self.0.endpoint.connect(ticket.inviter.clone(), JOIN_ALPN).await.context("reach the inviting device")?;
+    pub async fn join(&self, code: &str) -> Result<Key> {
+        let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).context("that isn't a pairing code")?;
+        let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
+        ensure!(!self.0.spaces.lock().unwrap().contains_key(&code.space), "this device is already in that space");
+        let conn = self.0.endpoint.connect(code.from.clone(), JOIN_ALPN).await.context("couldn't reach the device that made the pairing code")?;
         let (mut send, mut recv) = conn.open_bi().await?;
-        send.write_all(&serde_json::to_vec(&JoinRequest { secret: ticket.secret, name: self.device_name(), client: false })?).await?;
+        send.write_all(&serde_json::to_vec(&JoinRequest { secret: code.secret, name: self.device_name(), client: false })?).await?;
         send.finish()?;
         let reply: Value = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
         if let Some(err) = reply.get("error") {
-            bail!("{}", err.as_str().unwrap_or("the invite was refused"));
+            bail!("{}", err.as_str().unwrap_or("the pairing code was refused"));
         }
         let reply: JoinReply = serde_json::from_value(reply)?;
-        self.save_space(&ticket.space, &SpaceFile { person: reply.person, inviter: Some(hex(ticket.inviter.id.as_bytes())) })?;
-        self.open_space(ticket.space)?;
-        let inviter = ticket.inviter.id;
+        self.save_space(&code.space, &SpaceFile { user: reply.user, paired_by: Some(hex(code.from.id.as_bytes())) })?;
+        self.open_space(code.space)?;
+        let paired_by = code.from.id;
         let node = self.clone();
         tokio::spawn(async move {
-            if let Err(err) = node.connect_sync(ticket.space, *inviter.as_bytes()).await {
+            if let Err(err) = node.connect_sync(code.space, *paired_by.as_bytes()).await {
                 tracing::warn!("first sync after joining: {err:#}");
             }
         });
         self.emit(Event::Spaces);
-        Ok(ticket.space)
+        Ok(code.space)
     }
 
     async fn accept_join(&self, conn: Connection) -> Result<()> {
         let remote = *conn.remote_id().as_bytes();
         let (mut send, mut recv) = conn.accept_bi().await?;
         let request: JoinRequest = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
-        let invite = self.take_invite(&request.secret)?.filter(|i| i.until > now_ms());
-        let Some(invite) = invite else {
-            send.write_all(br#"{"error":"this invite was already used or has expired"}"#).await?;
+        let pairing = self.take_pairing(&request.secret)?.filter(|p| p.until > now_ms());
+        let Some(pairing) = pairing else {
+            send.write_all(br#"{"error":"this pairing code was already used or has expired"}"#).await?;
             send.finish()?;
             return Ok(());
         };
-        let person = invite.person.unwrap_or_else(new_person);
-        let admit = if request.client { space::admit_client(&remote, &person, &request.name) } else { space::admit(&remote, &person, &request.name, Role::Member) };
-        self.append(invite.space, admit).await?;
-        if self.0.spaces.lock().unwrap()[&invite.space].members.current(&remote).is_none() {
+        let user = pairing.user.unwrap_or_else(new_user);
+        let admit = if request.client { space::admit_client(&remote, &user, &request.name) } else { space::admit(&remote, &user, &request.name, Role::Member) };
+        self.append(pairing.space, admit).await?;
+        if self.0.spaces.lock().unwrap()[&pairing.space].members.current(&remote).is_none() {
             send.write_all(br#"{"error":"this device can no longer admit that one"}"#).await?;
             send.finish()?;
             return Ok(());
         }
-        let space_name = self.0.spaces.lock().unwrap()[&invite.space].members.name.clone();
-        send.write_all(&serde_json::to_vec(&JoinReply { space_name, person })?).await?;
+        let space_name = self.0.spaces.lock().unwrap()[&pairing.space].members.name.clone();
+        send.write_all(&serde_json::to_vec(&JoinReply { space_name, user })?).await?;
         send.finish()?;
         conn.closed().await;
         Ok(())
@@ -758,9 +758,9 @@ impl Node {
                     .iter()
                     .flat_map(|(space, s)| {
                         let mut devices: Vec<Key> = s.members.current_devices().filter(|m| m.device != self.0.id && !m.client).map(|m| m.device).collect();
-                        // Still joining: only the inviter knows we're in.
+                        // Still joining: only the device that made the pairing code knows we're in.
                         if s.members.current(&self.0.id).is_none() {
-                            devices.extend(s.inviter);
+                            devices.extend(s.paired_by);
                         }
                         devices.into_iter().filter(|d| !s.sessions.contains_key(d)).map(|d| (*space, d)).collect::<Vec<_>>()
                     })
@@ -856,7 +856,7 @@ impl Node {
             let spaces = self.0.spaces.lock().unwrap();
             let s = spaces.get(&space).context("no such space")?;
             let joining = s.members.current(&self.0.id).is_none();
-            ensure!(s.members.current(&peer).is_some() || (joining && s.inviter == Some(peer)), "{} is no longer a member", short(&peer));
+            ensure!(s.members.current(&peer).is_some() || (joining && s.paired_by == Some(peer)), "{} is no longer a member", short(&peer));
             sync::handle(&s.store, msg, now_ms())?
         };
         self.after(space, &new, Some(peer)).await?;
@@ -909,7 +909,7 @@ impl Node {
         matches.sort();
         match matches.as_slice() {
             [one] => Ok(*one),
-            [] if name.is_none() => bail!("this device is in no space yet: create one, or join with a ticket"),
+            [] if name.is_none() => bail!("this device is in no space yet: create one, or join with a pairing code"),
             [] => bail!("no space called {}", name.unwrap()),
             _ => bail!("this device is in several spaces: say which"),
         }
@@ -1062,7 +1062,7 @@ fn to_fold(members: &Members, entries: &[Entry]) -> Vec<Folded> {
                 app: e.content.app.clone(),
                 kind: e.content.kind.clone(),
                 author: hex(&e.author()),
-                person: m.person.clone(),
+                user: m.user.clone(),
                 name: m.name_at(e.order()).to_string(),
                 time: e.time(),
                 id: format!("{}:{}", short(&e.author()), e.seq()),
@@ -1072,7 +1072,7 @@ fn to_fold(members: &Members, entries: &[Entry]) -> Vec<Folded> {
         .collect()
 }
 
-/// Writes a file only this user can read: device keys, invite secrets.
+/// Writes a file only this account can read: device keys, pairing secrets.
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     std::fs::write(path, bytes)?;
     #[cfg(unix)]
@@ -1083,14 +1083,14 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn load_invites(dir: &Path) -> HashMap<[u8; 16], Invite> {
-    let list: Vec<(String, Invite)> = std::fs::read(dir.join("invites.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+fn load_pairings(dir: &Path) -> HashMap<[u8; 16], Pairing> {
+    let list: Vec<(String, Pairing)> = std::fs::read(dir.join("pairings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     list.into_iter()
         .filter_map(|(k, v)| Some((data_encoding::HEXLOWER.decode(k.as_bytes()).ok()?.try_into().ok()?, v)))
         .collect()
 }
 
-fn new_person() -> String {
+fn new_user() -> String {
     data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>())
 }
 

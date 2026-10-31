@@ -1,4 +1,13 @@
-# The One App
+<p align="center">
+  <img src="docs/ring.png" width="200" alt="">
+</p>
+
+<h1 align="center">The One App</h1>
+
+<p align="center"><i>
+One app to rule them all, one app to find them,<br>
+one app to bring them all, and in the network bind them.
+</i></p>
 
 Your devices, and your team's, as one place for apps and agents.
 
@@ -22,8 +31,8 @@ Apps are JavaScript modules (see `apps/board.js`) or, for device features, nativ
 cargo build --release
 sh scripts/install-linux.sh target/release/one   # runs the node as a service
 one create Home                                   # a space, on your first device
-one invite --mine                                 # a ticket for your next device
-one join <ticket>                                 # on that device
+one pair                                          # a pairing code for your next device
+one join <code>                                   # on that device
 one board post --text "hello from here"
 ```
 

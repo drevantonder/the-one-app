@@ -18,9 +18,9 @@ const JOIN_ALPN: &[u8] = b"one/join/1";
 const CLIENT_ALPN: &[u8] = b"one/client/1";
 
 #[derive(Serialize, Deserialize)]
-struct Ticket {
+struct PairingCode {
     space: [u8; 32],
-    inviter: EndpointAddr,
+    from: EndpointAddr,
     secret: [u8; 16],
 }
 
@@ -81,22 +81,22 @@ impl Client {
         self.save()
     }
 
-    pub async fn join(&self, ticket: &str) -> Result<Value> {
-        let bytes = data_encoding::BASE32_NOPAD.decode(ticket.trim().to_uppercase().as_bytes()).context("that isn't a ticket")?;
-        let ticket: Ticket = ciborium::from_reader(bytes.as_slice()).context("that isn't a ticket")?;
-        let conn = self.endpoint.connect(ticket.inviter.clone(), JOIN_ALPN).await.context("couldn't reach the inviting device")?;
+    pub async fn join(&self, code: &str) -> Result<Value> {
+        let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).context("that isn't a pairing code")?;
+        let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
+        let conn = self.endpoint.connect(code.from.clone(), JOIN_ALPN).await.context("couldn't reach the device that made the pairing code")?;
         let (mut send, mut recv) = conn.open_bi().await?;
         let name = self.saved.lock().unwrap().name.clone();
-        send.write_all(&serde_json::to_vec(&json!({ "secret": ticket.secret, "name": name, "client": true }))?).await?;
+        send.write_all(&serde_json::to_vec(&json!({ "secret": code.secret, "name": name, "client": true }))?).await?;
         send.finish()?;
         let reply: Value = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
         if let Some(err) = reply.get("error") {
-            bail!("{}", err.as_str().unwrap_or("the invite was refused"));
+            bail!("{}", err.as_str().unwrap_or("the pairing code was refused"));
         }
         {
             let mut saved = self.saved.lock().unwrap();
-            saved.peers.retain(|p| p.id != ticket.inviter.id);
-            saved.peers.insert(0, ticket.inviter);
+            saved.peers.retain(|p| p.id != code.from.id);
+            saved.peers.insert(0, code.from);
         }
         self.save()?;
         // Learn the space's other devices, so any of them can answer later.
@@ -218,16 +218,16 @@ pub unsafe extern "C" fn one_start(dir: *const c_char, name: *const c_char) -> *
     }))
 }
 
-/// Joins the space `ticket` invites this device to, as `name` (or the name it started with, if empty).
+/// Joins the space a pairing code is for, as `name` (or the name it started with, if empty).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn one_join(ticket: *const c_char, name: *const c_char) -> *mut c_char {
-    let (ticket, name) = unsafe { (arg(ticket), arg(name)) };
+pub unsafe extern "C" fn one_join(code: *const c_char, name: *const c_char) -> *mut c_char {
+    let (code, name) = unsafe { (arg(code), arg(name)) };
     out(runtime().block_on(async {
         let c = client()?;
         if !name.trim().is_empty() {
             c.set_name(name.trim())?;
         }
-        c.join(&ticket).await
+        c.join(&code).await
     }))
 }
 

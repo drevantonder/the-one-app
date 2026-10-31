@@ -1,4 +1,4 @@
-//! Acts as a phone from a terminal: `cargo run -p one-client --example phone -- <dir> join <ticket>`,
+//! Acts as a phone from a terminal: `cargo run -p one-client --example phone -- <dir> join <pairing code>`,
 //! then `... <dir> GET /v1/state` or `... <dir> POST /v1/call '{"app":"board","op":"read","input":{}}'`.
 
 use serde_json::Value;

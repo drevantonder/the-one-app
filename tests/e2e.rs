@@ -35,13 +35,13 @@ async fn devices_and_a_phone_share_a_board() {
     let space = a.create_space("Test").await.unwrap();
     a.call(space, "board", "post", json!({ "text": "from a" })).await.unwrap();
 
-    b.join(&a.invite(space, true).unwrap()).await.unwrap();
+    b.join(&a.pair(space, false).unwrap()).await.unwrap();
     eventually("b to receive a's post", async || b.call(space, "board", "news", json!({ "since": 0 })).await.is_ok_and(|p| p.as_array().is_some_and(|p| !p.is_empty()))).await;
     b.call(space, "board", "post", json!({ "text": "from b" })).await.unwrap();
     eventually("a to receive b's post", async || texts(&a, space).await.contains(&"from b".to_string())).await;
 
     let phone = one_client::Client::start(temp("phone"), "Phone").await.unwrap();
-    phone.join(&a.invite(space, true).unwrap()).await.unwrap();
+    phone.join(&a.pair(space, false).unwrap()).await.unwrap();
     let state = phone.request("GET", "/v1/state", Value::Null).await.unwrap();
     assert_eq!(state["device"]["name"], "Phone");
     let page = phone.request("GET", "/v1/screen", json!({ "app": "board", "screen": "main" })).await.unwrap();
@@ -68,7 +68,7 @@ async fn a_provider_answers_calls_from_another_device() {
     let (a, _ra) = Node::start(&temp("pa"), one::builtin::all()).await.unwrap();
     let (b, _rb) = Node::start(&temp("pb"), one::builtin::all()).await.unwrap();
     let space = a.create_space("Test").await.unwrap();
-    b.join(&a.invite(space, true).unwrap()).await.unwrap();
+    b.join(&a.pair(space, false).unwrap()).await.unwrap();
     eventually("b to become a member", async || b.state()["spaces"][0]["member"] == true).await;
 
     // b runs a provider for "echo", as a Swift or Go program would over the local API.

@@ -1,6 +1,6 @@
 # Protocol
 
-Version 3. Everything here is what two devices must agree on.
+Version 4. Everything here is what two devices must agree on.
 
 ## Keys
 
@@ -27,8 +27,8 @@ The **fold order** is `(time, author, seq)`, compared as integers, then key byte
 
 Membership is the fold of entries whose app is `space`:
 
-- `genesis`: `{ name, root_sig, person, device_name }`. The first entry of a space. `root_sig` is the space key's signature over `author ‖ name`. The author becomes an admin, with that person and device name.
-- `admit`: `{ device, person, name, role, client? }`. `client` marks a device that keeps no log (a phone); nobody syncs with it. Valid when written by an admin, or by a member admitting a device for their own `person` as a `member`. `role` is `admin` or `member`. A removed device is never admitted again; it joins with a new key.
+- `genesis`: `{ name, root_sig, user, device_name }`. The first entry of a space. `root_sig` is the space key's signature over `author ‖ name`. The author becomes an admin, with that user and device name.
+- `admit`: `{ device, user, name, role, client? }`. `client` marks a device that keeps no log (a phone); nobody syncs with it. Valid when written by an admin, or by a member admitting a device for their own `user` as a `member`. `role` is `admin` or `member`. A removed device is never admitted again; it joins with a new key.
 - `remove`: `{ device }`. Valid when written by an admin. Entries the removed device writes after the `remove` (in fold order) are ignored.
 - `rename`: `{ device, name }`. Valid when written by that device or an admin.
 
@@ -41,11 +41,11 @@ One bidirectional stream of length-prefixed CBOR messages:
 - `Hello { space, frontier: [(author, log, next_seq)] }`
 - `Entries { space, entries: [(header, body)] }`
 
-Each side sends `Hello`, then sends every entry the other's frontier lacks (in batches of at most 200), then sends new entries as they are written. `Hello` repeats every 30 seconds; a device that receives an entry before the one it follows answers with `Hello` at once, so the gap is filled. Entries timed more than an hour ahead of the receiver's clock, or in a log other than `space`, are refused. Only members' devices may sync, checked on every message; a joining device may sync with its inviter. Receiving an entry twice is harmless.
+Each side sends `Hello`, then sends every entry the other's frontier lacks (in batches of at most 200), then sends new entries as they are written. `Hello` repeats every 30 seconds; a device that receives an entry before the one it follows answers with `Hello` at once, so the gap is filled. Entries timed more than an hour ahead of the receiver's clock, or in a log other than `space`, are refused. Only members' devices may sync, checked on every message; a joining device may sync with the device whose pairing code it used. Receiving an entry twice is harmless.
 
 ## Join (ALPN `one/join/1`)
 
-An invite is a ticket: `{ space, inviter: EndpointAddr, secret: [u8; 16] }` in CBOR, encoded as lowercase base32. The inviter remembers, for each secret, whose device it is for: one of its own person's, or a new person's. The joiner opens the stream and sends `{ secret, name, client? }`; the inviter appends an `admit` and answers `{ space_name, person }`. The joiner then syncs as a member. A secret works once, for seven days.
+A pairing code is `{ space, from: EndpointAddr, secret: [u8; 16] }` in CBOR, encoded as lowercase base32. The device that made it remembers, for each secret, whose device it is for: another of its own user's, or a new user's (admins only). The joining device opens the stream and sends `{ secret, name, client? }`; the device that made the code appends an `admit` and answers `{ space_name, user }`. The joining device then syncs as a member. A pairing code works once, for seven days.
 
 ## Calls (ALPN `one/call/1`)
 
@@ -61,11 +61,11 @@ The app `node` is the node's own, and other apps' folds never see it. A release 
 
 ## Providers
 
-A device announces each provider registered with it (see "Local API") as an entry with app `node` and kind `provides`: the app's description, as `GET /v1/apps` gives it. It writes one only when the description differs from the last it announced. Every device lists the newest description each of its own person's devices announced, and calls the app on a device that announced it.
+A device announces each provider registered with it (see "Local API") as an entry with app `node` and kind `provides`: the app's description, as `GET /v1/apps` gives it. It writes one only when the description differs from the last it announced. Every device lists the newest description each of its own user's devices announced, and calls the app on a device that announced it.
 
 ## Clients (ALPN `one/client/1`)
 
-A device that keeps no log (a phone) is still a member: it joins with a ticket like any device. It then asks any member device that does keep logs to act for it. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`. Clients may ask `GET /v1/state`, `GET /v1/apps`, `GET /v1/widgets` and `GET /v1/screen` (with `space` in the body), `POST /v1/call` and `POST /v1/invite`. `GET /v1/events` instead streams events as JSON lines until the stream closes. Operations run for the asking device: `ctx.me` is the client, and the entries they append are written by the device that ran them. Only members may ask.
+A device that keeps no log (a phone) is still a member: it joins with a pairing code like any device. It then asks any member device that does keep logs to act for it. Each request is one stream: JSON `{ method, path, body }`, answered with the same JSON the local API gives (below), or `{ error }`. Clients may ask `GET /v1/state`, `GET /v1/apps`, `GET /v1/widgets` and `GET /v1/screen` (with `space` in the body), `POST /v1/call` and `POST /v1/pair`. `GET /v1/events` instead streams events as JSON lines until the stream closes. Operations run for the asking device: `ctx.me` is the client, and the entries they append are written by the device that ran them. Only members may ask.
 
 ## Local API
 
@@ -76,10 +76,10 @@ Each node serves HTTP on `127.0.0.1:<brand port>` for its own device's shells, C
 - `POST /v1/call { space?, device?, app, op, input }` → `{ ok }`.
 - `GET /v1/widgets?space=`: every widget, rendered.
 - `GET /v1/screens/<app>/<screen>?space=&params=`: an app screen as a page (see "Screens").
-- `POST /v1/spaces { name }`, `POST /v1/invite { space?, mine }` → `{ ticket }`, `POST /v1/join { ticket }`, `POST /v1/device { name }`, `POST /v1/remove { space?, device }`.
+- `POST /v1/spaces { name }`, `POST /v1/pair { space?, new_user? }` → `{ code }`, `POST /v1/join { code }`, `POST /v1/device { name }`, `POST /v1/remove { space?, device }`.
 - `POST /v1/release { space?, path, commit, target }`: publishes the binary at `path` (admins).
 - `GET /v1/events`: server-sent events `changed { space, apps }`, `peers { space }` and `spaces`.
-- Providers, for device features written outside the node (Swift, Go): `POST /v1/providers/<app>` with the app's description registers it; `GET /v1/providers/<app>/calls` waits up to 25 seconds for a call `{ id, op, input, caller }` (204 if none); `POST /v1/providers/<app>/calls/<id>` answers `{ ok, entries?: [{ kind, data }] }` or `{ error }`. A provider that stops asking for calls for a minute is gone. Providers run only for their device's own person's devices.
+- Providers, for device features written outside the node (Swift, Go): `POST /v1/providers/<app>` with the app's description registers it; `GET /v1/providers/<app>/calls` waits up to 25 seconds for a call `{ id, op, input, caller }` (204 if none); `POST /v1/providers/<app>/calls/<id>` answers `{ ok, entries?: [{ kind, data }] }` or `{ error }`. A provider that stops asking for calls for a minute is gone. Providers run only for their device's own user's devices.
 - `POST /hooks/<app>/<name>`: for agent harnesses' hooks. The body is the hook's JSON; the reply is plain text for the agent. The node remembers per `session_id` when the hook last ran and passes it to the app as `since` (null on a session's first call). Hooks need the device to be in exactly one space.
 
 ## Apps
@@ -98,7 +98,7 @@ An app is JavaScript: one ES module, run in workerd (Cloudflare's open-source Wo
 }
 ```
 
-`ctx` has `append(kind, data)`, `query(sql, params)`, `me` (who asked: `{ space, device, person, name }`) and `now()`. A fold handler gets `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, app, kind, author, person, name, time, data }`, where `id` is `<first 8 hex of author>:<seq>`. Entries an operation appends are written by the device that ran it. Each app keeps its views in a Durable Object per space, in SQLite. A call that takes longer than 30 seconds stops the runtime, which starts again.
+`ctx` has `append(kind, data)`, `query(sql, params)`, `me` (who asked: `{ space, device, user, name }`) and `now()`. A fold handler gets `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, app, kind, author, user, name, time, data }`, where `id` is `<first 8 hex of author>:<seq>`. Entries an operation appends are written by the device that ran it. Each app keeps its views in a Durable Object per space, in SQLite. A call that takes longer than 30 seconds stops the runtime, which starts again.
 
 ## Screens
 

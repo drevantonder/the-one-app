@@ -104,17 +104,17 @@ impl Providers {
     }
 }
 
-/// A device announces each provider it runs, so its person's other devices list it too (SPEC.md, "Providers").
+/// A device announces each provider it runs, so its user's other devices list it too (SPEC.md, "Providers").
 pub fn announcement(describe: &Value) -> Content {
     Content { app: crate::release::APP.into(), kind: "provides".into(), data: describe.clone() }
 }
 
-/// The newest description each of `person`'s devices announced for each app, in fold order.
-pub fn announced(members: &Members, entries: &[Entry], person: &str) -> Vec<(Key, Value)> {
+/// The newest description each of `user`'s devices announced for each app, in fold order.
+pub fn announced(members: &Members, entries: &[Entry], user: &str) -> Vec<(Key, Value)> {
     let mut newest: HashMap<(Key, String), Value> = HashMap::new();
     for e in entries.iter().filter(|e| e.content.app == crate::release::APP && e.content.kind == "provides") {
         let Some(name) = e.content.data["name"].as_str() else { continue };
-        if members.active(&e.author(), e.order()).is_some_and(|m| m.person == person) {
+        if members.active(&e.author(), e.order()).is_some_and(|m| m.user == user) {
             newest.insert((e.author(), name.to_string()), e.content.data.clone());
         }
     }

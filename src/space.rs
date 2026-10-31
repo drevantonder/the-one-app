@@ -22,7 +22,7 @@ pub enum Role {
 pub struct Member {
     #[serde(serialize_with = "ser_hex")]
     pub device: Key,
-    pub person: String,
+    pub user: String,
     pub name: String,
     pub role: Role,
     /// A device that keeps no log (a phone): others ask it nothing and don't sync with it.
@@ -79,17 +79,17 @@ impl Members {
                 let sig = Signature::from_bytes(&sig.try_into().map_err(|_| anyhow::anyhow!("bad signature length"))?);
                 ensure!(verifying(space)?.verify(&root_message(&author, &name), &sig), "bad root signature");
                 self.name = name;
-                let person = text("person")?;
+                let user = text("user")?;
                 let device_name = text("device_name")?;
                 let names = vec![(entry.order(), device_name.clone())];
-                self.devices.insert(author, Member { device: author, person, name: device_name, role: Role::Admin, client: false, names, since: entry.order(), until: None });
+                self.devices.insert(author, Member { device: author, user, name: device_name, role: Role::Admin, client: false, names, since: entry.order(), until: None });
             }
             "admit" => {
                 let by = self.active(&author, entry.order()).context("admitter is not a member")?.clone();
                 let device = unhex(&text("device")?)?;
-                let person = text("person")?;
+                let user = text("user")?;
                 let role: Role = serde_json::from_value(data["role"].clone())?;
-                ensure!(by.role == Role::Admin || (person == by.person && role == Role::Member), "not allowed to admit");
+                ensure!(by.role == Role::Admin || (user == by.user && role == Role::Member), "not allowed to admit");
                 if self.active(&device, entry.order()).is_some() {
                     return Ok(());
                 }
@@ -97,7 +97,7 @@ impl Members {
                 let client = data["client"].as_bool().unwrap_or(false);
                 ensure!(!self.devices.contains_key(&device), "a removed device can't come back; it joins again with a new key");
                 let names = vec![(entry.order(), name.clone())];
-                self.devices.insert(device, Member { device, person, name, role, client, names, since: entry.order(), until: None });
+                self.devices.insert(device, Member { device, user, name, role, client, names, since: entry.order(), until: None });
             }
             "remove" => {
                 let by = self.active(&author, entry.order()).context("remover is not a member")?;
@@ -141,22 +141,22 @@ pub fn root_message(device: &Key, name: &str) -> Vec<u8> {
     [device.as_slice(), name.as_bytes()].concat()
 }
 
-pub fn genesis(root: &SigningKey, device: &Key, name: &str, person: &str, device_name: &str) -> Content {
+pub fn genesis(root: &SigningKey, device: &Key, name: &str, user: &str, device_name: &str) -> Content {
     let sig = root.sign(&root_message(device, name));
     Content {
         app: APP.into(),
         kind: "genesis".into(),
-        data: json!({ "name": name, "root_sig": data_encoding::HEXLOWER.encode(&sig.to_bytes()), "person": person, "device_name": device_name }),
+        data: json!({ "name": name, "root_sig": data_encoding::HEXLOWER.encode(&sig.to_bytes()), "user": user, "device_name": device_name }),
     }
 }
 
-pub fn admit(device: &Key, person: &str, name: &str, role: Role) -> Content {
-    Content { app: APP.into(), kind: "admit".into(), data: json!({ "device": hex(device), "person": person, "name": name, "role": role }) }
+pub fn admit(device: &Key, user: &str, name: &str, role: Role) -> Content {
+    Content { app: APP.into(), kind: "admit".into(), data: json!({ "device": hex(device), "user": user, "name": name, "role": role }) }
 }
 
 /// Admits a device that keeps no log, such as a phone.
-pub fn admit_client(device: &Key, person: &str, name: &str) -> Content {
-    let mut c = admit(device, person, name, Role::Member);
+pub fn admit_client(device: &Key, user: &str, name: &str) -> Content {
+    let mut c = admit(device, user, name, Role::Member);
     c.data["client"] = json!(true);
     c
 }

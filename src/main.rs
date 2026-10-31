@@ -14,8 +14,8 @@ Usage:
   {CLI} serve                       run this device's node
   {CLI} status                      this device, its spaces and their devices
   {CLI} create <name>               create a space
-  {CLI} invite [--mine]             a one-time ticket for another device (--mine: one of yours)
-  {CLI} join <ticket>               join a space with a ticket
+  {CLI} pair [--new-user]           a pairing code for another of your devices (or a new user's)
+  {CLI} join <code>                 join a space with a pairing code
   {CLI} rename <name>               rename this device
   {CLI} remove <device>             remove a device from the space (admins)
   {CLI} apps                        every app and its operations
@@ -70,14 +70,14 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["create", name @ ..] if !name.is_empty() => {
             post("/v1/spaces", json!({ "name": name.join(" ") }))?;
-            println!("Created {}. Invite your other devices with: {CLI} invite --mine", name.join(" "));
+            println!("Created {}. Add your other devices with: {CLI} pair", name.join(" "));
         }
-        ["invite"] => {
-            let r = post("/v1/invite", json!({ "space": space, "mine": flags.contains_key("mine") }))?;
-            println!("On the other device, run:\n\n  {CLI} join {}\n\nThe ticket works once.", r["ticket"].as_str().unwrap_or(""));
+        ["pair"] => {
+            let r = post("/v1/pair", json!({ "space": space, "new_user": flags.contains_key("new-user") }))?;
+            println!("On the other device, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for a week.", r["code"].as_str().unwrap_or(""));
         }
-        ["join", ticket] => {
-            post("/v1/join", json!({ "ticket": ticket }))?;
+        ["join", code] => {
+            post("/v1/join", json!({ "code": code }))?;
             println!("Joined. Syncing now; {CLI} status shows progress.");
         }
         ["remove", device] => {
@@ -203,7 +203,7 @@ fn status(state: &Value) {
     println!("{} ({})", state["device"]["name"].as_str().unwrap_or(""), &state["device"]["id"].as_str().unwrap_or("")[..8]);
     let spaces = state["spaces"].as_array().cloned().unwrap_or_default();
     if spaces.is_empty() {
-        println!("\nIn no space yet. Create one with {CLI} create <name>, or join with a ticket.");
+        println!("\nIn no space yet. Create one with {CLI} create <name>, or join with a pairing code.");
     }
     for s in spaces {
         println!("\n{}  {} entries", s["name"].as_str().unwrap_or("(joining)"), s["entries"]);
@@ -265,7 +265,7 @@ fn mcp() -> Result<()> {
 }
 
 fn instructions() -> String {
-    let mut text = format!("{NAME} is this person's apps and agents, shared across their devices. Every tool is also a CLI command ({CLI} <app> <op>).");
+    let mut text = format!("{NAME} is this user's apps and agents, shared across their devices. Every tool is also a CLI command ({CLI} <app> <op>).");
     if let Ok(apps) = get("/v1/apps") {
         for app in apps.as_array().into_iter().flatten() {
             if let Some(i) = app["instructions"].as_str().filter(|i| !i.is_empty()) {

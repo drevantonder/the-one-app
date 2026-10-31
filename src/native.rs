@@ -1,5 +1,5 @@
 //! Native apps: device features that only native code can reach (a shell, files, local models).
-//! They run on the device they live on (`runs: here`) and only for that device's own person's devices.
+//! They run on the device they live on (`runs: here`) and only for that device's own user's devices.
 //! Like JavaScript apps, they describe themselves and append entries; the core never names one.
 
 use std::future::Future;

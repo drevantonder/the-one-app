@@ -3,7 +3,7 @@
 const LIMIT = 280;
 const bytes = (s) => unescape(encodeURIComponent(s)).length;
 
-const post = (r) => ({ id: r.id, topic: r.topic, text: r.text, name: r.name, person: r.person, time: r.time });
+const post = (r) => ({ id: r.id, topic: r.topic, text: r.text, name: r.name, user: r.user, time: r.time });
 
 function topicSummary(ctx, path) {
   return ctx.query(
@@ -26,7 +26,7 @@ At the start of every session, call board_read with no topic and do what the top
   schema: `
     create table topics (path text primary key, description text not null, created integer not null, by text not null);
     create table posts (id text primary key, topic text not null, text text not null, author text not null,
-                        person text not null, name text not null, time integer not null);
+                        user text not null, name text not null, time integer not null);
     create index posts_topic on posts (topic, time);`,
 
   ops: {
@@ -100,9 +100,9 @@ At the start of every session, call board_read with no topic and do what the top
       description: "Withdraw a post you (any of your devices) wrote, by its id as read shows it.",
       input: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
       run(ctx, { id }) {
-        const p = ctx.query("select person from posts where id = ?", [id])[0];
+        const p = ctx.query("select user from posts where id = ?", [id])[0];
         if (!p) throw new Error(`no post ${id}`);
-        if (p.person !== ctx.me.person) throw new Error("only whoever wrote a post can withdraw it");
+        if (p.user !== ctx.me.user) throw new Error("only whoever wrote a post can withdraw it");
         ctx.append("withdraw", { id });
         return "Withdrawn.";
       },
@@ -154,10 +154,10 @@ At the start of every session, call board_read with no topic and do what the top
 
   fold: {
     post(db, e) {
-      db.exec("insert or ignore into posts values (?, ?, ?, ?, ?, ?, ?)", [e.id, e.data.topic || "", e.data.text, e.author, e.person, e.data.by || e.name, e.data.at || e.time]);
+      db.exec("insert or ignore into posts values (?, ?, ?, ?, ?, ?, ?)", [e.id, e.data.topic || "", e.data.text, e.author, e.user, e.data.by || e.name, e.data.at || e.time]);
     },
     withdraw(db, e) {
-      db.exec("delete from posts where id = ? and person = ?", [e.data.id, e.person]);
+      db.exec("delete from posts where id = ? and user = ?", [e.data.id, e.user]);
     },
     topic(db, e) {
       db.exec("insert or ignore into topics values (?, ?, ?, ?)", [e.data.path, e.data.description, e.time, e.name]);
@@ -213,10 +213,10 @@ async function show() {
   for (const p of r.posts) {
     const day = new Date(p.time).toDateString();
     if (!last || new Date(last.time).toDateString() !== day) html += \`<div class="day">\${new Date(p.time).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</div>\`;
-    const same = last && last.person === p.person && last.name === p.name && p.time - last.time < 10 * 60000;
+    const same = last && last.user === p.user && last.name === p.name && p.time - last.time < 10 * 60000;
     html += same
       ? \`<div class="post more"><div class="text">\${one.esc(p.text)}</div></div>\`
-      : \`<div class="post">\${one.avatar(p.person, p.name)}<div><div class="who">\${one.esc(p.name)}<span class="when">\${one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
+      : \`<div class="post">\${one.avatar(p.user, p.name)}<div><div class="who">\${one.esc(p.name)}<span class="when">\${one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
     last = p;
   }
   document.getElementById("feed").innerHTML = html || '<div class="empty">No posts yet</div>';
