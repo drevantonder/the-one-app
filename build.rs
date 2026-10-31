@@ -17,20 +17,32 @@ fn main() {
     );
     let optional = |key: &str| brand.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\npub const STORE: &str = {:?};\n", optional("release_key"), optional("release_signer"), optional("store"));
-    // The apps a new install deploys and installs in `global`: each folder's files, built in.
-    let base = std::path::Path::new(&path).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+    // Every app in this repo's apps/ folder ships built in: each folder's files. The brand's `apps` are the ones a new
+    // install deploys and installs in `global`; they must be among them.
+    let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("apps");
+    println!("cargo:rerun-if-changed={}", root.display());
+    let mut dirs: Vec<_> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.path()).filter(|p| p.join("app.js").is_file()).collect();
+    dirs.sort();
     let mut apps = String::new();
-    for dir in brand.get("apps").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()) {
-        let dir = std::fs::canonicalize(base.join(dir)).unwrap_or_else(|_| panic!("brand app {dir} isn't there"));
+    for dir in &dirs {
         println!("cargo:rerun-if-changed={}", dir.display());
         let mut files = Vec::new();
-        collect(&dir, &dir, &mut files);
+        collect(dir, dir, &mut files);
         files.sort();
         let name = dir.file_name().unwrap().to_string_lossy().to_string();
         let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
         apps.push_str(&format!("({name:?}, &[{}]),", files.join(", ")));
     }
-    let out = format!("{out}pub const APPS: &[(&str, &[(&str, &[u8])])] = &[{apps}];\n");
+    let base = std::path::Path::new(&path).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+    let mut starters = String::new();
+    for dir in brand.get("apps").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()) {
+        let dir = std::fs::canonicalize(base.join(dir)).unwrap_or_else(|_| panic!("brand app {dir} isn't there"));
+        assert!(dirs.iter().any(|d| std::fs::canonicalize(d).is_ok_and(|d| d == dir)), "brand app {} isn't in apps/", dir.display());
+        starters.push_str(&format!("{:?},", dir.file_name().unwrap().to_string_lossy()));
+    }
+    let out = format!("{out}pub const BUILT_IN: &[(&str, &[(&str, &[u8])])] = &[{apps}];\npub const STARTERS: &[&str] = &[{starters}];\n");
+    // What the App Store calls the apps made in the install rather than built in.
+    let out = format!("{out}pub const MADE_HERE: &str = {:?};\n", brand.get("made_here").and_then(|v| v.as_str()).unwrap_or("Made here"));
     // Which build this is, so a node can tell a release apart from itself.
     let commit = std::process::Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])

@@ -549,3 +549,38 @@ async fn the_app_store_lists_adds_and_shows_code() {
         assert!(html.contains("one.call("), "{screen}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
+    let (a, _ra) = start("built-in").await;
+    a.create_with("Built in", "Andre", &["apps"]).await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap() };
+    let app = |listed: &Value, name: &str| listed["apps"].as_array().unwrap().iter().find(|x| x["name"] == name).cloned().unwrap();
+
+    let listed = a.call(call("apps", "list", json!({}))).await.unwrap();
+    let board = app(&listed, "board");
+    assert_eq!((board["built_in"].clone(), board["added"].clone(), board["title"].clone()), (json!(true), json!(false), json!("Board")), "{board}");
+    let store = app(&listed, "apps");
+    assert_eq!((store["added"].clone(), store["up_to_date"].clone()), (json!(true), json!(true)), "{store}");
+    assert!(!a.apps(&me).await.unwrap().iter().any(|x| x["name"] == "board"), "the install's own list has only what it added");
+    let code = a.call(call("apps", "code", json!({ "app": "board", "path": "src/app.js" }))).await.unwrap();
+    assert!(code["text"].as_str().unwrap().contains("name: \"board\""), "a built-in app's code reads before it's added");
+
+    a.call(call("apps", "add", json!({ "app": "board", "scope": "user" }))).await.unwrap();
+    let board = app(&a.call(call("apps", "list", json!({}))).await.unwrap(), "board");
+    assert_eq!((board["added"].clone(), board["up_to_date"].clone(), board["installed_names"].clone()), (json!(true), json!(true), json!(["You"])), "{board}");
+    a.call(board_in_user("post", json!({ "text": "hello" }))).await.unwrap();
+
+    // Another deploy is out of date until the release's version is deployed again, as `one update` does.
+    deploy_module(&a, "board", "export default { name: \"board\", ops: {} };").await;
+    let up_to_date = async |want: bool| a.call(call("apps", "list", json!({}))).await.is_ok_and(|l| app(&l, "board")["up_to_date"] == want);
+    eventually("board out of date", async || up_to_date(false).await).await;
+    let built_in = a.apps(&me).await.unwrap().iter().find(|x| x["name"] == "board").unwrap()["built_in"].as_str().unwrap().to_string();
+    a.deploy(&me, "board", &built_in).await.unwrap();
+    eventually("board up to date", async || up_to_date(true).await).await;
+}
+
+fn board_in_user(op: &str, mut input: Value) -> CallRequest {
+    input["scope"] = json!("user");
+    board(op, input)
+}

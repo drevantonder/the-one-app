@@ -192,6 +192,8 @@ pub struct Inner {
     changed: tokio::sync::Notify,
     /// The bundle each app runs here.
     bundles: Mutex<BTreeMap<String, String>>,
+    /// The bundle of each app this release has built in, kept as a blob: any install may add them.
+    built_in: BTreeMap<String, String>,
     /// The calls, widgets and hooks running now, by the token their requests carry.
     grants: Mutex<HashMap<String, Grant>>,
     /// The port apps' requests go out through.
@@ -240,6 +242,10 @@ impl Node {
         let outbound = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let apps = Apps::start(dir.join("runtime"), outbound.local_addr()?.port()).await?;
         let (events, _) = broadcast::channel(256);
+        let mut built_in = BTreeMap::new();
+        for (app, files) in crate::brand::BUILT_IN {
+            built_in.insert(app.to_string(), release::put_blob(dir, &built_in_bundle(files)?)?);
+        }
         let node = Node(Arc::new(Inner {
             dir: dir.to_path_buf(),
             key,
@@ -255,6 +261,7 @@ impl Node {
             writes: tokio::sync::Mutex::new(()),
             changed: tokio::sync::Notify::new(),
             bundles: Mutex::new(BTreeMap::new()),
+            built_in,
             grants: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             woke: Instant::now(),
@@ -371,6 +378,11 @@ impl Node {
     /// Creates this server's install, with its local user as the first admin, and deploys the brand's apps in
     /// `global`. Returns the recovery key's secret, given only this once.
     pub async fn create(&self, name: &str, user_name: &str) -> Result<String> {
+        self.create_with(name, user_name, crate::brand::STARTERS).await
+    }
+
+    /// Creates the install, starting with these built-in apps.
+    pub async fn create_with(&self, name: &str, user_name: &str, apps: &[&str]) -> Result<String> {
         self.ensure_no_install()?;
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the install a name, and yourself one");
         let user = new_id();
@@ -382,12 +394,9 @@ impl Node {
         Store::open(&self.install_dir().join("entries.db"))?.insert_own(&entry, None)?;
         self.open_install()?;
         self.replay_all().await?;
-        for (app, files) in crate::brand::APPS {
-            let mut bundle = vec![("app.js".to_string(), files.iter().find(|(p, _)| *p == "app.js").context("a brand app has no app.js")?.1.to_vec())];
-            bundle.extend(files.iter().map(|(p, b)| (format!("src/{p}"), b.to_vec())));
-            let blob = self.put_blob(&crate::bundle::pack(&bundle)?)?;
-            self.append(&Scope::Global, members::node("app", json!({ "name": app, "owner": "admins" }))).await?;
-            self.append(&Scope::Global, deploy(app, &blob)).await?;
+        let me = Caller { key: self.0.id, user };
+        for app in apps {
+            self.bring_in(&me, app).await?;
             self.append(&Scope::Global, members::node("install", json!({ "app": app }))).await?;
         }
         self.settle().await?;
@@ -645,15 +654,17 @@ impl Node {
         let mut ctx = ctx;
         let _granted = self.grant(&req.app, me, &mut ctx);
         let outcome = self.0.apps.call(&req.app, &req.op, input, &ctx).await?;
-        // Every append is checked before any is written: a call that fails writes nothing.
+        // Every append is checked before any is written: a call that fails writes nothing. Installs come last, since
+        // installing a built-in app the install doesn't have yet adds it first.
+        let (installs, appends): (Vec<_>, Vec<_>) = outcome.appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
         let mut writes = Vec::new();
-        for append in outcome.appends {
-            match append {
-                Append::Install { app, scope, installed } => {
-                    let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
-                    writes.extend(self.install_entries(me, &app, &scope, installed).await?);
-                }
-                append => writes.push(self.with(|i| check_append(i, &req.app, append, &scopes, me))?),
+        for append in appends {
+            writes.push(self.with(|i| check_append(i, &req.app, append, &scopes, me))?);
+        }
+        for append in installs {
+            if let Append::Install { app, scope, installed } = append {
+                let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
+                writes.extend(self.install_entries(me, &app, &scope, installed).await?);
             }
         }
         let by = (me.key != self.0.id).then_some(me.key);
@@ -839,7 +850,8 @@ impl Node {
     pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>) -> Result<String> {
         let body = self.0.apps.screen(app, name).await?;
         let me = self.me_for(&viewer)?;
-        let context = json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope });
+        let brand = json!({ "name": crate::brand::NAME, "made_here": crate::brand::MADE_HERE });
+        let context = json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope, "brand": brand });
         // `</` can't appear inside the inline script, so it can't end it early.
         let context = context.to_string().replace("</", "<\\/");
         Ok(format!(
@@ -854,7 +866,7 @@ impl Node {
     /// Every app in the install, with what each does for `viewer` where it's installed for them; and the drivers
     /// that serve them.
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
-        let mut out = self.catalog(viewer).await?;
+        let mut out = self.catalog(viewer, false).await?;
         if viewer.user == self.user()? {
             out.extend(self.0.native.iter().map(|n| (n.describe)()));
             out.extend(self.0.providers.describe());
@@ -873,8 +885,10 @@ impl Node {
     }
 
     /// Every app in the install: owner, `from`, forks, deploys, the scopes `viewer` may use it's installed in, its
-    /// title and icon; and for those installed for them, what it does (operations, widgets, screens, instructions).
-    pub async fn catalog(&self, viewer: &Caller) -> Result<Vec<Value>> {
+    /// title and icon, and for one built in, the bundle this release has of it; for those installed for them, what it
+    /// does (operations, widgets, screens, instructions). With `not_added`, also the built-in apps the install hasn't
+    /// added yet, with no deploys.
+    pub async fn catalog(&self, viewer: &Caller, not_added: bool) -> Result<Vec<Value>> {
         let listed = self.with(|i| {
             let m = &i.r.members;
             Ok(m.apps
@@ -891,11 +905,19 @@ impl Node {
                     let reach = reachable(i, &a.name, &viewer.user);
                     let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
                     let forks: Vec<&String> = m.apps.values().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
-                    let info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed });
+                    let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed });
+                    if let Some(bundle) = self.built_in(a) {
+                        info["built_in"] = json!(bundle);
+                    }
                     (a.name.clone(), info, !reach.is_empty())
                 })
                 .collect::<Vec<_>>())
         })?;
+        let missing: Vec<Value> = if not_added {
+            self.with(|i| Ok(self.0.built_in.iter().filter(|(name, _)| !i.r.members.apps.contains_key(*name)).map(|(name, bundle)| json!({ "name": name, "owner": "admins", "from": null, "forks": [], "deploys": 0, "bundle": null, "history": [], "installed": [], "built_in": bundle })).collect()))?
+        } else {
+            Vec::new()
+        };
         let mut out = Vec::new();
         for (name, mut info, mine) in listed {
             if self.0.apps.has(&name) {
@@ -908,7 +930,25 @@ impl Node {
             }
             out.push(info);
         }
+        out.extend(missing);
         Ok(out)
+    }
+
+    /// The bundle this release has of `app`, if it's the built-in app of that name: owned by admins, not a fork.
+    fn built_in(&self, app: &members::App) -> Option<&String> {
+        self.0.built_in.get(&app.name).filter(|_| app.owner == Principal::Admins && app.from.is_none())
+    }
+
+    /// Adds a built-in app the install doesn't have yet, owned by admins, as this release has it. Admins only.
+    async fn bring_in(&self, caller: &Caller, app: &str) -> Result<()> {
+        let Some(bundle) = self.0.built_in.get(app) else { return Ok(()) };
+        let (present, admin) = self.with(|i| Ok((i.r.members.apps.contains_key(app), i.r.members.is_admin(&caller.user))))?;
+        if present {
+            return Ok(());
+        }
+        ensure!(admin, "{app} is built in, but this install doesn't have it yet: an admin adds it first");
+        self.member_as(caller, "app", json!({ "name": app, "owner": "admins" })).await?;
+        self.member_content(caller, deploy(app, bundle)).await
     }
 
     /// What an app's latest deploy says it uses: (apps, drivers). Waits a while for this server to run that deploy.
@@ -932,6 +972,7 @@ impl Node {
         let mut wanted = vec![app.to_string()];
         let mut i = 0;
         while installed && i < wanted.len() {
+            self.bring_in(caller, &wanted[i]).await?;
             for used in self.uses(&wanted[i]).await.0 {
                 if !wanted.contains(&used) {
                     wanted.push(used);
@@ -1003,10 +1044,11 @@ impl Node {
             }
             ("GET", p) if p.starts_with("/blob/") => {
                 let hash = &p["/blob/".len()..];
-                ensure!(grant.puts.iter().any(|h| h == hash) || self.blob_named_for(hash, &grant.caller.user)?, "no such blob for you");
+                let built_in = self.0.built_in.values().any(|h| h == hash);
+                ensure!(built_in || grant.puts.iter().any(|h| h == hash) || self.blob_named_for(hash, &grant.caller.user)?, "no such blob for you");
                 self.blob(hash).await?.into_response()
             }
-            ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller).await?)),
+            ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
             _ => bail!("the node has no {method} {path}"),
         })
     }
@@ -1835,6 +1877,14 @@ fn secret_entry(i: &Install, user: &str, scope: &Scope, app: &str, name: &str, h
 }
 
 /// A deploy of `app`: the bundle at blob `bundle`.
+/// A built-in app's bundle: its `app.js` as the module, and every file of its folder as its source.
+fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+    let module = files.iter().find(|(p, _)| *p == "app.js").context("a built-in app has no app.js")?.1;
+    let mut bundle = vec![("app.js".to_string(), module.to_vec())];
+    bundle.extend(files.iter().map(|(p, b)| (format!("src/{p}"), b.to_vec())));
+    crate::bundle::pack(&bundle)
+}
+
 pub fn deploy(app: &str, bundle: &str) -> Content {
     Content { blobs: vec![bundle.into()], ..members::node("deploy", json!({ "app": app, "bundle": bundle })) }
 }

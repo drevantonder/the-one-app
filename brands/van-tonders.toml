@@ -4,4 +4,5 @@ port = 4949
 # The apps a new install deploys and installs in global.
 apps = ["../apps/board", "../apps/repos", "../apps/apps"]
 store = "apps"
+made_here = "Made by the family"
 accent = "#2F7D5B"

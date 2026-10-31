@@ -16,6 +16,6 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 - `cargo test` before every commit, and `gh signoff` once it's pushed: tests run on our own machines, never in CI. `tests/sim.rs` runs the simulator; a failing seed is a bug, never a flake.
 - Changes to `SPEC.md` are breaking for every machine: bump `PROTOCOL` in `src/entry.rs`.
 - Push to `main` as you go (pull with `--rebase` first: several threads on several machines work on it at once). After each push to main, run `one update` on a Linux server of yours: it tests and builds main's tip, every Linux node updates itself, and each Mac rebuilds its app over SSH. `one release vX.Y.Z` does the same and publishes it on GitHub, where the installer gets it.
-- Apps reach servers only by `one deploy`; drivers, only by an owner of a server installing them there. Apps will live outside this repo; for now the board is in `apps/board` (see ARCHITECTURE.md, "Built so far").
+- Apps reach servers only by a deploy: `one deploy`, or an admin adding a built-in app (the folders in `apps/`, which every release ships; see ARCHITECTURE.md). Drivers, only by an owner of a server installing them there. Install-specific apps (PTC's) never go in `apps/`.
 - One commit per change, once it works: `area: what changes, for whoever uses it`. No co-author or "Generated with" lines.
 - Document only what the code can't say.

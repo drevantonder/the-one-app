@@ -61,6 +61,10 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     crate::publish(&binary, &Default::default(), &key)?;
     let started_at = Instant::now();
     let mut failed = await_builds(&linux, short, started_at, Duration::from_secs(180));
+    if let Err(err) = deploy_built_in() {
+        failed = true;
+        println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
+    }
 
     let mut assets = Vec::new();
     if let Some(tag) = tag {
@@ -114,6 +118,18 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     gh.current_dir(&dir).args(["release", "create", tag, "--repo", REPO, "--target", &commit, "--generate-notes"]).args(&assets);
     step(&mut gh)?;
     ensure!(!failed, "released {tag}, but not every device runs it");
+    Ok(())
+}
+
+/// Deploys this device's release's version of each built-in app the install has, where it runs another.
+fn deploy_built_in() -> Result<()> {
+    for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+        let (Some(name), Some(bundle)) = (app["name"].as_str(), app["built_in"].as_str()) else { continue };
+        if app["bundle"].as_str() != Some(bundle) {
+            post("/v1/deploy", json!({ "app": name, "bundle": bundle }))?;
+            println!("Deployed {name}'s new version ({})", &bundle[..12]);
+        }
+    }
     Ok(())
 }
 
