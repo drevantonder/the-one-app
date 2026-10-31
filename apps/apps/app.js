@@ -143,7 +143,7 @@ const MADE_HERE = one.brand.made_here;
 function status(a) {
   if (!a.built_in) return a.from ? "Fork of " + a.from : "";
   if (!a.added) return "Not added";
-  return a.up_to_date ? "Up to date" : "Out of date";
+  return a.up_to_date ? "Up to date" : "Other version";
 }
 
 let apps = [];
@@ -195,7 +195,7 @@ one.title(name);
 /// The app's page, section by section: each takes what show() loaded and gives HTML, or "" to leave itself out.
 const sections = [
   function head({ a }) {
-    const state = a.built_in ? (!a.added ? "Built in, not added" : a.up_to_date ? "Built in, up to date" : "Built in, out of date") : "Made by " + a.owner_name;
+    const state = a.built_in ? (!a.added ? "Built in, not added" : a.up_to_date ? "Built in, up to date" : "Built in, running another version than this release's: the next update deploys the release's") : "Made by " + a.owner_name;
     return \`<div class="head">\${one.appIcon(a, 60)}
       <div><h1>\${one.esc(a.title)}</h1><div class="muted small">\${one.esc(a.name)} · \${one.esc(state)} · \${a.deploys} deploy\${a.deploys === 1 ? "" : "s"}</div></div></div>
       \${a.description ? '<div class="about">' + one.esc(a.description) + "</div>" : ""}\`;
