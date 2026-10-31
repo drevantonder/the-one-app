@@ -378,6 +378,7 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
     sneak: { run: (ctx) => ctx.apps.board.read({}) },
     echo: { run: (ctx) => ctx.drivers.shell.run({ command: "echo from a driver" }) },
     keep: { run: async (ctx, { text }) => { const hash = await ctx.blob.put(new TextEncoder().encode(text)); return new TextDecoder().decode(await ctx.blob.get(hash)); } },
+    open: { run: async (ctx, { hash }) => new TextDecoder().decode(await ctx.blob.get(hash)) },
     catalog: { run: async (ctx) => (await ctx.catalog()).map((a) => a.name) },
     who: { run: (ctx) => ctx.apps.notes.who({}) },
     share: { run: (ctx, { scope }) => { ctx.install("journal", scope); return null; } },
@@ -399,6 +400,9 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
     let echoed = a.call(call("journal", "echo", json!({}))).await.unwrap();
     assert!(echoed.to_string().contains("from a driver"), "{echoed}");
     assert_eq!(a.call(call("journal", "keep", json!({ "text": "in a blob" }))).await.unwrap(), "in a blob");
+    // A call asked on the server's own machine reads a blob put there through the local API, to attach it.
+    let put = a.put_blob(b"put locally").unwrap();
+    assert_eq!(a.call(call("journal", "open", json!({ "hash": put }))).await.unwrap(), "put locally");
     let names = a.call(call("journal", "catalog", json!({}))).await.unwrap();
     assert!(names.as_array().unwrap().contains(&json!("notes")), "{names}");
     // The agent that asked is credited, and stays on the calls an app makes for it.

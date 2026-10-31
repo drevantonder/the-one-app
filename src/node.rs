@@ -1103,7 +1103,9 @@ impl Node {
             ("GET", p) if p.starts_with("/blob/") => {
                 let hash = &p["/blob/".len()..];
                 let built_in = self.0.built_in.values().any(|h| h == hash);
-                ensure!(built_in || grant.puts.iter().any(|h| h == hash) || self.blob_named_for(hash, &grant.caller.user)?, "no such blob for you");
+                // A call asked on this machine may read what its local API would give it: a file put there to attach.
+                let local = grant.caller.key == self.0.id && release::blob_path(&self.0.dir, hash).is_ok_and(|p| p.exists());
+                ensure!(built_in || local || grant.puts.iter().any(|h| h == hash) || self.blob_named_for(hash, &grant.caller.user)?, "no such blob for you");
                 self.blob(hash).await?.into_response()
             }
             ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
