@@ -10,7 +10,9 @@ import (
 	"log"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -320,8 +322,23 @@ func (ds *desktops) saveLogin(ctx context.Context, d desktop, login string) erro
 	return nil
 }
 
-// logins lists the saved logins.
-func (ds *desktops) logins() []map[string]any {
+// loginServer is the other server that keeps the saved login, or "".
+func (ds *desktops) loginServer(ctx context.Context, login string) string {
+	got, _ := ds.everywhere(ctx, "logins", nil)
+	for s, r := range got {
+		var theirs struct{ Logins []struct{ Login string } }
+		json.Unmarshal(r, &theirs)
+		for _, l := range theirs.Logins {
+			if l.Login == login {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// logins lists this server's saved logins: each server keeps its own.
+func (ds *desktops) logins(me string) []map[string]any {
 	dirs, _ := os.ReadDir(filepath.Join(ds.dir, "logins"))
 	out := []map[string]any{}
 	for _, e := range dirs {
@@ -333,7 +350,7 @@ func (ds *desktops) logins() []map[string]any {
 		if err != nil {
 			continue
 		}
-		out = append(out, map[string]any{"login": e.Name(), "saved": info.ModTime().UTC(), "size": info.Size()})
+		out = append(out, map[string]any{"login": e.Name(), "server": me, "saved": info.ModTime().UTC(), "size": info.Size()})
 	}
 	return out
 }
@@ -399,7 +416,7 @@ func (ds *desktops) tend(ctx context.Context) {
 		ds.drop(d.Name)
 		remove(ctx, d)
 	}
-	if len(free) == 0 && roomForOne() {
+	if len(free) == 0 && keepsSpare() {
 		d, err := create(ctx, newPoolName(), sizes[0], true, true)
 		if err != nil {
 			log.Printf("making a spare desktop: %v", err)
@@ -411,6 +428,18 @@ func (ds *desktops) tend(ctx context.Context) {
 	ds.pauseIdle(ctx, all, lent)
 }
 
+// keepsSpare reports whether this server keeps a spare desktop: a Linux one
+// with room for it. A Mac's memory is its person's; it makes desktops only
+// when asked, and passes borrowing on to a server with a spare.
+func keepsSpare() bool { return runtime.GOOS != "darwin" && roomForOne() }
+
+// makesHere reports whether a borrow here would be quick, or this server is
+// the one to make a desktop for it.
+func (ds *desktops) makesHere(ctx context.Context) bool {
+	all, err := list(ctx)
+	return err == nil && len(spares(all, ds.loans())) > 0 || keepsSpare()
+}
+
 // roomForOne reports whether another small desktop fits, leaving plenty for
 // everything else: a third of the memory, and at least 6 GB.
 func roomForOne() bool {
@@ -420,6 +449,9 @@ func roomForOne() bool {
 
 // memory is this server's available and total memory, in bytes.
 func memory() (free, total int64) {
+	if runtime.GOOS == "darwin" {
+		return macMemory()
+	}
 	b, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
 		return 0, 0
@@ -433,6 +465,33 @@ func memory() (free, total int64) {
 			free = n << 10
 		case "MemTotal":
 			total = n << 10
+		}
+	}
+	return free, total
+}
+
+// macMemory reads vm_stat: free, inactive and speculative pages are
+// available.
+func macMemory() (free, total int64) {
+	out, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
+	if err != nil {
+		return 0, 0
+	}
+	fmt.Sscan(strings.TrimSpace(string(out)), &total)
+	if out, err = exec.Command("vm_stat").Output(); err != nil {
+		return 0, 0
+	}
+	page := int64(16384)
+	for line := range strings.Lines(string(out)) {
+		if _, rest, ok := strings.Cut(line, "page size of "); ok {
+			fmt.Sscan(rest, &page)
+		}
+		for _, k := range []string{"Pages free:", "Pages inactive:", "Pages speculative:"} {
+			if v, ok := strings.CutPrefix(line, k); ok {
+				var n int64
+				fmt.Sscan(strings.TrimSuffix(strings.TrimSpace(v), "."), &n)
+				free += n * page
+			}
 		}
 	}
 	return free, total

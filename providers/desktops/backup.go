@@ -132,19 +132,31 @@ func (ds *desktops) backupsAll(ctx context.Context, desktop string) ([]backupRec
 // restore makes a desktop from a backup: a new one, its home folder unpacked
 // from the blob, fetched from whichever server has it.
 func (ds *desktops) restore(ctx context.Context, name string, rec backupRecord, sz size) (desktop, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ds.node+"/v1/blobs/"+rec.Blob, nil)
-	if err != nil {
-		return desktop{}, err
+	if _, err := find(ctx, name); err == nil {
+		return desktop{}, fmt.Errorf("desktop %s already exists", name)
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return desktop{}, err
+	var resp *http.Response
+	// Another server serves the blob once the entry naming it reaches it,
+	// which takes a moment after a backup.
+	for try := 0; ; try++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ds.node+"/v1/blobs/"+rec.Blob, nil)
+		if err != nil {
+			return desktop{}, err
+		}
+		if resp, err = http.DefaultClient.Do(req); err != nil {
+			return desktop{}, err
+		}
+		if resp.StatusCode == http.StatusOK {
+			break
+		}
+		msg, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if try == 5 {
+			return desktop{}, fmt.Errorf("fetching the backup: %s: %s", resp.Status, msg)
+		}
+		time.Sleep(2 * time.Second)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(resp.Body)
-		return desktop{}, fmt.Errorf("fetching the backup: %s: %s", resp.Status, msg)
-	}
 	d, err := create(ctx, name, sz, false, true)
 	if err != nil {
 		return d, err
@@ -157,7 +169,7 @@ func (ds *desktops) restore(ctx context.Context, name string, rec backupRecord, 
 	if err := in(ctx, d, resp.Body, nil, "tar", "-C", home, "-xzf", "-"); err != nil {
 		return fail(fmt.Errorf("unpacking the backup: %w", err))
 	}
-	if _, err := podman(ctx, "restart", "--time", "10", prefix+d.Name); err != nil {
+	if err := rt.restart(ctx, d); err != nil {
 		return fail(err)
 	}
 	if err := ready(ctx, d); err != nil {

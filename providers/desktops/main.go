@@ -40,7 +40,7 @@ func main() {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	if err := podmanEnv(); err != nil {
+	if err := setup(dir); err != nil {
 		log.Fatal(err)
 	}
 	d := newDesktops(dir, node)

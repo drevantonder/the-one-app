@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"maps"
 	"net/http"
 	"slices"
@@ -199,4 +200,40 @@ func (ds *desktops) listAll(ctx context.Context) (map[string]any, error) {
 		out["unreachable"] = strings.Join(why, "; ")
 	}
 	return out, nil
+}
+
+// located is the other server that has the desktop named, or "".
+func (ds *desktops) located(ctx context.Context, name string) string {
+	got, _ := ds.everywhere(ctx, "list", nil)
+	for s, r := range got {
+		var theirs struct{ Desktops []listed }
+		json.Unmarshal(r, &theirs)
+		for _, d := range theirs.Desktops {
+			if d.Name == name {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// borrowElsewhere runs op (borrow or sign_in) on another server that runs
+// desktops, for a server that shouldn't make one itself; nil if none could.
+func (ds *desktops) borrowElsewhere(ctx context.Context, op string, input map[string]any) json.RawMessage {
+	_, others, err := ds.servers(ctx)
+	if err != nil {
+		return nil
+	}
+	in := map[string]any{"here": true}
+	for k, v := range input {
+		in[k] = v
+	}
+	for _, s := range others {
+		r, err := ds.callNode(ctx, s, op, in)
+		if err == nil {
+			return r
+		}
+		log.Printf("%s on %s: %v", op, s, err)
+	}
+	return nil
 }

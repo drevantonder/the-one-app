@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -48,7 +46,7 @@ func sizesText() string {
 type limit struct {
 	CPUs    float64 // 0: no limit
 	Memory  int64   // bytes; 0: no limit
-	Restart string  // the restart policy
+	Restart bool    // started again when the server restarts
 }
 
 // sizeOf names a desktop's limits; desktops made before sizes, with only a
@@ -62,75 +60,11 @@ func (l limit) sizeOf() string {
 	return "custom"
 }
 
-// limits are the desktops' limits, by name.
-func limits(ctx context.Context, all []desktop) (map[string]limit, error) {
-	out := map[string]limit{}
-	if len(all) == 0 {
-		return out, nil
-	}
-	args := []string{"inspect", "--format", "json"}
-	for _, d := range all {
-		args = append(args, prefix+d.Name)
-	}
-	raw, err := podman(ctx, args...)
-	if err != nil {
-		return nil, err
-	}
-	var got []struct {
-		Name       string
-		HostConfig struct {
-			Memory        int64
-			NanoCpus      int64
-			RestartPolicy struct{ Name string }
-		}
-	}
-	if err := json.Unmarshal(raw, &got); err != nil {
-		return nil, err
-	}
-	for _, g := range got {
-		out[strings.TrimPrefix(strings.TrimPrefix(g.Name, "/"), prefix)] = limit{CPUs: float64(g.HostConfig.NanoCpus) / 1e9, Memory: g.HostConfig.Memory, Restart: g.HostConfig.RestartPolicy.Name}
-	}
-	return out, nil
-}
-
-// resize changes what a running or stopped desktop may use, at once.
-func resize(ctx context.Context, d desktop, s size) error {
-	_, err := podman(ctx, append([]string{"update"}, append(s.limits(), prefix+d.Name)...)...)
-	return err
-}
-
 // usage is what a desktop uses now: CPU in percent of one core, memory in
 // bytes.
 type usage struct {
 	CPU    float64
 	Memory int64
-}
-
-func stats(ctx context.Context) (map[string]usage, error) {
-	out, err := podman(ctx, "stats", "--no-stream", "--format", "json")
-	if err != nil {
-		return nil, err
-	}
-	var raw []struct {
-		Name string `json:"name"`
-		CPU  string `json:"cpu_percent"`
-		Mem  string `json:"mem_usage"` // "88.25MB / 4.295GB"
-	}
-	if err := json.Unmarshal(out, &raw); err != nil {
-		return nil, err
-	}
-	all := map[string]usage{}
-	for _, r := range raw {
-		name, ok := strings.CutPrefix(r.Name, prefix)
-		if !ok {
-			continue
-		}
-		var cpu float64
-		fmt.Sscan(strings.TrimSuffix(r.CPU, "%"), &cpu)
-		mem, _, _ := strings.Cut(r.Mem, " /")
-		all[name] = usage{CPU: cpu, Memory: bytesOf(mem)}
-	}
-	return all, nil
 }
 
 // bytesOf reads a size as Podman writes it, like 88.25MB.

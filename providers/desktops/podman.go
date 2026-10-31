@@ -1,57 +1,34 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
-// A desktop is a rootless Podman container named prefix+name, its home folder
-// on a volume of its own, so its sign-ins survive restarts and image updates.
-// Its server's port and token are labels on the container, where the old app
-// kept them too, so its desktops carry on here.
-const (
-	prefix    = "desktop-"
-	cuaImage  = "ghcr.io/trycua/linux:24.04"
-	home      = "/home/cua"
-	firstPort = 32100
-)
+// podmanRT runs desktops as rootless Podman containers, in the user's own
+// systemd instance rather than this service, so restarting it leaves them
+// running; with --restart=always and podman-restart they start again after a
+// reboot.
+type podmanRT struct{}
 
-type desktop struct {
-	Name    string    `json:"name"`
-	State   string    `json:"state"` // running, paused or stopped
-	Started time.Time `json:"started,omitzero"`
-	pool    bool      // made to be borrowed (pool.go)
-	port    int
-	token   string
-}
-
-var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
-
-// podmanEnv points Podman at the user's runtime directory and systemd, which a
+// newPodman points Podman at the user's runtime directory and systemd, which a
 // service has no login session for; lingering keeps them.
-func podmanEnv() error {
+func newPodman() (containers, error) {
 	if _, err := exec.LookPath("podman"); err != nil {
-		return fmt.Errorf("needs Podman")
+		return nil, fmt.Errorf("needs Podman")
 	}
 	if os.Getenv("XDG_RUNTIME_DIR") == "" {
 		dir := fmt.Sprintf("/run/user/%d", os.Getuid())
 		if _, err := os.Stat(dir); err != nil {
-			return fmt.Errorf("Podman needs %s: run loginctl enable-linger %s", dir, os.Getenv("USER"))
+			return nil, fmt.Errorf("Podman needs %s: run loginctl enable-linger %s", dir, os.Getenv("USER"))
 		}
 		os.Setenv("XDG_RUNTIME_DIR", dir)
 		os.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+dir+"/bus")
@@ -61,21 +38,14 @@ func podmanEnv() error {
 	if out, err := exec.Command("systemctl", "--user", "enable", "podman-restart.service").CombinedOutput(); err != nil {
 		log.Printf("enabling podman-restart: %v: %s", err, strings.TrimSpace(string(out)))
 	}
-	return nil
+	return podmanRT{}, nil
 }
 
 func podman(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "podman", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("podman %s: %v: %s", args[0], err, strings.TrimSpace(stderr.String()))
-	}
-	return out, nil
+	return command(ctx, "podman", args...)
 }
 
-func list(ctx context.Context) ([]desktop, error) {
+func (podmanRT) list(ctx context.Context) ([]desktop, error) {
 	out, err := podman(ctx, "ps", "--all", "--filter", "label=one.token", "--format", "json")
 	if err != nil {
 		return nil, err
@@ -107,70 +77,11 @@ func list(ctx context.Context) ([]desktop, error) {
 	return all, nil
 }
 
-// pick is the desktop named, or with no name the only one.
-func pick(all []desktop, name string) (desktop, error) {
-	var names []string
-	for _, d := range all {
-		if d.Name == name || name == "" && len(all) == 1 {
-			return d, nil
-		}
-		names = append(names, d.Name)
-	}
-	switch {
-	case len(all) == 0:
-		return desktop{}, fmt.Errorf("no desktops: make one with create")
-	case name == "":
-		return desktop{}, fmt.Errorf("which desktop? pass desktop: %s", strings.Join(names, ", "))
-	}
-	return desktop{}, fmt.Errorf("no desktop named %q: there's %s", name, strings.Join(names, ", "))
-}
-
-func find(ctx context.Context, name string) (desktop, error) {
-	all, err := list(ctx)
-	if err != nil {
-		return desktop{}, err
-	}
-	return pick(all, name)
-}
-
-// nextPort is the first port after every desktop's.
-func nextPort(all []desktop) int {
-	port := firstPort
-	for _, d := range all {
-		port = max(port, d.port+1)
-	}
-	return port
-}
-
-// creating keeps two desktops being made at once from taking the same port.
-var creating sync.Mutex
-
-// create makes a desktop and starts it, waiting for its server to answer
-// if wait.
-func create(ctx context.Context, name string, sz size, pool, wait bool) (desktop, error) {
-	if !validName.MatchString(name) {
-		return desktop{}, fmt.Errorf("a desktop's name is lowercase letters, digits and dashes")
-	}
-	creating.Lock()
-	defer creating.Unlock()
-	all, err := list(ctx)
-	if err != nil {
-		return desktop{}, err
-	}
-	if _, err := pick(all, name); err == nil {
-		return desktop{}, fmt.Errorf("desktop %s already exists", name)
-	}
-	b := make([]byte, 24)
-	rand.Read(b)
-	d := desktop{Name: name, State: "running", pool: pool, port: nextPort(all), token: hex.EncodeToString(b)}
-	c := prefix + name
-	labels := []string{"--label", fmt.Sprintf("one.port=%d", d.port), "--label", "one.token=" + d.token}
-	if pool {
-		labels = append(labels, "--label", "one.pool=1")
-	}
-	args := append([]string{"run", "--detach", "--name", c, "--restart=always"}, labels...)
+func (podmanRT) run(ctx context.Context, d desktop, sz size) error {
+	c := prefix + d.Name
+	args := append([]string{"run", "--detach", "--name", c, "--restart=always"}, d.labels()...)
 	args = append(args, sz.limits()...)
-	_, err = podman(ctx, append(args,
+	_, err := podman(ctx, append(args,
 		"--env", "CUA_ENV_TOKEN="+d.token,
 		// The image says HOME=/root, which its desktop user inherits; there
 		// Chromium can't keep crash reports, and won't start.
@@ -180,34 +91,18 @@ func create(ctx context.Context, name string, sz size, pool, wait bool) (desktop
 		"--volume", c+"-home:"+home,
 		"--shm-size=1g",
 		cuaImage)...)
-	if err != nil {
-		remove(context.WithoutCancel(ctx), d)
-		return desktop{}, err
-	}
-	if !wait {
-		return d, nil
-	}
-	return d, ready(ctx, d)
+	return err
 }
 
-// start starts a desktop, and again after the device restarts.
-func start(ctx context.Context, d desktop) error {
+func (podmanRT) start(ctx context.Context, d desktop) error {
 	if _, err := podman(ctx, "update", "--restart=always", prefix+d.Name); err != nil {
 		return err
 	}
-	if _, err := podman(ctx, "start", prefix+d.Name); err != nil {
-		return err
-	}
-	return ready(ctx, d)
+	_, err := podman(ctx, "start", prefix+d.Name)
+	return err
 }
 
-// stop stops a desktop until it's started again, restarts of the device too.
-func stop(ctx context.Context, d desktop) error {
-	if d.State == "paused" {
-		if err := unpause(ctx, d); err != nil {
-			return err
-		}
-	}
+func (podmanRT) stop(ctx context.Context, d desktop) error {
 	if _, err := podman(ctx, "update", "--restart=no", prefix+d.Name); err != nil {
 		return err
 	}
@@ -215,8 +110,12 @@ func stop(ctx context.Context, d desktop) error {
 	return err
 }
 
-// remove deletes a desktop's container and its volumes.
-func remove(ctx context.Context, d desktop) error {
+func (podmanRT) restart(ctx context.Context, d desktop) error {
+	_, err := podman(ctx, "restart", "--time", "10", prefix+d.Name)
+	return err
+}
+
+func (podmanRT) remove(ctx context.Context, d desktop) error {
 	out, err := podman(ctx, "inspect", "--format", "{{range .Mounts}}{{.Name}} {{end}}", prefix+d.Name)
 	if err != nil {
 		return err
@@ -229,84 +128,82 @@ func remove(ctx context.Context, d desktop) error {
 			return err
 		}
 	}
-	if d.port > 0 {
-		tailscale(ctx, "serve", "--https="+strconv.Itoa(d.port), "off")
-	}
 	return nil
 }
 
-// pause freezes a desktop's processes: it keeps its memory but uses no CPU
-// until unpaused, which takes a moment.
-func pause(ctx context.Context, d desktop) error {
+func (podmanRT) pause(ctx context.Context, d desktop) error {
 	_, err := podman(ctx, "pause", prefix+d.Name)
 	return err
 }
 
-func unpause(ctx context.Context, d desktop) error {
+func (podmanRT) unpause(ctx context.Context, d desktop) error {
 	_, err := podman(ctx, "unpause", prefix+d.Name)
 	return err
 }
 
-// sh runs a script in a running desktop, as root.
-func sh(ctx context.Context, d desktop, script string) error {
-	var out bytes.Buffer
-	return in(ctx, d, strings.NewReader(script), &out, "sh", "-s")
+func (podmanRT) exec(ctx context.Context, d desktop, stdin io.Reader, stdout io.Writer, args ...string) error {
+	return execIn(ctx, "podman", prefix+d.Name, stdin, stdout, args...)
 }
 
-// in runs a command in a running desktop, as root. An exitError keeps its
-// exit code, which some callers accept.
-func in(ctx context.Context, d desktop, stdin io.Reader, stdout io.Writer, args ...string) error {
-	cmd := exec.CommandContext(ctx, "podman", append([]string{"exec", "--interactive", "--user", "root", prefix + d.Name}, args...)...)
-	cmd.Stdin, cmd.Stdout = stdin, stdout
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return &exitError{err: err, stderr: strings.TrimSpace(stderr.String())}
+func (podmanRT) limits(ctx context.Context, all []desktop) (map[string]limit, error) {
+	out := map[string]limit{}
+	if len(all) == 0 {
+		return out, nil
 	}
-	return nil
-}
-
-type exitError struct {
-	err    error
-	stderr string
-}
-
-func (e *exitError) Error() string { return fmt.Sprintf("%v: %s", e.err, e.stderr) }
-func (e *exitError) Unwrap() error { return e.err }
-
-// tarred reports whether tar's error is only that files changed while it read
-// them, as a running browser's do.
-func tarred(err error) bool {
-	var exit *exec.ExitError
-	return err == nil || errors.As(err, &exit) && exit.ExitCode() == 1
-}
-
-func (d desktop) local() string { return fmt.Sprintf("http://127.0.0.1:%d", d.port) }
-
-// ready waits for a desktop's server to answer.
-func ready(ctx context.Context, d desktop) error {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	for {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, d.local()+"/health", nil)
-		if resp, err := http.DefaultClient.Do(req); err == nil {
-			resp.Body.Close()
-			if resp.StatusCode < 300 {
-				return nil
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("desktop %s didn't start: %w", d.Name, ctx.Err())
-		case <-time.After(time.Second):
-		}
+	args := []string{"inspect", "--format", "json"}
+	for _, d := range all {
+		args = append(args, prefix+d.Name)
 	}
-}
-
-func tailscale(ctx context.Context, args ...string) (string, error) {
-	out, err := exec.CommandContext(ctx, "tailscale", args...).CombinedOutput()
+	raw, err := podman(ctx, args...)
 	if err != nil {
-		return "", fmt.Errorf("tailscale %s: %v: %s", args[0], err, strings.TrimSpace(string(out)))
+		return nil, err
 	}
-	return string(out), nil
+	var got []struct {
+		Name       string
+		HostConfig struct {
+			Memory        int64
+			NanoCpus      int64
+			RestartPolicy struct{ Name string }
+		}
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return nil, err
+	}
+	for _, g := range got {
+		out[strings.TrimPrefix(strings.TrimPrefix(g.Name, "/"), prefix)] = limit{CPUs: float64(g.HostConfig.NanoCpus) / 1e9, Memory: g.HostConfig.Memory,
+			Restart: g.HostConfig.RestartPolicy.Name == "always"}
+	}
+	return out, nil
+}
+
+func (podmanRT) resize(ctx context.Context, d desktop, sz size) error {
+	_, err := podman(ctx, append([]string{"update"}, append(sz.limits(), prefix+d.Name)...)...)
+	return err
+}
+
+func (podmanRT) stats(ctx context.Context) (map[string]usage, error) {
+	out, err := podman(ctx, "stats", "--no-stream", "--format", "json")
+	if err != nil {
+		return nil, err
+	}
+	var raw []struct {
+		Name string `json:"name"`
+		CPU  string `json:"cpu_percent"`
+		Mem  string `json:"mem_usage"` // "88.25MB / 4.295GB"
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, err
+	}
+	all := map[string]usage{}
+	for _, r := range raw {
+		name, ok := strings.CutPrefix(r.Name, prefix)
+		if !ok {
+			continue
+		}
+		var cpu float64
+		fmt.Sscan(strings.TrimSuffix(r.CPU, "%"), &cpu)
+		mem, _, _ := strings.Cut(r.Mem, " /")
+		all[name] = usage{CPU: cpu, Memory: bytesOf(mem)}
+	}
+	return all, nil
 }

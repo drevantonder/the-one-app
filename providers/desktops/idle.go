@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os/exec"
@@ -24,7 +25,9 @@ func (ds *desktops) pauseIdle(ctx context.Context, all []desktop, lent map[strin
 			continue
 		}
 		ds.drop(d.Name) // its session's requests would wait
-		if err := pause(ctx, d); err != nil {
+		if err := pause(ctx, d); errors.Is(err, errCant) {
+			return
+		} else if err != nil {
 			log.Printf("pausing %s: %v", d.Name, err)
 			continue
 		}
@@ -60,8 +63,8 @@ func (ds *desktops) running(ctx context.Context, name string) (desktop, error) {
 }
 
 // revive starts desktops that should be running but aren't, once Podman
-// answers: after a reboot, podman-restart does, unless the user's systemd
-// wasn't ready for it.
+// answers: after a reboot on Linux, podman-restart does, unless the user's
+// systemd wasn't ready for it; Apple's container has no restart policy.
 func revive(ctx context.Context) {
 	var all []desktop
 	var err error
@@ -81,11 +84,11 @@ func revive(ctx context.Context) {
 		return
 	}
 	for _, d := range all {
-		if d.State != "stopped" || lims[d.Name].Restart != "always" {
+		if d.State != "stopped" || !lims[d.Name].Restart {
 			continue
 		}
 		log.Printf("starting %s, which should be running", d.Name)
-		if _, err := podman(ctx, "start", prefix+d.Name); err != nil {
+		if err := rt.start(ctx, d); err != nil {
 			log.Print(err)
 		}
 	}

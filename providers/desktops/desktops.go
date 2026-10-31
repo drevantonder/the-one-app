@@ -258,6 +258,16 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 	delete(in, "desktop")
 	text := func(k string) string { s, _ := in[k].(string); return strings.TrimSpace(s) }
 	here, _ := in["here"].(bool)
+	delete(in, "here")
+	if name != "" && !here && !slices.Contains(local, op) {
+		// A desktop on another server: pass the call on to it.
+		if _, err := find(ctx, name); err != nil {
+			if s := ds.located(ctx, name); s != "" {
+				in["desktop"], in["here"] = name, true
+				return ds.callNode(ctx, s, op, in)
+			}
+		}
+	}
 	switch op {
 	case "list":
 		if here {
@@ -366,6 +376,11 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		if why == "" {
 			return nil, errors.New("say what it's for, in a few words: the person sees it")
 		}
+		if !here && !ds.makesHere(ctx) {
+			if r := ds.borrowElsewhere(ctx, op, in); r != nil {
+				return r, nil
+			}
+		}
 		login, given := in["login"].(string)
 		if !given && ds.savedLogin("default") != "" {
 			login = "default"
@@ -394,6 +409,11 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		}
 		return fmt.Sprintf("Gave back desktop %s.", name), nil
 	case "sign_in":
+		if !here && !ds.makesHere(ctx) {
+			if r := ds.borrowElsewhere(ctx, op, in); r != nil {
+				return r, nil
+			}
+		}
 		login := cmpOr(text("login"), "default")
 		if !validName.MatchString(login) {
 			return nil, errors.New("a login's name is lowercase letters, digits and dashes")
@@ -430,9 +450,32 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		}
 		return fmt.Sprintf("Saved desktop %s's browser as the %s login: desktops borrowed with it start signed in to the same sites.", d.Name, login), nil
 	case "logins":
-		return map[string]any{"logins": ds.logins()}, nil
+		me, _, err := ds.servers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		mine := ds.logins(me)
+		if here {
+			return map[string]any{"logins": mine}, nil
+		}
+		got, failed := ds.everywhere(ctx, "logins", nil)
+		for _, r := range got {
+			var theirs struct{ Logins []map[string]any }
+			json.Unmarshal(r, &theirs)
+			mine = append(mine, theirs.Logins...)
+		}
+		out := map[string]any{"logins": mine}
+		if len(failed) > 0 {
+			out["unreachable"] = failed
+		}
+		return out, nil
 	case "forget_login":
 		login := text("login")
+		if ds.savedLogin(login) == "" && !here {
+			if s := ds.loginServer(ctx, login); s != "" {
+				return ds.callNode(ctx, s, op, map[string]any{"login": login, "here": true})
+			}
+		}
 		if !validName.MatchString(login) || ds.savedLogin(login) == "" {
 			return nil, fmt.Errorf("no saved login %q", login)
 		}
@@ -450,7 +493,7 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return reply{ok: map[string]any{"backup": rec, "text": fmt.Sprintf("Backed up desktop %s (%s). Restore it on any server with restore.", d.Name, bytesText(rec.Bytes))},
-			entries: []map[string]any{{"kind": "backup", "data": rec}}}, nil
+			entries: []map[string]any{{"kind": "backup", "data": rec, "blobs": []string{rec.Blob}}}}, nil
 	case "backups":
 		if here {
 			return map[string]any{"backups": ds.backupsHere()}, nil
@@ -490,11 +533,21 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 			return nil, errors.New("a borrowed desktop can't be moved: borrow one on the other server")
 		}
 		closeBrowsers(ctx, d, true)
-		rec, err := ds.backup(ctx, d)
+		// Backed up through the node, so the entry naming the backup's blob is
+		// written before the other server asks for it.
+		me, _, err := ds.servers(ctx)
 		if err != nil {
 			return nil, err
 		}
-		entries := []map[string]any{{"kind": "backup", "data": rec}}
+		raw, err := ds.callNode(ctx, me, "backup", map[string]any{"desktop": d.Name, "here": true})
+		if err != nil {
+			return nil, err
+		}
+		var backed struct{ Backup backupRecord }
+		if err := json.Unmarshal(raw, &backed); err != nil || backed.Backup.Blob == "" {
+			return nil, fmt.Errorf("backing it up: %s", raw)
+		}
+		rec := backed.Backup
 		if _, err := ds.callNode(ctx, to, "restore", map[string]any{"desktop": d.Name, "blob": rec.Blob, "size": rec.Size}); err != nil {
 			return nil, fmt.Errorf("not moved: restoring it on %s: %w", to, err)
 		}
@@ -502,7 +555,7 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		if err := stop(ctx, d); err != nil {
 			return nil, fmt.Errorf("moved to %s, but stopping it here failed: %w", to, err)
 		}
-		return reply{ok: fmt.Sprintf("Moved desktop %s to %s, where it's running. It's stopped here; delete it here (delete) once it's fine there.", d.Name, to), entries: entries}, nil
+		return fmt.Sprintf("Moved desktop %s to %s, where it's running. It's stopped here; delete it here (delete) once it's fine there.", d.Name, to), nil
 	}
 	if slices.Contains(browsing, op) {
 		return ds.use(ctx, name, op, in)
@@ -620,6 +673,10 @@ func viewURL(ctx context.Context, d desktop, minutes int) (string, error) {
 	}
 	return fmt.Sprintf("https://%s:%s%s", strings.TrimSuffix(st.Self.DNSName, "."), port, path), nil
 }
+
+// local are the operations that act on this server even when given a
+// desktop it doesn't have.
+var local = []string{"list", "create", "borrow", "sign_in", "logins", "forget_login", "backups", "restore", "refresh_tools"}
 
 // reply is a result with entries for the node to write in the caller's log.
 type reply struct {
