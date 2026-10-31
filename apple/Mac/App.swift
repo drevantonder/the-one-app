@@ -24,17 +24,17 @@ struct MacApp: App {
             RootView()
                 .environment(store)
                 .tint(accent)
-                .frame(minWidth: 720, minHeight: 460)
+                .frame(minWidth: 760, minHeight: 500)
         }
         .defaultSize(width: 1000, height: 700)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Pair a Device…") { store.sheet = .pair }
+                Button("Pair a Phone or Computer…") { store.sheet = .pair }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
-                    .disabled(store.space == nil)
+                    .disabled(store.install == nil)
                 Button("Join with a Pairing Code…") { store.sheet = .join }
                     .keyboardShortcut("j", modifiers: [.command, .shift])
-                    .disabled(store.space != nil)
+                    .disabled(store.install != nil)
             }
         }
 

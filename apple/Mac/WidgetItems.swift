@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// A menu bar item of its own for each of the space's widgets, beside the app's: titled with the widget's
+/// A menu bar item of its own for each widget on the pages, beside the app's: titled with the widget's
 /// headline, it opens the widget, drawn natively, below it. A new headline pushes the old one up and out.
 @MainActor @Observable
 final class WidgetItems {
@@ -26,7 +26,7 @@ final class WidgetItems {
     /// Opens an app's first screen in the window.
     func open(_ app: String) {
         guard let store else { return }
-        if let app = store.app(app) { store.selection = store.main(app) }
+        if let app = store.app(app) { store.selection = store.open(app, from: store.pages.first { store.apps(on: $0).contains(app) }) }
         openWindow?()
         NSApp.activate()
     }
@@ -39,7 +39,7 @@ final class WidgetItems {
 
     private func update() {
         guard let store else { return }
-        let shown = store.widgets.filter { !hidden.contains($0.id) }
+        let shown = store.allWidgets.filter { !hidden.contains($0.id) }
         for (id, item) in items where !shown.contains(where: { $0.id == id }) {
             item.remove()
             items[id] = nil

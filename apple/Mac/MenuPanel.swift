@@ -1,7 +1,7 @@
 import ServiceManagement
 import SwiftUI
 
-/// The app's own menu bar item's panel: this space's devices, which widgets have items, and a way into the app.
+/// The app's own menu bar item's panel: this user's devices, which widgets have items, and a way into the app.
 struct MenuPanel: View {
     @Environment(Store.self) private var store
     @Environment(\.openWindow) private var openWindow
@@ -10,29 +10,27 @@ struct MenuPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let space = store.space {
+            if let install = store.install {
                 HStack(spacing: 10) {
-                    SpaceMark(name: space.title, size: 26)
-                    Text(space.title).font(.headline)
+                    Image("Logo").resizable().frame(width: 26, height: 26)
+                    Text(install.name).font(.headline)
                     Spacer()
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
-                SectionTitle("Devices")
-                ForEach(space.sortedDevices) { device in
+                SectionTitle("Your Devices")
+                ForEach(install.servers.filter { $0.user == store.me?.id }) { server in
                     HStack(spacing: 8) {
                         Circle()
-                            .fill(device.online ? AnyShapeStyle(.green) : device.phone ? AnyShapeStyle(.clear) : AnyShapeStyle(.quaternary))
+                            .fill(server.isOnline ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
                             .frame(width: 7, height: 7)
-                        Text(displayName(device.name))
+                        Text(displayName(server.name))
                         Spacer()
-                        if device.me {
+                        if server.key == store.state?.machine.key {
                             Text("This device").foregroundStyle(.secondary)
-                        } else if device.phone {
-                            Text(device.phoneStatus).foregroundStyle(.tertiary)
-                        } else if !device.online {
+                        } else if !server.isOnline {
                             Text("Offline").foregroundStyle(.tertiary)
                         }
                     }
@@ -40,10 +38,10 @@ struct MenuPanel: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 3)
                 }
-                if !store.widgets.isEmpty {
+                if !store.allWidgets.isEmpty {
                     Divider().padding(.vertical, 6).padding(.horizontal, 14)
                     SectionTitle("In the Menu Bar")
-                    ForEach(store.widgets) { widget in
+                    ForEach(store.allWidgets) { widget in
                         MenuButton { items.toggle(widget.id) } label: {
                             HStack {
                                 Label(widget.title ?? widget.widget, systemImage: symbol(store.app(widget.app)?.icon))
@@ -55,7 +53,7 @@ struct MenuPanel: View {
                 }
                 Divider().padding(.vertical, 6).padding(.horizontal, 14)
             } else {
-                Text(store.state == nil ? "Starting…" : "No space yet")
+                Text(store.state == nil ? "Starting…" : "Not set up yet")
                     .foregroundStyle(.secondary)
                     .padding(14)
                 Divider().padding(.horizontal, 14)

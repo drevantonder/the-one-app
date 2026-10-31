@@ -1,13 +1,13 @@
 import Foundation
 
-/// The space's widgets, as the app last saw them, which it leaves in its app group for the home-screen widget.
+/// The pages' widgets, as the app last saw them, which it leaves in its app group for the home-screen widget.
 struct WidgetCache: Codable {
     struct Item: Codable {
         var title: String
         var icon: String
         var root: WidgetNode
     }
-    var space: String?
+    var install: String?
     var widgets: [Item]
 
     private static var file: URL? {

@@ -16,7 +16,7 @@ struct PhoneApp: App {
     }
 }
 
-/// The phone before and after it joins a space.
+/// The phone before and after it joins an install.
 @MainActor @Observable
 final class Phone {
     enum Stage: Equatable {
@@ -29,16 +29,33 @@ final class Phone {
     private(set) var stage = Stage.starting
     private(set) var joining = false
     var joinError: String?
-    let store = Store(node: NodeClient(transport: ClientTransport()))
+    let store = Store(node: Phone.transport)
     private var running: Task<Void, Never>?
 
-    /// The brand's accent: the build's until a device sends the space's.
+    /// The brand's accent: the build's until a server sends its own.
     var accent: Color {
         Color(brandHex: store.brand?.accent ?? Bundle.main.object(forInfoDictionaryKey: "BrandAccent") as? String ?? "")
     }
 
+    /// In the simulator, NODE_URL points the app at a server's local API instead of joining over the network.
+    private static var nodeURL: URL? {
+        #if targetEnvironment(simulator)
+        ProcessInfo.processInfo.environment["NODE_URL"].flatMap(URL.init(string:))
+        #else
+        nil
+        #endif
+    }
+
+    private static var transport: NodeClient {
+        NodeClient(transport: nodeURL.map { HTTPNode(base: $0) as any NodeTransport } ?? ClientTransport())
+    }
+
     func start() async {
         guard stage == .starting else { return }
+        if Self.nodeURL != nil {
+            stage = .joined
+            return run()
+        }
         let dir = URL.applicationSupportDirectory.appending(path: "client")
         do {
             stage = try await Client.start(in: dir) ? .joined : .welcome
@@ -48,7 +65,7 @@ final class Phone {
         if stage == .joined { run() }
     }
 
-    /// Joins the space a pairing code is for, as `name`, and shows it.
+    /// Joins the install a pairing code is for, as `name`, and shows it.
     func join(_ code: String, name: String) async {
         guard !joining else { return }
         joining = true
@@ -63,8 +80,8 @@ final class Phone {
         stage = .joined
         run()
         try? await store.refreshState()
-        // A device already in the space keeps the name it had there.
-        if let current = store.state?.device.name, current != name { try? await store.renameDevice(name) }
+        // A device already in the install keeps the name it had there.
+        if let current = store.state?.machine.name, current != name { try? await store.rename(name) }
     }
 
     /// `<cli>://join?code=…&name=…`: joins without the camera, from a link another device gives.
@@ -72,7 +89,7 @@ final class Phone {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let value = { (name: String) in query.first { $0.name == name }?.value?.trimmingCharacters(in: .whitespaces) }
         guard url.host() == "join", let code = value("code"), !code.isEmpty else { return }
-        let name = value("name").flatMap { $0.isEmpty ? nil : $0 } ?? store.state?.device.name ?? UIDevice.current.name
+        let name = value("name").flatMap { $0.isEmpty ? nil : $0 } ?? store.state?.machine.name ?? UIDevice.current.name
         Task { await join(code, name: name) }
     }
 
@@ -94,7 +111,7 @@ struct PhoneRoot: View {
         case .welcome:
             WelcomeView()
         case .joined:
-            HomeView()
+            PagesView()
         }
     }
 }

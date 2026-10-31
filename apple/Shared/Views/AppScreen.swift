@@ -152,7 +152,7 @@ private struct ScreenWebView: Representable {
             let route = view.route, node = view.store.node
             Task {
                 do {
-                    let page = try await node.page(app: route.app, screen: route.screen, params: route.params)
+                    let page = try await node.page(app: route.app, screen: route.screen, params: route.params, scope: route.scope)
                     web.loadHTMLString(page.html, baseURL: page.base)
                 } catch {
                     view.failure = error.localizedDescription
@@ -175,7 +175,7 @@ private struct ScreenWebView: Representable {
                 }
             case "open":
                 let params = (try? JSONSerialization.data(withJSONObject: body["params"] ?? [:])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-                view.store.path.append(.screen(ScreenRoute(app: route.app, screen: body["screen"] as? String ?? "main", params: params)))
+                view.store.path.append(.screen(ScreenRoute(app: route.app, screen: body["screen"] as? String ?? "main", params: params, scope: route.scope)))
                 return (nil, nil)
             case "title":
                 view.title = body["text"] as? String
@@ -206,14 +206,39 @@ private struct ScreenWebView: Representable {
     }
 }
 
-/// What a shell shows for a route: an app's screen, or one of its own views.
+/// What a shell shows for a route: a page, an app's screen, or one of its own views.
 struct RouteView: View {
+    @Environment(Store.self) private var store
     var route: Route
+    var open: (Route) -> Void
 
     var body: some View {
         switch route {
-        case .screen(let screen): AppScreen(route: screen).id(screen)
-        case .devices: DevicesView()
+        case .page(let scope):
+            if let page = store.page(scope) { PageView(page: page, open: open) }
+        case .screen(let screen):
+            AppScreen(route: screen).id(screen)
+        case .settings:
+            SettingsPage(open: open)
+        case .group(let id):
+            GroupView(id: id)
+        case .setting(let setting):
+            switch setting {
+            case .store:
+                // The brand's store app, once it exists; until then, a list of every app.
+                if let name = store.brand?.store, let app = store.app(name), app.hasScreens {
+                    AppScreen(route: ScreenRoute(app: app.name)).id(app.name)
+                } else {
+                    AppStoreView()
+                }
+            case .groups: GroupsView(open: open)
+            case .devices: DevicesView()
+            case .secrets: SecretsView()
+            case .access: AccessLogView()
+            case .users: UsersView()
+            case .backups: BackupsView()
+            case .requests: RequestsView()
+            }
         }
     }
 }

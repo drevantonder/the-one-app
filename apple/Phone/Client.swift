@@ -1,9 +1,9 @@
 import Foundation
 import OneClient
 
-/// The client library (client/one_client.h): a phone keeps no log, so a member device that does acts for it.
+/// The client library (client/one_client.h): a phone keeps no log, so a server acts for it.
 enum Client {
-    /// Starts the client with its key and the devices it knows in `dir`. Whether it has joined a space yet.
+    /// Starts the client with its key and the servers it knows in `dir`. Whether it has joined yet.
     static func start(in dir: URL) async throws -> Bool {
         let path = dir.path(percentEncoded: false)
         let reply = try await run { path.withCString { one_start($0, "") } }
@@ -11,7 +11,7 @@ enum Client {
         return try JSONDecoder().decode(Started.self, from: reply).joined
     }
 
-    /// Joins the space a pairing code is for, calling this device `name` there.
+    /// Joins the install a pairing code is for, calling this device `name` there.
     static func join(_ code: String, name: String) async throws {
         _ = try await run { code.withCString { c in name.withCString { one_join(c, $0) } } }
     }
@@ -32,9 +32,9 @@ enum Client {
     }
 }
 
-/// The local API, asked of a member device over iroh.
+/// The local API, asked of a server over iroh.
 struct ClientTransport: NodeTransport {
-    var unreachable: String { String(localized: "None of the space’s devices answered.") }
+    var unreachable: String { String(localized: "None of your servers answered.") }
 
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data {
         let path = "/" + path
@@ -44,9 +44,9 @@ struct ClientTransport: NodeTransport {
         }
     }
 
-    func page(app: String, screen: String, params: String) async throws -> (html: String, base: URL?) {
+    func page(app: String, screen: String, params: String, scope: String?) async throws -> (html: String, base: URL?) {
         let params = (try? JSONSerialization.jsonObject(with: Data(params.utf8))) ?? [String: Any]()
-        let body = try JSONSerialization.data(withJSONObject: ["app": app, "screen": screen, "params": params])
+        let body = try JSONSerialization.data(withJSONObject: ["app": app, "screen": screen, "params": params, "scope": scope ?? NSNull()])
         let reply = try JSONSerialization.jsonObject(with: try await send("GET", "v1/screen", body: body, timeout: 15)) as? [String: Any]
         return (reply?["html"] as? String ?? "", nil)
     }

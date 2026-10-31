@@ -1,49 +1,82 @@
 import SwiftUI
 
-/// The apps the space has screens for, then the shell's own views.
+/// One collapsible section per page, listing its apps; a section's name shows the page. Settings sit at the bottom.
 struct Sidebar: View {
     @Environment(Store.self) private var store
+    @AppStorage("collapsedPages") private var collapsed = ""
 
     var body: some View {
         @Bindable var store = store
         List(selection: $store.selection) {
-            Section {
-                ForEach(store.screenApps) { app in
-                    Label(app.label, systemImage: symbol(app.icon)).tag(store.main(app))
+            ForEach(store.pages) { page in
+                Section(isExpanded: expanded(page)) {
+                    ForEach(store.apps(on: page)) { app in
+                        Label {
+                            Text(app.label)
+                        } icon: {
+                            AppTile(symbol: symbol(app.icon), seed: app.name, size: 20)
+                        }
+                        .tag(store.open(app, from: page))
+                    }
+                } header: {
+                    Button { store.selection = .page(page.scope) } label: {
+                        Text(page.title.uppercased())
+                            .foregroundStyle(store.selection == .page(page.scope) ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        if page.group != nil {
+                            Button("Hide \(page.title)") { store.setHidden(page.scope, true) }
+                        }
+                        Button("Edit Pages…") { store.sheet = .pages }
+                    }
                 }
-                Label("Devices", systemImage: "laptopcomputer.and.iphone")
-                    .badge(store.space.map { "\($0.nodes.filter(\.online).count)/\($0.nodes.count)" } ?? "")
-                    .tag(Route.devices)
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            SpaceHeader()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            SettingsButton()
                 .padding(.horizontal, 10)
-                .padding(.bottom, 6)
+                .padding(.vertical, 8)
+        }
+    }
+
+    private func expanded(_ page: Page) -> Binding<Bool> {
+        Binding {
+            !collapsed.split(separator: " ").contains(Substring(page.scope))
+        } set: { open in
+            var set = Set(collapsed.split(separator: " ").map(String.init))
+            if open { set.remove(page.scope) } else { set.insert(page.scope) }
+            collapsed = set.sorted().joined(separator: " ")
         }
     }
 }
 
-/// The app's one space: another context is another app.
-private struct SpaceHeader: View {
+/// The cog, with a red dot while a request waits.
+private struct SettingsButton: View {
     @Environment(Store.self) private var store
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            SpaceMark(name: store.space?.title ?? "", size: 30)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(store.space?.title ?? "")
-                    .font(.headline)
-                    .lineLimit(1)
-                if let space = store.space {
-                    Text(space.devices.count == 1 ? "1 device" : "\(space.devices.count) devices")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+        let selected = store.selection == .settings
+        Button { store.selection = .settings } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .medium))
+                    .overlay(alignment: .topTrailing) {
+                        if store.hasRequests { Circle().fill(.red).frame(width: 7, height: 7).offset(x: 3, y: -2) }
+                    }
+                Text("Settings")
+                Spacer()
             }
-            Spacer(minLength: 4)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(selected ? AnyShapeStyle(.tint.opacity(0.18)) : hovering ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(.clear),
+                        in: .rect(cornerRadius: 8))
+            .contentShape(.rect)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }

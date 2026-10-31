@@ -3,18 +3,18 @@ import WidgetKit
 
 @main
 struct Widgets: WidgetBundle {
-    var body: some Widget { SpaceWidget() }
+    var body: some Widget { PagesWidget() }
 }
 
-/// The space's first widget, drawn as the app draws it.
-struct SpaceWidget: Widget {
+/// The first widget on your pages, drawn as the app draws it.
+struct PagesWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "widget", provider: Provider()) { entry in
             EntryView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName(appName)
-        .description("What’s new in your space.")
+        .description("What’s new on your pages.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
     }
 }
@@ -76,7 +76,7 @@ struct EntryView: View {
                 Image("Logo")
                     .resizable()
                     .frame(width: 44, height: 44)
-                Text("Open \(appName) to see your space.")
+                Text("Open \(appName) to see your pages.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

@@ -1,7 +1,7 @@
 import SwiftUI
 import VisionKit
 
-/// The first run: name this iPhone, then join a space with the pairing code another device shows.
+/// The first run: name this iPhone, then join with the pairing code another device shows.
 struct WelcomeView: View {
     @Environment(Phone.self) private var phone
     @State private var name = UIDevice.current.name
@@ -20,7 +20,7 @@ struct WelcomeView: View {
                         .accessibilityHidden(true)
                     Text("Welcome to \(appName)")
                         .font(.largeTitle.bold())
-                    Text("On a device that’s already in your space, choose Pair a Device, then scan its code here.")
+                    Text("On a computer that’s already set up, open Settings, then Devices, and choose Pair a Phone or Computer. Scan its code here.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
@@ -38,7 +38,7 @@ struct WelcomeView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 13)
                         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
-                    Text("Other devices in the space see this iPhone by this name.")
+                    Text("Others see this iPhone by this name.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 16)
@@ -182,7 +182,7 @@ private struct CodeSheet: View {
                         .textInputAutocapitalization(.never)
                         .focused($focused)
                 } footer: {
-                    Text("Copy the code from Pair a Device on your other device, or run \(Bundle.main.object(forInfoDictionaryKey: "BrandCLI") as? String ?? "") pair there. Each code works once.")
+                    Text("Copy the code from Pair a Phone or Computer on your other device, or run \(Bundle.main.object(forInfoDictionaryKey: "BrandCLI") as? String ?? "") pair there. Each code works once.")
                 }
             }
             .navigationTitle("Enter a Pairing Code")
