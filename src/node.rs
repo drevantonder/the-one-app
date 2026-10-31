@@ -236,7 +236,7 @@ pub struct Inner {
     /// The port apps' requests go out through.
     outbound: u16,
     woke: Instant,
-    /// What each app did this minute, and the apps stopped here for looping.
+    /// What each app did in its last minute, and the apps stopped here for looping.
     guard: Mutex<Guard>,
     /// The schedules' slots running here now: `<scope>/<app>/<schedule>/<slot>`.
     running: Mutex<std::collections::HashSet<String>>,
@@ -252,8 +252,9 @@ pub struct Inner {
 /// server is stopped here for `STOPPED_FOR`, or until it's deployed again.
 #[derive(Default)]
 struct Guard {
-    minute: u64,
-    counts: HashMap<(String, &'static str), u32>,
+    /// Each app's calls or runs since the minute it started counting (milliseconds): a minute from its first, not
+    /// the clock's, so a loop that runs across the turn of a minute is still caught.
+    counts: HashMap<(String, &'static str), (u64, u32)>,
     /// Each app stopped here: why, until when, and the bundle it was running.
     stopped: HashMap<String, (String, u64, Option<String>)>,
 }
@@ -1189,14 +1190,13 @@ impl Node {
     /// Counts one of `app`'s calls of other apps, or one run of its schedules (`kind`). Past `RATE_LIMIT` this minute,
     /// the app is stopped here: it's looping.
     async fn count(&self, app: &str, kind: &'static str) -> Result<()> {
-        let minute = now_ms() / 60_000;
+        let now = now_ms();
         let tripped = {
             let mut g = self.0.guard.lock().unwrap();
-            if g.minute != minute {
-                g.minute = minute;
-                g.counts.clear();
+            let (since, n) = g.counts.entry((app.to_string(), kind)).or_insert((now, 0));
+            if now.saturating_sub(*since) >= 60_000 {
+                (*since, *n) = (now, 0);
             }
-            let n = g.counts.entry((app.to_string(), kind)).or_default();
             *n += 1;
             *n == RATE_LIMIT + 1
         };
