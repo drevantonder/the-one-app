@@ -41,6 +41,7 @@ What's here so far, and what isn't, is at the end ("Built so far").
 - *(Not built yet.)* `src/drivers.rs`: starts the drivers installed on this server, takes registrations over the local API, tells sync whom each serves, and passes them calls.
 - *(Not built yet.)* `src/backup.rs`: streams entries and blobs to a bucket, and restores from one.
 - `src/update.rs`, `src/release.rs`: tooling, not protocol. `one update` builds main's tip on your own Linux servers and publishes it as a `node-release`, and rebuilds the Mac app on each Mac over SSH; `one release vX.Y.Z` also signs it off (`gh signoff`; there is no CI) and publishes it on GitHub, each file with `<file>.sig`. `install.sh` installs GitHub's latest, if signed with the brand's release key.
+- `src/load.rs`: how loaded this machine is (memory, CPU, GPU, disk, the containers it hosts), sampled on a thread of its own and carried in `Hello`. Server info, like `build`, never an entry.
 - `src/screen/`: the design kit and the bridge every app screen is served in.
 - `client/`: the library phones link (Rust, with a C interface in `one_client.h`).
 - `apple/`: the Mac app (a server's node inside, its window and menu bar, and the host of the Apple drivers, built in from the `apple-drivers` repo so they keep the permissions macOS grants the app) and the iPhone app and widget (a client). They draw apps' screens and widgets and name no app.

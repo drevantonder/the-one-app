@@ -27,7 +27,13 @@ pub type Driver = (String, Vec<String>, Value);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Msg {
-    Hello { frontier: Frontier, drivers: Vec<Driver> },
+    /// `load` is how loaded the sender is; older servers send none, and skip it.
+    Hello {
+        frontier: Frontier,
+        drivers: Vec<Driver>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        load: Option<crate::load::Load>,
+    },
     Entries { entries: Vec<Wire> },
 }
 
@@ -94,7 +100,7 @@ impl Replica {
     }
 
     pub fn hello(&self, drivers: Vec<Driver>) -> Result<Msg> {
-        Ok(Msg::Hello { frontier: self.store.frontier()?, drivers })
+        Ok(Msg::Hello { frontier: self.store.frontier()?, drivers, load: None })
     }
 
     /// The message that passes `entries` on to `peer`: those in scopes it holds.
@@ -273,4 +279,34 @@ pub async fn read<R: AsyncRead + Unpin>(r: &mut R) -> Result<Msg> {
     let mut bytes = vec![0; len];
     r.read_exact(&mut bytes).await?;
     Ok(ciborium::from_reader(bytes.as_slice())?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Msg` as servers before `load` had it.
+    #[derive(Serialize, Deserialize)]
+    enum OldMsg {
+        Hello { frontier: Frontier, drivers: Vec<Driver> },
+        Entries { entries: Vec<Wire> },
+    }
+
+    fn cbor<T: Serialize>(v: &T) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        ciborium::into_writer(v, &mut bytes).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn hello_load_is_optional_both_ways() {
+        let load = crate::load::Load { cpu: vec![3, 4], memory: Some(crate::load::Space { used: 1, total: 2 }), ..Default::default() };
+        let new = Msg::Hello { frontier: vec![([7; 32], "global".into(), 3)], drivers: vec![], load: Some(load.clone()) };
+        let Ok(OldMsg::Hello { frontier, .. }) = ciborium::from_reader(cbor(&new).as_slice()) else { panic!("an older server can't read it") };
+        assert_eq!(frontier.len(), 1);
+        let old = OldMsg::Hello { frontier, drivers: vec![] };
+        let Ok(Msg::Hello { load: None, .. }) = ciborium::from_reader(cbor(&old).as_slice()) else { panic!("can't read an older server's") };
+        let Ok(Msg::Hello { load: Some(l), .. }) = ciborium::from_reader::<Msg, _>(cbor(&new).as_slice()) else { panic!() };
+        assert_eq!(l, load);
+    }
 }

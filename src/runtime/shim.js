@@ -141,6 +141,8 @@ function context(env, body, appends) {
     },
     /// Every app in the install, as `GET /v1/apps` gives them to the caller.
     catalog: async () => (await ask("catalog")).json(),
+    /// The install's servers, as `GET /v1/state` gives them to the caller: online or not, and each one's load.
+    servers: async () => (await ask("servers")).json(),
     /// Installs (or with `installed: false`, uninstalls) an app in a scope, with the caller's own rights there.
     install: (name, scope, installed = true) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");

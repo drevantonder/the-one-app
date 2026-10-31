@@ -60,6 +60,8 @@ struct Session {
     /// The frontier the peer last said it had.
     frontier: Option<Frontier>,
     drivers: Vec<Driver>,
+    /// How loaded the peer said it is.
+    load: Option<crate::load::Load>,
     /// Whether this server has received everything the peer's first hello offered it.
     caught_up: bool,
 }
@@ -1085,7 +1087,7 @@ impl Node {
 
     /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs an
     /// operation of an app or driver the calling app uses, as its caller; `POST /blob` keeps a blob, `GET
-    /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the install's apps.
+    /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the install's apps, `GET /servers` its servers.
     pub async fn internal(&self, token: &str, method: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
         use axum::response::IntoResponse;
         let grant = &self.grant_of(token).context("only a running call asks the node")?;
@@ -1118,6 +1120,7 @@ impl Node {
                 self.blob(hash).await?.into_response()
             }
             ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
+            ("GET", "/servers") => ok(self.state_for(&grant.caller)["install"]["servers"].take()),
             _ => bail!("the node has no {method} {path}"),
         })
     }
@@ -1142,6 +1145,13 @@ impl Node {
                 .servers()
                 .map(|s| {
                     let session = i.sessions.get(&s.key);
+                    // The containers on a server are its owners' business.
+                    let load = if s.key == self.0.id { Some(crate::load::current()) } else { session.and_then(|s| s.load.clone()) }.map(|mut l| {
+                        if !m.owners(&s.key).iter().any(|o| m.acts_for(me, o)) {
+                            l.containers.clear();
+                        }
+                        l
+                    });
                     json!({
                         "key": hex(&s.key), "name": s.name, "user": s.user, "me": s.key == viewer.key, "here": s.key == self.0.id,
                         "online": s.key == self.0.id || session.is_some(),
@@ -1150,6 +1160,7 @@ impl Node {
                         "serves_me": m.serves(&s.key, me),
                         "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
                         "drivers": session.map(|s| s.drivers.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default(),
+                        "load": load,
                     })
                 })
                 .collect();
@@ -1607,20 +1618,21 @@ impl Node {
         let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
         self.with(|i| {
             tx.send(self.hello(i)?).ok();
-            i.sessions.insert(peer, Session { tx: tx.clone(), frontier: None, drivers: Vec::new(), caught_up: false });
+            i.sessions.insert(peer, Session { tx: tx.clone(), frontier: None, drivers: Vec::new(), load: None, caught_up: false });
             Ok(())
         })?;
         self.emit(Event::Servers);
         tracing::info!("syncing with {}", self.name_of(&peer));
         let writer = async {
             while let Some(mut msg) = rx.recv().await {
-                // Hellos made inside sync carry no drivers; every hello this server sends does.
-                if let Msg::Hello { drivers, .. } = &mut msg {
+                // Hellos made inside sync carry no drivers or load; every hello this server sends does.
+                if let Msg::Hello { drivers, load, .. } = &mut msg {
                     if drivers.is_empty() {
                         if let Ok(Msg::Hello { drivers: d, .. }) = self.with(|i| self.hello(i)) {
                             *drivers = d;
                         }
                     }
+                    *load = Some(crate::load::current());
                 }
                 sync::write(&mut send, &msg).await?;
             }
@@ -1655,9 +1667,10 @@ impl Node {
     async fn handle(&self, peer: Key, msg: Msg) -> Result<Vec<Msg>> {
         let _write = self.0.writes.lock().await;
         let drivers_changed = self.with(|i| {
-            let Msg::Hello { frontier, drivers } = &msg else { return Ok(false) };
+            let Msg::Hello { frontier, drivers, load } = &msg else { return Ok(false) };
             let Some(s) = i.sessions.get_mut(&peer) else { return Ok(false) };
             s.frontier = Some(frontier.clone());
+            s.load = load.clone();
             let changed = s.drivers != *drivers;
             s.drivers = drivers.clone();
             Ok(changed)
