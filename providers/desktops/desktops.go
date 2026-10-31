@@ -58,7 +58,7 @@ func (ds *desktops) describe() map[string]any {
 			ops = append(ops, map[string]any{"name": t.Name, "description": t.Description, "input": withDesktop(t.InputSchema)})
 		}
 	}
-	return map[string]any{"title": "Desktops", "icon": "monitor", "instructions": instructions, "ops": ops, "widgets": []any{}}
+	return map[string]any{"title": "Desktops", "icon": "monitor", "instructions": instructions, "ops": ops, "widgets": []any{}, "screens": screens}
 }
 
 // withDesktop adds the desktop argument to a tool's input.
@@ -245,6 +245,9 @@ func content(r result) (any, error) {
 }
 
 func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (any, error) {
+	if op == "_screen" {
+		return screenBody(raw)
+	}
 	in := map[string]any{}
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &in); err != nil {
