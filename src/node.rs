@@ -437,6 +437,22 @@ impl Node {
         Ok(out)
     }
 
+    /// An app screen as a whole page: the app's HTML with the design kit, the bridge, and who's looking.
+    pub async fn screen(&self, space: Key, viewer: Key, app: &str, name: &str, params: Value) -> Result<String> {
+        let body = self.0.apps.screen(app, name).await?;
+        let me = self.me_of(&space, &viewer)?;
+        let context = json!({ "app": app, "screen": name, "params": params, "space": hex(&space), "me": me });
+        // `</` can't appear inside the inline script, so it can't end it early.
+        let context = context.to_string().replace("</", "<\\/");
+        Ok(format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\
+             <style>{kit}:root{{--accent:{accent}}}</style><script>window.__one={context};{bridge}</script></head><body>{body}</body></html>",
+            kit = include_str!("screen/kit.css"),
+            accent = crate::brand::ACCENT,
+            bridge = include_str!("screen/bridge.js"),
+        ))
+    }
+
     pub async fn apps(&self) -> Result<Vec<Value>> {
         let mut apps = self.0.apps.describe().await?;
         apps.extend(self.0.native.iter().map(|n| (n.describe)()));
@@ -583,6 +599,10 @@ impl Node {
             ("GET", "/v1/state") => self.state_for(caller),
             ("GET", "/v1/apps") => json!(self.apps().await?),
             ("GET", "/v1/widgets") => json!(self.widgets(space(&body)?, caller).await?),
+            ("GET", "/v1/screen") => {
+                let (app, name) = (body["app"].as_str().unwrap_or(""), body["screen"].as_str().unwrap_or("main"));
+                json!({ "html": self.screen(space(&body)?, caller, app, name, body["params"].clone()).await? })
+            }
             ("POST", "/v1/call") => {
                 let input = if body["input"].is_null() { json!({}) } else { body["input"].clone() };
                 let ok = self.call_as(space(&body)?, caller, body["app"].as_str().unwrap_or(""), body["op"].as_str().unwrap_or(""), input).await?;

@@ -29,6 +29,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/remove", post(remove))
         .route("/v1/release", post(release))
         .route("/v1/events", get(events))
+        .route("/v1/screens/{app}/{screen}", get(screen))
         .route("/hooks/{app}/{name}", post(hook))
         .route("/v1/providers/{app}", post(register))
         .route("/v1/providers/{app}/calls", get(next_call))
@@ -42,7 +43,10 @@ pub fn router(node: Node) -> Router {
 async fn only_this_device(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let host = req.headers().get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
     let local = host.split(':').next().is_some_and(|h| matches!(h, "127.0.0.1" | "localhost" | "[::1]"));
-    if req.headers().contains_key(axum::http::header::ORIGIN) || !local {
+    // A screen this node served may call it: its origin is this node's own address.
+    let origin = req.headers().get(axum::http::header::ORIGIN).and_then(|o| o.to_str().ok());
+    let own = origin.is_some_and(|o| o.strip_prefix("http://").is_some_and(|h| h == host));
+    if (origin.is_some() && !own) || !local {
         return (StatusCode::FORBIDDEN, "only this device's own programs may use this").into_response();
     }
     next.run(req).await
@@ -202,6 +206,20 @@ async fn next_call(State(node): State<Node>, axum::extract::Path(app): axum::ext
 async fn reply(State(node): State<Node>, axum::extract::Path((app, id)): axum::extract::Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
     node.providers().reply(&app, id, body)?;
     Ok(Json(json!({})))
+}
+
+#[derive(Deserialize)]
+struct ScreenQuery {
+    space: Option<String>,
+    params: Option<String>,
+}
+
+/// An app screen as a page, for shells' web views and for a browser on this device.
+async fn screen(State(node): State<Node>, axum::extract::Path((app, name)): axum::extract::Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
+    let space = node.find_space(q.space.as_deref())?;
+    let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
+    let html = node.screen(space, node.id(), &app, &name, params).await?;
+    Ok(axum::response::Html(html).into_response())
 }
 
 async fn events(State(node): State<Node>) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {

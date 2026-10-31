@@ -57,7 +57,13 @@ globalThis.__describe = (app) => {
     name: a.name, title: a.title, icon: a.icon, instructions: a.instructions || "",
     ops: Object.entries(a.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {} })),
     widgets: Object.entries(a.widgets || {}).map(([name, w]) => ({ name, title: w.title || name })),
+    screens: Object.entries(a.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
   });
+};
+globalThis.__screen = (app, name) => {
+  const s = __apps[app]?.screens?.[name];
+  if (!s) throw new Error(`${app} has no screen ${name}`);
+  return s.html;
 };
 globalThis.__schema = (app) => __apps[app].schema || "";
 "#;
@@ -100,6 +106,7 @@ enum Job {
     Call { space: Key, app: String, op: String, input: Value, me: Me, now: u64, reply: oneshot::Sender<Result<Outcome>> },
     Widget { space: Key, app: String, name: String, me: Me, now: u64, reply: oneshot::Sender<Result<Value>> },
     Describe { reply: oneshot::Sender<Vec<Value>> },
+    Screen { app: String, name: String, reply: oneshot::Sender<Result<String>> },
     Hook { space: Key, app: String, name: String, input: Value, me: Me, now: u64, reply: oneshot::Sender<Result<Value>> },
 }
 
@@ -152,6 +159,13 @@ impl Apps {
         let (reply, rx) = oneshot::channel();
         let job = Job::Hook { space, app: app.into(), name: name.into(), input, me, now, reply };
         self.jobs.send(job).map_err(|_| anyhow!("apps stopped"))?;
+        rx.await?
+    }
+
+    /// A screen's HTML, as the app wrote it.
+    pub async fn screen(&self, app: &str, name: &str) -> Result<String> {
+        let (reply, rx) = oneshot::channel();
+        self.jobs.send(Job::Screen { app: app.into(), name: name.into(), reply }).map_err(|_| anyhow!("apps stopped"))?;
         rx.await?
     }
 
@@ -227,6 +241,13 @@ impl Engine {
                 }
                 Job::Hook { space, app, name, input, me, now, reply } => {
                     let _ = reply.send(self.hook(space, &app, &name, &input, &me, now));
+                }
+                Job::Screen { app, name, reply } => {
+                    let html = self.context.with(|ctx| -> Result<String> {
+                        let f: Function = ctx.globals().get("__screen")?;
+                        f.call((app.as_str(), name.as_str())).catch(&ctx).map_err(|e| anyhow!("{e}"))
+                    });
+                    let _ = reply.send(html);
                 }
                 Job::Describe { reply } => {
                     let _ = reply.send(self.describe());

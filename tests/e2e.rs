@@ -44,6 +44,9 @@ async fn devices_and_a_phone_share_a_board() {
     phone.join(&a.invite(space, true).unwrap()).await.unwrap();
     let state = phone.request("GET", "/v1/state", Value::Null).await.unwrap();
     assert_eq!(state["device"]["name"], "Phone");
+    let page = phone.request("GET", "/v1/screen", json!({ "app": "board", "screen": "main" })).await.unwrap();
+    let html = page["html"].as_str().unwrap();
+    assert!(html.contains("window.one") && html.contains("one.call(\"topics\")"), "a phone gets the board's screen with the bridge");
     let reply = phone.request("POST", "/v1/call", json!({ "app": "board", "op": "post", "input": { "text": "from the phone" } })).await.unwrap();
     assert!(reply.get("error").is_none(), "{reply}");
     eventually("b to receive the phone's post", async || texts(&b, space).await.contains(&"from the phone".to_string())).await;

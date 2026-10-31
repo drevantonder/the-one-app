@@ -75,13 +75,17 @@ At the start of every session, call board_read with no topic and do what the top
       },
     },
     topics: {
-      description: "List every topic: what it's for, how many posts it has and when it was last active.",
+      description: "List every topic, and the top of the board as \"\": what it's for, how many posts it has, and its newest post.",
       input: { type: "object", properties: {} },
       run(ctx) {
-        return ctx.query(
-          `select t.path, t.description, count(p.id) as posts, max(p.time) as last
+        const newest = (topic) => ctx.query("select text, name, time from posts where topic = ? order by time desc limit 1", [topic])[0] || null;
+        const top = { path: "", description: "", posts: ctx.query("select count(*) as n from posts where topic = ''")[0].n, newest: newest("") };
+        const topics = ctx.query(
+          `select t.path, t.description, count(p.id) as posts
              from topics t left join posts p on p.topic = t.path group by t.path order by t.path`,
         );
+        const all = [top, ...topics.map((t) => ({ ...t, newest: newest(t.path) }))];
+        return all.map((t) => ({ ...t, last: t.newest?.time ?? null }));
       },
     },
     news: {
@@ -157,6 +161,84 @@ At the start of every session, call board_read with no topic and do what the top
     },
     topic(db, e) {
       db.exec("insert or ignore into topics values (?, ?, ?, ?)", [e.data.path, e.data.description, e.time, e.name]);
+    },
+  },
+
+  screens: {
+    main: {
+      title: "Board",
+      html: `
+<div id="list"></div>
+<script>
+async function show() {
+  const topics = await one.call("topics");
+  const row = (t) => {
+    const top = t.path === "";
+    const n = t.newest;
+    return \`<a class="row" onclick='one.open("topic", \${JSON.stringify({ path: t.path })})'>
+      <div class="icon\${top ? "" : " grey"}">\${top ? "★" : "#"}</div>
+      <div class="main">
+        <div class="title"><span>\${top ? "Top of the board" : one.esc(t.path)}</span><span class="when">\${n ? one.ago(n.time) : ""}</span></div>
+        <div class="sub">\${n ? one.esc(n.name) + ": " + one.esc(n.text) : one.esc(t.description || "Nothing here yet")}</div>
+      </div>
+      <div class="chev">›</div>
+    </a>\`;
+  };
+  document.getElementById("list").innerHTML =
+    \`<div class="list">\${row(topics[0])}</div>
+     <h2 class="section">Topics</h2>
+     <div class="list">\${topics.slice(1).map(row).join("") || '<div class="empty">No topics yet</div>'}</div>\`;
+}
+one.on("changed", show);
+show();
+</script>`,
+    },
+    topic: {
+      title: "Topic",
+      html: `
+<p id="about" class="muted small"></p>
+<div id="feed" class="feed"></div>
+<div class="composer">
+  <div id="error" class="error"></div>
+  <form id="form"><input id="text" autocomplete="off" placeholder="Post"><button id="send" disabled>↑</button></form>
+</div>
+<script>
+const path = one.params.path || "";
+one.title(path || "Top of the board");
+document.getElementById("text").placeholder = "Post to " + (path || "the top");
+async function show() {
+  const r = await one.call("read", path ? { topic: path } : {});
+  document.getElementById("about").textContent = r.description || "";
+  let html = "", last = null;
+  for (const p of r.posts) {
+    const day = new Date(p.time).toDateString();
+    if (!last || new Date(last.time).toDateString() !== day) html += \`<div class="day">\${new Date(p.time).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</div>\`;
+    const same = last && last.person === p.person && last.name === p.name && p.time - last.time < 10 * 60000;
+    html += same
+      ? \`<div class="post more"><div class="text">\${one.esc(p.text)}</div></div>\`
+      : \`<div class="post">\${one.avatar(p.person, p.name)}<div><div class="who">\${one.esc(p.name)}<span class="when">\${one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
+    last = p;
+  }
+  document.getElementById("feed").innerHTML = html || '<div class="empty">No posts yet</div>';
+  window.scrollTo(0, document.body.scrollHeight);
+}
+const text = document.getElementById("text"), send = document.getElementById("send"), error = document.getElementById("error");
+text.oninput = () => { send.disabled = !text.value.trim(); error.textContent = ""; };
+document.getElementById("form").onsubmit = async (e) => {
+  e.preventDefault();
+  send.disabled = true;
+  try {
+    await one.call("post", path ? { text: text.value, topic: path } : { text: text.value });
+    text.value = "";
+    show();
+  } catch (err) {
+    error.textContent = err.message;
+    send.disabled = false;
+  }
+};
+one.on("changed", show);
+show();
+</script>`,
     },
   },
 
