@@ -27,6 +27,8 @@ pub const CLIENT_ALPN: &[u8] = b"one/client/1";
 const BLOB_ALPN: &[u8] = b"one/blob/1";
 /// How long a call may run before it's stopped.
 const CALL_LIMIT: Duration = Duration::from_secs(30);
+/// The most a call or a client's request (or its answer) may carry: an email of a claim's receipts, base64, fits.
+const MESSAGE_LIMIT: usize = 64 << 20;
 /// How long a waking server waits for its first round of dialing before it may call itself ready.
 const FIRST_DIAL: Duration = Duration::from_secs(5);
 
@@ -617,7 +619,7 @@ impl Node {
         let request = json!({ "app": req.app, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
         send.write_all(&serde_json::to_vec(&request)?).await?;
         send.finish()?;
-        let reply = tokio::time::timeout(CALL_LIMIT + Duration::from_secs(5), recv.read_to_end(16 << 20)).await.context("timed out")??;
+        let reply = tokio::time::timeout(CALL_LIMIT + Duration::from_secs(5), recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
         Ok(Reply::from_json(serde_json::from_slice(&reply)?))
     }
 
@@ -1228,7 +1230,7 @@ impl Node {
             let me = Caller { key: caller, user, agent: None };
             tokio::spawn(async move {
                 let result = async {
-                    let request: Value = serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?;
+                    let request: Value = serde_json::from_slice(&recv.read_to_end(MESSAGE_LIMIT).await?)?;
                     let (method, path) = (request["method"].as_str().unwrap_or("GET"), request["path"].as_str().unwrap_or(""));
                     if path == "/v1/events" {
                         let mut events = node.subscribe();
@@ -1628,7 +1630,7 @@ impl Node {
     async fn accept_call(&self, conn: Connection) -> Result<()> {
         let remote = *conn.remote_id().as_bytes();
         let (mut send, mut recv) = conn.accept_bi().await?;
-        let request: Value = serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?;
+        let request: Value = serde_json::from_slice(&recv.read_to_end(MESSAGE_LIMIT).await?)?;
         let reply = match self.check_caller(remote, &request) {
             Ok(me) => {
                 let req: CallRequest = serde_json::from_value(request)?;

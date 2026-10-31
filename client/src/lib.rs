@@ -163,7 +163,7 @@ impl Client {
         let (mut send, mut recv) = conn.open_bi().await?;
         send.write_all(request).await?;
         send.finish()?;
-        Ok(serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?)
+        Ok(serde_json::from_slice(&recv.read_to_end(64 << 20).await?)?)
     }
 
     /// Streams the node's events (`changed`, `servers`, `install`) until the connection drops.

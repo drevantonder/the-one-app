@@ -26,7 +26,7 @@ pub fn router(node: Node) -> Router {
     Router::new()
         .route("/v1/state", get(state))
         .route("/v1/apps", get(apps))
-        .route("/v1/call", post(call))
+        .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .route("/v1/widgets", get(widgets))
         .route("/v1/create", post(create))
         .route("/v1/pair", post(pair))
