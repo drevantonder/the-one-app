@@ -558,6 +558,9 @@ impl Node {
     /// Tries the servers that might run a call, nearest first, one at a time, the next only if one can't be reached
     /// or says to go elsewhere.
     async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
+        if req.server.as_deref() == Some("all") {
+            return self.everywhere(req, me).await;
+        }
         let mut why = Vec::new();
         for server in self.candidates(&req, &me)? {
             let started = Instant::now();
@@ -583,6 +586,29 @@ impl Node {
             bail!("no server runs {} for you", req.app);
         }
         bail!("no server could run it ({})", why.join("; "))
+    }
+
+    /// Runs a driver's call on every server that runs it for the caller, one at a time: `{ <server>: answer }`, or
+    /// `{ error }` for one that failed. Only for drivers: an app's call runs once.
+    async fn everywhere(&self, req: CallRequest, me: Caller) -> Result<Value> {
+        let deployed = self.with(|i| Ok(i.r.members.apps.get(&req.app).is_some_and(|a| a.bundle.is_some())))?;
+        ensure!(!deployed, "{} is an app: its calls run once, on one server", req.app);
+        let req = CallRequest { server: None, ..req };
+        let mut out = serde_json::Map::new();
+        for server in self.candidates(&req, &me)? {
+            let reply = match server == self.0.id {
+                true => Ok(self.run(&req, &me).await),
+                false => self.ask_server(server, &req, &me).await,
+            };
+            let answer = match reply {
+                Ok(Reply::Ok(v)) => v,
+                Ok(Reply::Error(e) | Reply::Elsewhere(e)) => json!({ "error": e }),
+                Err(err) => json!({ "error": format!("{err:#}") }),
+            };
+            out.insert(self.name_of(&server), answer);
+        }
+        ensure!(!out.is_empty(), "no server runs {} for you", req.app);
+        Ok(Value::Object(out))
     }
 
     /// The servers that might run a call, nearest first.
@@ -643,7 +669,10 @@ impl Node {
             if !self.runs_driver_here(&req.app) {
                 return Ok(Reply::Elsewhere(format!("{} doesn't run here", req.app)));
             }
-            return self.run_driver(&req.app, &req.op, input, me).await.map(Reply::Ok);
+            return match self.run_driver(&req.app, &req.op, input, me).await {
+                Err(err) if err.is::<crate::native::Elsewhere>() => Ok(Reply::Elsewhere(err.to_string())),
+                other => other.map(Reply::Ok),
+            };
         }
         let prepared = self.with(|i| prepare(self, i, req, me));
         let (ctx, scopes) = match prepared? {

@@ -73,6 +73,9 @@ impl Providers {
         p.replies.lock().unwrap().insert(id, tx);
         p.calls.send(Call { id, op: op.into(), input, caller }).map_err(|_| anyhow!("{app} stopped"))?;
         let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{app} didn't answer"))??;
+        if let Some(why) = reply.get("elsewhere") {
+            return Err(crate::native::Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());
+        }
         if let Some(err) = reply.get("error") {
             bail!("{}", err.as_str().unwrap_or("failed"));
         }

@@ -13,6 +13,18 @@ use crate::entry::Content;
 
 pub type Reply = Pin<Box<dyn Future<Output = Result<(Value, Vec<Content>)>> + Send>>;
 
+/// A driver's answer that it can't serve this call here (a model it lacks), so the call goes on to the next server.
+#[derive(Debug)]
+pub struct Elsewhere(pub String);
+
+impl std::fmt::Display for Elsewhere {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Elsewhere {}
+
 pub struct Native {
     pub name: &'static str,
     pub describe: fn() -> Value,

@@ -6,17 +6,17 @@ use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 
 use crate::apps::{AppEntry, Me};
-use crate::native::Reply;
+use crate::native::{Elsewhere, Reply};
 
 const OLLAMA: &str = "http://127.0.0.1:11434";
 
 pub fn describe() -> Value {
     json!({
         "name": "models", "title": "Models", "icon": "cpu", "runs": "here",
-        "instructions": "Local models run on the device that has them. models_here lists a server's models (give server to ask another). models_chat asks one and returns its answer; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
+        "instructions": "Local models run on the device that has them. models_here lists this server's models; give server \"all\" for every server's, and which are loaded. models_chat asks one and returns its answer, on whichever of your servers has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
         "ops": [
-            { "name": "here", "description": "This server's local models (or the server given).", "input": { "type": "object", "properties": {} } },
-            { "name": "chat", "description": "Ask a local model and get its answer. Give prompt, or messages as [{role, content}]; system sets its instructions; format \"json\" or a JSON schema makes it answer in JSON.",
+            { "name": "here", "reads": true, "description": "This server's local models, and whether each is loaded; give server \"all\" for every server's.", "input": { "type": "object", "properties": {} } },
+            { "name": "chat", "reads": true, "description": "Ask a local model and get its answer, on whichever of your servers has it (or the server given). Give prompt, or messages as [{role, content}]; system sets its instructions; format \"json\" or a JSON schema makes it answer in JSON.",
               "input": { "type": "object", "required": ["model"], "properties": {
                   "model": { "type": "string", "description": "a model's name as here lists it" },
                   "prompt": { "type": "string" },
@@ -27,7 +27,7 @@ pub fn describe() -> Value {
                   "think": { "type": "boolean", "description": "whether a thinking model reasons first" },
                   "options": { "type": "object", "description": "Ollama's options, like { temperature: 0, num_predict: 1024 }" },
               }}},
-            { "name": "decide", "description": "Ask a decision model (a model with the decision capability, like clef-flash) questions about something and get typed answers with probabilities: choice (one of criteria, an object of option: description), noul (yes/no) or score (levels, lowest first). Answers { answers: { name: { choice, probabilities, confidence } }, usage }.",
+            { "name": "decide", "reads": true, "description": "Ask a decision model (a model with the decision capability, like clef-flash) questions about something and get typed answers with probabilities: choice (one of criteria, an object of option: description), noul (yes/no) or score (levels, lowest first). Answers { answers: { name: { choice, probabilities, confidence } }, usage }.",
               "input": { "type": "object", "required": ["model", "questions"], "properties": {
                   "model": { "type": "string", "description": "a decision model, like clef-flash" },
                   "state": { "type": "object", "description": "what to decide about: named fields" },
@@ -45,12 +45,15 @@ pub fn call(op: String, input: Value, _caller: Me, _entries: Vec<AppEntry>) -> R
             match op.as_str() {
                 "here" => {
                     let tags: Value = get("/api/tags")?;
+                    let loaded: Vec<Value> = get("/api/ps").map(|ps| ps["models"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
                     Ok(json!(tags["models"].as_array().into_iter().flatten().map(|m| json!({
                         "name": m["name"], "size": m["size"], "family": m["details"]["family"], "parameters": m["details"]["parameter_size"],
+                        "loaded": loaded.iter().any(|l| l["name"] == m["name"]),
                     })).collect::<Vec<_>>()))
                 }
                 "chat" => {
                     let model = input["model"].as_str().context("give a model; models_here lists them")?;
+                    here(model)?;
                     let mut messages: Vec<Value> = input["messages"].as_array().cloned().unwrap_or_default();
                     if let Some(p) = input["prompt"].as_str() {
                         let mut m = json!({ "role": "user", "content": p });
@@ -79,6 +82,7 @@ pub fn call(op: String, input: Value, _caller: Me, _entries: Vec<AppEntry>) -> R
                 }
                 "decide" => {
                     let model = input["model"].as_str().context("give a decision model, like clef-flash")?;
+                    here(model)?;
                     ensure!(input["questions"].is_object(), "give questions");
                     let mut body = json!({ "model": model, "state": input.get("state").cloned().unwrap_or(json!({})), "questions": input["questions"] });
                     // Ollama takes each image as its base64; [{ content_type, base64 }] (Workers AI's way) works too.
@@ -97,6 +101,16 @@ pub fn call(op: String, input: Value, _caller: Me, _entries: Vec<AppEntry>) -> R
         .await??;
         Ok((result, vec![]))
     })
+}
+
+/// Whether this device has `model`; if not, the call goes on to a server that might.
+fn here(model: &str) -> Result<()> {
+    let tags = get("/api/tags").map_err(|e| Elsewhere(format!("{e:#}")))?;
+    let named = |m: &&Value| m["name"] == model || m["name"].as_str() == Some(&format!("{model}:latest"));
+    match tags["models"].as_array().into_iter().flatten().find(named) {
+        Some(_) => Ok(()),
+        None => Err(Elsewhere(format!("it has no model {model}")).into()),
+    }
 }
 
 fn agent() -> ureq::Agent {
