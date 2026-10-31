@@ -891,3 +891,35 @@ async fn an_apps_owners_see_who_used_it_its_errors_and_its_ai_cost() {
     assert_eq!(i["cost"][0]["model"], "gemini-flash", "the AI cost counts against the app that asked: {i}");
     assert_eq!(i["cost"][0]["input"], 1200);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleted_apps_wait_in_recently_deleted_until_restored_or_erased() {
+    let (a, _ra) = start("deleted").await;
+    a.create("Deleted", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    deploy_module(&a, "scratch", r#"export default { name: "scratch", ops: { hi: { run: () => "hi" } } };"#).await;
+    a.install(&me, "scratch", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
+    eventually("scratch to run", async || a.call(call("scratch", "hi", json!({}))).await.is_ok()).await;
+    let listed = |n: &Node| {
+        let (n, me) = (n.clone(), me.clone());
+        async move { n.apps(&me).await.unwrap().into_iter().find(|x| x["name"] == "scratch") }
+    };
+
+    a.retire(&me, "scratch", "deleted").await.unwrap();
+    let err = a.call(call("scratch", "hi", json!({}))).await.unwrap_err();
+    assert!(format!("{err:#}").contains("Recently Deleted"), "{err:#}");
+    let shown = listed(&a).await.unwrap();
+    assert_eq!(shown["installed"], json!([]), "it leaves every page");
+    assert_eq!(shown["deleted"]["yours"], true);
+    let blob = a.put_blob(&one::bundle::pack(&[("app.js".into(), b"export default { name: \"scratch\" };".to_vec())]).unwrap()).unwrap();
+    assert!(a.deploy(&me, "scratch", &blob).await.is_err(), "a deleted app isn't deployed");
+
+    a.retire(&me, "scratch", "restored").await.unwrap();
+    assert_eq!(a.call(call("scratch", "hi", json!({}))).await.unwrap(), "hi", "restored, it runs on the pages it was on");
+
+    assert!(a.retire(&me, "scratch", "erased").await.is_err(), "deleted before erased");
+    a.retire(&me, "scratch", "deleted").await.unwrap();
+    a.retire(&me, "scratch", "erased").await.unwrap();
+    assert!(listed(&a).await.is_none(), "erased, it's gone from every list");
+    assert!(a.member("app", json!({ "name": "scratch", "owner": format!("user:{}", me.user) })).await.is_err(), "and its name isn't used again");
+}

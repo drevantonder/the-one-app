@@ -191,6 +191,12 @@ function context(env, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ install: name, scope, installed });
     },
+    /// Deletes an app ("deleted": to Recently Deleted), restores it ("restored") or erases it for good ("erased"),
+    /// for someone acting for its owner.
+    retire: (name, how) => {
+      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+      appends.push({ retire: name, how });
+    },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     schedule: (name, schedule, scope, on = true) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");

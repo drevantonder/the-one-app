@@ -53,6 +53,7 @@ Usage:
                                        ask the person to set a secret: a link to a sheet where they type it, so
                                        you never see it; secret status <id> says how it went
   {CLI} secret requests                the requests waiting for you; secret answer <id> [--decline] sets one from stdin
+  {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
@@ -276,6 +277,11 @@ fn run(args: Vec<String>) -> Result<()> {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             post("/v1/secrets", json!({ "scope": scope, "app": app, "name": name, "value": null }))?;
             println!("{app}'s secret {name} is gone from {scope}.");
+        }
+        ["app", how @ ("delete" | "restore" | "erase"), app] => {
+            let past = match *how { "delete" => "deleted", "restore" => "restored", _ => "erased" };
+            post("/v1/retire", json!({ "app": app, "how": past }))?;
+            println!("{app} is {past}{}.", if *how == "delete" { ": it's in the App Store's Recently Deleted until you restore or erase it" } else { "" });
         }
         ["schedules"] => {
             for app in get("/v1/apps")?.as_array().into_iter().flatten() {

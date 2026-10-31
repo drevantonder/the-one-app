@@ -46,6 +46,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/deploy", post(deploy))
         .route("/v1/install", post(install))
         .route("/v1/schedule", post(schedule))
+        .route("/v1/retire", post(retire))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
         .route("/v1/secrets", get(secrets).post(set_secret))
@@ -113,6 +114,12 @@ async fn state(State(node): State<Node>) -> Json<Value> {
 
 async fn apps(State(node): State<Node>) -> Reply {
     Ok(Json(json!(node.apps(&local(&node)?).await?)))
+}
+
+/// `{ app, how }`: deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`).
+async fn retire(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    node.retire(&local(&node)?, text(&body, "app")?, text(&body, "how")?).await?;
+    done()
 }
 
 async fn schedule(State(node): State<Node>, Json(body): Json<Value>) -> Reply {

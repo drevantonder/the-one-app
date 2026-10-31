@@ -16,6 +16,13 @@ function places(ctx) {
   return out;
 }
 
+/// Whether the caller acts for an app's owner: it's theirs, a group's they're an admin of, or admins' and they're one.
+function mine(ctx, owner) {
+  if (owner === `user:${ctx.me.user}`) return true;
+  if (owner === "admins") return ctx.me.role === "admin";
+  return ctx.groups.some((g) => g.id === owner && g.role === "admin");
+}
+
 /// What to call a scope or owner: You, a group's name, Everyone, admins.
 function namer(ctx) {
   const groups = Object.fromEntries(ctx.groups.map((g) => [g.id, g.name]));
@@ -104,6 +111,7 @@ export default {
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], drivers: [] },
             built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
+            mine: mine(ctx, a.owner), deleted: a.deleted || null,
           };
         }));
         apps.sort((a, b) => a.title.localeCompare(b.title));
@@ -126,6 +134,32 @@ export default {
       async run(ctx, { app, scope }) {
         ctx.install(app, scope, false);
         return `Removed ${app}.`;
+      },
+    },
+    delete: {
+      confirm: true,
+      description: "Delete an app you own: it leaves every page and stops running, and waits in Recently Deleted, where everyone sees it and its owners restore it or erase it for good.",
+      input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
+      async run(ctx, { app }) {
+        ctx.retire(app, "deleted");
+        return `Deleted ${app}: it's in Recently Deleted.`;
+      },
+    },
+    restore: {
+      description: "Restore an app you own from Recently Deleted: it runs again, on the pages it was on.",
+      input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
+      async run(ctx, { app }) {
+        ctx.retire(app, "restored");
+        return `Restored ${app}.`;
+      },
+    },
+    erase: {
+      confirm: true,
+      description: "Erase a deleted app you own for good: it's gone from every list and its name can't be used again.",
+      input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
+      async run(ctx, { app }) {
+        ctx.retire(app, "erased");
+        return `Erased ${app}.`;
       },
     },
     health: {
@@ -199,7 +233,7 @@ function draw() {
   const q = document.getElementById("search").value.trim().toLowerCase();
   const found = apps.filter((a) => !q || [a.title, a.name, a.description || ""].some((t) => t.toLowerCase().includes(q)));
   document.getElementById("list").innerHTML = found.length
-    ? section(BUILT_IN, found.filter((a) => a.built_in)) + section(MADE_HERE, found.filter((a) => !a.built_in))
+    ? section(BUILT_IN, found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted))
     : '<div class="empty">No apps match.<div class="small" style="margin-top:6px">Make your own: put an app.js in a folder and run <code>one deploy</code> on it.</div></div>';
 }
 async function show() {
@@ -221,10 +255,12 @@ show();
   .pill { font: inherit; font-size: 15px; font-weight: 600; padding: 5px 14px; border-radius: 15px; border: 0; background: var(--accent); color: white; }
   .pill.off { background: var(--line); color: var(--accent); }
   .pill:disabled { opacity: 0.4; }
+  .pill.danger { background: var(--danger); }
   #error { margin: 8px 4px; }
   .code-icon { width: 20px; height: 20px; color: var(--muted); }
 </style>
 <div id="app"></div>
+<div id="ask"></div>
 <div id="error" class="error small"></div>
 <script>
 ${folder}
@@ -239,7 +275,17 @@ const sections = [
       <div><h1>\${one.esc(a.title)}</h1><div class="muted small">\${one.esc(a.name)} · \${one.esc(state)} · \${a.deploys} deploy\${a.deploys === 1 ? "" : "s"}</div></div></div>
       \${a.description ? '<div class="about">' + one.esc(a.description) + "</div>" : ""}\`;
   },
+  function deleted({ a }) {
+    if (!a.deleted) return "";
+    const by = a.deleted.by ? " by " + one.esc(a.deleted.by) : "";
+    const buttons = a.mine
+      ? \`<div class="row plain"><div class="main"><div class="title"><span>Restore</span></div><div class="sub small">It runs again, on the pages it was on.</div></div><button class="pill" onclick="retire(this, 'restore')">Restore</button></div>
+         <div class="row plain"><div class="main"><div class="title"><span>Erase</span></div><div class="sub small">Gone for good: its name can't be used again.</div></div><button class="pill danger" onclick="retire(this, 'erase')">Erase</button></div>\`
+      : '<div class="row plain"><div class="main sub small">Only its owners can restore or erase it.</div></div>';
+    return '<h2 class="section">Deleted ' + ago(a.deleted.time) + by + '</h2><div class="list">' + buttons + "</div>";
+  },
   function addTo({ a, places, admin }) {
+    if (a.deleted) return "";
     const first = !a.added && !admin ? \`Only an admin can add \${a.title} to this install. Settings shows who they are.\` : null;
     const place = (p) => {
       const on = a.installed.includes(p.id);
@@ -249,16 +295,6 @@ const sections = [
         <button class="pill\${on ? " off" : ""}"\${why ? " disabled" : ""} onclick='toggle(this, \${JSON.stringify(p.scope)}, \${on})'>\${on ? "Remove" : "Add"}</button></div>\`;
     };
     return '<h2 class="section">Add to…</h2><div class="list">' + places.map(place).join("") + "</div>";
-  },
-  function uses({ a }) {
-    const all = [...a.uses.apps, ...a.uses.drivers];
-    return all.length ? '<h2 class="section">Uses</h2><div class="list">' + all.map((u) => '<div class="row plain"><div class="main">' + one.esc(u) + "</div></div>").join("") + "</div>" : "";
-  },
-  function forkedFrom({ a }) {
-    return a.from ? '<h2 class="section">Forked from</h2><div class="list">' + link(a.from) + "</div>" : "";
-  },
-  function forks({ a }) {
-    return a.forks.length ? '<h2 class="section">Forks</h2><div class="list">' + a.forks.map(link).join("") + "</div>" : "";
   },
   function schedules({ health }) {
     const list = health?.schedules || [];
@@ -270,11 +306,11 @@ const sections = [
       else if (s.removed) notes.push("Removed by a deploy" + (s.was ? ": it ran " + one.esc(s.was) : "") + ".");
       else {
         notes.push(one.esc(cap(s.when)) + (places ? " · " + one.esc(s.scope_name) : ""));
-        if (s.changed) notes.push("A deploy changed it " + one.ago(s.changed.time) + " ago; it ran " + one.esc(s.changed.was) + " before.");
+        if (s.changed) notes.push("A deploy changed it " + ago(s.changed.time) + "; it ran " + one.esc(s.changed.was) + " before.");
         if (s.on && s.runs_as) notes.push("Runs as " + one.esc(s.runs_as) + (s.next ? ", next " + soon(s.next) : ""));
         else if (s.on) notes.push("Nobody can run it: whoever added it here can't any more. Switch it on to run it as you.");
-        else if (s.switched) notes.push("Switched off by " + one.esc(s.switched.by) + " " + one.ago(s.switched.time) + " ago");
-        if (s.last && !s.last.ok) notes.push('<span class="error">Its last run failed ' + one.ago(s.last.time) + " ago: " + one.esc(s.last.error || "") + "</span>");
+        else if (s.switched) notes.push("Switched off by " + one.esc(s.switched.by) + " " + ago(s.switched.time));
+        if (s.last && !s.last.ok) notes.push('<span class="error">Its last run failed ' + ago(s.last.time) + ": " + one.esc(s.last.error || "") + "</span>");
       }
       const live = !s.invalid && !s.removed;
       const toggle = live ? \`<input type="checkbox" class="switch"\${s.on && s.runs_as ? " checked" : ""}\${s.may_switch ? "" : " disabled"} onchange='switchIt(this, \${JSON.stringify({ schedule: s.name, scope: s.scope })})'>\` : "";
@@ -283,6 +319,14 @@ const sections = [
     };
     return '<h2 class="section">Schedules</h2><div class="list">' + list.map(row).join("") + "</div>";
   },
+  function errors({ health }) {
+    const list = health?.insights?.errors || [];
+    if (!list.length) return "";
+    const total = list.reduce((n, e) => n + e.count, 0);
+    const row = (e) => \`<div class="row plain"><div class="main"><div class="title"><span class="error">\${one.esc(e.error || "Failed")}</span><span class="when">\${e.count}×</span></div>
+        <div class="sub small">\${one.esc(e.op)} · last \${ago(e.last)}\${e.user ? " by " + one.esc(e.user) : ""}</div></div></div>\`;
+    return '<h2 class="section">Errors · ' + total + '</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>";
+  },
   function activity({ health }) {
     const runs = health?.activity || [];
     if (!runs.length) return "";
@@ -290,7 +334,7 @@ const sections = [
     const row = (r) => \`<div class="row plain"><div class="main"><div class="title"><span>\${r.ok ? "✓" : '<span class="error">✕</span>'} \${one.esc(r.schedule)}</span><span class="when">\${one.ago(r.time)}</span></div>
         \${r.ok ? "" : '<div class="sub small error">' + one.esc(r.error || "Failed") + "</div>"}
         <div class="sub small">\${r.ok ? "Ran" : "Failed"} on \${one.esc(r.server || "a server")} as \${one.esc(r.user)} · \${r.ms < 1000 ? r.ms + " ms" : (r.ms / 1000).toFixed(1) + " s"}</div></div></div>\`;
-    return '<h2 class="section">Activity' + (failed ? " · " + failed + " failed" : "") + '</h2><div class="list">' + runs.slice(0, 20).map(row).join("") + "</div>";
+    return '<h2 class="section">Activity' + (failed ? " · " + failed + " failed" : "") + '</h2><div class="list">' + runs.slice(0, 8).map(row).join("") + "</div>";
   },
   function usage({ health }) {
     const list = health?.insights?.usage || [];
@@ -300,14 +344,6 @@ const sections = [
         <div class="sub small">\${one.esc(u.agent || what[u.client] || u.client)} · \${u.days} day\${u.days === 1 ? "" : "s"}</div></div></div>\`;
     return '<h2 class="section">Used by</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>";
   },
-  function errors({ health }) {
-    const list = health?.insights?.errors || [];
-    if (!list.length) return "";
-    const total = list.reduce((n, e) => n + e.count, 0);
-    const row = (e) => \`<div class="row plain"><div class="main"><div class="title"><span class="error">\${one.esc(e.error || "Failed")}</span><span class="when">\${e.count}×</span></div>
-        <div class="sub small">\${one.esc(e.op)} · last \${one.ago(e.last)} ago\${e.user ? " by " + one.esc(e.user) : ""}</div></div></div>\`;
-    return '<h2 class="section">Errors · ' + total + '</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>";
-  },
   function cost({ health }) {
     const list = health?.insights?.cost || [];
     if (!list.length) return "";
@@ -316,6 +352,21 @@ const sections = [
     const row = (c) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(c.model)}</span><span class="when">\${usd(c.usd)}</span></div>
         <div class="sub small">\${c.calls} call\${c.calls === 1 ? "" : "s"} · \${c.input.toLocaleString()} tokens in, \${c.output.toLocaleString()} out</div></div></div>\`;
     return '<h2 class="section">AI cost · ' + usd(total) + '</h2><div class="list">' + list.map(row).join("") + "</div>";
+  },
+  function uses({ a }) {
+    const all = [...a.uses.apps, ...a.uses.drivers];
+    return all.length ? '<h2 class="section">Uses</h2><div class="list">' + all.map((u) => '<div class="row plain"><div class="main">' + one.esc(u) + "</div></div>").join("") + "</div>" : "";
+  },
+  function forkedFrom({ a }) {
+    return a.from ? '<h2 class="section">Forked from</h2><div class="list">' + link(a.from) + "</div>" : "";
+  },
+  function forks({ a }) {
+    return a.forks.length ? '<h2 class="section">Forks</h2><div class="list">' + a.forks.map(link).join("") + "</div>" : "";
+  },
+  function remove({ a }) {
+    if (!a.mine || a.deleted || !a.added) return "";
+    return \`<div class="list" style="margin-top:24px"><a class="row plain" onclick="retire(null, 'delete')"><div class="main"><div class="title"><span class="error">Delete App</span></div></div></a></div>
+      <div class="muted small" style="margin:6px 16px">It leaves every page and stops running. You can restore it from Recently Deleted.</div>\`;
   },
   function code({ code }) {
     return code ? '<h2 class="section">Code</h2>' + folder(code.files, "") : "";
@@ -329,10 +380,31 @@ function link(n) {
 async function show() {
   const [{ apps, places, admin }, code, health] = await Promise.all([one.call("list"), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null)]);
   const a = apps.find((x) => x.name === name);
+  if (!a) return (document.getElementById("app").innerHTML = '<div class="empty">' + one.esc(name) + " was erased.</div>");
   one.title(a.title);
   document.getElementById("app").innerHTML = sections.map((s) => s({ a, places, admin, code, health })).join("");
 }
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+/// "just now", "5 min ago".
+const ago = (t) => (one.ago(t) === "now" ? "just now" : one.ago(t) + " ago");
+async function retire(button, op) {
+  const go = async () => {
+    await one.call(op, { app: name, confirm: true });
+    if (op === "erase") history.back();
+    show();
+  };
+  if (op === "restore") {
+    button.disabled = true;
+    return go().catch((err) => { document.getElementById("error").textContent = err.message; show(); });
+  }
+  const erase = op === "erase";
+  document.getElementById("ask").scrollIntoView({ behavior: "smooth", block: "center" });
+  await one.confirm("#ask", {
+    title: erase ? "Erase " + name + " for good?" : "Delete " + name + "?",
+    detail: erase ? "It's gone from every list, and its name can't be used again." : "It leaves every page and stops running. You can restore it from Recently Deleted.",
+    action: erase ? "Erase" : "Delete", danger: true, run: go,
+  });
+}
 /// When a time in the next while is: "in 7m", "in 3h", "tomorrow".
 function soon(ms) {
   const m = Math.max(0, Math.round((ms - Date.now()) / 60000));

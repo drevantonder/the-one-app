@@ -562,7 +562,7 @@ impl Node {
     /// says which build it runs.
     async fn settle(&self) -> Result<()> {
         let Ok((wanted, author)) = self.with(|i| {
-            let wanted: BTreeMap<String, String> = i.r.members.apps.values().filter_map(|a| Some((a.name.clone(), a.bundle.clone()?))).collect();
+            let wanted: BTreeMap<String, String> = i.r.members.apps.values().filter(|a| !a.erased).filter_map(|a| Some((a.name.clone(), a.bundle.clone()?))).collect();
             Ok((wanted, i.r.members.server(&self.0.id).is_some()))
         }) else {
             return Ok(());
@@ -757,6 +757,9 @@ impl Node {
         let latest = self.with(|i| Ok(i.r.members.apps.get(&req.app).and_then(|a| a.bundle.clone())))?;
         if deployed_here.is_none() || deployed_here != latest {
             return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest deploy yet", req.app)));
+        }
+        if self.deleted(&req.app) {
+            return Ok(Reply::Error(format!("{} was deleted: its owners can restore it from Recently Deleted in the App Store", req.app)));
         }
         if let Some(why) = self.stopped(&req.app) {
             self.record(&req.app, req, me, Some(&why));
@@ -977,6 +980,18 @@ impl Node {
         }
     }
 
+    /// Whether `app` is in Recently Deleted (or erased): it doesn't run, show or run its schedules until restored.
+    fn deleted(&self, app: &str) -> bool {
+        self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.deleted.is_some() || a.erased))).unwrap_or(false)
+    }
+
+    /// Deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`), for someone acting for
+    /// its owner. A deleted app stops running and leaves every page, but keeps its data until it's erased.
+    pub async fn retire(&self, caller: &Caller, app: &str, how: &str) -> Result<()> {
+        let (_, content) = self.with(|i| check_append(i, app, Append::Retire { app: app.into(), how: how.into() }, &[], caller))?;
+        self.member_content(caller, content).await
+    }
+
     // Schedules.
 
     /// Now and then, runs the schedules this server is next in line for.
@@ -994,7 +1009,7 @@ impl Node {
     /// Each loaded app's schedules, as its latest deploy declares them, with why any don't make sense.
     async fn declared(&self) -> Vec<(String, Vec<std::result::Result<Schedule, (String, String)>>)> {
         let mut out = Vec::new();
-        for app in self.0.apps.names() {
+        for app in self.0.apps.names().into_iter().filter(|a| !self.deleted(a)) {
             if let Ok(d) = self.0.apps.describe(&app).await {
                 let list = Schedule::all(&d);
                 if !list.is_empty() {
@@ -1383,7 +1398,7 @@ impl Node {
             None => None,
         };
         let mut out = Vec::new();
-        for app in self.0.apps.names() {
+        for app in self.0.apps.names().into_iter().filter(|a| !self.deleted(a)) {
             let mut ctx = self.read_context(&app, &viewer)?;
             let _granted = self.grant(&app, &viewer, &mut ctx, 0);
             if let Some(scope) = &scope {
@@ -1490,6 +1505,7 @@ impl Node {
             let m = &i.r.members;
             Ok(m.apps
                 .values()
+                .filter(|a| !a.erased)
                 .map(|a| {
                     let mut installed: Vec<String> = i
                         .views
@@ -1505,6 +1521,12 @@ impl Node {
                     let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed });
                     if let Some(bundle) = self.built_in(a) {
                         info["built_in"] = json!(bundle);
+                    }
+                    // A deleted app leaves every page; its owners see it in Recently Deleted.
+                    if let Some((time, by)) = &a.deleted {
+                        info["installed"] = json!([]);
+                        info["deleted"] = json!({ "time": time, "by": m.users.get(by).map(|u| &u.name), "yours": m.acts_for(&viewer.user, &a.owner) });
+                        return (a.name.clone(), info, false);
                     }
                     (a.name.clone(), info, !reach.is_empty())
                 })
@@ -1925,6 +1947,10 @@ impl Node {
             ("POST", "/v1/install") => {
                 let scope = self.scope_for(me, body["scope"].as_str().unwrap_or("user"))?;
                 self.install(me, body["app"].as_str().unwrap_or(""), &scope, body["installed"] != false).await?;
+                json!({})
+            }
+            ("POST", "/v1/retire") => {
+                self.retire(me, body["app"].as_str().unwrap_or(""), body["how"].as_str().unwrap_or("")).await?;
                 json!({})
             }
             ("POST", "/v1/schedule") => {
@@ -2557,6 +2583,20 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
             ensure!(scopes.contains(&scope), "the call didn't name {scope}");
             ensure!(blob.len() == 64 && blob.bytes().all(|b| b.is_ascii_hexdigit()), "a blob is named by its hash");
             (scope, members::node("forget", json!({ "blob": blob.to_lowercase() })))
+        }
+        Append::Retire { app: name, how } => {
+            let m = &i.r.members;
+            let a = m.apps.get(&name).with_context(|| format!("no app named {name}"))?;
+            ensure!(m.acts_for(&me.user, &a.owner), "only someone acting for {name}'s owner deletes, restores or erases it");
+            let mut data = json!({ "name": name, "owner": a.owner.to_string() });
+            match how.as_str() {
+                "deleted" => data["deleted"] = json!(true),
+                "restored" => data["deleted"] = json!(false),
+                "erased" if a.deleted.is_some() => data["erased"] = json!(true),
+                "erased" => bail!("delete {name} before erasing it"),
+                other => bail!("an app is deleted, restored or erased, not {other}"),
+            }
+            (Scope::Global, members::node("app", data))
         }
         Append::Install { .. } | Append::Cost { .. } => bail!("installs and costs are written on their own"),
     })

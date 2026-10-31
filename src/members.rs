@@ -99,6 +99,10 @@ pub struct App {
     pub deploys: u32,
     /// Every deploy: (bundle, time, user), oldest first.
     pub history: Vec<(String, u64, String)>,
+    /// When it was deleted, and by whom: it's in Recently Deleted until it's restored or erased.
+    pub deleted: Option<(u64, String)>,
+    /// Erased for good: gone from every list, and its name never used again.
+    pub erased: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -465,12 +469,21 @@ impl Members {
                 match self.apps.get_mut(&name) {
                     Some(app) => {
                         let current = app.owner.clone();
+                        ensure!(!app.erased, "that app was erased");
                         ensure!(self.acts_for(&w, &current), "only someone acting for the app's owner gives it away");
-                        self.apps.get_mut(&name).unwrap().owner = owner;
+                        let app = self.apps.get_mut(&name).unwrap();
+                        app.owner = owner;
+                        // Deleting moves it to Recently Deleted; `deleted: false` restores it; erasing is for good.
+                        if data["erased"] == true {
+                            ensure!(app.deleted.is_some(), "delete it first");
+                            app.erased = true;
+                        } else if let Some(deleted) = data["deleted"].as_bool() {
+                            app.deleted = deleted.then(|| (e.time(), w.clone()));
+                        }
                     }
                     None => {
                         let from = data["from"].as_str().map(str::to_string);
-                        self.apps.insert(name.clone(), App { name, owner, from, bundle: None, deploys: 0, history: Vec::new() });
+                        self.apps.insert(name.clone(), App { name, owner, from, bundle: None, deploys: 0, history: Vec::new(), deleted: None, erased: false });
                     }
                 }
             }
@@ -479,6 +492,7 @@ impl Members {
                 let bundle = text("bundle")?;
                 let owner = self.apps.get(&name).context("no such app")?.owner.clone();
                 ensure!(self.acts_for(&w, &owner), "only someone acting for the app's owner deploys it");
+                ensure!(self.apps[&name].deleted.is_none(), "it was deleted: restore it first");
                 ensure!(e.content.blobs.contains(&bundle), "a deploy names its bundle among its blobs");
                 let app = self.apps.get_mut(&name).unwrap();
                 app.bundle = Some(bundle.clone());

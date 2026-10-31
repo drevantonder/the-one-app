@@ -93,6 +93,8 @@ pub enum Append {
     Switch { app: String, schedule: String, scope: String, on: bool },
     /// Says a scope no longer needs a blob its entries named: once no scope does, servers delete it.
     Forget { scope: String, blob: String },
+    /// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), with the caller's own rights.
+    Retire { app: String, how: String },
     /// What the call spent on AI: `{ model, usd, input, output }`, for the insights of the app that called it.
     Cost { data: Value },
     /// Sets (or with no value, deletes) one of the calling app's secrets in a scope.
@@ -120,6 +122,10 @@ pub fn appends(app: &str, list: &Value) -> Result<Vec<Append>> {
         }
         if let Some(schedule) = a["switch"].as_str() {
             appends.push(Append::Switch { app: a["app"].as_str().unwrap_or("").into(), schedule: schedule.into(), scope, on: a["on"] != false });
+            continue;
+        }
+        if let Some(name) = a["retire"].as_str() {
+            appends.push(Append::Retire { app: name.into(), how: a["how"].as_str().unwrap_or("").into() });
             continue;
         }
         if a["cost"].is_object() {
