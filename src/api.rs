@@ -155,7 +155,8 @@ async fn create(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 }
 
 async fn pair(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    Ok(Json(json!({ "code": node.pair(crate::node::new_user(&body)?)? })))
+    let (code, user) = node.pair_local(crate::node::new_user(&body)?, body["user"].as_str())?;
+    Ok(Json(json!({ "code": code, "user": user })))
 }
 
 async fn join(State(node): State<Node>, Json(body): Json<Value>) -> Reply {

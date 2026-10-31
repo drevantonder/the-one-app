@@ -118,6 +118,10 @@ struct Pairing {
     /// For a new user: their name and role.
     #[serde(default)]
     new_user: Option<(String, Role)>,
+    /// The user the machine joins as, when it isn't the asker's: an admin's code for someone else's machine, or a new
+    /// user's id, chosen when the code is made. Codes made before this have none, and a new user's id is chosen then.
+    #[serde(default)]
+    admits: Option<String>,
     /// Milliseconds since 1970 after which it no longer works.
     until: u64,
 }
@@ -2075,7 +2079,10 @@ impl Node {
                 self.member_as(me, "rename", json!({ "key": hex(&me.key), "name": name })).await?;
                 json!({})
             }
-            ("POST", "/v1/pair") => json!({ "code": self.pair_as(me, new_user(&body)?)? }),
+            ("POST", "/v1/pair") => {
+                let (code, user) = self.pair_as(me, new_user(&body)?, body["user"].as_str())?;
+                json!({ "code": code, "user": user })
+            }
             ("POST", "/v1/trust") => {
                 let server = self.find_server(body["server"].as_str().unwrap_or(""))?;
                 let kind = if body["trust"] == false { "untrust" } else { "trust" };
@@ -2095,24 +2102,35 @@ impl Node {
 
     /// Makes a one-time pairing code for another of the local user's machines, or, for an admin, a new user's.
     pub fn pair(&self, new_user: Option<(String, Role)>) -> Result<String> {
-        self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None }, new_user)
+        Ok(self.pair_local(new_user, None)?.0)
     }
 
-    fn pair_as(&self, asker: &Caller, new_user: Option<(String, Role)>) -> Result<String> {
+    /// Like `pair`, or for an admin, a code for another machine of `user` (an id or a name). With the id of the user
+    /// the code admits.
+    pub fn pair_local(&self, new_user: Option<(String, Role)>, user: Option<&str>) -> Result<(String, String)> {
+        self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None }, new_user, user)
+    }
+
+    fn pair_as(&self, asker: &Caller, new_user: Option<(String, Role)>, user: Option<&str>) -> Result<(String, String)> {
+        let user = user.map(|u| self.find_user(u)).transpose()?;
         self.with(|i| {
             let m = &i.r.members;
             ensure!(m.server(&self.0.id).is_some(), "this server isn't in the install yet");
             ensure!(new_user.is_none() || m.is_admin(&asker.user), "only admins add users; pair one of your own machines instead");
+            ensure!(new_user.is_none() || user.is_none(), "a code is for a new user or an existing one, not both");
+            ensure!(user.as_ref().is_none_or(|u| *u == asker.user) || m.is_admin(&asker.user), "only admins pair other people's machines");
             ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.server_name());
             Ok(())
         })?;
+        let admits = user.or_else(|| new_user.as_ref().map(|_| new_id()));
+        let joins_as = admits.clone().unwrap_or_else(|| asker.user.clone());
         let secret: [u8; 16] = rand::random();
         let by = (asker.key != self.0.id).then(|| hex(&asker.key));
-        self.add_pairing(secret, Pairing { user: asker.user.clone(), by, new_user, until: now_ms() + PAIRING_LIFE })?;
+        self.add_pairing(secret, Pairing { user: asker.user.clone(), by, new_user, admits, until: now_ms() + PAIRING_LIFE })?;
         let code = PairingCode { from: self.0.endpoint.addr(), secret };
         let mut bytes = Vec::new();
         ciborium::into_writer(&code, &mut bytes)?;
-        Ok(data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase())
+        Ok((data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase(), joins_as))
     }
 
     /// Pairing codes are kept in a file, so one still works after the server that made it restarts.
@@ -2184,9 +2202,10 @@ impl Node {
             "client" => false,
             other => bail!("can't join as {other}"),
         };
-        let user = match &pairing.new_user {
-            Some(_) => new_id(),
-            None => pairing.user.clone(),
+        let user = match (&pairing.admits, &pairing.new_user) {
+            (Some(user), _) => user.clone(),
+            (None, Some(_)) => new_id(),
+            (None, None) => pairing.user.clone(),
         };
         let root = self.with(|i| {
             let m = &i.r.members;

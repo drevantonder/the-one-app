@@ -167,11 +167,22 @@ async fn users_groups_trust_and_privileged_servers() {
     andre.member("acl", json!({ "server": key(&cloud), "owners": ["install"], "users": ["install"] })).await.unwrap();
     eventually("cloud to hold bob's group post", async || sees(&cloud, "group:f000000000000001", "hi family").await).await;
     assert!(bob.member("untrust", json!({ "server": key(&cloud) })).await.is_err(), "nobody untrusts a privileged server");
-    let carol_code = andre.pair(Some(("Carol".into(), one::members::Role::Member))).unwrap();
+    let (carol_code, carol_id) = andre.pair_local(Some(("Carol".into(), one::members::Role::Member)), None).unwrap();
     carol.join(&carol_code).await.unwrap();
     eventually("cloud to know carol's phone", async || cloud.state()["install"]["clients"].as_array().unwrap().iter().any(|c| c["name"] == "Carol's phone")).await;
     let reply = carol.request("POST", "/v1/call", json!({ "app": "board", "op": "post", "input": { "text": "carol here", "scope": "user" } })).await.unwrap();
     assert!(reply.get("ok").is_some(), "the privileged server serves a phone-only user: {reply}");
+    let state = carol.request("GET", "/v1/state", Value::Null).await.unwrap();
+    assert_eq!(state["user"]["id"], carol_id.as_str(), "a new user's code says who it admits: {state}");
+
+    // An admin pairs another of someone's machines, as them.
+    assert!(bob.pair_local(None, Some("Carol")).is_err(), "only admins pair other people's machines");
+    let (code, user) = andre.pair_local(None, Some("Carol")).unwrap();
+    assert_eq!(user, carol_id);
+    let ipad = one_client::Client::start(temp("carol-ipad"), "Carol's iPad").await.unwrap();
+    ipad.join(&code).await.unwrap();
+    let state = ipad.request("GET", "/v1/state", Value::Null).await.unwrap();
+    assert_eq!(state["user"]["id"], carol_id.as_str(), "{state}");
 
     // Bob's call goes elsewhere from a server that doesn't hold what it touches, and runs where it does.
     let bobs_user = format!("user:{}", bob.user().unwrap());
