@@ -263,7 +263,7 @@ const TYPES = {
   ics: "text/calendar", mp3: "audio/mpeg", m4a: "audio/mp4", mp4: "video/mp4", mov: "video/quicktime",
 };
 
-/// The files to attach, each { name, type?, data (base64) | blob (a blob's hash) }.
+/// The files to attach, each { name, type?, base64 | data (base64) | blob or file (a blob's hash) }.
 async function files(ctx, given) {
   const list = given || [];
   if (list.length > MOST_FILES) throw new Error(`at most ${MOST_FILES} attachments`);
@@ -272,10 +272,10 @@ async function files(ctx, given) {
   for (const f of list) {
     if (!f?.name) throw new Error("each attachment needs a name");
     let bytes;
-    if (f.blob) bytes = await ctx.blob.get(f.blob);
-    else if (f.data != null) {
-      try { bytes = fromB64(f.data); } catch { throw new Error(`attachment ${f.name} isn't base64`); }
-    } else throw new Error(`attachment ${f.name} needs data (base64) or blob`);
+    if (f.blob || f.file) bytes = await ctx.blob.get(f.blob || f.file);
+    else if ((f.base64 ?? f.data) != null) {
+      try { bytes = fromB64(f.base64 ?? f.data); } catch { throw new Error(`attachment ${f.name} isn't base64`); }
+    } else throw new Error(`attachment ${f.name} needs base64 or blob`);
     total += bytes.length;
     if (total > MOST_BYTES) throw new Error("attachments may be 25 MB in all");
     out.push({ name: String(f.name).replace(/[\r\n"]/g, ""), type: f.type || TYPES[f.name.split(".").pop().toLowerCase()] || "application/octet-stream", bytes });
@@ -365,8 +365,8 @@ const writing = {
   html: str("the email as HTML; sent with body (or, without it, the HTML made plain) as its text, so mail apps show the one they prefer"),
   reply_to: str("the id of a message to reply to, keeping the reply in its thread"),
   attachments: {
-    type: "array", description: `files to attach, up to ${MOST_FILES} and 25 MB in all: each { name, type, data } with data in base64, or { name, type, blob } with a blob's hash`,
-    items: { type: "object", required: ["name"], properties: { name: str("the file's name"), type: str("its MIME type; guessed from the name if left out"), data: str("its bytes, base64"), blob: str("or a blob's hash") } },
+    type: "array", description: `files to attach, up to ${MOST_FILES} and 25 MB in all: each { name, type, base64 }, or { name, type, blob } with a blob's hash`,
+    items: { type: "object", format: "file", required: ["name"], properties: { name: str("the file's name"), type: str("its MIME type; guessed from the name if left out"), base64: str("its bytes"), blob: str("or a blob's hash") } },
   },
 };
 const list = (v) => (v == null ? [] : (Array.isArray(v) ? v : [v]).flatMap((s) => String(s).split(",")).map((s) => s.trim()).filter(Boolean));
@@ -432,7 +432,7 @@ export default {
   icon: "envelope",
   description: "Your Gmail accounts, for you and your agents: search, read, label, draft and send.",
   instructions: "Gmail is the person's Gmail accounts. gmail_search finds messages with Gmail's search syntax " +
-    "(from:, is:unread, in:inbox, newer_than:2d, ...); gmail_read reads one and gmail_thread a whole conversation; gmail_attachment gets one of a message's files as a blob. " +
+    "(from:, is:unread, in:inbox, newer_than:2d, ...); gmail_read reads one and gmail_thread a whole conversation; gmail_attachment gets one of a message's files. " +
     "gmail_label archives (remove INBOX), marks read (remove UNREAD), stars or labels messages. Write with gmail_draft and let the person send it, unless they asked you to send: " +
     "gmail_send and gmail_send_draft send real email to real people. With several accounts, each operation takes account; gmail_accounts lists them.",
   schema: {
@@ -569,7 +569,7 @@ export default {
     },
     attachment: {
       reads: true,
-      description: "One of a message's attachments, as a file: { blob, name, type, size }, the blob being its bytes (GET /v1/blobs/<blob>, or pass it to another tool).",
+      description: "One of a message's attachments, as a file: { name, type, size, base64 }, which MCP gives back as a file id other tools take, and the CLI saves with --out.",
       input: withAccount({
         id: str("the message's id"), name: str("the attachment's file name; or give number"),
         number: { type: "integer", description: "which attachment, as read numbers them (1 is the first); the first when neither is given" },
@@ -583,7 +583,7 @@ export default {
         if (!f) throw new Error(`no such attachment; it has: ${all.map((x, i) => `${i + 1}. ${x.name}`).join(", ")}`);
         const data = f.id ? (await api(ctx, email, "GET", `messages/${encodeURIComponent(m.id)}/attachments/${encodeURIComponent(f.id)}`)).data : f.data;
         const bytes = fromB64(data || "");
-        return { blob: await ctx.blob.put(bytes), name: f.name, type: f.type, size: bytes.length };
+        return { name: f.name, type: f.type, size: bytes.length, base64: toB64(bytes) };
       },
     },
     labels: {
