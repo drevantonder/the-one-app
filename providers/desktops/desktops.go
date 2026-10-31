@@ -437,6 +437,69 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return fmt.Sprintf("Forgot the %s login.", login), nil
+	case "backup":
+		d, err := ds.running(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		rec, err := ds.backup(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		return reply{ok: map[string]any{"backup": rec, "text": fmt.Sprintf("Backed up desktop %s (%s). Restore it on any server with restore.", d.Name, bytesText(rec.Bytes))},
+			entries: []map[string]any{{"kind": "backup", "data": rec}}}, nil
+	case "backups":
+		if here {
+			return map[string]any{"backups": ds.backupsHere()}, nil
+		}
+		all, failed := ds.backupsAll(ctx, name)
+		out := map[string]any{"backups": all}
+		if len(failed) > 0 {
+			out["unreachable"] = failed
+		}
+		return out, nil
+	case "restore":
+		rec, err := ds.findBackup(ctx, name, text("blob"))
+		if err != nil {
+			return nil, err
+		}
+		as := cmpOr(text("as"), cmpOr(name, rec.Desktop))
+		sz, err := sizeNamed(cmpOr(text("size"), rec.Size))
+		if err != nil {
+			sz = sizes[0]
+		}
+		d, err := ds.restore(ctx, as, rec, sz)
+		if err != nil {
+			return nil, err
+		}
+		ds.touch(d.Name)
+		return fmt.Sprintf("Restored desktop %s from its backup of %s.", d.Name, rec.At.Local().Format(time.DateTime)), nil
+	case "move":
+		to := text("to")
+		if to == "" {
+			return nil, errors.New("move it to which server? pass to")
+		}
+		d, err := ds.running(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := ds.loans()[d.Name]; ok {
+			return nil, errors.New("a borrowed desktop can't be moved: borrow one on the other server")
+		}
+		closeBrowsers(ctx, d, true)
+		rec, err := ds.backup(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		entries := []map[string]any{{"kind": "backup", "data": rec}}
+		if _, err := ds.callNode(ctx, to, "restore", map[string]any{"desktop": d.Name, "blob": rec.Blob, "size": rec.Size}); err != nil {
+			return nil, fmt.Errorf("not moved: restoring it on %s: %w", to, err)
+		}
+		ds.drop(d.Name)
+		if err := stop(ctx, d); err != nil {
+			return nil, fmt.Errorf("moved to %s, but stopping it here failed: %w", to, err)
+		}
+		return reply{ok: fmt.Sprintf("Moved desktop %s to %s, where it's running. It's stopped here; delete it here (delete) once it's fine there.", d.Name, to), entries: entries}, nil
 	}
 	if slices.Contains(browsing, op) {
 		return ds.use(ctx, name, op, in)

@@ -205,5 +205,12 @@ func ownOps() []map[string]any {
 		{"name": "refresh_tools", "description": "Read the desktops' tools again from a running desktop, as after its image was updated.", "input": object(map[string]any{})},
 		{"name": "use", "description": "Run one of the desktop's tools, as desktops_tools lists them, e.g. list_windows, launch_app, click, type_text, get_guide.",
 			"input": object(map[string]any{"desktop": desktopArg, "tool": str("the tool's name"), "args": map[string]any{"type": "object", "description": "the tool's input"}}, "tool")},
+		{"name": "backup", "description": "Back up a desktop's home folder (its files and sign-ins, without caches) as a blob any server can fetch, keeping the newest 5. Not off-site: backups to a bucket aren't built yet.", "input": name},
+		{"name": "backups", "description": "Every server's backups of desktops, newest first.",
+			"input": object(map[string]any{"desktop": str("only this desktop's"), "here": map[string]any{"type": "boolean", "description": "only this server's"}})},
+		{"name": "restore", "description": "Make a desktop on this server from a backup: the newest of the desktop named, from any server, or the one with blob.",
+			"input": object(map[string]any{"desktop": str("the backed-up desktop's name"), "blob": str("a particular backup's blob"), "as": str("the new desktop's name; default the same"), "size": sizeArg})},
+		{"name": "move", "description": "Move a desktop to another server: backs it up, restores it there and stops it here, kept until you delete it. Takes a few minutes.",
+			"input": object(map[string]any{"desktop": str("the desktop's name"), "to": str("the server to move it to")}, "desktop", "to")},
 	}
 }
