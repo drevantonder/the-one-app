@@ -63,6 +63,8 @@ struct Sidebar: View {
                     Button { store.selection = .page(page.scope) } label: {
                         Text(page.title)
                             .foregroundStyle(store.selection == .page(page.scope) ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                            // A long group name wraps rather than lose its last words.
+                            .lineLimit(3)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(.rect)
                     }
