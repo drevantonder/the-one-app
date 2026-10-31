@@ -1,4 +1,5 @@
 use std::io::{BufRead, Write};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use one::brand::{CLI, NAME};
@@ -83,7 +84,10 @@ fn run(args: Vec<String>) -> Result<()> {
     let (positional, flags) = parse(&args);
     match positional.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         [] | ["help"] => println!("{}", help()),
-        ["serve"] => serve()?,
+        ["serve"] => {
+            usual_path();
+            serve()?
+        }
         ["mcp"] => mcp()?,
         ["status"] => status(&get("/v1/state")?),
         ["apps"] => {
@@ -432,6 +436,33 @@ fn ago(ms: u64) -> String {
         60..3600 => format!("{}m ago", s / 60),
         3600..86400 => format!("{}h ago", s / 3600),
         _ => format!("{}d ago", s / 86400),
+    }
+}
+
+/// Puts the usual tool folders on PATH: launchd starts the Mac's node with almost none, and the shell, agents and
+/// drivers it starts need Homebrew's and the user's own tools.
+fn usual_path() {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let mut path: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    let usual = [
+        home.join(".local/bin"),
+        home.join(".cargo/bin"),
+        home.join(".bun/bin"),
+        "/opt/homebrew/bin".into(),
+        "/opt/homebrew/sbin".into(),
+        "/usr/local/bin".into(),
+        "/usr/local/sbin".into(),
+        "/usr/bin".into(),
+        "/bin".into(),
+        "/usr/sbin".into(),
+        "/sbin".into(),
+    ];
+    // Before what it has, as a login shell puts them (Homebrew's git before the system's).
+    let missing: Vec<PathBuf> = usual.into_iter().filter(|d| d.is_dir() && !path.contains(d)).collect();
+    path.splice(0..0, missing);
+    if let Ok(joined) = std::env::join_paths(path) {
+        // Before the runtime starts any thread.
+        unsafe { std::env::set_var("PATH", joined) };
     }
 }
 
