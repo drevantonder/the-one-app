@@ -3,43 +3,49 @@ import WidgetKit
 
 @main
 struct Widgets: WidgetBundle {
-    var body: some Widget { NewestPost() }
+    var body: some Widget { SpaceWidget() }
 }
 
-struct NewestPost: Widget {
+/// The space's first widget, drawn as the app draws it.
+struct SpaceWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "newest", provider: Provider()) { entry in
-            NewestView(newest: entry.newest)
+        StaticConfiguration(kind: "widget", provider: Provider()) { entry in
+            EntryView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("Newest Post")
-        .description("The newest post on your space’s board.")
+        .configurationDisplayName(appName)
+        .description("What’s new in your space.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
     }
 }
 
 struct Entry: TimelineEntry {
     var date = Date.now
-    var newest: Newest?
+    var widget: WidgetCache.Item?
 }
 
-/// The app reloads the widget whenever the newest post changes.
+/// The app reloads the timeline whenever its widgets change; between reloads, times count on from each entry.
 struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> Entry {
-        Entry(newest: Newest(name: "MacBook Air", text: "Deployed the new build to every device.", topic: "", time: .now))
+        Entry(widget: .init(title: appName, icon: "app", root: WidgetNode(t: "col", c: [
+            WidgetNode(t: "text", text: "MacBook Air", size: "sm", weight: "medium"),
+            WidgetNode(t: "text", text: "Deployed the new build to every device.", lines: 3),
+        ])))
     }
 
     func getSnapshot(in context: Context, completion: @escaping (Entry) -> Void) {
-        completion(context.isPreview ? placeholder(in: context) : Entry(newest: Newest.load()))
+        completion(context.isPreview ? placeholder(in: context) : Entry(widget: WidgetCache.load()?.widgets.first))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
-        completion(Timeline(entries: [Entry(newest: Newest.load())], policy: .never))
+        let widget = WidgetCache.load()?.widgets.first
+        let entries = (0..<36).map { Entry(date: .now.addingTimeInterval(Double($0) * 300), widget: widget) }
+        completion(Timeline(entries: entries, policy: .atEnd))
     }
 }
 
-struct NewestView: View {
-    var newest: Newest?
+struct EntryView: View {
+    var entry: Entry
     @Environment(\.widgetFamily) private var family
 
     private var accent: Color {
@@ -47,36 +53,30 @@ struct NewestView: View {
     }
 
     var body: some View {
-        if let newest {
-            VStack(alignment: .leading, spacing: 4) {
+        if let widget = entry.widget {
+            VStack(alignment: .leading, spacing: 6) {
                 if family != .accessoryRectangular {
-                    Label(newest.topic.isEmpty ? (newest.space ?? "Board") : newest.topic, systemImage: "text.bubble.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(accent)
-                        .lineLimit(1)
-                        .padding(.bottom, 2)
+                    HStack(spacing: 6) {
+                        Image("Logo")
+                            .resizable()
+                            .frame(width: 18, height: 18)
+                        Text(widget.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(accent)
+                            .lineLimit(1)
+                    }
                 }
-                Text(newest.text)
-                    .font(family == .systemSmall ? .subheadline : .body)
-                    .lineLimit(family == .systemMedium ? 3 : 4)
+                WidgetTree(node: widget.root, now: entry.date)
+                    .font(family == .systemSmall ? .footnote : .subheadline)
                 Spacer(minLength: 0)
-                HStack(spacing: 4) {
-                    Text(displayName(newest.name)).lineLimit(1)
-                    Text("·")
-                    // A clock time stays true until the next post reloads the widget; a relative one would tick.
-                    Text(newest.time.formatted(Calendar.current.isDateInToday(newest.time) ? .dateTime.hour().minute() : .dateTime.day().month()))
-                        .fixedSize()
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
-            VStack(spacing: 6) {
-                Image(systemName: "text.bubble")
-                    .font(.title2)
-                    .foregroundStyle(accent)
-                Text("Open \(appName) to see your board.")
+            VStack(spacing: 8) {
+                Image("Logo")
+                    .resizable()
+                    .frame(width: 44, height: 44)
+                Text("Open \(appName) to see your space.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

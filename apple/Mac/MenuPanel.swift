@@ -1,21 +1,12 @@
 import ServiceManagement
 import SwiftUI
 
-struct MenuLabel: View {
-    var store: Store
-
-    var body: some View {
-        let text = store.recent.first?.text ?? store.brand?.name ?? appName
-        let line = text.count > 44 ? text.prefix(42).trimmingCharacters(in: .whitespaces) + "…" : text
-        Text("\(Image(systemName: "text.bubble"))  \(line)")
-    }
-}
-
-/// The menu bar extra's panel: the latest posts, this space's devices, and a way into the app.
+/// The app's own menu bar item's panel: this space's devices, which widgets have items, and a way into the app.
 struct MenuPanel: View {
     @Environment(Store.self) private var store
     @Environment(\.openWindow) private var openWindow
     @State private var openAtLogin = SMAppService.mainApp.status == .enabled
+    private var items: WidgetItems { .shared }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -29,23 +20,6 @@ struct MenuPanel: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
-                SectionTitle("Latest")
-                if store.recent.isEmpty {
-                    Text("Nothing on the board yet")
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                }
-                ForEach(store.recent.prefix(4)) { post in
-                    MenuButton {
-                        store.selection = .board(post.topic)
-                        open()
-                    } label: {
-                        PostRow(post: post)
-                    }
-                }
-
-                Divider().padding(.vertical, 6).padding(.horizontal, 14)
                 SectionTitle("Devices")
                 ForEach(space.sortedDevices) { device in
                     HStack(spacing: 8) {
@@ -63,6 +37,19 @@ struct MenuPanel: View {
                     .font(.callout)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 3)
+                }
+                if !store.widgets.isEmpty {
+                    Divider().padding(.vertical, 6).padding(.horizontal, 14)
+                    SectionTitle("In the Menu Bar")
+                    ForEach(store.widgets) { widget in
+                        MenuButton { items.toggle(widget.id) } label: {
+                            HStack {
+                                Label(widget.title ?? widget.widget, systemImage: symbol(store.app(widget.app)?.icon))
+                                Spacer()
+                                if !items.hidden.contains(widget.id) { Image(systemName: "checkmark").font(.callout.weight(.semibold)) }
+                            }
+                        }
+                    }
                 }
                 Divider().padding(.vertical, 6).padding(.horizontal, 14)
             } else {
@@ -99,6 +86,18 @@ struct MenuPanel: View {
     }
 }
 
+/// The app's own menu bar item: the brand's mark. It also lends the widget items a way to open the window.
+struct MenuBarMark: View {
+    var store: Store
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image("MenuBarIcon")
+            .accessibilityLabel(store.brand?.name ?? appName)
+            .onAppear { WidgetItems.shared.openWindow = { openWindow(id: "main") } }
+    }
+}
+
 private struct SectionTitle: View {
     var title: LocalizedStringKey
     init(_ title: LocalizedStringKey) { self.title = title }
@@ -110,31 +109,6 @@ private struct SectionTitle: View {
             .padding(.horizontal, 14)
             .padding(.top, 4)
             .padding(.bottom, 4)
-    }
-}
-
-private struct PostRow: View {
-    var post: Post
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Avatar(name: post.name, person: post.person, size: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(displayName(post.name)).fontWeight(.semibold)
-                    if !post.topic.isEmpty {
-                        Text(post.topic).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Spacer(minLength: 4)
-                    Text(post.date.relative).foregroundStyle(.secondary)
-                }
-                .font(.caption)
-                Text(post.text)
-                    .font(.callout)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
     }
 }
 

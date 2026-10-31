@@ -1,14 +1,12 @@
 import SwiftUI
 import VisionKit
 
-/// The first run: name this iPhone, then join a space with a ticket another device shows.
+/// The first run: name this iPhone, then join a space with the pairing code another device shows.
 struct WelcomeView: View {
     @Environment(Phone.self) private var phone
     @State private var name = UIDevice.current.name
     @State private var scanning = false
     @State private var typing = false
-    @State private var joining = false
-    @State private var error: String?
 
     private var named: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -16,14 +14,13 @@ struct WelcomeView: View {
         ScrollView {
             VStack(spacing: 36) {
                 VStack(spacing: 14) {
-                    Image(systemName: "laptopcomputer.and.iphone")
-                        .font(.system(size: 64, weight: .light))
-                        .foregroundStyle(.tint)
-                        .padding(.bottom, 6)
+                    Image("Logo")
+                        .resizable()
+                        .frame(width: 120, height: 120)
                         .accessibilityHidden(true)
                     Text("Welcome to \(appName)")
                         .font(.largeTitle.bold())
-                    Text("On a device that’s already in your space, choose Invite a Device, then scan its code here.")
+                    Text("On a device that’s already in your space, choose Pair a Device, then scan its code here.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
@@ -53,7 +50,7 @@ struct WelcomeView: View {
         .background(Color(.systemGroupedBackground))
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 14) {
-                if let error {
+                if let error = phone.joinError {
                     Label(error, systemImage: "exclamationmark.circle.fill")
                         .font(.callout)
                         .foregroundStyle(.red)
@@ -61,53 +58,44 @@ struct WelcomeView: View {
                 }
                 Button { scanning = true } label: {
                     Group {
-                        if joining {
+                        if phone.joining {
                             ProgressView()
                         } else {
-                            Label("Scan Code", systemImage: "qrcode.viewfinder")
+                            Label("Scan Pairing Code", systemImage: "qrcode.viewfinder")
                         }
                     }
                     .frame(maxWidth: .infinity, minHeight: 30)
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
-                Button("Enter a Ticket Instead") { typing = true }
+                Button("Enter a Pairing Code Instead") { typing = true }
                     .font(.callout.weight(.medium))
             }
-            .disabled(!named || joining)
+            .disabled(!named || phone.joining)
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
         }
-        .animation(.snappy, value: error)
+        .animation(.snappy, value: phone.joinError)
         .sheet(isPresented: $scanning) {
-            ScannerSheet { ticket in
+            ScannerSheet { code in
                 scanning = false
-                join(ticket)
+                join(code)
             }
         }
         .sheet(isPresented: $typing) {
-            TicketSheet { ticket in
+            CodeSheet { code in
                 typing = false
-                join(ticket)
+                join(code)
             }
         }
     }
 
-    private func join(_ ticket: String) {
-        joining = true
-        error = nil
-        Task {
-            defer { joining = false }
-            do {
-                try await phone.join(ticket, name: name.trimmingCharacters(in: .whitespaces))
-            } catch {
-                self.error = error.localizedDescription
-            }
-        }
+    private func join(_ code: String) {
+        Task { await phone.join(code, name: name.trimmingCharacters(in: .whitespaces)) }
     }
 }
 
-/// The camera, looking for a ticket's QR code.
+/// The camera, looking for a pairing code's QR code.
 private struct ScannerSheet: View {
     var found: (String) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -127,10 +115,10 @@ private struct ScannerSheet: View {
                                 .padding(.bottom, 24)
                         }
                 } else {
-                    ContentUnavailableView("No Camera", systemImage: "camera", description: Text("This device can’t scan codes. Enter the ticket instead."))
+                    ContentUnavailableView("No Camera", systemImage: "camera", description: Text("This device can’t scan codes. Enter the pairing code instead."))
                 }
             }
-            .navigationTitle("Scan Code")
+            .navigationTitle("Scan Pairing Code")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -174,30 +162,30 @@ private struct Scanner: UIViewControllerRepresentable {
     }
 }
 
-/// A ticket, pasted.
-private struct TicketSheet: View {
+/// A pairing code, pasted.
+private struct CodeSheet: View {
     var entered: (String) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var ticket = ""
+    @State private var code = ""
     @FocusState private var focused: Bool
 
-    private var trimmed: String { ticket.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmed: String { code.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Ticket", text: $ticket, axis: .vertical)
+                    TextField("Pairing Code", text: $code, axis: .vertical)
                         .font(.system(.body, design: .monospaced))
                         .lineLimit(3...8)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .focused($focused)
                 } footer: {
-                    Text("Copy the ticket from Invite a Device on your other device, or run \(Bundle.main.object(forInfoDictionaryKey: "BrandCLI") as? String ?? "") invite --mine there. Each ticket works once.")
+                    Text("Copy the code from Pair a Device on your other device, or run \(Bundle.main.object(forInfoDictionaryKey: "BrandCLI") as? String ?? "") pair there. Each code works once.")
                 }
             }
-            .navigationTitle("Enter a Ticket")
+            .navigationTitle("Enter a Pairing Code")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

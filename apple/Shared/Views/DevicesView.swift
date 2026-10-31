@@ -6,8 +6,8 @@ struct DevicesView: View {
     var body: some View {
         let space = store.space
         let devices = space?.sortedDevices ?? []
-        let mine = devices.filter { $0.person == space?.person }
-        let others = devices.filter { $0.person != space?.person }
+        let mine = devices.filter { $0.user == space?.user }
+        let others = devices.filter { $0.user != space?.user }
         Form {
             Section {
                 ForEach(mine) { DeviceRow(device: $0) }
@@ -15,7 +15,7 @@ struct DevicesView: View {
                 Text("Your Devices")
             } footer: {
                 if others.isEmpty {
-                    Text("Invite a device to bring it into \(space?.title ?? "this space"). It syncs everything here and can run its apps.")
+                    Text("Pair a device to bring it into \(space?.title ?? "this space"). It syncs everything here and can run its apps.")
                         .foregroundStyle(.secondary)
                 }
             }

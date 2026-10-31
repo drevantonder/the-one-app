@@ -1,18 +1,31 @@
 import Foundation
 import Observation
 
-enum SidebarItem: Hashable {
-    case board(String)
+/// Where a shell's navigation goes: an app's screen, or one of the shell's own views.
+enum Route: Hashable {
+    case screen(ScreenRoute)
     case devices
 }
 
+struct ScreenRoute: Hashable {
+    var space: String
+    var app: String
+    var screen = "main"
+    /// The screen's params, as JSON.
+    var params = "{}"
+}
+
 enum Sheet: Hashable, Identifiable {
-    case invite
+    case pair
     case join
     case newSpace
-    case newTopic(String)
 
     var id: Self { self }
+}
+
+extension Notification.Name {
+    /// Each node event, as JSON in `object`, for the app screens that are open.
+    static let nodeEvent = Notification.Name("nodeEvent")
 }
 
 /// Everything the windows and the menu bar show, kept in step with the node's events.
@@ -32,18 +45,21 @@ final class Store {
 
     private(set) var phase = Phase.connecting
     private(set) var state: NodeState?
-    private(set) var topics: [Topic] = []
-    private(set) var page: BoardPage?
-    private(set) var recent: [Post] = []
-    var selection: SidebarItem? = .board("")
+    private(set) var apps: [AppInfo] = []
+    private(set) var widgets: [WidgetInfo] = []
+    /// The Mac's sidebar selection: the screen or view at the bottom of `path`.
+    var selection: Route? {
+        didSet { if selection != oldValue { path = [] } }
+    }
+    /// What's been pushed on top of it, by app screens or the shell.
+    var path: [Route] = []
     var sheet: Sheet?
     var spaceID: String? {
         didSet {
             guard spaceID != oldValue else { return }
             UserDefaults.standard.set(spaceID, forKey: "space")
-            topics = []; page = nil; recent = []
-            selection = .board("")
-            Task { await refreshBoard() }
+            widgets = []; path = []; selection = nil
+            Task { await refreshSpace() }
         }
     }
 
@@ -55,7 +71,13 @@ final class Store {
     var brand: Brand? { state?.brand }
     var spaces: [Space] { state?.spaces ?? [] }
     var space: Space? { spaces.first { $0.id == spaceID } }
-    var topic: String? { if case .board(let t) = selection { t } else { nil } }
+    /// The apps with screens, which shells list.
+    var screenApps: [AppInfo] { apps.filter(\.hasScreens) }
+
+    func app(_ name: String) -> AppInfo? { apps.first { $0.name == name } }
+
+    /// An app's first screen, in this space.
+    func main(_ app: AppInfo) -> Route { .screen(ScreenRoute(space: spaceID ?? "", app: app.name)) }
 
     // MARK: Connection
 
@@ -104,21 +126,18 @@ final class Store {
         self.state = state
         phase = .ready
         if space == nil { spaceID = state.spaces.first?.id }
-        if first {
-            await renameIfHostname()
-            await refreshBoard()
+        if first || apps.isEmpty {
+            if first { await renameIfHostname() }
+            await refreshSpace()
         }
     }
 
     private func handle(_ event: NodeEvent) async {
-        switch event.type {
-        case "changed" where event.space == spaceID && (event.apps ?? []).contains("board"):
-            await refreshBoard()
-        case "changed", "peers", "spaces":
-            try? await refreshState()
-        default:
-            break
+        if let json = try? JSONEncoder().encode(event) {
+            NotificationCenter.default.post(name: .nodeEvent, object: String(decoding: json, as: UTF8.self))
         }
+        if event.type == "changed", event.space == spaceID { await refreshWidgets() }
+        if ["changed", "peers", "spaces"].contains(event.type) { try? await refreshState() }
     }
 
     private func renameIfHostname() async {
@@ -129,47 +148,21 @@ final class Store {
         try? await refreshState()
     }
 
-    // MARK: Board
+    // MARK: Apps
 
-    func refreshBoard() async {
-        guard let id = spaceID, space?.member == true else { return }
-        async let page: Void = refreshPage()
-        let topics: [Topic]? = try? await node.call("board", "topics", space: id)
-        let recent = await latest(in: id, topics: topics ?? [])
-        await page
-        guard id == spaceID else { return }
-        if let topics { self.topics = topics }
-        self.recent = recent
-    }
-
-    /// The newest posts anywhere: the top of the board and the most recently active topics hold them.
-    private func latest(in space: String, topics: [Topic]) async -> [Post] {
-        let active = [""] + topics.filter { $0.last != nil }.sorted { $0.last! > $1.last! }.prefix(3).map(\.path)
-        var posts: [Post] = []
-        for topic in active {
-            let page: BoardPage? = try? await node.call("board", "read", space: space, input: ["topic": .string(topic)])
-            posts += page?.posts ?? []
+    /// The apps and widgets of the space shown.
+    func refreshSpace() async {
+        if let apps = try? await node.apps() {
+            self.apps = apps
+            if selection == nil { selection = screenApps.first.map(main) ?? .devices }
         }
-        return Array(posts.sorted { $0.time > $1.time }.prefix(6))
+        await refreshWidgets()
     }
 
-    func refreshPage() async {
-        guard let id = spaceID, let topic else { return }
-        let page: BoardPage? = try? await node.call("board", "read", space: id, input: ["topic": .string(topic)])
-        if id == spaceID, topic == self.topic { self.page = page }
-    }
-
-    func post(_ text: String) async throws {
-        var input: [String: JSONValue] = ["text": .string(text)]
-        if let topic, !topic.isEmpty { input["topic"] = .string(topic) }
-        let _: String = try await node.call("board", "post", space: spaceID, input: input)
-        await refreshBoard()
-    }
-
-    func createTopic(path: String, description: String) async throws {
-        let _: String = try await node.call("board", "create", space: spaceID, input: ["path": .string(path), "description": .string(description)])
-        await refreshBoard()
-        selection = .board(path)
+    func refreshWidgets() async {
+        guard let id = spaceID, space?.member == true else { return }
+        let widgets = try? await node.widgets(space: id)
+        if let widgets, id == spaceID, widgets != self.widgets { self.widgets = widgets }
     }
 
     // MARK: Spaces
@@ -181,9 +174,9 @@ final class Store {
         if let new = spaces.first(where: { !before.contains($0.id) }) { spaceID = new.id }
     }
 
-    func join(_ ticket: String) async throws {
+    func join(_ code: String) async throws {
         let before = Set(spaces.map(\.id))
-        try await node.join(ticket.trimmingCharacters(in: .whitespacesAndNewlines))
+        try await node.join(code.trimmingCharacters(in: .whitespacesAndNewlines))
         try await refreshState()
         if let new = spaces.first(where: { !before.contains($0.id) }) { spaceID = new.id }
     }
@@ -193,8 +186,8 @@ final class Store {
         try await refreshState()
     }
 
-    func invite(mine: Bool) async throws -> String {
+    func pair(newUser: Bool) async throws -> String {
         guard let spaceID else { throw NodeError("Choose a space first") }
-        return try await node.invite(space: spaceID, mine: mine)
+        return try await node.pair(space: spaceID, newUser: newUser)
     }
 }

@@ -1,23 +1,19 @@
 import SwiftUI
 
+/// The apps this space has screens for, then the shell's own views.
 struct Sidebar: View {
     @Environment(Store.self) private var store
-    @State private var collapsed: Set<String> = []
 
     var body: some View {
         @Bindable var store = store
         List(selection: $store.selection) {
             Section {
-                DisclosureGroup(isExpanded: expanded("")) {
-                    TopicTree(parent: "", topics: store.topics, collapsed: $collapsed)
-                } label: {
-                    Label("Board", systemImage: "text.bubble")
-                        .contextMenu { newTopic("") }
+                ForEach(store.screenApps) { app in
+                    Label(app.label, systemImage: symbol(app.icon)).tag(store.main(app))
                 }
-                .tag(SidebarItem.board(""))
                 Label("Devices", systemImage: "laptopcomputer.and.iphone")
                     .badge(store.space.map { "\($0.devices.filter(\.online).count)/\($0.devices.count)" } ?? "")
-                    .tag(SidebarItem.devices)
+                    .tag(Route.devices)
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -25,60 +21,6 @@ struct Sidebar: View {
                 .padding(.horizontal, 10)
                 .padding(.bottom, 6)
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Button {
-                store.sheet = .newTopic(store.topic ?? "")
-            } label: {
-                Label("New Topic", systemImage: "plus.circle")
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-        }
-    }
-
-    private func expanded(_ path: String) -> Binding<Bool> {
-        Binding { !collapsed.contains(path) } set: { open in
-            if open { collapsed.remove(path) } else { collapsed.insert(path) }
-        }
-    }
-
-    private func newTopic(_ parent: String) -> some View {
-        Button(parent.isEmpty ? "New Topic…" : "New Topic in \(parent)…") { store.sheet = .newTopic(parent) }
-    }
-}
-
-private struct TopicTree: View {
-    @Environment(Store.self) private var store
-    var parent: String
-    var topics: [Topic]
-    @Binding var collapsed: Set<String>
-
-    var body: some View {
-        ForEach(topics.filter { $0.parent == parent }) { topic in
-            if topics.contains(where: { $0.parent == topic.path }) {
-                DisclosureGroup(isExpanded: Binding { !collapsed.contains(topic.path) } set: { open in
-                    if open { collapsed.remove(topic.path) } else { collapsed.insert(topic.path) }
-                }) {
-                    TopicTree(parent: topic.path, topics: topics, collapsed: $collapsed)
-                } label: {
-                    row(topic)
-                }
-                .tag(SidebarItem.board(topic.path))
-            } else {
-                row(topic).tag(SidebarItem.board(topic.path))
-            }
-        }
-    }
-
-    private func row(_ topic: Topic) -> some View {
-        Label(topic.name, systemImage: "number")
-            .help(topic.description)
-            .contextMenu {
-                Button("New Topic in \(topic.path)…") { store.sheet = .newTopic(topic.path) }
-            }
     }
 }
 
@@ -97,7 +39,7 @@ private struct SpaceSwitcher: View {
             .labelsHidden()
             Divider()
             Button("New Space…", systemImage: "plus") { store.sheet = .newSpace }
-            Button("Join a Space…", systemImage: "ticket") { store.sheet = .join }
+            Button("Join with a Pairing Code…", systemImage: "qrcode.viewfinder") { store.sheet = .join }
         } label: {
             HStack(spacing: 10) {
                 SpaceMark(name: store.space?.title ?? "", size: 30)

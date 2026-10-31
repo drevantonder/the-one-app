@@ -11,6 +11,7 @@ struct PhoneApp: App {
                 .environment(phone.store)
                 .tint(phone.accent)
                 .task { await phone.start() }
+                .onOpenURL { phone.open($0) }
         }
     }
 }
@@ -26,6 +27,8 @@ final class Phone {
     }
 
     private(set) var stage = Stage.starting
+    private(set) var joining = false
+    var joinError: String?
     let store = Store(node: NodeClient(transport: ClientTransport()))
     private var running: Task<Void, Never>?
 
@@ -45,10 +48,34 @@ final class Phone {
         if stage == .joined { run() }
     }
 
-    func join(_ ticket: String, name: String) async throws {
-        try await Client.join(ticket.trimmingCharacters(in: .whitespacesAndNewlines), name: name)
+    /// Joins the space a pairing code is for, as `name`, and shows it.
+    func join(_ code: String, name: String) async {
+        guard !joining else { return }
+        joining = true
+        joinError = nil
+        defer { joining = false }
+        let before = Set(store.spaces.map(\.id))
+        do {
+            try await Client.join(code.trimmingCharacters(in: .whitespacesAndNewlines), name: name)
+        } catch {
+            joinError = error.localizedDescription
+            return
+        }
         stage = .joined
         run()
+        try? await store.refreshState()
+        if let new = store.spaces.first(where: { !before.contains($0.id) }) { store.spaceID = new.id }
+        // A device already in the space keeps the name it had there.
+        if let current = store.state?.device.name, current != name { try? await store.renameDevice(name) }
+    }
+
+    /// `<cli>://join?code=…&name=…`: joins without the camera, from a link another device gives.
+    func open(_ url: URL) {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let value = { (name: String) in query.first { $0.name == name }?.value?.trimmingCharacters(in: .whitespaces) }
+        guard url.host() == "join", let code = value("code"), !code.isEmpty else { return }
+        let name = value("name").flatMap { $0.isEmpty ? nil : $0 } ?? store.state?.device.name ?? UIDevice.current.name
+        Task { await join(code, name: name) }
     }
 
     private func run() {

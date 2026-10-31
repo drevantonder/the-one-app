@@ -29,6 +29,7 @@ targets:
         NSHumanReadableCopyright: ""
         NodeCLI: ${BRAND_CLI}
         NodePort: "${BRAND_PORT}"
+        BrandAccent: ${BRAND_ACCENT}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         # Asked for on the first call that needs each (Mac/Providers).
@@ -41,7 +42,7 @@ targets:
   Phone:
     type: application
     platform: iOS
-    sources: [Shared, Phone, Widget/Newest.swift, build/Phone.xcassets, build/Brand.xcassets]
+    sources: [Shared, Phone, Widget/Cache.swift, build/Phone.xcassets, build/Brand.xcassets]
     dependencies:
       - framework: build/OneClient.xcframework
         embed: false
@@ -68,13 +69,18 @@ targets:
         BrandCLI: ${BRAND_CLI}
         AppGroup: group.app.${BRAND_CLI}
         NSCameraUsageDescription: Scan the code another device shows to join its space.
+        # <cli>://join?code=…&name=…: joining from a link, without the camera.
+        CFBundleURLTypes:
+          - CFBundleURLName: app.${BRAND_CLI}.join
+            CFBundleURLSchemes:
+              - ${BRAND_CLI}
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
 
   Widgets:
     type: app-extension
     platform: iOS
-    sources: [Widget, Shared/Views/Style.swift, build/Brand.xcassets]
+    sources: [Widget, Shared/Views/Style.swift, Shared/Views/WidgetTree.swift, build/Brand.xcassets]
     settings:
       base:
         PRODUCT_NAME: Widgets

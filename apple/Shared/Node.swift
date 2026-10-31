@@ -21,7 +21,7 @@ struct NodeState: Codable, Sendable, Equatable {
 struct Space: Codable, Sendable, Equatable, Identifiable {
     var id: String
     var name: String?
-    var person: String
+    var user: String
     var member: Bool
     var role: String?
     var entries: Int
@@ -38,7 +38,7 @@ struct Space: Codable, Sendable, Equatable, Identifiable {
 struct Member: Codable, Sendable, Equatable, Identifiable {
     var device: String
     var name: String
-    var person: String
+    var user: String
     var role: String
     var me: Bool
     var online: Bool
@@ -46,36 +46,24 @@ struct Member: Codable, Sendable, Equatable, Identifiable {
     var id: String { device }
 }
 
-struct Post: Codable, Sendable, Equatable, Identifiable {
-    var id: String
-    var topic: String
-    var text: String
+/// An app as `GET /v1/apps` describes it: only what a shell needs to show it.
+struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
+    struct Screen: Decodable, Sendable, Equatable {
+        var name: String
+        var title: String?
+    }
     var name: String
-    var person: String
-    var time: Int64
+    var title: String?
+    var icon: String?
+    var screens: [Screen]?
 
-    var date: Date { Date(timeIntervalSince1970: TimeInterval(time) / 1000) }
+    var id: String { name }
+    var label: String { title ?? name }
+    /// Apps with a `main` screen are the ones a shell lists.
+    var hasScreens: Bool { screens?.contains { $0.name == "main" } == true }
 }
 
-struct Topic: Codable, Sendable, Equatable, Identifiable {
-    var path: String
-    var description: String
-    var posts: Int
-    var last: Int64?
-
-    var id: String { path }
-    var name: String { path.split(separator: "/").last.map(String.init) ?? path }
-    var parent: String { path.contains("/") ? String(path[..<path.lastIndex(of: "/")!]) : "" }
-}
-
-struct BoardPage: Codable, Sendable, Equatable {
-    var topic: String
-    var description: String
-    var posts: [Post]
-    var subtopics: [Topic]
-}
-
-struct NodeEvent: Decodable, Sendable {
+struct NodeEvent: Codable, Sendable {
     var type: String
     var space: String?
     var apps: [String]?
@@ -97,6 +85,8 @@ struct NodeError: LocalizedError, Sendable {
 protocol NodeTransport: Sendable {
     /// Sends a request and returns the local API's JSON reply, or throws its error.
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data
+    /// An app screen's page (SPEC.md "Screens"), and the address it may call back to.
+    func page(space: String, app: String, screen: String, params: String) async throws -> (html: String, base: URL?)
     /// The node's events, until the connection drops.
     func events() -> AsyncThrowingStream<NodeEvent, Error>
     /// What to say when nothing answers.
@@ -110,9 +100,14 @@ struct HTTPNode: NodeTransport {
     var unreachable: String { "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." }
 
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data {
-        var request = URLRequest(url: base.appending(path: path), timeoutInterval: timeout)
+        var url = base.appending(path: path)
+        // A GET's body goes in its query: `{ space }` becomes `?space=`.
+        if method == "GET", let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            url.append(queryItems: fields.compactMap { k, v in (v as? String).map { URLQueryItem(name: k, value: $0) } })
+        }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
-        if let body {
+        if let body, method != "GET" {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = body
         }
@@ -123,6 +118,11 @@ struct HTTPNode: NodeTransport {
             throw NodeError(error ?? "The node answered \((response as? HTTPURLResponse)?.statusCode ?? 0)")
         }
         return data
+    }
+
+    func page(space: String, app: String, screen: String, params: String) async throws -> (html: String, base: URL?) {
+        let query = try JSONEncoder().encode(["space": space, "params": params])
+        return (String(decoding: try await send("GET", "v1/screens/\(app)/\(screen)", body: query, timeout: 10), as: UTF8.self), base)
     }
 
     func events() -> AsyncThrowingStream<NodeEvent, Error> {
@@ -158,19 +158,7 @@ struct NodeClient: Sendable {
         return NodeClient(transport: HTTPNode(base: URL(string: "http://127.0.0.1:\(port)")!))
     }
 
-    private struct Reply<T: Decodable>: Decodable {
-        var ok: T?
-        var error: String?
-    }
-
     private struct Empty: Codable {}
-
-    private struct Call: Encodable, Sendable {
-        var space: String?
-        var app: String
-        var op: String
-        var input: [String: JSONValue]
-    }
 
     private func send<T: Decodable>(_ method: String, _ path: String, _ body: (any Encodable & Sendable)? = nil, timeout: TimeInterval = 10) async throws -> T {
         let data = try await transport.send(method, path, body: try body.map { try JSONEncoder().encode($0) }, timeout: timeout)
@@ -181,10 +169,26 @@ struct NodeClient: Sendable {
         try await send("GET", "v1/state", timeout: 2)
     }
 
-    func call<T: Decodable>(_ app: String, _ op: String, space: String?, input: [String: JSONValue] = [:]) async throws -> T {
-        let reply: Reply<T> = try await send("POST", "v1/call", Call(space: space, app: app, op: op, input: input))
-        guard let ok = reply.ok else { throw NodeError(reply.error ?? "No answer") }
-        return ok
+    func apps() async throws -> [AppInfo] {
+        try await send("GET", "v1/apps")
+    }
+
+    func widgets(space: String) async throws -> [WidgetInfo] {
+        try await send("GET", "v1/widgets", ["space": space])
+    }
+
+    /// Runs an app's operation for an app screen: its input and result are JSON, whatever their shape.
+    func call(space: String, app: String, op: String, input: Data) async throws -> Data {
+        let input = try JSONSerialization.jsonObject(with: input, options: .fragmentsAllowed)
+        let body = try JSONSerialization.data(withJSONObject: ["space": space, "app": app, "op": op, "input": input])
+        let data = try await transport.send("POST", "v1/call", body: body, timeout: 15)
+        let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        if let error = reply["error"] as? String { throw NodeError(error) }
+        return try JSONSerialization.data(withJSONObject: reply["ok"] ?? NSNull(), options: .fragmentsAllowed)
+    }
+
+    func page(space: String, app: String, screen: String, params: String) async throws -> (html: String, base: URL?) {
+        try await transport.page(space: space, app: app, screen: screen, params: params)
     }
 
     func createSpace(_ name: String) async throws {
@@ -192,15 +196,15 @@ struct NodeClient: Sendable {
         let _: [String: String] = try await send("POST", "v1/spaces", Body(name: name))
     }
 
-    func invite(space: String, mine: Bool) async throws -> String {
-        struct Body: Encodable, Sendable { var space: String; var mine: Bool }
-        let reply: [String: String] = try await send("POST", "v1/invite", Body(space: space, mine: mine))
-        return reply["ticket"] ?? ""
+    func pair(space: String, newUser: Bool) async throws -> String {
+        struct Body: Encodable, Sendable { var space: String; var new_user: Bool }
+        let reply: [String: String] = try await send("POST", "v1/pair", Body(space: space, new_user: newUser))
+        return reply["code"] ?? ""
     }
 
-    func join(_ ticket: String) async throws {
-        struct Body: Encodable, Sendable { var ticket: String }
-        let _: [String: String] = try await send("POST", "v1/join", Body(ticket: ticket), timeout: 60)
+    func join(_ code: String) async throws {
+        struct Body: Encodable, Sendable { var code: String }
+        let _: [String: String] = try await send("POST", "v1/join", Body(code: code), timeout: 60)
     }
 
     func renameDevice(_ name: String) async throws {
@@ -210,26 +214,5 @@ struct NodeClient: Sendable {
 
     func events() -> AsyncThrowingStream<NodeEvent, Error> {
         transport.events()
-    }
-}
-
-enum JSONValue: Codable, Sendable, Equatable, ExpressibleByStringLiteral, ExpressibleByIntegerLiteral {
-    case string(String)
-    case number(Double)
-
-    init(stringLiteral value: String) { self = .string(value) }
-    init(integerLiteral value: Int) { self = .number(Double(value)) }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        if let s = try? c.decode(String.self) { self = .string(s) } else { self = .number(try c.decode(Double.self)) }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var c = encoder.singleValueContainer()
-        switch self {
-        case .string(let s): try c.encode(s)
-        case .number(let n): try c.encode(n)
-        }
     }
 }

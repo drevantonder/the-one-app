@@ -43,22 +43,25 @@ private struct MainView: View {
                     ContentUnavailableView {
                         Label("Joining…", systemImage: "arrow.trianglehead.2.clockwise")
                     } description: {
-                        Text("This device is syncing the space from the device that invited it.")
+                        Text("This device is syncing the space from the device it paired with.")
                     }
                 } else {
-                    switch store.selection {
-                    case .devices: DevicesView()
-                    case .board(let topic): BoardView(topic: topic)
-                    case nil: BoardView(topic: "")
+                    @Bindable var store = store
+                    NavigationStack(path: $store.path) {
+                        Group {
+                            if let selection = store.selection { RouteView(route: selection) }
+                        }
+                        .navigationDestination(for: Route.self) { RouteView(route: $0) }
                     }
+                    .id(store.selection)
                 }
             }
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button("Join a Space", systemImage: "ticket") { store.sheet = .join }
-                        .help("Join a space with a ticket")
-                    Button("Invite a Device", systemImage: "person.badge.plus") { store.sheet = .invite }
-                        .help("Invite a device into this space")
+                    Button("Join with a Pairing Code", systemImage: "qrcode.viewfinder") { store.sheet = .join }
+                        .help("Join a space with a pairing code from another device")
+                    Button("Pair a Device", systemImage: "qrcode") { store.sheet = .pair }
+                        .help("Show a pairing code that brings another device into this space")
                 }
             }
         }
@@ -73,10 +76,9 @@ private struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 28) {
             VStack(spacing: 14) {
-                Image(systemName: "laptopcomputer.and.iphone")
-                    .font(.system(size: 54, weight: .light))
-                    .foregroundStyle(.tint)
-                    .padding(.bottom, 4)
+                Image("Logo")
+                    .resizable()
+                    .frame(width: 112, height: 112)
                 Text("Welcome to \(store.brand?.name ?? appName)")
                     .font(.largeTitle.weight(.semibold))
                 Text("Your devices, and your team’s, as one place for apps and agents.\nStart a space here, or join one from another device.")
@@ -100,7 +102,7 @@ private struct WelcomeView: View {
                 if let error {
                     Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
                 }
-                Button("Have a ticket? Join a space…") { store.sheet = .join }
+                Button("Have a pairing code? Join a space…") { store.sheet = .join }
                     .buttonStyle(.link)
             }
         }

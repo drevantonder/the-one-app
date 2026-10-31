@@ -11,6 +11,7 @@ struct MacApp: App {
         store.preferredDeviceName = Host.current().localizedName
         Task { await store.run() }
         Providers.start()
+        WidgetItems.shared.start(store)
         _store = State(initialValue: store)
         if !UserDefaults.standard.bool(forKey: "loginItemSet") {
             UserDefaults.standard.set(true, forKey: "loginItemSet")
@@ -28,16 +29,13 @@ struct MacApp: App {
         .defaultSize(width: 1000, height: 700)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Topic…") { store.sheet = .newTopic(store.topic ?? "") }
-                    .keyboardShortcut("n")
-                    .disabled(store.space == nil)
                 Button("New Space…") { store.sheet = .newSpace }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                 Divider()
-                Button("Invite a Device…") { store.sheet = .invite }
+                Button("Pair a Device…") { store.sheet = .pair }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
                     .disabled(store.space == nil)
-                Button("Join a Space…") { store.sheet = .join }
+                Button("Join with a Pairing Code…") { store.sheet = .join }
                     .keyboardShortcut("j", modifiers: [.command, .shift])
             }
         }
@@ -47,7 +45,7 @@ struct MacApp: App {
                 .environment(store)
                 .tint(accent)
         } label: {
-            MenuLabel(store: store)
+            MenuBarMark(store: store)
         }
         .menuBarExtraStyle(.window)
     }

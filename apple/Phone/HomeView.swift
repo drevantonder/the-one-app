@@ -1,26 +1,27 @@
 import SwiftUI
 import WidgetKit
 
-/// The space: its board's topics, newest first, and its devices.
+/// The space: the apps it has screens for, then its devices.
 struct HomeView: View {
     @Environment(Store.self) private var store
     @Environment(\.scenePhase) private var scenePhase
-    @State private var path: [SidebarItem] = []
     @State private var settings = false
 
     var body: some View {
-        NavigationStack(path: $path) {
+        @Bindable var store = store
+        NavigationStack(path: $store.path) {
             Group {
                 if let space = store.space {
                     List {
-                        Section {
-                            NavigationLink(value: SidebarItem.board("")) { TopRow() }
-                            ForEach(topics) { topic in
-                                NavigationLink(value: SidebarItem.board(topic.path)) { TopicRow(topic: topic) }
+                        if !store.screenApps.isEmpty {
+                            Section {
+                                ForEach(store.screenApps) { app in
+                                    NavigationLink(value: store.main(app)) { AppRow(app: app) }
+                                }
                             }
                         }
                         Section {
-                            NavigationLink(value: SidebarItem.devices) {
+                            NavigationLink(value: Route.devices) {
                                 LabeledContent {
                                     Text("\(space.devices.filter(\.online).count) of \(space.devices.count) online")
                                 } label: {
@@ -49,102 +50,51 @@ struct HomeView: View {
                     Button("Settings", systemImage: "gearshape") { settings = true }
                 }
             }
-            .navigationDestination(for: SidebarItem.self) { item in
-                Group {
-                    switch item {
-                    case .board(let topic): BoardView(topic: topic)
-                    case .devices: DevicesView()
-                    }
-                }
-                .navigationBarTitleDisplayMode(.inline)
-                .refreshable { await refresh() }
-                .onAppear { store.selection = item }
+            .navigationDestination(for: Route.self) { route in
+                RouteView(route: route)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .background(Color(.systemGroupedBackground))
             }
         }
         .sheet(isPresented: $settings) { SettingsView() }
-        .onChange(of: path) {
-            store.selection = path.last ?? .board("")
-            if path.isEmpty { Task { await store.refreshPage() } }
-        }
-        .onChange(of: store.recent) {
-            guard let post = store.recent.first else { return }
-            Newest(name: post.name, text: post.text, topic: post.topic, time: post.date, space: store.space?.title).save()
+        .onChange(of: store.widgets, initial: true) {
+            guard !store.widgets.isEmpty else { return }
+            WidgetCache(space: store.space?.title, widgets: store.widgets.map { w in
+                WidgetCache.Item(title: w.title ?? store.app(w.app)?.label ?? "", icon: symbol(store.app(w.app)?.icon), root: w.root)
+            }).save()
             WidgetCenter.shared.reloadAllTimelines()
         }
         .onChange(of: scenePhase) { if scenePhase == .active { Task { await refresh() } } }
     }
 
-    /// Topics with posts, most recently active first, then the quiet ones by name.
-    private var topics: [Topic] {
-        store.topics.sorted { ($0.last ?? 0, $1.path) > ($1.last ?? 0, $0.path) }
-    }
-
     private func refresh() async {
         try? await store.refreshState()
-        await store.refreshBoard()
+        await store.refreshSpace()
     }
 }
 
-private struct TopRow: View {
+/// An app, with its first widget's headline under its name.
+private struct AppRow: View {
     @Environment(Store.self) private var store
+    var app: AppInfo
 
     var body: some View {
-        // At home the store's page is the top of the board; the newest posts elsewhere may not include it.
-        let newest = store.page?.topic == "" ? store.page?.posts.last : store.recent.first { $0.topic.isEmpty }
-        Row(symbol: "text.bubble.fill", accent: true, title: "Top of the Board", time: newest?.date,
-            detail: newest.map(\.line) ?? String(localized: "For everyone in the space"))
-    }
-}
-
-private struct TopicRow: View {
-    @Environment(Store.self) private var store
-    var topic: Topic
-
-    /// Its newest post if it's among the board's newest, else what it's about.
-    var body: some View {
-        Row(symbol: "number", accent: false, title: topic.parent.isEmpty ? topic.name : "\(topic.parent)/\(topic.name)",
-            time: topic.last.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) },
-            detail: store.recent.first { $0.topic == topic.path }?.line ?? topic.description)
-    }
-}
-
-private extension Post {
-    var line: String { "\(displayName(name)): \(text)" }
-}
-
-/// A row as in Messages: a mark, a title with the time of its newest post, and a line or two under it.
-private struct Row: View {
-    var symbol: String
-    var accent: Bool
-    var title: String
-    var time: Date?
-    var detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol)
+        let detail = store.widgets.first { $0.app == app.name }?.root.headline
+        HStack(spacing: 12) {
+            Image(systemName: symbol(app.icon))
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(accent ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                .foregroundStyle(.white)
                 .frame(width: 36, height: 36)
-                .background(accent ? AnyShapeStyle(.tint) : AnyShapeStyle(.fill.tertiary), in: .circle)
+                .background(.tint, in: .circle)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(title)
-                        .font(.body.weight(.semibold))
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    if let time {
-                        TimelineView(.everyMinute) { _ in
-                            Text(time.relative)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                Text(app.label)
+                    .font(.body.weight(.semibold))
+                if let detail {
+                    Text(detail)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
-                Text(detail)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
             }
         }
         .padding(.vertical, 2)

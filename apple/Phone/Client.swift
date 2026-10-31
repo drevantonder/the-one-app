@@ -11,9 +11,9 @@ enum Client {
         return try JSONDecoder().decode(Started.self, from: reply).joined
     }
 
-    /// Joins the space a ticket invites this device to, calling it `name` there.
-    static func join(_ ticket: String, name: String) async throws {
-        _ = try await run { ticket.withCString { t in name.withCString { one_join(t, $0) } } }
+    /// Joins the space a pairing code is for, calling this device `name` there.
+    static func join(_ code: String, name: String) async throws {
+        _ = try await run { code.withCString { c in name.withCString { one_join(c, $0) } } }
     }
 
     /// Runs one blocking call on a thread of its own, never the main one or Swift's pool, and unwraps its `ok`.
@@ -42,6 +42,13 @@ struct ClientTransport: NodeTransport {
         return try await Client.run {
             method.withCString { m in path.withCString { p in body.withCString { one_request(m, p, $0) } } }
         }
+    }
+
+    func page(space: String, app: String, screen: String, params: String) async throws -> (html: String, base: URL?) {
+        let params = (try? JSONSerialization.jsonObject(with: Data(params.utf8))) ?? [String: Any]()
+        let body = try JSONSerialization.data(withJSONObject: ["space": space, "app": app, "screen": screen, "params": params])
+        let reply = try JSONSerialization.jsonObject(with: try await send("GET", "v1/screen", body: body, timeout: 15)) as? [String: Any]
+        return (reply?["html"] as? String ?? "", nil)
     }
 
     func events() -> AsyncThrowingStream<NodeEvent, Error> {

@@ -5,54 +5,33 @@ import AppKit
 import UIKit
 #endif
 
+/// The brand's accent as red, green and blue, lifted a little in dark mode so it keeps its contrast there,
+/// yet still carries white text.
+func brandRGB(_ hex: String, dark: Bool) -> (CGFloat, CGFloat, CGFloat) {
+    let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0x808080
+    let rgb = [16, 8, 0].map { CGFloat((value >> $0) & 0xFF) / 255 }.map { dark ? $0 + (1 - $0) * 0.2 : $0 }
+    return (rgb[0], rgb[1], rgb[2])
+}
+
+/// The same, as CSS.
+func brandCSS(_ hex: String, dark: Bool) -> String {
+    let (r, g, b) = brandRGB(hex, dark: dark)
+    return "rgb(\(Int(r * 255)), \(Int(g * 255)), \(Int(b * 255)))"
+}
+
 extension Color {
-    /// The brand's accent, lifted a little in dark mode so it keeps its contrast.
     init(brandHex hex: String) {
-        let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0x808080
-        let r = CGFloat((value >> 16) & 0xFF) / 255, g = CGFloat((value >> 8) & 0xFF) / 255, b = CGFloat(value & 0xFF) / 255
-        let lift = { (c: CGFloat) in c + (1 - c) * 0.35 }
         #if canImport(AppKit)
         self.init(nsColor: NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor(srgbRed: lift(r), green: lift(g), blue: lift(b), alpha: 1)
-                : NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+            let (r, g, b) = brandRGB(hex, dark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+            return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
         })
         #else
         self.init(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(red: lift(r), green: lift(g), blue: lift(b), alpha: 1)
-                : UIColor(red: r, green: g, blue: b, alpha: 1)
+            let (r, g, b) = brandRGB(hex, dark: traits.userInterfaceStyle == .dark)
+            return UIColor(red: r, green: g, blue: b, alpha: 1)
         })
         #endif
-    }
-}
-
-/// A person's circle: their initials on a colour that stays theirs on every device.
-struct Avatar: View {
-    var name: String
-    var person: String
-    var size: CGFloat = 32
-
-    private static let palette: [Color] = [.blue, .indigo, .purple, .pink, .red, .orange, .yellow, .green, .mint, .teal, .cyan, .brown]
-
-    var body: some View {
-        let color = Self.palette[Int(person.utf8.reduce(UInt32(5381)) { ($0 &* 33) &+ UInt32($1) } % UInt32(Self.palette.count))]
-        Circle()
-            .fill(color.gradient)
-            .overlay {
-                Text(Self.initials(name))
-                    .font(.system(size: size * 0.4, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
-    }
-
-    static func initials(_ name: String) -> String {
-        let base = name.hasSuffix(".local") ? String(name.dropLast(6)) : name
-        let words = base.split { !$0.isLetter && !$0.isNumber && $0 != "’" && $0 != "'" }
-        let letters = words.prefix(2).compactMap { $0.first.map(String.init) }
-        return letters.joined().uppercased()
     }
 }
 
@@ -66,14 +45,14 @@ func deviceSymbol(_ name: String) -> String {
     return "server.rack"
 }
 
-extension Date {
-    /// "now", "5 min. ago", "yesterday", or a date once it's a week old.
-    var relative: String {
-        let seconds = Date.now.timeIntervalSince(self)
-        if seconds < 60 { return String(localized: "now") }
-        if seconds < 7 * 86400 { return formatted(.relative(presentation: .named, unitsStyle: .abbreviated)) }
-        return formatted(date: .abbreviated, time: .omitted)
-    }
+/// An app's icon: its SF Symbol, or a generic one when it names something else.
+func symbol(_ name: String?) -> String {
+    #if canImport(AppKit)
+    let exists = name.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) } != nil
+    #else
+    let exists = name.flatMap { UIImage(systemName: $0) } != nil
+    #endif
+    return exists ? name! : "app"
 }
 
 func displayName(_ name: String) -> String {
