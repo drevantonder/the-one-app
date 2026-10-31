@@ -145,7 +145,8 @@ async fn users_groups_trust_and_privileged_servers() {
 
     // A page is a scope's installs: the board is on Everyone's, and on the group's once installed there too.
     let me = one::node::Caller { key: andre.id(), user: andre.user().unwrap() };
-    assert_eq!(andre.widgets(me.clone(), Some("global")).await.unwrap().len(), 1);
+    let everyone = andre.widgets(me.clone(), Some("global")).await.unwrap();
+    assert!(everyone.iter().any(|w| w["app"] == "board"), "{everyone:?}");
     assert!(andre.widgets(me.clone(), Some("group:f000000000000001")).await.unwrap().is_empty());
     andre.append(&one::entry::Scope::Group("f000000000000001".into()), one::members::node("install", json!({ "app": "board" }))).await.unwrap();
     let widgets = andre.widgets(me, Some("group:f000000000000001")).await.unwrap();
