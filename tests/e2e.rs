@@ -596,3 +596,31 @@ fn board_in_user(op: &str, mut input: Value) -> CallRequest {
     input["scope"] = json!("user");
     board(op, input)
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drivers_screen_is_served_wherever_it_runs() {
+    let (a, _ra) = start("screens-a").await;
+    let (b, _rb) = start("screens-b").await;
+    a.create("Screens", "Andre").await.unwrap();
+    b.join(&a.pair(None).unwrap()).await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap() };
+    b.provide("lamps", json!({ "title": "Lamps", "ops": [], "screens": [{ "name": "main", "title": "Lamps" }] })).await.unwrap();
+    // b's provider answers the node's `_screen` calls.
+    let provider = b.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Ok(Some(c)) = provider.providers().next("lamps").await {
+                let body = format!("<p>{} {}</p>", c.input["name"].as_str().unwrap(), c.input["params"]["room"].as_str().unwrap_or(""));
+                let reply = if c.op == "_screen" { json!({ "ok": body }) } else { json!({ "error": "no" }) };
+                provider.providers().reply("lamps", c.id, reply).unwrap();
+            }
+        }
+    });
+    eventually("a to list b's driver on its user's page", async || {
+        let apps = a.apps(&me).await.unwrap();
+        apps.iter().any(|x| x["name"] == "lamps" && x["installed"] == json!([format!("user:{}", me.user)]))
+    })
+    .await;
+    let html = a.screen(me, "lamps", "main", json!({ "room": "kitchen" }), None).await.unwrap();
+    assert!(html.contains("<p>main kitchen</p>") && html.contains("window.one"), "a serves b's driver's screen in the kit and bridge: {html}");
+}

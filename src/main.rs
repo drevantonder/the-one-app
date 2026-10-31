@@ -557,7 +557,8 @@ fn tools() -> Result<Vec<Value>, Value> {
     let mut tools = secret_tools();
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
-        for op in app["ops"].as_array().into_iter().flatten() {
+        // Operations starting with `_` are for the node, such as a driver's `_screen`.
+        for op in app["ops"].as_array().into_iter().flatten().filter(|op| !op["name"].as_str().unwrap_or("").starts_with('_')) {
             let mut schema = op["input"].clone();
             if !schema.is_object() {
                 schema = json!({ "type": "object", "properties": {} });

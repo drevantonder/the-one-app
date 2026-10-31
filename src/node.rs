@@ -859,7 +859,17 @@ impl Node {
     /// An app screen as a whole page: the app's HTML with the design kit, the bridge, and who's looking.
     /// `scope` is the page a shell opened it from, a hint the app may follow or not.
     pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>) -> Result<String> {
-        let body = self.0.apps.screen(app, name).await?;
+        let deployed = self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some())))?;
+        let body = match deployed {
+            true => self.0.apps.screen(app, name).await?,
+            // A driver's screen, for now: its `_screen` operation gives the body, wherever the driver runs.
+            false => {
+                let input = json!({ "name": name, "params": params });
+                let req = CallRequest { app: app.into(), op: "_screen".into(), input, ..Default::default() };
+                let body = self.route(req, viewer.clone()).await?;
+                body.as_str().context("the screen isn't text")?.to_string()
+            }
+        };
         let me = self.me_for(&viewer)?;
         let brand = json!({ "name": crate::brand::NAME, "made_here": crate::brand::MADE_HERE });
         let context = json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope, "brand": brand });
@@ -878,19 +888,25 @@ impl Node {
     /// that serve them.
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let mut out = self.catalog(viewer, false).await?;
+        let mut drivers = Vec::new();
         if viewer.user == self.user()? {
-            out.extend(self.0.native.iter().map(|n| (n.describe)()));
-            out.extend(self.0.providers.describe());
+            drivers.extend(self.0.native.iter().map(|n| (n.describe)()));
+            drivers.extend(self.0.providers.describe());
         }
         let remote = self.with(|i| {
             let mut d: Vec<Value> = i.sessions.values().flat_map(|s| s.drivers.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
             d.sort_by_key(|v| v["name"].as_str().unwrap_or("").to_string());
             Ok(d)
         })?;
-        for describe in remote {
-            if !out.iter().any(|a| a["name"] == describe["name"]) {
-                out.push(describe);
+        for mut describe in drivers.into_iter().chain(remote) {
+            if out.iter().any(|a| a["name"] == describe["name"]) {
+                continue;
             }
+            // A driver serves its user, so its screens are on their own page.
+            if describe["screens"].as_array().is_some_and(|s| !s.is_empty()) && describe["installed"].is_null() {
+                describe["installed"] = json!([Scope::User(viewer.user.clone()).to_string()]);
+            }
+            out.push(describe);
         }
         Ok(out)
     }
