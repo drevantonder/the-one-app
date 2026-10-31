@@ -117,6 +117,7 @@ struct ConnectedAppsView: View {
                         Button { open(add) } label: {
                             Label("Add Account", systemImage: "plus")
                         }
+                        .buttonStyle(.borderless)
                     }
                 } header: {
                     header(app)
@@ -130,6 +131,7 @@ struct ConnectedAppsView: View {
                     Button { open(route) } label: {
                         Label("Add a Connected App", systemImage: "plus.app")
                     }
+                    .buttonStyle(.borderless)
                 }
             }
         }
@@ -188,6 +190,7 @@ struct ConnectedAppsView: View {
                     .accessibilityLabel("More for \(app.label)")
             }
             .menuStyle(.button)
+            .menuIndicator(.hidden)
             .buttonStyle(.borderless)
             .fixedSize()
         }
