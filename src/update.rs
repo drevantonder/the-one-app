@@ -6,8 +6,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use one::brand::{CLI, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
-use one::release;
+use one::brand::{BRAND_FILE, CLI, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
+use one::{cache, release};
 use serde_json::{Value, json};
 
 use crate::{get, post};
@@ -21,6 +21,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
     if let Some(tag) = tag {
         ensure!(version_tag(tag), "a release is named like v1.2.3");
+        ensure!(installer_is_ours(), "install.sh installs another brand, so {NAME} isn't released on GitHub; {CLI} update runs main on its servers");
         ensure!(quiet(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     }
     let key = release_key()?;
@@ -31,7 +32,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         ensure!(!quiet(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
     }
     println!("Testing {short}");
-    step(Command::new(cargo()).current_dir(&src).arg("test"))?;
+    step(Command::new(cargo()).current_dir(&src).env("BRAND", src.join(BRAND_FILE)).arg("test"))?;
     if tag.is_some() {
         step(Command::new("gh").current_dir(&src).args(["signoff", "create", "--commit", &commit]))
             .context("sign off (gh extension install basecamp/gh-signoff)")?;
@@ -54,8 +55,8 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
 
     println!("Building {short}");
-    step(Command::new(cargo()).current_dir(&src).args(["build", "--release"]))?;
-    let binary = src.join("target/release").join(CLI);
+    step(Command::new(cargo()).current_dir(&src).env("BRAND", src.join(BRAND_FILE)).args(["build", "--release"]))?;
+    let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     // Which devices to wait for, asked before this device's own node restarts on the new build.
     let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
     crate::publish(&binary, &Default::default(), &key)?;
@@ -141,6 +142,11 @@ fn version_tag(tag: &str) -> bool {
     parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// Whether install.sh, which gets releases from GitHub, installs this brand. Only that brand is released there.
+fn installer_is_ours() -> bool {
+    include_str!("../install.sh").contains(&format!("\ncli={CLI}\n"))
+}
+
 /// What the Mac app is published as.
 fn app_zip() -> String {
     format!("{CLI}-macos.zip")
@@ -159,11 +165,6 @@ pub fn release_key() -> Result<ssh_key::PrivateKey> {
     let key = ssh_key::PrivateKey::from_openssh(&out.stdout).map_err(|_| anyhow::anyhow!("`{RELEASE_SIGNER}` didn't give an OpenSSH private key"))?;
     ensure!(key.public_key().key_data() == ssh_key::PublicKey::from_openssh(RELEASE_KEY)?.key_data(), "`{RELEASE_SIGNER}` gave a key, but not the release key in brand.toml");
     Ok(key)
-}
-
-fn cache() -> PathBuf {
-    let base = std::env::var("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache"));
-    base.join(CLI)
 }
 
 /// A clean clone of the repo, kept in the cache, at the tip of main on GitHub. Build output stays, so builds are quick.
@@ -259,13 +260,14 @@ fn mac_job(commit: &str, assets: bool) -> String {
     let assets = if assets {
         format!(
             r#"a="$c/assets"; rm -rf "$a"; mkdir "$a"
-cp target/release/{CLI} "$a/{CLI}-$(rustc -vV | sed -n 's/^host: //p')"
+cp target/release/{bin} "$a/{CLI}-$(rustc -vV | sed -n 's/^host: //p')"
 ditto -c -k --keepParent "$HOME/Applications/{NAME}.app" "$a/{zip}"
 for f in "$a"/*; do
-	n=0; until h=$(target/release/{CLI} blob put "$f"); do n=$((n + 1)); [ $n -lt 30 ]; sleep 2; done
+	n=0; until h=$(target/release/{bin} blob put "$f"); do n=$((n + 1)); [ $n -lt 30 ]; sleep 2; done
 	echo "$h $(basename "$f")" >> "$c/assets.txt"
 done"#,
-            zip = app_zip()
+            zip = app_zip(),
+            bin = env!("CARGO_BIN_NAME")
         )
     } else {
         String::new()
@@ -284,7 +286,7 @@ cd "$c/src"
 git fetch -q --tags --force origin
 git checkout -q --detach --force {commit}
 git clean -qfdx -e /target -e /apple/build
-apple/build.sh{release}
+BRAND="$c/src/{BRAND_FILE}" apple/build.sh{release}
 {assets}
 JOB
 cat > update.plist <<PLIST
@@ -346,6 +348,9 @@ mod tests {
 
     #[test]
     fn the_installer_gets_this_brands_releases_and_checks_them_with_its_key() {
+        if !super::installer_is_ours() {
+            return;
+        }
         let script = include_str!("../install.sh");
         for line in [format!("repo={}", super::REPO), format!("cli={}", super::CLI), format!("key=\"{}\"", super::RELEASE_KEY)] {
             assert!(script.contains(&format!("\n{line}\n")), "install.sh lacks {line}");

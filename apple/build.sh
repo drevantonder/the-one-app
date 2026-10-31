@@ -12,7 +12,8 @@ label=$BUNDLE_ID.node
 xcodebuild -project Shells.xcodeproj -scheme Mac -configuration Release -destination generic/platform=macOS -derivedDataPath build/derived build -quiet
 
 app="build/derived/Build/Products/Release/$BRAND_NAME.app"
-cp "$root/target/release/$BRAND_CLI" "$app/Contents/MacOS/"
+# Cargo names the binary after the package, whatever the brand.
+cp "$root/target/release/one" "$app/Contents/MacOS/$BRAND_CLI"
 mkdir -p "$app/Contents/Resources" && cp build/AppIcon.icns "$app/Contents/Resources/"
 plutil -replace CFBundleIconFile -string AppIcon "$app/Contents/Info.plist"
 mkdir -p "$app/Contents/Library/LaunchAgents"
@@ -64,7 +65,9 @@ dest="$HOME/Applications/$BRAND_NAME.app"
 rm -rf "$dest"
 ditto "$app" "$dest"
 mkdir -p "$HOME/.local/bin"
-ln -sf "$dest/Contents/MacOS/$BRAND_CLI" "$HOME/.local/bin/$BRAND_CLI"
+# Another program by the CLI's name stays; the app's node runs all the same.
+cli=$HOME/.local/bin/$BRAND_CLI
+if [ ! -e "$cli" ] || [ -L "$cli" ]; then ln -sf "$dest/Contents/MacOS/$BRAND_CLI" "$cli"; else echo "Left $cli alone: it isn't this app's"; fi
 # A running node keeps the old binary until it restarts.
 launchctl kickstart -k "gui/$(id -u)/$label" 2>/dev/null || true
 open "$dest"
