@@ -38,6 +38,8 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
+jsonc-parser = { version = "0.34", features = ["cst", "serde"] }
+toml_edit = "0.25"
 
 [build-dependencies]
 toml = "0.9"
