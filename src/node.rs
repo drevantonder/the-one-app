@@ -111,6 +111,8 @@ pub struct Inner {
     pairings: Mutex<HashMap<[u8; 16], Pairing>>,
     events: broadcast::Sender<Event>,
     writes: tokio::sync::Mutex<()>,
+    /// Wakes the task that announces this device when its membership in a space may have changed.
+    membership_changed: tokio::sync::Notify,
 }
 
 #[derive(Clone)]
@@ -150,6 +152,7 @@ impl Node {
             pairings: Mutex::new(load_pairings(dir)),
             events,
             writes: tokio::sync::Mutex::new(()),
+            membership_changed: tokio::sync::Notify::new(),
         }));
         for entry in std::fs::read_dir(dir.join("spaces")).into_iter().flatten().flatten() {
             if let Ok(space) = unhex(&entry.file_name().to_string_lossy()) {
@@ -165,9 +168,22 @@ impl Node {
             .accept(BLOB_ALPN, BlobHandler(node.clone()))
             .spawn();
         tokio::spawn(node.clone().dial_loop());
+        let announcer = node.clone();
+        tokio::spawn(async move {
+            loop {
+                announcer.0.membership_changed.notified().await;
+                for space in announcer.spaces() {
+                    if let Err(err) = announcer.announce(space).await {
+                        tracing::warn!("announce: {err:#}");
+                    }
+                }
+            }
+        });
         for space in node.spaces() {
             node.consider_update(space);
-            node.say_running(space).await;
+            if let Err(err) = node.announce(space).await {
+                tracing::warn!("announce: {err:#}");
+            }
             for native in node.0.native.iter().filter(|n| n.sync.is_some()) {
                 node.sync_native(space, native.name);
             }
@@ -183,18 +199,37 @@ impl Node {
         &self.0.providers
     }
 
-    /// Registers a provider and, where its description is new, announces it to every space this device is in.
+    /// Registers a provider and announces it to every space this device is in.
     pub async fn provide(&self, app: &str, describe: Value) -> Result<()> {
-        let describe = self.0.providers.register(app, describe);
+        self.0.providers.register(app, describe);
         for space in self.spaces() {
-            let known = {
-                let spaces = self.0.spaces.lock().unwrap();
-                let Some(s) = spaces.get(&space).filter(|s| s.members.current(&self.0.id).is_some()) else { continue };
-                s.provides.iter().any(|(d, v)| *d == self.0.id && *v == describe)
-            };
-            if !known {
-                self.append(space, crate::providers::announcement(&describe)).await?;
+            self.announce(space).await?;
+        }
+        Ok(())
+    }
+
+    /// Tells a space what this device is: the build it runs and the providers it has, where the
+    /// space doesn't know yet. Runs when the node starts, when a provider registers, and when this
+    /// device's membership changes, so a device that just created or joined a space announces itself.
+    async fn announce(&self, space: Key) -> Result<()> {
+        let missing: Vec<Content> = {
+            let spaces = self.0.spaces.lock().unwrap();
+            let Some(s) = spaces.get(&space).filter(|s| s.members.current(&self.0.id).is_some()) else { return Ok(()) };
+            let mut missing: Vec<Content> = self
+                .0
+                .providers
+                .describe()
+                .into_iter()
+                .filter(|d| !s.provides.iter().any(|(dev, v)| *dev == self.0.id && v == d))
+                .map(|d| crate::providers::announcement(&d))
+                .collect();
+            if s.builds.get(&self.0.id).map(String::as_str) != Some(crate::brand::BUILD) {
+                missing.push(release::running());
             }
+            missing
+        };
+        for content in missing {
+            self.append(space, content).await?;
         }
         Ok(())
     }
@@ -309,6 +344,9 @@ impl Node {
         };
         if new.iter().any(|e| e.content.app == release::APP) {
             self.consider_update(space);
+        }
+        if new.iter().any(|e| e.content.app == space::APP) {
+            self.0.membership_changed.notify_one();
         }
         for native in &self.0.native {
             if native.sync.is_some() && new.iter().any(|e| e.content.app == native.name) {
@@ -935,23 +973,6 @@ impl Node {
         let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64, committed };
         self.append(space, release::content(&r)).await?;
         Ok(r)
-    }
-
-    /// Records this device's build in the space, once per build.
-    async fn say_running(&self, space: Key) {
-        let said = {
-            let spaces = self.0.spaces.lock().unwrap();
-            let Some(s) = spaces.get(&space) else { return };
-            if s.members.current(&self.0.id).is_none() {
-                return;
-            }
-            s.store.ordered().map(|e| release::builds(&e).get(&self.0.id).cloned()).ok().flatten()
-        };
-        if said.as_deref() != Some(crate::brand::BUILD) {
-            if let Err(err) = self.append(space, release::running()).await {
-                tracing::warn!("record build: {err:#}");
-            }
-        }
     }
 
     /// Updates this node if an admin published a newer build for its platform.
