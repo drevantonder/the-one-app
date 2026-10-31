@@ -36,7 +36,7 @@ code { font: 0.88em var(--mono); }
 .crumbs { font-size: 16px; min-width: 0; overflow-wrap: anywhere; }
 .crumbs a { color: var(--accent); font-weight: 600; cursor: pointer; }
 .crumbs .sep { color: var(--muted); margin: 0 5px; }
-.path-copy { padding: 4px; }
+.path-copy { padding: 2px 4px; vertical-align: middle; }
 
 /* The newest commit and the file list, in one box. */
 .code-box { background: var(--card); border-radius: var(--radius); overflow: hidden; border: 0.5px solid var(--line); margin-bottom: 16px; }
@@ -138,6 +138,7 @@ code { font: 0.88em var(--mono); }
 @media (max-width: 699px) {
   .entry-commit, .entry-when { display: none; }
   .entry-name { flex: 1; }
+  .entry.up { display: none; }
   .entry { padding: 11px 16px; font-size: 16px; }
   .latest { flex-direction: column; align-items: stretch; padding: 0; background: var(--card); }
   .latest-main { flex-wrap: wrap; row-gap: 4px; padding: 12px 16px; }

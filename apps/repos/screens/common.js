@@ -25,7 +25,7 @@ function pathBar(d, { file = false } = {}) {
     crumbs.push(last ? `<strong>${esc(p)}</strong>` : `<a onclick="${go("repo", { repo: d.repo, ref, path: parts.slice(0, k + 1).join("/") })}">${esc(p)}</a>`);
   });
   if (!parts.length && !file) return `<div class="pathbar">${chip}</div>`;
-  return `<div class="pathbar">${chip}<nav class="crumbs" aria-label="Path">${crumbs.join('<span class="sep">/</span>')}</nav>${file ? one.copyButton(d.path, { label: "", cls: "path-copy" }) : ""}</div>`;
+  return `<div class="pathbar">${chip}<nav class="crumbs" aria-label="Path">${crumbs.join('<span class="sep">/</span>')}${file ? one.copyButton(d.path, { label: "", cls: "path-copy" }) : ""}</nav></div>`;
 }
 
 /// The newest commit here, with History: a bar on wide windows, a card with a History row on phones.
