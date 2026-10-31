@@ -36,6 +36,9 @@ struct PageView: View {
                 }
             }
             .padding(.horizontal, 20)
+            #if os(iOS)
+            .padding(.top, 20) // where the Home Screen's first row starts
+            #endif
             .padding(.bottom, 96)
             .frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity)
@@ -224,6 +227,9 @@ struct SettingsPage: View {
                 }
             }
             .padding(.horizontal, 20)
+            #if os(iOS)
+            .padding(.top, 20) // where the Home Screen's first row starts
+            #endif
             .padding(.bottom, 96)
             .frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity)
