@@ -180,6 +180,10 @@ fn description(skill_md: &str) -> String {
 /// Sets up every harness installed on this device: AGENTS.md, the skills, the board's prompt hook and the MCP server.
 /// It looks again every minute, so a harness installed later gets them too.
 pub fn sync(entries: &[AppEntry]) {
+    // A node given a home of its own (one being tried out, say) writes nowhere else, so it leaves the harnesses alone.
+    if std::env::var_os(format!("{}_HOME", crate::brand::CLI.to_uppercase())).is_some() {
+        return;
+    }
     static LATEST: Mutex<Vec<AppEntry>> = Mutex::new(Vec::new());
     static AGAIN: std::sync::Once = std::sync::Once::new();
     *LATEST.lock().unwrap_or_else(|e| e.into_inner()) = entries.to_vec();
