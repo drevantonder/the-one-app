@@ -114,20 +114,37 @@ struct AppTile: View {
     }
 }
 
-/// A page's background: a soft gradient of the accent, turned a little for each page so pages tell apart.
-struct PageBackground: View {
-    var seed: String
-    @Environment(\.colorScheme) private var scheme
+/// The system's grouped background, behind a page's grouped containers.
+extension View {
+    func groupedBackground() -> some View {
+        #if os(macOS)
+        self
+        #else
+        background(Color(.systemGroupedBackground))
+        #endif
+    }
+
+    /// A grouped container, as a list's inset section draws one.
+    func groupedContainer() -> some View {
+        #if os(macOS)
+        background(.fill.quaternary, in: .rect(cornerRadius: 12, style: .continuous))
+        #else
+        background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24, style: .continuous))
+        #endif
+    }
+}
+
+/// A shell icon, as Settings draws one: a white symbol on a system colour.
+struct SymbolTile: View {
+    var symbol: String
+    var color: Color
+    var size: CGFloat
 
     var body: some View {
-        let turn = seed == "user" ? 0 : Double(steadyHash(seed) % 7 - 3) * 0.03
-        let dark = scheme == .dark
-        LinearGradient(stops: [
-            .init(color: accentShade(turn: turn, brightness: dark ? 0.55 : 1.3, saturation: dark ? 0.9 : 0.45).opacity(dark ? 0.9 : 0.75), location: 0),
-            .init(color: accentShade(turn: turn - 0.04, brightness: dark ? 0.35 : 1.4, saturation: dark ? 0.7 : 0.25).opacity(dark ? 0.7 : 0.45), location: 0.45),
-            .init(color: accentShade(turn: turn + 0.05, brightness: dark ? 0.25 : 1.4, saturation: 0.3).opacity(dark ? 0.6 : 0.35), location: 1),
-        ], startPoint: .topLeading, endPoint: .bottomTrailing)
-        .background(dark ? Color.black : Color.white)
-        .ignoresSafeArea()
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.46, weight: .medium))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(color.gradient, in: .rect(cornerRadius: size * 0.225, style: .continuous))
     }
 }

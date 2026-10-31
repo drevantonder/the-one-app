@@ -13,7 +13,7 @@ struct GroupsView: View {
                 ForEach(mine) { group in
                     Button { open(.group(group.id)) } label: {
                         HStack(spacing: 12) {
-                            AppTile(symbol: "person.3.fill", seed: "group:\(group.id)", size: 36)
+                            SymbolTile(symbol: "person.3.fill", color: .green, size: 36)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(group.name).font(.body.weight(.semibold)).foregroundStyle(.primary)
                                 Text(group.members.count == 1 ? "1 member" : "\(group.members.count) members")

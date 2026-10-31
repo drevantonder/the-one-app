@@ -39,31 +39,31 @@ struct PageView: View {
             .frame(maxWidth: .infinity)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-        .background { PageBackground(seed: page.scope) }
+        .groupedBackground()
         .refreshable { try? await store.refreshState(); await store.refreshApps() }
     }
 }
 
-/// A page's title, large at its top; on a Mac, the window's title and subtitle instead.
+/// A page's title, large at its top. On a Mac it is the window's title too, though the toolbar doesn't repeat it.
 struct PageHeader: View {
     var title: String
     var subtitle: String
 
     var body: some View {
-        #if os(macOS)
-        Color.clear.frame(height: 4)
-            .navigationTitle(title)
-            .navigationSubtitle(subtitle)
-        #else
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.largeTitle.bold())
+                .foregroundStyle(.primary)
             Text(subtitle)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .padding(.top, 4)
         .padding(.horizontal, 4)
+        #if os(macOS)
+        .navigationTitle(title)
+        .navigationSubtitle(subtitle)
+        .toolbar(removing: .title)
         #endif
     }
 }
@@ -85,7 +85,7 @@ private struct WidgetColumn: View {
     }
 }
 
-/// A widget on a translucent card, under its app's tile and title.
+/// A widget in a grouped container, under its app's icon and title.
 struct WidgetCard: View {
     var widget: WidgetInfo
     var app: AppInfo?
@@ -94,8 +94,8 @@ struct WidgetCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 7) {
                 AppTile(symbol: symbol(app?.icon), seed: widget.app, size: 18)
-                Text((widget.title ?? app?.label ?? widget.widget).uppercased())
-                    .font(.caption2.weight(.semibold))
+                Text(widget.title ?? app?.label ?? widget.widget)
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -104,11 +104,10 @@ struct WidgetCard: View {
                     .font(.subheadline)
             }
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(.white.opacity(0.25), lineWidth: 0.5) }
-        .contentShape(.rect(cornerRadius: 22))
+        .groupedContainer()
+        .contentShape(.rect)
     }
 }
 
@@ -123,7 +122,9 @@ private struct IconGrid: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: iconSize + 18, maximum: iconSize + 34), spacing: 10, alignment: .top)],
                   alignment: .leading, spacing: 20) {
             ForEach(apps) { app in
-                IconButton(title: app.label, symbol: symbol(app.icon), seed: app.name) { open(store.open(app, from: page)) }
+                IconButton(title: app.label) { open(store.open(app, from: page)) } icon: {
+                    AppTile(symbol: symbol(app.icon), seed: app.name, size: iconSize)
+                }
                     .contextMenu {
                         if store.canArrange(page.scope) {
                             Button("Remove from \(page.title)", systemImage: "minus.circle", role: .destructive) { remove(app) }
@@ -146,17 +147,16 @@ private struct IconGrid: View {
 }
 
 /// A large rounded icon with its name under it, as a home screen's.
-struct IconButton: View {
+struct IconButton<Icon: View>: View {
     var title: String
-    var symbol: String
-    var seed: String
     var badge = false
     var action: () -> Void
+    @ViewBuilder var icon: Icon
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                AppTile(symbol: symbol, seed: seed, size: iconSize)
+                icon
                     .overlay(alignment: .topTrailing) {
                         if badge {
                             Circle().fill(.red).frame(width: 14, height: 14).offset(x: 4, y: -4)
@@ -197,11 +197,11 @@ private struct EmptyPage: View {
         }
         .frame(maxWidth: .infinity)
         .padding(28)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22, style: .continuous))
+        .groupedContainer()
     }
 }
 
-/// The cog's page: the shell's own views, as icons.
+/// The cog's page: the shell's own views, as icons. A phone pushes it, under its own navigation bar.
 struct SettingsPage: View {
     @Environment(Store.self) private var store
     var open: (Route) -> Void
@@ -209,12 +209,14 @@ struct SettingsPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                #if os(macOS)
                 PageHeader(title: String(localized: "Settings"), subtitle: subtitle)
+                #endif
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: iconSize + 18, maximum: iconSize + 34), spacing: 10, alignment: .top)],
                           alignment: .leading, spacing: 20) {
                     ForEach(store.settings) { item in
-                        IconButton(title: item.title, symbol: item.symbol, seed: item.rawValue, badge: item == .requests) {
-                            open(.setting(item))
+                        IconButton(title: item.title, badge: item == .requests) { open(.setting(item)) } icon: {
+                            SymbolTile(symbol: item.symbol, color: item.color, size: iconSize)
                         }
                     }
                 }
@@ -224,11 +226,32 @@ struct SettingsPage: View {
             .frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .background { PageBackground(seed: "settings") }
+        .groupedBackground()
+        #if os(iOS)
+        .navigationTitle("Settings")
+        .navigationSubtitle(subtitle)
+        .navigationBarTitleDisplayMode(.large)
+        #endif
     }
 
     private var subtitle: String {
         let who = store.me.map { $0.admin ? String(localized: "\($0.name) · admin") : $0.name } ?? ""
         return [store.install?.name ?? "", who].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+extension Setting {
+    /// Its icon's colour, as Settings colours its own.
+    var color: Color {
+        switch self {
+        case .store: .blue
+        case .groups: .green
+        case .devices: .gray
+        case .secrets: .indigo
+        case .access: .purple
+        case .users: .teal
+        case .backups: .orange
+        case .requests: .red
+        }
     }
 }

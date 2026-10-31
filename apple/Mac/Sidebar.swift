@@ -20,7 +20,7 @@ struct Sidebar: View {
                     }
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {
-                        Text(page.title.uppercased())
+                        Text(page.title)
                             .foregroundStyle(store.selection == .page(page.scope) ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(.rect)
@@ -35,11 +35,7 @@ struct Sidebar: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            SettingsButton()
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { SettingsRow() }
     }
 
     private func expanded(_ page: Page) -> Binding<Bool> {
@@ -53,30 +49,25 @@ struct Sidebar: View {
     }
 }
 
-/// The cog, with a red dot while a request waits.
-private struct SettingsButton: View {
+/// The cog, kept at the sidebar's foot as a row of its own, with a red dot while a request waits.
+private struct SettingsRow: View {
     @Environment(Store.self) private var store
-    @State private var hovering = false
 
     var body: some View {
-        let selected = store.selection == .settings
-        Button { store.selection = .settings } label: {
-            HStack(spacing: 8) {
+        @Bindable var store = store
+        List(selection: $store.selection) {
+            Label {
+                Text("Settings")
+            } icon: {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 14, weight: .medium))
                     .overlay(alignment: .topTrailing) {
                         if store.hasRequests { Circle().fill(.red).frame(width: 7, height: 7).offset(x: 3, y: -2) }
                     }
-                Text("Settings")
-                Spacer()
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(selected ? AnyShapeStyle(.tint.opacity(0.18)) : hovering ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(.clear),
-                        in: .rect(cornerRadius: 8))
-            .contentShape(.rect)
+            .tag(Route.settings)
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+        .scrollDisabled(true)
+        .scrollContentBackground(.hidden)
+        .frame(height: 44)
     }
 }
