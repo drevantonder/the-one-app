@@ -9,6 +9,7 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 - Privileged servers are trusted by admins, not built in: any server can be made one, and the install keeps working without them. If something only a privileged server can do is in code rather than in trust, the design is wrong.
 - Entries are the truth; views are caches. The same entries replayed in the same order give the same views, on every server, every time.
 - Dumb beats clever. Delete before adding. No dependency without a reason written in its commit.
+- One name per thing. A rename reaches everything in the same change: code, files, docs, screens, CLI and MCP text, keeping live paths working. No old names left behind, and no internal words (module names, "provider") where a person reads.
 - The old One App and the PTC App are feature lists, not code to copy.
 
 ## Work
