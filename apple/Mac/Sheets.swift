@@ -59,7 +59,7 @@ struct JoinSheet: View {
                 joining = true
                 Task {
                     defer { joining = false }
-                    do { try await store.join(code); dismiss() } catch { self.error = error.localizedDescription }
+                    do { try await store.join(code); dismiss() } catch { self.error = joinFailure(error) }
                 }
             }
             .keyboardShortcut(.defaultAction)

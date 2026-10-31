@@ -1412,8 +1412,12 @@ impl Node {
             for w in describe["widgets"].as_array().into_iter().flatten() {
                 let widget = w["name"].as_str().unwrap_or_default();
                 match self.0.apps.widget(&app, widget, &ctx).await {
-                    Ok(root) => out.push(json!({ "app": app, "widget": widget, "title": w["title"], "root": root })),
-                    Err(err) => tracing::warn!("{app} widget {widget}: {err:#}"),
+                    Ok(root) => out.push(json!({ "app": app, "widget": widget, "title": w["title"], "size": w["size"], "root": root })),
+                    // A shell that knows `error` says the widget is broken; one that doesn't still draws `root`.
+                    Err(err) => out.push(json!({
+                        "app": app, "widget": widget, "title": w["title"], "size": w["size"], "error": format!("{err:#}"),
+                        "root": { "t": "text", "text": "This widget stopped working.", "tone": "muted" },
+                    })),
                 }
             }
         }

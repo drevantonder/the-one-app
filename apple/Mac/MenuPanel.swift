@@ -40,16 +40,17 @@ struct MenuPanel: View {
                 }
                 if !store.allWidgets.isEmpty {
                     Divider().padding(.vertical, 6).padding(.horizontal, 14)
-                    SectionTitle("In the Menu Bar")
-                    ForEach(store.allWidgets) { widget in
-                        MenuButton { items.toggle(widget.id) } label: {
-                            HStack {
-                                Label(widget.title ?? widget.widget, systemImage: symbol(store.app(widget.app)?.icon))
-                                Spacer()
-                                if !items.hidden.contains(widget.id) { Image(systemName: "checkmark").font(.callout.weight(.semibold)) }
+                    SectionTitle("Widgets")
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(store.allWidgets) { widget in
+                                PanelWidget(widget: widget, inMenuBar: !items.hidden.contains(widget.id), toggle: { items.toggle(widget.id) }, open: open)
                             }
                         }
+                        .padding(.horizontal, 10)
                     }
+                    .frame(maxHeight: 460)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 Divider().padding(.vertical, 6).padding(.horizontal, 14)
             } else {
@@ -130,5 +131,65 @@ private struct MenuButton<Label: View>: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .padding(.horizontal, 6)
+    }
+}
+
+/// A widget in the panel, drawn live, with whether it also has an item of its own in the menu bar.
+private struct PanelWidget: View {
+    @Environment(Store.self) private var store
+    var widget: WidgetInfo
+    var inMenuBar: Bool
+    var toggle: () -> Void
+    var open: () -> Void
+
+    var body: some View {
+        let app = store.app(widget.app)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                AppTile(symbol: symbol(app?.icon), seed: widget.app, size: 16)
+                Text(widget.title ?? app?.label ?? widget.widget)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                Button(action: toggle) {
+                    Image(systemName: inMenuBar ? "menubar.rectangle" : "menubar.dock.rectangle")
+                        .foregroundStyle(inMenuBar ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                }
+                .buttonStyle(.borderless)
+                .help(inMenuBar ? "Shown in the menu bar: click to hide it there" : "Show in the menu bar")
+            }
+            if widget.error != nil {
+                Label("This widget stopped working.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            } else {
+                TimelineView(.everyMinute) { context in
+                    WidgetTree(node: widget.root, now: context.date)
+                        .font(.callout)
+                }
+                .environment(\.widgetHost, WidgetHost(app: widget.app, scope: nil, run: { [store] op, input in await store.run(app: widget.app, op: op, input: input) },
+                                                      open: { link in follow(link) }))
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.fill.quaternary, in: .rect(cornerRadius: 10, style: .continuous))
+        .contentShape(.rect)
+        .onTapGesture { follow(widget.root.link) }
+    }
+
+    /// A web link in the browser; a screen, or the app's first, in the window.
+    private func follow(_ link: WidgetLink?) {
+        if case .url(let url) = link { NSWorkspace.shared.open(url); return }
+        let page = store.pages.first { store.widgets(on: $0, hidden: true).contains(widget) }
+        if let link, let route = store.route(for: link, app: widget.app, scope: page?.scope) {
+            store.selection = route
+        } else if let app = store.app(widget.app), app.hasScreens {
+            store.selection = store.open(app, from: page)
+        } else {
+            return
+        }
+        open()
     }
 }

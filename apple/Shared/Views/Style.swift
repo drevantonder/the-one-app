@@ -148,3 +148,72 @@ struct SymbolTile: View {
             .background(color.gradient, in: .rect(cornerRadius: size * 0.225, style: .continuous))
     }
 }
+
+/// A person: their initials on a colour picked by their id, the same one app screens draw (`one.avatar`).
+struct Avatar: View {
+    var id: String
+    var name: String
+    var size: CGFloat = 32
+
+    private static let colors: [UInt32] = [0x5e5ce6, 0xff9f0a, 0x30b0c7, 0xff375f, 0x34c759, 0xaf52de, 0x0a84ff, 0xa2845e]
+
+    var body: some View {
+        let h = id.unicodeScalars.reduce(UInt32(0)) { $0 &* 31 &+ UInt32($1.value) }
+        let rgb = Self.colors[Int(h % UInt32(Self.colors.count))]
+        let initials = name.split(separator: " ").compactMap(\.first).prefix(2).map(String.init).joined().uppercased()
+        Circle()
+            .fill(Color(red: Double(rgb >> 16 & 0xFF) / 255, green: Double(rgb >> 8 & 0xFF) / 255, blue: Double(rgb & 0xFF) / 255).gradient)
+            .overlay {
+                Text(initials.isEmpty ? "?" : initials)
+                    .font(.system(size: size * 0.4, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Light, Dark or Automatic, as chosen in Settings on this device.
+enum Appearance: String, CaseIterable, Identifiable {
+    case automatic, light, dark
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .automatic: String(localized: "Automatic")
+        case .light: String(localized: "Light")
+        case .dark: String(localized: "Dark")
+        }
+    }
+
+    var scheme: ColorScheme? {
+        switch self {
+        case .automatic: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
+extension View {
+    /// A navigation title that keeps every word: on a phone, a long one wraps to two lines and shrinks a little,
+    /// where the bar would cut it short.
+    func wholeTitle(_ title: String) -> some View {
+        #if os(iOS)
+        navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(title)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                        .multilineTextAlignment(.center)
+                        .accessibilityAddTraits(.isHeader)
+                }
+            }
+        #else
+        navigationTitle(title)
+        #endif
+    }
+}

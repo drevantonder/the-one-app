@@ -22,7 +22,7 @@ function describe() {
   return {
     name: app.name, title: app.title, icon: app.icon, description: app.description || "", instructions: app.instructions || "",
     ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}) })),
-    widgets: Object.entries(app.widgets || {}).map(([name, w]) => ({ name, title: w.title || name })),
+    widgets: Object.entries(app.widgets || {}).map(([name, w]) => ({ name, title: w.title || name, size: w.size || "medium" })),
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
     uses: { apps: app.uses?.apps || [], drivers: app.uses?.drivers || [] },
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),

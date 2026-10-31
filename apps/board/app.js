@@ -547,6 +547,8 @@ show();
         return {
           t: "col",
           gap: 4,
+          // Tapping it opens the post's topic.
+          link: { screen: "topic", params: { path: p.topic || "" } },
           c: [
             { t: "row", gap: 6, c: [{ t: "text", text: p.name, size: "sm", weight: "medium" }, { t: "text", text: p.topic || "top", size: "sm", tone: "muted" }, { t: "time", at: p.time, size: "sm", tone: "muted" }] },
             { t: "text", text: p.text, lines: 3 },

@@ -13,7 +13,7 @@ struct Page: Identifiable, Hashable {
 }
 
 /// Where a shell's navigation goes: a page, an app's screen, or one of the shell's own views.
-enum Route: Hashable {
+enum Route: Hashable, Codable {
     case page(String)
     case screen(ScreenRoute)
     case settings
@@ -21,7 +21,7 @@ enum Route: Hashable {
     case group(String)
 }
 
-struct ScreenRoute: Hashable {
+struct ScreenRoute: Hashable, Codable {
     var app: String
     var screen = "main"
     /// The screen's params, as JSON.
@@ -31,8 +31,8 @@ struct ScreenRoute: Hashable {
 }
 
 /// The settings page's icons.
-enum Setting: String, Hashable, CaseIterable, Identifiable {
-    case inbox, store, groups, devices, secrets, access, users, backups, requests
+enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
+    case inbox, store, groups, devices, secrets, access, users, backups, requests, appearance
 
     var id: Self { self }
 
@@ -47,6 +47,7 @@ enum Setting: String, Hashable, CaseIterable, Identifiable {
         case .users: String(localized: "Users")
         case .backups: String(localized: "Backups")
         case .requests: String(localized: "Requests")
+        case .appearance: String(localized: "Appearance")
         }
     }
 
@@ -61,6 +62,7 @@ enum Setting: String, Hashable, CaseIterable, Identifiable {
         case .users: "person.2.badge.gearshape.fill"
         case .backups: "externaldrive.fill.badge.timemachine"
         case .requests: "tray.full.fill"
+        case .appearance: "circle.lefthalf.filled"
         }
     }
 }
@@ -71,6 +73,8 @@ enum Sheet: Hashable, Identifiable {
     case pages
     /// A request that this user set a secret, from a `<cli>://secret?id=…&scope=…` link.
     case secret(scope: String, id: String)
+    /// A page's widgets, to show, hide and size, with every other widget there is.
+    case widgets(String)
 
     var id: Self { self }
 }
@@ -102,9 +106,18 @@ final class Store {
     private(set) var widgets: [String: [WidgetInfo]] = [:]
     /// How many of this user's notifications in the inbox app are unread.
     private(set) var unread = 0
-    /// The Mac's sidebar selection: the page, screen or view at the bottom of `path`.
+    /// The Mac's sidebar selection: the page, screen or view at the bottom of `path`. It's kept, so the app opens
+    /// where it was, after an update too.
     var selection: Route? {
-        didSet { if selection != oldValue { path = [] } }
+        didSet {
+            guard selection != oldValue else { return }
+            path = []
+            UserDefaults.standard.set(selection.flatMap { try? JSONEncoder().encode($0) }, forKey: "selection")
+        }
+    }
+    /// The Mac's sidebar, folded to icons (⌘\).
+    var sidebarFolded = UserDefaults.standard.bool(forKey: "sidebarFolded") {
+        didSet { UserDefaults.standard.set(sidebarFolded, forKey: "sidebarFolded") }
     }
     /// What's been pushed on top of it, by app screens or the shell.
     var path: [Route] = []
@@ -179,10 +192,61 @@ final class Store {
         apps.filter { $0.hasScreens && $0.scopes.contains(page.scope) }
     }
 
-    /// A page's widgets: those of the apps installed in its scope, screen or not.
-    func widgets(on page: Page) -> [WidgetInfo] {
+    /// A page's widgets: those of the apps installed in its scope, screen or not, but for those hidden from it.
+    func widgets(on page: Page, hidden: Bool = false) -> [WidgetInfo] {
         let here = Set(apps.filter { $0.scopes.contains(page.scope) }.map(\.name))
-        return (widgets[page.scope] ?? []).filter { here.contains($0.app) }
+        return (widgets[page.scope] ?? []).filter { here.contains($0.app) && (hidden || !hiddenWidgets.contains("\(page.scope)/\($0.id)")) }
+    }
+
+    // MARK: Widgets
+
+    /// The widgets someone hid from a page, and the sizes they gave others, on this machine, as `<scope>/<app>.<widget>`.
+    private(set) var hiddenWidgets = Set(UserDefaults.standard.stringArray(forKey: "pageHiddenWidgets") ?? [])
+    private(set) var widgetSizes = UserDefaults.standard.dictionary(forKey: "widgetSizes") as? [String: String] ?? [:]
+
+    func size(of widget: WidgetInfo, on page: Page) -> String {
+        widgetSizes["\(page.scope)/\(widget.id)"] ?? widget.size ?? "medium"
+    }
+
+    func setSize(_ size: String, of widget: WidgetInfo, on page: Page) {
+        widgetSizes["\(page.scope)/\(widget.id)"] = size
+        UserDefaults.standard.set(widgetSizes, forKey: "widgetSizes")
+    }
+
+    func setHidden(_ widget: WidgetInfo, on page: Page, _ hidden: Bool) {
+        let id = "\(page.scope)/\(widget.id)"
+        if hidden { hiddenWidgets.insert(id) } else { hiddenWidgets.remove(id) }
+        UserDefaults.standard.set(Array(hiddenWidgets), forKey: "pageHiddenWidgets")
+    }
+
+    /// Runs an operation a widget's button or toggle names, as this user, then draws the widgets again. The error's
+    /// text, if it failed.
+    func run(app: String, op: String, input: JSONValue) async -> String? {
+        do {
+            _ = try await node.call(app: app, op: op, input: input.data)
+        } catch {
+            return error.localizedDescription
+        }
+        await refreshWidgets()
+        return nil
+    }
+
+    /// Where a widget's link goes, if it's one of the app's screens.
+    func route(for link: WidgetLink, app: String, scope: String?) -> Route? {
+        guard case .screen(let screen, let params) = link else { return nil }
+        return .screen(ScreenRoute(app: app, screen: screen, params: String(decoding: (params ?? .object([:])).data, as: UTF8.self), scope: scope))
+    }
+
+    /// Draws the widgets again when the soonest of them asks to be (`next`), as well as on every change.
+    private var redraw: Task<Void, Never>?
+
+    private func scheduleRedraw() {
+        redraw?.cancel()
+        guard let soonest = widgets.values.flatMap({ $0 }).compactMap({ $0.root.redraw() }).min() else { return }
+        redraw = Task {
+            try? await Task.sleep(for: .seconds(soonest.timeIntervalSinceNow))
+            if !Task.isCancelled { await refreshWidgets() }
+        }
     }
 
     /// Every page's widgets, once each: for the menu bar and the home-screen widget.
@@ -363,7 +427,10 @@ final class Store {
                 await refreshApps()
             }
         }
-        if selection == nil { selection = .page("user") }
+        if selection == nil {
+            let kept = UserDefaults.standard.data(forKey: "selection").flatMap { try? JSONDecoder().decode(Route.self, from: $0) }
+            selection = kept.flatMap(stillThere) ?? .page("user")
+        }
         await refreshWidgets()
     }
 
@@ -376,6 +443,17 @@ final class Store {
             for await (scope, widgets) in tasks { fresh[scope] = widgets ?? self.widgets[scope] ?? [] }
         }
         if fresh != widgets { widgets = fresh }
+        scheduleRedraw()
+    }
+
+    /// A route kept from before, if it still leads somewhere.
+    private func stillThere(_ route: Route) -> Route? {
+        switch route {
+        case .page(let scope): pages.contains { $0.scope == scope } ? route : nil
+        case .screen(let screen): app(screen.app) != nil ? route : nil
+        case .group(let id): install?.group(id) != nil ? route : nil
+        case .settings, .setting: route
+        }
     }
 
     // MARK: Changes

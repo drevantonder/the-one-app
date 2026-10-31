@@ -1,19 +1,31 @@
+import CryptoKit
 import Foundation
+import SwiftUI
 
-/// The pages' widgets, as the app last saw them, which it leaves in its app group for the home-screen widget.
+/// Every page's widgets, as the app last saw them, which it leaves in its app group for the home-screen widgets.
 struct WidgetCache: Codable {
-    struct Item: Codable {
+    struct Item: Codable, Identifiable {
+        /// `<scope>/<app>.<widget>`: what a home-screen widget's choice is found again by.
+        var id: String { "\(scope ?? "")/\(app ?? "").\(widget ?? "")" }
+        var app: String?
+        var widget: String?
+        /// The page it's on, and that page's name.
+        var scope: String?
+        var page: String?
         var title: String
         var icon: String
+        var error: String?
         var root: WidgetNode
     }
     var install: String?
     var widgets: [Item]
 
-    private static var file: URL? {
+    private static var group: URL? {
         guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
-        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?.appending(path: "widgets.json")
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
     }
+
+    private static var file: URL? { group?.appending(path: "widgets.json") }
 
     static func load() -> WidgetCache? {
         file.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode(WidgetCache.self, from: $0) }
@@ -22,5 +34,33 @@ struct WidgetCache: Codable {
     func save() {
         guard let file = Self.file, let data = try? JSONEncoder().encode(self) else { return }
         try? data.write(to: file, options: .atomic)
+    }
+}
+
+/// The images widgets show, saved by the app where its home-screen widgets can read them: they can't download.
+enum WidgetImages {
+    private static func file(_ url: String) -> URL? {
+        let name = SHA256.hash(data: Data(url.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+        guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String,
+              let dir = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?.appending(path: "images") else { return nil }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appending(path: name)
+    }
+
+    static func load(_ url: String) -> Image? {
+        #if canImport(UIKit)
+        file(url).flatMap { UIImage(contentsOfFile: $0.path(percentEncoded: false)) }.map { Image(uiImage: $0) }
+        #else
+        nil
+        #endif
+    }
+
+    /// Downloads the ones not saved yet, small enough for a widget to draw.
+    static func save(_ urls: [URL]) async {
+        for url in Set(urls) where url.scheme == "https" {
+            guard let file = file(url.absoluteString), !FileManager.default.fileExists(atPath: file.path(percentEncoded: false)) else { continue }
+            guard let (data, _) = try? await URLSession.shared.data(from: url), data.count < 2_000_000 else { continue }
+            try? data.write(to: file, options: .atomic)
+        }
     }
 }

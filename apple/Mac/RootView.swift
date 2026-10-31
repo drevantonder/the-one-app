@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(Store.self) private var store
+    @AppStorage("appearance") private var appearance = Appearance.automatic.rawValue
 
     var body: some View {
         @Bindable var store = store
@@ -32,7 +33,11 @@ struct RootView: View {
             case .join: JoinSheet()
             case .pages: PagesEditor()
             case .secret(let scope, let id): SecretRequestSheet(scope: scope, id: id)
+            case .widgets(let scope): WidgetsEditor(scope: scope)
             }
+        }
+        .onChange(of: appearance, initial: true) {
+            NSApp.appearance = Appearance(rawValue: appearance)?.scheme.map { NSAppearance(named: $0 == .dark ? .darkAqua : .aqua)! }
         }
     }
 }
@@ -42,8 +47,13 @@ private struct MainView: View {
 
     var body: some View {
         NavigationSplitView {
-            Sidebar()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
+            Group {
+                if store.sidebarFolded {
+                    Sidebar().navigationSplitViewColumnWidth(64)
+                } else {
+                    Sidebar().navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
+                }
+            }
         } detail: {
             if store.install?.joining == true {
                 ContentUnavailableView {

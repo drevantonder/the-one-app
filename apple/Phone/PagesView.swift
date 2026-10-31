@@ -1,8 +1,8 @@
 import SwiftUI
 import WidgetKit
 
-/// Settings' place among the pages; no scope is named this.
-private let settingsID = "settings"
+/// Settings' place among the pages; no scope is named this. A link may turn the pages to it (`store.current`).
+let settingsID = "settings"
 
 /// The pages side by side, then Settings: swipe between them, scroll within one. At the bottom, a dot per page, with a
 /// cog as Settings' dot, and the current page's name above them; the pages have no titles of their own.
@@ -58,20 +58,15 @@ struct PagesView: View {
             switch sheet {
             case .pair: PairSheet()
             case .pages: PagesEditor()
+            case .widgets(let scope): WidgetsEditor(scope: scope)
             case .join: EmptyView()
             case .secret(let scope, let id): SecretRequestSheet(scope: scope, id: id)
             }
         }
         .onChange(of: store.pages) {
-            if !store.pages.contains(where: { $0.scope == store.current }) { store.current = "user" }
+            if store.current != settingsID, !store.pages.contains(where: { $0.scope == store.current }) { store.current = "user" }
         }
-        .onChange(of: store.allWidgets, initial: true) {
-            guard !store.allWidgets.isEmpty else { return }
-            WidgetCache(install: store.install?.name, widgets: store.allWidgets.map { w in
-                WidgetCache.Item(title: w.title ?? store.app(w.app)?.label ?? "", icon: symbol(store.app(w.app)?.icon), root: w.root)
-            }).save()
-            WidgetCenter.shared.reloadAllTimelines()
-        }
+        .onChange(of: store.widgets, initial: true) { Task { await store.saveForHomeScreen() } }
         .onChange(of: scenePhase) {
             if scenePhase == .active { Task { try? await store.refreshState(); await store.refreshApps(); await store.refreshUnread() } }
         }
@@ -101,7 +96,10 @@ private struct BottomBar: View {
             Text(title)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                // A long name shrinks, then wraps, rather than lose a word.
+                .lineLimit(1...2)
+                .minimumScaleFactor(0.75)
+                .multilineTextAlignment(.center)
                 .contentTransition(.opacity)
                 .padding(.horizontal, 40)
                 .accessibilityHidden(true)
@@ -115,6 +113,9 @@ private struct BottomBar: View {
                     .pickerStyle(.inline)
                     Divider()
                     Button("Edit Pages…", systemImage: "list.bullet") { store.sheet = .pages }
+                    if !onSettings {
+                        Button("Edit Widgets…", systemImage: "square.grid.2x2") { store.sheet = .widgets(positions[index]) }
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         ForEach(pages.indices, id: \.self) { i in
@@ -167,5 +168,26 @@ private struct BottomBar: View {
         )
         .sensoryFeedback(.selection, trigger: index) { _, _ in swipeStart != nil }
         .frame(maxWidth: .infinity)
+    }
+}
+
+extension Store {
+    /// Leaves every page's widgets, and the images they show, where the home-screen widgets read them, then has
+    /// those draw again.
+    func saveForHomeScreen() async {
+        let items = pages.flatMap { page in
+            widgets(on: page, hidden: true).map { w in
+                WidgetCache.Item(app: w.app, widget: w.widget, scope: page.scope, page: page.title, title: w.title ?? app(w.app)?.label ?? w.widget,
+                                 icon: symbol(app(w.app)?.icon), error: w.error, root: w.root)
+            }
+        }
+        guard !items.isEmpty else { return }
+        WidgetCache(install: install?.name, widgets: items).save()
+        WidgetCenter.shared.reloadAllTimelines()
+        let images = items.flatMap(\.root.imageURLs)
+        if !images.isEmpty {
+            await WidgetImages.save(images)
+            WidgetCenter.shared.reloadAllTimelines()
+        }
     }
 }

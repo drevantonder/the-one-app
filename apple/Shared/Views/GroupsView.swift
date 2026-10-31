@@ -50,42 +50,49 @@ struct GroupsView: View {
     }
 }
 
-/// A group's members and invites; its admins change roles, invite and remove.
+/// A group's members and invites. Each member's role is a button on their row: its admins change it or remove them
+/// there. The last admin's role can't change.
 struct GroupView: View {
     @Environment(Store.self) private var store
-    @Environment(\.dismiss) private var dismiss
     var id: String
     @State private var inviting = false
     @State private var error: String?
+    /// Roles changed but not yet taken in, shown at once.
+    @State private var pending: [String: String?] = [:]
 
     var body: some View {
         let group = store.install?.group(id)
-        let admin = group?.role(of: store.me?.id ?? "") == "admin"
+        let me = store.me?.id ?? ""
+        let admin = group?.role(of: me) == "admin"
+        let lastAdmin = group.map { $0.admins == [me] } ?? false
         List {
             if let group {
-                Section("Members") {
-                    ForEach(group.members) { member in
-                        HStack {
-                            Text(store.userName(member.user))
-                            Spacer()
-                            Text(member.role == "admin" ? "Admin" : "Member").foregroundStyle(.secondary)
-                        }
-                        .contextMenu {
-                            if admin && member.user != store.me?.id {
-                                Button(member.role == "admin" ? "Make Member" : "Make Admin") {
-                                    run { try await $0.setMember(group: id, user: member.user, role: member.role == "admin" ? "member" : "admin") }
-                                }
-                                Button("Remove from \(group.name)", role: .destructive) { run { try await $0.setMember(group: id, user: member.user, role: nil) } }
+                Section {
+                    ForEach(group.members.filter { pending[$0.user] != .some(nil) }) { member in
+                        let role = pending[member.user].flatMap { $0 } ?? member.role
+                        PersonRow(id: member.user, name: store.userName(member.user)) {
+                            if admin && !(role == "admin" && group.admins.count == 1) {
+                                RoleMenu(role: role, removeTitle: member.user == me ? "Leave \(group.name)" : "Remove from \(group.name)") { change(member.user, to: $0) }
+                            } else {
+                                Text(role == "admin" ? "Admin" : "Member").foregroundStyle(.secondary)
                             }
                         }
+                    }
+                } header: {
+                    Text("Members")
+                } footer: {
+                    if let error {
+                        Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                    } else if !admin {
+                        Text("Only its admins can change who’s in it.")
+                    } else if group.admins.count == 1 {
+                        Text("A group always keeps one admin: make someone else an admin before you step down.")
                     }
                 }
                 if let invited = group.invited, !invited.isEmpty {
                     Section("Invited") {
                         ForEach(invited) { member in
-                            HStack {
-                                Text(store.userName(member.user))
-                                Spacer()
+                            PersonRow(id: member.user, name: store.userName(member.user)) {
                                 Text("Waiting").foregroundStyle(.secondary)
                             }
                         }
@@ -95,60 +102,112 @@ struct GroupView: View {
                     if admin {
                         Button("Invite Someone…", systemImage: "person.badge.plus") { inviting = true }
                     }
-                    Button("Leave \(group.name)", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                        run { try await $0.setMember(group: id, user: store.me?.id ?? "", role: nil) }
-                    }
+                    Button("Leave \(group.name)", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) { change(me, to: nil) }
+                        .disabled(lastAdmin && group.members.count > 1)
                 } footer: {
-                    if let error {
-                        Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                    if lastAdmin && group.members.count > 1 {
+                        Text("You’re its only admin: make someone else an admin before you leave.")
                     } else if admin {
                         Text("As an admin you arrange its page, add apps to it and set its secrets.")
                     }
                 }
             }
         }
-        .navigationTitle(group?.name ?? "")
+        .wholeTitle(group?.name ?? "")
         .sheet(isPresented: $inviting) {
             InviteSheet(group: id)
         }
     }
 
-    private func run(_ work: @escaping @MainActor (NodeClient) async throws -> Void) {
+    /// Changes a member's role, or with none removes them: shown at once, and undone with why if it fails.
+    private func change(_ user: String, to role: String?) {
         error = nil
+        pending[user] = .some(role)
         Task {
-            do { try await store.change(work) } catch { self.error = error.localizedDescription }
+            do { try await store.change { try await $0.setMember(group: id, user: user, role: role) } } catch { self.error = error.localizedDescription }
+            pending[user] = nil
         }
     }
 }
 
-/// Inviting someone already in the install into a group.
+/// A person, with their avatar, and what goes at the end of their row.
+struct PersonRow<Trailing: View>: View {
+    var id: String
+    var name: String
+    var detail: String?
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Avatar(id: id, name: name, size: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).lineLimit(1)
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+            }
+            Spacer(minLength: 8)
+            trailing
+        }
+        .frame(minHeight: 36)
+    }
+}
+
+/// A role, as a button that offers the other role and removing them.
+struct RoleMenu: View {
+    var role: String
+    var removeTitle: String
+    var change: (String?) -> Void
+
+    var body: some View {
+        Menu {
+            Picker("Role", selection: Binding(get: { role }, set: { change($0) })) {
+                Text("Admin").tag("admin")
+                Text("Member").tag("member")
+            }
+            .pickerStyle(.inline)
+            Button(removeTitle, systemImage: "person.badge.minus", role: .destructive) { change(nil) }
+        } label: {
+            HStack(spacing: 3) {
+                Text(role == "admin" ? "Admin" : "Member")
+                Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold))
+            }
+        }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .fixedSize()
+    }
+}
+
+/// Inviting someone already in the install into a group: search by name, tap (or Return for the first) to invite.
 private struct InviteSheet: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     var group: String
     @State private var role = "member"
+    @State private var query = ""
     @State private var error: String?
 
     var body: some View {
         let g = store.install?.group(group)
         let others = (store.install?.users ?? []).filter { u in g?.role(of: u.id) == nil && g?.invited?.contains { $0.user == u.id } != true }
+        let matches = query.trimmingCharacters(in: .whitespaces).isEmpty ? others : others.filter { $0.name.localizedStandardContains(query.trimmingCharacters(in: .whitespaces)) }
         NavigationStack {
             Form {
-                Picker("Role", selection: $role) {
+                Picker("Invite as", selection: $role) {
                     Text("Member").tag("member")
                     Text("Admin").tag("admin")
                 }
                 Section {
-                    ForEach(others) { user in
-                        Button(user.name) {
-                            Task {
-                                do {
-                                    try await store.change { try await $0.invite(group: group, user: user.id, role: role) }
-                                    dismiss()
-                                } catch { self.error = error.localizedDescription }
+                    ForEach(matches) { user in
+                        Button { invite(user.id) } label: {
+                            PersonRow(id: user.id, name: user.name, detail: user.admin ? String(localized: "Admin of \(store.install?.name ?? "")") : nil) {
+                                Image(systemName: "plus.circle.fill").foregroundStyle(.tint).font(.title3)
                             }
+                            .contentShape(.rect)
                         }
+                        .buttonStyle(.plain)
                     }
+                    if matches.isEmpty && !others.isEmpty { Text("No one called “\(query)”.").foregroundStyle(.secondary) }
                 } footer: {
                     if let error {
                         Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
@@ -160,14 +219,25 @@ private struct InviteSheet: View {
                 }
             }
             .formStyle(.grouped)
+            .searchable(text: $query, prompt: "Find people")
+            .onSubmit(of: .search) { if let first = matches.first { invite(first.id) } }
             .navigationTitle("Invite to \(g?.name ?? "")")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
         }
         #if os(macOS)
-        .frame(width: 380, height: 400)
+        .frame(width: 400, height: 460)
         #endif
+    }
+
+    private func invite(_ user: String) {
+        Task {
+            do {
+                try await store.change { try await $0.invite(group: group, user: user, role: role) }
+                dismiss()
+            } catch { self.error = error.localizedDescription }
+        }
     }
 }
 

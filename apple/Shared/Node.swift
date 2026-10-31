@@ -84,6 +84,8 @@ struct Server: Codable, Sendable, Equatable, Identifiable {
     /// The users who trust it, and so whose data it holds.
     var trusted_by: [String]?
     var target: String?
+    /// The commit its node was built from.
+    var build: String?
     var drivers: [String]?
     /// How loaded it is, as it last said (SPEC.md "Sync").
     var load: Load?
@@ -386,4 +388,23 @@ struct NodeClient: Sendable {
             try await post("v1/backup", ["url": nil])
         }
     }
+}
+
+/// A failed join, said as what went wrong and what to do next, with the node's own words for whoever needs them.
+func joinFailure(_ error: Error) -> String {
+    let raw = NodeError(error.localizedDescription).message
+    let lower = raw.lowercased()
+    let next: String
+    if lower.contains("already used") || lower.contains("expired") || lower.contains("refused") {
+        next = String(localized: "That pairing code has been used or has run out: each works once, for a few minutes. Make a new one on your other device, then try again.")
+    } else if lower.contains("already belongs") {
+        next = String(localized: "This device is already in an install. Remove it there first, or install the other context’s own app.")
+    } else if lower.contains("decode") || lower.contains("invalid") || lower.contains("base") || lower.contains("parse") || lower.contains("bad") {
+        next = String(localized: "That isn’t a whole pairing code. Copy it again, all of it, or scan its QR code instead.")
+    } else if lower.contains("timed out") || lower.contains("timeout") || lower.contains("connect") || lower.contains("unreachable") || lower.contains("no route") || lower.contains("network") {
+        next = String(localized: "Couldn’t reach the device that made the code. Check that it’s on and online (and so is this one), then try again.")
+    } else {
+        next = String(localized: "Couldn’t join. Make a new pairing code on your other device and try again.")
+    }
+    return "\(next)\n(\(raw))"
 }

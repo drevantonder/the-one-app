@@ -146,11 +146,14 @@ struct AccessLogView: View {
             Section {
                 ForEach(opens) { open in
                     let server = store.install?.servers.first { $0.key == open.server }?.name ?? String(open.server.prefix(8))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(store.userName(open.by)) opened your data on \(displayName(server))\(open.agent.map { ", through \($0)" } ?? "")")
-                        Text(Date(timeIntervalSince1970: open.time / 1000).formatted(date: .abbreviated, time: .shortened))
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        Avatar(id: open.by, name: store.install?.user(open.by)?.name ?? "", size: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(store.userName(open.by)) opened your data on \(displayName(server))\(open.agent.map { ", through \($0)" } ?? "")")
+                            Text(Date(timeIntervalSince1970: open.time / 1000).formatted(date: .abbreviated, time: .shortened))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 if opens.isEmpty { Text("Nobody has opened your data.").foregroundStyle(.secondary) }
@@ -163,34 +166,40 @@ struct AccessLogView: View {
     }
 }
 
-/// Everyone in the install, for admins: roles, removing, and adding someone new.
+/// Everyone in the install, for admins: each one's role as a button on their row, with Remove there too, and
+/// adding someone new. The last admin's role can't change.
 struct UsersView: View {
     @Environment(Store.self) private var store
     @State private var newName = ""
     @State private var newRole = "member"
     @State private var inviting: (name: String, role: String)?
     @State private var error: String?
+    /// Roles changed but not yet taken in, shown at once; nil for someone being removed.
+    @State private var pending: [String: String?] = [:]
 
     var body: some View {
+        let users = store.install?.users ?? []
+        let admins = users.filter(\.admin).count
         Form {
             Section {
-                ForEach(store.install?.users ?? []) { user in
-                    HStack {
-                        Text(user.id == store.me?.id ? "\(user.name) (you)" : user.name)
-                        Spacer()
-                        Text(user.admin ? "Admin" : "Member").foregroundStyle(.secondary)
-                    }
-                    .contextMenu {
-                        if user.id != store.me?.id {
-                            Button(user.admin ? "Make Member" : "Make Admin") { run { try await $0.setRole(user: user.id, role: user.admin ? "member" : "admin") } }
-                            Button("Remove \(user.name)", role: .destructive) { run { try await $0.remove(user: user.id) } }
+                ForEach(users.filter { pending[$0.id] != .some(nil) }) { user in
+                    let role = pending[user.id].flatMap { $0 } ?? user.role
+                    PersonRow(id: user.id, name: user.id == store.me?.id ? String(localized: "\(user.name) (you)") : user.name) {
+                        if user.id == store.me?.id || (role == "admin" && admins == 1) {
+                            Text(role == "admin" ? "Admin" : "Member").foregroundStyle(.secondary)
+                        } else {
+                            RoleMenu(role: role, removeTitle: "Remove \(user.name)") { change(user.id, to: $0) }
                         }
                     }
                 }
             } header: {
                 Text("People in \(store.install?.name ?? "")")
             } footer: {
-                if let error { Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red) }
+                if let error {
+                    Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                } else {
+                    Text("Admins add apps for everyone, run its servers and add people. An install always keeps one admin.")
+                }
             }
             Section {
                 TextField("Name", text: $newName)
@@ -213,9 +222,18 @@ struct UsersView: View {
         }
     }
 
-    private func run(_ work: @escaping @MainActor (NodeClient) async throws -> Void) {
+    /// Changes someone's role, or with none removes them: shown at once, and undone with why if it fails.
+    private func change(_ user: String, to role: String?) {
         error = nil
-        Task { do { try await store.change(work) } catch { self.error = error.localizedDescription } }
+        pending[user] = .some(role)
+        Task {
+            do {
+                try await store.change { node in
+                    if let role { try await node.setRole(user: user, role: role) } else { try await node.remove(user: user) }
+                }
+            } catch { self.error = error.localizedDescription }
+            pending[user] = nil
+        }
     }
 }
 

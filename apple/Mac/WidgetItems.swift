@@ -23,12 +23,17 @@ final class WidgetItems {
         UserDefaults.standard.set(Array(hidden), forKey: "hiddenWidgets")
     }
 
-    /// Opens an app's first screen in the window.
-    func open(_ app: String) {
-        guard let store else { return }
-        if let app = store.app(app) { store.selection = store.open(app, from: store.pages.first { store.apps(on: $0).contains(app) }) }
+    /// Opens an app's first screen, or the screen a link names, in the window.
+    func open(_ app: String, link: WidgetLink? = nil) {
+        guard let store, let info = store.app(app) else { return }
+        let page = store.pages.first { store.apps(on: $0).contains(info) || store.widgets(on: $0, hidden: true).contains { $0.app == app } }
+        store.selection = link.flatMap { store.route(for: $0, app: app, scope: page?.scope) } ?? store.open(info, from: page)
         openWindow?()
         NSApp.activate()
+    }
+
+    func run(app: String, op: String, input: JSONValue) async -> String? {
+        await store?.run(app: app, op: op, input: input)
     }
 
     private func watch() {
@@ -146,10 +151,14 @@ private struct WidgetPopover: View {
                         .help("Open \(app.label)")
                 }
             }
-            if let root = shown.widget?.root {
+            if let widget = shown.widget {
                 TimelineView(.everyMinute) { context in
-                    WidgetTree(node: root, now: context.date)
+                    WidgetTree(node: widget.root, now: context.date)
                 }
+                .environment(\.widgetHost, WidgetHost(app: widget.app, run: { op, input in await WidgetItems.shared.run(app: widget.app, op: op, input: input) },
+                                                      open: { link in
+                                                          if case .url(let url) = link { NSWorkspace.shared.open(url) } else { WidgetItems.shared.open(widget.app, link: link) }
+                                                      }))
             }
         }
         .padding(14)

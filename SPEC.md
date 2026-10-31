@@ -179,7 +179,7 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
   schema: { user, group, global },  // SQL run on each empty store of that scope
   ops: { name: { description, input, reads?, confirm?, run(ctx, input) } },  // reads: only reads; confirm: can't be undone
   on: { kind(db, entry) },          // no clock, no randomness, no I/O
-  widgets: { name: { title, render(ctx) } },
+  widgets: { name: { title, size, render(ctx) } },  // size: "small" | "medium" (the default) | "large"
   schedules: { name: { description, op, input?, every } | { description, op, input?, at, tz?, days? } },
   hooks: { name(ctx, { event, since }) },  // returns text for the agent
   screens: { name: { title, html } },      // `main` is the one a shell opens first
@@ -257,7 +257,7 @@ Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CL
 - `GET /v1/apps`: every app in the install (owner, `from`, its `forks`, its running `bundle`, every deploy as `history`, where installed, title, icon, `description` and `uses`, and `built_in`, the bundle this server's release has of it, if it's built in), with instructions, operations, widgets and screens for each installed for this user, and its `schedules` where it's installed for them (each `{ name, description, when, scope, on, runs_as, next, last, changed?, removed, invalid? }`) and their runs as `activity`, newest first.
 - `GET /v1/source/<app>?bundle=&path=`: an app's code as deployed, its latest deploy's or, with `bundle` (or its first characters), an earlier one's: `{ files: [{ path, size }] }`, or with `path` that file, `{ path, text }` (`base64` if it isn't text).
 - `POST /v1/call { app, op, input, scopes?, server?, as?, agent? }` → `{ ok }`. `server` (a name or key prefix) runs it there, or `all`, a driver's call on every server that runs it for you, answering `{ <server>: answer | { error } }`; otherwise it runs on the nearest server that can. `agent` names the agent asking (an MCP client's name), for apps to credit.
-- `GET /v1/widgets?scope=`: every widget, rendered; with `scope` (`user`, `group:<id>` or `global`), those of the apps installed there, each reaching only that scope, for a shell's page of it.
+- `GET /v1/widgets?scope=`: every widget, rendered, as `{ app, widget, title, size, root }`; one whose render failed has `error` too, and a `root` that says so. With `scope` (`user`, `group:<id>` or `global`), those of the apps installed there, each reaching only that scope, for a shell's page of it.
 - `GET /v1/screens/<app>/<screen>?params=&scope=`: an app screen as a page (see "Screens").
 - `POST /v1/create { name, user_name }` → `{ recovery }`, the recovery key's secret, given once, for 1Password. `POST /v1/pair { new_user?: { name, role } }` → `{ code }`. `POST /v1/join { code }`. Creating, joining or restoring is refused once the server belongs to an install.
 - `POST /v1/name { name }`, `POST /v1/remove { key | user }`, `POST /v1/role { user, role }`, `POST /v1/relays { urls }`, `POST /v1/recovery` → `{ recovery }` *(not built yet)*. Users, groups and servers may be given by name.
@@ -291,10 +291,23 @@ A shell answers the bridge itself: in WKWebView, the page posts `{ type: "call" 
 
 ## Widgets
 
-A widget renders to a tree of nodes, drawn natively by each shell and as HTML in chats:
+A widget renders to a tree of nodes, drawn natively by each shell and as HTML in chats. Every field but `t` is optional.
 
-- `{ t: "col" | "row", gap?, c: [nodes] }`
-- `{ t: "text", text, size?: "xl" | "lg" | "md" | "sm", weight?: "medium" | "bold", tone?: "muted", lines? }`
-- `{ t: "time", at, size?, tone? }`: a time in milliseconds, shown relative to now.
+- `{ t: "col" | "row", gap, c: [nodes] }`
+- `{ t: "text", text, size: "xl" | "lg" | "md" | "sm", weight: "medium" | "bold", tone, lines, anim }`: one line in a row unless `lines` says otherwise.
+- `{ t: "time", at, style, size, tone }`: a time in milliseconds, as `style` says: `ago` (the default: "now", "5 min", "3 h", then the day), `relative` ("in 5 minutes", "2 hours ago"), `timer` (counting each second: 12:04), `date` (30 Oct) or `clock` (2:15 pm).
+- `{ t: "stat", value, label, unit, tone, anim }`: a number (or short text) set large, with a label under it.
+- `{ t: "gauge", value, max, label, tone }`: a ring filled `value / max` (`max` 1 by default), with `label` inside.
+- `{ t: "progress", value, max, label, tone }`: a bar filled `value / max`.
+- `{ t: "spark", values, tone }`: a line through numbers, as wide as its place.
+- `{ t: "chart", kind: "bar" | "line", values, labels, tone }`: bars (the default) or a line, with a label under each value.
+- `{ t: "list", c: [items], empty }` of `{ t: "item", title, subtitle, trailing, icon, tone, link }`: rows, with `empty` shown when there are none.
+- `{ t: "image", url, w, h, round }`: an `https` image, `w` by `h` points (as wide as its place, if not given).
+- `{ t: "icon", name, tone, size }`: an icon, named as an app's `icon` is; `{ t: "dot", tone }`: a small round status light.
+- `{ t: "link", text, link }`: text that opens `link`.
+- `{ t: "button", label, icon, op, input, tone }`: runs the app's operation `op` with `input`, as the user looking, then the widget redraws. `{ t: "toggle", label, on, op, input }`: runs `op` with `input` and `on`, the new value.
+- `{ t: "divider" }`.
 
-Renderers skip node types and fields they don't know.
+`tone` is `muted`, `accent`, `good`, `warn` or `bad`. Any node may have `link`, what tapping it opens: an `https` URL, or `{ screen, params }`, one of the app's screens; a widget's root's link is where tapping the widget goes (its app's `main` screen if none). `anim: true` on a text or stat says its changes are worth showing: a number rolls to its new value, other text crossfades. The root may have `next`, a time in milliseconds: the shell renders the widget again then, at least a minute and at most fifteen from now, as well as whenever the app's data changes.
+
+Renderers skip node types and fields they don't know, so a widget for a newer shell still draws, less fully, in an older one.

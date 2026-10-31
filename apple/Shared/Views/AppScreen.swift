@@ -34,7 +34,7 @@ struct AppScreen: View {
                 }
             }
             #endif
-            .navigationTitle(title ?? defaultTitle)
+            .wholeTitle(title ?? defaultTitle)
     }
 
     private var defaultTitle: String {
@@ -276,6 +276,7 @@ struct RouteView: View {
             case .users: UsersView()
             case .backups: BackupsView()
             case .requests: RequestsView()
+            case .appearance: AppearanceView()
             }
         }
     }

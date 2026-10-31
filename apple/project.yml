@@ -30,6 +30,7 @@ targets:
         NodeCLI: ${BRAND_CLI}
         NodePort: "${BRAND_PORT}"
         BrandAccent: ${BRAND_ACCENT}
+        BuildCommit: ${BUILD_COMMIT}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         # <cli>://secret?id=…&scope=…: an agent's request that the person set a secret.
@@ -47,7 +48,7 @@ targets:
   Phone:
     type: application
     platform: iOS
-    sources: [Shared, Phone, Widget/Cache.swift, build/Phone.xcassets, build/Brand.xcassets]
+    sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Phone.xcassets, build/Brand.xcassets]
     dependencies:
       - framework: build/OneClient.xcframework
         embed: false
@@ -73,6 +74,7 @@ targets:
         CFBundleDisplayName: ${BRAND_NAME}
         BrandAccent: ${BRAND_ACCENT}
         BrandCLI: ${BRAND_CLI}
+        BuildCommit: ${BUILD_COMMIT}
         AppGroup: group.app.${BRAND_CLI}.phone
         NSCameraUsageDescription: Scan the code another device shows to join its space.
         # <cli>://join?code=…&name=…: joining from a link, without the camera; <cli>://secret?id=…&scope=…: an
@@ -94,6 +96,8 @@ targets:
         PRODUCT_NAME: Widgets
         PRODUCT_BUNDLE_IDENTIFIER: app.${BRAND_CLI}.phone.widgets
         TARGETED_DEVICE_FAMILY: "1,2"
+        # WidgetTree draws buttons, toggles and links as intents and links, and images from the app group.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WIDGET
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ${APPLE_TEAM}
     entitlements:
@@ -105,6 +109,7 @@ targets:
       properties:
         CFBundleDisplayName: ${BRAND_NAME}
         BrandAccent: ${BRAND_ACCENT}
+        BrandCLI: ${BRAND_CLI}
         AppGroup: group.app.${BRAND_CLI}.phone
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
