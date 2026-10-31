@@ -54,6 +54,7 @@ export default {
   name: "devices",
   title: "Devices",
   icon: "desktopcomputer",
+  color: "#30b0c7",
   description: "How loaded each server is: memory, CPU, GPU and disk, with its containers",
   instructions: "devices_list shows every server in the install, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU and GPU (percent busy, a sample every 5 seconds over the last two minutes, oldest first) and disk, and the containers each hosts under it. Use it to pick a server with room for a desktop, a model or a build.",
 

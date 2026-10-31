@@ -11,7 +11,7 @@ struct AppStoreView: View {
             Section {
                 ForEach(store.apps) { app in
                     HStack(spacing: 12) {
-                        AppTile(symbol: symbol(app.icon), seed: app.name, size: 44)
+                        AppTile(app: app, seed: app.name, size: 44)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(app.label).font(.body.weight(.semibold))
                             Text(detail(app))

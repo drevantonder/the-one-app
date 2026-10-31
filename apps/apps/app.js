@@ -51,14 +51,14 @@ function untar(bytes) {
 }
 
 /// What a built-in app the install hasn't added says about itself: nothing runs it yet, so its code says (the first
-/// `title`, `icon` and `description` after `export default` given as plain strings, as the built-in apps give them
-/// before their ops).
+/// `title`, `icon`, `color` and `description` after `export default` given as plain strings, as the built-in apps
+/// give them before their ops).
 async function described(ctx, bundle) {
   const file = untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
   const all = file ? new TextDecoder().decode(file.bytes) : "";
   const code = all.slice(Math.max(0, all.indexOf("export default")));
   const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
-  return { title: field("title"), icon: field("icon"), description: field("description") };
+  return { title: field("title"), icon: field("icon"), color: field("color"), description: field("description") };
 }
 
 async function find(ctx, name) {
@@ -92,6 +92,7 @@ export default {
   name: "apps",
   title: "App Store",
   icon: "square.grid.2x2",
+  color: "#007aff",
   description: "Every app you can add, and its code",
   instructions: "The App Store lists every app in this install, where each is installed and its code. apps_add installs one for you, a group you're an admin of, or everyone (admins).",
 
@@ -106,7 +107,7 @@ export default {
           const added = a.deploys > 0;
           const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
           return {
-            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, description: d.description || a.description || null,
+            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, image: a.image || null, description: d.description || a.description || null,
             owner: a.owner, owner_name: name(a.owner),
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], drivers: [] },

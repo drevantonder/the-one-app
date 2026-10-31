@@ -108,10 +108,12 @@
       const d = new Date(ms);
       return s < 7 * 86400 ? d.toLocaleDateString(undefined, { weekday: "short" }) : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
     },
-    // An app's icon, `{ name, title, icon }` as catalog() gives it: the shells' tile of its symbol, drawn in by the shell.
+    // An app's icon, `{ name, title, icon, color, image }` as catalog() gives it: the shells' tile, drawn in by the
+    // shell; elsewhere its picture, or its first letter on its colour.
     appIcon(app, size = 36) {
       const letter = String(app.title || app.name || "?")[0].toUpperCase();
-      return `<span class="app-icon" style="--size:${size}px" data-symbol="${one.esc(app.icon || "")}" data-seed="${one.esc(app.name)}" data-size="${size}">${one.esc(letter)}</span>`;
+      const look = app.image && !shell ? `;background-image:url(${app.image})` : app.color ? `;--tile:${app.color}` : "";
+      return `<span class="app-icon${look.includes("url(") ? " drawn" : ""}" style="--size:${size}px${one.esc(look)}" data-symbol="${one.esc(app.icon || "")}" data-seed="${one.esc(app.name)}" data-color="${one.esc(app.color || "")}" data-image="${one.esc(app.image || "")}" data-size="${size}">${one.esc(letter)}</span>`;
     },
     // A steady colour and initials for someone, from their id and name.
     avatar(id, name) {
@@ -126,9 +128,9 @@
   if (shell) {
     const drawn = {};
     const draw = (el) => {
-      const { symbol, seed, size } = el.dataset;
-      const key = `${symbol}|${seed}|${size}`;
-      (drawn[key] ||= host({ type: "icon", symbol, seed, size: Number(size) }).catch(() => null)).then((url) => {
+      const { symbol, seed, color, image, size } = el.dataset;
+      const key = `${symbol}|${seed}|${color}|${image.length}|${size}`;
+      (drawn[key] ||= host({ type: "icon", symbol, seed, color, image, size: Number(size) }).catch(() => null)).then((url) => {
         if (url) el.style.backgroundImage = `url(${url})`, el.classList.add("drawn");
       });
     };

@@ -16,7 +16,7 @@ struct Sidebar: View {
             ForEach(store.pages) { page in
                 Section {
                     ForEach(store.apps(on: page)) { app in
-                        AppTile(symbol: symbol(app.icon), seed: app.name, size: 24)
+                        AppTile(app: app, seed: app.name, size: 24)
                             .frame(maxWidth: .infinity)
                             .help(app.label)
                             .accessibilityLabel(app.label)
@@ -54,7 +54,7 @@ struct Sidebar: View {
                         Label {
                             Text(app.label)
                         } icon: {
-                            AppTile(symbol: symbol(app.icon), seed: app.name, size: 20)
+                            AppTile(app: app, seed: app.name, size: 20)
                         }
                         .badge(store.appBadge(app.name, on: page) ?? 0)
                         .tag(store.open(app, from: page))

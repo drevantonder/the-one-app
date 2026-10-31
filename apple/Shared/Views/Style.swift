@@ -64,55 +64,69 @@ var appName: String {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? ""
 }
 
-/// The brand's accent, as this build was made with it.
-var accentHex: String { Bundle.main.object(forInfoDictionaryKey: "BrandAccent") as? String ?? "" }
-
-/// A colour near the accent: turned `turn` of the way around the colour wheel, with its brightness scaled.
-func accentShade(turn: Double, brightness: Double = 1, saturation: Double = 1) -> Color {
-    let (r, g, b) = brandRGB(accentHex, dark: false)
-    let maxC = max(r, g, b), minC = min(r, g, b), d = maxC - minC
-    var h: Double = 0
-    if d > 0 {
-        h = maxC == r ? (g - b) / d : maxC == g ? 2 + (b - r) / d : 4 + (r - g) / d
-        h = (h / 6).truncatingRemainder(dividingBy: 1)
-        if h < 0 { h += 1 }
-    }
-    let s = maxC == 0 ? 0 : d / maxC
-    var hue = (h + turn).truncatingRemainder(dividingBy: 1)
-    if hue < 0 { hue += 1 }
-    return Color(hue: hue, saturation: min(1, s * saturation), brightness: min(1, maxC * brightness))
-}
-
 /// A steady number for a name, the same on every device.
 func steadyHash(_ text: String) -> Int {
     text.unicodeScalars.reduce(5381) { ($0 &* 33 &+ Int($1.value)) & 0x7FFF_FFFF }
 }
 
-/// An app's icon tile: its symbol in white on a gradient near the accent, turned by its name.
+/// An app's icon tile, as a phone's Home Screen draws one: its own picture (`icon.png` in its folder) on white, or its
+/// symbol in white on its colour, the one it declares or else one picked by its name, so apps side by side differ.
 struct AppTile: View {
-    var symbol: String
+    var icon: String?
     var seed: String
+    var color: String? = nil
+    var image: String? = nil
     var size: CGFloat
 
+    /// The system's colours, for apps that don't declare one.
+    private static let colors = ["#007aff", "#34c759", "#ff9500", "#ff3b30", "#af52de", "#5856d6", "#30b0c7", "#ff2d55",
+                                 "#a2845e", "#32ade6", "#00c7be", "#8e8e93"]
+
     var body: some View {
-        let turn = Double(steadyHash(seed) % 9 - 4) * 0.028
-        RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
-            .fill(LinearGradient(colors: [accentShade(turn: turn, brightness: 1.25, saturation: 0.85), accentShade(turn: turn + 0.02, brightness: 0.9)],
-                                 startPoint: .top, endPoint: .bottom))
-            .overlay {
-                Image(systemName: symbol)
-                    .font(.system(size: size * 0.44, weight: .medium))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+        let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
+        Group {
+            if let picture = image.flatMap(Self.picture) {
+                shape.fill(.white).overlay { picture.resizable().interpolation(.high).scaledToFill() }.clipShape(shape)
+                    .overlay { shape.strokeBorder(.black.opacity(0.1), lineWidth: 0.5) }
+            } else {
+                let (r, g, b) = brandRGB(color ?? Self.colors[steadyHash(seed) % Self.colors.count], dark: false)
+                shape.fill(Color(red: r, green: g, blue: b).gradient)
+                    .overlay {
+                        Image(systemName: symbol(icon))
+                            .font(.system(size: size * 0.44, weight: .medium))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+                    }
+                    .overlay { shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.5) }
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
-                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
-            }
-            .frame(width: size, height: size)
-            .shadow(color: .black.opacity(0.12), radius: size * 0.08, y: size * 0.04)
+        }
+        .frame(width: size, height: size)
+        .shadow(color: .black.opacity(0.12), radius: size * 0.08, y: size * 0.04)
+    }
+
+    nonisolated(unsafe) private static let pictures = NSCache<NSString, PlatformImage>()
+
+    /// An app's picture, from the data URL its server gives.
+    private static func picture(_ url: String) -> Image? {
+        let image = pictures.object(forKey: url as NSString) ?? {
+            guard let comma = url.firstIndex(of: ","), let data = Data(base64Encoded: String(url[url.index(after: comma)...])),
+                  let image = PlatformImage(data: data) else { return nil }
+            pictures.setObject(image, forKey: url as NSString)
+            return image
+        }()
+        #if canImport(AppKit)
+        return image.map { Image(nsImage: $0) }
+        #else
+        return image.map { Image(uiImage: $0) }
+        #endif
     }
 }
+
+#if canImport(AppKit)
+typealias PlatformImage = NSImage
+#else
+typealias PlatformImage = UIImage
+#endif
 
 /// The system's grouped background, behind a page's grouped containers.
 extension View {

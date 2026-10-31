@@ -146,7 +146,7 @@ private struct PanelWidget: View {
         let app = store.app(widget.app)
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                AppTile(symbol: symbol(app?.icon), seed: widget.app, size: 16)
+                AppTile(app: app, seed: widget.app, size: 16)
                 Text(widget.title ?? app?.label ?? widget.widget)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)

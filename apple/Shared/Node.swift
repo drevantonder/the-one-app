@@ -141,6 +141,9 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     var name: String
     var title: String?
     var icon: String?
+    /// Its tile's colour, as hex, if it declares one; and its own picture, as a data URL, if it ships one.
+    var color: String?
+    var image: String?
     var owner: String?
     var instructions: String?
     var screens: [Screen]?

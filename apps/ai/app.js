@@ -44,6 +44,7 @@ export default {
   name: "ai",
   title: "AI",
   icon: "sparkles",
+  color: "#af52de",
   instructions: "AI for apps: ai_read reads photos and PDFs with a prompt, ai_decide asks a decision model typed questions. ai_settings shows which models answer (local models on one of your servers, or Gemini once its gemini_key secret is set); ai_set changes them.",
   uses: { drivers: ["models"] },
   schema: Object.fromEntries(kinds.map((k) => [k, schema])),

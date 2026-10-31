@@ -26,6 +26,7 @@ export default {
   name: "details",
   title: "Your details",
   icon: "person.text.rectangle",
+  color: "#8e8e93",
   instructions: "Your details are your phone, address, RC, supervisor (approver) and the last 4 numbers of your bank account and cards, kept once for every app. details_get reads them; details_set changes the fields given (null clears one). Never ask for or keep a whole account or card number.",
   schema: { user: "create table details (key text primary key, value text);" },
 

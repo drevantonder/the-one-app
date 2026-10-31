@@ -174,7 +174,7 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
 
 ```js
 {
-  name, title, icon, description, instructions,  // description: one line on what it's for
+  name, title, icon, color, description, instructions,  // description: one line on what it's for
   uses: { apps: [name], drivers: [name] },
   schema: { user, group, global },  // SQL run on each empty store of that scope
   ops: { name: { description, input, reads?, confirm?, run(ctx, input) } },  // reads: only reads; confirm: can't be undone
@@ -186,6 +186,8 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
   screens: { name: { title, html } },      // `main` is the one a shell opens first
 }
 ```
+
+**Icons.** A shell draws an app's tile as its `icon` (an SF Symbol's name) in white on its `color` (`"#rrggbb"`), or on a colour it picks by the app's name when it declares none. An app whose folder holds `icon.png` (a square picture, opaque or on white) shows that instead: `GET /v1/apps` and `catalog()` give it as `image`, a data URL, from bundles the server has.
 
 **Stores.** An app has a private store per scope, SQLite in a Durable Object of its own, for each scope that has a `schema`. A store replays the app's entries in its scope with the app's latest deploy. For each, in replay order, `on[entry.kind]` gets the store, as `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, scope, kind, user, user_name, name, role, groups, time, data, blobs }`. `id` is `<first 8 hex of author>:<seq>`; `user_name` is the user's name; `name` is the name of `by`, else of the author; `role` is the writer's role in the scope, and `groups` their role in each of their groups, at that point. A new deploy replays its stores from empty, beside the old ones; calls use the old until it's done *(for now: the runtime restarts with the new deploy and replays its stores before running calls)*. There are no migrations.
 
@@ -255,7 +257,7 @@ A client joins with a pairing code like a server, then asks the servers its user
 Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CLI, MCP, git helpers and drivers, acting as its local user. It refuses requests with an `Origin` header or a `Host` other than this machine, so no web page can use it.
 
 - `GET /v1/state`: the brand (with its `store` app), `me` (who's asking: key, name, user; also as `client` when a client asks), this `server` (and whether it's ready), the asker's `user` (id, name, role), every `open` of their data (`opens`), and the `install` (null until it creates or joins one): its users, groups, servers (online, owners, users, privileged, who trusts each, whether each serves me, build, target, drivers, and `load`, as its last `Hello` said, or null; its `containers` only for someone acting for one of its owners) and clients (`asked`: when each last asked this server, milliseconds, or null); and every `open` of this user's data.
-- `GET /v1/apps`: every app in the install (owner, `from`, its `forks`, its running `bundle`, every deploy as `history`, where installed, title, icon, `description` and `uses`, and `built_in`, the bundle this server's release has of it, if it's built in), with instructions, operations, widgets and screens for each installed for this user, and its `schedules` where it's installed for them (each `{ name, description, when, scope, on, runs_as, next, last, changed?, removed, invalid? }`) and their runs as `activity`, newest first.
+- `GET /v1/apps`: every app in the install (owner, `from`, its `forks`, its running `bundle`, every deploy as `history`, where installed, title, icon, `color`, `image`, `description` and `uses`, and `built_in`, the bundle this server's release has of it, if it's built in), with instructions, operations, widgets and screens for each installed for this user, and its `schedules` where it's installed for them (each `{ name, description, when, scope, on, runs_as, next, last, changed?, removed, invalid? }`) and their runs as `activity`, newest first.
 - `GET /v1/source/<app>?bundle=&path=`: an app's code as deployed, its latest deploy's or, with `bundle` (or its first characters), an earlier one's: `{ files: [{ path, size }] }`, or with `path` that file, `{ path, text }` (`base64` if it isn't text).
 - `POST /v1/call { app, op, input, scopes?, server?, as?, agent? }` → `{ ok }`. `server` (a name or key prefix) runs it there, or `all`, a driver's call on every server that runs it for you, answering `{ <server>: answer | { error } }`; otherwise it runs on the nearest server that can. `agent` names the agent asking (an MCP client's name), for apps to credit.
 - `GET /v1/badges?scope=`: `{ <app>: count }`, each app's `badge` where it isn't 0, reaching scopes as widgets do.
@@ -285,13 +287,13 @@ An app's screens are HTML. A server serves each as a whole page: the app's HTML 
 - `one.title(text)`: the screen's title, shown by the shell.
 - `one.on("changed", fn)`: called when this app's data changes.
 - `one.params`, `one.me`, and helpers `one.esc`, `one.ago`, `one.avatar`.
-- `one.appIcon(app, size)`: an app's icon (`{ name, title, icon }`, as `catalog()` gives it), which the shell draws as it draws apps on its pages; a browser shows the first letter.
+- `one.appIcon(app, size)`: an app's icon (`{ name, title, icon, color, image }`, as `catalog()` gives it), which the shell draws as it draws apps on its pages; a browser shows its `image`, or its first letter on its `color`.
 - `one.brand`: the product's `name`, and `made_here`, what an App Store calls the apps made in the install.
 - `one.save(file)` and `one.preview(file)`: saves or shares a file (`{ name, type, base64 }`, or `{ name, type, blob }`), or shows it. `one.scan()`, where `one.can.scan` says the shell has a document camera: resolves to the pages scanned, each a JPEG `{ name, type, size, base64 }` (none if cancelled).
 - Links, `window.open` and anything else that would take the page away open outside it (the browser, Mail); `<a download>` and blob or data URLs save the file. File inputs work in every shell.
 - `one.scope`: the page the shell opened the screen from (`user`, `group:<id>` or `global`), or null. Only a hint: the app decides what to show, and draws its own scope picker if it has one.
 
-A shell answers the bridge itself: in WKWebView, the page posts `{ type: "call" | "open" | "title" | "icon" | "copy" | "haptic" | "save" | "preview" | "scan", … }` to the `one` message handler and awaits the reply (for `icon`, `{ symbol, seed, size }`, an image URL, or nothing, which leaves the letter); the shell passes server events to `one.__event(event)`. A shell keeps the last copy of each screen it drew and shows it, saying so, when no server answers. In a plain browser on a server's machine, the bridge talks to the node directly. Shells get pages from `GET /v1/screens/<app>/<screen>?params=&scope=` (local API) or `GET /v1/screen { app, screen, params, scope }` (clients). A page a server served may call the server it came from.
+A shell answers the bridge itself: in WKWebView, the page posts `{ type: "call" | "open" | "title" | "icon" | "copy" | "haptic" | "save" | "preview" | "scan", … }` to the `one` message handler and awaits the reply (for `icon`, `{ symbol, seed, color, image, size }`, an image URL, or nothing, which leaves the letter); the shell passes server events to `one.__event(event)`. A shell keeps the last copy of each screen it drew and shows it, saying so, when no server answers. In a plain browser on a server's machine, the bridge talks to the node directly. Shells get pages from `GET /v1/screens/<app>/<screen>?params=&scope=` (local API) or `GET /v1/screen { app, screen, params, scope }` (clients). A page a server served may call the server it came from.
 
 ## Widgets
 

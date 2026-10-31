@@ -64,6 +64,7 @@ export default {
   name: "inbox",
   title: "Inbox",
   icon: "bell",
+  color: "#ff3b30",
   description: "Notifications from your apps, agents and people",
   instructions: "inbox_notify tells a person, a group or the admins something (title, body, and a link into an app's screen); it lands in their Inbox, and on their phone if it can push. It says whether a push was accepted or there was no device, never whether anyone saw it. inbox_list reads your own.",
 

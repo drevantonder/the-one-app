@@ -234,7 +234,8 @@ private struct ScreenWebView: Representable {
                 view.title = body["text"] as? String
                 return (nil, nil)
             case "icon":
-                let tile = AppTile(symbol: symbol(body["symbol"] as? String), seed: body["seed"] as? String ?? "", size: body["size"] as? Double ?? 36)
+                let tile = AppTile(icon: body["symbol"] as? String, seed: body["seed"] as? String ?? "", color: (body["color"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                                   image: (body["image"] as? String).flatMap { $0.isEmpty ? nil : $0 }, size: body["size"] as? Double ?? 36)
                 return (Self.png(tile), nil)
             case "copy":
                 let text = body["text"] as? String ?? ""

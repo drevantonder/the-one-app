@@ -84,6 +84,7 @@ export default {
   name: "drive",
   title: "Google Drive",
   icon: "externaldrive",
+  color: "#fbbc04",
   instructions: "Google Drive is your own Drive accounts. drive_accounts lists them; drive_sign_in connects one (a link to open, then drive_finish_sign_in with the address the browser ends up on). The files_* operations are Drive's own API (v3): files_get, files_list (q is Drive's search), files_create, files_upload, files_update (addParents and removeParents move a file), generate_ids.",
   schema: {
     user: "create table accounts (email text primary key, added integer not null); create table settings (key text primary key, value text);",

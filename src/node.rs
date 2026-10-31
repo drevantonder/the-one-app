@@ -231,6 +231,8 @@ pub struct Inner {
     bundles: Mutex<BTreeMap<String, String>>,
     /// The bundle of each app this release has built in, kept as a blob: any install may add them.
     built_in: BTreeMap<String, String>,
+    /// Each bundle's `icon.png` as a data URL, once read, or none.
+    images: Mutex<HashMap<String, Option<String>>>,
     /// The calls, widgets and hooks running now, by the token their requests carry.
     grants: Mutex<HashMap<String, Grant>>,
     /// The port apps' requests go out through.
@@ -324,6 +326,7 @@ impl Node {
             changed: tokio::sync::Notify::new(),
             bundles: Mutex::new(BTreeMap::new()),
             built_in,
+            images: Mutex::new(HashMap::new()),
             grants: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             woke: Instant::now(),
@@ -1573,7 +1576,7 @@ impl Node {
                 if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
                     // A fork's module may still give its first name; the install's name for it is the one that counts.
                     let declared = Schedule::all(&Value::Object(d.clone()));
-                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "description" | "uses"))) {
+                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "description" | "uses"))) {
                         info[k] = v;
                     }
                     if mine {
@@ -1589,7 +1592,25 @@ impl Node {
             out.push(info);
         }
         out.extend(missing);
+        for info in &mut out {
+            if let Some(image) = info["bundle"].as_str().or(info["built_in"].as_str()).and_then(|b| self.image(b)) {
+                info["image"] = json!(image);
+            }
+        }
         Ok(out)
+    }
+
+    /// The picture a bundle's app shows on its tile instead of its symbol: `icon.png` in its folder, as a data URL.
+    /// Only from bundles this server has.
+    fn image(&self, bundle: &str) -> Option<String> {
+        if let Some(image) = self.0.images.lock().unwrap().get(bundle) {
+            return image.clone();
+        }
+        let bytes = std::fs::read(release::blob_path(&self.0.dir, bundle).ok()?).ok()?;
+        let files = crate::bundle::unpack(&bytes).ok()?;
+        let png = files.into_iter().find(|(path, _)| path == "src/icon.png").map(|(_, png)| format!("data:image/png;base64,{}", data_encoding::BASE64.encode(&png)));
+        self.0.images.lock().unwrap().insert(bundle.to_string(), png.clone());
+        png
     }
 
     /// The bundle this release has of `app`, if it's the built-in app of that name: owned by admins, not a fork.

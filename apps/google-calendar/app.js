@@ -270,6 +270,7 @@ export default {
   name: APP,
   title: "Google Calendar",
   icon: "calendar",
+  color: "#4285f4",
   description: "Your Google calendars, from any of your servers: events, and adding and changing them.",
   instructions: `Google Calendar is the person's Google calendars (the Mac's Apple Calendar is the calendar app). ${APP}_events lists events in a time range (default the coming week); ${APP}_event shows one. ${APP}_create_event, ${APP}_update_event and ${APP}_delete_event change the calendar: do them only when the person asked. Guests are told only with notify. With several accounts, each operation takes account.`,
   schema: signInSchema,

@@ -168,7 +168,7 @@ struct WidgetCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 7) {
-                AppTile(symbol: symbol(app?.icon), seed: widget.app, size: 18)
+                AppTile(app: app, seed: widget.app, size: 18)
                 Text(widget.title ?? app?.label ?? widget.widget)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -292,7 +292,7 @@ private struct IconGrid: View {
                   alignment: .leading, spacing: 20) {
             ForEach(apps) { app in
                 IconButton(title: app.label, badge: store.appBadge(app.name, on: page) ?? 0) { open(store.open(app, from: page)) } icon: {
-                    AppTile(symbol: symbol(app.icon), seed: app.name, size: iconSize)
+                    AppTile(app: app, seed: app.name, size: iconSize)
                 }
                     .contextMenu {
                         if store.canArrange(page.scope) {
@@ -642,5 +642,12 @@ extension Setting {
         case .requests: .pink
         case .appearance: .blue
         }
+    }
+}
+
+extension AppTile {
+    /// `app`'s tile; `seed` names it when it's not known here.
+    init(app: AppInfo?, seed: String, size: CGFloat) {
+        self.init(icon: app?.icon, seed: app?.name ?? seed, color: app?.color, image: app?.image, size: size)
     }
 }
