@@ -54,7 +54,7 @@ struct AddToSheet: View {
             Form {
                 Section {
                     ForEach(store.allPages.filter { store.canArrange($0.scope) }) { page in
-                        let on = app.scopes.contains(page.scope)
+                        let on = (store.app(app.name) ?? app).scopes.contains(page.scope)
                         Button {
                             toggle(page, on: on)
                         } label: {
