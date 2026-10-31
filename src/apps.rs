@@ -346,7 +346,10 @@ pub fn pinned(dir: &str, bin: &str, url: &str, integrity: &str) -> Result<PathBu
     ensure!(digest == *integrity, "the download of {bin} doesn't match its pinned hash");
     // Unpack into a folder of our own and move the binary into place in one step,
     // so nodes starting at the same time can't see a half-written one.
-    let tmp = dir.with_extension(format!("{}.part", std::process::id()));
+    // Several nodes in one process (as in tests) can download at once, so the folder is this call's alone.
+    static CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.with_extension(format!("{}-{call}.part", std::process::id()));
     std::fs::create_dir_all(&tmp)?;
     std::fs::File::create(tmp.join("package.tgz"))?.write_all(&tarball)?;
     let ok = std::process::Command::new("tar").args(["-xzf", "package.tgz", "--strip-components=2", &format!("package/bin/{bin}")]).current_dir(&tmp).status()?;
