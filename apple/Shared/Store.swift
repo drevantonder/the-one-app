@@ -102,7 +102,7 @@ final class Store {
     }
     /// What's been pushed on top of it, by app screens or the shell.
     var path: [Route] = []
-    /// The iPhone's current page: a scope, or `settings`.
+    /// The iPhone's current page: a scope.
     var current = "user"
     var sheet: Sheet?
 
