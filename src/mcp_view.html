@@ -19,7 +19,7 @@
   .row > .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .xl { font-size: 22px; font-weight: 600; } .lg { font-size: 17px; font-weight: 600; } .sm { font-size: 13px; } .xs { font-size: 11px; }
   .medium { font-weight: 600; } .bold { font-weight: 700; }
-  .muted { color: var(--muted); } .accent { color: var(--accent); } .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); } .blue { color: #0a84ff; } .purple { color: #bf5af2; }
+  .muted { color: var(--muted); } .accent { color: var(--accent); } .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); } .blue { color: #0a9edc; } .purple { color: #a550d9; }
   .stat b { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; } .stat small { color: var(--muted); font-size: 12px; display: block; }
   .bar { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; } .bar > i { display: block; height: 100%; background: var(--tone, var(--accent)); }
   .list > .item { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); } .list > .item:first-child { border-top: 0; }
@@ -98,7 +98,7 @@
     return el;
   }
 
-  const tones = { muted: "var(--muted)", accent: "var(--accent)", good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", blue: "#0a84ff", purple: "#bf5af2" };
+  const tones = { muted: "var(--muted)", accent: "var(--accent)", good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", blue: "#0a9edc", purple: "#a550d9" };
   const fmt = (v) => typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? "–");
 
   function time(n) {
@@ -195,12 +195,13 @@
       case "image": el = node("img"); el.src = n.url || ""; el.alt = ""; el.style.cssText = `width:${n.w ? n.w + "px" : "100%"};height:${n.h ? n.h + "px" : "auto"};object-fit:cover;border-radius:${n.round ? "50%" : "8px"}`; break;
       case "dot": el = tone(node("span", "dot")); break;
       case "icon": {
-        // Icons are named for the Apple shells; here only a badge (an SVG path) can be drawn.
+        // Named icons are the Apple shells' symbols; here only a path and a badge (SVG paths) can be drawn.
         const size = n.w || 16;
         el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         el.setAttribute("viewBox", "0 0 24 24"); el.setAttribute("width", size); el.setAttribute("height", size);
         el.style.flex = "none"; el.style.color = tones[n.tone] || "currentColor";
-        if (n.badge) { const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", n.badge); path.setAttribute("fill", "currentColor"); el.append(path); }
+        if (n.path) { const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", n.path); path.setAttribute("fill", "none"); path.setAttribute("stroke", "currentColor"); path.setAttribute("stroke-width", "1.5"); path.setAttribute("stroke-linejoin", "round"); el.append(path); }
+        if (n.badge) { const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", n.badge); path.setAttribute("fill", "currentColor"); path.setAttribute("transform", n.path || n.name ? "translate(15.5 15.5) scale(.458)" : ""); el.append(path); el.style.overflow = "visible"; }
         break;
       }
       case "link": el = node("a", "", n.text || ""); break;

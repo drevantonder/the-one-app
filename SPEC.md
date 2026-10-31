@@ -320,7 +320,7 @@ A widget comes in the sizes of an iPhone's Home Screen widgets, which shells dra
 - `{ t: "chart", kind: "bar" | "line", values, labels, tone }`: bars (the default) or a line, with a label under each value.
 - `{ t: "list", c: [items], empty }` of `{ t: "item", title, subtitle, trailing, icon, tone, link }`: rows, with `empty` shown when there are none.
 - `{ t: "image", url, w, h, round }`: an `https` image, `w` by `h` points (as wide as its place, if not given).
-- `{ t: "icon", name, tone, size, w, badge }`: an icon, named as an app's `icon` is, `w` points across; `badge` is an SVG path in a 24-point box (a logo), filled at its bottom trailing corner, with the icon cut away around it. `{ t: "dot", tone }`: a small round status light.
+- `{ t: "icon", name, path, tone, size, w, badge }`: an icon, named as an app's `icon` is, or `path`, an SVG path in a 24-point box drawn as an outline, `w` points across; `badge` is an SVG path in a 24-point box (a logo), filled at its bottom trailing corner, with the icon cut away around it. `{ t: "dot", tone }`: a small round status light.
 - `{ t: "link", text, link }`: text that opens `link`.
 - `{ t: "button", label, icon, op, input, tone }`: runs the app's operation `op` with `input`, as the user looking, then the widget redraws. `{ t: "toggle", label, on, op, input }`: runs `op` with `input` and `on`, the new value.
 - `{ t: "divider" }`.

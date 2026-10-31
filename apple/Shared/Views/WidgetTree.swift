@@ -198,6 +198,7 @@ struct WidgetNode: Codable, Sendable, Equatable {
     var badge: String?
     /// On the root, false: the tree labels itself, so no title goes over it.
     var header: Bool?
+    var path: String?
 
     init(t: String, gap: Double? = nil, c: [WidgetNode]? = nil, text: String? = nil, size: String? = nil, weight: String? = nil,
          tone: String? = nil, lines: Int? = nil, at: Double? = nil, value: JSONValue? = nil, label: String? = nil) {
@@ -216,7 +217,7 @@ struct WidgetNode: Codable, Sendable, Equatable {
 
     private enum Key: String, CodingKey {
         case t, gap, c, text, size, weight, tone, lines, at, style, value, max, label, unit, values, labels, kind, title, subtitle,
-             trailing, icon, name, url, w, h, round, empty, link, op, input, on, anim, next, grow, align, dim, badge, header
+             trailing, icon, name, url, w, h, round, empty, link, op, input, on, anim, next, grow, align, dim, badge, header, path
     }
 
     /// Decodes what it can: a field of the wrong shape is left out, and so is a child that isn't a node.
@@ -230,7 +231,7 @@ struct WidgetNode: Codable, Sendable, Equatable {
         trailing = get(.trailing); icon = get(.icon); name = get(.name); url = get(.url); w = get(.w); h = get(.h)
         round = get(.round); empty = get(.empty); link = get(.link); op = get(.op); input = get(.input); on = get(.on)
         anim = get(.anim); next = get(.next); grow = get(.grow); align = get(.align); dim = get(.dim); badge = get(.badge)
-        header = get(.header)
+        header = get(.header); path = get(.path)
         let children: [Skippable]? = get(.c)
         c = children?.compactMap(\.node)
     }
@@ -367,7 +368,8 @@ struct WidgetTree: View {
             AnyView(WidgetTree(node: child, now: now, inRow: inRow))
                 .frame(maxWidth: child.grow == true && inRow ? .infinity : nil, maxHeight: child.grow == true && !inRow ? .infinity : nil,
                        alignment: .topLeading)
-                .layoutPriority(inRow ? -Double(i) : 0)
+                // Room left over goes to growing nodes last, so text keeps its lines.
+                .layoutPriority(inRow ? -Double(i) : child.grow == true ? -1 : 0)
         }
     }
 
@@ -418,11 +420,15 @@ func toned(_ tone: String?, otherwise: some ShapeStyle = .primary) -> AnyShapeSt
     case "good": AnyShapeStyle(.green)
     case "warn": AnyShapeStyle(.orange)
     case "bad": AnyShapeStyle(.red)
-    case "blue": AnyShapeStyle(.blue)
-    case "purple": AnyShapeStyle(.purple)
+    case "blue": AnyShapeStyle(widgetBlue)
+    case "purple": AnyShapeStyle(widgetPurple)
     default: AnyShapeStyle(otherwise)
     }
 }
+
+/// The colour tones `blue` and `purple`, as the old widgets drew CPU and GPU.
+let widgetBlue = Color(red: 0x0a / 255, green: 0x9e / 255, blue: 0xdc / 255)
+let widgetPurple = Color(red: 0xa5 / 255, green: 0x50 / 255, blue: 0xd9 / 255)
 
 /// A tone as a tint: none for the accent, which a tint already is.
 func toneColor(_ tone: String?) -> Color? {
@@ -431,8 +437,8 @@ func toneColor(_ tone: String?) -> Color? {
     case "good": .green
     case "warn": .orange
     case "bad": .red
-    case "blue": .blue
-    case "purple": .purple
+    case "blue": widgetBlue
+    case "purple": widgetPurple
     default: nil
     }
 }
@@ -482,7 +488,7 @@ private struct Ring: View {
         let fraction = max > 0 ? min(1, Swift.max(0, (node.value?.number ?? 0) / max)) : 0
         let size = CGFloat(node.w ?? 46), line = min(5, size / 6)
         ZStack {
-            Circle().stroke(.quaternary, lineWidth: line)
+            Circle().stroke(Color.secondary.opacity(0.25), lineWidth: line)
             Circle().trim(from: 0, to: fraction)
                 .stroke(toned(node.tone, otherwise: .tint), style: StrokeStyle(lineWidth: line, lineCap: .round))
                 .rotationEffect(.degrees(-90))
@@ -510,7 +516,7 @@ private struct Bar: View {
             if let label = node.label { Text(label).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.quaternary)
+                    Capsule().fill(Color.secondary.opacity(0.25))
                     Capsule().fill(toned(node.tone, otherwise: .tint)).frame(width: Swift.max(6, geo.size.width * fraction))
                 }
             }
@@ -530,9 +536,9 @@ private struct Spark: View {
         Canvas { context, size in
             guard !values.isEmpty else {
                 var line = Path()
-                line.move(to: CGPoint(x: 2, y: size.height / 2))
-                line.addLine(to: CGPoint(x: size.width - 2, y: size.height / 2))
-                context.stroke(line, with: .style(.quaternary), style: StrokeStyle(lineWidth: 1.5, dash: [2, 3]))
+                line.move(to: CGPoint(x: 4, y: size.height / 2))
+                line.addLine(to: CGPoint(x: size.width - 4, y: size.height / 2))
+                context.stroke(line, with: .color(.secondary.opacity(0.3)), style: StrokeStyle(lineWidth: 1.5, dash: [2, 3]))
                 return
             }
             let data = values.count == 1 ? [values[0], values[0]] : values
@@ -557,22 +563,23 @@ private struct Spark: View {
     }
 }
 
-/// An icon, `w` points across or as big as its font, with its badge (an SVG path) at its bottom trailing corner and
-/// the icon cut away around it.
+/// An icon, `w` points across or as big as its font: named, or an SVG path outlined; with its badge (an SVG path) at
+/// its bottom trailing corner and the icon cut away around it.
 private struct Icon: View {
     var node: WidgetNode
     var font: Font?
 
     var body: some View {
-        let style = toned(node.tone, otherwise: .tint)
-        if let w = node.w.map({ CGFloat($0) }) {
+        let style = toned(node.tone, otherwise: node.path == nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+        if let w = node.w.map({ CGFloat($0) }) ?? (node.path == nil ? nil : 22) {
             ZStack {
-                Image(systemName: symbol(node.name))
-                    .resizable()
-                    .scaledToFit()
-                    .fontWeight(.light)
-                    .padding(node.badge == nil ? 0 : w / 12)
-                    .foregroundStyle(style)
+                Group {
+                    if let path = node.path {
+                        SVGShape(path).stroke(style, style: StrokeStyle(lineWidth: 1.5 * w / 24, lineJoin: .round))
+                    } else {
+                        Image(systemName: symbol(node.name)).resizable().scaledToFit().foregroundStyle(style)
+                    }
+                }
                     .mask {
                         if node.badge != nil {
                             Rectangle()
