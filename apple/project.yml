@@ -66,8 +66,7 @@ targets:
       path: build/Phone.entitlements
       properties:
         com.apple.security.application-groups: ["group.app.${BRAND_CLI}.phone"]
-        # The inbox's pushes; an App Store build is signed for production instead.
-        aps-environment: development
+        # aps-environment, for the inbox's pushes, is added by project.sh only once push is on (see there).
     info:
       path: build/Phone-Info.plist
       properties:

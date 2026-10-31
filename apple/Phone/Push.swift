@@ -44,6 +44,8 @@ extension Phone {
     /// Asks to notify once the phone is in an install whose inbox it can read, then registers for pushes: each launch,
     /// since a token can change.
     func setUpPush() async {
+        // A build has push only once it's on for the brand (apple/project.sh): without the entitlement, no token.
+        guard Bundle.main.object(forInfoDictionaryKey: "Push") as? Bool == true else { return }
         guard Self.nodeURL == nil, store.inbox != nil else { return }
         let center = UNUserNotificationCenter.current()
         var status = await center.notificationSettings().authorizationStatus
