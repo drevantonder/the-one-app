@@ -126,6 +126,8 @@ struct JoinReply {
 pub struct Caller {
     pub key: Key,
     pub user: String,
+    /// The agent that asked through it, by name ("Claude Code"), when one did.
+    pub agent: Option<String>,
 }
 
 /// An operation to run: of an app, or of a driver.
@@ -144,6 +146,9 @@ pub struct CallRequest {
     /// A user whose data was opened for the caller, to run as, reading only.
     #[serde(default, rename = "as")]
     pub as_user: Option<String>,
+    /// The agent that asked (an MCP client's name), credited on the call.
+    #[serde(default)]
+    pub agent: Option<String>,
 }
 
 /// What a server says to a call.
@@ -394,7 +399,7 @@ impl Node {
         Store::open(&self.install_dir().join("entries.db"))?.insert_own(&entry, None)?;
         self.open_install()?;
         self.replay_all().await?;
-        let me = Caller { key: self.0.id, user };
+        let me = Caller { key: self.0.id, user, agent: None };
         for app in apps {
             self.bring_in(&me, app).await?;
             self.append(&Scope::Global, members::node("install", json!({ "app": app }))).await?;
@@ -544,7 +549,7 @@ impl Node {
 
     /// Runs an operation for this server's local user: here, or on the nearest server that can.
     pub async fn call(&self, req: CallRequest) -> Result<Value> {
-        let me = Caller { key: self.0.id, user: self.user()? };
+        let me = Caller { key: self.0.id, user: self.user()?, agent: req.agent.clone() };
         self.route(req, me).await
     }
 
@@ -609,7 +614,7 @@ impl Node {
     async fn ask_server(&self, server: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
         let conn = tokio::time::timeout(Duration::from_secs(10), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, CALL_ALPN)).await.context("timed out")??;
         let (mut send, mut recv) = conn.open_bi().await?;
-        let request = json!({ "app": req.app, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "me": { "key": hex(&me.key), "user": me.user } });
+        let request = json!({ "app": req.app, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
         send.write_all(&serde_json::to_vec(&request)?).await?;
         send.finish()?;
         let reply = tokio::time::timeout(CALL_LIMIT + Duration::from_secs(5), recv.read_to_end(16 << 20)).await.context("timed out")??;
@@ -704,7 +709,11 @@ impl Node {
                     Ok(())
                 })?;
                 let by = (me.key != self.0.id).then_some(me.key);
-                self.append_as(&scope, &me.user, by, members::node("open", json!({ "server": hex(&self.0.id) }))).await?;
+                let mut data = json!({ "server": hex(&self.0.id) });
+                if let Some(agent) = &me.agent {
+                    data["agent"] = json!(agent);
+                }
+                self.append_as(&scope, &me.user, by, members::node("open", data)).await?;
                 Ok(json!(format!("Opened for an hour on {}.", self.server_name())))
             }
             other => bail!("the node has no operation {other}"),
@@ -834,7 +843,7 @@ impl Node {
         let key = format!("{app}/{name}/{session}");
         let since = seen.get(&key).cloned().unwrap_or(Value::Null);
         let now = now_ms();
-        let caller = Caller { key: self.0.id, user: self.user()? };
+        let caller = Caller { key: self.0.id, user: self.user()?, agent: None };
         let mut ctx = self.read_context(app, &caller)?;
         let _granted = self.grant(app, &caller, &mut ctx);
         let out = self.0.apps.hook(app, name, json!({ "event": event, "since": since }), &ctx).await?;
@@ -1058,7 +1067,7 @@ impl Node {
     /// Everything a shell needs to draw this server and its install, for this server's local user.
     pub fn state(&self) -> Value {
         let user = self.user().unwrap_or_default();
-        self.state_for(&Caller { key: self.0.id, user })
+        self.state_for(&Caller { key: self.0.id, user, agent: None })
     }
 
     /// The state as `viewer`, this server or a client it serves, sees it.
@@ -1103,7 +1112,7 @@ impl Node {
             let opens: Vec<Value> = i
                 .views
                 .get(&Scope::User(me.clone()).to_string())
-                .map(|(_, s)| s.opens.iter().map(|(by, server, time)| json!({ "by": by, "by_name": m.users.get(by).map(|u| &u.name), "server": hex(server), "time": time, "until": time + members::OPEN_FOR })).collect())
+                .map(|(_, s)| s.opens.iter().map(|(by, server, time, agent)| json!({ "by": by, "by_name": m.users.get(by).map(|u| &u.name), "agent": agent, "server": hex(server), "time": time, "until": time + members::OPEN_FOR })).collect())
                 .unwrap_or_default();
             json!({
                 "name": m.name, "root": i.r.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
@@ -1131,7 +1140,7 @@ impl Node {
 
     /// Writes one of `global`'s node entries as the local user, after checking it would count.
     pub async fn member(&self, kind: &str, data: Value) -> Result<()> {
-        self.member_as(&Caller { key: self.0.id, user: self.user()? }, kind, data).await
+        self.member_as(&Caller { key: self.0.id, user: self.user()?, agent: None }, kind, data).await
     }
 
     async fn member_as(&self, caller: &Caller, kind: &str, data: Value) -> Result<()> {
@@ -1192,8 +1201,8 @@ impl Node {
     }
 
     /// Opens `user`'s data on `server` for an hour, for the local user (see SPEC.md, "Servers").
-    pub async fn open(&self, user: &str, server: &str) -> Result<Value> {
-        let req = CallRequest { app: members::APP.into(), op: "open".into(), input: json!({ "user": user }), server: Some(server.into()), ..Default::default() };
+    pub async fn open(&self, user: &str, server: &str, agent: Option<String>) -> Result<Value> {
+        let req = CallRequest { app: members::APP.into(), op: "open".into(), input: json!({ "user": user }), server: Some(server.into()), agent, ..Default::default() };
         self.call(req).await
     }
 
@@ -1216,7 +1225,7 @@ impl Node {
             let Some(user) = user else { return Ok(()) };
             let _ = self.with(|i| Ok(i.asked.insert(caller, now_ms())));
             let node = self.clone();
-            let me = Caller { key: caller, user };
+            let me = Caller { key: caller, user, agent: None };
             tokio::spawn(async move {
                 let result = async {
                     let request: Value = serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?;
@@ -1262,6 +1271,7 @@ impl Node {
             }
             ("POST", "/v1/call") => {
                 let req: CallRequest = serde_json::from_value(body)?;
+                let me = &Caller { agent: req.agent.clone(), ..me.clone() };
                 let deployed = self.with(|i| Ok(i.r.members.apps.get(&req.app).is_some_and(|a| a.bundle.is_some())))?;
                 // An app's call runs here or the client tries another server; a driver's goes where the driver is.
                 match deployed || req.app == members::APP {
@@ -1349,7 +1359,7 @@ impl Node {
 
     /// Makes a one-time pairing code for another of the local user's machines, or, for an admin, a new user's.
     pub fn pair(&self, new_user: Option<(String, Role)>) -> Result<String> {
-        self.pair_as(&Caller { key: self.0.id, user: self.user()? }, new_user)
+        self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None }, new_user)
     }
 
     fn pair_as(&self, asker: &Caller, new_user: Option<(String, Role)>) -> Result<String> {
@@ -1457,7 +1467,7 @@ impl Node {
         let by = pairing.by.as_deref().map(unhex).transpose()?;
         let new_user = pairing.new_user.as_ref().map(|(name, role)| (name.as_str(), *role));
         let admit = members::admit(&key, &user, &request.name, server, new_user);
-        self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone() }, "admit", admit.data).await.context("this server can no longer admit that machine")?;
+        self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None }, "admit", admit.data).await.context("this server can no longer admit that machine")?;
         Ok(JoinReply { root, user })
     }
 
@@ -1642,7 +1652,8 @@ impl Node {
             ensure!(mine(&key) && (remote == key || m.trusts(&user, &remote)), "{} may not call as that user", short(&remote));
             Ok(())
         })?;
-        Ok(Caller { key, user })
+        let agent = request["me"]["agent"].as_str().map(str::to_string);
+        Ok(Caller { key, user, agent })
     }
 
     /// Finds a server of the install by name or key prefix.
@@ -1759,6 +1770,7 @@ fn app_entry(e: &Entry, m: &Members) -> AppEntry {
         kind: e.content.kind.clone(),
         user: e.user().to_string(),
         name: m.machines.get(&named).map(|k| k.name.clone()).unwrap_or_default(),
+        user_name: m.users.get(e.user()).map(|u| u.name.clone()).unwrap_or_default(),
         role: m.role_in(e.user(), &scope),
         groups: m.groups_of(e.user()),
         time: e.time(),
@@ -1811,9 +1823,9 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
     let here = node.0.id;
     if let Some(target) = &req.as_user {
         let scope = Scope::User(target.clone());
-        let open = i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.opens.iter().any(|(by, server, t)| by == &me.user && *server == here && now_ms() < t + members::OPEN_FOR));
+        let open = i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.opens.iter().any(|(by, server, t, _)| by == &me.user && *server == here && now_ms() < t + members::OPEN_FOR));
         ensure!(open, "that user's data isn't open for you on {}", node.server_name());
-        let caller = Caller { key: me.key, user: target.clone() };
+        let caller = Caller { key: me.key, user: target.clone(), agent: me.agent.clone() };
         let ctx = Context { me: node_me(node, m, &caller), now: now_ms(), scopes: handles(m, std::slice::from_ref(&scope), target), read_only: true, token: String::new() };
         return Ok(Ok((ctx, vec![scope])));
     }
@@ -1845,7 +1857,15 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
 
 fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
     let name = if caller.key == node.0.id { node.server_name() } else { m.machine(&caller.key).map(|k| k.name.clone()).unwrap_or_default() };
-    Me { key: hex(&caller.key), user: caller.user.clone(), name, role: m.user(&caller.user).map(|u| u.role) }
+    let user = m.user(&caller.user);
+    Me {
+        key: hex(&caller.key),
+        user: caller.user.clone(),
+        name,
+        role: user.map(|u| u.role),
+        user_name: user.map(|u| u.name.clone()).unwrap_or_default(),
+        agent: caller.agent.clone(),
+    }
 }
 
 /// Checks one of a call's appends: into a scope it named, or a secret of the calling app's in a scope it named, which

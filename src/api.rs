@@ -96,7 +96,7 @@ fn done() -> Reply {
 }
 
 fn local(node: &Node) -> Result<Caller, Error> {
-    Ok(Caller { key: node.id(), user: node.user()? })
+    Ok(Caller { key: node.id(), user: node.user()?, agent: None })
 }
 
 fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
@@ -195,7 +195,7 @@ async fn trust(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 
 async fn open(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     let user = node.find_user(text(&body, "user")?)?;
-    Ok(Json(json!({ "ok": node.open(&user, text(&body, "server")?).await? })))
+    Ok(Json(json!({ "ok": node.open(&user, text(&body, "server")?, body["agent"].as_str().map(str::to_string)).await? })))
 }
 
 async fn group(State(node): State<Node>, Json(body): Json<Value>) -> Reply {

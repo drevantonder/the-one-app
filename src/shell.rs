@@ -43,7 +43,7 @@ pub fn call(op: String, input: Value, caller: Me, _entries: Vec<AppEntry>) -> Re
             Ok(Err(err)) => bail!("couldn't start sh: {err}"),
             Err(_) => (-1, String::new(), format!("timed out after {timeout}s")),
         };
-        let log = Content::new("shell", "ran", json!({ "command": command, "dir": dir, "exit": exit, "by": caller.name }));
+        let log = Content::new("shell", "ran", json!({ "command": command, "dir": dir, "exit": exit, "by": caller.name, "agent": caller.agent }));
         Ok((json!({ "exit": exit, "stdout": stdout, "stderr": stderr }), vec![log]))
     })
 }

@@ -153,7 +153,7 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("You {} {server}.", if trust { "trust" } else { "no longer trust" });
         }
         ["open", user, server] => {
-            let r = post("/v1/open", json!({ "user": user, "server": server }))?;
+            let r = post("/v1/open", json!({ "user": user, "server": server, "agent": agent_from_env() }))?;
             println!("{}", r["ok"].as_str().unwrap_or("Opened."));
         }
         ["deploy", app] if flags.contains_key("bundle") => {
@@ -256,7 +256,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let mut input = flags.clone();
             let server = input.remove("server").or(input.remove("device"));
             let scopes = input.remove("scopes").and_then(|s| s.as_str().map(|s| s.split(',').map(str::trim).map(String::from).collect::<Vec<_>>()));
-            let r = post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input }))?;
+            let r = post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env() }))?;
             match &r["ok"] {
                 ok if ok["content"].is_array() => print_content(app, op, &ok["content"])?,
                 Value::String(s) => println!("{s}"),
@@ -458,20 +458,27 @@ async fn serve() -> Result<()> {
 fn mcp() -> Result<()> {
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
+    // The agent this serves, credited on its calls: the client's own name for itself, else what its environment says.
+    let mut agent = agent_from_env();
     for line in stdin.lock().lines() {
         let line = line?;
         let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
         let Some(id) = msg.get("id").cloned() else { continue };
         let result = match msg["method"].as_str().unwrap_or("") {
-            "initialize" => Ok(json!({
+            "initialize" => Ok({
+                if let Some(name) = msg["params"]["clientInfo"]["name"].as_str().filter(|n| !n.trim().is_empty()) {
+                    agent = Some(agent_name(name));
+                }
+                json!({
                 "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
                 "instructions": instructions(),
-            })),
+                })
+            }),
             "ping" => Ok(json!({})),
             "tools/list" => tools().map(|t| json!({ "tools": t })),
-            "tools/call" => Ok(call_tool(&msg["params"])),
+            "tools/call" => Ok(call_tool(&msg["params"], agent.as_deref())),
             other => Err(json!({ "code": -32601, "message": format!("unknown method {other}") })),
         };
         let reply = match result {
@@ -482,6 +489,36 @@ fn mcp() -> Result<()> {
         out.flush()?;
     }
     Ok(())
+}
+
+/// The agent running this command, if one is: `<CLI>_AGENT`, else what agent harnesses say about themselves.
+fn agent_from_env() -> Option<String> {
+    let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+    if let Some(a) = var(&format!("{}_AGENT", CLI.to_uppercase().replace('-', "_"))) {
+        return Some(a);
+    }
+    // AI_AGENT is `<name>_<version>_<kind>`, like claude-code_2-1-314_agent.
+    if let Some(a) = var("AI_AGENT") {
+        return Some(agent_name(a.split('_').next().unwrap_or(&a)));
+    }
+    let named = [("CLAUDECODE", "Claude Code"), ("CODEX_THREAD_ID", "Codex"), ("CODEX_SANDBOX", "Codex"), ("OPENCODE", "OpenCode"), ("AMP_THREAD_ID", "Amp")];
+    named.iter().find(|(k, _)| var(k).is_some()).map(|(_, n)| n.to_string())
+}
+
+/// An agent's name as people know it, from what it calls itself (an MCP client's `clientInfo.name`).
+fn agent_name(raw: &str) -> String {
+    let known = [
+        (&["claude-code", "claude code", "claude-ai", "claude"][..], "Claude Code"),
+        (&["codex", "codex-mcp-client", "codex_cli_rs", "codex-cli"][..], "Codex"),
+        (&["opencode"][..], "OpenCode"),
+        (&["amp", "amp-cli", "ampcode"][..], "Amp"),
+        (&["pi", "pi-coding-agent"][..], "Pi"),
+        (&["cursor", "cursor-vscode", "cursor-agent"][..], "Cursor"),
+        (&["gemini-cli", "gemini"][..], "Gemini CLI"),
+        (&["t3-code", "t3code"][..], "T3 Code"),
+    ];
+    let lower = raw.trim().to_lowercase();
+    known.iter().find(|(names, _)| names.contains(&lower.as_str())).map(|(_, n)| n.to_string()).unwrap_or_else(|| raw.trim().to_string())
 }
 
 fn instructions() -> String {
@@ -534,7 +571,7 @@ fn tools() -> Result<Vec<Value>, Value> {
     Ok(tools)
 }
 
-fn call_tool(params: &Value) -> Value {
+fn call_tool(params: &Value, agent: Option<&str>) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let mut input = params["arguments"].as_object().cloned().unwrap_or_default();
     let server = input.remove("server").or(input.remove("device"));
@@ -543,7 +580,7 @@ fn call_tool(params: &Value) -> Value {
     };
     let result = match app {
         "secrets" => secret_tool(op, &input).map(|ok| json!({ "ok": ok })),
-        _ => post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input })),
+        _ => post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input, "agent": agent })),
     };
     match result {
         Ok(r) => match &r["ok"] {

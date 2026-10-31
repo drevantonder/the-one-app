@@ -52,7 +52,7 @@ Examples: a laptop has owners `[user:you]`, users `[user:you]`. A team box: owne
 
 A server that should no longer hold a scope (an owner left a group, a user untrusted it, the ACL changed) deletes that scope's logs, its blobs no other entry names *(not built yet: blobs stay)*, its views and its secrets. It keeps only the end of its own log there (seq, hash, time), and if it holds the scope again it writes there only once it has its own log back, so no seq is ever written twice. Removing a user or a server deletes nothing anywhere else.
 
-**Opening a user's data.** Nothing gives anyone access to another user's data but this: someone acting for an owner of a server that holds `user:<id>` writes `open { server }` in that scope. For an hour from its time, the opener's calls on that server may run as that user, reading only (appends fail). The user sees it ("Alice opened your data on 3 Nov"). On a privileged server, that is any admin. The opener asks that server over `one/call/1`, as `{ app: "node", op: "open", input: { user } }`, since only a server that holds the scope can write in it.
+**Opening a user's data.** Nothing gives anyone access to another user's data but this: someone acting for an owner of a server that holds `user:<id>` writes `open { server, agent? }` in that scope (`agent`: the agent it was opened through). For an hour from its time, the opener's calls on that server may run as that user, reading only (appends fail). The user sees it ("Alice opened your data on 3 Nov"). On a privileged server, that is any admin. The opener asks that server over `one/call/1`, as `{ app: "node", op: "open", input: { user } }`, since only a server that holds the scope can write in it.
 
 ## Entries
 
@@ -147,7 +147,7 @@ A **pairing code** adds a server or client. It is `{ from: EndpointAddr, secret:
 
 ## Calls (ALPN `one/call/1`)
 
-A call runs an operation of an app, or of a driver for an app, as a user. One stream per call: JSON `{ app | driver, op, input, me, scopes, as? }`, where `me` is `{ key, user }` of the server or client that asked, `scopes` the scopes the call touches, and `as` a user whose data was opened for the caller (see "Servers"). Then a JSON reply: `{ ok }`, `{ error }`, or `{ elsewhere: why }` when it can't run here. *(For now, `app` also names a driver, and there is no `driver` field.)*
+A call runs an operation of an app, or of a driver for an app, as a user. One stream per call: JSON `{ app | driver, op, input, me, scopes, as? }`, where `me` is `{ key, user, agent? }` of the server or client that asked (`agent` names the agent that asked through it, such as an MCP client, "Claude Code"; older machines leave it out), `scopes` the scopes the call touches, and `as` a user whose data was opened for the caller (see "Servers"). Then a JSON reply: `{ ok }`, `{ error }`, or `{ elsewhere: why }` when it can't run here. *(For now, `app` also names a driver, and there is no `driver` field.)*
 
 **Scopes first.** The asker names the scopes a call touches before it runs; a client may leave them out, and each server then takes every scope the call may reach (see "Calls" under "Apps"). A server answers `{ elsewhere }` before running anything when it doesn't serve that user, doesn't hold every scope named, isn't ready, or lacks the app's latest deploy or the driver. So failing over to the next server never repeats a side effect. A call that names a scope it may not reach is an error.
 
@@ -168,7 +168,7 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
   name, title, icon, description, instructions,  // description: one line on what it's for
   uses: { apps: [name], drivers: [name] },
   schema: { user, group, global },  // SQL run on each empty store of that scope
-  ops: { name: { description, input, run(ctx, input) } },
+  ops: { name: { description, input, reads?, confirm?, run(ctx, input) } },  // reads: only reads; confirm: can't be undone
   on: { kind(db, entry) },          // no clock, no randomness, no I/O
   widgets: { name: { title, render(ctx) } },
   hooks: { name(ctx, { event, since }) },  // returns text for the agent
@@ -176,11 +176,11 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
 }
 ```
 
-**Stores.** An app has a private store per scope, SQLite in a Durable Object of its own, for each scope that has a `schema`. A store replays the app's entries in its scope with the app's latest deploy. For each, in replay order, `on[entry.kind]` gets the store, as `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, scope, kind, user, name, role, groups, time, data, blobs }`. `id` is `<first 8 hex of author>:<seq>`; `name` is the name of `by`, else of the author; `role` is the writer's role in the scope, and `groups` their role in each of their groups, at that point. A new deploy replays its stores from empty, beside the old ones; calls use the old until it's done *(for now: the runtime restarts with the new deploy and replays its stores before running calls)*. There are no migrations.
+**Stores.** An app has a private store per scope, SQLite in a Durable Object of its own, for each scope that has a `schema`. A store replays the app's entries in its scope with the app's latest deploy. For each, in replay order, `on[entry.kind]` gets the store, as `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, scope, kind, user, user_name, name, role, groups, time, data, blobs }`. `id` is `<first 8 hex of author>:<seq>`; `user_name` is the user's name; `name` is the name of `by`, else of the author; `role` is the writer's role in the scope, and `groups` their role in each of their groups, at that point. A new deploy replays its stores from empty, beside the old ones; calls use the old until it's done *(for now: the runtime restarts with the new deploy and replays its stores before running calls)*. There are no migrations.
 
 **Calls.** A call runs as one user. `ctx` gives it:
 
-- `me`: `{ key, user, name, role }`, the client or server that asked, and its user's role in the install.
+- `me`: `{ key, user, name, role, user_name, agent }`, the client or server that asked (`name`), its user's role in the install and name, and the agent that asked through it, or null. Calls it makes with `apps` and `drivers` carry the same agent.
 - `now()`: the time.
 - `user`, `group(id)` and `global`: the scopes the call named, each `{ id, name, role, query(sql, params), append(kind, data, blobs?), secret(name, value, hosts) }`, or null; `role` is the caller's there. `groups` lists the groups it named. `query` returns a promise.
 - `install(app, scope, installed = true)`: installs (or uninstalls) an app in a scope (`user`, `group:<id>` or `global`), with the caller's own rights there, as the caller could themselves. So an App Store is an ordinary app (`brand.toml`'s `store`).
@@ -232,7 +232,7 @@ Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CL
 - `GET /v1/state`: the brand (with its `store` app), `me` (who's asking: key, name, user; also as `client` when a client asks), this `server` (and whether it's ready), the asker's `user` (id, name, role), every `open` of their data (`opens`), and the `install` (null until it creates or joins one): its users, groups, servers (online, owners, users, privileged, who trusts each, whether each serves me, build, target, drivers) and clients (`asked`: when each last asked this server, milliseconds, or null); and every `open` of this user's data.
 - `GET /v1/apps`: every app in the install (owner, `from`, its `forks`, its running `bundle`, every deploy as `history`, where installed, title, icon, `description` and `uses`, and `built_in`, the bundle this server's release has of it, if it's built in), with instructions, operations, widgets and screens for each installed for this user.
 - `GET /v1/source/<app>?bundle=&path=`: an app's code as deployed, its latest deploy's or, with `bundle` (or its first characters), an earlier one's: `{ files: [{ path, size }] }`, or with `path` that file, `{ path, text }` (`base64` if it isn't text).
-- `POST /v1/call { app, op, input, scopes?, server?, as? }` → `{ ok }`. `server` (a name or key prefix) runs it there; otherwise it runs on the nearest server that can.
+- `POST /v1/call { app, op, input, scopes?, server?, as?, agent? }` → `{ ok }`. `server` (a name or key prefix) runs it there; otherwise it runs on the nearest server that can. `agent` names the agent asking (an MCP client's name), for apps to credit.
 - `GET /v1/widgets?scope=`: every widget, rendered; with `scope` (`user`, `group:<id>` or `global`), those of the apps installed there, each reaching only that scope, for a shell's page of it.
 - `GET /v1/screens/<app>/<screen>?params=&scope=`: an app screen as a page (see "Screens").
 - `POST /v1/create { name, user_name }` → `{ recovery }`, the recovery key's secret, given once, for 1Password. `POST /v1/pair { new_user?: { name, role } }` → `{ code }`. `POST /v1/join { code }`. Creating, joining or restoring is refused once the server belongs to an install.

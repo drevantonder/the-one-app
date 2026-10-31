@@ -56,7 +56,7 @@ async fn servers_and_a_phone_share_a_deployed_board() {
     let recovery = a.create("Test", "Andre").await.unwrap();
     assert_eq!(recovery.len(), 64, "creating gives the recovery key's secret once");
     assert!(a.create("Another", "Andre").await.is_err(), "a brand holds one install");
-    let apps = a.apps(&one::node::Caller { key: a.id(), user: a.user().unwrap() }).await.unwrap();
+    let apps = a.apps(&one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None }).await.unwrap();
     let listed = apps.iter().find(|app| app["name"] == "board").expect("the brand's board is deployed");
     assert_eq!(listed["owner"], "admins");
     assert!(listed["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == "post")), "{listed}");
@@ -144,7 +144,7 @@ async fn users_groups_trust_and_privileged_servers() {
     assert_eq!(news[0]["user"], bob.user().unwrap().as_str());
 
     // A page is a scope's installs: the board is on Everyone's, and on the group's once installed there too.
-    let me = one::node::Caller { key: andre.id(), user: andre.user().unwrap() };
+    let me = one::node::Caller { key: andre.id(), user: andre.user().unwrap(), agent: None };
     let everyone = andre.widgets(me.clone(), Some("global")).await.unwrap();
     assert!(everyone.iter().any(|w| w["app"] == "board"), "{everyone:?}");
     assert!(andre.widgets(me.clone(), Some("group:f000000000000001")).await.unwrap().is_empty());
@@ -179,7 +179,7 @@ async fn users_groups_trust_and_privileged_servers() {
     eventually("bob's own server to get what cloud wrote for him", async || sees(&bob, "user", "bob via cloud").await).await;
 
     // An admin opens bob's data on the privileged server: read only, and bob sees it.
-    andre.open(&bob.user().unwrap(), &key(&cloud)).await.unwrap();
+    andre.open(&bob.user().unwrap(), &key(&cloud), None).await.unwrap();
     let read = CallRequest { server: Some(key(&cloud)), as_user: Some(bob.user().unwrap()), ..board("news", json!({ "since": 0, "scope": "user" })) };
     let posts = andre.call(read.clone()).await.unwrap();
     assert!(posts.as_array().unwrap().iter().any(|p| p["text"] == "bob via cloud"));
@@ -264,7 +264,7 @@ async fn deploys_build_with_bun_keep_their_source_and_roll_back() {
     // Only someone acting for its owner deploys it.
     bob.join(&a.pair(Some(("Bob".into(), one::members::Role::Member))).unwrap()).await.unwrap();
     eventually("bob to know the app", async || bob.source("hello", None, None).await.is_ok()).await;
-    let bob_me = one::node::Caller { key: bob.id(), user: bob.user().unwrap() };
+    let bob_me = one::node::Caller { key: bob.id(), user: bob.user().unwrap(), agent: None };
     let refused = bob.deploy(&bob_me, "hello", &first).await.unwrap_err();
     assert!(format!("{refused:#}").contains("only someone acting for hello's owner"), "{refused:#}");
 }
@@ -273,7 +273,7 @@ async fn deploys_build_with_bun_keep_their_source_and_roll_back() {
 async fn deploy_module(node: &Node, app: &str, source: &str) {
     let bundle = one::bundle::pack(&[("app.js".into(), source.as_bytes().to_vec()), ("src/app.js".into(), source.as_bytes().to_vec())]).unwrap();
     let blob = node.put_blob(&bundle).unwrap();
-    let me = one::node::Caller { key: node.id(), user: node.user().unwrap() };
+    let me = one::node::Caller { key: node.id(), user: node.user().unwrap(), agent: None };
     if node.source(app, None, None).await.is_err() {
         node.member("app", json!({ "name": app, "owner": format!("user:{}", me.user) })).await.unwrap();
     }
@@ -310,7 +310,7 @@ async fn secrets_are_set_never_read_and_go_only_to_their_hosts() {
   },
 };"#)
     .await;
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap() };
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
     a.set_secret(&me, &one::entry::Scope::User(me.user.clone()), "keeper", "token", vec!["127.0.0.1".into()], Some("s3cret".into())).await.unwrap();
     a.append(&one::entry::Scope::User(me.user.clone()), one::members::node("install", json!({ "app": "keeper" }))).await.unwrap();
     let send = |url: String, auth: &str, body: &str| call("keeper", "send", json!({ "url": url, "auth": auth, "body": body }));
@@ -343,7 +343,7 @@ async fn secrets_are_set_never_read_and_go_only_to_their_hosts() {
     a.set_secret(&me, &one::entry::Scope::User(me.user.clone()), "keeper", "token", vec![], None).await.unwrap();
     let got = a.call(send(format!("http://127.0.0.1:{port}/"), "Bearer {{token}}", "")).await.unwrap();
     assert_eq!(got["authorization"], "Bearer {{token}}");
-    let other = one::node::Caller { key: a.id(), user: "0123456789abcdef".into() };
+    let other = one::node::Caller { key: a.id(), user: "0123456789abcdef".into(), agent: None };
     assert!(a.set_secret(&other, &one::entry::Scope::Global, "keeper", "x", vec!["a.com".into()], Some("v".into())).await.is_err());
 }
 
@@ -351,7 +351,7 @@ async fn secrets_are_set_never_read_and_go_only_to_their_hosts() {
 async fn apps_install_in_several_scopes_use_each_other_and_fork() {
     let (a, _ra) = start("apps").await;
     a.create("Apps", "Andre").await.unwrap();
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap() };
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
     let mine = one::entry::Scope::User(me.user.clone());
     a.member("group", json!({ "group": "a000000000000001", "name": "Team" })).await.unwrap();
     let team = one::entry::Scope::Group("a000000000000001".into());
@@ -362,6 +362,7 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
   ops: {
     add: { run: (ctx, { text, scope }) => { (scope ? ctx.group(scope) : ctx.user).append("note", { text }); return null; } },
     list: { run: async (ctx, { scope }) => (await (scope ? ctx.group(scope) : ctx.user).query("select text from notes")).map((n) => n.text) },
+    who: { reads: true, run: (ctx) => ctx.me },
   },
   on: { note: (db, e) => db.exec("insert into notes values (?)", [e.data.text]) },
 };"#;
@@ -375,6 +376,7 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
     echo: { run: (ctx) => ctx.drivers.shell.run({ command: "echo from a driver" }) },
     keep: { run: async (ctx, { text }) => { const hash = await ctx.blob.put(new TextEncoder().encode(text)); return new TextDecoder().decode(await ctx.blob.get(hash)); } },
     catalog: { run: async (ctx) => (await ctx.catalog()).map((a) => a.name) },
+    who: { run: (ctx) => ctx.apps.notes.who({}) },
     share: { run: (ctx, { scope }) => { ctx.install("journal", scope); return null; } },
   },
 };"#)
@@ -396,6 +398,12 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
     assert_eq!(a.call(call("journal", "keep", json!({ "text": "in a blob" }))).await.unwrap(), "in a blob");
     let names = a.call(call("journal", "catalog", json!({}))).await.unwrap();
     assert!(names.as_array().unwrap().contains(&json!("notes")), "{names}");
+    // The agent that asked is credited, and stays on the calls an app makes for it.
+    let who = a.call(CallRequest { agent: Some("Claude Code".into()), ..call("journal", "who", json!({})) }).await.unwrap();
+    assert_eq!((who["agent"].as_str(), who["user_name"].as_str()), (Some("Claude Code"), Some("Andre")), "{who}");
+    assert_eq!(a.call(call("journal", "who", json!({}))).await.unwrap()["agent"], Value::Null, "no agent, none credited");
+    let notes_ops = a.apps(&me).await.unwrap().into_iter().find(|x| x["name"] == "notes").unwrap()["ops"].clone();
+    assert_eq!(notes_ops.as_array().unwrap().iter().find(|o| o["name"] == "who").unwrap()["reads"], true, "op flags reach the catalog");
 
     // The same app in another scope: one version, data per scope.
     a.install(&me, "notes", &team, true).await.unwrap();
@@ -517,7 +525,7 @@ async fn repos_clone_push_and_take_suggestions_with_real_git() {
     assert_eq!(std::fs::read_to_string(work.join("fork/app.js")).unwrap(), "// mine\n");
     let r = a.call(call("repos", "get", json!({ "repo": "hello" }))).await.unwrap();
     assert_eq!(r["forks"], json!(["hello-too"]));
-    let html = a.screen(one::node::Caller { key: a.id(), user: a.user().unwrap() }, "repos", "repo", json!({ "repo": "hello" }), None).await.unwrap();
+    let html = a.screen(one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None }, "repos", "repo", json!({ "repo": "hello" }), None).await.unwrap();
     assert!(html.contains("one.call(\"get\""), "repos has screens");
 }
 
@@ -525,7 +533,7 @@ async fn repos_clone_push_and_take_suggestions_with_real_git() {
 async fn the_app_store_lists_adds_and_shows_code() {
     let (a, _ra) = start("store").await;
     a.create("Store", "Andre").await.unwrap();
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap() };
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
     a.member("group", json!({ "group": "b000000000000001", "name": "Team" })).await.unwrap();
     assert_eq!(a.state()["brand"]["store"], "apps");
     let listed = a.call(call("apps", "list", json!({}))).await.unwrap();
@@ -554,7 +562,7 @@ async fn the_app_store_lists_adds_and_shows_code() {
 async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
     let (a, _ra) = start("built-in").await;
     a.create_with("Built in", "Andre", &["apps"]).await.unwrap();
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap() };
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
     let app = |listed: &Value, name: &str| listed["apps"].as_array().unwrap().iter().find(|x| x["name"] == name).cloned().unwrap();
 
     let listed = a.call(call("apps", "list", json!({}))).await.unwrap();

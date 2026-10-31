@@ -38,6 +38,10 @@ pub struct Me {
     pub user: String,
     pub name: String,
     pub role: Option<Role>,
+    /// The user's name.
+    pub user_name: String,
+    /// The agent that asked (an MCP client's name, like "Claude Code"), when one did.
+    pub agent: Option<String>,
 }
 
 /// An entry as an app's `on` handlers see it.
@@ -50,6 +54,8 @@ pub struct AppEntry {
     pub kind: String,
     pub user: String,
     pub name: String,
+    /// The user's name when it was written.
+    pub user_name: String,
     pub role: Option<Role>,
     pub groups: BTreeMap<String, Role>,
     pub time: u64,

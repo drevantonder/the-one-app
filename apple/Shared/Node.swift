@@ -102,6 +102,8 @@ struct Open: Codable, Sendable, Equatable, Identifiable {
     var by: String
     var server: String
     var time: Double
+    /// The agent it was opened through, if one did it.
+    var agent: String?
 
     var id: String { "\(by).\(server).\(time)" }
 }

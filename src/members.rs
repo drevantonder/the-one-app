@@ -499,7 +499,8 @@ pub fn valid_app_name(name: &str) -> bool {
 pub struct ScopeState {
     pub installed: BTreeSet<String>,
     /// (opener, server, time)
-    pub opens: Vec<(String, Key, u64)>,
+    /// Who opened this user's data, on which server, when, and through which agent.
+    pub opens: Vec<(String, Key, u64, Option<String>)>,
     /// Each app's secrets here, by (app, name).
     pub secrets: BTreeMap<(String, String), Secret>,
 }
@@ -577,7 +578,7 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let server = unhex(e.content.data["server"].as_str().context("no server")?)?;
             ensure!(m.holds(&server, &scope), "that server doesn't hold it");
             ensure!(m.owners(&server).iter().any(|o| m.acts_for(w, o)), "only someone acting for an owner of the server opens");
-            state.opens.push((w.to_string(), server, e.time()));
+            state.opens.push((w.to_string(), server, e.time(), e.content.data["agent"].as_str().map(str::to_string)));
         }
         _ if scope == Scope::Global => {}
         other => bail!("{other} isn't a node entry of a user or group scope"),

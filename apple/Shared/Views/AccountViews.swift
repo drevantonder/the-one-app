@@ -147,7 +147,7 @@ struct AccessLogView: View {
                 ForEach(opens) { open in
                     let server = store.install?.servers.first { $0.key == open.server }?.name ?? String(open.server.prefix(8))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(store.userName(open.by)) opened your data on \(displayName(server))")
+                        Text("\(store.userName(open.by)) opened your data on \(displayName(server))\(open.agent.map { ", through \($0)" } ?? "")")
                         Text(Date(timeIntervalSince1970: open.time / 1000).formatted(date: .abbreviated, time: .shortened))
                             .font(.callout)
                             .foregroundStyle(.secondary)
