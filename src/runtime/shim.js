@@ -1,6 +1,6 @@
 // Every app runs inside this shim, in workerd. The app module (./app.js) is the app's code; this turns
 // it into a Worker whose Durable Object, one per space, holds the app's views in SQLite and answers
-// the node: folds, operations, widgets and hooks. See SPEC.md, "Apps".
+// the node: replays, operations, widgets and hooks. See SPEC.md, "Apps".
 import app from "./app.js";
 import { DurableObject } from "cloudflare:workers";
 
@@ -32,23 +32,23 @@ export class Views extends DurableObject {
   }
 
   query(q, params = []) {
-    if (!/^\s*(select|with)\b/i.test(q)) throw new Error("query only reads; fold handlers write with db.exec");
+    if (!/^\s*(select|with)\b/i.test(q)) throw new Error("query only reads; `on` handlers write with db.exec");
     return this.sql.exec(q, ...params).toArray();
   }
 
-  /// A fold sees no clock and no randomness, so it gives the same views on every device.
-  fold(fresh, entries) {
+  /// Replays entries into the views. The `on` handlers see no clock and no randomness, so they give the same views on every device.
+  replay(fresh, entries) {
     if (fresh) this.reset();
     const db = { exec: (q, params = []) => void this.sql.exec(q, ...params), query: (q, params) => this.query(q, params) };
     const saved = [Math.random, Date.now];
-    Math.random = () => { throw new Error("folds have no randomness: they must give the same views everywhere"); };
-    Date.now = () => { throw new Error("folds read the time from entry.time"); };
+    Math.random = () => { throw new Error("on handlers have no randomness: they must give the same views everywhere"); };
+    Date.now = () => { throw new Error("on handlers read the time from entry.time"); };
     try {
       for (const e of entries) {
         try {
-          app.fold?.[e.kind]?.(db, e);
+          app.on?.[e.kind]?.(db, e);
         } catch (err) {
-          console.warn(`${app.name} fold of ${e.kind} failed: ${err.message}`);
+          console.warn(`${app.name} on ${e.kind} failed: ${err.message}`);
         }
       }
     } finally {
@@ -60,8 +60,8 @@ export class Views extends DurableObject {
     const what = new URL(req.url).pathname.split("/").pop();
     const body = await req.json();
     try {
-      if (what === "fold") {
-        this.fold(body.fresh, body.entries);
+      if (what === "replay") {
+        this.replay(body.fresh, body.entries);
         return json({ ok: null });
       }
       const appends = [];

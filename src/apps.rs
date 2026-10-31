@@ -1,6 +1,6 @@
 //! Apps run in workerd, Cloudflare's open-source Workers runtime, which the node starts beside itself.
 //! Each app is an ES module inside `runtime/shim.js`: a Worker with a Durable Object per space that
-//! holds the app's views in SQLite. The node folds entries into them and asks them to run operations.
+//! holds the app's views in SQLite. The node replays entries into them and asks them to run operations.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -34,9 +34,9 @@ pub struct Me {
     pub name: String,
 }
 
-/// An entry as a fold handler sees it.
+/// An entry as an app's `on` handlers see it.
 #[derive(Clone, Debug, Serialize)]
-pub struct Folded {
+pub struct AppEntry {
     pub app: String,
     pub kind: String,
     pub author: String,
@@ -52,11 +52,11 @@ pub struct Outcome {
     pub appends: Vec<Content>,
 }
 
-/// One app's part of a fold: its new entries, or all of them into fresh views.
-pub struct FoldJob {
+/// One app's part of a replay: its new entries, or all of them into fresh views.
+pub struct Replay {
     pub app: String,
     pub fresh: bool,
-    pub entries: Vec<Folded>,
+    pub entries: Vec<AppEntry>,
 }
 
 #[derive(Clone)]
@@ -153,13 +153,13 @@ impl Apps {
         Ok((reply["ok"].clone(), appends))
     }
 
-    pub async fn fold(&self, space: Key, jobs: Vec<FoldJob>) -> Result<()> {
+    pub async fn replay(&self, space: Key, jobs: Vec<Replay>) -> Result<()> {
         for job in jobs {
             if job.entries.is_empty() && !job.fresh {
                 continue;
             }
-            if let Err(err) = self.ask(&job.app, "fold", Some(space), json!({ "fresh": job.fresh, "entries": job.entries })).await {
-                tracing::warn!("{} fold: {err:#}", job.app);
+            if let Err(err) = self.ask(&job.app, "replay", Some(space), json!({ "fresh": job.fresh, "entries": job.entries })).await {
+                tracing::warn!("{} replay: {err:#}", job.app);
             }
         }
         Ok(())

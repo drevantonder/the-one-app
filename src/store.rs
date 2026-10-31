@@ -119,7 +119,7 @@ impl Store {
         .collect()
     }
 
-    /// Every entry, in fold order.
+    /// Every entry, in replay order.
     pub fn ordered(&self) -> Result<Vec<Entry>> {
         let mut stmt = self.db.prepare("select header, body from entries order by time, author, seq")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)))?;

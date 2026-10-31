@@ -1,4 +1,4 @@
-//! Membership: who is in a space, folded from its `space` entries. See SPEC.md, "Membership".
+//! Membership: who is in a space, rebuilt by replaying its `space` entries. See SPEC.md, "Membership".
 
 use std::collections::BTreeMap;
 
@@ -27,7 +27,7 @@ pub struct Member {
     pub role: Role,
     /// A device that keeps no log (a phone): others ask it nothing and don't sync with it.
     pub client: bool,
-    /// Every name it had, from when: folds see the name a device had when it wrote.
+    /// Every name it had, from when: apps see the name a device had when it wrote.
     #[serde(skip)]
     pub names: Vec<(Order, String)>,
     #[serde(skip)]
@@ -54,8 +54,8 @@ impl Member {
 }
 
 impl Members {
-    /// Folds a space's entries (any order is fine; only `space` entries count).
-    pub fn fold(space: &Key, entries: &[Entry]) -> Members {
+    /// Replays a space's entries (any order is fine; only `space` entries count).
+    pub fn replay(space: &Key, entries: &[Entry]) -> Members {
         let mut members = Members::default();
         let mut sorted: Vec<&Entry> = entries.iter().filter(|e| e.content.app == APP).collect();
         sorted.sort_by_key(|e| e.order());
@@ -214,7 +214,7 @@ mod tests {
         let mut impostor = Dev::new(2);
         let id = impostor.id();
         let fake = impostor.write(space, 1, genesis(&SigningKey::from([7; 32]), &id, "Home", "x", "y"));
-        assert!(Members::fold(&space, &[fake]).devices.is_empty());
+        assert!(Members::replay(&space, &[fake]).devices.is_empty());
     }
 
     #[test]
@@ -227,7 +227,7 @@ mod tests {
         entries.push(phone.write(space, 4, admit(&laptop.id(), "andre", "laptop", Role::Member)));
         entries.push(phone.write(space, 5, admit(&Dev::new(6).id(), "eve", "eve's", Role::Member)));
         entries.push(stranger.write(space, 6, admit(&Dev::new(7).id(), "sam", "sam's admin", Role::Admin)));
-        let m = Members::fold(&space, &entries);
+        let m = Members::replay(&space, &entries);
         let names: Vec<&str> = m.current_devices().map(|d| d.name.as_str()).collect();
         assert_eq!(m.current_devices().count(), 4, "{names:?}");
         assert!(m.current(&laptop.id()).is_some());
@@ -241,7 +241,7 @@ mod tests {
         let phone = Dev::new(3);
         entries.push(admin.write(space, 2, admit(&phone.id(), "andre", "phone", Role::Member)));
         entries.push(admin.write(space, 10, remove(&phone.id())));
-        let m = Members::fold(&space, &entries);
+        let m = Members::replay(&space, &entries);
         assert!(m.current(&phone.id()).is_none());
         assert!(m.active(&phone.id(), (5, phone.id(), 0)).is_some(), "what it wrote before removal still counts");
         assert!(m.active(&phone.id(), (11, phone.id(), 0)).is_none(), "nothing it writes after does");
@@ -254,16 +254,16 @@ mod tests {
         entries.push(admin.write(space, 2, admit(&phone.id(), "andre", "phone", Role::Member)));
         entries.push(admin.write(space, 3, remove(&phone.id())));
         entries.push(admin.write(space, 4, admit(&phone.id(), "andre", "phone", Role::Member)));
-        let m = Members::fold(&space, &entries);
+        let m = Members::replay(&space, &entries);
         assert!(m.current(&phone.id()).is_none());
         assert!(m.active(&phone.id(), (2, phone.id(), 9)).is_some(), "what it wrote while a member still counts");
     }
 
     #[test]
-    fn folds_see_the_name_a_device_had_when_it_wrote() {
+    fn apps_see_the_name_a_device_had_when_it_wrote() {
         let (_, space, mut admin, mut entries) = setup();
         entries.push(admin.write(space, 5, rename(&admin.id(), "new name")));
-        let m = Members::fold(&space, &entries);
+        let m = Members::replay(&space, &entries);
         let me = m.current(&admin.id()).unwrap();
         assert_eq!(me.name_at((3, admin.id(), 0)), "mac");
         assert_eq!(me.name_at((6, admin.id(), 0)), "new name");
@@ -271,13 +271,13 @@ mod tests {
     }
 
     #[test]
-    fn fold_order_doesnt_depend_on_arrival_order() {
+    fn replay_order_doesnt_depend_on_arrival_order() {
         let (_, space, mut admin, mut entries) = setup();
         entries.push(admin.write(space, 2, admit(&Dev::new(3).id(), "andre", "phone", Role::Member)));
         entries.push(admin.write(space, 3, rename(&Dev::new(3).id(), "Andre's phone")));
-        let forwards = Members::fold(&space, &entries);
+        let forwards = Members::replay(&space, &entries);
         entries.reverse();
-        let backwards = Members::fold(&space, &entries);
+        let backwards = Members::replay(&space, &entries);
         assert_eq!(format!("{:?}", forwards.devices), format!("{:?}", backwards.devices));
     }
 }

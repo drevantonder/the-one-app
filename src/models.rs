@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
-use crate::apps::{Folded, Me};
+use crate::apps::{AppEntry, Me};
 use crate::native::Reply;
 
 const OLLAMA: &str = "http://127.0.0.1:11434";
@@ -29,7 +29,7 @@ pub fn describe() -> Value {
     })
 }
 
-pub fn call(op: String, input: Value, _caller: Me, _entries: Vec<Folded>) -> Reply {
+pub fn call(op: String, input: Value, _caller: Me, _entries: Vec<AppEntry>) -> Reply {
     Box::pin(async move {
         let result = tokio::task::spawn_blocking(move || -> Result<Value> {
             match op.as_str() {

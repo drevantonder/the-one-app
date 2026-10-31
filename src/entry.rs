@@ -6,7 +6,7 @@ use p2panda_core::{Body, Hash, Header, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL: u32 = 4;
+pub const PROTOCOL: u32 = 5;
 
 /// The audience every entry has in protocol version 1.
 pub const SPACE_LOG: &str = "space";
@@ -35,7 +35,7 @@ pub struct Entry {
     pub content: Content,
 }
 
-/// Where an entry sits in the fold order: (time, author, seq).
+/// Where an entry sits in the replay order: (time, author, seq).
 pub type Order = (u64, Key, u32);
 
 impl Entry {

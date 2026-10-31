@@ -109,7 +109,7 @@ pub fn announcement(describe: &Value) -> Content {
     Content { app: crate::release::APP.into(), kind: "provides".into(), data: describe.clone() }
 }
 
-/// The newest description each of `user`'s devices announced for each app, in fold order.
+/// The newest description each of `user`'s devices announced for each app, in replay order.
 pub fn announced(members: &Members, entries: &[Entry], user: &str) -> Vec<(Key, Value)> {
     let mut newest: HashMap<(Key, String), Value> = HashMap::new();
     for e in entries.iter().filter(|e| e.content.app == crate::release::APP && e.content.kind == "provides") {

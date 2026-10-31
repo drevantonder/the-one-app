@@ -104,12 +104,12 @@ fn run(seed: u64) {
     let everything: BTreeSet<[u8; 32]> = devices.iter().flat_map(|d| d.written.iter().copied()).collect();
     let reference: Vec<[u8; 32]> = devices[0].store.ordered().unwrap().iter().map(|e| *e.hash().as_bytes()).collect();
     assert_eq!(reference.iter().copied().collect::<BTreeSet<_>>(), everything, "seed {seed}: an entry was lost");
-    let members = Members::fold(&space, &devices[0].store.ordered().unwrap());
+    let members = Members::replay(&space, &devices[0].store.ordered().unwrap());
     assert_eq!(members.current_devices().count(), n, "seed {seed}: membership is incomplete");
     for d in &devices[1..] {
         let order: Vec<[u8; 32]> = d.store.ordered().unwrap().iter().map(|e| *e.hash().as_bytes()).collect();
-        assert_eq!(order, reference, "seed {seed}: devices disagree on fold order");
-        let theirs = Members::fold(&space, &d.store.ordered().unwrap());
+        assert_eq!(order, reference, "seed {seed}: devices disagree on replay order");
+        let theirs = Members::replay(&space, &d.store.ordered().unwrap());
         assert_eq!(format!("{:?}", theirs.devices.keys().collect::<Vec<_>>()), format!("{:?}", members.devices.keys().collect::<Vec<_>>()), "seed {seed}: devices disagree on members");
     }
 }

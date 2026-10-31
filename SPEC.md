@@ -21,18 +21,18 @@ Each device writes one log per space and audience. Its entries are numbered from
 
 ## Order
 
-The **fold order** is `(time, author, seq)`, compared as integers, then key bytes, then integers. Every view is a fold of all entries in that order, so it is the same on every device.
+The **replay order** is `(time, author, seq)`, compared as integers, then key bytes, then integers. Every view is rebuilt by replaying every device's entries in that order, so it is the same on every device.
 
 ## Membership
 
-Membership is the fold of entries whose app is `space`:
+Membership is rebuilt by replaying the entries whose app is `space`:
 
 - `genesis`: `{ name, root_sig, user, device_name }`. The first entry of a space. `root_sig` is the space key's signature over `author ‖ name`. The author becomes an admin, with that user and device name.
 - `admit`: `{ device, user, name, role, client? }`. `client` marks a device that keeps no log (a phone); nobody syncs with it. Valid when written by an admin, or by a member admitting a device for their own `user` as a `member`. `role` is `admin` or `member`. A removed device is never admitted again; it joins with a new key.
-- `remove`: `{ device }`. Valid when written by an admin. Entries the removed device writes after the `remove` (in fold order) are ignored.
+- `remove`: `{ device }`. Valid when written by an admin. Entries the removed device writes after the `remove` (in replay order) are ignored.
 - `rename`: `{ device, name }`. Valid when written by that device or an admin.
 
-Folds of other apps only see entries whose author was a member when they were written, under the name it had then.
+Apps only see entries whose author was a member when they were written, under the name it had then.
 
 ## Sync (ALPN `one/sync/1`)
 
@@ -57,7 +57,7 @@ A blob is bytes named by their BLAKE3 hash. A member sends a hash (64 hex charac
 
 ## Releases
 
-The app `node` is the node's own, and other apps' folds never see it. A release of the node is an entry with kind `release`: `{ commit, target, blob, size, committed }`, where `committed` is when the commit was made (seconds since 1970), where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin count. A node whose own build differs from the newest release for its target, and isn't newer than it, fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead. Each node also writes `running { commit, target }` once per build, so everyone can see what each device runs.
+The app `node` is the node's own, and other apps never see it. A release of the node is an entry with kind `release`: `{ commit, target, blob, size, committed }`, where `committed` is when the commit was made (seconds since 1970), where `target` is a Rust target triple and `blob` holds the binary. Only releases written by an admin count. A node whose own build differs from the newest release for its target, and isn't newer than it, fetches the blob (from the author, else any member), replaces its binary and exits; its service manager starts the new one. Nodes inside an app bundle update with the app instead. Each node also writes `running { commit, target }` once per build, so everyone can see what each device runs.
 
 ## Providers
 
@@ -91,14 +91,14 @@ An app is JavaScript: one ES module, run in workerd (Cloudflare's open-source Wo
   name, title, icon, instructions,
   schema,                         // SQL run on its empty view database
   ops: { name: { description, input, run(ctx, input) } },
-  fold: { kind(db, entry) },      // no clock, no randomness, no I/O
+  on: { kind(db, entry) },        // no clock, no randomness, no I/O
   widgets: { name: { title, render(ctx) } },
   hooks: { name(ctx, { event, since }) },  // returns text for the agent
   screens: { name: { title, html } },      // `main` is the one a shell opens first
 }
 ```
 
-`ctx` has `append(kind, data)`, `query(sql, params)`, `me` (who asked: `{ space, device, user, name }`) and `now()`. A fold handler gets `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, app, kind, author, user, name, time, data }`, where `id` is `<first 8 hex of author>:<seq>`. Entries an operation appends are written by the device that ran it. Each app keeps its views in a Durable Object per space, in SQLite. A call that takes longer than 30 seconds stops the runtime, which starts again.
+`ctx` has `append(kind, data)`, `query(sql, params)`, `me` (who asked: `{ space, device, user, name }`) and `now()`. For each of the app's entries, in replay order, `on[entry.kind]` gets `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, app, kind, author, user, name, time, data }`, where `id` is `<first 8 hex of author>:<seq>`. Entries an operation appends are written by the device that ran it. Each app keeps its views in a Durable Object per space, in SQLite. A call that takes longer than 30 seconds stops the runtime, which starts again.
 
 ## Screens
 

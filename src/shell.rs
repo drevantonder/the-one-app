@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::bail;
 use serde_json::{Value, json};
 
-use crate::apps::{Folded, Me};
+use crate::apps::{AppEntry, Me};
 use crate::entry::Content;
 use crate::native::Reply;
 
@@ -26,7 +26,7 @@ pub fn describe() -> Value {
     })
 }
 
-pub fn call(op: String, input: Value, caller: Me, _entries: Vec<Folded>) -> Reply {
+pub fn call(op: String, input: Value, caller: Me, _entries: Vec<AppEntry>) -> Reply {
     Box::pin(async move {
         if op != "run" {
             bail!("shell has no operation {op}");

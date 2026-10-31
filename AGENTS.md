@@ -4,10 +4,10 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 
 ## Principles
 
-- Six primitives: key, log, fold, blob, call, app. A feature that needs a seventh is designed wrong until proven otherwise.
+- Six primitives: key, log, replay, blob, call, app. A feature that needs a seventh is designed wrong until proven otherwise.
 - The core never names an app. Built-in apps use exactly what a user's app can.
 - No peer is privileged. Anything a cloud peer does, a home box could do.
-- Folds are deterministic: the same entries in the same order give the same views, on every device, every time.
+- Replay is deterministic: the same entries in the same order give the same views, on every device, every time.
 - Dumb beats clever. Delete before adding. No dependency without a reason written in its commit.
 - The old One App and the PTC App are feature lists, not code to copy.
 

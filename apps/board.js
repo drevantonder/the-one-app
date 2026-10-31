@@ -152,7 +152,7 @@ At the start of every session, call board_read with no topic and do what the top
     },
   },
 
-  fold: {
+  on: {
     post(db, e) {
       db.exec("insert or ignore into posts values (?, ?, ?, ?, ?, ?, ?)", [e.id, e.data.topic || "", e.data.text, e.author, e.user, e.data.by || e.name, e.data.at || e.time]);
     },

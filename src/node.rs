@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::apps::{Apps, FoldJob, Folded, Me};
+use crate::apps::{Apps, Replay, AppEntry, Me};
 use crate::entry::{Content, Entry, Key, Order, SPACE_LOG, hex, short, unhex};
 use crate::release::{self, Release};
 use crate::space::{self, Members, Role};
@@ -53,7 +53,7 @@ struct Space {
     builds: HashMap<Key, String>,
     /// What each of this user's devices announced it provides (SPEC.md, "Providers").
     provides: Vec<(Key, Value)>,
-    folded: Option<Order>,
+    replayed: Option<Order>,
     /// Senders to every live sync session for this space, by peer device.
     sessions: HashMap<Key, mpsc::UnboundedSender<Msg>>,
 }
@@ -157,7 +157,7 @@ impl Node {
         for entry in std::fs::read_dir(dir.join("spaces")).into_iter().flatten().flatten() {
             if let Ok(space) = unhex(&entry.file_name().to_string_lossy()) {
                 node.open_space(space).with_context(|| format!("open space {}", short(&space)))?;
-                node.refold(space).await?;
+                node.replay_all(space).await?;
             }
         }
         let router = Router::builder(endpoint)
@@ -250,9 +250,9 @@ impl Node {
         let dir = self.space_dir(&space);
         let file: SpaceFile = serde_json::from_slice(&std::fs::read(dir.join("space.json"))?)?;
         let store = Store::open(&dir.join("entries.db"), space)?;
-        let members = Members::fold(&space, &store.ordered()?);
+        let members = Members::replay(&space, &store.ordered()?);
         let paired_by = file.paired_by.and_then(|h| unhex(&h).ok());
-        self.0.spaces.lock().unwrap().insert(space, Space { store, members, user: file.user, paired_by, builds: HashMap::new(), provides: Vec::new(), folded: None, sessions: HashMap::new() });
+        self.0.spaces.lock().unwrap().insert(space, Space { store, members, user: file.user, paired_by, builds: HashMap::new(), provides: Vec::new(), replayed: None, sessions: HashMap::new() });
         Ok(())
     }
 
@@ -296,7 +296,7 @@ impl Node {
         Ok(entry)
     }
 
-    /// Folds new entries and passes them on to every session but the one they came from.
+    /// Replays new entries into the apps and passes them on to every session but the one they came from.
     async fn after(&self, space: Key, new: &[Entry], from: Option<Key>) -> Result<()> {
         if new.is_empty() {
             return Ok(());
@@ -306,7 +306,7 @@ impl Node {
             let s = spaces.get_mut(&space).context("no such space")?;
             let membership = new.iter().any(|e| e.content.app == space::APP);
             if membership {
-                s.members = Members::fold(&space, &s.store.ordered()?);
+                s.members = Members::replay(&space, &s.store.ordered()?);
                 let members = &s.members;
                 s.sessions.retain(|peer, _| members.current(peer).is_some());
             }
@@ -321,25 +321,25 @@ impl Node {
                 }
             }
             // Membership changes who counts, so every view is rebuilt. Otherwise an app is rebuilt only
-            // if an entry arrived late (before something already folded); the rest just fold what's new.
+            // if an entry arrived late (before something already replayed); the rest just replay what's new.
             let late: std::collections::BTreeSet<String> =
-                new.iter().filter(|e| membership || s.folded.is_some_and(|f| e.order() <= f)).map(|e| e.content.app.clone()).collect();
-            let all = if membership || !late.is_empty() { to_fold(&s.members, &s.store.ordered()?) } else { Vec::new() };
-            let fresh = to_fold(&s.members, &sorted(new));
+                new.iter().filter(|e| membership || s.replayed.is_some_and(|f| e.order() <= f)).map(|e| e.content.app.clone()).collect();
+            let all = if membership || !late.is_empty() { for_apps(&s.members, &s.store.ordered()?) } else { Vec::new() };
+            let fresh = for_apps(&s.members, &sorted(new));
             let mut apps: Vec<String> = new.iter().map(|e| e.content.app.clone()).collect();
             apps.sort();
             apps.dedup();
-            let jobs: Vec<FoldJob> = if membership {
-                self.0.apps_names.iter().map(|app| FoldJob { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() }).collect()
+            let jobs: Vec<Replay> = if membership {
+                self.0.apps_names.iter().map(|app| Replay { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() }).collect()
             } else {
                 apps.iter()
                     .map(|app| match late.contains(app) {
-                        true => FoldJob { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() },
-                        false => FoldJob { app: app.clone(), fresh: false, entries: fresh.iter().filter(|e| &e.app == app).cloned().collect() },
+                        true => Replay { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() },
+                        false => Replay { app: app.clone(), fresh: false, entries: fresh.iter().filter(|e| &e.app == app).cloned().collect() },
                     })
                     .collect()
             };
-            s.folded = s.folded.max(new.iter().map(Entry::order).max());
+            s.replayed = s.replayed.max(new.iter().map(Entry::order).max());
             (jobs, apps)
         };
         if new.iter().any(|e| e.content.app == release::APP) {
@@ -353,23 +353,23 @@ impl Node {
                 self.sync_native(space, native.name);
             }
         }
-        self.0.apps.fold(space, jobs).await?;
+        self.0.apps.replay(space, jobs).await?;
         self.emit(Event::Changed { space: hex(&space), apps });
         Ok(())
     }
 
-    async fn refold(&self, space: Key) -> Result<()> {
+    async fn replay_all(&self, space: Key) -> Result<()> {
         let all = {
             let mut spaces = self.0.spaces.lock().unwrap();
             let s = spaces.get_mut(&space).context("no such space")?;
             let entries = s.store.ordered()?;
-            s.folded = entries.iter().map(Entry::order).max();
+            s.replayed = entries.iter().map(Entry::order).max();
             s.builds = release::builds(&entries);
             s.provides = crate::providers::announced(&s.members, &entries, &s.user);
-            to_fold(&s.members, &entries)
+            for_apps(&s.members, &entries)
         };
-        let jobs = self.0.apps_names.iter().map(|app| FoldJob { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() }).collect();
-        self.0.apps.fold(space, jobs).await
+        let jobs = self.0.apps_names.iter().map(|app| Replay { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() }).collect();
+        self.0.apps.replay(space, jobs).await
     }
 
     /// Who `device` is in `space`, as apps see them.
@@ -1032,10 +1032,10 @@ impl Node {
     }
 
     /// Every entry an app has in a space, by members, oldest first.
-    fn app_entries(&self, space: Key, app: &str) -> Result<Vec<Folded>> {
+    fn app_entries(&self, space: Key, app: &str) -> Result<Vec<AppEntry>> {
         let spaces = self.0.spaces.lock().unwrap();
         let s = spaces.get(&space).context("no such space")?;
-        Ok(to_fold(&s.members, &s.store.ordered()?).into_iter().filter(|e| e.app == app).collect())
+        Ok(for_apps(&s.members, &s.store.ordered()?).into_iter().filter(|e| e.app == app).collect())
     }
 
     fn sync_native(&self, space: Key, app: &'static str) {
@@ -1072,14 +1072,14 @@ impl Node {
     }
 }
 
-/// The entries app folds see: by members, minus membership itself.
-fn to_fold(members: &Members, entries: &[Entry]) -> Vec<Folded> {
+/// The entries apps see: by members, minus membership itself.
+fn for_apps(members: &Members, entries: &[Entry]) -> Vec<AppEntry> {
     entries
         .iter()
         .filter(|e| e.content.app != space::APP && e.content.app != release::APP)
         .filter_map(|e| {
             let m = members.active(&e.author(), e.order())?;
-            Some(Folded {
+            Some(AppEntry {
                 app: e.content.app.clone(),
                 kind: e.content.kind.clone(),
                 author: hex(&e.author()),

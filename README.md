@@ -13,7 +13,7 @@ Your devices, and your team's, as one place for apps and agents.
 
 Every device you own runs a small node. Together they form a **space**: they find each other by key over [iroh](https://iroh.computer), with no account and no VPN, and keep working when some of them are off. Apps run on your own devices and use their compute; agents reach them over MCP or the CLI; phones join as clients.
 
-No device is in charge. Everything anyone does is a signed entry in their device's log, and every view is a fold of everyone's logs, so every device sees the same thing once it has caught up.
+No device is in charge. Everything anyone does is a signed entry in their device's log, and every view is rebuilt by replaying everyone's logs in one shared order, so every device sees the same thing once it has caught up.
 
 ## What's in it
 

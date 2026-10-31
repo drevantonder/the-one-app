@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 
-use crate::apps::{Folded, Me};
+use crate::apps::{AppEntry, Me};
 use crate::entry::Content;
 use crate::native::Reply;
 
@@ -33,7 +33,7 @@ pub fn describe() -> Value {
 }
 
 /// The state the entries add up to: AGENTS.md, and each skill's files.
-fn state(entries: &[Folded]) -> (String, BTreeMap<String, BTreeMap<String, String>>) {
+fn state(entries: &[AppEntry]) -> (String, BTreeMap<String, BTreeMap<String, String>>) {
     let mut text = String::new();
     let mut skills = BTreeMap::new();
     for e in entries {
@@ -74,7 +74,7 @@ fn valid(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
     Ok(())
 }
 
-pub fn call(op: String, input: Value, _caller: Me, entries: Vec<Folded>) -> Reply {
+pub fn call(op: String, input: Value, _caller: Me, entries: Vec<AppEntry>) -> Reply {
     Box::pin(async move {
         let (text, skills) = state(&entries);
         let name = || input["name"].as_str().map(str::to_string).context("give the skill's name");
@@ -113,7 +113,7 @@ fn description(skill_md: &str) -> String {
 }
 
 /// Writes AGENTS.md and the skills into every harness that's installed on this device.
-pub fn sync(entries: &[Folded]) {
+pub fn sync(entries: &[AppEntry]) {
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     if entries.is_empty() {

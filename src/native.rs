@@ -8,7 +8,7 @@ use std::pin::Pin;
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::apps::{Folded, Me};
+use crate::apps::{AppEntry, Me};
 use crate::entry::Content;
 
 pub type Reply = Pin<Box<dyn Future<Output = Result<(Value, Vec<Content>)>> + Send>>;
@@ -19,9 +19,9 @@ pub struct Native {
     /// Whether `call` needs the app's entries (reading them all costs a pass over the log).
     pub entries: bool,
     /// Runs an operation, given every entry the app has in the space, oldest first.
-    pub call: fn(op: String, input: Value, caller: Me, entries: Vec<Folded>) -> Reply,
+    pub call: fn(op: String, input: Value, caller: Me, entries: Vec<AppEntry>) -> Reply,
     /// Brings this device in line with the app's entries, after they change and when the node starts.
-    pub sync: Option<fn(entries: &[Folded])>,
+    pub sync: Option<fn(entries: &[AppEntry])>,
 }
 
 /// The apps a build of the node runs: JavaScript ones as (name, source), and native ones.
