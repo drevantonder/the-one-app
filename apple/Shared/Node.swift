@@ -81,10 +81,28 @@ struct Server: Codable, Sendable, Equatable, Identifiable {
     var trusted_by: [String]?
     var target: String?
     var drivers: [String]?
+    /// How loaded it is, as it last said (SPEC.md "Sync").
+    var load: Load?
 
     var id: String { key }
     var isOnline: Bool { online == true }
     var isPrivileged: Bool { privileged == true }
+}
+
+struct Load: Codable, Sendable, Equatable {
+    struct Space: Codable, Sendable, Equatable { var used: Double; var total: Double }
+    var memory: Space?
+    /// Percent busy, oldest first.
+    var cpu: [Int]?
+
+    /// "Memory 12.2 of 32 GB · CPU 12%", memory in GB as macOS counts them (2^30 bytes).
+    var summary: String? {
+        let gb = { (b: Double) in (b / 1_073_741_824).formatted(.number.precision(.fractionLength(1))) }
+        var parts: [String] = []
+        if let m = memory, m.total > 0 { parts.append(String(localized: "Memory \(gb(m.used)) of \(gb(m.total)) GB")) }
+        if let c = cpu?.last { parts.append(String(localized: "CPU \(c)%")) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 }
 
 struct ClientInfo: Codable, Sendable, Equatable, Identifiable {

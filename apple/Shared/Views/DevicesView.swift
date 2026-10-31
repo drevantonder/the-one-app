@@ -89,6 +89,9 @@ private struct ServerRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName(server.name)).font(.body.weight(.medium))
                 Text(error ?? detail).font(.callout).foregroundStyle(error == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
+                if server.isOnline, let load = server.load?.summary {
+                    Text(load).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                }
             }
             Spacer()
             if mayTrust(me) {
