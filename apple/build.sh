@@ -59,8 +59,10 @@ if [ "${1:-}" = --release ]; then
 	fi
 fi
 
+# Only one copy may run: ask the running app to quit, wait for it, and stop it if it won't, before the new one opens.
 osascript -e "quit app id \"$BUNDLE_ID\"" 2>/dev/null || true
-sleep 1
+for _ in $(seq 20); do pgrep -f "/Contents/MacOS/$BRAND_NAME\$" >/dev/null || break; sleep 0.5; done
+pkill -f "/Contents/MacOS/$BRAND_NAME\$" 2>/dev/null && sleep 1 || true
 dest="$HOME/Applications/$BRAND_NAME.app"
 rm -rf "$dest"
 ditto "$app" "$dest"

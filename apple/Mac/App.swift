@@ -6,6 +6,7 @@ struct MacApp: App {
     @State private var store: Store
 
     init() {
+        SingleCopy.claim()
         let store = Store(node: .local)
         store.startNode = NodeLauncher.start
         store.preferredDeviceName = Host.current().localizedName
@@ -31,6 +32,10 @@ struct MacApp: App {
         }
         .defaultSize(width: 1000, height: 700)
         .commands {
+            CommandGroup(before: .sidebar) {
+                Button(store.sidebarFolded ? "Unfold Sidebar" : "Fold Sidebar to Icons") { withAnimation(.snappy) { store.sidebarFolded.toggle() } }
+                    .keyboardShortcut("\\", modifiers: .command)
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Pair a Phone or Computer…") { store.sheet = .pair }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
@@ -82,5 +87,28 @@ enum NodeLauncher {
         process.arguments = ["serve"]
         try process.run()
         child = process
+    }
+}
+
+/// Only one copy of the app runs. A copy that starts while others run asks them to quit (after an update, the new
+/// one is the one to keep) and stops any that won't; but a copy outside ~/Applications, such as one an update left
+/// half staged, defers to the one there and quits itself.
+enum SingleCopy {
+    static func claim() {
+        let me = NSRunningApplication.current
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "").filter { $0 != me }
+        guard !others.isEmpty else { return }
+        let home = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Applications").standardizedFileURL.path
+        let atHome = { (url: URL?) in url?.deletingLastPathComponent().standardizedFileURL.path == home }
+        if !atHome(Bundle.main.bundleURL), let keeper = others.first(where: { atHome($0.bundleURL) }) {
+            keeper.activate()
+            exit(0)
+        }
+        others.forEach { $0.terminate() }
+        let deadline = Date.now.addingTimeInterval(5)
+        while others.contains(where: { !$0.isTerminated }), Date.now < deadline {
+            RunLoop.current.run(until: .now.addingTimeInterval(0.1))
+        }
+        others.filter { !$0.isTerminated }.forEach { $0.forceTerminate() }
     }
 }
