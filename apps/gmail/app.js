@@ -200,48 +200,6 @@ async function metadata(ctx, email, ms) {
   return out;
 }
 
-// ---- new mail ----
-
-/// A name to show for a From header: the name, else the address.
-const sender = (from) => (/^\s*"?([^"<]+?)"?\s*</.exec(from)?.[1] || from).trim();
-
-/// Each account's unread count, kept for Gmail's badge, and a push to the person's phones for each message new since
-/// the last look. The first look at an account only takes note of what's there.
-async function check(ctx) {
-  if (!ctx.user) return "Gmail isn't installed for you here.";
-  const kept = new Map((await ctx.user.query("select * from mail")).map((r) => [r.email, r]));
-  const lines = [];
-  for (const { email } of await accounts(ctx)) {
-    try {
-      const inbox = await api(ctx, email, "GET", "labels/INBOX");
-      const r = await api(ctx, email, "GET", "messages", { query: { q: "in:inbox is:unread newer_than:2d", maxResults: 20 } });
-      const ids = (r.messages || []).map((m) => m.id);
-      const was = kept.get(email);
-      const seen = new Set(was ? JSON.parse(was.seen) : ids);
-      const fresh = ids.filter((id) => !seen.has(id));
-      const unread = inbox.threadsUnread || 0;
-      if (!was || was.unread !== unread || was.seen !== JSON.stringify(ids)) ctx.user.append("mail", { email, unread, seen: ids });
-      if (fresh.length) await push(ctx, email, await metadata(ctx, email, fresh.map((id) => ({ id }))));
-      lines.push(`${email}: ${unread} unread${fresh.length ? `, ${fresh.length} new` : ""}`);
-    } catch (e) {
-      lines.push(`${email}: ${e.message}`);
-    }
-  }
-  return lines.join("\n") || "No account is signed in.";
-}
-
-/// Pushes new messages to the person's own phones: one each, or one for them all past three. Without push set up, or
-/// a phone, nothing happens.
-async function push(ctx, email, ms) {
-  const of = (m) => ({ title: sender(header(m.payload, "From")) || email, body: header(m.payload, "Subject") || "(no subject)" });
-  const pushes = ms.length > 3
-    ? [{ title: `${ms.length} new emails`, body: ms.map((m) => of(m).body).slice(0, 5).join("\n") }]
-    : ms.map(of);
-  for (const p of pushes) {
-    try { await ctx.drivers.push.send(p); } catch {}
-  }
-}
-
 // ---- writing ----
 
 const ASCII = /^[\x20-\x7e]*$/;
@@ -478,28 +436,12 @@ export default {
     "(from:, is:unread, in:inbox, newer_than:2d, ...); gmail_read reads one and gmail_thread a whole conversation; gmail_attachment gets one of a message's files. " +
     "gmail_label archives (remove INBOX), marks read (remove UNREAD), stars or labels messages. Write with gmail_draft and let the person send it, unless they asked you to send: " +
     "gmail_send and gmail_send_draft send real email to real people. With several accounts, each operation takes account; gmail_accounts lists them.",
-  uses: { drivers: ["push"] },
-  schedules: {
-    check: { description: "Count unread mail and push new mail", op: "check", every: "5m" },
-  },
-
-  // The unread conversations in every account's inbox, as of the last check.
-  async badge(ctx) {
-    return ctx.user ? (await ctx.user.query("select coalesce(sum(unread), 0) as n from mail"))[0].n : 0;
-  },
-
   schema: {
-    user: "create table accounts (email text primary key, added integer not null); create table settings (key text primary key, value text); " +
-      "create table mail (email text primary key, unread integer not null, seen text not null);",
+    user: "create table accounts (email text primary key, added integer not null); create table settings (key text primary key, value text);",
     global: "create table settings (key text primary key, value text);",
   },
 
   ops: {
-    check: {
-      description: "Look for new mail now: counts each account's unread conversations for Gmail's icon, and pushes each message new since the last look to your phones. It runs every 5 minutes on its own.",
-      input: { type: "object", properties: {} },
-      run: (ctx) => check(ctx),
-    },
     accounts: {
       reads: true,
       description: "The Gmail accounts signed in, and whether each still works. The first is the default.",
@@ -747,11 +689,7 @@ export default {
 
   on: {
     account(db, e) { db.exec("insert or ignore into accounts values (?, ?)", [e.data.email, e.time]); },
-    forget(db, e) {
-      db.exec("delete from accounts where email = ?", [e.data.email]);
-      db.exec("delete from mail where email = ?", [e.data.email]);
-    },
-    mail(db, e) { db.exec("insert or replace into mail values (?, ?, ?)", [e.data.email, e.data.unread, JSON.stringify(e.data.seen)]); },
+    forget(db, e) { db.exec("delete from accounts where email = ?", [e.data.email]); },
     setting(db, e) {
       if (e.scope === "global" && e.role !== "admin") return;
       db.exec("insert or replace into settings values (?, ?)", [e.data.key, JSON.stringify(e.data.value)]);
