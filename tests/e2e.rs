@@ -34,7 +34,7 @@ fn board(op: &str, input: Value) -> CallRequest {
 
 /// The texts of the posts on a server's board of `scope`.
 async fn texts(node: &Node, scope: &str) -> Vec<String> {
-    match node.call(board("news", json!({ "since": 0, "scope": scope }))).await {
+    match node.call(board("news", json!({ "format": "json", "since": 0, "scope": scope }))).await {
         Ok(posts) => posts.as_array().unwrap().iter().map(|p| p["text"].as_str().unwrap().to_string()).collect(),
         Err(_) => Vec::new(),
     }
@@ -60,7 +60,7 @@ async fn servers_and_a_phone_share_a_deployed_board() {
     let listed = apps.iter().find(|app| app["name"] == "board").expect("the brand's board is deployed");
     assert_eq!(listed["owner"], "admins");
     assert!(listed["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == "post")), "{listed}");
-    a.call(board("post", json!({ "text": "from a" }))).await.unwrap();
+    assert_eq!(a.call(board("post", json!({ "text": "from a" }))).await.unwrap(), "Posted as #1 in the top.");
 
     b.join(&a.pair(None).unwrap()).await.unwrap();
     assert_eq!(b.user().unwrap(), a.user().unwrap(), "a pairing code from a's user makes another of their servers");
@@ -68,6 +68,9 @@ async fn servers_and_a_phone_share_a_deployed_board() {
     b.call(board("post", json!({ "text": "from b" }))).await.unwrap();
     assert!(b.join(&a.pair(None).unwrap()).await.is_err(), "a server in an install joins no other");
     eventually("a to see b's post", async || sees(&a, "global", "from b").await).await;
+    let read = a.call(board("read", json!({}))).await.unwrap();
+    let read = read.as_str().unwrap();
+    assert!(read.lines().any(|l| l.starts_with("#1 ") && l.ends_with(": from a")) && read.lines().any(|l| l.starts_with("#2 ") && l.ends_with(": from b")), "agents read posts as numbered lines: {read}");
 
     // A new deploy runs everywhere.
     let source = include_str!("../apps/board/app.js").replace("  ops: {", "  ops: {\n    ping: { description: \"\", input: {}, run: () => \"pong\" },");
@@ -87,7 +90,7 @@ async fn servers_and_a_phone_share_a_deployed_board() {
     let reply = phone.request("POST", "/v1/call", json!({ "app": "board", "op": "post", "input": { "text": "from the phone" } })).await.unwrap();
     assert!(reply.get("error").is_none() && reply.get("elsewhere").is_none(), "{reply}");
     eventually("b to see the phone's post", async || sees(&b, "global", "from the phone").await).await;
-    let news = b.call(board("news", json!({ "since": 0 }))).await.unwrap();
+    let news = b.call(board("news", json!({ "format": "json", "since": 0 }))).await.unwrap();
     let by_phone = news.as_array().unwrap().iter().find(|p| p["text"] == "from the phone").unwrap();
     assert_eq!(by_phone["name"], "Phone", "posts are credited to the client that asked");
     phone.request("POST", "/v1/name", json!({ "name": "Andre's iPhone" })).await.unwrap();
@@ -127,7 +130,7 @@ async fn users_groups_trust_and_privileged_servers() {
     let code = andre.pair(Some(("Bob".into(), one::members::Role::Member))).unwrap();
     bob.join(&code).await.unwrap();
     assert_ne!(bob.user().unwrap(), andre.user().unwrap());
-    eventually("bob to run the board", async || bob.call(board("news", json!({ "since": 0 }))).await.is_ok()).await;
+    eventually("bob to run the board", async || bob.call(board("news", json!({ "format": "json", "since": 0 }))).await.is_ok()).await;
     assert!(texts(&bob, "user").await.is_empty(), "bob's server never gets andre's own data");
     let a_user = format!("user:{}", andre.user().unwrap());
     let shut = bob.call(CallRequest { scopes: Some(vec![a_user.clone()]), ..board("news", json!({ "scope": a_user })) }).await;
@@ -140,7 +143,7 @@ async fn users_groups_trust_and_privileged_servers() {
     bob.member("accept", json!({ "group": "f000000000000001" })).await.unwrap();
     eventually("bob to post in the group", async || bob.call(board("post", json!({ "text": "hi family", "scope": "group:f000000000000001" }))).await.is_ok()).await;
     eventually("andre to see bob's group post", async || sees(&andre, "group:f000000000000001", "hi family").await).await;
-    let news = andre.call(board("news", json!({ "since": 0, "scope": "group:f000000000000001" }))).await.unwrap();
+    let news = andre.call(board("news", json!({ "format": "json", "since": 0, "scope": "group:f000000000000001" }))).await.unwrap();
     assert_eq!(news[0]["user"], bob.user().unwrap().as_str());
 
     // A page is a scope's installs: the board is on Everyone's, and on the group's once installed there too.
@@ -180,7 +183,7 @@ async fn users_groups_trust_and_privileged_servers() {
 
     // An admin opens bob's data on the privileged server: read only, and bob sees it.
     andre.open(&bob.user().unwrap(), &key(&cloud), None).await.unwrap();
-    let read = CallRequest { server: Some(key(&cloud)), as_user: Some(bob.user().unwrap()), ..board("news", json!({ "since": 0, "scope": "user" })) };
+    let read = CallRequest { server: Some(key(&cloud)), as_user: Some(bob.user().unwrap()), ..board("news", json!({ "format": "json", "since": 0, "scope": "user" })) };
     let posts = andre.call(read.clone()).await.unwrap();
     assert!(posts.as_array().unwrap().iter().any(|p| p["text"] == "bob via cloud"));
     let write = CallRequest { input: json!({ "text": "nope", "scope": "user" }), op: "post".into(), ..read };
