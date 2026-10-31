@@ -142,7 +142,7 @@ var describe = map[string]any{
 		{"name": "chats", "description": "Recent WhatsApp chats, most recent first: who, when, the last message, and how many are unread.",
 			"input": object(map[string]any{"unread": map[string]any{"type": "boolean", "description": "only unread chats"},
 				"limit": num("at most this many; default 30"), "skip": num("skip this many of the most recent, to page back")})},
-		{"name": "read", "description": "A WhatsApp chat's messages, newest last. Page back with skip.",
+		{"name": "read", "description": "A WhatsApp chat's messages, newest last. Page back with skip. WhatsApp isn't told they were read: the sender sees no blue ticks, and the chat stays unread on the phone.",
 			"input": object(map[string]any{"chat": str("the chat's name, a part of it only one chat has, a phone number, or a JID"),
 				"limit": num("this many; default 30"), "skip": num("skip this many of the newest, to read further back")}, "chat")},
 		{"name": "search", "description": "WhatsApp messages containing some text, across chats or in one, newest last.",
