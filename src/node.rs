@@ -674,10 +674,21 @@ impl Node {
         })
     }
 
-    pub async fn widgets(&self, viewer: Caller) -> Result<Vec<Value>> {
+    /// Every widget, rendered for `viewer`; with `scope` (`user`, `group:<id>` or `global`), those of the apps
+    /// installed there, for a shell's page of that scope, each reaching only it.
+    pub async fn widgets(&self, viewer: Caller, scope: Option<&str>) -> Result<Vec<Value>> {
+        let scope = match scope {
+            Some("user") => Some(Scope::User(viewer.user.clone())),
+            Some(s) => Some(Scope::parse(s)?),
+            None => None,
+        };
         let mut out = Vec::new();
         for app in self.0.apps.names() {
-            let ctx = self.read_context(&app, &viewer)?;
+            let mut ctx = self.read_context(&app, &viewer)?;
+            if let Some(scope) = &scope {
+                let installed = self.with(|i| Ok(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&app))))?;
+                ctx.scopes.retain(|s| installed && s.id == scope.to_string());
+            }
             if ctx.scopes.is_empty() {
                 continue;
             }
@@ -736,7 +747,12 @@ impl Node {
             Ok(m.apps
                 .values()
                 .map(|a| {
-                    let installed: Vec<String> = i.views.iter().filter(|(_, (_, s))| s.installed.contains(&a.name)).map(|(scope, _)| scope.clone()).collect();
+                    let installed: Vec<String> = i
+                        .views
+                        .iter()
+                        .filter(|(scope, (_, s))| s.installed.contains(&a.name) && Scope::parse(scope).is_ok_and(|s| m.may_use(&viewer.user, &s)))
+                        .map(|(scope, _)| scope.clone())
+                        .collect();
                     let reach = reachable(i, &a.name, &viewer.user);
                     (a.name.clone(), json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "deploys": a.deploys, "installed": installed }), !reach.is_empty())
                 })
@@ -781,6 +797,7 @@ impl Node {
         let ready = self.ready();
         let install = self.0.install.lock().unwrap();
         let viewer_name = if viewer.key == self.0.id { self.server_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
+        let user = install.as_ref().and_then(|i| i.r.members.user(&viewer.user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role }));
         let install = install.as_ref().map(|i| {
             let m = &i.r.members;
             let me = &viewer.user;
@@ -826,12 +843,19 @@ impl Node {
                 "entries": i.r.store.count().unwrap_or(0),
             })
         });
-        json!({
+        let opens = install.as_ref().map(|i| i["opens"].clone()).unwrap_or(json!([]));
+        let mut state = json!({
             "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT, "store": crate::brand::STORE },
             "me": { "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user },
             "server": { "key": hex(&self.0.id), "name": self.server_name(), "ready": ready },
+            "user": user,
             "install": install,
-        })
+            "opens": opens,
+        });
+        if viewer.key != self.0.id {
+            state["client"] = json!({ "key": hex(&viewer.key), "name": viewer_name });
+        }
+        state
     }
 
     // Members.
@@ -928,7 +952,7 @@ impl Node {
         Ok(match (method, path) {
             ("GET", "/v1/state") => self.state_for(me),
             ("GET", "/v1/apps") => json!(self.apps(me).await?),
-            ("GET", "/v1/widgets") => json!(self.widgets(me.clone()).await?),
+            ("GET", "/v1/widgets") => json!(self.widgets(me.clone(), body["scope"].as_str()).await?),
             ("GET", "/v1/screen") => {
                 let (app, name) = (body["app"].as_str().unwrap_or(""), body["screen"].as_str().unwrap_or("main"));
                 json!({ "html": self.screen(me.clone(), app, name, body["params"].clone(), body["scope"].as_str()).await? })

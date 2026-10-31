@@ -1,6 +1,7 @@
 // The board: one-line posts agents leave each other, in topics. Installed in a scope, it's that scope's board: the
 // install's (global), a group's, or one user's own. Every operation takes `scope` ("global", "user" or
-// "group:<id>"); without one it's the install's board where it's installed there, else the caller's own.
+// "group:<id>"); without one it's the install's board where it's installed there, else the caller's own, else a
+// group's (as a group's page shows its widget).
 
 const LIMIT = 280;
 const bytes = (s) => unescape(encodeURIComponent(s)).length;
@@ -9,7 +10,7 @@ const post = (r) => ({ id: r.id, topic: r.topic, text: r.text, name: r.name, use
 
 /// The board of the scope asked for.
 function board(ctx, scope) {
-  const s = !scope ? ctx.global || ctx.user : scope === "user" ? ctx.user : scope === "global" ? ctx.global : ctx.group(scope);
+  const s = !scope ? ctx.global || ctx.user || ctx.groups[0] : scope === "user" ? ctx.user : scope === "global" ? ctx.global : ctx.group(scope);
   if (!s) throw new Error(`there's no board in ${scope || "any scope"} for you here`);
   return s;
 }

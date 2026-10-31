@@ -107,8 +107,13 @@ async fn call(State(node): State<Node>, Json(req): Json<CallRequest>) -> Reply {
     Ok(Json(json!({ "ok": node.call(req).await? })))
 }
 
-async fn widgets(State(node): State<Node>) -> Reply {
-    Ok(Json(json!(node.widgets(local(&node)?).await?)))
+#[derive(Deserialize)]
+struct WidgetsQuery {
+    scope: Option<String>,
+}
+
+async fn widgets(State(node): State<Node>, Query(q): Query<WidgetsQuery>) -> Reply {
+    Ok(Json(json!(node.widgets(local(&node)?, q.scope.as_deref()).await?)))
 }
 
 async fn create(State(node): State<Node>, Json(body): Json<Value>) -> Reply {

@@ -134,6 +134,14 @@ async fn users_groups_trust_and_privileged_servers() {
     let news = andre.call(board("news", json!({ "since": 0, "scope": "group:f000000000000001" }))).await.unwrap();
     assert_eq!(news[0]["user"], bob.user().unwrap().as_str());
 
+    // A page is a scope's installs: the board is on Everyone's, and on the group's once installed there too.
+    let me = one::node::Caller { key: andre.id(), user: andre.user().unwrap() };
+    assert_eq!(andre.widgets(me.clone(), Some("global")).await.unwrap().len(), 1);
+    assert!(andre.widgets(me.clone(), Some("group:f000000000000001")).await.unwrap().is_empty());
+    andre.append(&one::entry::Scope::Group("f000000000000001".into()), one::members::node("install", json!({ "app": "board" }))).await.unwrap();
+    let widgets = andre.widgets(me, Some("group:f000000000000001")).await.unwrap();
+    assert_eq!(widgets[0]["root"]["c"][1]["text"], "hi family", "a group's page shows its board: {widgets:?}");
+
     // A phone-only user needs a server that serves them.
     let carol_code = andre.pair(Some(("Carol".into(), one::members::Role::Member))).unwrap();
     let carol = one_client::Client::start(temp("carol"), "Carol's phone").await.unwrap();
