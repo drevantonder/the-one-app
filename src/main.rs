@@ -6,6 +6,7 @@ use one::brand::{CLI, NAME};
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
 
+mod ops;
 mod update;
 
 fn help() -> String {
@@ -48,8 +49,12 @@ Usage:
                                        never read back
   {CLI} secret list [--scope s]        the secrets you may set: names and hosts, never values
   {CLI} secret remove <app> <name> [--scope s]
-  {CLI} <app> <op> [--key value]       run an operation, e.g. {CLI} board post --text hi
-                                       --server <name> runs it there; --scopes a,b names the scopes it touches
+  {CLI} <app>                          an app's operations
+  {CLI} <app> <op> [words] [--input value]
+                                       run an operation, e.g. {CLI} board post \"hi there\" --topic x; --help says
+                                       what it takes. Required inputs may be words, lists repeat a flag, inputs not
+                                       given are read as JSON from stdin, --file <input>=<path> gives a file and
+                                       --out <path> saves what it gives back. --server <name> runs it there
   {CLI} update                         test and build main's tip on this machine and the Macs, and run it everywhere
   {CLI} release <vX.Y.Z>               the same, signed off and published on GitHub for the installer
   {CLI} publish [binary]               sign and publish a build you made; every node on its platform updates
@@ -82,8 +87,15 @@ fn main() {
 
 fn run(args: Vec<String>) -> Result<()> {
     let (positional, flags) = parse(&args);
+    if !matches!(positional.first().map(String::as_str), Some("serve" | "mcp")) {
+        // Printing into `| head` ends quietly, as other commands do, instead of panicking.
+        unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+    }
     match positional.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
-        [] | ["help"] => println!("{}", help()),
+        [] | ["help"] => {
+            println!("{}", help());
+            println!("\n{}", connection());
+        }
         ["serve"] => {
             usual_path();
             serve()?
@@ -96,9 +108,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 let installed: Vec<&str> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
                 let installed = if installed.is_empty() { String::new() } else { format!(", installed in {}", installed.join(", ")) };
                 println!("{} ({}{from}{installed})", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
-                for op in app["ops"].as_array().into_iter().flatten() {
-                    println!("  {:<10} {}", op["name"].as_str().unwrap_or(""), op["description"].as_str().unwrap_or(""));
-                }
+                ops::list(std::slice::from_ref(app)).iter().for_each(|l| println!("{l}"));
             }
         }
         ["create", name @ ..] if !name.is_empty() => {
@@ -255,17 +265,20 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/name", json!({ "name": name.join(" ") }))?;
             println!("This server is now {}.", name.join(" "));
         }
-        [app, op] => {
-            let mut input = flags.clone();
-            let server = input.remove("server").or(input.remove("device"));
-            let scopes = input.remove("scopes").and_then(|s| s.as_str().map(|s| s.split(',').map(str::trim).map(String::from).collect::<Vec<_>>()));
-            let r = post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env() }))?;
-            match &r["ok"] {
-                ok if ok["content"].is_array() => print_content(app, op, &ok["content"])?,
-                Value::String(s) => println!("{s}"),
-                Value::Null => {}
-                other => println!("{}", serde_json::to_string_pretty(other)?),
+        [app] if !app.starts_with('-') => {
+            let apps = get("/v1/apps")?;
+            let found = apps.as_array().into_iter().flatten().find(|a| a["name"] == *app).with_context(|| format!("unknown command {app}; {CLI} help lists them, {CLI} apps every app's"))?;
+            println!("{} ({app})", found["title"].as_str().unwrap_or(app));
+            if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
+                println!("\n{i}\n");
             }
+            ops::list(std::slice::from_ref(found)).iter().for_each(|l| println!("{l}"));
+            println!("\n{CLI} {app} <op> --help says what an operation takes.");
+        }
+        [app, op, ..] => {
+            // The words and flags after `<app> <op>`, as written.
+            let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
+            ops::run(app, op, &args[at(op, at(app, 0))..])?
         }
         _ => bail!("unknown command; {CLI} help lists them"),
     }
@@ -317,23 +330,6 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
-/// Prints an operation's MCP content (`{ content: [...] }`, as a provider passing on an MCP server's answers gives it):
-/// its text, and the path of each image, saved to a file.
-fn print_content(app: &str, op: &str, content: &Value) -> Result<()> {
-    for (i, c) in content.as_array().into_iter().flatten().enumerate() {
-        match c["type"].as_str() {
-            Some("image") => {
-                let ext = c["mimeType"].as_str().and_then(|m| m.strip_prefix("image/")).unwrap_or("img");
-                let path = std::env::temp_dir().join(format!("{app}-{op}-{i}.{ext}"));
-                std::fs::write(&path, data_encoding::BASE64.decode(c["data"].as_str().unwrap_or("").as_bytes())?)?;
-                println!("{}", path.display());
-            }
-            _ => println!("{}", c["text"].as_str().unwrap_or("")),
-        }
-    }
-    Ok(())
-}
-
 /// Splits `--key value` flags from positional words. A flag with no value is true.
 fn parse(args: &[String]) -> (Vec<String>, Map<String, Value>) {
     let (mut positional, mut flags) = (Vec::new(), Map::new());
@@ -357,6 +353,20 @@ fn parse(args: &[String]) -> (Vec<String>, Map<String, Value>) {
         }
     }
     (positional, flags)
+}
+
+/// Whether a node runs here, and which install it's in, for the bare command.
+fn connection() -> String {
+    let Ok(state) = get("/v1/state") else { return format!("No node is running here: start one with {CLI} serve.") };
+    let server = state["server"]["name"].as_str().unwrap_or("this server");
+    let i = &state["install"];
+    if i.is_null() {
+        return format!("{server} is in no install yet: {CLI} create <name> --as <your name>, or {CLI} join <code>.");
+    }
+    let install = i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("an install (still joining)");
+    let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("");
+    let ready = if state["server"]["ready"] == true { "" } else { ", catching up" };
+    format!("Connected to {install} as {me}, on {server}{ready}. {CLI} status shows its servers; {CLI} apps what you can run.")
 }
 
 fn agent() -> ureq::Agent {
@@ -568,8 +578,8 @@ fn secret_tools() -> Vec<Value> {
     let scope = json!({ "type": "string", "description": "user (yours, the default), global, or a group's name or id" });
     vec![
         json!({ "name": "secrets_set", "description": "Set (or replace) a secret of an app: it puts {{name}} in a request's headers or body and the node fills it in, only for these hosts. Nobody can read it back.", "inputSchema": { "type": "object", "required": ["app", "name", "value", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "scope": scope } } }),
-        json!({ "name": "secrets_list", "description": "The secrets you may set: app, name and hosts, never values.", "inputSchema": { "type": "object", "properties": { "scope": scope } } }),
-        json!({ "name": "secrets_remove", "description": "Delete a secret of an app.", "inputSchema": { "type": "object", "required": ["app", "name"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "scope": scope } } }),
+        json!({ "name": "secrets_list", "description": "The secrets you may set: app, name and hosts, never values.", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": { "readOnlyHint": true } }),
+        json!({ "name": "secrets_remove", "annotations": { "destructiveHint": true }, "description": "Delete a secret of an app.", "inputSchema": { "type": "object", "required": ["app", "name"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "scope": scope } } }),
     ]
 }
 
@@ -589,14 +599,12 @@ fn tools() -> Result<Vec<Value>, Value> {
         let name = app["name"].as_str().unwrap_or("");
         // Operations starting with `_` are for the node, such as a driver's `_screen`.
         for op in app["ops"].as_array().into_iter().flatten().filter(|op| !op["name"].as_str().unwrap_or("").starts_with('_')) {
-            let mut schema = op["input"].clone();
-            if !schema.is_object() {
-                schema = json!({ "type": "object", "properties": {} });
+            let mut tool = json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": ops::mcp_schema(app, op) });
+            let hints = ops::mcp_annotations(op);
+            if hints.as_object().is_some_and(|h| !h.is_empty()) {
+                tool["annotations"] = hints;
             }
-            if app["runs"] == "here" {
-                schema["properties"]["server"] = json!({ "type": "string", "description": "which of your servers, by name; default is this one" });
-            }
-            tools.push(json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": schema }));
+            tools.push(tool);
         }
     }
     Ok(tools)
@@ -605,20 +613,26 @@ fn tools() -> Result<Vec<Value>, Value> {
 fn call_tool(params: &Value, agent: Option<&str>) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let mut input = params["arguments"].as_object().cloned().unwrap_or_default();
+    let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
+    let Some((app, op)) = name.split_once('_') else { return failed(format!("no tool {name}")) };
+    if app == "secrets" {
+        return match secret_tool(op, &input) {
+            Ok(ok) => json!({ "content": ops::mcp_content(&ok) }),
+            Err(e) => failed(format!("{e:#}")),
+        };
+    }
     let server = input.remove("server").or(input.remove("device"));
-    let Some((app, op)) = name.split_once('_') else {
-        return json!({ "isError": true, "content": [{ "type": "text", "text": format!("no tool {name}") }] });
-    };
-    let result = match app {
-        "secrets" => secret_tool(op, &input).map(|ok| json!({ "ok": ok })),
-        _ => post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input, "agent": agent })),
-    };
-    match result {
-        Ok(r) => match &r["ok"] {
-            ok if ok["content"].is_array() => json!({ "content": ok["content"] }),
-            Value::String(s) => json!({ "content": [{ "type": "text", "text": s }] }),
-            other => json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(other).unwrap_or_default() }] }),
-        },
-        Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("{e:#}") }] }),
+    let confirmed = input.remove("confirm") == Some(json!(true));
+    if let Some((_, spec)) = ops::find(app, op) {
+        if spec["confirm"] == true && !confirmed {
+            return failed(format!("{name} can't be undone: ask the person first, then call it again with confirm: true"));
+        }
+        if let Err(e) = ops::mcp_files(&spec, &mut input) {
+            return failed(format!("{e:#}"));
+        }
+    }
+    match post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input, "agent": agent })) {
+        Ok(r) => json!({ "content": ops::mcp_content(&r["ok"]) }),
+        Err(e) => failed(format!("{e:#}")),
     }
 }

@@ -178,6 +178,8 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
 
 **Stores.** An app has a private store per scope, SQLite in a Durable Object of its own, for each scope that has a `schema`. A store replays the app's entries in its scope with the app's latest deploy. For each, in replay order, `on[entry.kind]` gets the store, as `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, scope, kind, user, user_name, name, role, groups, time, data, blobs }`. `id` is `<first 8 hex of author>:<seq>`; `user_name` is the user's name; `name` is the name of `by`, else of the author; `role` is the writer's role in the scope, and `groups` their role in each of their groups, at that point. A new deploy replays its stores from empty, beside the old ones; calls use the old until it's done *(for now: the runtime restarts with the new deploy and replays its stores before running calls)*. There are no migrations.
 
+**Files.** An input whose schema says `format: "file"` (or a list whose `items` do) takes a file as `{ name, type, size, base64 }`; the CLI makes it from a path (`--file <input>=<path>`) and MCP from base64, a file id or a URL. A result, or a value in one, shaped the same is a file: the CLI saves it (`--out <path>`), and MCP keeps it as a blob and gives back `{ name, type, size, file, link }`, `file` being the blob's hash.
+
 **Calls.** A call runs as one user. `ctx` gives it:
 
 - `me`: `{ key, user, name, role, user_name, agent }`, the client or server that asked (`name`), its user's role in the install and name, and the agent that asked through it, or null. Calls it makes with `apps` and `drivers` carry the same agent.
