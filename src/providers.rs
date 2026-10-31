@@ -71,7 +71,8 @@ impl Providers {
         names.iter().filter_map(|n| self.get(n)).map(|p| p.describe.clone()).collect()
     }
 
-    /// Hands a call to the provider and waits for its reply: `{ ok, entries? }` or `{ error }`.
+    /// Hands a call to the provider and waits for its reply: `{ ok, entries? }` or `{ error }`. Each entry is
+    /// `{ kind, data, blobs? }`; naming a blob lets the servers that hold the entry fetch it.
     pub async fn call(&self, app: &str, op: &str, input: Value, caller: Me) -> Result<(Value, Vec<Content>)> {
         let p = self.get(app).ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -89,7 +90,7 @@ impl Providers {
             .as_array()
             .into_iter()
             .flatten()
-            .map(|e| Content::new(app, e["kind"].as_str().unwrap_or(""), e["data"].clone()))
+            .map(|e| Content { blobs: serde_json::from_value(e["blobs"].clone()).unwrap_or_default(), ..Content::new(app, e["kind"].as_str().unwrap_or(""), e["data"].clone()) })
             .collect();
         Ok((reply["ok"].clone(), entries))
     }
