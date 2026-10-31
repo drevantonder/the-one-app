@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,12 @@ type input struct {
 	ClientSecret               string `json:"client_secret"`
 	IDs, Add, Remove           words
 	Limit                      int
+	Attachments                []file
+}
+
+// file is an attachment to send, its bytes in base64.
+type file struct {
+	Name, Type, Data string
 }
 
 // word is a string the CLI may have read as a number (an id of only digits).
@@ -224,6 +231,36 @@ func (c client) call(ctx context.Context, method, path string, q url.Values, in,
 	}
 	if out == nil || len(b) == 0 {
 		return nil
+	}
+	return json.Unmarshal(b, out)
+}
+
+// upload sends d as a whole RFC 822 message through Gmail's upload endpoint, which takes messages up to 35 MB (the
+// JSON one takes a few). A draft can't be threaded this way, so a reply with files goes without its thread.
+func (c client) upload(ctx context.Context, path string, d draft, thread string, out any) error {
+	tok, err := c.accounts.token(ctx, c.acc)
+	if err != nil {
+		return err
+	}
+	u := "https://gmail.googleapis.com/upload/gmail/v1/users/me/" + path + "?uploadType=media"
+	req, err := http.NewRequestWithContext(ctx, "POST", u, bytes.NewReader(raw(d)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "message/rfc822")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		var e struct {
+			Error struct{ Message string }
+		}
+		_ = json.Unmarshal(b, &e)
+		return fmt.Errorf("Gmail: %s", cmp.Or(e.Error.Message, resp.Status))
 	}
 	return json.Unmarshal(b, out)
 }
@@ -513,6 +550,13 @@ func (c client) drafts(ctx context.Context, page string, limit int) (string, err
 // to its sender, with its subject, unless in says otherwise.
 func (c client) compose(ctx context.Context, in input) (draft, string, error) {
 	d := draft{To: in.To, Cc: in.Cc, Bcc: in.Bcc, Subject: in.Subject, Body: in.Body}
+	for _, f := range in.Attachments {
+		data, err := base64.StdEncoding.DecodeString(f.Data)
+		if err != nil {
+			return d, "", fmt.Errorf("attachment %s isn't base64", f.Name)
+		}
+		d.Files = append(d.Files, attached{Name: f.Name, Type: cmp.Or(f.Type, "application/octet-stream"), Data: data})
+	}
 	thread := ""
 	if in.ReplyTo != "" {
 		var m message
@@ -539,7 +583,11 @@ func (c client) send(ctx context.Context, d draft, thread string) (string, error
 		return "", errors.New("give to")
 	}
 	var sent struct{ ID string }
-	if err := c.call(ctx, "POST", "messages/send", nil, outgoing(d, thread), &sent); err != nil {
+	if len(d.Files) > 0 {
+		if err := c.upload(ctx, "messages/send", d, thread, &sent); err != nil {
+			return "", err
+		}
+	} else if err := c.call(ctx, "POST", "messages/send", nil, outgoing(d, thread), &sent); err != nil {
 		return "", err
 	}
 	return "Sent, as message " + sent.ID + ".", nil
@@ -547,12 +595,21 @@ func (c client) send(ctx context.Context, d draft, thread string) (string, error
 
 func (c client) saveDraft(ctx context.Context, id string, d draft, thread string) (string, error) {
 	body := map[string]any{"message": outgoing(d, thread)}
-	var saved struct{ ID string }
+	var saved struct {
+		ID      string
+		Message struct{ ID string }
+	}
+	if id == "" && len(d.Files) > 0 {
+		if err := c.upload(ctx, "drafts", d, thread, &saved); err != nil {
+			return "", err
+		}
+		return "Saved draft " + saved.ID + " (message " + saved.Message.ID + ").", nil
+	}
 	if id == "" {
 		if err := c.call(ctx, "POST", "drafts", nil, body, &saved); err != nil {
 			return "", err
 		}
-		return "Saved draft " + saved.ID + ".", nil
+		return "Saved draft " + saved.ID + " (message " + saved.Message.ID + ").", nil
 	}
 	if err := c.call(ctx, "PUT", "drafts/"+url.PathEscape(id), nil, body, &saved); err != nil {
 		return "", err

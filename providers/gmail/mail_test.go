@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"mime"
+	"mime/multipart"
 	"mime/quotedprintable"
 	"net/mail"
 	"strings"
@@ -103,3 +104,30 @@ func TestInputTakesListsAndNumbers(t *testing.T) {
 type mimeDecoder = mime.WordDecoder
 
 func qpReader(r io.Reader) io.Reader { return quotedprintable.NewReader(r) }
+
+func TestComposeWithFiles(t *testing.T) {
+	pdf := []byte("%PDF-1.4 receipt " + strings.Repeat("x", 200))
+	m, err := mail.ReadMessage(strings.NewReader(string(raw(draft{To: "a@example.com", Subject: "Claim", Body: "Hi,\nattached.",
+		Files: []attached{{Name: "01 2026-10-03 Officeworks.pdf", Type: "application/pdf", Data: pdf}}}))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind, params, _ := mime.ParseMediaType(m.Header.Get("Content-Type"))
+	if kind != "multipart/mixed" {
+		t.Fatalf("type %s", kind)
+	}
+	r := multipart.NewReader(m.Body, params["boundary"])
+	text, _ := r.NextPart()
+	body, _ := io.ReadAll(quotedprintable.NewReader(text))
+	if string(body) != "Hi,\r\nattached." {
+		t.Fatalf("body %q", body)
+	}
+	file, _ := r.NextPart()
+	got, _ := io.ReadAll(base64.NewDecoder(base64.StdEncoding, file))
+	if file.FileName() != "01 2026-10-03 Officeworks.pdf" || string(got) != string(pdf) {
+		t.Fatalf("file %q %q", file.FileName(), got)
+	}
+	if _, err := r.NextPart(); err != io.EOF {
+		t.Fatal("more parts than files")
+	}
+}

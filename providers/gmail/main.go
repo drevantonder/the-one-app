@@ -140,6 +140,8 @@ var writing = map[string]any{
 	"to": str("addresses, comma-separated; a reply goes to the sender unless given"), "cc": str("addresses, comma-separated"),
 	"bcc": str("addresses, comma-separated"), "subject": str("the subject; a reply keeps the original's unless given"),
 	"body": str("the text of the email"), "reply_to": str("the id of a message to reply to, keeping the reply in its thread"),
+	"attachments": map[string]any{"type": "array", "description": "files to attach: [{name, type, data}], data in base64; up to 35 MB in all",
+		"items": map[string]any{"type": "object", "properties": map[string]any{"name": str("the file's name"), "type": str("its MIME type"), "data": str("its bytes, base64")}}},
 }
 
 var describe = map[string]any{
@@ -175,13 +177,13 @@ var describe = map[string]any{
 			"input": with(map[string]any{"ids": list("the messages' ids")}, "ids")},
 		{"name": "drafts", "description": "The account's drafts, newest first: draft id, date, recipients and subject.",
 			"input": with(map[string]any{"limit": num("at most this many; default 20"), "page": str("the page token the previous call gave")})},
-		{"name": "draft", "description": "Save a plain-text draft, or replace one, for the person to review and send.",
+		{"name": "draft", "description": "Save a plain-text draft (with files, if given), or replace one, for the person to review and send. Answers the draft's id and its message's id.",
 			"input": with(merge(writing, map[string]any{"id": str("a draft's id, to replace that draft")}))},
 		{"name": "send_draft", "description": "Send a draft as it is. This sends real email to real people.",
 			"input": with(map[string]any{"id": str("the draft's id")}, "id")},
 		{"name": "delete_draft", "description": "Delete a draft for good.",
 			"input": with(map[string]any{"id": str("the draft's id")}, "id")},
-		{"name": "send", "description": "Send a plain-text email, or a reply. This sends real email to real people: send only what the person asked to send.",
+		{"name": "send", "description": "Send a plain-text email, with files if given, or a reply. This sends real email to real people: send only what the person asked to send.",
 			"input": with(merge(writing, nil))},
 	},
 	"widgets": []any{},

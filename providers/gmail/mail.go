@@ -8,6 +8,7 @@ import (
 	"mime"
 	"mime/quotedprintable"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -118,11 +119,23 @@ func text(h string) string {
 type draft struct {
 	To, Cc, Bcc, Subject, Body string
 	InReplyTo, References      string // Message-IDs, when replying
+	Files                      []attached
+}
+
+// attached is a file sent with an email.
+type attached struct {
+	Name, Type string
+	Data       []byte
 }
 
 // compose writes d as an RFC 5322 message, base64url-encoded as Gmail wants
 // it. Gmail adds From, Date and Message-ID.
 func compose(d draft) string {
+	return base64.URLEncoding.EncodeToString(raw(d))
+}
+
+// raw writes d as an RFC 5322 message: plain text, or with files, multipart/mixed with the text first.
+func raw(d draft) []byte {
 	var b bytes.Buffer
 	line := strings.NewReplacer("\r", "", "\n", "")
 	for _, h := range [][2]string{{"To", d.To}, {"Cc", d.Cc}, {"Bcc", d.Bcc},
@@ -132,11 +145,33 @@ func compose(d draft) string {
 			fmt.Fprintf(&b, "%s: %s\r\n", h[0], line.Replace(h[1]))
 		}
 	}
-	b.WriteString("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
-	w := quotedprintable.NewWriter(&b)
-	w.Write([]byte(strings.ReplaceAll(strings.ReplaceAll(d.Body, "\r\n", "\n"), "\n", "\r\n")))
-	w.Close()
-	return base64.URLEncoding.EncodeToString(b.Bytes())
+	b.WriteString("MIME-Version: 1.0\r\n")
+	text := func() {
+		b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
+		w := quotedprintable.NewWriter(&b)
+		w.Write([]byte(strings.ReplaceAll(strings.ReplaceAll(d.Body, "\r\n", "\n"), "\n", "\r\n")))
+		w.Close()
+	}
+	if len(d.Files) == 0 {
+		text()
+		return b.Bytes()
+	}
+	boundary := "one-" + strconv.FormatInt(int64(len(d.Body))*7919+int64(len(d.Files)), 36) + "-mixed"
+	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n--%s\r\n", boundary, boundary)
+	text()
+	for _, f := range d.Files {
+		name := mime.QEncoding.Encode("utf-8", line.Replace(f.Name))
+		fmt.Fprintf(&b, "\r\n--%s\r\nContent-Type: %s; name=\"%s\"\r\nContent-Disposition: attachment; filename=\"%s\"\r\nContent-Transfer-Encoding: base64\r\n\r\n",
+			boundary, f.Type, name, name)
+		enc := base64.StdEncoding.EncodeToString(f.Data)
+		for len(enc) > 76 {
+			b.WriteString(enc[:76] + "\r\n")
+			enc = enc[76:]
+		}
+		b.WriteString(enc + "\r\n")
+	}
+	fmt.Fprintf(&b, "--%s--\r\n", boundary)
+	return b.Bytes()
 }
 
 // snippet is Gmail's preview of a message, made plain and on one line.
