@@ -1,5 +1,6 @@
 import SwiftUI
 import VisionKit
+import AuthenticationServices
 
 /// The first run: name this iPhone, then join with the pairing code another device shows. For a brand with one
 /// install, sign in to it instead, a pairing code still there for anyone without the account.

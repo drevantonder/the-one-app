@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 struct RootView: View {
     @Environment(Store.self) private var store
