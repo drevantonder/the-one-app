@@ -307,8 +307,9 @@ final class Store {
         do {
             let apps = try await node.apps()
             if apps != self.apps { self.apps = apps }
+            // A node that just started lists its deployed apps before it can describe them.
+            if apps.contains(where: { ($0.deploys ?? 0) > 0 && $0.title == nil }) { throw NodeError("starting") }
         } catch {
-            // A node that just started may not have its apps running yet.
             Task {
                 try? await Task.sleep(for: .seconds(2))
                 await refreshApps()

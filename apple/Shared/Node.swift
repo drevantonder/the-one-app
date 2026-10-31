@@ -120,6 +120,7 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     var screens: [Screen]?
     /// The scopes it is installed in that the asker may use: `user:<id>`, `group:<id>`, `global`.
     var installed: [String]?
+    var deploys: Int?
 
     var id: String { name }
     var label: String { title ?? name }
