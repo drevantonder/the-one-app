@@ -32,7 +32,7 @@ pub fn describe() -> Value {
                   "model": { "type": "string", "description": "a decision model, like clef-flash" },
                   "state": { "type": "object", "description": "what to decide about: named fields" },
                   "questions": { "type": "object", "description": "named questions, each { type, instructions, criteria | levels }" },
-                  "images": { "type": "array", "items": { "type": "object" }, "description": "images as [{ content_type, base64 }], named in state as image 1, 2..." },
+                  "images": { "type": "array", "description": "images in base64 (or [{ content_type, base64 }]), named in state as image 1, 2..." },
               }}},
         ],
         "widgets": [],
@@ -81,8 +81,9 @@ pub fn call(op: String, input: Value, _caller: Me, _entries: Vec<AppEntry>) -> R
                     let model = input["model"].as_str().context("give a decision model, like clef-flash")?;
                     ensure!(input["questions"].is_object(), "give questions");
                     let mut body = json!({ "model": model, "state": input.get("state").cloned().unwrap_or(json!({})), "questions": input["questions"] });
-                    if input["images"].is_array() {
-                        body["images"] = input["images"].clone();
+                    // Ollama takes each image as its base64; [{ content_type, base64 }] (Workers AI's way) works too.
+                    if let Some(images) = input["images"].as_array() {
+                        body["images"] = json!(images.iter().map(|i| i.get("base64").unwrap_or(i).clone()).collect::<Vec<_>>());
                     }
                     let reply = post("/v1/systemone", &body)?;
                     if let Some(err) = reply.get("error") {
