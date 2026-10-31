@@ -36,7 +36,7 @@ func main() {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	w, err := open(filepath.Join(dir, "whatsapp.db"))
+	w, err := open(filepath.Join(dir, "whatsapp.db"), node)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -66,7 +66,11 @@ func serve(node string, w *link) {
 			go func() {
 				result, err := w.run(context.Background(), c.Op, c.Input)
 				reply := map[string]any{"ok": result}
-				if err != nil {
+				var away elsewhere
+				switch {
+				case errors.As(err, &away): // error too, for nodes that don't know elsewhere
+					reply = map[string]any{"elsewhere": err.Error(), "error": err.Error()}
+				case err != nil:
 					reply = map[string]any{"error": err.Error()}
 				}
 				if err := post(fmt.Sprintf("%s/v1/providers/%s/calls/%d", node, app, c.ID), reply); err != nil {
@@ -95,21 +99,59 @@ func next(client *http.Client, node string) (*call, error) {
 	return nil, fmt.Errorf("%s: %s", resp.Status, body)
 }
 
+// elsewhere is an error saying the call should go to another server, as
+// when WhatsApp isn't linked here; the node then tries the next.
+type elsewhere string
+
+func (e elsewhere) Error() string { return string(e) }
+
 func post(url string, body any) error {
-	b, err := json.Marshal(body)
-	if err != nil {
-		return err
+	_, err := request(http.DefaultClient, url, body)
+	return err
+}
+
+// request posts body as JSON, or gets url if body is nil, and returns the
+// reply's body.
+func request(client *http.Client, url string, body any) ([]byte, error) {
+	var resp *http.Response
+	var err error
+	if body == nil {
+		resp, err = client.Get(url)
+	} else {
+		b, merr := json.Marshal(body)
+		if merr != nil {
+			return nil, merr
+		}
+		resp, err = client.Post(url, "application/json", bytes.NewReader(b))
 	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
+	msg, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(resp.Body)
-		return errors.New(resp.Status + ": " + string(msg))
+		var e struct{ Error string }
+		if json.Unmarshal(msg, &e) == nil && e.Error != "" {
+			return nil, errors.New(e.Error)
+		}
+		return nil, errors.New(resp.Status + ": " + string(msg))
 	}
-	return nil
+	return msg, nil
+}
+
+// callOn runs one of this provider's operations on another of the user's
+// servers, through this server's node, and decodes its result into out.
+func callOn(node, server, op string, input, out any) error {
+	body, err := request(&http.Client{Timeout: 28 * time.Second}, node+"/v1/call",
+		map[string]any{"app": app, "op": op, "input": input, "server": server})
+	if err != nil {
+		return err
+	}
+	var reply struct{ Ok json.RawMessage }
+	if err := json.Unmarshal(body, &reply); err != nil {
+		return err
+	}
+	return json.Unmarshal(reply.Ok, out)
 }
 
 func object(props map[string]any, required ...string) map[string]any {
@@ -131,14 +173,16 @@ func num(description string) map[string]any {
 var describe = map[string]any{
 	"title": "WhatsApp",
 	"icon":  "message-circle",
-	"instructions": "WhatsApp runs on the device linked to the account (give device). whatsapp_chats lists recent chats; " +
+	"instructions": "WhatsApp runs on the server linked to the account; calls find it. whatsapp_chats lists recent chats; " +
 		"whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: " +
-		"send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read.",
+		"send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. " +
+		"whatsapp_move moves the link to another server.",
 	"ops": []map[string]any{
-		{"name": "status", "description": "Whether WhatsApp is linked and connected here, as which number, and how many messages are kept.",
+		{"name": "status", "description": "Whether WhatsApp is linked and connected here, as which number, and how many messages are kept; or on which of your servers it's linked.",
 			"input": object(map[string]any{})},
-		{"name": "sign_in", "description": "Link WhatsApp here, as WhatsApp Desktop is linked: returns a QR code to scan on the phone (WhatsApp > Settings > Linked devices > Link a device), or, given phone, a code to enter there instead.",
-			"input": object(map[string]any{"phone": str("the account's number with its country code, e.g. +61 400 000 000, to link with a code instead of a QR code")})},
+		{"name": "sign_in", "description": "Link WhatsApp here, as WhatsApp Desktop is linked: returns a QR code to scan on the phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code is on the phone itself. " +
+			"Refused while WhatsApp is linked on another of your servers: whatsapp_move moves it from there.",
+			"input": object(map[string]any{"phone": str("the account's number with its country code, e.g. +61 400 000 000, for a code to type on the phone")})},
 		{"name": "chats", "description": "Recent WhatsApp chats, most recent first: who, when, the last message, and how many are unread.",
 			"input": object(map[string]any{"unread": map[string]any{"type": "boolean", "description": "only unread chats"},
 				"limit": num("at most this many; default 30"), "skip": num("skip this many of the most recent, to page back")})},
@@ -151,6 +195,8 @@ var describe = map[string]any{
 		{"name": "send", "description": "Send a WhatsApp message, as the linked account, to a chat, a contact or a phone number. This sends a real message to a real person.",
 			"input": object(map[string]any{"chat": str("the chat's name, a part of it only one chat has, a contact's exact name, a phone number with its country code, or a JID"),
 				"text": str("the message")}, "chat", "text")},
+		{"name": "move", "description": "Move the WhatsApp link, with its kept messages, from the server it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted here once the other server has it.",
+			"input": object(map[string]any{"to": str("the server to move it to, by name")}, "to")},
 	},
 	"widgets": []any{},
 }

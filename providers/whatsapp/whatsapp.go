@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -25,39 +27,57 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// link is this device's link to the account: whatsmeow's client, and the
+// link is this server's link to the account: whatsmeow's client, and the
 // database it shares with the messages.
 type link struct {
+	node string // this server's node, through which it asks the user's other servers
+	path string
+
+	mu        sync.Mutex
 	db        *sql.DB
 	container *sqlstore.Container
-
-	mu     sync.Mutex
-	client *whatsmeow.Client
-	qr     string // the current QR code, while pairing
+	client    *whatsmeow.Client
+	qr        string // the current QR code, while pairing
 }
 
-func open(path string) (*link, error) {
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
-	if err != nil {
-		return nil, err
-	}
-	l := &link{db: db, container: sqlstore.NewWithDB(db, "sqlite", logger{"whatsmeow"})}
-	if err := l.container.Upgrade(context.Background()); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(schema); err != nil {
-		return nil, err
-	}
+// connect and loggedIn reach WhatsApp; tests replace them, so they never do.
+var (
+	connect  = func(c *whatsmeow.Client) error { return c.Connect() }
+	loggedIn = func(c *whatsmeow.Client) bool { return c.IsLoggedIn() }
+)
+
+func open(path, node string) (*link, error) {
 	store.SetOSInfo("The One App", [3]uint32{0, 2, 0})
-	if err := l.fresh(); err != nil {
+	l := &link{node: node, path: path}
+	if err := l.load(); err != nil {
 		return nil, err
 	}
 	if l.client.Store.ID != nil {
-		if err := l.client.Connect(); err != nil {
+		if err := connect(l.client); err != nil {
 			log.Printf("connecting: %v", err)
 		}
 	}
 	return l, nil
+}
+
+// load opens the database, with a client for the device in it, or a new one
+// to pair.
+func (l *link) load() error {
+	db, err := sql.Open("sqlite", "file:"+l.path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return err
+	}
+	container := sqlstore.NewWithDB(db, "sqlite", logger{"whatsmeow"})
+	if err := container.Upgrade(context.Background()); err != nil {
+		db.Close()
+		return err
+	}
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return err
+	}
+	l.db, l.container = db, container
+	return l.fresh()
 }
 
 // fresh makes a client for the stored device, or a new one to pair.
@@ -71,11 +91,34 @@ func (l *link) fresh() error {
 	return nil
 }
 
+// unload disconnects and closes the database, with everything in its main
+// file.
+func (l *link) unload() {
+	l.client.Disconnect()
+	_, _ = l.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	l.db.Close()
+}
+
+// forget deletes the link and the messages kept here, leaving a new device
+// to pair.
+func (l *link) forget() error {
+	l.unload()
+	var errs []error
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(l.path + suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(append(errs, l.load())...)
+}
+
 func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, error) {
 	var in struct {
-		Phone, Chat, Query, Text string
-		Unread                   bool
-		Limit, Skip              int
+		Phone, Chat, Query, Text, To string
+		Unread                       bool
+		Limit, Skip                  int
+		From, Data                   string // take's
+		Part, Parts                  int
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &in); err != nil {
@@ -88,6 +131,10 @@ func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, er
 		return l.status()
 	case "sign_in":
 		return l.signIn(ctx, in.Phone)
+	case "_holder": // the provider's own, between the user's servers
+		return l.holder(), nil
+	case "_take":
+		return l.take(in.From, in.Part, in.Parts, in.Data)
 	}
 	if err := l.linked(); err != nil {
 		return nil, err
@@ -124,15 +171,17 @@ func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, er
 		return l.lines(ctx, ms, chat == ""), err
 	case "send":
 		return l.send(ctx, in.Chat, in.Text)
+	case "move":
+		return l.move(in.To)
 	}
 	return nil, fmt.Errorf("whatsapp has no operation %s", op)
 }
 
+// linked says, if WhatsApp isn't linked here, to try the user's other
+// servers.
 func (l *link) linked() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.client.Store.ID == nil {
-		return errors.New("WhatsApp isn't linked here: whatsapp_sign_in links it")
+	if l.holder().Phone == "" {
+		return elsewhere("WhatsApp isn't linked here: whatsapp_sign_in links it")
 	}
 	return nil
 }
@@ -143,21 +192,66 @@ func (l *link) status() (string, error) {
 	l.mu.Unlock()
 	var chats, msgs int
 	_ = l.db.QueryRow(`SELECT (SELECT count(*) FROM chats), (SELECT count(*) FROM messages)`).Scan(&chats, &msgs)
+	kept := fmt.Sprintf("%d messages in %d chats are kept here.", msgs, chats)
+	s, err := l.servers()
+	if err != nil {
+		return "", err
+	}
 	if c.Store.ID == nil {
-		return fmt.Sprintf("Not linked: whatsapp_sign_in links it. %d messages in %d chats are kept here.", msgs, chats), nil
+		if server, phone := l.linkedElsewhere(s); server != "" {
+			return fmt.Sprintf("Not linked here, on %s: WhatsApp is linked on %s, as +%s. %s", s.here, server, phone, kept), nil
+		}
+		return fmt.Sprintf("Not linked here, on %s, nor on any other server of yours that answered: whatsapp_sign_in links it. %s", s.here, kept), nil
 	}
 	state := "connected"
 	if !c.IsConnected() || !c.IsLoggedIn() {
 		state = "not connected right now (it reconnects by itself)"
 	}
-	return fmt.Sprintf("Linked as +%s, %s. %d messages in %d chats are kept here.", c.Store.ID.User, state, msgs, chats), nil
+	return fmt.Sprintf("Linked here, on %s, as +%s, %s. %s", s.here, c.Store.ID.User, state, kept), nil
 }
 
-func (l *link) signIn(ctx context.Context, phone string) (string, error) {
+// pairingPhone is a phone number as WhatsApp's pairing wants it: digits
+// only, with the country code.
+func pairingPhone(number string) (string, error) {
+	number = strings.TrimSpace(number)
+	digits := strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, number)
+	if !phone.MatchString(number) || len(digits) < 7 {
+		return "", fmt.Errorf("%q isn't a phone number", number)
+	}
+	if !strings.HasPrefix(number, "+") || strings.HasPrefix(digits, "0") {
+		return "", fmt.Errorf("give %q with its country code, e.g. +61…", number)
+	}
+	return digits, nil
+}
+
+func (l *link) signIn(ctx context.Context, number string) (string, error) {
+	var digits string
+	if number != "" {
+		var err error
+		if digits, err = pairingPhone(number); err != nil {
+			return "", err
+		}
+	}
+	s, err := l.servers()
+	if err != nil {
+		return "", err
+	}
+	if h := l.holder(); h.Phone != "" {
+		return fmt.Sprintf("Already linked here, on %s, as +%s.", s.here, h.Phone), nil
+	}
+	// Asked before locking, so two servers signing in at once can ask each other.
+	if server, phone := l.linkedElsewhere(s); server != "" {
+		return "", fmt.Errorf("WhatsApp is linked on %s, as +%s: whatsapp_move there (to %s) moves the link here, or whatsapp_sign_out there unlinks it first", server, phone, s.here)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.client.Store.ID != nil {
-		return fmt.Sprintf("Already linked, as +%s.", l.client.Store.ID.User), nil
+		return fmt.Sprintf("Already linked here, on %s, as +%s.", s.here, l.client.Store.ID.User), nil
 	}
 	if l.qr == "" {
 		l.client.Disconnect()
@@ -168,7 +262,7 @@ func (l *link) signIn(ctx context.Context, phone string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if err := l.client.Connect(); err != nil {
+		if err := connect(l.client); err != nil {
 			return "", err
 		}
 		select {
@@ -192,18 +286,21 @@ func (l *link) signIn(ctx context.Context, phone string) (string, error) {
 			}
 		}()
 	}
-	if phone != "" {
-		code, err := l.client.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("On the phone, open WhatsApp > Settings > Linked devices > Link a device > Link with phone number instead, and enter %s. WhatsApp then sends recent chats here, which takes a few minutes.", code), nil
-	}
 	q, err := qrcode.New(l.qr, qrcode.Low)
 	if err != nil {
 		return "", err
 	}
-	return "On the phone, open WhatsApp > Settings > Linked devices > Link a device, and scan this within 20 seconds (sign_in again for a new one). WhatsApp then sends recent chats here, which takes a few minutes.\n\n" + q.ToSmallString(false), nil
+	after := " WhatsApp then sends recent chats here, which takes a few minutes.\n\n" + q.ToSmallString(false)
+	if digits == "" {
+		return "On the phone, open WhatsApp > Settings > Linked devices > Link a device, and scan this within 20 seconds (sign_in again for a new one). " +
+			"If this is on the phone itself, sign_in with phone instead, for a code to type there." + after, nil
+	}
+	code, err := l.client.PairPhone(ctx, digits, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("On the phone, open WhatsApp > Settings > Linked devices > Link a device, then tap Link with phone number instead and type %s within 2 minutes; "+
+		"or scan this QR code there within 20 seconds (sign_in again for new ones).", code) + after, nil
 }
 
 func (l *link) handle(evt any) {
