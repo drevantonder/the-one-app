@@ -9,7 +9,7 @@ A node runs on every device that can keep a log: laptops, the home box, servers.
                     \                             /
                      node (src/node.rs) ── iroh: one/sync/1, one/join/1, one/call/1
                       │         │
-          store (src/store.rs)  apps (src/apps.rs): QuickJS + one SQLite view per app
+          store (src/store.rs)  apps (src/apps.rs): workerd; a Durable Object per app and space
           entries, per space    fold handlers, operations, widgets, hooks
                       │
           entry (src/entry.rs): p2panda-core operations, signed, hash-linked per device
@@ -24,7 +24,7 @@ A node runs on every device that can keep a log: laptops, the home box, servers.
 - `src/space.rs`: who's in a space. Pure: entries in, members out.
 - `src/sync.rs`: what two devices say to each other. It reads and writes the store but has no clock or network, so the simulator can drive it.
 - `src/node.rs`: the only place with state and I/O: stores, sessions, invites, calls, hooks.
-- `src/apps.rs`: one thread owns QuickJS and every view database. Folds can't read the clock or randomness, and can only write their own views; operations can only append entries.
+- `src/apps.rs`: apps run in workerd, which the node downloads (pinned, hash-checked), configures and supervises. `src/runtime/shim.js` makes each app a Worker with one Durable Object per space holding its views in SQLite; folds see no clock or randomness, and operations can only append entries.
 - `src/builtin.rs`: the apps this build ships with, handed to the node by the binary; the core names none.
 - `src/native.rs` (the type), `src/shell.rs`, `src/agents.rs`, `src/models.rs`: device features in Rust. `src/providers.rs`: the same for features written outside the node (the Mac app's Swift, Go), over the local API.
 - `apps/`: the apps every build ships with. They use nothing a user's app couldn't.

@@ -132,7 +132,9 @@ impl Node {
         let id = *key.verifying_key().as_bytes();
         let endpoint = Endpoint::builder(presets::N0).secret_key(SecretKey::from_bytes(&secret)).bind().await?;
         let apps_names: Vec<String> = builtin.apps.iter().map(|(n, _)| n.clone()).collect();
-        let apps = Apps::start(dir.join("views"), builtin.apps)?;
+        // Views used to live here, before apps ran in workerd.
+        let _ = std::fs::remove_dir_all(dir.join("views"));
+        let apps = Apps::start(dir.join("runtime"), builtin.apps).await?;
         let (events, _) = broadcast::channel(256);
         let node = Node(Arc::new(Inner {
             dir: dir.to_path_buf(),

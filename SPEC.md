@@ -84,7 +84,7 @@ Each node serves HTTP on `127.0.0.1:<brand port>` for its own device's shells, C
 
 ## Apps
 
-An app is JavaScript: one module whose default export is
+An app is JavaScript: one ES module, run in workerd (Cloudflare's open-source Workers runtime), whose default export is
 
 ```js
 {
@@ -98,7 +98,7 @@ An app is JavaScript: one module whose default export is
 }
 ```
 
-`ctx` has `append(kind, data)`, `query(sql, params)`, `me` (who asked: `{ space, device, person, name }`) and `now()`. A fold handler gets `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, app, kind, author, person, name, time, data }`, where `id` is `<first 8 hex of author>:<seq>`. Entries an operation appends are written by the device that ran it. A call into an app stops after 10 seconds, and an app's views can't attach other databases.
+`ctx` has `append(kind, data)`, `query(sql, params)`, `me` (who asked: `{ space, device, person, name }`) and `now()`. A fold handler gets `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, app, kind, author, person, name, time, data }`, where `id` is `<first 8 hex of author>:<seq>`. Entries an operation appends are written by the device that ran it. Each app keeps its views in a Durable Object per space, in SQLite. A call that takes longer than 30 seconds stops the runtime, which starts again.
 
 ## Screens
 

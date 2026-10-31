@@ -13,7 +13,7 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 
 ## Work
 
-- `cargo test` before every commit. `tests/sim.rs` runs the network simulator; a failing seed is a bug, never a flake.
+- `cargo test` before every commit, and `gh signoff` once it's pushed: tests run on our own devices, never in CI. `tests/sim.rs` runs the network simulator; a failing seed is a bug, never a flake.
 - Changes to `SPEC.md` are breaking for every device: bump `PROTOCOL` in `src/entry.rs`.
 - Push to `main` as you go (pull with `--rebase` first: several threads on several machines work on it at once). To deploy, build on Linux (`cargo build --release`), copy `target/release/one` to an admin device (linux) and run `one release <binary>` there: every node on that platform updates itself. The Mac's node updates with the Mac app (`apple/build.sh`).
 - One commit per change, once it works: `area: what changes, for whoever uses it`. No co-author or "Generated with" lines.

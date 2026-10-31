@@ -1,72 +1,30 @@
-//! Apps: JavaScript modules run in QuickJS, each folding entries into its own SQLite views.
-//! One thread owns the JS engine and every view database; the node talks to it by message.
+//! Apps run in workerd, Cloudflare's open-source Workers runtime, which the node starts beside itself.
+//! Each app is an ES module inside `runtime/shim.js`: a Worker with a Durable Object per space that
+//! holds the app's views in SQLite. The node folds entries into them and asks them to run operations.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-use anyhow::{Context as _, Result, anyhow, bail};
-use rquickjs::{CatchResultExt, Context, Ctx, Function, Module, Promise, Runtime};
-use rusqlite::{Connection, types::Value as Sql};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use serde::Serialize;
-use serde_json::{Map, Value, json};
-use tokio::sync::{mpsc, oneshot};
+use serde_json::{Value, json};
+use sha2::Digest;
 
 use crate::entry::{Content, Key, hex};
 
-
-const PRELUDE: &str = r#"
-const RealDate = Date;
-globalThis.Date = function (...args) {
-  if (args.length === 0) throw new Error("apps read the time with ctx.now()");
-  return new RealDate(...args);
-};
-Date.UTC = RealDate.UTC; Date.parse = RealDate.parse; Date.prototype = RealDate.prototype;
-Date.now = () => { throw new Error("apps read the time with ctx.now()"); };
-Math.random = () => { throw new Error("apps have no randomness: folds must give the same result everywhere"); };
-const json = (v) => JSON.stringify(v === undefined ? null : v);
-globalThis.__apps = {};
-const db = {
-  exec: (sql, params) => __exec(sql, json(params || [])),
-  query: (sql, params) => JSON.parse(__query(sql, json(params || []))),
-};
-const ctx = (me) => ({
-  me,
-  append: (kind, data) => __append(kind, json(data)),
-  query: db.query,
-  now: () => __now(),
-});
-globalThis.__run = (app, op, input, me) => {
-  const o = __apps[app].ops?.[op];
-  if (!o) throw new Error(`${app} has no operation ${op}`);
-  return json(o.run(ctx(JSON.parse(me)), JSON.parse(input)));
-};
-globalThis.__fold = (app, kind, entry) => {
-  const f = __apps[app].fold?.[kind];
-  if (f) f(db, JSON.parse(entry));
-};
-globalThis.__hook = (app, name, input, me) => {
-  const h = __apps[app].hooks?.[name];
-  if (!h) throw new Error(`${app} has no hook ${name}`);
-  return json(h(ctx(JSON.parse(me)), JSON.parse(input)));
-};
-globalThis.__widget = (app, name, me) => json(__apps[app].widgets[name].render(ctx(JSON.parse(me))));
-globalThis.__describe = (app) => {
-  const a = __apps[app];
-  return json({
-    name: a.name, title: a.title, icon: a.icon, instructions: a.instructions || "",
-    ops: Object.entries(a.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {} })),
-    widgets: Object.entries(a.widgets || {}).map(([name, w]) => ({ name, title: w.title || name })),
-    screens: Object.entries(a.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
-  });
-};
-globalThis.__screen = (app, name) => {
-  const s = __apps[app]?.screens?.[name];
-  if (!s) throw new Error(`${app} has no screen ${name}`);
-  return s.html;
-};
-globalThis.__schema = (app) => __apps[app].schema || "";
-"#;
+/// The workerd build every node runs, and each platform's npm package of it with its sha512.
+const WORKERD: &str = "1.20261031.1";
+const PACKAGES: &[(&str, &str, &str)] = &[
+    ("x86_64-unknown-linux-gnu", "linux-64", "42mhHUcRRqs0FI3Ej6HybrxuCeOoHiH9A1h8CC341bT/FSNBzJZWNLiiCHaQQH+dpYU+Vz/bC6DurKnuJZTW3Q=="),
+    ("aarch64-unknown-linux-gnu", "linux-arm64", "ZGeXhiFYcUoKvQVLARBowkyjEhymW7VUMk69f4TD2B7UFj4ijq6YEDWcxm0oQLw7uTI9W2915Bnlp8sCixLYag=="),
+    ("aarch64-apple-darwin", "darwin-arm64", "rN2OJjYA9DiHJPub+J1D1TCTw0+g40M+hfMUsD4sPm1qBSWyqG/H9M40ww2IKB16F8m+/0O9GmdlzYI932GduA=="),
+    ("x86_64-apple-darwin", "darwin-64", "qjXbqX7J50hqThWbYzT2c5yxr5Ymq6m6WETgPGqOAbIY+aZ11NQhnEV1Vsd/3Ljt97ctApQ1v8aCwX4Fa16nYQ=="),
+];
+const COMPATIBILITY_DATE: &str = "2026-10-01";
+/// How long an app may take to answer before its runtime is restarted.
+const TIME_LIMIT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Me {
@@ -94,383 +52,238 @@ pub struct Outcome {
     pub appends: Vec<Content>,
 }
 
-/// One app's part of a fold: its new entries, or all of them into a fresh view.
+/// One app's part of a fold: its new entries, or all of them into fresh views.
 pub struct FoldJob {
     pub app: String,
     pub fresh: bool,
     pub entries: Vec<Folded>,
 }
 
-enum Job {
-    Fold { space: Key, jobs: Vec<FoldJob>, reply: oneshot::Sender<Result<()>> },
-    Call { space: Key, app: String, op: String, input: Value, me: Me, now: u64, reply: oneshot::Sender<Result<Outcome>> },
-    Widget { space: Key, app: String, name: String, me: Me, now: u64, reply: oneshot::Sender<Result<Value>> },
-    Describe { reply: oneshot::Sender<Vec<Value>> },
-    Screen { app: String, name: String, reply: oneshot::Sender<Result<String>> },
-    Hook { space: Key, app: String, name: String, input: Value, me: Me, now: u64, reply: oneshot::Sender<Result<Value>> },
-}
-
 #[derive(Clone)]
-pub struct Apps {
-    jobs: mpsc::UnboundedSender<Job>,
+pub struct Apps(Arc<Runtime>);
+
+struct Runtime {
+    base: String,
+    names: Vec<String>,
+    /// The running workerd's process id, so a hung one can be stopped and started again.
+    pid: Mutex<Option<u32>>,
 }
 
 impl Apps {
-    /// Starts the engine with these apps: (name, JavaScript source).
-    pub fn start(dir: PathBuf, apps: Vec<(String, String)>) -> Result<Self> {
-        let (jobs, rx) = mpsc::unbounded_channel();
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        std::thread::Builder::new().name("apps".into()).spawn(move || {
-            match Engine::new(dir, apps) {
-                Ok(engine) => {
-                    let _ = ready_tx.send(Ok(()));
-                    engine.serve(rx);
-                }
-                Err(err) => {
-                    let _ = ready_tx.send(Err(err));
-                }
+    /// Starts workerd with these apps, (name, ES module source), keeping its files in `dir`.
+    pub async fn start(dir: PathBuf, apps: Vec<(String, String)>) -> Result<Self> {
+        tokio::task::spawn_blocking(move || Apps::start_blocking(&dir, apps)).await?
+    }
+
+    fn start_blocking(dir: &Path, apps: Vec<(String, String)>) -> Result<Self> {
+        let workerd = workerd()?;
+        std::fs::create_dir_all(dir.join("storage"))?;
+        stop_previous(dir);
+        let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+        let config = write_config(dir, &apps, port)?;
+        let runtime = Arc::new(Runtime { base: format!("http://127.0.0.1:{port}"), names: apps.into_iter().map(|(n, _)| n).collect(), pid: Mutex::new(None) });
+        let watch = runtime.clone();
+        let (dir, log) = (dir.to_path_buf(), dir.join("workerd.log"));
+        std::thread::Builder::new().name("workerd".into()).spawn(move || loop {
+            let out = std::fs::OpenOptions::new().create(true).append(true).open(&log).expect("workerd log");
+            let mut command = std::process::Command::new(&workerd);
+            command.arg("serve").arg(&config).stdout(out.try_clone().unwrap()).stderr(out);
+            // On Linux the runtime dies with its node; elsewhere the next start stops it (stop_previous).
+            #[cfg(target_os = "linux")]
+            unsafe {
+                use std::os::unix::process::CommandExt;
+                command.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                    Ok(())
+                });
             }
+            match command.spawn() {
+                Ok(mut child) => {
+                    *watch.pid.lock().unwrap() = Some(child.id());
+                    let _ = std::fs::write(dir.join("workerd.pid"), child.id().to_string());
+                    let status = child.wait();
+                    tracing::warn!("the app runtime stopped ({status:?}); starting it again");
+                }
+                Err(err) => tracing::warn!("couldn't start the app runtime: {err}"),
+            }
+            std::thread::sleep(Duration::from_secs(1));
         })?;
-        ready_rx.recv()??;
-        Ok(Apps { jobs })
+        let started = Instant::now();
+        while ureq::get(format!("{}/ready", runtime.base)).call().is_err() {
+            ensure!(started.elapsed() < Duration::from_secs(60), "the app runtime didn't start; see {}", dir_log(&runtime));
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        Ok(Apps(runtime))
+    }
+
+    pub fn names(&self) -> &[String] {
+        &self.0.names
+    }
+
+    async fn ask(&self, app: &str, what: &str, space: Option<Key>, body: Value) -> Result<(Value, Vec<Content>)> {
+        if !self.0.names.iter().any(|n| n == app) {
+            bail!("no app named {app}");
+        }
+        let url = match space {
+            Some(s) => format!("{}/{app}/{what}?space={}", self.0.base, hex(&s)),
+            None => format!("{}/{app}/{what}", self.0.base),
+        };
+        let runtime = self.0.clone();
+        let reply: Value = tokio::task::spawn_blocking(move || -> Result<Value> {
+            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(TIME_LIMIT)).build().into();
+            match agent.post(&url).send_json(&body) {
+                Ok(mut resp) => Ok(resp.body_mut().with_config().limit(64 << 20).read_json()?),
+                Err(ureq::Error::Timeout(_)) => {
+                    runtime.restart();
+                    bail!("the app took longer than {}s; it was stopped", TIME_LIMIT.as_secs())
+                }
+                Err(err) => Err(err.into()),
+            }
+        })
+        .await??;
+        if let Some(err) = reply.get("error") {
+            bail!("{}", err.as_str().unwrap_or("the app failed"));
+        }
+        let appends = reply["appends"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|a| Content { app: app.into(), kind: a["kind"].as_str().unwrap_or("").into(), data: a["data"].clone() })
+            .collect();
+        Ok((reply["ok"].clone(), appends))
     }
 
     pub async fn fold(&self, space: Key, jobs: Vec<FoldJob>) -> Result<()> {
-        let (reply, rx) = oneshot::channel();
-        self.jobs.send(Job::Fold { space, jobs, reply }).map_err(|_| anyhow!("apps stopped"))?;
-        rx.await?
-    }
-
-    pub async fn call(&self, space: Key, app: &str, op: &str, input: Value, me: Me, now: u64) -> Result<Outcome> {
-        let (reply, rx) = oneshot::channel();
-        let job = Job::Call { space, app: app.into(), op: op.into(), input, me, now, reply };
-        self.jobs.send(job).map_err(|_| anyhow!("apps stopped"))?;
-        rx.await?
-    }
-
-    pub async fn widget(&self, space: Key, app: &str, name: &str, me: Me, now: u64) -> Result<Value> {
-        let (reply, rx) = oneshot::channel();
-        let job = Job::Widget { space, app: app.into(), name: name.into(), me, now, reply };
-        self.jobs.send(job).map_err(|_| anyhow!("apps stopped"))?;
-        rx.await?
-    }
-
-    pub async fn hook(&self, space: Key, app: &str, name: &str, input: Value, me: Me, now: u64) -> Result<Value> {
-        let (reply, rx) = oneshot::channel();
-        let job = Job::Hook { space, app: app.into(), name: name.into(), input, me, now, reply };
-        self.jobs.send(job).map_err(|_| anyhow!("apps stopped"))?;
-        rx.await?
-    }
-
-    /// A screen's HTML, as the app wrote it.
-    pub async fn screen(&self, app: &str, name: &str) -> Result<String> {
-        let (reply, rx) = oneshot::channel();
-        self.jobs.send(Job::Screen { app: app.into(), name: name.into(), reply }).map_err(|_| anyhow!("apps stopped"))?;
-        rx.await?
-    }
-
-    pub async fn describe(&self) -> Result<Vec<Value>> {
-        let (reply, rx) = oneshot::channel();
-        self.jobs.send(Job::Describe { reply }).map_err(|_| anyhow!("apps stopped"))?;
-        Ok(rx.await?)
-    }
-}
-
-/// What the host functions act on during one call into JavaScript.
-struct Current {
-    db: Connection,
-    mode: Mode,
-    appends: Vec<Content>,
-    app: String,
-}
-
-#[derive(PartialEq)]
-enum Mode {
-    Fold,
-    Op(u64),
-}
-
-thread_local! {
-    static CURRENT: RefCell<Option<Current>> = const { RefCell::new(None) };
-}
-
-/// How long one call into an app may run before it's stopped.
-const TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
-
-struct Engine {
-    _runtime: Runtime,
-    deadline: std::sync::Arc<std::sync::Mutex<std::time::Instant>>,
-    context: Context,
-    dir: PathBuf,
-    names: Vec<String>,
-    views: HashMap<(Key, String), Connection>,
-}
-
-impl Engine {
-    fn new(dir: PathBuf, apps: Vec<(String, String)>) -> Result<Self> {
-        let runtime = Runtime::new()?;
-        runtime.set_memory_limit(256 << 20);
-        let deadline = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now() + TIME_LIMIT));
-        let watch = deadline.clone();
-        runtime.set_interrupt_handler(Some(Box::new(move || std::time::Instant::now() > *watch.lock().unwrap())));
-        let context = Context::full(&runtime)?;
-        let mut names = Vec::new();
-        context.with(|ctx| -> Result<()> {
-            install_host(&ctx)?;
-            ctx.eval::<(), _>(PRELUDE).catch(&ctx).map_err(|e| anyhow!("prelude: {e}"))?;
-            for (name, source) in &apps {
-                load(&ctx, name, source)?;
-                names.push(name.clone());
-            }
-            Ok(())
-        })?;
-        Ok(Engine { _runtime: runtime, deadline, context, dir, names, views: HashMap::new() })
-    }
-
-    fn serve(mut self, mut rx: mpsc::UnboundedReceiver<Job>) {
-        while let Some(job) = rx.blocking_recv() {
-            match job {
-                Job::Fold { space, jobs, reply } => {
-                    let _ = reply.send(self.fold(space, jobs));
-                }
-                Job::Call { space, app, op, input, me, now, reply } => {
-                    let _ = reply.send(self.call(space, &app, &op, &input, &me, now));
-                }
-                Job::Widget { space, app, name, me, now, reply } => {
-                    let _ = reply.send(self.widget(space, &app, &name, &me, now));
-                }
-                Job::Hook { space, app, name, input, me, now, reply } => {
-                    let _ = reply.send(self.hook(space, &app, &name, &input, &me, now));
-                }
-                Job::Screen { app, name, reply } => {
-                    let html = self.context.with(|ctx| -> Result<String> {
-                        let f: Function = ctx.globals().get("__screen")?;
-                        f.call((app.as_str(), name.as_str())).catch(&ctx).map_err(|e| anyhow!("{e}"))
-                    });
-                    let _ = reply.send(html);
-                }
-                Job::Describe { reply } => {
-                    let _ = reply.send(self.describe());
-                }
-            }
-        }
-    }
-
-    /// Takes an app's view database out to work on; `put` returns it.
-    fn take(&mut self, space: Key, app: &str, fresh: bool) -> Result<Connection> {
-        let key = (space, app.to_string());
-        let path = self.path(space, app);
-        if fresh {
-            self.views.remove(&key);
-            let _ = std::fs::remove_file(&path);
-        }
-        if let Some(db) = self.views.remove(&key) {
-            return Ok(db);
-        }
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        let existed = path.exists();
-        let db = Connection::open(&path)?;
-        db.execute_batch("pragma journal_mode = wal; pragma synchronous = off;")?;
-        // An app reaches only its own views: no attaching another app's database, or the log.
-        db.set_limit(rusqlite::limits::Limit::SQLITE_LIMIT_ATTACHED, 0)?;
-        if !existed {
-            let schema: String = self.context.with(|ctx| -> Result<String> {
-                let f: Function = ctx.globals().get("__schema")?;
-                f.call((app,)).catch(&ctx).map_err(|e| anyhow!("{e}"))
-            })?;
-            db.execute_batch(&schema).with_context(|| format!("{app} schema"))?;
-        }
-        Ok(db)
-    }
-
-    fn put(&mut self, space: Key, app: &str, db: Connection) {
-        self.views.insert((space, app.to_string()), db);
-    }
-
-    fn path(&self, space: Key, app: &str) -> PathBuf {
-        self.dir.join(hex(&space)).join(format!("{app}.db"))
-    }
-
-    fn fold(&mut self, space: Key, jobs: Vec<FoldJob>) -> Result<()> {
         for job in jobs {
-            if !self.names.contains(&job.app) || (job.entries.is_empty() && !job.fresh) {
+            if job.entries.is_empty() && !job.fresh {
                 continue;
             }
-            let mut db = self.take(space, &job.app, job.fresh)?;
-            db.execute_batch("begin")?;
-            for entry in &job.entries {
-                let entry_json = serde_json::to_string(entry)?;
-                let (result, current) = self.with_current(Current { db, mode: Mode::Fold, appends: Vec::new(), app: job.app.clone() }, |ctx| {
-                    let f: Function = ctx.globals().get("__fold")?;
-                    f.call::<_, ()>((job.app.as_str(), entry.kind.as_str(), entry_json.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))
-                });
-                db = current.db;
-                if let Err(err) = result {
-                    tracing::warn!("{} fold of {} failed: {err:#}", job.app, entry.kind);
-                }
+            if let Err(err) = self.ask(&job.app, "fold", Some(space), json!({ "fresh": job.fresh, "entries": job.entries })).await {
+                tracing::warn!("{} fold: {err:#}", job.app);
             }
-            db.execute_batch("commit")?;
-            self.put(space, &job.app, db);
         }
         Ok(())
     }
 
-    /// Runs one of an app's functions (`__run`, `__widget`, `__hook`) with its views to read.
-    fn op(&mut self, space: Key, app: &str, now: u64, f: impl FnOnce(&Ctx) -> Result<Value>) -> Result<Outcome> {
-        if !self.names.iter().any(|n| n == app) {
-            bail!("no app named {app}");
+    pub async fn call(&self, space: Key, app: &str, op: &str, input: Value, me: Me, now: u64) -> Result<Outcome> {
+        let (result, appends) = self.ask(app, "call", Some(space), json!({ "op": op, "input": input, "me": me, "now": now })).await?;
+        Ok(Outcome { result, appends })
+    }
+
+    pub async fn widget(&self, space: Key, app: &str, name: &str, me: Me, now: u64) -> Result<Value> {
+        Ok(self.ask(app, "widget", Some(space), json!({ "name": name, "me": me, "now": now })).await?.0)
+    }
+
+    pub async fn hook(&self, space: Key, app: &str, name: &str, input: Value, me: Me, now: u64) -> Result<Value> {
+        Ok(self.ask(app, "hook", Some(space), json!({ "name": name, "input": input, "me": me, "now": now })).await?.0)
+    }
+
+    /// A screen's HTML, as the app wrote it.
+    pub async fn screen(&self, app: &str, name: &str) -> Result<String> {
+        let (html, _) = self.ask(app, &format!("screen?name={name}"), None, json!({})).await?;
+        html.as_str().map(str::to_string).context("the screen isn't text")
+    }
+
+    pub async fn describe(&self) -> Result<Vec<Value>> {
+        let mut out = Vec::new();
+        for app in self.0.names.clone() {
+            match self.ask(&app, "describe", None, json!({})).await {
+                Ok((d, _)) => out.push(d),
+                Err(err) => tracing::warn!("{app}: {err:#}"),
+            }
         }
-        let db = self.take(space, app, false)?;
-        let (result, current) = self.with_current(Current { db, mode: Mode::Op(now), appends: Vec::new(), app: app.into() }, f);
-        self.put(space, app, current.db);
-        Ok(Outcome { result: result?, appends: current.appends })
-    }
-
-    fn call(&mut self, space: Key, app: &str, op: &str, input: &Value, me: &Me, now: u64) -> Result<Outcome> {
-        let (input, me) = (serde_json::to_string(input)?, serde_json::to_string(me)?);
-        self.op(space, app, now, |ctx| {
-            let f: Function = ctx.globals().get("__run")?;
-            let out: String = f.call((app, op, input.as_str(), me.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))?;
-            Ok(serde_json::from_str(&out)?)
-        })
-    }
-
-    fn widget(&mut self, space: Key, app: &str, name: &str, me: &Me, now: u64) -> Result<Value> {
-        let me = serde_json::to_string(me)?;
-        let outcome = self.op(space, app, now, |ctx| {
-            let f: Function = ctx.globals().get("__widget")?;
-            let out: String = f.call((app, name, me.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))?;
-            Ok(serde_json::from_str(&out)?)
-        })?;
-        Ok(outcome.result)
-    }
-
-    fn hook(&mut self, space: Key, app: &str, name: &str, input: &Value, me: &Me, now: u64) -> Result<Value> {
-        let (input, me) = (serde_json::to_string(input)?, serde_json::to_string(me)?);
-        let outcome = self.op(space, app, now, |ctx| {
-            let f: Function = ctx.globals().get("__hook")?;
-            let out: String = f.call((app, name, input.as_str(), me.as_str())).catch(ctx).map_err(|e| anyhow!("{e}"))?;
-            Ok(serde_json::from_str(&out)?)
-        })?;
-        Ok(outcome.result)
-    }
-
-    fn describe(&self) -> Vec<Value> {
-        self.context.with(|ctx| {
-            self.names
-                .iter()
-                .filter_map(|name| {
-                    let f: Function = ctx.globals().get("__describe").ok()?;
-                    let out: String = f.call((name.as_str(),)).ok()?;
-                    serde_json::from_str(&out).ok()
-                })
-                .collect()
-        })
-    }
-
-    /// Runs `f` with `current` where the host functions can reach it, and hands it back.
-    fn with_current<T>(&self, current: Current, f: impl FnOnce(&Ctx) -> Result<T>) -> (Result<T>, Current) {
-        *self.deadline.lock().unwrap() = std::time::Instant::now() + TIME_LIMIT;
-        CURRENT.with(|c| *c.borrow_mut() = Some(current));
-        let result = self.context.with(|ctx| f(&ctx));
-        let current = CURRENT.with(|c| c.borrow_mut().take()).expect("current is set for the call");
-        (result, current)
+        Ok(out)
     }
 }
 
-fn load(ctx: &Ctx, name: &str, source: &str) -> Result<()> {
-    let (module, promise) = Module::declare(ctx.clone(), name, source).catch(ctx).map_err(|e| anyhow!("{name}: {e}"))?.eval().catch(ctx).map_err(|e| anyhow!("{name}: {e}"))?;
-    let _: () = Promise::finish(&promise).catch(ctx).map_err(|e| anyhow!("{name}: {e}"))?;
-    let app: rquickjs::Object = module.get("default").catch(ctx).map_err(|e| anyhow!("{name} has no default export: {e}"))?;
-    let apps: rquickjs::Object = ctx.globals().get("__apps")?;
-    apps.set(name, app)?;
-    Ok(())
-}
-
-fn install_host(ctx: &Ctx) -> Result<()> {
-    let globals = ctx.globals();
-    globals.set(
-        "__query",
-        Function::new(ctx.clone(), |sql: String, params: String| -> rquickjs::Result<String> { host(|c| query(c, &sql, &params)) }),
-    )?;
-    globals.set(
-        "__exec",
-        Function::new(ctx.clone(), |sql: String, params: String| -> rquickjs::Result<()> {
-            host(|c| {
-                if c.mode != Mode::Fold {
-                    bail!("only fold handlers write views; operations append entries");
-                }
-                c.db.execute(&sql, rusqlite::params_from_iter(to_sql(&params)?))?;
-                Ok(())
-            })
-        }),
-    )?;
-    globals.set(
-        "__append",
-        Function::new(ctx.clone(), |kind: String, data: String| -> rquickjs::Result<()> {
-            host(|c| {
-                if c.mode == Mode::Fold {
-                    bail!("fold handlers can't append");
-                }
-                c.appends.push(Content { app: c.app.clone(), kind, data: serde_json::from_str(&data)? });
-                Ok(())
-            })
-        }),
-    )?;
-    globals.set(
-        "__now",
-        Function::new(ctx.clone(), || -> rquickjs::Result<f64> {
-            host(|c| match c.mode {
-                Mode::Op(now) => Ok(now as f64),
-                Mode::Fold => bail!("fold handlers can't read the clock; use entry.time"),
-            })
-        }),
-    )?;
-    Ok(())
-}
-
-fn host<T>(f: impl FnOnce(&mut Current) -> Result<T>) -> rquickjs::Result<T> {
-    CURRENT.with(|c| {
-        let mut c = c.borrow_mut();
-        let current = c.as_mut().ok_or_else(|| rquickjs::Error::new_from_js_message("host", "call", "not inside an app call"))?;
-        f(current).map_err(|e| rquickjs::Error::new_from_js_message("host", "call", format!("{e:#}")))
-    })
-}
-
-fn query(c: &Current, sql: &str, params: &str) -> Result<String> {
-    let mut stmt = c.db.prepare(sql)?;
-    if !stmt.readonly() {
-        bail!("query only reads; fold handlers write with db.exec");
-    }
-    let names: Vec<String> = stmt.column_names().map(|s| s.to_string()).collect();
-    let rows = stmt.query_map(rusqlite::params_from_iter(to_sql(params)?), |r| {
-        let mut row = Map::new();
-        for (i, name) in names.iter().enumerate() {
-            let v = match r.get_ref(i)? {
-                rusqlite::types::ValueRef::Null => Value::Null,
-                rusqlite::types::ValueRef::Integer(n) => json!(n),
-                rusqlite::types::ValueRef::Real(f) => json!(f),
-                rusqlite::types::ValueRef::Text(t) => json!(String::from_utf8_lossy(t)),
-                rusqlite::types::ValueRef::Blob(b) => json!(data_encoding::BASE64.encode(b)),
-            };
-            row.insert(name.clone(), v);
+impl Runtime {
+    /// Stops a hung runtime; the watcher starts it again.
+    fn restart(&self) {
+        if let Some(pid) = *self.pid.lock().unwrap() {
+            let _ = std::process::Command::new("kill").arg("-9").arg(pid.to_string()).status();
         }
-        Ok(Value::Object(row))
-    })?;
-    let rows: Vec<Value> = rows.collect::<Result<_, _>>()?;
-    Ok(serde_json::to_string(&rows)?)
+    }
 }
 
-fn to_sql(params: &str) -> Result<Vec<Sql>> {
-    let params: Vec<Value> = serde_json::from_str(params)?;
-    Ok(params
-        .into_iter()
-        .map(|v| match v {
-            Value::Null => Sql::Null,
-            Value::Bool(b) => Sql::Integer(b as i64),
-            Value::Number(n) => n.as_i64().map(Sql::Integer).unwrap_or_else(|| Sql::Real(n.as_f64().unwrap_or(0.0))),
-            Value::String(s) => Sql::Text(s),
-            other => Sql::Text(other.to_string()),
-        })
-        .collect())
+fn dir_log(runtime: &Runtime) -> String {
+    format!("workerd.log (runtime at {})", runtime.base)
+}
+
+/// A runtime left behind by an earlier run of the node would hold on to its storage; stop it.
+fn stop_previous(dir: &Path) {
+    let Ok(pid) = std::fs::read_to_string(dir.join("workerd.pid")) else { return };
+    let pid = pid.trim();
+    let is_workerd = std::process::Command::new("ps").args(["-p", pid, "-o", "comm="]).output().is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("workerd"));
+    if is_workerd {
+        let _ = std::process::Command::new("kill").arg(pid).status();
+        std::thread::sleep(Duration::from_millis(300));
+    }
+}
+
+/// The workerd binary for this platform, downloaded once into the cache and checked against its pinned hash.
+fn workerd() -> Result<PathBuf> {
+    let (_, package, integrity) = PACKAGES
+        .iter()
+        .find(|(target, _, _)| *target == crate::brand::TARGET)
+        .ok_or_else(|| anyhow!("apps can't run on {} yet: workerd has no build for it", crate::brand::TARGET))?;
+    let cache = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache"));
+    let dir = cache.join(crate::brand::CLI).join(format!("workerd-{WORKERD}"));
+    let bin = dir.join("workerd");
+    if bin.exists() {
+        return Ok(bin);
+    }
+    tracing::info!("downloading the app runtime (workerd {WORKERD}, about 50 MB)");
+    let url = format!("https://registry.npmjs.org/@cloudflare/workerd-{package}/-/workerd-{package}-{WORKERD}.tgz");
+    let tarball = ureq::get(&url).call()?.body_mut().with_config().limit(400 << 20).read_to_vec()?;
+    let digest = data_encoding::BASE64.encode(&sha2::Sha512::digest(&tarball)[..]);
+    ensure!(digest == *integrity, "the downloaded runtime doesn't match its pinned hash");
+    // Unpack into a folder of our own and move the binary into place in one step,
+    // so nodes starting at the same time can't see a half-written runtime.
+    let tmp = dir.with_extension(format!("{}.part", std::process::id()));
+    std::fs::create_dir_all(&tmp)?;
+    std::fs::File::create(tmp.join("package.tgz"))?.write_all(&tarball)?;
+    let ok = std::process::Command::new("tar").args(["-xzf", "package.tgz", "--strip-components=2", "package/bin/workerd"]).current_dir(&tmp).status()?;
+    ensure!(ok.success(), "couldn't unpack the runtime");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::rename(tmp.join("workerd"), &bin)?;
+    let _ = std::fs::remove_dir_all(&tmp);
+    Ok(bin)
+}
+
+/// Writes each app's modules and the workerd config that runs them all behind one router.
+fn write_config(dir: &Path, apps: &[(String, String)], port: u16) -> Result<PathBuf> {
+    let modules = dir.join("apps");
+    let _ = std::fs::remove_dir_all(&modules);
+    std::fs::write(dir.join("router.js"), include_str!("runtime/router.js"))?;
+    let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+    let mut services = vec![
+        "(name = \"router\", worker = .router)".to_string(),
+        format!("(name = \"storage\", disk = (path = {}, writable = true))", quote(&dir.join("storage").to_string_lossy())),
+    ];
+    let mut bindings = Vec::new();
+    let mut workers = Vec::new();
+    for (i, (name, source)) in apps.iter().enumerate() {
+        ensure!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'), "app names are lowercase words joined by -");
+        let app_dir = modules.join(name);
+        std::fs::create_dir_all(&app_dir)?;
+        std::fs::write(app_dir.join("app.js"), source)?;
+        std::fs::write(app_dir.join("shim.js"), include_str!("runtime/shim.js"))?;
+        services.push(format!("(name = {}, worker = .app{i})", quote(&format!("app-{name}"))));
+        bindings.push(format!("(name = {}, service = {})", quote(name), quote(&format!("app-{name}"))));
+        workers.push(format!(
+            "const app{i} :Workerd.Worker = (\n  modules = [(name = \"shim.js\", esModule = embed {}), (name = \"app.js\", esModule = embed {})],\n  compatibilityDate = \"{COMPATIBILITY_DATE}\",\n  bindings = [(name = \"VIEWS\", durableObjectNamespace = \"Views\")],\n  durableObjectNamespaces = [(className = \"Views\", uniqueKey = {}, enableSql = true)],\n  durableObjectStorage = (localDisk = \"storage\"),\n);",
+            quote(&format!("apps/{name}/shim.js")),
+            quote(&format!("apps/{name}/app.js")),
+            quote(name),
+        ));
+    }
+    let config = format!(
+        "using Workerd = import \"/workerd/workerd.capnp\";\n\nconst config :Workerd.Config = (\n  services = [\n    {}\n  ],\n  sockets = [(name = \"http\", address = \"127.0.0.1:{port}\", http = (), service = \"router\")],\n);\n\nconst router :Workerd.Worker = (\n  modules = [(name = \"router.js\", esModule = embed \"router.js\")],\n  compatibilityDate = \"{COMPATIBILITY_DATE}\",\n  bindings = [{}],\n);\n\n{}\n",
+        services.join(",\n    "),
+        bindings.join(", "),
+        workers.join("\n\n"),
+    );
+    let path = dir.join("config.capnp");
+    std::fs::write(&path, config)?;
+    Ok(path)
 }
