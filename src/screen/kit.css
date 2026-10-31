@@ -37,6 +37,10 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 
 .icon { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; font-weight: 600; font-size: 15px; color: white; background: var(--accent); }
 .icon.grey { background: var(--faint); color: var(--text); }
+/* An app's icon, from one.appIcon: a shell draws its symbol's tile in; a browser shows its first letter. */
+.app-icon { --size: 36px; width: var(--size); height: var(--size); border-radius: calc(var(--size) * 0.225); display: grid; place-items: center; flex: none; font-weight: 600; font-size: calc(var(--size) * 0.42); color: white; background: linear-gradient(color-mix(in srgb, var(--accent) 80%, white), var(--accent)); background-size: cover; }
+.app-icon.drawn { color: transparent; }
+.search { width: 100%; font: inherit; padding: 8px 12px; margin: 4px 0 4px; border-radius: 10px; border: 0; background: var(--line); color: var(--text); outline: none; }
 .avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 13px; font-weight: 600; color: white; }
 
 .feed { display: flex; flex-direction: column; gap: 18px; padding-top: 8px; }

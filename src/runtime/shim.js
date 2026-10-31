@@ -20,7 +20,7 @@ const json = (v, status = 200) => new Response(JSON.stringify(v ?? null), { stat
 
 function describe() {
   return {
-    name: app.name, title: app.title, icon: app.icon, instructions: app.instructions || "",
+    name: app.name, title: app.title, icon: app.icon, description: app.description || "", instructions: app.instructions || "",
     ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {} })),
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => ({ name, title: w.title || name })),
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),

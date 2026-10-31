@@ -1,14 +1,18 @@
 // The App Store: the apps built into the release, whether or not the install has added them, and the apps made in the
-// install; who owns each, where it's installed, its forks and its code; and "Add to…" the places the person may
-// install it: themselves, groups they're an admin of, and everyone if they're an admin.
+// install; who owns each, where it's installed, its forks and its code; and "Add to…" each place the person has a
+// page: themselves, their groups and everyone, saying who can add it where they can't.
 // An ordinary app: it installs with ctx.install, with the caller's own rights. Installing a built-in app the install
 // hasn't added yet adds it (admins only).
 
-/// Where the caller may install apps: [{ scope, name }].
+/// The caller's pages, where apps install: [{ scope, id, name, may, why }]; `why` says who can when they can't.
 function places(ctx) {
-  const out = [{ scope: "user", id: `user:${ctx.me.user}`, name: "You" }];
-  for (const g of ctx.groups) if (g.role === "admin") out.push({ scope: g.id, id: g.id, name: g.name });
-  if (ctx.me.role === "admin") out.push({ scope: "global", id: "global", name: "Everyone" });
+  const out = [{ scope: "user", id: `user:${ctx.me.user}`, name: "You", may: true }];
+  for (const g of ctx.groups) {
+    const may = g.role === "admin";
+    out.push({ scope: g.id, id: g.id, name: g.name, may, why: may ? null : `Only ${g.name}'s admins can add apps to its page.` });
+  }
+  const admin = ctx.me.role === "admin";
+  out.push({ scope: "global", id: "global", name: "Everyone", may: admin, why: admin ? null : "Only the install's admins can add apps for everyone. Settings shows who they are." });
   return out;
 }
 
@@ -39,12 +43,15 @@ function untar(bytes) {
   return files;
 }
 
-/// What a built-in app the install hasn't added calls itself: nothing runs it yet, so its code says.
+/// What a built-in app the install hasn't added says about itself: nothing runs it yet, so its code says (the first
+/// `title`, `icon` and `description` after `export default` given as plain strings, as the built-in apps give them
+/// before their ops).
 async function described(ctx, bundle) {
   const file = untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
-  const code = file ? new TextDecoder().decode(file.bytes) : "";
+  const all = file ? new TextDecoder().decode(file.bytes) : "";
+  const code = all.slice(Math.max(0, all.indexOf("export default")));
   const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
-  return { title: field("title"), icon: field("icon") };
+  return { title: field("title"), icon: field("icon"), description: field("description") };
 }
 
 async function find(ctx, name) {
@@ -57,6 +64,7 @@ export default {
   name: "apps",
   title: "App Store",
   icon: "square.grid.2x2",
+  description: "Every app you can add, and its code",
   instructions: "The App Store lists every app in this install, where each is installed and its code. apps_add installs one for you, a group you're an admin of, or everyone (admins).",
 
   ops: {
@@ -69,10 +77,11 @@ export default {
           const added = a.deploys > 0;
           const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
           return {
-            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, owner: a.owner, owner_name: name(a.owner),
+            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, description: d.description || a.description || null,
+            owner: a.owner, owner_name: name(a.owner),
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], drivers: [] },
-            built_in: !!a.built_in, added, up_to_date: a.built_in ? a.bundle === a.built_in : null,
+            built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
           };
         }));
         apps.sort((a, b) => a.title.localeCompare(b.title));
@@ -117,37 +126,47 @@ export default {
       title: "App Store",
       html: `
 <style>
-  .initial { font-size: 17px; border-radius: 9px; }
   .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
   .tag { font-size: 12px; padding: 1px 7px; border-radius: 10px; background: var(--line); color: var(--muted); }
 </style>
+<input id="search" class="search" type="search" placeholder="Find an app" autocomplete="off">
 <div id="list"></div>
 <script>
 // The sections: the apps built into the release, and those made in this install (each brand words that its own way).
 const BUILT_IN = "Built In";
 const MADE_HERE = one.brand.made_here;
 
-/// A built-in app's state here; an app made here says who made it.
+/// A built-in app's state here; for an app made here, what it was forked from.
 function status(a) {
-  if (!a.built_in) return "by " + a.owner_name + (a.from ? " · fork of " + a.from : "");
+  if (!a.built_in) return a.from ? "Fork of " + a.from : "";
   if (!a.added) return "Not added";
   return a.up_to_date ? "Up to date" : "Out of date";
 }
 
-async function show() {
-  const { apps } = await one.call("list");
-  const row = (a) => \`<a class="row" onclick='one.open("app", \${JSON.stringify({ app: a.name })})'>
-    <div class="icon initial\${a.installed.length ? "" : " grey"}">\${one.esc(a.title[0].toUpperCase())}</div>
+let apps = [];
+const row = (a) => \`<a class="row" onclick='one.open("app", \${JSON.stringify({ app: a.name })})'>
+    \${one.appIcon(a, 44)}
     <div class="main">
-      <div class="title"><span>\${one.esc(a.title)}</span></div>
-      <div class="sub">\${one.esc(a.name)} · \${one.esc(status(a))}</div>
+      <div class="title"><span>\${one.esc(a.title)}</span><span class="when">\${one.esc(status(a))}</span></div>
+      <div class="sub">\${one.esc(a.description || "Made by " + a.owner_name)}</div>
       \${a.installed.length ? '<div class="tags">' + a.installed_names.map((n) => '<span class="tag">' + one.esc(n) + "</span>").join("") + "</div>" : ""}
     </div>
     <div class="chev">›</div>
   </a>\`;
-  const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(title) + '</h2><div class="list">' + list.map(row).join("") + "</div>" : "";
-  document.getElementById("list").innerHTML = section(BUILT_IN, apps.filter((a) => a.built_in)) + section(MADE_HERE, apps.filter((a) => !a.built_in));
+const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(title) + '</h2><div class="list">' + list.map(row).join("") + "</div>" : "";
+
+function draw() {
+  const q = document.getElementById("search").value.trim().toLowerCase();
+  const found = apps.filter((a) => !q || [a.title, a.name, a.description || ""].some((t) => t.toLowerCase().includes(q)));
+  document.getElementById("list").innerHTML = found.length
+    ? section(BUILT_IN, found.filter((a) => a.built_in)) + section(MADE_HERE, found.filter((a) => !a.built_in))
+    : '<div class="empty">No apps match.<div class="small" style="margin-top:6px">Make your own: put an app.js in a folder and run <code>one deploy</code> on it.</div></div>';
 }
+async function show() {
+  apps = (await one.call("list")).apps;
+  draw();
+}
+document.getElementById("search").addEventListener("input", draw);
 one.on("changed", show);
 show();
 </script>`,
@@ -157,11 +176,11 @@ show();
       html: `
 <style>
   .head { display: flex; gap: 14px; align-items: center; margin: 12px 4px 4px; }
-  .head .icon { width: 60px; height: 60px; font-size: 26px; border-radius: 14px; }
   .head h1 { font-size: 22px; margin: 0; }
+  .about { margin: 12px 4px 0; }
   .pill { font: inherit; font-size: 15px; font-weight: 600; padding: 5px 14px; border-radius: 15px; border: 0; background: var(--accent); color: white; }
   .pill.off { background: var(--line); color: var(--accent); }
-  .pill:disabled { opacity: 0.5; }
+  .pill:disabled { opacity: 0.4; }
   #error { margin: 8px 4px; }
 </style>
 <div id="app"></div>
@@ -169,28 +188,53 @@ show();
 <script>
 const name = one.params.app;
 one.title(name);
+
+/// The app's page, section by section: each takes what show() loaded and gives HTML, or "" to leave itself out.
+const sections = [
+  function head({ a }) {
+    const state = a.built_in ? (!a.added ? "Built in, not added" : a.up_to_date ? "Built in, up to date" : "Built in, out of date") : "Made by " + a.owner_name;
+    return \`<div class="head">\${one.appIcon(a, 60)}
+      <div><h1>\${one.esc(a.title)}</h1><div class="muted small">\${one.esc(a.name)} · \${one.esc(state)} · \${a.deploys} deploy\${a.deploys === 1 ? "" : "s"}</div></div></div>
+      \${a.description ? '<div class="about">' + one.esc(a.description) + "</div>" : ""}\`;
+  },
+  function addTo({ a, places, admin }) {
+    const first = !a.added && !admin ? \`Only an admin can add \${a.title} to this install. Settings shows who they are.\` : null;
+    const place = (p) => {
+      const on = a.installed.includes(p.id);
+      const why = first || p.why;
+      return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(p.name)}</span></div>
+          \${why ? '<div class="sub small">' + one.esc(why) + "</div>" : ""}</div>
+        <button class="pill\${on ? " off" : ""}"\${why ? " disabled" : ""} onclick='toggle(this, \${JSON.stringify(p.scope)}, \${on})'>\${on ? "Remove" : "Add"}</button></div>\`;
+    };
+    return '<h2 class="section">Add to…</h2><div class="list">' + places.map(place).join("") + "</div>";
+  },
+  function uses({ a }) {
+    const all = [...a.uses.apps, ...a.uses.drivers];
+    return all.length ? '<h2 class="section">Uses</h2><div class="list">' + all.map((u) => '<div class="row plain"><div class="main">' + one.esc(u) + "</div></div>").join("") + "</div>" : "";
+  },
+  function forkedFrom({ a }) {
+    return a.from ? '<h2 class="section">Forked from</h2><div class="list">' + link(a.from) + "</div>" : "";
+  },
+  function forks({ a }) {
+    return a.forks.length ? '<h2 class="section">Forks</h2><div class="list">' + a.forks.map(link).join("") + "</div>" : "";
+  },
+  function code({ code }) {
+    if (!code) return "";
+    const file = (f) => \`<a class="row plain" onclick='one.open("file", \${JSON.stringify({ app: name, path: f.path })})'>
+        <div class="main"><div class="title"><span>\${one.esc(f.path)}</span><span class="when">\${f.size < 1024 ? f.size + " B" : (f.size / 1024).toFixed(1) + " KB"}</span></div></div><div class="chev">›</div></a>\`;
+    return '<h2 class="section">Code</h2><div class="list">' + code.files.filter((f) => f.path.startsWith("src/")).map(file).join("") + file(code.files.find((f) => f.path === "app.js")) + "</div>";
+  },
+];
+
+function link(n) {
+  return \`<a class="row plain" onclick='one.open("app", \${JSON.stringify({ app: n })})'><div class="main"><div class="title"><span>\${one.esc(n)}</span></div></div><div class="chev">›</div></a>\`;
+}
+
 async function show() {
   const [{ apps, places, admin }, code] = await Promise.all([one.call("list"), one.call("code", { app: name }).catch(() => null)]);
   const a = apps.find((x) => x.name === name);
   one.title(a.title);
-  const place = (p) => {
-    const on = a.installed.includes(p.id);
-    return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(p.name)}</span></div></div>
-      <button class="pill\${on ? " off" : ""}" onclick='toggle(this, \${JSON.stringify(p.scope)}, \${on})'>\${on ? "Remove" : "Add"}</button></div>\`;
-  };
-  const file = (f) => \`<a class="row plain" onclick='one.open("file", \${JSON.stringify({ app: name, path: f.path })})'>
-      <div class="main"><div class="title"><span>\${one.esc(f.path)}</span><span class="when">\${f.size < 1024 ? f.size + " B" : Math.round(f.size / 1024) + " KB"}</span></div></div><div class="chev">›</div></a>\`;
-  const link = (n) => \`<a class="row plain" onclick='one.open("app", \${JSON.stringify({ app: n })})'><div class="main"><div class="title"><span>\${one.esc(n)}</span></div></div><div class="chev">›</div></a>\`;
-  const uses = [...a.uses.apps, ...a.uses.drivers];
-  document.getElementById("app").innerHTML = \`
-    <div class="head"><div class="icon">\${one.esc(a.title[0].toUpperCase())}</div>
-      <div><h1>\${one.esc(a.title)}</h1><div class="muted small">\${one.esc(a.name)} · \${a.built_in ? (!a.added ? "built in, not added" : a.up_to_date ? "built in, up to date" : "built in, out of date") : "by " + one.esc(a.owner_name)} · \${a.deploys} deploy\${a.deploys === 1 ? "" : "s"}</div></div></div>
-    <h2 class="section">Add to…</h2>
-    \${a.added || admin ? '<div class="list">' + places.map(place).join("") + "</div>" : '<div class="muted small" style="margin: 0 4px">This install hasn\\'t added it yet: an admin adds it first.</div>'}
-    \${uses.length ? '<h2 class="section">Uses</h2><div class="list">' + uses.map((u) => '<div class="row plain"><div class="main">' + one.esc(u) + "</div></div>").join("") + "</div>" : ""}
-    \${a.from ? '<h2 class="section">Forked from</h2><div class="list">' + link(a.from) + "</div>" : ""}
-    \${a.forks.length ? '<h2 class="section">Forks</h2><div class="list">' + a.forks.map(link).join("") + "</div>" : ""}
-    \${code ? '<h2 class="section">Code</h2><div class="list">' + code.files.filter((f) => f.path.startsWith("src/")).map(file).join("") + file(code.files.find((f) => f.path === "app.js")) + "</div>" : ""}\`;
+  document.getElementById("app").innerHTML = sections.map((s) => s({ a, places, admin, code })).join("");
 }
 async function toggle(button, scope, on) {
   button.disabled = true;

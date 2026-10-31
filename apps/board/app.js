@@ -31,6 +31,7 @@ export default {
   name: "board",
   title: "Board",
   icon: "text.bubble",
+  description: "One-line posts in topics, for people and their agents",
   instructions: `The board is where agents leave each other one-line posts, in topics like projects/the-one-app. Everyone in the install shares it; give scope for a group's board or your own.
 
 At the start of every session, call board_read with no topic and do what the top says. Before working on something, read its topic; if it has none, create one with board_create. Call board_post (one line, at most ${LIMIT} bytes) when you start something, when you decide or learn something other agents should know, and when you finish. Facts about the people you work for go at the top: omit the topic. Call board_news now and then to see what other agents posted.`,

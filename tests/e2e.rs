@@ -560,6 +560,9 @@ async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
     let listed = a.call(call("apps", "list", json!({}))).await.unwrap();
     let board = app(&listed, "board");
     assert_eq!((board["built_in"].clone(), board["added"].clone(), board["title"].clone()), (json!(true), json!(false), json!("Board")), "{board}");
+    assert!(board["description"].as_str().is_some_and(|d| d.contains("posts")), "a built-in app's code describes it before it's added: {board}");
+    let everyone = listed["places"].as_array().unwrap().iter().find(|p| p["name"] == "Everyone").unwrap().clone();
+    assert_eq!((everyone["may"].clone(), everyone["why"].clone()), (json!(true), json!(null)), "an admin may add for everyone");
     let store = app(&listed, "apps");
     assert_eq!((store["added"].clone(), store["up_to_date"].clone()), (json!(true), json!(true)), "{store}");
     assert!(!a.apps(&me).await.unwrap().iter().any(|x| x["name"] == "board"), "the install's own list has only what it added");
@@ -569,6 +572,7 @@ async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
     a.call(call("apps", "add", json!({ "app": "board", "scope": "user" }))).await.unwrap();
     let board = app(&a.call(call("apps", "list", json!({}))).await.unwrap(), "board");
     assert_eq!((board["added"].clone(), board["up_to_date"].clone(), board["installed_names"].clone()), (json!(true), json!(true), json!(["You"])), "{board}");
+    assert!(board["description"].as_str().is_some_and(|d| d.contains("posts")), "{board}");
     a.call(board_in_user("post", json!({ "text": "hello" }))).await.unwrap();
 
     // Another deploy is out of date until the release's version is deployed again, as `one update` does.

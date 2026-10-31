@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import WebKit
 
@@ -160,7 +161,7 @@ private struct ScreenWebView: Representable {
             }
         }
 
-        /// The bridge: `{ type: "call" | "open" | "title", … }`. A page only ever calls its own app.
+        /// The bridge: `{ type: "call" | "open" | "title" | "icon", … }`. A page only ever calls its own app.
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
             guard let body = message.body as? [String: Any] else { return (nil, "Not a message") }
             let route = view.route
@@ -180,9 +181,23 @@ private struct ScreenWebView: Representable {
             case "title":
                 view.title = body["text"] as? String
                 return (nil, nil)
+            case "icon":
+                let tile = AppTile(symbol: symbol(body["symbol"] as? String), seed: body["seed"] as? String ?? "", size: body["size"] as? Double ?? 36)
+                return (Self.png(tile), nil)
             default:
                 return (nil, "Unknown message")
             }
+        }
+
+        /// A view as a PNG data URL, for an `<img>` or a CSS background.
+        private static func png(_ content: some View) -> String? {
+            let renderer = ImageRenderer(content: content)
+            renderer.scale = 3
+            let data = NSMutableData()
+            guard let image = renderer.cgImage, let out = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+            CGImageDestinationAddImage(out, image, nil)
+            guard CGImageDestinationFinalize(out) else { return nil }
+            return "data:image/png;base64," + (data as Data).base64EncodedString()
         }
 
         func webView(_ web: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {

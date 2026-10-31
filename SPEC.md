@@ -165,7 +165,7 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
 
 ```js
 {
-  name, title, icon, instructions,
+  name, title, icon, description, instructions,  // description: one line on what it's for
   uses: { apps: [name], drivers: [name] },
   schema: { user, group, global },  // SQL run on each empty store of that scope
   ops: { name: { description, input, run(ctx, input) } },
@@ -230,7 +230,7 @@ A client joins with a pairing code like a server, then asks the servers its user
 Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CLI, MCP, git helpers and drivers, acting as its local user. It refuses requests with an `Origin` header or a `Host` other than this machine, so no web page can use it.
 
 - `GET /v1/state`: the brand (with its `store` app), `me` (who's asking: key, name, user; also as `client` when a client asks), this `server` (and whether it's ready), the asker's `user` (id, name, role), every `open` of their data (`opens`), and the `install` (null until it creates or joins one): its users, groups, servers (online, owners, users, privileged, who trusts each, whether each serves me, build, target, drivers) and clients (`asked`: when each last asked this server, milliseconds, or null); and every `open` of this user's data.
-- `GET /v1/apps`: every app in the install (owner, `from`, its `forks`, its running `bundle`, every deploy as `history`, where installed, title, icon and `uses`, and `built_in`, the bundle this server's release has of it, if it's built in), with instructions, operations, widgets and screens for each installed for this user.
+- `GET /v1/apps`: every app in the install (owner, `from`, its `forks`, its running `bundle`, every deploy as `history`, where installed, title, icon, `description` and `uses`, and `built_in`, the bundle this server's release has of it, if it's built in), with instructions, operations, widgets and screens for each installed for this user.
 - `GET /v1/source/<app>?bundle=&path=`: an app's code as deployed, its latest deploy's or, with `bundle` (or its first characters), an earlier one's: `{ files: [{ path, size }] }`, or with `path` that file, `{ path, text }` (`base64` if it isn't text).
 - `POST /v1/call { app, op, input, scopes?, server?, as? }` → `{ ok }`. `server` (a name or key prefix) runs it there; otherwise it runs on the nearest server that can.
 - `GET /v1/widgets?scope=`: every widget, rendered; with `scope` (`user`, `group:<id>` or `global`), those of the apps installed there, each reaching only that scope, for a shell's page of it.
@@ -258,9 +258,11 @@ An app's screens are HTML. A server serves each as a whole page: the app's HTML 
 - `one.title(text)`: the screen's title, shown by the shell.
 - `one.on("changed", fn)`: called when this app's data changes.
 - `one.params`, `one.me`, and helpers `one.esc`, `one.ago`, `one.avatar`.
+- `one.appIcon(app, size)`: an app's icon (`{ name, title, icon }`, as `catalog()` gives it), which the shell draws as it draws apps on its pages; a browser shows the first letter.
+- `one.brand`: the product's `name`, and `made_here`, what an App Store calls the apps made in the install.
 - `one.scope`: the page the shell opened the screen from (`user`, `group:<id>` or `global`), or null. Only a hint: the app decides what to show, and draws its own scope picker if it has one.
 
-A shell answers the bridge itself: in WKWebView, the page posts `{ type: "call" | "open" | "title", … }` to the `one` message handler and awaits the reply; the shell passes server events to `one.__event(event)`. In a plain browser on a server's machine, the bridge talks to the node directly. Shells get pages from `GET /v1/screens/<app>/<screen>?params=&scope=` (local API) or `GET /v1/screen { app, screen, params, scope }` (clients). A page a server served may call the server it came from.
+A shell answers the bridge itself: in WKWebView, the page posts `{ type: "call" | "open" | "title" | "icon", … }` to the `one` message handler and awaits the reply (for `icon`, `{ symbol, seed, size }`, an image URL, or nothing, which leaves the letter); the shell passes server events to `one.__event(event)`. In a plain browser on a server's machine, the bridge talks to the node directly. Shells get pages from `GET /v1/screens/<app>/<screen>?params=&scope=` (local API) or `GET /v1/screen { app, screen, params, scope }` (clients). A page a server served may call the server it came from.
 
 ## Widgets
 

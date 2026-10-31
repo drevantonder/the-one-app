@@ -56,6 +56,11 @@
       const d = new Date(ms);
       return s < 7 * 86400 ? d.toLocaleDateString(undefined, { weekday: "short" }) : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
     },
+    // An app's icon, `{ name, title, icon }` as catalog() gives it: the shells' tile of its symbol, drawn in by the shell.
+    appIcon(app, size = 36) {
+      const letter = String(app.title || app.name || "?")[0].toUpperCase();
+      return `<span class="app-icon" style="--size:${size}px" data-symbol="${one.esc(app.icon || "")}" data-seed="${one.esc(app.name)}" data-size="${size}">${one.esc(letter)}</span>`;
+    },
     // A steady colour and initials for someone, from their id and name.
     avatar(id, name) {
       let h = 0;
@@ -64,4 +69,18 @@
       return `<div class="avatar" style="background:${colors[h % colors.length]}">${one.esc(initials)}</div>`;
     },
   };
+
+  // Inside a shell, app icons are drawn by it, once per symbol, seed and size.
+  if (shell) {
+    const drawn = {};
+    const draw = (el) => {
+      const { symbol, seed, size } = el.dataset;
+      const key = `${symbol}|${seed}|${size}`;
+      (drawn[key] ||= host({ type: "icon", symbol, seed, size: Number(size) }).catch(() => null)).then((url) => {
+        if (url) el.style.backgroundImage = `url(${url})`, el.classList.add("drawn");
+      });
+    };
+    new MutationObserver(() => document.querySelectorAll(".app-icon:not([data-asked])").forEach((el) => (el.dataset.asked = "1", draw(el))))
+      .observe(document.documentElement, { childList: true, subtree: true });
+  }
 })();
