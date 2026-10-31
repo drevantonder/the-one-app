@@ -36,7 +36,7 @@ func main() {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	w, err := open(filepath.Join(dir, "whatsapp.db"), node)
+	w, err := openAll(dir, node)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func main() {
 
 // serve registers with the node and answers its calls, registering again
 // whenever the node forgets (it keeps providers in memory) or restarts.
-func serve(node string, w *link) {
+func serve(node string, w *whatsapp) {
 	poll := &http.Client{Timeout: 40 * time.Second}
 	for {
 		if err := post(node+"/v1/providers/"+app, describe); err != nil {
@@ -170,35 +170,40 @@ func num(description string) map[string]any {
 	return map[string]any{"type": "integer", "description": description}
 }
 
+var account = str("which account: its number, as whatsapp_accounts lists them; default the first linked here")
+
 var describe = map[string]any{
 	"title": "WhatsApp",
-	"icon":  "message-circle",
-	"instructions": "WhatsApp runs on the server linked to the account; calls find it. whatsapp_chats lists recent chats; " +
-		"whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: " +
+	"icon":  "phone.bubble.fill",
+	"color": "#25d366",
+	"instructions": "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their servers, as WhatsApp Desktop is linked; calls find the server. whatsapp_accounts lists them; the others take account, the first by default. " +
+		"whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: " +
 		"send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. " +
-		"whatsapp_move moves the link to another server; whatsapp_sign_out unlinks it and deletes its messages, only when the user asks.",
+		"whatsapp_move moves a link to another server; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
 	"ops": []map[string]any{
-		{"name": "status", "reads": true, "description": "Whether WhatsApp is linked and connected here, as which number, and how many messages are kept; or on which of your servers it's linked.",
+		{"name": "accounts", "reads": true, "description": "The WhatsApp accounts linked on any of your servers, this one's first: each { account, ok, server }, with why when ok is false.",
 			"input": object(map[string]any{})},
-		{"name": "sign_in", "description": "Link WhatsApp here, as WhatsApp Desktop is linked: returns a QR code to scan on the phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code is on the phone itself. " +
-			"Refused while WhatsApp is linked on another of your servers: whatsapp_move moves it from there.",
+		{"name": "status", "reads": true, "description": "Which accounts are linked and connected here, and how many messages each keeps; or on which of your servers WhatsApp is linked.",
+			"input": object(map[string]any{})},
+		{"name": "sign_in", "description": "Link a WhatsApp account here, or another one, as WhatsApp Desktop is linked: returns a QR code to scan on the phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code is on the phone itself.",
 			"input": object(map[string]any{"phone": str("the account's number with its country code, e.g. +61 400 000 000, for a code to type on the phone")})},
 		{"name": "chats", "reads": true, "description": "Recent WhatsApp chats, most recent first: who, when, the last message, and how many are unread.",
 			"input": object(map[string]any{"unread": map[string]any{"type": "boolean", "description": "only unread chats"},
-				"limit": num("at most this many; default 30"), "skip": num("skip this many of the most recent, to page back")})},
+				"limit": num("at most this many; default 30"), "skip": num("skip this many of the most recent, to page back"), "account": account})},
 		{"name": "read", "reads": true, "description": "A WhatsApp chat's messages, newest last. Page back with skip. WhatsApp isn't told they were read: the sender sees no blue ticks, and the chat stays unread on the phone.",
 			"input": object(map[string]any{"chat": str("the chat's name, a part of it only one chat has, a phone number, or a JID"),
-				"limit": num("this many; default 30"), "skip": num("skip this many of the newest, to read further back")}, "chat")},
+				"limit": num("this many; default 30"), "skip": num("skip this many of the newest, to read further back"), "account": account}, "chat")},
 		{"name": "search", "reads": true, "description": "WhatsApp messages containing some text, across chats or in one, newest last.",
 			"input": object(map[string]any{"query": str("text to look for, case-insensitive"), "chat": str("only in this chat"),
-				"limit": num("at most this many; default 30"), "skip": num("skip this many of the newest matches, to page back")}, "query")},
+				"limit": num("at most this many; default 30"), "skip": num("skip this many of the newest matches, to page back"), "account": account}, "query")},
 		{"name": "send", "description": "Send a WhatsApp message, as the linked account, to a chat, a contact or a phone number. This sends a real message to a real person.",
 			"input": object(map[string]any{"chat": str("the chat's name, a part of it only one chat has, a contact's exact name, a phone number with its country code, or a JID"),
-				"text": str("the message")}, "chat", "text")},
-		{"name": "move", "description": "Move the WhatsApp link, with its kept messages, from the server it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted here once the other server has it.",
-			"input": object(map[string]any{"to": str("the server to move it to, by name")}, "to")},
-		{"name": "sign_out", "confirm": true, "description": "Unlink WhatsApp: removes this server from the account's linked devices and deletes the messages kept here. Destructive: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
-			"input": object(map[string]any{})},
+				"text": str("the message"), "account": account}, "chat", "text")},
+		{"name": "move", "description": "Move a WhatsApp link, with its kept messages, from the server it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted here once the other server has it.",
+			"input": object(map[string]any{"to": str("the server to move it to, by name"), "account": account}, "to")},
+		{"name": "sign_out", "confirm": true, "description": "Unlink a WhatsApp account: removes this server from its linked devices and deletes the messages kept here. Destructive: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
+			"input": object(map[string]any{"account": str("the account's number; needed when several are linked here")})},
 	},
+	"screens": []map[string]any{{"name": "settings", "title": "WhatsApp"}},
 	"widgets": []any{},
 }

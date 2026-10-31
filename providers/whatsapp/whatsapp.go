@@ -38,6 +38,7 @@ type link struct {
 	container *sqlstore.Container
 	client    *whatsmeow.Client
 	qr        string // the current QR code, while pairing
+	code      string // the code to type on the phone instead, while pairing with a number
 }
 
 // connect and loggedIn reach WhatsApp; tests replace them, so they never do.
@@ -102,6 +103,11 @@ func (l *link) unload() {
 // forget deletes the link and the messages kept here, leaving a new device
 // to pair.
 func (l *link) forget() error {
+	return errors.Join(l.remove(), l.load())
+}
+
+// remove disconnects and deletes the link's database.
+func (l *link) remove() error {
 	l.unload()
 	var errs []error
 	for _, suffix := range []string{"", "-wal", "-shm"} {
@@ -109,16 +115,15 @@ func (l *link) forget() error {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(append(errs, l.load())...)
+	return errors.Join(errs...)
 }
 
+// run runs one of a linked account's own operations.
 func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, error) {
 	var in struct {
-		Phone, Chat, Query, Text, To string
-		Unread                       bool
-		Limit, Skip                  int
-		From, Data                   string // take's
-		Part, Parts                  int
+		Chat, Query, Text string
+		Unread            bool
+		Limit, Skip       int
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &in); err != nil {
@@ -126,19 +131,6 @@ func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, er
 		}
 	}
 	in.Limit = cmp.Or(in.Limit, 30)
-	switch op {
-	case "status":
-		return l.status()
-	case "sign_in":
-		return l.signIn(ctx, in.Phone)
-	case "_holder": // the provider's own, between the user's servers
-		return l.holder(), nil
-	case "_take":
-		return l.take(in.From, in.Part, in.Parts, in.Data)
-	}
-	if err := l.linked(); err != nil {
-		return nil, err
-	}
 	switch op {
 	case "chats":
 		return l.chats(ctx, in.Unread, in.Limit, in.Skip)
@@ -171,21 +163,8 @@ func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, er
 		return l.lines(ctx, ms, chat == ""), err
 	case "send":
 		return l.send(ctx, in.Chat, in.Text)
-	case "move":
-		return l.move(in.To)
-	case "sign_out":
-		return l.signOut(ctx)
 	}
 	return nil, fmt.Errorf("whatsapp has no operation %s", op)
-}
-
-// linked says, if WhatsApp isn't linked here, to try the user's other
-// servers.
-func (l *link) linked() error {
-	if l.holder().Phone == "" {
-		return elsewhere("WhatsApp isn't linked here: whatsapp_sign_in links it")
-	}
-	return nil
 }
 
 func (l *link) status() (string, error) {
@@ -239,21 +218,10 @@ func (l *link) signIn(ctx context.Context, number string) (string, error) {
 			return "", err
 		}
 	}
-	s, err := l.servers()
-	if err != nil {
-		return "", err
-	}
-	if h := l.holder(); h.Phone != "" {
-		return fmt.Sprintf("Already linked here, on %s, as +%s.", s.here, h.Phone), nil
-	}
-	// Asked before locking, so two servers signing in at once can ask each other.
-	if server, phone := l.linkedElsewhere(s); server != "" {
-		return "", fmt.Errorf("WhatsApp is linked on %s, as +%s: whatsapp_move there (to %s) moves the link here, or whatsapp_sign_out there unlinks it first", server, phone, s.here)
-	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.client.Store.ID != nil {
-		return fmt.Sprintf("Already linked here, on %s, as +%s.", s.here, l.client.Store.ID.User), nil
+		return fmt.Sprintf("Already linked, as +%s.", l.client.Store.ID.User), nil
 	}
 	if l.qr == "" {
 		l.client.Disconnect()
@@ -283,6 +251,8 @@ func (l *link) signIn(ctx context.Context, number string) (string, error) {
 				l.qr = ""
 				if item.Event == whatsmeow.QRChannelEventCode {
 					l.qr = item.Code
+				} else {
+					l.code = ""
 				}
 				l.mu.Unlock()
 			}
@@ -301,6 +271,7 @@ func (l *link) signIn(ctx context.Context, number string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	l.code = code
 	return fmt.Sprintf("On the phone, open WhatsApp > Settings > Linked devices > Link a device, then tap Link with phone number instead and type %s within 2 minutes; "+
 		"or scan this QR code there within 20 seconds (sign_in again for new ones).", code) + after, nil
 }

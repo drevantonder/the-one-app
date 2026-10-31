@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,14 +22,14 @@ import (
 // fakeNode stands in for the node and the user's other servers: each
 // server's provider is a link, called directly.
 type fakeNode struct {
-	links map[string]*link
-	url   string
+	servers map[string]*whatsapp
+	url     string
 }
 
 func newFakeNode(t *testing.T, names ...string) *fakeNode {
 	connect = func(*whatsmeow.Client) error { return nil }
 	loggedIn = func(*whatsmeow.Client) bool { return true }
-	f := &fakeNode{links: map[string]*link{}}
+	f := &fakeNode{servers: map[string]*whatsapp{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/{server}/v1/state", func(w http.ResponseWriter, r *http.Request) {
 		type server struct {
@@ -48,7 +50,7 @@ func newFakeNode(t *testing.T, names ...string) *fakeNode {
 			Input      json.RawMessage
 		}
 		json.NewDecoder(r.Body).Decode(&req)
-		result, err := f.links[req.Server].run(context.Background(), req.Op, req.Input)
+		result, err := f.servers[req.Server].run(context.Background(), req.Op, req.Input)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
@@ -60,9 +62,9 @@ func newFakeNode(t *testing.T, names ...string) *fakeNode {
 	t.Cleanup(srv.Close)
 	f.url = srv.URL
 	for _, n := range names {
-		l, err := open(filepath.Join(t.TempDir(), "whatsapp.db"), srv.URL+"/"+n)
+		w, err := openAll(t.TempDir(), srv.URL+"/"+n)
 		must(t, err)
-		f.links[n] = l
+		f.servers[n] = w
 	}
 	return f
 }
@@ -76,12 +78,20 @@ func linkTo(t *testing.T, l *link, number string) {
 	must(t, l.fresh())
 }
 
-func run(t *testing.T, l *link, op string, input any) (string, error) {
+func run(t *testing.T, w *whatsapp, op string, input any) (string, error) {
 	t.Helper()
 	raw, _ := json.Marshal(input)
-	out, err := l.run(context.Background(), op, raw)
+	out, err := w.run(context.Background(), op, raw)
 	s, _ := out.(string)
 	return s, err
+}
+
+// link links a new account on w, as pairing it would.
+func link2(t *testing.T, w *whatsapp, number string) *link {
+	l, err := w.spare()
+	must(t, err)
+	linkTo(t, l, number)
+	return l
 }
 
 func TestPairingPhone(t *testing.T) {
@@ -98,20 +108,52 @@ func TestPairingPhone(t *testing.T) {
 	}
 }
 
-func TestSignInWhileLinkedSaysWhere(t *testing.T) {
+func TestSeveralAccounts(t *testing.T) {
 	f := newFakeNode(t, "linux", "personal")
-	linkTo(t, f.links["linux"], "61400000000")
-	out, err := run(t, f.links["linux"], "sign_in", map[string]any{"phone": "+61 400 000 000"})
-	if err != nil || out != "Already linked here, on linux, as +61400000000." {
-		t.Fatalf("sign_in here: %q, %v", out, err)
+	linux := f.servers["linux"]
+	first := link2(t, linux, "61400000000")
+	if first != linux.links[0] {
+		t.Fatal("the first account isn't whatsapp.db")
 	}
-	_, err = run(t, f.links["personal"], "sign_in", map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "WhatsApp is linked on linux, as +61400000000") {
-		t.Fatalf("sign_in elsewhere: %v", err)
+	second := link2(t, linux, "61411111111")
+	if second == first || filepath.Base(second.path) == "whatsapp.db" {
+		t.Fatalf("the second account went in %s", second.path)
 	}
-	out, _ = run(t, f.links["personal"], "status", nil)
-	if !strings.Contains(out, "Not linked here, on personal: WhatsApp is linked on linux, as +61400000000.") {
-		t.Fatalf("status elsewhere: %q", out)
+	link2(t, f.servers["personal"], "61422222222")
+
+	got, err := linux.accounts()
+	must(t, err)
+	var all []string
+	for _, a := range got {
+		all = append(all, fmt.Sprint(a["account"], "@", a["server"]))
+	}
+	if strings.Join(all, " ") != "+61400000000@linux +61411111111@linux +61422222222@personal" {
+		t.Fatalf("accounts: %v", all)
+	}
+	if l, err := linux.pick("+61 411 111 111", false); err != nil || l != second {
+		t.Fatalf("pick: %v", err)
+	}
+	var away elsewhere
+	if _, err := linux.pick("+61422222222", false); !errors.As(err, &away) {
+		t.Fatalf("an account on another server: %v, want elsewhere", err)
+	}
+	if _, err := run(t, linux, "sign_out", nil); err == nil || !strings.Contains(err.Error(), "give account") {
+		t.Fatalf("sign_out of one of several, unnamed: %v", err)
+	}
+
+	// The next start opens both, and forgets a pairing that never finished.
+	unfinished, err := linux.spare()
+	must(t, err)
+	for _, l := range linux.links {
+		l.unload()
+	}
+	again, err := openAll(linux.dir, linux.node)
+	must(t, err)
+	if len(again.links) != 2 || again.links[1].holder().Phone != "61411111111" {
+		t.Fatalf("opened %d links", len(again.links))
+	}
+	if _, err := os.Stat(unfinished.path); err == nil {
+		t.Fatal("kept an unfinished pairing")
 	}
 }
 
@@ -119,7 +161,7 @@ func TestUnlinkedSendsCallsElsewhere(t *testing.T) {
 	f := newFakeNode(t, "personal")
 	for _, op := range []string{"chats", "read", "search", "send", "move", "sign_out"} {
 		var away elsewhere
-		if _, err := run(t, f.links["personal"], op, map[string]any{"chat": "x", "query": "x", "text": "x", "to": "x"}); !errors.As(err, &away) {
+		if _, err := run(t, f.servers["personal"], op, map[string]any{"chat": "x", "query": "x", "text": "x", "to": "x"}); !errors.As(err, &away) {
 			t.Errorf("%s while unlinked: %v, want elsewhere", op, err)
 		}
 	}
@@ -129,11 +171,12 @@ func TestMoveHandsOverTheLinkAndMessages(t *testing.T) {
 	partSize = 1000 // several parts
 	t.Cleanup(func() { partSize = 1 << 20 })
 	f := newFakeNode(t, "linux", "personal")
-	from, to := f.links["linux"], f.links["personal"]
+	linux, personal := f.servers["linux"], f.servers["personal"]
+	from, to := linux.links[0], personal.links[0]
 	linkTo(t, from, "61400000000")
 	must(t, put(from.db, stored{Chat: "1@s.whatsapp.net", ID: "a", Sender: "1@s.whatsapp.net", Time: time.Unix(1e9, 0), Text: "kept"}, false))
 
-	out, err := run(t, from, "move", map[string]any{"to": "personal"})
+	out, err := run(t, linux, "move", map[string]any{"to": "personal"})
 	if err != nil || !strings.HasPrefix(out, "Moved WhatsApp from linux to personal, as +61400000000") {
 		t.Fatalf("move: %q, %v", out, err)
 	}
@@ -153,22 +196,37 @@ func TestMoveHandsOverTheLinkAndMessages(t *testing.T) {
 		t.Fatalf("left behind %v", left)
 	}
 
-	// Back again, and not onto a server that's linked.
-	if _, err := run(t, to, "move", map[string]any{"to": "linux"}); err != nil {
+	// Back again, and not onto a server where that number is linked already.
+	if _, err := run(t, personal, "move", map[string]any{"to": "linux"}); err != nil {
 		t.Fatal(err)
 	}
-	linkTo(t, to, "61411111111")
-	if _, err := run(t, to, "move", map[string]any{"to": "linux"}); err == nil || !strings.Contains(err.Error(), "linux is linked to WhatsApp already") {
-		t.Fatalf("move onto a linked server: %v", err)
+	link2(t, personal, "61400000000")
+	if _, err := run(t, linux, "move", map[string]any{"to": "personal"}); err == nil || !strings.Contains(err.Error(), "personal is linked to WhatsApp already, as +61400000000") {
+		t.Fatalf("move onto a server linked as that number: %v", err)
 	}
-	if h := to.holder(); h.Phone != "61411111111" {
-		t.Fatalf("a refused move unlinked personal: %+v", h)
+	if h := from.holder(); h.Phone != "61400000000" {
+		t.Fatalf("a refused move unlinked linux: %+v", h)
+	}
+
+	// Another account moves beside one linked there, and its database goes from here.
+	second := link2(t, linux, "61411111111")
+	if _, err := run(t, linux, "move", map[string]any{"to": "personal", "account": "+61411111111"}); err != nil {
+		t.Fatal(err)
+	}
+	if h := personal.holding(); len(h.All) != 2 || h.All[1].Phone != "61411111111" {
+		t.Fatalf("personal holds %+v", h)
+	}
+	if len(linux.links) != 1 {
+		t.Fatalf("linux kept %d links", len(linux.links))
+	}
+	if _, err := os.Stat(second.path); err == nil {
+		t.Fatal("the moved account's database is still on linux")
 	}
 }
 
 func TestTakeRefusesWhatHoldsNoLink(t *testing.T) {
 	f := newFakeNode(t, "personal")
-	l := f.links["personal"]
+	l := f.servers["personal"].links[0]
 	session, err := snapshot(l.db, t.TempDir())
 	must(t, err)
 	if _, err := l.take("linux", 0, 1, encode(session)); err == nil || !strings.Contains(err.Error(), "holds no link") {

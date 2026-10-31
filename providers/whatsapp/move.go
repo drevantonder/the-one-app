@@ -31,10 +31,28 @@ import (
 // call may carry, even through older nodes (2 MB).
 var partSize = 1 << 20
 
-// holding is what one server's provider tells another about the link.
+// holding is what one server's provider tells another about its links: the
+// first, as when there could be only one, and all of them.
 type holding struct {
-	Phone     string `json:"phone,omitempty"` // the linked number, if linked there
-	Connected bool   `json:"connected,omitempty"`
+	Phone     string    `json:"phone,omitempty"` // the linked number, if linked there
+	Connected bool      `json:"connected,omitempty"`
+	All       []holding `json:"all,omitempty"`
+}
+
+// all is every link a server holds, from a server before several too.
+func (h holding) all() []holding {
+	if h.All != nil {
+		return h.All
+	}
+	if h.Phone != "" {
+		return []holding{{Phone: h.Phone, Connected: h.Connected}}
+	}
+	return nil
+}
+
+// has says whether a server holds a link as number.
+func (h holding) has(number string) bool {
+	return slices.ContainsFunc(h.all(), func(o holding) bool { return o.Phone == number })
 }
 
 func (l *link) holder() holding {
@@ -104,12 +122,13 @@ func (l *link) move(to string) (string, error) {
 	if strings.EqualFold(to, s.here) {
 		return "", fmt.Errorf("WhatsApp is linked here, on %s, already", s.here)
 	}
+	mine := l.holder().Phone
 	var there holding
 	if err := callOn(l.node, to, "_holder", map[string]any{}, &there); err != nil {
 		return "", fmt.Errorf("not moved: %s didn't answer (it needs WhatsApp installed and to be online): %w", to, err)
 	}
-	if there.Phone != "" {
-		return "", fmt.Errorf("not moved: %s is linked to WhatsApp already, as +%s", to, there.Phone)
+	if mine != "" && there.has(mine) {
+		return "", fmt.Errorf("not moved: %s is linked to WhatsApp already, as +%s", to, mine)
 	}
 
 	l.mu.Lock()
@@ -132,7 +151,7 @@ func (l *link) move(to string) (string, error) {
 	}
 	if err != nil {
 		// Its answer may be what was lost: ask before connecting here again.
-		if callOn(l.node, to, "_holder", map[string]any{}, &there) != nil || there.Phone == "" {
+		if callOn(l.node, to, "_holder", map[string]any{}, &there) != nil || !there.has(number) {
 			l.reconnect()
 			return "", fmt.Errorf("not moved, still linked here: %w", err)
 		}
