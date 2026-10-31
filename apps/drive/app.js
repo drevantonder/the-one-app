@@ -93,10 +93,13 @@ export default {
 
   ops: {
     accounts: {
-      description: "Your Drive accounts, the first is the default; and whether Drive can sign in at all here.",
+      reads: true,
+      description: "Your Drive accounts, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
       input: { type: "object", properties: {} },
       async run(ctx) {
-        return { accounts: (await accounts(ctx)).map((a) => a.email), client: !!(await setting(ctx, "client_id")) };
+        return Promise.all((await accounts(ctx)).map(async ({ email: account }) => {
+          try { await token(ctx, account); return { account, ok: true }; } catch (e) { return { account, ok: false, why: e.message }; }
+        }));
       },
     },
     set_client: {
@@ -210,41 +213,52 @@ export default {
   },
 
   screens: {
-    main: {
-      title: "Google Drive",
-      html: `
+    settings: { title: "Google Drive", html: settingsScreen("Google Drive", "Sign in to Google Drive, and apps like Claims save a copy of what you add to your own Drive.") },
+  },
+};
+
+/// The settings screen a shell opens for a connected app (SPEC.md "Connected apps"): the accounts signed in, each with
+/// whether it still works and a way to sign it out, and signing in another, by link and pasted address. Opened with
+/// { add: true } (a shell's Add account), it starts signing in at once.
+function settingsScreen(title, blurb) {
+  return `
 <style>
   .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
   button.primary { font: inherit; font-weight: 600; color: white; background: var(--accent); border: 0; border-radius: 10px; padding: 11px 16px; }
   button.plain { font: inherit; color: var(--accent); background: none; border: 0; padding: 4px 0; }
-  input { width: 100%; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
+  input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
   ol { padding-left: 20px; margin: 8px 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #34c759; flex: none; margin-right: 12px; }
+  .dot.warn { background: #ff9f0a; }
 </style>
 <div id="list"></div>
 <div class="card" id="connect"></div>
 <script>
 async function show() {
-  const { accounts, client } = await one.call("accounts");
+  const accounts = await one.call("accounts");
   document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Connected</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a)}</div>\${i ? "" : '<div class="sub">Used first</div>'}</div><button class="plain" data-out="\${one.esc(a)}">Forget</button></div>\`).join("") + "</div>"
-    : '<p class="muted">Connect Google Drive and apps like Claims save a copy of what you add to your own Drive.</p>';
+    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Signed in" : "Signed in · used first") : a.why || "Needs signing in again")}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+    : '<p class="muted">${blurb}</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => { await one.call("sign_out", { account: b.dataset.out }); show(); };
   const c = document.getElementById("connect");
-  if (!client) { c.innerHTML = '<div class="muted">Drive can\\'t sign in yet: an admin sets its Google client first.</div>'; return; }
-  c.innerHTML = '<button class="primary" id="start">' + (accounts.length ? "Connect another account" : "Connect Google Drive") + "</button>";
-  document.getElementById("start").onclick = async () => {
-    const { url } = await one.call("sign_in");
-    c.innerHTML = \`<ol><li><a href="\${one.esc(url)}">Sign in to Google</a> and allow Drive.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
-      <input id="code" placeholder="http://127.0.0.1:4747/hooks/drive/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Connect</button><div id="err" class="error small"></div>\`;
-    document.getElementById("finish").onclick = async () => {
-      try { await one.call("finish_sign_in", { code: document.getElementById("code").value }); show(); }
-      catch (e) { document.getElementById("err").textContent = e.message; }
-    };
+  c.innerHTML = '<button class="primary" id="start">' + (accounts.length ? "Add account" : "Sign in to Google") + '</button><div id="err" class="error small"></div>';
+  document.getElementById("start").onclick = start;
+}
+async function start() {
+  const c = document.getElementById("connect");
+  let link;
+  try {
+    const r = await one.call("sign_in");
+    link = typeof r === "string" ? r.split("\\n").pop() : r.url;
+  } catch (e) { document.getElementById("err").textContent = e.message; return; }
+  c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
+    <input id="code" placeholder="http://127.0.0.1:4747/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign in</button><div id="err" class="error small"></div>\`;
+  document.getElementById("finish").onclick = async () => {
+    try { await one.call("finish_sign_in", { code: document.getElementById("code").value }); show(); }
+    catch (e) { document.getElementById("err").textContent = e.message; }
   };
 }
 one.on("changed", show);
-show();
-</script>`,
-    },
-  },
-};
+show().then(() => { if (one.params.add) start(); });
+</script>`;
+}

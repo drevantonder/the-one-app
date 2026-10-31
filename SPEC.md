@@ -189,6 +189,14 @@ An app is one ES module, run in workerd (Cloudflare's open-source Workers runtim
 
 **Icons.** A shell draws an app's tile as its `icon` (an SF Symbol's name) in white on its `color` (`"#rrggbb"`), or on a colour it picks by the app's name when it declares none. An app whose folder holds `icon.png` (a square picture, opaque or on white) shows that instead: `GET /v1/apps` and `catalog()` give it as `image`, a data URL, from bundles the server has.
 
+**Connected apps.** An app that only connects accounts, for the person's agents and other apps (Gmail, a chat's linked phone), has the operations `accounts`, `sign_in` and `sign_out`, and a `settings` screen but no `main` one. A shell keeps such apps in one Connected Apps folder at the end of each page they're installed on, listing each app's accounts, rather than giving each an icon; drivers may follow it too. Every connected app takes several accounts:
+
+- `accounts` (reads) answers `[{ account, ok, why? }]`, the default first: each account by what the person knows it as (an address, a phone number, a browser profile), and `ok: false`, with `why`, when it needs signing in again.
+- `sign_out { account }` signs one out. `sign_in` starts signing in another, as the app needs; a shell opens `settings` with `{ add: true }` instead, where the app walks the person through it.
+- Its other operations take `account`, the default when left out.
+
+A connected app is a connector, not the app the person reads it in (Gmail's own app stays that): it has no `badge`, pushes nothing on its own, and its folder shows no count.
+
 **Stores.** An app has a private store per scope, SQLite in a Durable Object of its own, for each scope that has a `schema`. A store replays the app's entries in its scope with the app's latest deploy. For each, in replay order, `on[entry.kind]` gets the store, as `db.exec(sql, params)` and `db.query(sql, params)`, and the entry `{ id, scope, kind, user, user_name, name, role, groups, time, data, blobs }`. `id` is `<first 8 hex of author>:<seq>`; `user_name` is the user's name; `name` is the name of `by`, else of the author; `role` is the writer's role in the scope, and `groups` their role in each of their groups, at that point. A new deploy replays its stores from empty, beside the old ones; calls use the old until it's done *(for now: the runtime restarts with the new deploy and replays its stores before running calls)*. There are no migrations.
 
 **Files.** An input whose schema says `format: "file"` (or a list whose `items` do) takes a file as `{ name, type, size, base64 }`; the CLI makes it from a path (`--file <input>=<path>`) and MCP from base64, a file id or a URL. A result, or a value in one, shaped the same is a file: the CLI saves it (`--out <path>`), and MCP keeps it as a blob and gives back `{ name, type, size, file, link }`, `file` being the blob's hash.

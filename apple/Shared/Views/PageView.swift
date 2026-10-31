@@ -15,24 +15,24 @@ struct PageView: View {
     @State private var width: CGFloat = 0
 
     var body: some View {
-        let apps = store.apps(on: page), widgets = store.widgets(on: page)
+        let apps = store.apps(on: page), widgets = store.widgets(on: page), connected = store.connectedApps(on: page)
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 #if os(macOS)
                 PageHeader(title: page.title, subtitle: page.subtitle)
                 #endif
-                if apps.isEmpty && widgets.isEmpty {
+                if apps.isEmpty && widgets.isEmpty && connected.isEmpty {
                     EmptyPage(page: page, open: open)
                 } else if width > 700 {
                     HStack(alignment: .top, spacing: 28) {
                         if !widgets.isEmpty {
                             WidgetColumn(widgets: widgets, page: page, open: open).frame(width: min(360, width * 0.4))
                         }
-                        IconGrid(apps: apps, page: page, open: open)
+                        IconGrid(apps: apps, connected: connected, page: page, open: open)
                     }
                 } else {
                     WidgetColumn(widgets: widgets, page: page, open: open)
-                    IconGrid(apps: apps, page: page, open: open)
+                    IconGrid(apps: apps, connected: connected, page: page, open: open)
                 }
             }
             .padding(.horizontal, 20)
@@ -280,11 +280,14 @@ struct WidgetsEditor: View {
     }
 }
 
+/// A page's icons, then its Connected Apps folder, if any of its apps only connects an account.
 private struct IconGrid: View {
     @Environment(Store.self) private var store
     var apps: [AppInfo]
+    var connected: [AppInfo]
     var page: Page
     var open: (Route) -> Void
+    @State private var deleting: AppInfo?
     @State private var error: String?
 
     var body: some View {
@@ -294,24 +297,16 @@ private struct IconGrid: View {
                 IconButton(title: app.label, badge: store.appBadge(app.name, on: page) ?? 0) { open(store.open(app, from: page)) } icon: {
                     AppTile(app: app, seed: app.name, size: iconSize)
                 }
-                    .contextMenu {
-                        if store.canArrange(page.scope) {
-                            Button("Remove from \(page.title)", systemImage: "minus.circle", role: .destructive) { remove(app) }
-                        }
-                    }
+                    .contextMenu { AppActions(app: app, page: page, open: open, deleting: $deleting, error: $error) }
+            }
+            if !connected.isEmpty {
+                IconButton(title: String(localized: "Connected Apps")) { open(.connected(page.scope)) } icon: {
+                    FolderTile(apps: connected, size: iconSize)
+                }
+                .accessibilityLabel("Connected Apps, \(connected.count) apps")
             }
         }
-        .alert("Couldn’t Remove It", isPresented: .constant(error != nil)) {
-            Button("OK") { error = nil }
-        } message: {
-            Text(error ?? "")
-        }
-    }
-
-    private func remove(_ app: AppInfo) {
-        Task {
-            do { try await store.change { try await $0.install(app: app.name, scope: page.scope, false) } } catch { self.error = error.localizedDescription }
-        }
+        .deleteAppDialog($deleting, error: $error)
     }
 }
 

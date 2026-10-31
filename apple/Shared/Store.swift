@@ -19,6 +19,8 @@ enum Route: Hashable, Codable {
     case settings
     case setting(Setting)
     case group(String)
+    /// A page's Connected Apps folder, opened: its scope.
+    case connected(String)
 }
 
 struct ScreenRoute: Hashable, Codable {
@@ -73,6 +75,8 @@ enum Sheet: Hashable, Identifiable {
     case secret(scope: String, id: String)
     /// A page's widgets, to show, hide and size, with every other widget there is.
     case widgets(String)
+    /// A page's Connected Apps folder, on a Mac: its scope.
+    case connected(String)
 
     var id: Self { self }
 }
@@ -188,6 +192,43 @@ final class Store {
     /// The apps on a page: those installed in its scope that have a screen.
     func apps(on page: Page) -> [AppInfo] {
         apps.filter { $0.hasScreens && $0.scopes.contains(page.scope) }
+    }
+
+    /// A page's connected apps, which its Connected Apps folder holds instead of each having an icon.
+    func connectedApps(on page: Page) -> [AppInfo] {
+        apps.filter { $0.isConnected && $0.scopes.contains(page.scope) }
+            .sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+    }
+
+    /// Whether this user acts for an app's owner, and so may delete it: it's theirs, their group's as its admin, or
+    /// the admins' and they're one.
+    func owns(_ app: AppInfo) -> Bool {
+        guard let owner = app.owner, let me else { return false }
+        if owner == "admins" { return isAdmin }
+        if owner == "user:\(me.id)" { return true }
+        return owner.hasPrefix("group:") && install?.group(String(owner.dropFirst(6)))?.role(of: me.id) == "admin"
+    }
+
+    /// The App Store's page for an app, if the brand's store app is here and the app is one it lists (drivers aren't).
+    func storeRoute(for app: AppInfo) -> Route? {
+        guard let name = brand?.store, let store = self.app(name), store.has(screen: "app"), (app.deploys ?? 0) > 0 else { return nil }
+        return .screen(ScreenRoute(app: name, screen: "app", params: Self.params(["app": app.name])))
+    }
+
+    /// The App Store, showing only connected apps, if the brand's store app is here.
+    var connectedStoreRoute: Route? {
+        guard let name = brand?.store, app(name)?.hasScreens == true else { return nil }
+        return .screen(ScreenRoute(app: name, params: Self.params(["connected": true])))
+    }
+
+    /// An app's settings screen, opened from a page; with `add`, starting to sign in another account.
+    func settingsRoute(for app: AppInfo, on page: Page, add: Bool = false) -> Route? {
+        guard app.has(screen: "settings") else { return nil }
+        return .screen(ScreenRoute(app: app.name, screen: "settings", params: Self.params(add ? ["add": true] : [:]), scope: page.scope))
+    }
+
+    static func params(_ fields: [String: Any]) -> String {
+        (try? JSONSerialization.data(withJSONObject: fields, options: .sortedKeys)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
     }
 
     /// The count an app's icon shows on a page, if any.
@@ -439,6 +480,7 @@ final class Store {
         case .page(let scope): pages.contains { $0.scope == scope } ? route : nil
         case .screen(let screen): app(screen.app) != nil ? route : nil
         case .group(let id): install?.group(id) != nil ? route : nil
+        case .connected(let scope): page(scope) != nil ? route : nil
         case .settings, .setting: route
         }
     }

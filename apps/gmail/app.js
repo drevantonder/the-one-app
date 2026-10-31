@@ -444,17 +444,12 @@ export default {
   ops: {
     accounts: {
       reads: true,
-      description: "The Gmail accounts signed in, and whether each still works. The first is the default.",
+      description: "The Gmail accounts signed in, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
       input: { type: "object", properties: {} },
       async run(ctx) {
-        const all = await accounts(ctx);
-        if (!all.length) return "No account is signed in: gmail_sign_in signs one in.";
-        const lines = await Promise.all(all.map(async ({ email }, i) => {
-          let line = `${email}: signed in`;
-          try { await token(ctx, email); } catch (e) { line = e.message; }
-          return i ? line : `${line} (the default)`;
+        return Promise.all((await accounts(ctx)).map(async ({ email: account }) => {
+          try { await token(ctx, account); return { account, ok: true }; } catch (e) { return { account, ok: false, why: e.message }; }
         }));
-        return lines.join("\n");
       },
     },
     sign_in: {
@@ -697,42 +692,52 @@ export default {
   },
 
   screens: {
-    main: {
-      title: "Gmail",
-      html: `
+    settings: { title: "Gmail", html: settingsScreen("Gmail", "Sign in to Gmail, and your agents can search, read and draft your email.") },
+  },
+};
+
+/// The settings screen a shell opens for a connected app (SPEC.md "Connected apps"): the accounts signed in, each with
+/// whether it still works and a way to sign it out, and signing in another, by link and pasted address. Opened with
+/// { add: true } (a shell's Add account), it starts signing in at once.
+function settingsScreen(title, blurb) {
+  return `
 <style>
   .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
   button.primary { font: inherit; font-weight: 600; color: white; background: var(--accent); border: 0; border-radius: 10px; padding: 11px 16px; }
   button.plain { font: inherit; color: var(--accent); background: none; border: 0; padding: 4px 0; }
   input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
   ol { padding-left: 20px; margin: 8px 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #34c759; flex: none; margin-right: 12px; }
+  .dot.warn { background: #ff9f0a; }
 </style>
 <div id="list"></div>
 <div class="card" id="connect"></div>
 <script>
 async function show() {
-  const text = await one.call("accounts");
-  const rows = text.startsWith("No account") ? [] : text.split("\\n");
-  document.getElementById("list").innerHTML = rows.length
-    ? '<h2 class="section">Accounts</h2><div class="list">' + rows.map((r) => { const email = (/^[^\\s:']+@[^\\s:']+/.exec(r) || [r])[0]; return \`<div class="row plain"><div class="main"><div class="title">\${one.esc(email)}</div><div class="sub">\${one.esc(r.slice(email.length).replace(/^: /, ""))}</div></div><button class="plain" data-out="\${one.esc(email)}">Sign out</button></div>\`; }).join("") + "</div>"
-    : '<p class="muted">Sign in to Gmail, and your agents can search, read and draft your email.</p>';
+  const accounts = await one.call("accounts");
+  document.getElementById("list").innerHTML = accounts.length
+    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Signed in" : "Signed in · used first") : a.why || "Needs signing in again")}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+    : '<p class="muted">${blurb}</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => { await one.call("sign_out", { account: b.dataset.out }); show(); };
   const c = document.getElementById("connect");
-  c.innerHTML = '<button class="primary" id="start">' + (rows.length ? "Add another account" : "Sign in to Gmail") + "</button><div id=\\"err\\" class=\\"error small\\"></div>";
-  document.getElementById("start").onclick = async () => {
-    let link;
-    try { link = (await one.call("sign_in")).split("\\n").pop(); } catch (e) { document.getElementById("err").textContent = e.message; return; }
-    c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow Gmail.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
-      <input id="code" placeholder="http://127.0.0.1:4747/hooks/gmail/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign in</button><div id="err" class="error small"></div>\`;
-    document.getElementById("finish").onclick = async () => {
-      try { await one.call("finish_sign_in", { code: document.getElementById("code").value }); show(); }
-      catch (e) { document.getElementById("err").textContent = e.message; }
-    };
+  c.innerHTML = '<button class="primary" id="start">' + (accounts.length ? "Add account" : "Sign in to Google") + '</button><div id="err" class="error small"></div>';
+  document.getElementById("start").onclick = start;
+}
+async function start() {
+  const c = document.getElementById("connect");
+  let link;
+  try {
+    const r = await one.call("sign_in");
+    link = typeof r === "string" ? r.split("\\n").pop() : r.url;
+  } catch (e) { document.getElementById("err").textContent = e.message; return; }
+  c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
+    <input id="code" placeholder="http://127.0.0.1:4747/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign in</button><div id="err" class="error small"></div>\`;
+  document.getElementById("finish").onclick = async () => {
+    try { await one.call("finish_sign_in", { code: document.getElementById("code").value }); show(); }
+    catch (e) { document.getElementById("err").textContent = e.message; }
   };
 }
 one.on("changed", show);
-show();
-</script>`,
-    },
-  },
-};
+show().then(() => { if (one.params.add) start(); });
+</script>`;
+}

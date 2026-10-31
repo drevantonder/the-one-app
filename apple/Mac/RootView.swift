@@ -35,6 +35,7 @@ struct RootView: View {
             case .pages: PagesEditor()
             case .secret(let scope, let id): SecretRequestSheet(scope: scope, id: id)
             case .widgets(let scope): WidgetsEditor(scope: scope)
+            case .connected(let scope): ConnectedSheet(scope: scope)
             }
         }
         .onChange(of: appearance, initial: true) {
@@ -75,9 +76,36 @@ private struct MainView: View {
         }
     }
 
-    /// An app opens in place of the page, selected in the sidebar; the shell's own views push.
+    /// An app opens in place of the page, selected in the sidebar; a page's Connected Apps, as a sheet over it; the
+    /// shell's own views push.
     private func open(_ route: Route) {
-        if case .screen = route { store.selection = route } else { store.path.append(route) }
+        switch route {
+        case .screen: store.selection = route
+        case .connected(let scope): store.sheet = .connected(scope)
+        default: store.path.append(route)
+        }
+    }
+}
+
+/// A page's Connected Apps, over the page: what it opens (a settings screen, the App Store) opens in the window.
+private struct ConnectedSheet: View {
+    @Environment(Store.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    var scope: String
+
+    var body: some View {
+        NavigationStack {
+            if let page = store.page(scope) {
+                ConnectedAppsView(page: page) { route in
+                    dismiss()
+                    if case .screen = route { store.selection = route } else { store.path.append(route) }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                }
+            }
+        }
+        .frame(width: 460, height: 560)
     }
 }
 

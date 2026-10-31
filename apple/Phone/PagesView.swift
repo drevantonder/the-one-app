@@ -59,7 +59,7 @@ struct PagesView: View {
             case .pair: PairSheet()
             case .pages: PagesEditor()
             case .widgets(let scope): WidgetsEditor(scope: scope)
-            case .join: EmptyView()
+            case .join, .connected: EmptyView()
             case .secret(let scope, let id): SecretRequestSheet(scope: scope, id: id)
             }
         }

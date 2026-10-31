@@ -138,6 +138,9 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
         var name: String
         var title: String?
     }
+    struct Op: Decodable, Sendable, Equatable {
+        var name: String
+    }
     var name: String
     var title: String?
     var icon: String?
@@ -147,6 +150,7 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     var owner: String?
     var instructions: String?
     var screens: [Screen]?
+    var ops: [Op]?
     /// The scopes it is installed in that the asker may use: `user:<id>`, `group:<id>`, `global`.
     var installed: [String]?
     var deploys: Int?
@@ -154,7 +158,13 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     var id: String { name }
     var label: String { title ?? name }
     /// Only apps with a `main` screen get an icon; the rest still give widgets and tools.
-    var hasScreens: Bool { screens?.contains { $0.name == "main" } == true }
+    var hasScreens: Bool { has(screen: "main") }
+    /// A connected app (SPEC.md "Connected apps"): it only connects accounts, so it goes in a page's Connected Apps
+    /// folder, with its accounts, rather than having an icon of its own.
+    var isConnected: Bool {
+        !hasScreens && ["accounts", "sign_in", "sign_out"].allSatisfy { op in ops?.contains { $0.name == op } == true }
+    }
+    func has(screen: String) -> Bool { screens?.contains { $0.name == screen } == true }
     /// Its pages: the asker's own scope is the page `user`.
     var scopes: [String] { (installed ?? []).map { $0.hasPrefix("user:") ? "user" : $0 } }
 }
@@ -367,6 +377,11 @@ struct NodeClient: Sendable {
 
     func install(app: String, scope: String, _ installed: Bool) async throws {
         try await post("v1/install", ["app": app, "scope": scope, "installed": installed])
+    }
+
+    /// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), for someone acting for its owner.
+    func retire(app: String, how: String) async throws {
+        try await post("v1/retire", ["app": app, "how": how])
     }
 
     func secrets(scope: String) async throws -> [SecretInfo] { try await get("v1/secrets", ["scope": scope]) }

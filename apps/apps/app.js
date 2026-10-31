@@ -61,6 +61,17 @@ async function described(ctx, bundle) {
   return { title: field("title"), icon: field("icon"), color: field("color"), description: field("description") };
 }
 
+/// Whether an app only connects accounts (SPEC.md "Connected apps"): it has accounts, sign_in and sign_out, and a
+/// settings screen but no main one. What it says about itself where it's installed for the caller; elsewhere, its code.
+async function connects(ctx, a) {
+  const has = (list, name) => (list || []).some((x) => x.name === name);
+  if (a.ops) return has(a.ops, "accounts") && has(a.ops, "sign_in") && has(a.ops, "sign_out") && !has(a.screens, "main");
+  const bundle = a.bundle || a.built_in;
+  const file = bundle && untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
+  const code = file ? new TextDecoder().decode(file.bytes) : "";
+  return ["accounts", "sign_in", "sign_out", "settings"].every((k) => new RegExp(`\\b${k}:\\s*\\{`).test(code)) && !/\bmain:\s*\{/.test(code);
+}
+
 async function find(ctx, name) {
   const app = (await ctx.catalog()).find((a) => a.name === name);
   if (!app) throw new Error(`no app named ${name}`);
@@ -104,11 +115,13 @@ export default {
   ops: {
     list: {
       reads: true,
-      description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; owner, where it's installed (that you can see), forks, and the places you may add it to.",
-      input: { type: "object", properties: {} },
-      async run(ctx) {
+      description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; owner, where it's installed (that you can see), forks, and the places you may add it to. With connected, only the apps that connect an account (Gmail, say), which shells keep in each page's Connected Apps folder.",
+      input: { type: "object", properties: { connected: { type: "boolean", description: "only connected apps" } } },
+      async run(ctx, { connected } = {}) {
         const name = namer(ctx);
-        const apps = await Promise.all((await ctx.catalog()).map(async (a) => {
+        let all = (await ctx.catalog()).filter((a) => !a.deleted || !connected);
+        if (connected) all = (await Promise.all(all.map(async (a) => ((await connects(ctx, a).catch(() => false)) ? a : null)))).filter(Boolean);
+        const apps = await Promise.all(all.map(async (a) => {
           const added = a.deploys > 0;
           const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
           return {
@@ -212,6 +225,12 @@ export default {
 <input id="search" class="search" type="search" placeholder="Find an app" autocomplete="off">
 <div id="list"></div>
 <script>
+// Opened with { connected: true } (a shell's Add a connected app), only the apps that connect an account.
+const CONNECTED = !!one.params.connected;
+if (CONNECTED) {
+  one.title("Connected Apps");
+  document.getElementById("search").insertAdjacentHTML("beforebegin", '<p class="muted small" style="margin:4px 4px 10px">Apps that connect an account, for you and your agents. Add one to a page, then sign in from that page\'s Connected Apps.</p>');
+}
 // The sections: the apps built into the release, and those made in this install (each brand words that its own way).
 const BUILT_IN = "Built In";
 const MADE_HERE = one.brand.made_here;
@@ -243,7 +262,7 @@ function draw() {
     : '<div class="empty">No apps match.<div class="small" style="margin-top:6px">Make your own: put an app.js in a folder and run <code>one deploy</code> on it.</div></div>';
 }
 async function show() {
-  apps = (await one.call("list")).apps;
+  apps = (await one.call("list", CONNECTED ? { connected: true } : {})).apps;
   draw();
 }
 document.getElementById("search").addEventListener("input", draw);
