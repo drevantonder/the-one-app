@@ -310,6 +310,11 @@ struct NodeClient: Sendable {
         try await get("v1/widgets", scope.map { ["scope": $0] } ?? [:])
     }
 
+    /// Each app's badge on a page's scope: the count its icon shows. A node too old to know badges has none.
+    func badges(scope: String?) async throws -> [String: Int] {
+        (try? await get("v1/badges", scope.map { ["scope": $0] } ?? [:])) ?? [:]
+    }
+
     /// Runs an app's operation for an app screen: its input and result are JSON, whatever their shape.
     func call(app: String, op: String, input: Data) async throws -> Data {
         let input = try JSONSerialization.jsonObject(with: input, options: .fragmentsAllowed)

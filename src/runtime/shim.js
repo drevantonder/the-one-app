@@ -23,6 +23,7 @@ function describe() {
     name: app.name, title: app.title, icon: app.icon, description: app.description || "", instructions: app.instructions || "",
     ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}) })),
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => ({ name, title: w.title || name, size: w.size || "medium" })),
+    badge: typeof app.badge === "function",
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
     uses: { apps: app.uses?.apps || [], drivers: app.uses?.drivers || [] },
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
@@ -234,6 +235,8 @@ export default {
         run = () => op.run(ctx, body.input ?? {});
       } else if (what === "widget") {
         run = () => app.widgets[body.name].render(ctx);
+      } else if (what === "badge") {
+        run = () => app.badge(ctx);
       } else if (what === "hook") {
         const hook = app.hooks?.[body.name];
         if (!hook) throw new Error(`${app.name} has no hook ${body.name}`);

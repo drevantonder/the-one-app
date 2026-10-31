@@ -307,6 +307,10 @@ impl Apps {
         Ok(Outcome { result: reply["ok"].clone(), appends: appends(app, &reply["appends"])?, later: reply["later"] == true })
     }
 
+    pub async fn badge(&self, app: &str, ctx: &Context) -> Result<Value> {
+        Ok(self.ask(app, "badge", json!({ "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
+    }
+
     pub async fn widget(&self, app: &str, name: &str, ctx: &Context) -> Result<Value> {
         Ok(self.ask(app, "widget", json!({ "name": name, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
     }

@@ -24,6 +24,17 @@
       location.href = `/v1/screens/${message.app || ctx.app}/${message.screen}?${q}`;
     }
     if (message.type === "title") document.title = message.text;
+    // A browser saves a file as a download, and shows one in a tab of its own.
+    if (message.type === "save" || message.type === "preview") {
+      const f = message.file || {};
+      const url = f.base64 ? `data:${f.type || "application/octet-stream"};base64,${f.base64}` : `/v1/blobs/${f.blob || f.file}`;
+      if (message.type === "preview") return void window.open(url, "_blank");
+      const a = Object.assign(document.createElement("a"), { href: url, download: f.name || "file" });
+      document.body.append(a);
+      a.click();
+      a.remove();
+    }
+    if (message.type === "scan") throw new Error("Scanning documents needs the iPhone or iPad app. Choose the files instead.");
     if (message.type === "copy") return navigator.clipboard.writeText(message.text);
   }
 
@@ -44,6 +55,15 @@
     // Opens one of this app's screens; or with `app`, another app's (a notification's link, say).
     open: (screen, params = {}, app) => host({ type: "open", screen, params, ...(app && app !== ctx.app ? { app } : {}) }),
     title: (text) => host({ type: "title", text }),
+    // Files, as `{ name, type, base64 }` or `{ name, type, blob }`: save (or share) one, or show it (Quick Look,
+    // Preview, a tab).
+    save: (file) => host({ type: "save", file }),
+    preview: (file) => host({ type: "preview", file }),
+    // The document camera, where the shell has one (one.can.scan): each page found, straightened and cropped, as a
+    // JPEG `{ name, type, size, base64 }`; none if the person cancels.
+    scan: () => host({ type: "scan" }),
+    // What this place can do beyond the basics.
+    can: { scan: !!window.__oneShell?.scan },
     // Copies text: through the shell (which a page's clipboard can't always reach), else the browser's clipboard.
     async copy(text) {
       try {

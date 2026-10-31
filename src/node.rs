@@ -1392,22 +1392,8 @@ impl Node {
     /// Every widget, rendered for `viewer`; with `scope` (`user`, `group:<id>` or `global`), those of the apps
     /// installed there, for a shell's page of that scope, each reaching only it.
     pub async fn widgets(&self, viewer: Caller, scope: Option<&str>) -> Result<Vec<Value>> {
-        let scope = match scope {
-            Some("user") => Some(Scope::User(viewer.user.clone())),
-            Some(s) => Some(Scope::parse(s)?),
-            None => None,
-        };
         let mut out = Vec::new();
-        for app in self.0.apps.names().into_iter().filter(|a| !self.deleted(a)) {
-            let mut ctx = self.read_context(&app, &viewer)?;
-            let _granted = self.grant(&app, &viewer, &mut ctx, 0);
-            if let Some(scope) = &scope {
-                let installed = self.with(|i| Ok(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&app))))?;
-                ctx.scopes.retain(|s| installed && s.id == scope.to_string());
-            }
-            if ctx.scopes.is_empty() {
-                continue;
-            }
+        for (app, ctx) in self.page_contexts(&viewer, scope)? {
             let describe = self.0.apps.describe(&app).await?;
             for w in describe["widgets"].as_array().into_iter().flatten() {
                 let widget = w["name"].as_str().unwrap_or_default();
@@ -1419,6 +1405,46 @@ impl Node {
                         "root": { "t": "text", "text": "This widget stopped working.", "tone": "muted" },
                     })),
                 }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Each app's badge, the count its icon shows, for `viewer`, as `widgets` reaches scopes; apps with none, or 0,
+    /// are left out.
+    pub async fn badges(&self, viewer: Caller, scope: Option<&str>) -> Result<Value> {
+        let mut out = serde_json::Map::new();
+        for (app, ctx) in self.page_contexts(&viewer, scope)? {
+            if self.0.apps.describe(&app).await?["badge"] != true {
+                continue;
+            }
+            match self.0.apps.badge(&app, &ctx).await {
+                Ok(n) if n.as_f64().is_some_and(|n| n > 0.0) => drop(out.insert(app, n)),
+                Ok(_) => {}
+                Err(err) => tracing::warn!("{app} badge: {err:#}"),
+            }
+        }
+        Ok(Value::Object(out))
+    }
+
+    /// The apps a page shows and the context each renders with: with `scope`, those installed there, each reaching
+    /// only it; without, every app, reaching all it may.
+    fn page_contexts(&self, viewer: &Caller, scope: Option<&str>) -> Result<Vec<(String, Context)>> {
+        let scope = match scope {
+            Some("user") => Some(Scope::User(viewer.user.clone())),
+            Some(s) => Some(Scope::parse(s)?),
+            None => None,
+        };
+        let mut out = Vec::new();
+        for app in self.0.apps.names().into_iter().filter(|a| !self.deleted(a)) {
+            let mut ctx = self.read_context(&app, viewer)?;
+            let _granted = self.grant(&app, viewer, &mut ctx, 0);
+            if let Some(scope) = &scope {
+                let installed = self.with(|i| Ok(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&app))))?;
+                ctx.scopes.retain(|s| installed && s.id == scope.to_string());
+            }
+            if !ctx.scopes.is_empty() {
+                out.push((app, ctx));
             }
         }
         Ok(out)
@@ -1929,6 +1955,7 @@ impl Node {
             ("GET", "/v1/state") => self.state_for(me),
             ("GET", "/v1/apps") => json!(self.apps(me).await?),
             ("GET", "/v1/widgets") => json!(self.widgets(me.clone(), body["scope"].as_str()).await?),
+            ("GET", "/v1/badges") => self.badges(me.clone(), body["scope"].as_str()).await?,
             ("GET", "/v1/screen") => {
                 let (app, name) = (body["app"].as_str().unwrap_or(""), body["screen"].as_str().unwrap_or("main"));
                 json!({ "html": self.screen(me.clone(), app, name, body["params"].clone(), body["scope"].as_str()).await? })

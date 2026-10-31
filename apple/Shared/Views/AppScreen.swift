@@ -1,5 +1,6 @@
 import ImageIO
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 /// An app's screen: the page the node serves for it, in a web view that answers its bridge (SPEC.md "Screens").
@@ -10,10 +11,23 @@ struct AppScreen: View {
     @State private var loaded = false
     @State private var slow = false
     @State private var failure: String?
+    /// When the node couldn't be reached, so the screen shows its last copy, kept from then.
+    @State private var offline: Date?
 
     var body: some View {
-        ScreenWebView(route: route, store: store, title: $title, loaded: $loaded, failure: $failure)
+        ScreenWebView(route: route, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline)
             .opacity(loaded ? 1 : 0)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let offline {
+                    Label("Offline: this is how it looked \(offline.formatted(.relative(presentation: .named))).", systemImage: "wifi.slash")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .glassEffect(.regular, in: .capsule)
+                        .padding(.vertical, 6)
+                }
+            }
             .overlay {
                 if let failure {
                     ContentUnavailableView("Can’t Open This", systemImage: "exclamationmark.triangle", description: Text(failure))
@@ -56,6 +70,7 @@ private struct ScreenWebView: Representable {
     @Binding var title: String?
     @Binding var loaded: Bool
     @Binding var failure: String?
+    @Binding var offline: Date?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     func makeCoordinator() -> Coordinator { Coordinator(view: self) }
@@ -75,9 +90,12 @@ private struct ScreenWebView: Representable {
         let config = WKWebViewConfiguration()
         config.userContentController.addScriptMessageHandler(context.coordinator, contentWorld: .page, name: "one")
         config.userContentController.addUserScript(WKUserScript(source: look, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // What this shell can do beyond the bridge's basics, for screens to offer it only where it works.
+        config.userContentController.addUserScript(WKUserScript(source: "window.__oneShell = { scan: \(ShellFiles.canScan) };", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.addUserScript(WKUserScript(source: Self.noZoom, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
+        web.uiDelegate = context.coordinator
         web.allowsLinkPreview = false
         web.pageZoom = zoom
         #if os(macOS)
@@ -132,7 +150,7 @@ private struct ScreenWebView: Representable {
     #endif
 
     @MainActor
-    final class Coordinator: NSObject, WKScriptMessageHandlerWithReply, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKScriptMessageHandlerWithReply, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
         var view: ScreenWebView
         private weak var web: WKWebView?
 
@@ -155,13 +173,28 @@ private struct ScreenWebView: Representable {
                 do {
                     let page = try await node.page(app: route.app, screen: route.screen, params: route.params, scope: route.scope)
                     web.loadHTMLString(page.html, baseURL: page.base)
+                    ScreenCache.keep(page.html, for: route)
+                    view.offline = nil
                 } catch {
-                    view.failure = error.localizedDescription
+                    // Offline, the last copy of this screen stands in, saying so; its calls fail until the node answers.
+                    if let kept = ScreenCache.last(for: route) {
+                        web.loadHTMLString(kept.html, baseURL: nil)
+                        view.offline = kept.time
+                    } else {
+                        view.failure = error.localizedDescription
+                    }
                 }
             }
         }
 
-        /// The bridge: `{ type: "call" | "open" | "title" | "icon" | "copy" | "haptic", … }`. A page only ever calls its own app; it may open another's screens.
+        #if os(iOS)
+        private var host: UIView? { web }
+        #else
+        private var host: NSView? { web }
+        #endif
+
+        /// The bridge: `{ type: "call" | "open" | "title" | "icon" | "copy" | "haptic" | "save" | "preview" | "scan", … }`.
+        /// A page only ever calls its own app, but may open another's screens.
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
             guard let body = message.body as? [String: Any] else { return (nil, "Not a message") }
             let route = view.route
@@ -176,10 +209,27 @@ private struct ScreenWebView: Representable {
                 }
             case "open":
                 let params = (try? JSONSerialization.data(withJSONObject: body["params"] ?? [:])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-                // `app` is another app's screen, as a notification's link opens.
-                let app = body["app"] as? String ?? route.app
+                let app = (body["app"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? route.app
                 view.store.path.append(.screen(ScreenRoute(app: app, screen: body["screen"] as? String ?? "main", params: params, scope: route.scope)))
                 return (nil, nil)
+            case "save", "preview":
+                do {
+                    let file = try await ScreenFile.from(body["file"], node: view.store.node)
+                    #if os(iOS)
+                    if body["type"] as? String == "save" { try ShellFiles.save(file, from: host) } else { try ShellFiles.preview(file, from: host) }
+                    #else
+                    if body["type"] as? String == "save" { try await ShellFiles.save(file, from: host) } else { try ShellFiles.preview(file, from: host) }
+                    #endif
+                    return (nil, nil)
+                } catch {
+                    return (nil, error.localizedDescription)
+                }
+            case "scan":
+                do {
+                    return (try await ShellFiles.scan(from: host).map(\.json), nil)
+                } catch {
+                    return (nil, error.localizedDescription)
+                }
             case "title":
                 view.title = body["text"] as? String
                 return (nil, nil)
@@ -222,21 +272,93 @@ private struct ScreenWebView: Representable {
         }
 
         func webView(_ web: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-            // Links leave for the browser; the page itself stays put.
-            guard action.navigationType == .linkActivated, let url = action.request.url else { return .allow }
+            // `<a download>`, and a blob or data URL, save the file; once the screen has loaded, anything else that
+            // would take it away (a link, `location.href`) leaves for the browser, Mail or Phone, and the screen stays.
+            if action.shouldPerformDownload { return .download }
+            guard shown, action.targetFrame?.isMainFrame != false, let url = action.request.url, url != web.url else { return .allow }
+            switch url.scheme ?? "" {
+            case "about", "javascript": return .allow
+            case "blob", "data": return .download
+            default:
+                Self.openOutside(url)
+                return .cancel
+            }
+        }
+
+        /// Whether the screen has loaded, after which it never navigates away.
+        private var shown = false
+
+        func webView(_ web: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+            response.canShowMIMEType ? .allow : .download
+        }
+
+        /// `window.open` and `target="_blank"`: a web address in the browser; nothing opens inside the screen.
+        func webView(_ web: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction,
+                     windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if let url = action.request.url {
+                if ["blob", "data"].contains(url.scheme ?? "") { web.load(action.request) } else { Self.openOutside(url) }
+            }
+            return nil
+        }
+
+        private static func openOutside(_ url: URL) {
             #if os(macOS)
             NSWorkspace.shared.open(url)
             #else
-            await UIApplication.shared.open(url)
+            UIApplication.shared.open(url)
             #endif
-            return .cancel
+        }
+
+        #if os(macOS)
+        /// A file input, on a Mac: the open panel (an iPhone's web view has its own picker).
+        func webView(_ web: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo) async -> [URL]? {
+            let panel = NSOpenPanel()
+            panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+            panel.canChooseDirectories = parameters.allowsDirectories
+            panel.canChooseFiles = true
+            let answer = if let window = web.window { await panel.beginSheetModal(for: window) } else { panel.runModal() }
+            return answer == .OK ? panel.urls : nil
+        }
+        #endif
+
+        // MARK: Downloads: a link to a file, a blob or data URL, saved like `one.save`.
+
+        func webView(_ web: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { download.delegate = self }
+        func webView(_ web: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { download.delegate = self }
+
+        private var downloads: [ObjectIdentifier: URL] = [:]
+
+        func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
+            let dir = FileManager.default.temporaryDirectory.appending(path: "screen-files/\(UUID().uuidString)")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appending(path: suggestedFilename.isEmpty ? "Download" : suggestedFilename)
+            downloads[ObjectIdentifier(download)] = url
+            return url
+        }
+
+        func downloadDidFinish(_ download: WKDownload) {
+            guard let url = downloads.removeValue(forKey: ObjectIdentifier(download)), let data = try? Data(contentsOf: url) else { return }
+            let file = ScreenFile(name: url.lastPathComponent, type: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream", data: data)
+            Task {
+                #if os(iOS)
+                try? ShellFiles.save(file, from: host)
+                #else
+                try? await ShellFiles.save(file, from: host)
+                #endif
+            }
+        }
+
+        func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+            downloads[ObjectIdentifier(download)] = nil
         }
 
         func webView(_ web: WKWebView, didFinish navigation: WKNavigation!) {
+            shown = true
             view.loaded = true
         }
 
         func webViewWebContentProcessDidTerminate(_ web: WKWebView) {
+            shown = false
             load(into: web)
         }
     }
@@ -279,5 +401,30 @@ struct RouteView: View {
             case .appearance: AppearanceView()
             }
         }
+    }
+}
+
+/// The last copy of each screen this device drew, by route, for when the node can't be reached.
+enum ScreenCache {
+    private static var dir: URL {
+        let dir = URL.cachesDirectory.appending(path: "screens")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private static func file(_ route: ScreenRoute) -> URL {
+        let key = [route.app, route.screen, route.params, route.scope ?? ""].joined(separator: "\u{1}")
+        return dir.appending(path: "\(steadyHash(key))-\(key.count).html")
+    }
+
+    static func keep(_ html: String, for route: ScreenRoute) {
+        try? Data(html.utf8).write(to: file(route), options: .atomic)
+    }
+
+    static func last(for route: ScreenRoute) -> (html: String, time: Date)? {
+        let url = file(route)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let time = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .now
+        return (String(decoding: data, as: UTF8.self), time)
     }
 }

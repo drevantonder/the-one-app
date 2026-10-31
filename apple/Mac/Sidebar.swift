@@ -56,6 +56,7 @@ struct Sidebar: View {
                         } icon: {
                             AppTile(symbol: symbol(app.icon), seed: app.name, size: 20)
                         }
+                        .badge(store.appBadge(app.name, on: page) ?? 0)
                         .tag(store.open(app, from: page))
                     }
                 } header: {

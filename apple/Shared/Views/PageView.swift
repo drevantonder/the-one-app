@@ -291,7 +291,7 @@ private struct IconGrid: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: iconSize + 18, maximum: iconSize + 34), spacing: 10, alignment: .top)],
                   alignment: .leading, spacing: 20) {
             ForEach(apps) { app in
-                IconButton(title: app.label) { open(store.open(app, from: page)) } icon: {
+                IconButton(title: app.label, badge: store.appBadge(app.name, on: page) ?? 0) { open(store.open(app, from: page)) } icon: {
                     AppTile(symbol: symbol(app.icon), seed: app.name, size: iconSize)
                 }
                     .contextMenu {
@@ -335,6 +335,7 @@ struct IconButton<Icon: View>: View {
                                 .frame(minWidth: 22, minHeight: 22)
                                 .background(.red, in: .capsule)
                                 .offset(x: 7, y: -7)
+                                .accessibilityLabel("\(badge) waiting")
                         }
                     }
                 Text(title)

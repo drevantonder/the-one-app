@@ -106,6 +106,8 @@ final class Store {
     private(set) var widgets: [String: [WidgetInfo]] = [:]
     /// How many of this user's notifications in the inbox app are unread.
     private(set) var unread = 0
+    /// Each page's apps' badges, by scope then app.
+    private(set) var badges: [String: [String: Int]] = [:]
     /// The Mac's sidebar selection: the page, screen or view at the bottom of `path`. It's kept, so the app opens
     /// where it was, after an update too.
     var selection: Route? {
@@ -190,6 +192,11 @@ final class Store {
     /// The apps on a page: those installed in its scope that have a screen.
     func apps(on page: Page) -> [AppInfo] {
         apps.filter { $0.hasScreens && $0.scopes.contains(page.scope) }
+    }
+
+    /// The count an app's icon shows on a page, if any.
+    func appBadge(_ app: String, on page: Page) -> Int? {
+        badges[page.scope]?[app].flatMap { $0 > 0 ? $0 : nil }
     }
 
     /// A page's widgets: those of the apps installed in its scope, screen or not, but for those hidden from it.
@@ -444,6 +451,9 @@ final class Store {
         }
         if fresh != widgets { widgets = fresh }
         scheduleRedraw()
+        var counts: [String: [String: Int]] = [:]
+        for page in allPages { counts[page.scope] = (try? await node.badges(scope: page.scope)) ?? [:] }
+        if counts != badges { badges = counts }
     }
 
     /// A route kept from before, if it still leads somewhere.

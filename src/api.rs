@@ -28,6 +28,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/apps", get(apps))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .route("/v1/widgets", get(widgets))
+        .route("/v1/badges", get(badges))
         .route("/v1/create", post(create))
         .route("/v1/pair", post(pair))
         .route("/v1/join", post(join))
@@ -138,6 +139,10 @@ async fn call(State(node): State<Node>, Json(mut req): Json<CallRequest>) -> Rep
 #[derive(Deserialize)]
 struct WidgetsQuery {
     scope: Option<String>,
+}
+
+async fn badges(State(node): State<Node>, Query(q): Query<WidgetsQuery>) -> Reply {
+    Ok(Json(node.badges(local(&node)?, q.scope.as_deref()).await?))
 }
 
 async fn widgets(State(node): State<Node>, Query(q): Query<WidgetsQuery>) -> Reply {
