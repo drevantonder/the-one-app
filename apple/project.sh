@@ -8,6 +8,23 @@ export BRAND_NAME=$(field name) BRAND_CLI=$(field cli) BRAND_PORT=$(field port) 
 # The iPhone app signs with the team of this Mac's Apple Development certificate, unless APPLE_TEAM names one.
 export APPLE_TEAM=${APPLE_TEAM:-$(security find-certificate -c "Apple Development" -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p')}
 
+# Runs a command as a one-shot job in the logged-in session, and prints its output: over SSH the keychain, which
+# codesign needs, is out of reach.
+session() {
+	local job=app.$BRAND_CLI.session.$$ out status plist
+	out=$(mktemp) status=$(mktemp) plist=$(mktemp).plist
+	printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<plist version="1.0"><dict>' \
+		"<key>Label</key><string>$job</string><key>RunAtLoad</key><true/><key>WorkingDirectory</key><string>$PWD</string>" \
+		'<key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string>' \
+		"<string>\"\$0\" \"\$@\" &gt; '$out' 2&gt;&amp;1; echo \$? &gt; '$status'</string>" \
+		"$(printf '<string>%s</string>' "$@")</array></dict></plist>" > "$plist"
+	launchctl bootstrap "gui/$(id -u)" "$plist"
+	until [ -s "$status" ]; do sleep 1; done
+	launchctl bootout "gui/$(id -u)/$job" 2>/dev/null || true
+	cat "$out"
+	return "$(cat "$status")"
+}
+
 icon=$(art icon) menubar=$(art menubar) logo=$(art logo)
 mkdir -p build
 contents() { printf '{"images":[%s],"info":{"author":"xcode","version":1}%s}\n' "$1" "${2:-}"; }

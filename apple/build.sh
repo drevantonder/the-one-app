@@ -36,19 +36,7 @@ PLIST
 # keychain is out of reach, so codesign runs as a one-shot job in the logged-in session instead.
 identity=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)
 sign=(codesign --force --sign "${identity:--}" "$PWD/$app/Contents/MacOS/$BRAND_CLI" "$PWD/$app")
-if ! "${sign[@]}" 2>/dev/null; then
-  job=$BUNDLE_ID.sign status=$(mktemp)
-  plist=$(mktemp).plist
-  printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<plist version="1.0"><dict>' \
-    "<key>Label</key><string>$job</string><key>RunAtLoad</key><true/>" \
-    '<key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string>' \
-    "<string>\"\$0\" \"\$@\"; echo \$? > '$status'</string>" \
-    "$(printf '<string>%s</string>' "${sign[@]}")</array></dict></plist>" > "$plist"
-  launchctl bootstrap "gui/$(id -u)" "$plist"
-  for _ in $(seq 60); do [ -s "$status" ] && break; sleep 1; done
-  launchctl bootout "gui/$(id -u)/$job" 2>/dev/null || true
-  [ "$(cat "$status")" = 0 ] || { echo "couldn't sign the app as $identity"; exit 1; }
-fi
+"${sign[@]}" 2>/dev/null || session "${sign[@]}" || { echo "couldn't sign the app as $identity"; exit 1; }
 
 osascript -e "quit app id \"$BUNDLE_ID\"" 2>/dev/null || true
 sleep 1

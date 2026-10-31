@@ -60,14 +60,14 @@ targets:
     entitlements:
       path: build/Phone.entitlements
       properties:
-        com.apple.security.application-groups: ["group.app.${BRAND_CLI}"]
+        com.apple.security.application-groups: ["group.app.${BRAND_CLI}.phone"]
     info:
       path: build/Phone-Info.plist
       properties:
         CFBundleDisplayName: ${BRAND_NAME}
         BrandAccent: ${BRAND_ACCENT}
         BrandCLI: ${BRAND_CLI}
-        AppGroup: group.app.${BRAND_CLI}
+        AppGroup: group.app.${BRAND_CLI}.phone
         NSCameraUsageDescription: Scan the code another device shows to join its space.
         # <cli>://join?code=…&name=…: joining from a link, without the camera.
         CFBundleURLTypes:
@@ -91,12 +91,12 @@ targets:
     entitlements:
       path: build/Widgets.entitlements
       properties:
-        com.apple.security.application-groups: ["group.app.${BRAND_CLI}"]
+        com.apple.security.application-groups: ["group.app.${BRAND_CLI}.phone"]
     info:
       path: build/Widgets-Info.plist
       properties:
         CFBundleDisplayName: ${BRAND_NAME}
         BrandAccent: ${BRAND_ACCENT}
-        AppGroup: group.app.${BRAND_CLI}
+        AppGroup: group.app.${BRAND_CLI}.phone
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
