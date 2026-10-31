@@ -161,7 +161,7 @@ private struct ScreenWebView: Representable {
             }
         }
 
-        /// The bridge: `{ type: "call" | "open" | "title" | "icon" | "copy" | "haptic", … }`. A page only ever calls its own app.
+        /// The bridge: `{ type: "call" | "open" | "title" | "icon" | "copy" | "haptic", … }`. A page only ever calls its own app; it may open another's screens.
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
             guard let body = message.body as? [String: Any] else { return (nil, "Not a message") }
             let route = view.route
@@ -176,7 +176,9 @@ private struct ScreenWebView: Representable {
                 }
             case "open":
                 let params = (try? JSONSerialization.data(withJSONObject: body["params"] ?? [:])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-                view.store.path.append(.screen(ScreenRoute(app: route.app, screen: body["screen"] as? String ?? "main", params: params, scope: route.scope)))
+                // `app` is another app's screen, as a notification's link opens.
+                let app = body["app"] as? String ?? route.app
+                view.store.path.append(.screen(ScreenRoute(app: app, screen: body["screen"] as? String ?? "main", params: params, scope: route.scope)))
                 return (nil, nil)
             case "title":
                 view.title = body["text"] as? String

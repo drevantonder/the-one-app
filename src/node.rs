@@ -42,6 +42,8 @@ pub const RATE_LIMIT: u32 = 600;
 const STOPPED_FOR: u64 = 15 * 60_000;
 /// How often a server looks for schedules to run.
 const SCHEDULE_TICK: Duration = Duration::from_secs(10);
+/// How long a call's work may carry on after it returns (`ctx.waitUntil`).
+const LATER_LIMIT: Duration = Duration::from_secs(600);
 /// How long a secret request waits for its answer.
 const SECRET_REQUEST_LIFE: u64 = 86_400_000;
 /// How long an app's page says a deploy changed or removed one of its schedules.
@@ -236,6 +238,8 @@ pub struct Inner {
     guard: Mutex<Guard>,
     /// The schedules' slots running here now: `<scope>/<app>/<schedule>/<slot>`.
     running: Mutex<std::collections::HashSet<String>>,
+    /// The calls that returned with work still running (`ctx.waitUntil`), by token: told when it's done.
+    later: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -316,6 +320,7 @@ impl Node {
             woke: Instant::now(),
             guard: Mutex::new(Guard::default()),
             running: Mutex::new(Default::default()),
+            later: Mutex::new(HashMap::new()),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -517,12 +522,16 @@ impl Node {
                 self.sync_native(native.name);
             }
         }
+        let forgotten: Vec<String> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| e.content.data["blob"].as_str().map(str::to_string)).collect();
         let mut apps: Vec<String> = jobs.iter().map(|j| j.app.clone()).collect();
         apps.extend(handled.new.iter().filter(|e| e.content.app != members::APP).map(|e| e.content.app.clone()));
         apps.sort();
         apps.dedup();
         self.0.apps.replay(jobs).await;
         self.emit(Event::Changed { apps });
+        if !forgotten.is_empty() {
+            self.delete_forgotten(forgotten);
+        }
         Ok(())
     }
 
@@ -744,14 +753,22 @@ impl Node {
         }
         let mut ctx = ctx;
         ctx.from = req.from.clone();
-        let _granted = self.grant(&req.app, me, &mut ctx, req.depth);
+        let granted = self.grant(&req.app, me, &mut ctx, req.depth);
         let outcome = self.0.apps.call(&req.app, &req.op, input, &ctx).await?;
-        // Every append is checked before any is written: a call that fails writes nothing. Installs come last, since
-        // installing a built-in app the install doesn't have yet adds it first.
-        let (installs, appends): (Vec<_>, Vec<_>) = outcome.appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
+        self.write_appends(&req.app, outcome.appends, &scopes, me).await?;
+        if outcome.later {
+            self.keep_for_later(granted);
+        }
+        Ok(Reply::Ok(outcome.result))
+    }
+
+    /// Writes a call's appends as its caller. Every one is checked before any is written: a call that fails writes
+    /// nothing. Installs come last, since installing a built-in app the install doesn't have yet adds it first.
+    async fn write_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller) -> Result<()> {
+        let (installs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
         let mut writes = Vec::new();
         for append in appends {
-            writes.push(self.with(|i| check_append(i, &req.app, append, &scopes, me))?);
+            writes.push(self.with(|i| check_append(i, app, append, scopes, me))?);
         }
         for append in installs {
             if let Append::Install { app, scope, installed } = append {
@@ -763,7 +780,21 @@ impl Node {
         for (scope, content) in writes {
             self.append_as(&scope, &me.user, by, content).await?;
         }
-        Ok(Reply::Ok(outcome.result))
+        Ok(())
+    }
+
+    /// Keeps a call's grant after it returned, while the work it left running (`ctx.waitUntil`) goes on: its requests
+    /// still go out as the call's, and it hands in its appends (`POST /appends`) until it says it's done, or for
+    /// `LATER_LIMIT` at most.
+    fn keep_for_later(&self, granted: Granted) {
+        let done = Arc::new(tokio::sync::Notify::new());
+        self.0.later.lock().unwrap().insert(granted.1.clone(), done.clone());
+        let node = self.clone();
+        tokio::spawn(async move {
+            let _ = tokio::time::timeout(LATER_LIMIT, done.notified()).await;
+            node.0.later.lock().unwrap().remove(&granted.1);
+            drop(granted);
+        });
     }
 
     /// Runs a native app or provider here, for this server's local user.
@@ -1495,6 +1526,23 @@ impl Node {
                 let local = grant.caller.key == self.0.id && release::blob_path(&self.0.dir, hash).is_ok_and(|p| p.exists());
                 ensure!(built_in || local || grant.puts.iter().any(|h| h == hash) || self.blob_named_for(hash, &grant.caller.user)?, "no such blob for you");
                 self.blob(hash).await?.into_response()
+            }
+            ("POST", "/appends") => {
+                ensure!(self.0.later.lock().unwrap().contains_key(token), "only work a call left running after it returned hands in appends later");
+                let req: Value = serde_json::from_slice(&body)?;
+                let appends = crate::apps::appends(&grant.app, &req["appends"])?;
+                self.write_appends(&grant.app, appends, &grant.scopes, &grant.caller).await?;
+                ok(json!({}))
+            }
+            ("POST", "/done") => {
+                let req: Value = serde_json::from_slice(&body).unwrap_or_default();
+                if let Some(err) = req["error"].as_str() {
+                    tracing::warn!("{}'s work after a call failed: {err}", grant.app);
+                }
+                if let Some(done) = self.0.later.lock().unwrap().remove(token) {
+                    done.notify_one();
+                }
+                ok(json!({}))
             }
             ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
             ("GET", "/servers") => ok(self.state_for(&grant.caller)["install"]["servers"].take()),
@@ -2363,6 +2411,12 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
             let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
             (scope.clone(), switch_entry(i, &me.user, &scope, &app, &schedule, on)?)
         }
+        Append::Forget { scope, blob } => {
+            let scope = Scope::parse(&scope)?;
+            ensure!(scopes.contains(&scope), "the call didn't name {scope}");
+            ensure!(blob.len() == 64 && blob.bytes().all(|b| b.is_ascii_hexdigit()), "a blob is named by its hash");
+            (scope, members::node("forget", json!({ "blob": blob.to_lowercase() })))
+        }
         Append::Install { .. } => bail!("installs are checked by install_entries"),
     })
 }
@@ -2542,16 +2596,33 @@ impl Node {
         Ok(bytes)
     }
 
-    /// Whether an entry in a scope `holds` says yes to names the blob.
+    /// Whether an entry in a scope `holds` says yes to names the blob, and that scope still needs it: an app's entry's
+    /// blob stops counting once its scope forgets it; a node entry's (a deploy's bundle, a release's binary) never does.
     fn blob_named(&self, hash: &str, holds: impl Fn(&Scope) -> bool) -> Result<bool> {
         self.with(|i| {
             for log in i.r.store.logs()? {
-                if Scope::parse(&log).is_ok_and(|s| holds(&s)) && i.r.store.scope(&log)?.iter().any(|e| e.content.blobs.iter().any(|b| b == hash)) {
+                let forgotten = i.views.get(&log).is_some_and(|(_, s)| s.forgotten.contains(hash));
+                let names = |e: &Entry| e.content.blobs.iter().any(|b| b == hash) && (!forgotten || e.content.app == members::APP);
+                if Scope::parse(&log).is_ok_and(|s| holds(&s)) && i.r.store.scope(&log)?.iter().any(names) {
                     return Ok(true);
                 }
             }
             Ok(false)
         })
+    }
+
+    /// Deletes the blobs here that scopes forgot, once no entry this server holds still needs them.
+    fn delete_forgotten(&self, hashes: Vec<String>) {
+        for hash in hashes {
+            if self.0.built_in.values().any(|b| *b == hash) || self.blob_named(&hash, |_| true).unwrap_or(true) {
+                continue;
+            }
+            if let Ok(path) = release::blob_path(&self.0.dir, &hash) {
+                if std::fs::remove_file(&path).is_ok() {
+                    tracing::info!("deleted blob {} that nothing needs any more", &hash[..12]);
+                }
+            }
+        }
     }
 
     fn blob_named_for(&self, hash: &str, user: &str) -> Result<bool> {

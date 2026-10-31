@@ -90,14 +90,46 @@ export class Store extends DurableObject {
   }
 }
 
+/// Asks the node something for the call with `token`: other apps' and drivers' operations, blobs, the install's apps.
+async function askNode(token, path, init = {}) {
+  const r = await fetchOut(new Request(`http://one.internal/${path}`, { ...init, headers: { "x-one-call": token } }));
+  if (!r.ok) throw new Error(await r.text());
+  return r;
+}
+
+/// After a call returned: waits for the work it left running (ctx.waitUntil), hands the node what that work appended,
+/// and says it's done.
+async function finish(token, later, appends) {
+  let error = null;
+  for (let i = 0; i < later.length; i++) {
+    try {
+      await later[i];
+    } catch (err) {
+      error ||= String(err?.message ?? err);
+      console.warn(`${app.name}: work after a call failed: ${error}`);
+    }
+  }
+  try {
+    if (appends.length) await askNode(token, "appends", { method: "POST", body: JSON.stringify({ appends: appends.splice(0) }) });
+  } catch (err) {
+    error ||= String(err?.message ?? err);
+  }
+  await askNode(token, "done", { method: "POST", body: JSON.stringify({ error }) }).catch(() => {});
+}
+
 /// What a call, widget or hook gets: the caller, and a handle on each scope the node lets it reach.
-function context(env, body, appends) {
+function context(env, body, appends, later) {
   const handle = (s) => ({
     id: s.id, name: s.name, role: s.role,
     query: (q, params = []) => env.STORES.get(env.STORES.idFromName(s.id)).query(s.id, q, params),
     append: (kind, data, blobs = []) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ scope: s.id, kind, data: data ?? null, blobs });
+    },
+    /// Says this scope no longer needs a blob its entries named: once no scope does, servers delete it.
+    forget: (hash) => {
+      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+      appends.push({ forget: String(hash), scope: s.id });
     },
     /// Sets one of this app's secrets in this scope (null deletes it): never read back, only sent to `hosts`.
     secret: (name, value, hosts = []) => {
@@ -107,11 +139,7 @@ function context(env, body, appends) {
   });
   const scopes = body.scopes.map(handle);
   // What the node does for a call: other apps' and drivers' operations, blobs, the install's apps.
-  const ask = async (path, init = {}) => {
-    const r = await fetchOut(new Request(`http://one.internal/${path}`, { ...init, headers: { "x-one-call": body.token } }));
-    if (!r.ok) throw new Error(await r.text());
-    return r;
-  };
+  const ask = (path, init) => askNode(body.token, path, init);
   // `ctx.apps.<name>.<op>(input, { server })`, for exactly the apps (or drivers) the app says it uses; `server` (a
   // name) runs it there, like a driver on the machine that has what it needs.
   const used = (kind) => new Proxy({}, {
@@ -131,6 +159,12 @@ function context(env, body, appends) {
     me: body.me,
     /// The app whose ctx.apps made this call, if one did.
     from: body.from ?? null,
+    /// Keeps work going after the call returns (an AI read, a copy to Drive), up to 10 minutes: its requests and
+    /// calls still go out as this call's, and what it appends is written when it's done.
+    waitUntil: (promise) => {
+      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+      later.push(Promise.resolve(promise));
+    },
     now: () => body.now,
     user: scopes.find((s) => s.id.startsWith("user:")) || null,
     global: find("global"),
@@ -160,7 +194,7 @@ function context(env, body, appends) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, execution) {
     const url = new URL(req.url);
     const what = url.pathname.split("/").pop();
     if (what === "describe") return json({ ok: describe() });
@@ -179,7 +213,8 @@ export default {
         return json({ ok: null });
       }
       const appends = [];
-      const ctx = context(env, body, appends);
+      const later = [];
+      const ctx = context(env, body, appends, later);
       let run;
       if (what === "call") {
         const op = app.ops?.[body.op];
@@ -195,7 +230,10 @@ export default {
         throw new Error(`no such request ${what}`);
       }
       const result = await calls.run(body.token, run);
-      return json({ ok: result, appends: what === "call" ? appends : [] });
+      const keep = what === "call" && later.length > 0;
+      const reply = json({ ok: result, appends: what === "call" ? appends.splice(0) : [], later: keep });
+      if (keep) execution.waitUntil(calls.run(body.token, () => finish(body.token, later, appends)));
+      return reply;
     } catch (err) {
       return json({ error: String(err?.message ?? err) }, 400);
     }

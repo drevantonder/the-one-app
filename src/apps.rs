@@ -91,6 +91,8 @@ pub enum Append {
     Install { app: String, scope: String, installed: bool },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     Switch { app: String, schedule: String, scope: String, on: bool },
+    /// Says a scope no longer needs a blob its entries named: once no scope does, servers delete it.
+    Forget { scope: String, blob: String },
     /// Sets (or with no value, deletes) one of the calling app's secrets in a scope.
     Secret { scope: String, name: String, value: Option<String>, hosts: Vec<String> },
 }
@@ -98,6 +100,40 @@ pub enum Append {
 pub struct Outcome {
     pub result: Value,
     pub appends: Vec<Append>,
+    /// Whether the call left work running after it returned (`ctx.waitUntil`), which hands its appends in later.
+    pub later: bool,
+}
+
+/// A call's appends, as the shim gives them.
+pub fn appends(app: &str, list: &Value) -> Result<Vec<Append>> {
+    let mut appends = Vec::new();
+    for a in list.as_array().into_iter().flatten() {
+        let scope = a["scope"].as_str().unwrap_or("").to_string();
+        if let Some(name) = a["secret"].as_str() {
+            let hosts = a["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
+            let value = a["value"].as_str().map(str::to_string);
+            ensure!(value.is_some() || a["value"].is_null(), "a secret's value is text");
+            appends.push(Append::Secret { scope, name: name.into(), value, hosts });
+            continue;
+        }
+        if let Some(schedule) = a["switch"].as_str() {
+            appends.push(Append::Switch { app: a["app"].as_str().unwrap_or("").into(), schedule: schedule.into(), scope, on: a["on"] != false });
+            continue;
+        }
+        if let Some(blob) = a["forget"].as_str() {
+            appends.push(Append::Forget { scope, blob: blob.into() });
+            continue;
+        }
+        match a["install"].as_str() {
+            Some(name) => appends.push(Append::Install { app: name.into(), scope, installed: a["installed"] != false }),
+            None => {
+                let blobs = a["blobs"].as_array().into_iter().flatten().filter_map(|b| b.as_str().map(str::to_string)).collect();
+                let content = Content { app: app.into(), kind: a["kind"].as_str().unwrap_or("").into(), data: a["data"].clone(), blobs };
+                appends.push(Append::Entry { scope, content });
+            }
+        }
+    }
+    Ok(appends)
 }
 
 /// One app's store of one scope: its new entries, or all of them into an empty store.
@@ -256,30 +292,7 @@ impl Apps {
 
     pub async fn call(&self, app: &str, op: &str, input: Value, ctx: &Context) -> Result<Outcome> {
         let reply = self.ask(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from })).await?;
-        let mut appends = Vec::new();
-        for a in reply["appends"].as_array().into_iter().flatten() {
-            let scope = a["scope"].as_str().unwrap_or("").to_string();
-            if let Some(name) = a["secret"].as_str() {
-                let hosts = a["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
-                let value = a["value"].as_str().map(str::to_string);
-                ensure!(value.is_some() || a["value"].is_null(), "a secret's value is text");
-                appends.push(Append::Secret { scope, name: name.into(), value, hosts });
-                continue;
-            }
-            if let Some(schedule) = a["switch"].as_str() {
-                appends.push(Append::Switch { app: a["app"].as_str().unwrap_or("").into(), schedule: schedule.into(), scope, on: a["on"] != false });
-                continue;
-            }
-            match a["install"].as_str() {
-                Some(name) => appends.push(Append::Install { app: name.into(), scope, installed: a["installed"] != false }),
-                None => {
-                    let blobs = a["blobs"].as_array().into_iter().flatten().filter_map(|b| b.as_str().map(str::to_string)).collect();
-                    let content = Content { app: app.into(), kind: a["kind"].as_str().unwrap_or("").into(), data: a["data"].clone(), blobs };
-                    appends.push(Append::Entry { scope, content });
-                }
-            }
-        }
-        Ok(Outcome { result: reply["ok"].clone(), appends })
+        Ok(Outcome { result: reply["ok"].clone(), appends: appends(app, &reply["appends"])?, later: reply["later"] == true })
     }
 
     pub async fn widget(&self, app: &str, name: &str, ctx: &Context) -> Result<Value> {

@@ -816,3 +816,37 @@ async fn agents_ask_for_secrets_and_never_see_them() {
     a.answer_secret_request(&me, &mine, other, None).await.unwrap();
     assert_eq!(a.secret_requests(&me, None, Some(other)).unwrap()[0]["state"], "declined");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn work_goes_on_after_a_call_returns_and_forgotten_blobs_go() {
+    let (a, _ra) = start("later").await;
+    a.create("Later", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    deploy_module(&a, "reader", r#"export default {
+  name: "reader",
+  schema: { user: "create table reads (text text); create table files (hash text)" },
+  ops: {
+    read: { run: (ctx) => {
+      ctx.waitUntil((async () => { await new Promise((r) => setTimeout(r, 1500)); ctx.user.append("read", { text: "done later" }); })());
+      return "started";
+    } },
+    reads: { run: async (ctx) => (await ctx.user.query("select text from reads")).map((r) => r.text) },
+    keep: { run: async (ctx) => { const hash = await ctx.blob.put(new TextEncoder().encode("a receipt")); ctx.user.append("file", { hash }, [hash]); return hash; } },
+    get: { run: async (ctx, { hash }) => new TextDecoder().decode(await ctx.blob.get(hash)) },
+    forget: { run: (ctx, { hash }) => { ctx.user.forget(hash); return null; } },
+  },
+  on: { read: (db, e) => db.exec("insert into reads values (?)", [e.data.text]) },
+};"#)
+    .await;
+    a.install(&me, "reader", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
+    eventually("reader to run", async || a.call(call("reader", "reads", json!({}))).await.is_ok()).await;
+    assert_eq!(a.call(call("reader", "read", json!({}))).await.unwrap(), "started", "the call returns at once");
+    assert_eq!(a.call(call("reader", "reads", json!({}))).await.unwrap(), json!([]), "the work isn't done yet");
+    eventually("the work after the call to write", async || a.call(call("reader", "reads", json!({}))).await.is_ok_and(|r| r == json!(["done later"]))).await;
+
+    let hash = a.call(call("reader", "keep", json!({}))).await.unwrap().as_str().unwrap().to_string();
+    assert_eq!(a.call(call("reader", "get", json!({ "hash": hash }))).await.unwrap(), "a receipt");
+    a.call(call("reader", "forget", json!({ "hash": hash }))).await.unwrap();
+    assert!(a.call(call("reader", "get", json!({ "hash": hash }))).await.is_err(), "a forgotten blob is gone");
+    assert!(a.blob(&hash).await.is_err(), "deleted from disk");
+}

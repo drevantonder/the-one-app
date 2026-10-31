@@ -117,7 +117,7 @@ pub struct Members {
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
-const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request"];
+const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "forget"];
 
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
@@ -512,6 +512,8 @@ pub struct ScopeState {
     pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
     /// Agents' requests for a person to set a secret here, by id.
     pub requests: BTreeMap<String, SecretRequest>,
+    /// The blobs this scope's apps said they no longer need, though their entries name them.
+    pub forgotten: BTreeSet<String>,
     /// (opener, server, time)
     /// Who opened this user's data, on which server, when, and through which agent.
     pub opens: Vec<(String, Key, u64, Option<String>)>,
@@ -655,6 +657,10 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
                     state.secrets.insert((app, name), Secret { hosts, value: value.to_string(), user: w.to_string(), time: e.time() });
                 }
             }
+        }
+        "forget" => {
+            let blob = e.content.data["blob"].as_str().filter(|b| b.len() == 64 && b.bytes().all(|c| c.is_ascii_hexdigit())).context("no blob")?;
+            state.forgotten.insert(blob.to_string());
         }
         "secret-request" => {
             ensure!(manages_scope(m, w, &scope), "not allowed to set secrets there");
