@@ -9,7 +9,7 @@ const os = (s) => (s.target || "").includes("apple") ? "macOS" : (s.target || ""
 const pct = (sp) => (sp && sp.total ? Math.round((sp.used * 100) / sp.total) : null);
 const last = (xs) => (xs && xs.length ? xs[xs.length - 1] : null);
 /// Bytes as GB: memory counts them in 2^30s, as macOS and Activity Monitor do, disks in 10^9s.
-const size = (b, g = GB) => (b >= 100 * g ? `${Math.round(b / g)} GB` : b >= g ? `${(b / g).toFixed(1)} GB` : `${Math.round(b / (g / 1000))} MB`);
+const size = (b, g = GB) => (b >= 10 * g ? `${Math.round(b / g)} GB` : b >= g ? `${(b / g).toFixed(1)} GB` : `${Math.round(b / (g / 1000))} MB`);
 const mem = (b) => size(b, GiB);
 
 /// A container's memory, out of its limit, or its host's memory if it has none.
@@ -22,14 +22,16 @@ async function devices(ctx) {
   const host = new Map();
   for (const s of servers) for (const c of s.load?.containers || []) if (byName.has(c.name) && c.name !== s.name) host.set(c.name, s.name);
   const device = (s, on) => ({
-    name: s.name, os: os(s), online: !!s.online, here: !!s.here, host: on || null,
+    name: s.name, os: os(s), online: !!s.online, here: !!s.me, host: on || null,
     memory: s.online ? s.load?.memory || null : null, disk: s.online ? s.load?.disk || null : null,
     cpu: s.online ? s.load?.cpu || [] : [], gpu: s.online ? s.load?.gpu || [] : [],
   });
   const out = [];
-  for (const s of servers.filter((s) => !host.has(s.name)).sort((a, b) => b.here - a.here || b.online - a.online || a.name.localeCompare(b.name))) {
+  for (const s of servers.filter((s) => !host.has(s.name)).sort((a, b) => b.me - a.me || b.online - a.online || a.name.localeCompare(b.name))) {
     out.push(device(s));
-    for (const c of (s.online && s.load?.containers) || []) {
+    // Containers that are servers themselves first, then the rest.
+    const guests = [...((s.online && s.load?.containers) || [])].sort((a, b) => (host.get(b.name) === s.name) - (host.get(a.name) === s.name));
+    for (const c of guests) {
       const self = byName.get(c.name);
       out.push(self && host.get(c.name) === s.name ? device(self, s.name) : { name: c.name, kind: c.kind, online: true, host: s.name, memory: share(c.memory, s.load.memory), cpu: [], gpu: [], disk: null });
     }
@@ -100,8 +102,8 @@ export default {
 .dev header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .dev h3 { margin: 0; font-size: 17px; }
 .dev .os { color: var(--muted); font-size: 13px; }
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 18px; margin-top: 12px; }
-.stat .label { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 24px; margin-top: 12px; }
+.stat .label { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .stat .label b { color: var(--text); font-weight: 600; }
 .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .bar i { display: block; height: 100%; border-radius: 3px; }
@@ -117,7 +119,7 @@ export default {
 <div id="list"></div>
 <script>
 const GB = 1e9, GiB = 2 ** 30;
-const size = (b, g = GB) => b >= 100 * g ? Math.round(b / g) + " GB" : b >= g ? (b / g).toFixed(1) + " GB" : Math.round(b / (g / 1000)) + " MB";
+const size = (b, g = GB) => b >= 10 * g ? Math.round(b / g) + " GB" : b >= g ? (b / g).toFixed(1) + " GB" : Math.round(b / (g / 1000)) + " MB";
 const mem = (b) => size(b, GiB);
 const pct = (s) => s && s.total ? Math.round(s.used * 100 / s.total) : null;
 const tone = (p) => p >= 85 ? "#ff3b30" : p >= 70 ? "#ff9500" : "#34c759";
@@ -131,7 +133,7 @@ function spark(xs, color) {
 }
 const stat = (label, value, body) => \`<div class="stat"><div class="label">\${label}<b>\${value}</b></div>\${body}</div>\`;
 function card(d, guests) {
-  const sub = [d.os, d.here ? "this device" : d.host ? "on " + one.esc(d.host) : ""].filter(Boolean).join(" · ");
+  const sub = [d.os, d.host ? "on " + one.esc(d.host) : "", d.here ? "this device" : ""].filter(Boolean).join(" · ");
   let stats = "";
   if (d.online) {
     if (d.memory) stats += stat("Memory", d.memory.total ? mem(d.memory.used) + " of " + mem(d.memory.total) : mem(d.memory.used), bar(d.memory));
