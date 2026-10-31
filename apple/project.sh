@@ -74,7 +74,7 @@ xcodegen generate --quiet
 
 # Push needs the Push Notifications capability on the iPhone app's App ID, which only the team's account holder
 # turns on (developer.apple.com, or Xcode signed in); signing fails without it. So builds leave push out until the
-# brand says `push = true`, or PUSH=1: then the app asks for an APNs token and registers it with the inbox.
+# brand says `push = true`, or PUSH=1: then the app asks for an APNs token and registers it with the brand's `push_driver`.
 if [ "${PUSH:-}" = 1 ] || [ "$(field push)" = true ]; then
 	/usr/libexec/PlistBuddy -c "Add :aps-environment string development" build/Phone.entitlements
 	/usr/libexec/PlistBuddy -c "Add :Push bool true" build/Phone-Info.plist

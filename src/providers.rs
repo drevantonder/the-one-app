@@ -23,6 +23,8 @@ pub struct Call {
     pub op: String,
     pub input: Value,
     pub caller: Me,
+    /// The app whose `ctx.drivers` made the call, if one did: a push says which app sent it.
+    pub from: Option<String>,
 }
 
 struct Provider {
@@ -73,12 +75,12 @@ impl Providers {
 
     /// Hands a call to the provider and waits for its reply: `{ ok, entries? }` or `{ error }`. Each entry is
     /// `{ kind, data, blobs? }`; naming a blob lets the servers that hold the entry fetch it.
-    pub async fn call(&self, app: &str, op: &str, input: Value, caller: Me) -> Result<(Value, Vec<Content>)> {
+    pub async fn call(&self, app: &str, op: &str, input: Value, caller: Me, from: Option<String>) -> Result<(Value, Vec<Content>)> {
         let p = self.get(app).ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         p.replies.lock().unwrap().insert(id, tx);
-        p.calls.send(Call { id, op: op.into(), input, caller }).map_err(|_| anyhow!("{app} stopped"))?;
+        p.calls.send(Call { id, op: op.into(), input, caller, from }).map_err(|_| anyhow!("{app} stopped"))?;
         let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{app} didn't answer"))??;
         if let Some(why) = reply.get("elsewhere") {
             return Err(crate::native::Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());

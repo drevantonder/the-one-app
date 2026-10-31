@@ -68,7 +68,7 @@ struct PagesView: View {
         }
         .onChange(of: store.widgets, initial: true) { Task { await store.saveForHomeScreen() } }
         .onChange(of: scenePhase) {
-            if scenePhase == .active { Task { try? await store.refreshState(); await store.refreshApps(); await store.refreshUnread() } }
+            if scenePhase == .active { Task { try? await store.refreshState(); await store.refreshApps() } }
         }
     }
 

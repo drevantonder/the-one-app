@@ -1,9 +1,12 @@
 // The push provider: sends notifications to phones through Apple's push
-// service (APNs), for every user its server serves, so the inbox app can reach
-// someone who isn't looking. It runs on a server whose owners trust it with
-// the brand's APNs key, a privileged one, and keeps that key in a file only its
+// service (APNs), for every user its server serves, so an app or an agent can
+// reach someone who isn't looking. Phones register their tokens with it; a push
+// goes to the caller's own phones, says which app sent it, and opens that app's
+// screen when tapped. It runs on a server whose owners trust it with the
+// brand's APNs key, a privileged one, and keeps that key in a file only its
 // user can read: AuthKey.p8 beside config.json { team_id, key_id, topic } in
-// its folder. It says whether APNs accepted a push, never whether anyone saw it.
+// its folder, with devices.json, the phones registered. It says whether APNs
+// accepted a push, never whether anyone saw it.
 package main
 
 import (
@@ -24,9 +27,15 @@ import (
 const app = "push"
 
 type call struct {
-	ID    uint64          `json:"id"`
-	Op    string          `json:"op"`
-	Input json.RawMessage `json:"input"`
+	ID     uint64          `json:"id"`
+	Op     string          `json:"op"`
+	Input  json.RawMessage `json:"input"`
+	Caller struct {
+		User string `json:"user"`
+		Name string `json:"user_name"`
+	} `json:"caller"`
+	// The app whose ctx.drivers made the call, as the node says.
+	From string `json:"from"`
 }
 
 func main() {
@@ -60,7 +69,7 @@ func serve(node string, s *sender) {
 				continue
 			}
 			go func() {
-				result, err := s.run(context.Background(), c.Op, c.Input)
+				result, err := s.run(context.Background(), c)
 				reply := map[string]any{"ok": result}
 				if err != nil {
 					reply = map[string]any{"error": err.Error()}
@@ -120,16 +129,30 @@ var describe = map[string]any{
 	"title":        "Push",
 	"icon":         "bell.badge",
 	"serves":       "everyone",
-	"instructions": "Push sends notifications to phones through Apple's push service. Apps reach it through the inbox app (inbox_notify), not directly.",
+	"instructions": "Push sends a notification to your own phones through Apple's push service: push_send with a title and a body. An app pushes with ctx.drivers.push.send, and tapping its push opens its screen. It says whether APNs accepted it, never whether anyone saw it.",
 	"ops": []map[string]any{
-		{"name": "send", "description": "Push a notification to devices: { devices: [{ token, platform, env }], title, body, link }. Says how many APNs accepted, and which tokens it said are gone.",
+		{"name": "send", "description": "Push a notification to your phones: { title, body, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many APNs accepted.",
 			"input": object(map[string]any{
-				"devices": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
 				"title":   map[string]any{"type": "string"},
 				"body":    map[string]any{"type": "string"},
-				"link":    map[string]any{"type": "object"},
+				"app":     map[string]any{"type": "string", "description": "the app it opens, when no app sends it"},
+				"screen":  map[string]any{"type": "string", "description": "the screen it opens"},
+				"params":  map[string]any{"type": "object", "description": "that screen's params"},
 				"badge":   map[string]any{"type": "integer"},
-			}, "devices", "title")},
+				"devices": map[string]any{"type": "array", "items": map[string]any{"type": "object"}, "description": "only these devices, [{ token, platform, env }], not your registered phones"},
+				"link":    map[string]any{"type": "object", "description": "{ app, screen, params }, as app, screen and params"},
+			}, "title")},
+		{"name": "register", "description": "A phone registers for push: its APNs device token (hex), platform ios, env sandbox or production, and a name.",
+			"input": object(map[string]any{
+				"token":    map[string]any{"type": "string"},
+				"platform": map[string]any{"type": "string"},
+				"env":      map[string]any{"type": "string"},
+				"name":     map[string]any{"type": "string"},
+			}, "token")},
+		{"name": "unregister", "description": "A phone stops getting pushes.",
+			"input": object(map[string]any{"token": map[string]any{"type": "string"}}, "token")},
+		{"name": "devices", "reads": true, "description": "Your phones registered for push here.",
+			"input": object(map[string]any{})},
 		{"name": "status", "reads": true, "description": "Whether push is set up here: the APNs team, key id and app it sends for, never the key.",
 			"input": object(map[string]any{})},
 	},

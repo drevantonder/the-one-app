@@ -32,13 +32,12 @@ struct ScreenRoute: Hashable, Codable {
 
 /// The settings page's icons.
 enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
-    case inbox, store, groups, devices, secrets, access, users, backups, requests, appearance
+    case store, groups, devices, secrets, access, users, backups, requests, appearance
 
     var id: Self { self }
 
     var title: String {
         switch self {
-        case .inbox: String(localized: "Inbox")
         case .store: String(localized: "App Store")
         case .groups: String(localized: "Groups")
         case .devices: String(localized: "Devices")
@@ -53,7 +52,6 @@ enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .inbox: "bell.fill"
         case .store: "bag.fill"
         case .groups: "person.3.fill"
         case .devices: "laptopcomputer.and.iphone"
@@ -104,8 +102,6 @@ final class Store {
     private(set) var apps: [AppInfo] = []
     /// Each page's widgets, rendered for its scope.
     private(set) var widgets: [String: [WidgetInfo]] = [:]
-    /// How many of this user's notifications in the inbox app are unread.
-    private(set) var unread = 0
     /// Each page's apps' badges, by scope then app.
     private(set) var badges: [String: [String: Int]] = [:]
     /// The Mac's sidebar selection: the page, screen or view at the bottom of `path`. It's kept, so the app opens
@@ -282,27 +278,22 @@ final class Store {
 
     // MARK: Settings
 
-    /// Icons by role: Users and Backups only for admins, Requests only while something waits, Inbox first wherever
-    /// the brand's inbox app is installed for this user.
+    /// Icons by role: Users and Backups only for admins, Requests first, only while something waits.
     var settings: [Setting] {
         var items: [Setting] = [.store, .groups, .devices, .secrets, .access]
         if isAdmin { items += [.users, .backups] }
         if requests > 0 { items.insert(.requests, at: 0) }
-        if inbox != nil { items.insert(.inbox, at: 0) }
         return items
-    }
-
-    /// The brand's inbox app, if it's installed where this user reads it.
-    var inbox: AppInfo? {
-        guard let name = brand?.inbox, let app = app(name), app.hasScreens, !(app.installed ?? []).isEmpty else { return nil }
-        return app
     }
 
     /// What waits for this user: invites, servers to trust and secrets asked for.
     var requests: Int { invites.count + trustOffers.count + (state?.secretRequests ?? 0) }
 
-    /// The count on Settings' icon: unread notifications and requests.
-    var badge: Int { (inbox == nil ? 0 : unread) + requests }
+    /// The count on Settings' icon: the requests waiting.
+    var badge: Int { requests }
+
+    /// The count on the app's own icon, as iOS adds up a folder's: every app's badge on every page, and the requests.
+    var iconBadge: Int { requests + badges.values.flatMap(\.values).reduce(0) { $0 + max($1, 0) } }
 
     /// Groups that invited this user.
     var invites: [GroupInfo] {
@@ -384,19 +375,7 @@ final class Store {
             let apps = event.apps ?? []
             if apps.isEmpty { try? await refreshState() }
             await refreshApps()
-            if let inbox = brand?.inbox, apps.contains(inbox) { await refreshUnread() }
         }
-    }
-
-    /// Takes in how many notifications are unread.
-    func refreshUnread() async {
-        guard let inbox else {
-            unread = 0
-            return
-        }
-        let reply = try? await node.call(app: inbox.name, op: "unread", input: Data("{}".utf8))
-        struct Unread: Decodable { var unread: Int }
-        if let count = reply.flatMap({ try? JSONDecoder().decode(Unread.self, from: $0) })?.unread, count != unread { unread = count }
     }
 
     /// `<cli>://secret?id=…&scope=…`, which an agent gives a person to set a secret it asked for. Whether it was one.
@@ -423,9 +402,7 @@ final class Store {
         guard install != nil else { return }
         do {
             let apps = try await node.apps()
-            let first = self.apps.isEmpty
             if apps != self.apps { self.apps = apps }
-            if first { await refreshUnread() }
             // A node that just started lists its deployed apps before it can describe them.
             if apps.contains(where: { ($0.deploys ?? 0) > 0 && $0.title == nil }) { throw NodeError("starting") }
         } catch {

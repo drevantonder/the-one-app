@@ -1,8 +1,8 @@
 import SwiftUI
 import UserNotifications
 
-/// The inbox's pushes: the phone registers its APNs token with the brand's inbox app each launch, shows a push that
-/// arrives while it's open, and opens a tapped one's `link` as an app screen.
+/// Apps' pushes: the phone registers its APNs token with the brand's push driver each launch, shows a push that
+/// arrives while it's open, and opens a tapped one's `link`, the screen of the app that sent it.
 @MainActor
 final class PhoneDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var phone: Phone? {
@@ -30,7 +30,7 @@ final class PhoneDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCe
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        // `link` is `{ app, screen, params }`, as the inbox app's notify was given it.
+        // `link` is `{ app, screen, params }`: the app that sent it, and the screen it named.
         guard let link = response.notification.request.content.userInfo["link"] as? [String: Any], let app = link["app"] as? String else { return }
         let params = (link["params"] as? [String: Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         let route = Route.screen(ScreenRoute(app: app, screen: link["screen"] as? String ?? "main", params: params))
@@ -41,12 +41,12 @@ final class PhoneDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCe
 }
 
 extension Phone {
-    /// Asks to notify once the phone is in an install whose inbox it can read, then registers for pushes: each launch,
-    /// since a token can change.
+    /// Asks to notify once the phone is in an install whose brand pushes, then registers for pushes: each launch, since
+    /// a token can change.
     func setUpPush() async {
         // A build has push only once it's on for the brand (apple/project.sh): without the entitlement, no token.
         guard Bundle.main.object(forInfoDictionaryKey: "Push") as? Bool == true else { return }
-        guard Self.nodeURL == nil, store.inbox != nil else { return }
+        guard Self.nodeURL == nil, store.install != nil, store.brand?.push?.isEmpty == false else { return }
         let center = UNUserNotificationCenter.current()
         var status = await center.notificationSettings().authorizationStatus
         if status == .notDetermined {
@@ -57,20 +57,20 @@ extension Phone {
         UIApplication.shared.registerForRemoteNotifications()
     }
 
-    /// Tells the inbox app where to push to: APNs' sandbox for a build signed for development, its production service
-    /// for one from the App Store or TestFlight.
+    /// Tells the push driver where to push this user's notifications: APNs' sandbox for a build signed for development,
+    /// its production service for one from the App Store or TestFlight.
     func register(token: String) async {
-        guard let inbox = store.inbox else { return }
+        guard let push = store.brand?.push, !push.isEmpty else { return }
         let input = ["token": token, "platform": "ios", "env": Self.apnsEnvironment, "name": store.state?.machine.name ?? UIDevice.current.name]
         guard let data = try? JSONSerialization.data(withJSONObject: input) else { return }
         do {
-            _ = try await store.node.call(app: inbox.name, op: "register", input: data)
+            _ = try await store.node.call(app: push, op: "register", input: data)
         } catch {
-            print("push: can't register with \(inbox.name): \(error.localizedDescription)")
+            print("push: can't register with \(push): \(error.localizedDescription)")
         }
     }
 
-    /// The unread count on the app's icon.
+    /// Every app's badge, and the requests, on the app's icon.
     func showBadge(_ count: Int) {
         UNUserNotificationCenter.current().setBadgeCount(count)
     }

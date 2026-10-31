@@ -21,7 +21,7 @@ fn main() {
     let file = std::fs::canonicalize(&path).unwrap();
     let file = file.strip_prefix(std::fs::canonicalize(&manifest).unwrap()).unwrap_or(&file).to_string_lossy().to_string();
     let out = format!("{out}pub const BRAND_FILE: &str = {file:?};\n");
-    let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\npub const STORE: &str = {:?};\npub const INBOX: &str = {:?};\n", optional("release_key"), optional("release_signer"), optional("store"), optional("inbox"));
+    let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\npub const STORE: &str = {:?};\npub const PUSH: &str = {:?};\n", optional("release_key"), optional("release_signer"), optional("store"), optional("push_driver"));
     // Every app in this repo's apps/ folder ships built in: each folder's files. The brand's `apps` are the ones a new
     // install deploys and installs in `global`; they must be among them.
     let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("apps");

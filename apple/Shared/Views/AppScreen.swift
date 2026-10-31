@@ -383,8 +383,6 @@ struct RouteView: View {
             GroupView(id: id)
         case .setting(let setting):
             switch setting {
-            case .inbox:
-                if let app = store.inbox { AppScreen(route: ScreenRoute(app: app.name)).id(app.name) }
             case .store:
                 // The brand's store app, once it exists; until then, a list of every app.
                 if let name = store.brand?.store, let app = store.app(name), app.hasScreens {

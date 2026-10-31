@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -17,6 +18,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,18 +45,56 @@ type device struct {
 	Token    string `json:"token"`
 	Platform string `json:"platform"`
 	Env      string `json:"env"`
+	// Whose phone it is, and what it's called, once registered here.
+	User string `json:"user,omitempty"`
+	Name string `json:"name,omitempty"`
+	Time int64  `json:"time,omitempty"`
 }
 
 type sendInput struct {
 	Devices []device       `json:"devices"`
 	Title   string         `json:"title"`
 	Body    string         `json:"body"`
+	App     string         `json:"app"`
+	Screen  string         `json:"screen"`
+	Params  map[string]any `json:"params"`
 	Link    map[string]any `json:"link"`
 	Badge   *int           `json:"badge"`
 }
 
-func (s *sender) run(ctx context.Context, op string, input json.RawMessage) (any, error) {
-	switch op {
+var hexToken = regexp.MustCompile(`^[0-9a-f]{16,200}$`)
+
+func (s *sender) run(ctx context.Context, c *call) (any, error) {
+	input := c.Input
+	switch c.Op {
+	case "register":
+		var d device
+		if err := json.Unmarshal(input, &d); err != nil {
+			return nil, err
+		}
+		d.Token = strings.ToLower(d.Token)
+		if !hexToken.MatchString(d.Token) {
+			return nil, errors.New("a device token is hex")
+		}
+		d.User, d.Time = c.Caller.User, time.Now().UnixMilli()
+		d.Platform, d.Env, d.Name = cmp.Or(d.Platform, "ios"), cmp.Or(d.Env, "production"), cmp.Or(d.Name, c.Caller.Name)
+		return "Registered for push.", s.change(func(all map[string]device) { all[d.Token] = d })
+	case "unregister":
+		var d device
+		if err := json.Unmarshal(input, &d); err != nil {
+			return nil, err
+		}
+		return "Unregistered.", s.change(func(all map[string]device) {
+			if all[strings.ToLower(d.Token)].User == c.Caller.User {
+				delete(all, strings.ToLower(d.Token))
+			}
+		})
+	case "devices":
+		mine := []map[string]any{}
+		for _, d := range s.mine(c.Caller.User) {
+			mine = append(mine, map[string]any{"token": d.Token[:8] + "…", "platform": d.Platform, "env": d.Env, "name": d.Name, "time": d.Time})
+		}
+		return mine, nil
 	case "status":
 		c, _, err := s.load()
 		if err != nil {
@@ -65,9 +106,86 @@ func (s *sender) run(ctx context.Context, op string, input json.RawMessage) (any
 		if err := json.Unmarshal(input, &in); err != nil {
 			return nil, err
 		}
-		return s.send(ctx, in)
+		if in.Title == "" {
+			return nil, errors.New("give it a title")
+		}
+		// Given devices are the old way, from before phones registered here.
+		registered := len(in.Devices) == 0
+		if registered {
+			in.Devices = s.mine(c.Caller.User)
+		}
+		if len(in.Devices) == 0 {
+			return map[string]any{"accepted": 0, "devices": 0, "why": "no phone of yours is registered for push"}, nil
+		}
+		out, err := s.send(ctx, in, link(c.From, in))
+		if err == nil && registered && len(out["gone"].([]string)) > 0 {
+			gone := out["gone"].([]string)
+			err = s.change(func(all map[string]device) {
+				for _, t := range gone {
+					delete(all, t)
+				}
+			})
+		}
+		return out, err
 	}
-	return nil, fmt.Errorf("push has no operation %s", op)
+	return nil, fmt.Errorf("push has no operation %s", c.Op)
+}
+
+// link is what a tap opens: the screen of the app that sent the push (as the
+// node says), or else the one the push names.
+func link(from string, in sendInput) map[string]any {
+	app, screen, params := cmp.Or(from, in.App), in.Screen, in.Params
+	if in.Link != nil {
+		l, _ := in.Link["app"].(string)
+		sc, _ := in.Link["screen"].(string)
+		p, _ := in.Link["params"].(map[string]any)
+		app, screen = cmp.Or(app, l), cmp.Or(screen, sc)
+		if params == nil {
+			params = p
+		}
+	}
+	if app == "" {
+		return nil
+	}
+	if params == nil {
+		params = map[string]any{}
+	}
+	return map[string]any{"app": app, "screen": cmp.Or(screen, "main"), "params": params}
+}
+
+// mine is a user's registered phones.
+func (s *sender) mine(user string) []device {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []device
+	for _, d := range s.devices() {
+		if d.User == user {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// change changes the registered phones and keeps them in devices.json.
+func (s *sender) change(f func(map[string]device)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	all := s.devices()
+	f(all)
+	b, _ := json.MarshalIndent(all, "", "  ")
+	tmp := filepath.Join(s.dir, "devices.json.new")
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(s.dir, "devices.json"))
+}
+
+// devices reads devices.json; s.mu is held.
+func (s *sender) devices() map[string]device {
+	all := map[string]device{}
+	b, _ := os.ReadFile(filepath.Join(s.dir, "devices.json"))
+	_ = json.Unmarshal(b, &all)
+	return all
 }
 
 // load reads the config and the APNs key.
@@ -129,7 +247,7 @@ func pad(n *big.Int) []byte {
 
 // send pushes to each iPhone or iPad, and says how many APNs accepted and
 // which tokens it said no longer work (the app was deleted, say).
-func (s *sender) send(ctx context.Context, in sendInput) (any, error) {
+func (s *sender) send(ctx context.Context, in sendInput, link map[string]any) (map[string]any, error) {
 	c, key, err := s.load()
 	if err != nil {
 		return nil, err
@@ -142,7 +260,7 @@ func (s *sender) send(ctx context.Context, in sendInput) (any, error) {
 	if in.Badge != nil {
 		aps["badge"] = *in.Badge
 	}
-	payload, _ := json.Marshal(map[string]any{"aps": aps, "link": in.Link})
+	payload, _ := json.Marshal(map[string]any{"aps": aps, "link": link})
 	accepted, gone, why := 0, []string{}, ""
 	for _, d := range in.Devices {
 		if d.Platform != "" && d.Platform != "ios" {
@@ -175,7 +293,7 @@ func (s *sender) send(ctx context.Context, in sendInput) (any, error) {
 			why = fmt.Sprintf("APNs said %d %s", resp.StatusCode, reason.Reason)
 		}
 	}
-	out := map[string]any{"accepted": accepted, "gone": gone}
+	out := map[string]any{"accepted": accepted, "devices": len(in.Devices), "gone": gone}
 	if why != "" {
 		out["why"] = why
 	}

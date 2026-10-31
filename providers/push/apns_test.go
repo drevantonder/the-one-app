@@ -50,3 +50,41 @@ func TestTokenIsSignedWithTheKey(t *testing.T) {
 		t.Fatal("a token is kept, not made for every push")
 	}
 }
+
+func TestPushesGoToTheCallersPhonesAndOpenTheSendingApp(t *testing.T) {
+	s := &sender{dir: t.TempDir()}
+	as := func(user, op, input, from string) (any, error) {
+		c := &call{Op: op, Input: json.RawMessage(input), From: from}
+		c.Caller.User = user
+		return s.run(t.Context(), c)
+	}
+	if _, err := as("ann", "register", `{"token":"not hex"}`, ""); err == nil {
+		t.Fatal("a token that isn't hex is refused")
+	}
+	if _, err := as("ann", "register", `{"token":"AB12CD34EF56AB12CD34","env":"sandbox"}`, ""); err != nil {
+		t.Fatal(err)
+	}
+	if mine := s.mine("ann"); len(mine) != 1 || mine[0].Token != "ab12cd34ef56ab12cd34" || mine[0].Env != "sandbox" {
+		t.Fatalf("ann's phones: %v", mine)
+	}
+	out, err := as("bob", "send", `{"title":"Hi"}`, "gmail")
+	if err != nil || out.(map[string]any)["devices"] != 0 {
+		t.Fatalf("bob has no phone: %v %v", out, err)
+	}
+	if _, err := as("ann", "send", `{"title":"Hi"}`, "gmail"); err == nil || !strings.Contains(err.Error(), "isn't set up") {
+		t.Fatalf("ann's phone, without a key here: %v", err)
+	}
+	if _, err := as("bob", "unregister", `{"token":"ab12cd34ef56ab12cd34"}`, ""); err != nil || len(s.mine("ann")) != 1 {
+		t.Fatal("only its owner unregisters a phone")
+	}
+	got := link("gmail", sendInput{App: "other", Screen: "thread", Params: map[string]any{"id": "1"}})
+	if got["app"] != "gmail" || got["screen"] != "thread" {
+		t.Fatalf("the sending app is the one it opens: %v", got)
+	}
+	if got := link("", sendInput{Link: map[string]any{"app": "repos"}}); got["app"] != "repos" || got["screen"] != "main" {
+		t.Fatalf("an old link still opens: %v", got)
+	}
+	if link("", sendInput{}) != nil {
+		t.Fatal("an agent's push opens nothing")
+	}
+}

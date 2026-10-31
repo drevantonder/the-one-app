@@ -8,10 +8,10 @@ repo = "drevantonder/the-one-app"
 release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFjnuPCkEUMe1/HXHZhMXoC1F+j+N6aVeumYmaLG7MnZ"
 release_signer = "ssh mac \"op read 'op://van-tonder-nosudo/The PTC App release key/private key?ssh-format=openssh'\""
 # The apps a new install deploys and installs in global.
-apps = ["../apps/board", "../apps/repos", "../apps/apps", "../apps/devices", "../apps/inbox"]
+apps = ["../apps/board", "../apps/repos", "../apps/apps", "../apps/devices"]
 store = "apps"
-# The app the node tells people through (an app stopped for looping, say): an ordinary app with a `notify` op.
-inbox = "inbox"
+# The driver phones register their push tokens with, which apps push through (providers/push).
+push_driver = "push"
 made_here = "Made at PTC"
 # PTC has one install: the shells sign people in to it with their PTC Google account at this address, the
 # workjoin driver's on ptc (providers/workjoin), instead of offering to start one. `account` names the account.

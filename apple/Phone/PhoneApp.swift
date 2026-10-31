@@ -27,8 +27,8 @@ struct PhoneApp: App {
                     await phone.start()
                 }
                 .onOpenURL { phone.open($0) }
-                .onChange(of: phone.store.inbox?.name, initial: true) { Task { await phone.setUpPush() } }
-                .onChange(of: phone.store.unread) { phone.showBadge(phone.store.unread) }
+                .onChange(of: phone.store.brand?.push, initial: true) { Task { await phone.setUpPush() } }
+                .onChange(of: phone.store.iconBadge) { phone.showBadge(phone.store.iconBadge) }
         }
     }
 }

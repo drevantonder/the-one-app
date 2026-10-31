@@ -6,8 +6,8 @@ struct Brand: Codable, Sendable, Equatable {
     var accent: String
     /// The app the App Store opens, if the brand names one.
     var store: String?
-    /// The app notifications go to, if the brand names one.
-    var inbox: String?
+    /// The driver phones register their push tokens with, if the brand names one.
+    var push: String?
 }
 
 /// `GET /v1/state` (SPEC.md "Local API"): this machine, its user and the install.

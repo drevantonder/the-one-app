@@ -96,6 +96,11 @@ export default {
   description: "Every app you can add, and its code",
   instructions: "The App Store lists every app in this install, where each is installed and its code. apps_add installs one for you, a group you're an admin of, or everyone (admins).",
 
+  // The apps whose schedule, where you may switch it, failed its last run.
+  async badge(ctx) {
+    return (await ctx.catalog()).filter((a) => (a.schedules || []).some((s) => s.on && s.may_switch && s.last && !s.last.ok)).length;
+  },
+
   ops: {
     list: {
       reads: true,

@@ -92,7 +92,7 @@ struct Sidebar: View {
     }
 }
 
-/// The cog, kept at the sidebar's foot as a row of its own, counting unread notifications and waiting requests.
+/// The cog, kept at the sidebar's foot as a row of its own, counting waiting requests.
 private struct SettingsRow: View {
     @Environment(Store.self) private var store
     var folded = false

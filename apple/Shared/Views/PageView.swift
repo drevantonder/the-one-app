@@ -392,10 +392,9 @@ struct SettingsPage: View {
                 PageHeader(title: String(localized: "Settings"), subtitle: store.install?.name ?? "")
                 #endif
                 Profile()
-                if store.inbox != nil || store.requests > 0 {
+                if store.requests > 0 {
                     SettingsSection {
-                        if store.inbox != nil { row(.inbox, value: store.unread > 0 ? "\(store.unread)" : "", badge: store.unread > 0) }
-                        if store.requests > 0 { row(.requests, value: "\(store.requests)", badge: true) }
+                        row(.requests, value: "\(store.requests)", badge: true)
                     }
                 }
                 SettingsSection {
@@ -631,7 +630,6 @@ extension Setting {
     /// Its icon's colour, as Settings colours its own.
     var color: Color {
         switch self {
-        case .inbox: .red
         case .store: .blue
         case .groups: .green
         case .devices: .gray

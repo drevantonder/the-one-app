@@ -17,7 +17,7 @@
     history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 4v4.5H8M12 7.5V12l3 2"/>',
     branch: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9v1a4 4 0 0 1-4 4h-4a4 4 0 0 0-4 4"/>',
     commit: '<circle cx="12" cy="12" r="3.5"/><path d="M3 12h5.5M15.5 12H21"/>',
-    inbox: '<path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/>',
+    tray: '<path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/>',
     chevron: '<path d="M9 6l6 6-6 6"/>',
     down: '<path d="M6 9l6 6 6-6"/>',
     question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/>',
@@ -35,7 +35,7 @@
 
   // An empty list: an icon, a title, a line of text and a button, each but the title optional. `action.onclick` is
   // the button's script.
-  one.empty = ({ icon = "inbox", title, text, action } = {}) =>
+  one.empty = ({ icon = "tray", title, text, action } = {}) =>
     `<div class="empty-state"><div class="empty-icon">${one.icon(icon)}</div><div class="empty-title">${esc(title)}</div>` +
     (text ? `<div class="empty-text">${text}</div>` : "") +
     (action ? `<button class="button" onclick="${esc(action.onclick)}">${esc(action.label)}</button>` : "") +

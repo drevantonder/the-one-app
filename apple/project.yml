@@ -69,7 +69,7 @@ targets:
       path: build/Phone.entitlements
       properties:
         com.apple.security.application-groups: ["group.app.${BRAND_CLI}.phone"]
-        # aps-environment, for the inbox's pushes, is added by project.sh only once push is on (see there).
+        # aps-environment, for apps' pushes, is added by project.sh only once push is on (see there).
     info:
       path: build/Phone-Info.plist
       properties:
