@@ -21,7 +21,7 @@
     if (message.type === "open") {
       const q = new URLSearchParams({ params: JSON.stringify(message.params || {}) });
       if (ctx.scope) q.set("scope", ctx.scope);
-      location.href = `/v1/screens/${ctx.app}/${message.screen}?${q}`;
+      location.href = `/v1/screens/${message.app || ctx.app}/${message.screen}?${q}`;
     }
     if (message.type === "title") document.title = message.text;
     if (message.type === "copy") return navigator.clipboard.writeText(message.text);
@@ -41,7 +41,8 @@
     // The page the shell opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
     scope: ctx.scope ?? null,
     call: (op, input = {}) => host({ type: "call", app: ctx.app, op, input }),
-    open: (screen, params = {}) => host({ type: "open", screen, params }),
+    // Opens one of this app's screens; or with `app`, another app's (a notification's link, say).
+    open: (screen, params = {}, app) => host({ type: "open", screen, params, ...(app && app !== ctx.app ? { app } : {}) }),
     title: (text) => host({ type: "title", text }),
     // Copies text: through the shell (which a page's clipboard can't always reach), else the browser's clipboard.
     async copy(text) {

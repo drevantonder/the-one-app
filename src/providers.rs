@@ -60,6 +60,12 @@ impl Providers {
         self.get(app).is_some()
     }
 
+    /// Whether a provider serves every user its server serves (`serves: "everyone"` in its description), not only
+    /// its server's local user: a push sender on a privileged server, say.
+    pub fn serves_everyone(&self, app: &str) -> bool {
+        self.get(app).is_some_and(|p| p.describe["serves"] == "everyone")
+    }
+
     pub fn describe(&self) -> Vec<Value> {
         let names: Vec<String> = self.by_app.lock().unwrap().keys().cloned().collect();
         names.iter().filter_map(|n| self.get(n)).map(|p| p.describe.clone()).collect()

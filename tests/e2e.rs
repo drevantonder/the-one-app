@@ -740,3 +740,49 @@ async fn loop_guards_cap_depth_and_stop_a_looping_app() {
     deploy_module(&a, "loopy", r#"export default { name: "loopy", uses: { apps: ["pong"] }, ops: { from: { run: (ctx) => ctx.apps.pong.ping({}) } } };"#).await;
     eventually("loopy to run again", async || a.call(call("loopy", "from", json!({}))).await.is_ok()).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_inbox_notifies_people_and_pushes_through_a_driver() {
+    let (a, _ra) = start("inbox").await;
+    a.create("Inbox", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    deploy_module(&a, "inbox", include_str!("../apps/inbox/app.js")).await;
+    a.install(&me, "inbox", &one::entry::Scope::Global, true).await.unwrap();
+    deploy_module(&a, "reminders", r#"export default { name: "reminders", uses: { apps: ["inbox"] }, ops: { nudge: { run: (ctx) => ctx.apps.inbox.notify({ title: "Pay the rent", link: { app: "reminders", screen: "main" } }) } } };"#).await;
+    a.install(&me, "reminders", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
+    eventually("the inbox to run", async || a.call(call("inbox", "unread", json!({}))).await.is_ok()).await;
+
+    let sent = a.call(call("inbox", "notify", json!({ "title": "Hello", "body": "from the CLI" }))).await.unwrap();
+    assert_eq!(sent["delivery"], "no_device", "{sent}");
+    eventually("reminders to run", async || a.call(call("reminders", "nudge", json!({}))).await.is_ok()).await;
+    let listed = a.call(call("inbox", "list", json!({}))).await.unwrap();
+    assert_eq!(listed["unread"], 2, "{listed}");
+    assert_eq!(listed["items"][0]["title"], "Pay the rent");
+    assert_eq!(listed["items"][0]["app"], "reminders", "it says which app sent it");
+    assert_eq!(listed["items"][0]["link"]["app"], "reminders");
+
+    // A phone registers; a push driver on this server, serving everyone, takes the push.
+    a.call(call("inbox", "register", json!({ "token": "ab12cd34ef56ab12cd34ef56", "env": "sandbox" }))).await.unwrap();
+    let no_driver = a.call(call("inbox", "notify", json!({ "title": "Nobody to push" }))).await.unwrap();
+    assert_eq!(no_driver["delivery"], "no_device", "{no_driver}");
+    a.provide("push", json!({ "title": "Push", "serves": "everyone", "ops": [{ "name": "send" }] })).await.unwrap();
+    let driver = a.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Ok(Some(c)) = driver.providers().next("push").await {
+                let n = c.input["devices"].as_array().map(|d| d.len()).unwrap_or(0);
+                driver.providers().reply("push", c.id, json!({ "ok": { "accepted": n, "gone": [] } })).unwrap();
+            }
+        }
+    });
+    let pushed = a.call(call("inbox", "notify", json!({ "title": "Pushed" }))).await.unwrap();
+    assert_eq!(pushed["delivery"], "accepted", "{pushed}");
+
+    a.call(call("inbox", "read", json!({}))).await.unwrap();
+    assert_eq!(a.call(call("inbox", "unread", json!({}))).await.unwrap()["unread"], 0, "all read");
+    let other = a.call(call("inbox", "notify", json!({ "title": "x", "to": "group:a000000000000009" }))).await.unwrap();
+    assert_eq!(other["to"], "group:a000000000000009", "a group you're not in gets it through global: {other}");
+    assert_eq!(a.call(call("inbox", "unread", json!({}))).await.unwrap()["unread"], 0, "and it isn't yours");
+    let refused = a.call(call("inbox", "notify", json!({ "title": "x", "to": "bob" }))).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("to is me"), "{refused:#}");
+}

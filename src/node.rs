@@ -666,7 +666,7 @@ impl Node {
                 m.servers().map(|s| s.key).filter(|s| m.serves(s, &me.user)).collect()
             } else {
                 let mut s: Vec<Key> = i.sessions.iter().filter(|(_, s)| s.drivers.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
-                if here && me.user == i.user {
+                if here && (me.user == i.user || (self.0.providers.serves_everyone(&req.app) && i.r.members.serves(&self.0.id, &me.user))) {
                     s.push(self.0.id);
                 }
                 s
@@ -766,7 +766,8 @@ impl Node {
 
     /// Runs a native app or provider here, for this server's local user.
     async fn run_driver(&self, app: &str, op: &str, input: Value, me: &Caller) -> Result<Value> {
-        let user = self.user()?;
+        let everyone = self.0.providers.serves_everyone(app) && self.with(|i| Ok(i.r.members.serves(&self.0.id, &me.user)))?;
+        let user = if everyone { me.user.clone() } else { self.user()? };
         ensure!(me.user == user, "{app} runs only for {}'s own user", self.server_name());
         let caller = self.me_for(me)?;
         let native = self.0.native.iter().find(|n| n.name == app);
@@ -904,6 +905,16 @@ impl Node {
         };
         let data = json!({ "app": app, "schedule": schedule.name, "slot": slot, "ok": ok, "error": error, "ms": started.elapsed().as_millis() as u64, "spec": schedule.spec() });
         self.append_as(scope, user, None, members::node("ran", data)).await?;
+        // The third failure in a row, and only the third, tells whom it runs as.
+        let streak = self.with(|i| {
+            let runs = i.views.get(&scope.to_string()).and_then(|(_, s)| s.runs.get(&(app.to_string(), schedule.name.clone())).cloned()).unwrap_or_default();
+            Ok(runs.iter().rev().take_while(|r| !r.ok).count())
+        })?;
+        if streak == 3 {
+            let body = format!("It failed its last 3 runs, most lately with: {}", error.unwrap_or_default());
+            let link = json!({ "app": crate::brand::STORE, "screen": "app", "params": { "app": app } });
+            self.tell(&format!("user:{user}"), &format!("{app}'s {} keeps failing", schedule.description.is_empty().then_some(schedule.name.as_str()).unwrap_or(&schedule.description)), &body, Some(link), app).await;
+        }
         Ok(())
     }
 
@@ -1029,8 +1040,30 @@ impl Node {
         None
     }
 
-    /// Tells an app's owners it was stopped for looping, and records why.
-    async fn stopped_app(&self, _app: &str, _why: &str) {}
+    /// Tells an app's owners it was stopped for looping, through the brand's inbox app, as this server's local user.
+    async fn stopped_app(&self, app: &str, why: &str) {
+        let owner = self.with(|i| Ok(i.r.members.apps.get(app).map(|a| a.owner.to_string()))).ok().flatten();
+        let Some(to) = owner else { return };
+        let link = json!({ "app": crate::brand::STORE, "screen": "app", "params": { "app": app } });
+        self.tell(&to, &format!("{app} was stopped"), why, Some(link), app).await;
+    }
+
+    /// Notifies someone (`user:<id>`, `group:<id>` or `admins`) through the brand's inbox app, as this server's local
+    /// user, in the background; quietly does nothing where there's no inbox. Never about the inbox itself.
+    async fn tell(&self, to: &str, title: &str, body: &str, link: Option<Value>, about: &str) {
+        let inbox = crate::brand::INBOX;
+        if inbox.is_empty() || about == inbox {
+            return;
+        }
+        let input = json!({ "to": to, "title": title, "body": body, "link": link });
+        let req = CallRequest { app: inbox.into(), op: "notify".into(), input, client: Some("node".into()), ..Default::default() };
+        let node = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = node.call(req).await {
+                tracing::info!("couldn't tell anyone through {inbox}: {err:#}");
+            }
+        });
+    }
 
     /// The ports this node serves on this machine: its local API, workerd, and apps' outbound requests.
     pub fn own_ports(&self) -> Vec<u16> {
@@ -1469,7 +1502,7 @@ impl Node {
         });
         let opens = install.as_ref().map(|i| i["opens"].clone()).unwrap_or(json!([]));
         let mut state = json!({
-            "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT, "store": crate::brand::STORE },
+            "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT, "store": crate::brand::STORE, "inbox": crate::brand::INBOX },
             "me": { "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user },
             "server": { "key": hex(&self.0.id), "name": self.server_name(), "ready": ready },
             "user": user,
@@ -1881,7 +1914,12 @@ impl Node {
     /// What this server's hello says: its frontier, and the drivers serving its local user here.
     fn hello(&self, i: &Install) -> Result<Msg> {
         let mut drivers: Vec<Driver> = self.0.native.iter().map(|n| (n.name.to_string(), vec![i.user.clone()], (n.describe)())).collect();
-        drivers.extend(self.0.providers.describe().into_iter().map(|d| (d["name"].as_str().unwrap_or("").to_string(), vec![i.user.clone()], d)));
+        let m = &i.r.members;
+        let everyone: Vec<String> = m.users.keys().filter(|u| m.serves(&self.0.id, u)).cloned().collect();
+        drivers.extend(self.0.providers.describe().into_iter().map(|d| {
+            let users = if d["serves"] == "everyone" { everyone.clone() } else { vec![i.user.clone()] };
+            (d["name"].as_str().unwrap_or("").to_string(), users, d)
+        }));
         i.r.hello(drivers)
     }
 
