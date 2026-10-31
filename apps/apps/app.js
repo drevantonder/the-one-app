@@ -229,7 +229,7 @@ export default {
 const CONNECTED = !!one.params.connected;
 if (CONNECTED) {
   one.title("Connected Apps");
-  document.getElementById("search").insertAdjacentHTML("beforebegin", '<p class="muted small" style="margin:4px 4px 10px">Apps that connect an account, for you and your agents. Add one to a page, then sign in from that page\'s Connected Apps.</p>');
+  document.getElementById("search").insertAdjacentHTML("beforebegin", '<p class="muted small" style="margin:4px 4px 10px">Apps that connect an account, for you and your agents. Add one to a page, then sign in from that page’s Connected Apps.</p>');
 }
 // The sections: the apps built into the release, and those made in this install (each install words that its own way,
 // in its settings).
