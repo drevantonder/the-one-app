@@ -51,9 +51,10 @@ fn signed_by(key: &str, signature: &str) -> bool {
 }
 
 /// The newest release for `target` signed with `key`, and the device that published it. Any member may publish or pass
-/// on a release: only the signature counts. Newer ones without it are ignored, and logged.
+/// on a release: only the signature counts. The newest of any newer ones without it is logged.
 pub fn latest(key: &str, entries: &[Entry], target: &str) -> Option<(Release, Key)> {
     let releases = entries.iter().rev().filter(|e| e.content.app == APP && e.content.kind == "release");
+    let mut logged = false;
     for e in releases {
         let Ok(r) = serde_json::from_value::<Release>(e.content.data.clone()) else { continue };
         if r.target != target {
@@ -62,7 +63,9 @@ pub fn latest(key: &str, entries: &[Entry], target: &str) -> Option<(Release, Ke
         if signed_by(key, &r.signature) {
             return Some((r, e.author()));
         }
-        tracing::warn!("ignoring the release of {} by {}: it isn't signed by this build's release key", r.commit, &crate::entry::hex(&e.author())[..8]);
+        if !std::mem::replace(&mut logged, true) {
+            tracing::warn!("ignoring the release of {} by {}: it isn't signed by this build's release key", r.commit, &crate::entry::hex(&e.author())[..8]);
+        }
     }
     None
 }
