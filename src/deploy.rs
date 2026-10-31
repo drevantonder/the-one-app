@@ -53,6 +53,37 @@ pub fn build(dir: &Path) -> Result<Vec<u8>> {
     crate::bundle::pack(&files)
 }
 
+/// A built-in app's bundle, built from its files as `build` builds a folder, once per version of them: the build is
+/// kept in the cache, by the files' hash.
+pub fn build_files(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+    use sha2::Digest;
+    let mut hash = sha2::Sha256::new();
+    for (path, bytes) in files {
+        hash.update(format!("{path}\0{}\0", bytes.len()));
+        hash.update(bytes);
+    }
+    let kept = crate::cache().join("built-in").join(format!("{}-{}.tar", data_encoding::HEXLOWER.encode(&hash.finalize()), BUN));
+    if let Ok(bundle) = std::fs::read(&kept) {
+        return Ok(bundle);
+    }
+    let dir = tempdir()?;
+    let built = (|| {
+        for (path, bytes) in files {
+            let path = dir.join(path);
+            std::fs::create_dir_all(path.parent().unwrap())?;
+            std::fs::write(path, bytes)?;
+        }
+        build(&dir)
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    let bundle = built?;
+    std::fs::create_dir_all(kept.parent().unwrap())?;
+    let part = kept.with_extension(format!("{}.part", rand::random::<u64>()));
+    std::fs::write(&part, &bundle)?;
+    std::fs::rename(&part, &kept)?;
+    Ok(bundle)
+}
+
 fn tempdir() -> Result<PathBuf> {
     let dir = std::env::temp_dir().join(format!("{}-build-{}", crate::brand::CLI, rand::random::<u64>()));
     std::fs::create_dir_all(&dir)?;

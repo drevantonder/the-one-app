@@ -1971,8 +1971,12 @@ fn secret_entry(i: &Install, user: &str, scope: &Scope, app: &str, name: &str, h
 }
 
 /// A deploy of `app`: the bundle at blob `bundle`.
-/// A built-in app's bundle: its `app.js` as the module, and every file of its folder as its source.
+/// A built-in app's bundle: its `app.js` as the module, and every file of its folder as its source. One with npm
+/// packages (a `package.json`) is built as `<cli> deploy` builds any app.
 fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+    if files.iter().any(|(p, _)| *p == "package.json") {
+        return crate::deploy::build_files(files);
+    }
     let module = files.iter().find(|(p, _)| *p == "app.js").context("a built-in app has no app.js")?.1;
     let mut bundle = vec![("app.js".to_string(), module.to_vec())];
     bundle.extend(files.iter().map(|(p, b)| (format!("src/{p}"), b.to_vec())));
