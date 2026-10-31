@@ -402,9 +402,7 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
     a.call(call("notes", "add", json!({ "text": "for the team", "scope": "a000000000000001" }))).await.unwrap();
     assert_eq!(a.call(call("notes", "list", json!({ "scope": "a000000000000001" }))).await.unwrap(), json!(["for the team"]));
     assert_eq!(a.call(call("notes", "list", json!({}))).await.unwrap(), json!(["first"]));
-    let mut where_ = installed("notes").await.as_array().unwrap().clone();
-    where_.sort_by_key(|v| v.to_string());
-    assert_eq!(json!(where_), json!([team.to_string(), mine.to_string()]));
+    assert_eq!(installed("notes").await, json!([mine.to_string(), team.to_string()]), "yours first, then groups'");
 
     // ctx.install, with the caller's rights: an admin may install for everyone.
     a.call(call("journal", "share", json!({ "scope": "global" }))).await.unwrap();
@@ -521,4 +519,33 @@ async fn repos_clone_push_and_take_suggestions_with_real_git() {
     assert_eq!(r["forks"], json!(["hello-too"]));
     let html = a.screen(one::node::Caller { key: a.id(), user: a.user().unwrap() }, "repos", "repo", json!({ "repo": "hello" }), None).await.unwrap();
     assert!(html.contains("one.call(\"get\""), "repos has screens");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_app_store_lists_adds_and_shows_code() {
+    let (a, _ra) = start("store").await;
+    a.create("Store", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap() };
+    a.member("group", json!({ "group": "b000000000000001", "name": "Team" })).await.unwrap();
+    assert_eq!(a.state()["brand"]["store"], "apps");
+    let listed = a.call(call("apps", "list", json!({}))).await.unwrap();
+    let names: Vec<&str> = listed["apps"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"board") && names.contains(&"repos") && names.contains(&"apps"), "{names:?}");
+    let places: Vec<&str> = listed["places"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
+    assert_eq!(places, ["You", "Team", "Everyone"]);
+
+    a.call(call("apps", "add", json!({ "app": "board", "scope": "group:b000000000000001" }))).await.unwrap();
+    let listed = a.call(call("apps", "list", json!({}))).await.unwrap();
+    let board = listed["apps"].as_array().unwrap().iter().find(|x| x["name"] == "board").unwrap().clone();
+    assert_eq!(board["installed_names"], json!(["Team", "Everyone"]), "{board}");
+    a.call(call("apps", "remove", json!({ "app": "board", "scope": "group:b000000000000001" }))).await.unwrap();
+
+    let code = a.call(call("apps", "code", json!({ "app": "board" }))).await.unwrap();
+    assert!(code["files"].as_array().unwrap().iter().any(|f| f["path"] == "src/app.js"), "{code}");
+    let file = a.call(call("apps", "code", json!({ "app": "board", "path": "src/app.js" }))).await.unwrap();
+    assert!(file["text"].as_str().unwrap().contains("name: \"board\""));
+    for screen in ["main", "app", "file"] {
+        let html = a.screen(me.clone(), "apps", screen, json!({ "app": "board", "path": "src/app.js" }), None).await.unwrap();
+        assert!(html.contains("one.call("), "{screen}");
+    }
 }

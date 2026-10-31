@@ -198,7 +198,17 @@ impl Apps {
         let runtime = self.0.clone();
         let reply: Value = tokio::task::spawn_blocking(move || -> Result<Value> {
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(TIME_LIMIT)).build().into();
-            match agent.post(&url).send_json(&body) {
+            // While the runtime restarts (for a deploy, or after a crash), wait for it rather than fail.
+            let started = Instant::now();
+            let sent = loop {
+                match agent.post(&url).send_json(&body) {
+                    Err(ureq::Error::Io(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused && started.elapsed() < Duration::from_secs(20) => {
+                        std::thread::sleep(Duration::from_millis(100))
+                    }
+                    sent => break sent,
+                }
+            };
+            match sent {
                 Ok(mut resp) => Ok(resp.body_mut().with_config().limit(64 << 20).read_json()?),
                 Err(ureq::Error::Timeout(_)) => {
                     runtime.restart();

@@ -35,6 +35,15 @@ function refusal(repo, row, e, branch) {
   return null;
 }
 
+/// What to call an owner, as far as the caller can tell: you, a group of theirs, admins.
+function ownerName(ctx, owner) {
+  if (owner === `user:${ctx.me.user}`) return "you";
+  if (owner === "admins") return "admins";
+  const group = ctx.groups.find((g) => g.id === owner);
+  if (group) return group.name;
+  return owner.startsWith("group:") ? "a group" : "someone else";
+}
+
 const repoOf = async (g, name) => (await g.query("select * from repos where name = ?", [name]))[0] || null;
 
 function global(ctx) {
@@ -91,7 +100,7 @@ export default {
         const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [repo])).map((p) => p.hash);
         const forks = (await g.query(`select name from repos where "from" = ? order by name`, [repo])).map((f) => f.name);
         const pushes = await g.query("select * from pushes where repo = ? order by time desc limit 30", [repo]);
-        return { ...r, branches, packs, forks, pushes };
+        return { ...r, owner_name: ownerName(ctx, r.owner), branches, packs, forks, pushes };
       },
     },
     create: {
@@ -218,7 +227,7 @@ async function show() {
     </div></div>\`;
   const fork = (f) => \`<a class="row plain" onclick='one.open("repo", \${JSON.stringify({ repo: f })})'><div class="main"><div class="title"><span>\${one.esc(f)}</span></div></div><div class="chev">›</div></a>\`;
   document.getElementById("repo").innerHTML = \`
-    <p class="muted small">Owned by \${one.esc(r.owner)}\${r.from ? " · fork of " + one.esc(r.from) : ""}</p>
+    <p class="muted small">Owned by \${one.esc(r.owner_name)}\${r.from ? " · fork of " + one.esc(r.from) : ""}</p>
     <div class="list"><div class="row plain"><div class="main"><div class="sub">git clone one://\${one.esc(r.name)}</div></div></div></div>
     <h2 class="section">Branches</h2>
     <div class="list">\${bare.map(branch).join("") || '<div class="empty">No branches yet</div>'}</div>

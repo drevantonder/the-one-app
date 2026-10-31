@@ -880,12 +880,14 @@ impl Node {
             Ok(m.apps
                 .values()
                 .map(|a| {
-                    let installed: Vec<String> = i
+                    let mut installed: Vec<String> = i
                         .views
                         .iter()
                         .filter(|(scope, (_, s))| s.installed.contains(&a.name) && Scope::parse(scope).is_ok_and(|s| m.may_use(&viewer.user, &s)))
                         .map(|(scope, _)| scope.clone())
                         .collect();
+                    // Yours, then groups', then everyone's.
+                    installed.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
                     let reach = reachable(i, &a.name, &viewer.user);
                     let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
                     let forks: Vec<&String> = m.apps.values().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();

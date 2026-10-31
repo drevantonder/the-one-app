@@ -12,7 +12,7 @@ release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNL
 release_signer = "ssh mac \"op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'\""
 # The apps a new install deploys and installs in global, each a folder with its app.js. Afterwards they're
 # deployed like any app: `one deploy apps/board`.
-apps = ["apps/board", "apps/repos"]
+apps = ["apps/board", "apps/repos", "apps/apps"]
 # The app the shells' App Store opens: an ordinary app, whose screens add apps to pages with ctx.install.
 store = "apps"
 # Artwork, relative to this file: the app icon (1024px), the menu bar template (18pt, with an @2x),
