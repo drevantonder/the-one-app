@@ -6,13 +6,17 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,8 +33,9 @@ const (
 
 type desktop struct {
 	Name    string    `json:"name"`
-	State   string    `json:"state"` // running or stopped
+	State   string    `json:"state"` // running, paused or stopped
 	Started time.Time `json:"started,omitzero"`
+	pool    bool      // made to be borrowed (pool.go)
 	port    int
 	token   string
 }
@@ -51,8 +56,12 @@ func podmanEnv() error {
 		os.Setenv("XDG_RUNTIME_DIR", dir)
 		os.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+dir+"/bus")
 	}
-	// Containers with --restart=always start again at boot through this.
-	return exec.Command("systemctl", "--user", "enable", "podman-restart.service").Run()
+	// Containers with --restart=always start again at boot through this. At
+	// boot the user's systemd may not answer yet; revive covers that.
+	if out, err := exec.Command("systemctl", "--user", "enable", "podman-restart.service").CombinedOutput(); err != nil {
+		log.Printf("enabling podman-restart: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func podman(ctx context.Context, args ...string) ([]byte, error) {
@@ -85,9 +94,9 @@ func list(ctx context.Context) ([]desktop, error) {
 		if len(r.Names) == 0 || !strings.HasPrefix(r.Names[0], prefix) {
 			continue
 		}
-		d := desktop{Name: strings.TrimPrefix(r.Names[0], prefix), State: "stopped", token: r.Labels["one.token"]}
-		if r.State == "running" {
-			d.State = "running"
+		d := desktop{Name: strings.TrimPrefix(r.Names[0], prefix), State: "stopped", token: r.Labels["one.token"], pool: r.Labels["one.pool"] != ""}
+		if r.State == "running" || r.State == "paused" {
+			d.State = r.State
 		}
 		if r.StartedAt > 0 {
 			d.Started = time.Unix(r.StartedAt, 0)
@@ -124,15 +133,6 @@ func find(ctx context.Context, name string) (desktop, error) {
 	return pick(all, name)
 }
 
-// running is find, refusing a stopped desktop.
-func running(ctx context.Context, name string) (desktop, error) {
-	d, err := find(ctx, name)
-	if err == nil && d.State != "running" {
-		err = fmt.Errorf("desktop %s is stopped: start it first", d.Name)
-	}
-	return d, err
-}
-
 // nextPort is the first port after every desktop's.
 func nextPort(all []desktop) int {
 	port := firstPort
@@ -142,10 +142,17 @@ func nextPort(all []desktop) int {
 	return port
 }
 
-func create(ctx context.Context, name string) (desktop, error) {
+// creating keeps two desktops being made at once from taking the same port.
+var creating sync.Mutex
+
+// create makes a desktop and starts it, waiting for its server to answer
+// if wait.
+func create(ctx context.Context, name string, sz size, pool, wait bool) (desktop, error) {
 	if !validName.MatchString(name) {
 		return desktop{}, fmt.Errorf("a desktop's name is lowercase letters, digits and dashes")
 	}
+	creating.Lock()
+	defer creating.Unlock()
 	all, err := list(ctx)
 	if err != nil {
 		return desktop{}, err
@@ -155,10 +162,15 @@ func create(ctx context.Context, name string) (desktop, error) {
 	}
 	b := make([]byte, 24)
 	rand.Read(b)
-	d := desktop{Name: name, State: "running", port: nextPort(all), token: hex.EncodeToString(b)}
+	d := desktop{Name: name, State: "running", pool: pool, port: nextPort(all), token: hex.EncodeToString(b)}
 	c := prefix + name
-	_, err = podman(ctx, "run", "--detach", "--name", c, "--restart=always",
-		"--label", fmt.Sprintf("one.port=%d", d.port), "--label", "one.token="+d.token,
+	labels := []string{"--label", fmt.Sprintf("one.port=%d", d.port), "--label", "one.token=" + d.token}
+	if pool {
+		labels = append(labels, "--label", "one.pool=1")
+	}
+	args := append([]string{"run", "--detach", "--name", c, "--restart=always"}, labels...)
+	args = append(args, sz.limits()...)
+	_, err = podman(ctx, append(args,
 		"--env", "CUA_ENV_TOKEN="+d.token,
 		// The image says HOME=/root, which its desktop user inherits; there
 		// Chromium can't keep crash reports, and won't start.
@@ -166,11 +178,14 @@ func create(ctx context.Context, name string) (desktop, error) {
 		"--publish", fmt.Sprintf("127.0.0.1:%d:3211", d.port),
 		// A new named volume starts as a copy of the image's home folder.
 		"--volume", c+"-home:"+home,
-		"--shm-size=1g", "--memory=4g",
-		cuaImage)
+		"--shm-size=1g",
+		cuaImage)...)
 	if err != nil {
 		remove(context.WithoutCancel(ctx), d)
 		return desktop{}, err
+	}
+	if !wait {
+		return d, nil
 	}
 	return d, ready(ctx, d)
 }
@@ -188,6 +203,11 @@ func start(ctx context.Context, d desktop) error {
 
 // stop stops a desktop until it's started again, restarts of the device too.
 func stop(ctx context.Context, d desktop) error {
+	if d.State == "paused" {
+		if err := unpause(ctx, d); err != nil {
+			return err
+		}
+	}
 	if _, err := podman(ctx, "update", "--restart=no", prefix+d.Name); err != nil {
 		return err
 	}
@@ -215,14 +235,50 @@ func remove(ctx context.Context, d desktop) error {
 	return nil
 }
 
+// pause freezes a desktop's processes: it keeps its memory but uses no CPU
+// until unpaused, which takes a moment.
+func pause(ctx context.Context, d desktop) error {
+	_, err := podman(ctx, "pause", prefix+d.Name)
+	return err
+}
+
+func unpause(ctx context.Context, d desktop) error {
+	_, err := podman(ctx, "unpause", prefix+d.Name)
+	return err
+}
+
 // sh runs a script in a running desktop, as root.
 func sh(ctx context.Context, d desktop, script string) error {
-	cmd := exec.CommandContext(ctx, "podman", "exec", "--interactive", "--user", "root", prefix+d.Name, "sh", "-s")
-	cmd.Stdin = strings.NewReader(script)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	var out bytes.Buffer
+	return in(ctx, d, strings.NewReader(script), &out, "sh", "-s")
+}
+
+// in runs a command in a running desktop, as root. An exitError keeps its
+// exit code, which some callers accept.
+func in(ctx context.Context, d desktop, stdin io.Reader, stdout io.Writer, args ...string) error {
+	cmd := exec.CommandContext(ctx, "podman", append([]string{"exec", "--interactive", "--user", "root", prefix + d.Name}, args...)...)
+	cmd.Stdin, cmd.Stdout = stdin, stdout
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return &exitError{err: err, stderr: strings.TrimSpace(stderr.String())}
 	}
 	return nil
+}
+
+type exitError struct {
+	err    error
+	stderr string
+}
+
+func (e *exitError) Error() string { return fmt.Sprintf("%v: %s", e.err, e.stderr) }
+func (e *exitError) Unwrap() error { return e.err }
+
+// tarred reports whether tar's error is only that files changed while it read
+// them, as a running browser's do.
+func tarred(err error) bool {
+	var exit *exec.ExitError
+	return err == nil || errors.As(err, &exit) && exit.ExitCode() == 1
 }
 
 func (d desktop) local() string { return fmt.Sprintf("http://127.0.0.1:%d", d.port) }

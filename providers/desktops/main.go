@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
 )
@@ -24,9 +25,12 @@ import (
 const app = "desktops"
 
 type call struct {
-	ID    uint64          `json:"id"`
-	Op    string          `json:"op"`
-	Input json.RawMessage `json:"input"`
+	ID     uint64          `json:"id"`
+	Op     string          `json:"op"`
+	Input  json.RawMessage `json:"input"`
+	Caller struct {
+		Name string `json:"name"` // the device it came from
+	} `json:"caller"`
 }
 
 func main() {
@@ -39,8 +43,9 @@ func main() {
 	if err := podmanEnv(); err != nil {
 		log.Fatal(err)
 	}
-	d := newDesktops(filepath.Join(dir, "tools.json"))
+	d := newDesktops(dir, node)
 	go d.refresh(context.Background())
+	go d.keep(context.Background())
 	serve(node, d)
 }
 
@@ -74,12 +79,22 @@ func serve(node string, d *desktops) {
 			running.Add(1)
 			go func() {
 				defer running.Add(-1)
-				result, err := d.run(context.Background(), c.Op, c.Input)
-				reply := map[string]any{"ok": result}
-				if err != nil {
-					reply = map[string]any{"error": err.Error()}
+				defer func() {
+					if p := recover(); p != nil {
+						log.Printf("%s panicked: %v\n%s", c.Op, p, debug.Stack())
+						post(fmt.Sprintf("%s/v1/providers/%s/calls/%d", node, app, c.ID), map[string]any{"error": fmt.Sprint("desktops failed: ", p)})
+					}
+				}()
+				ctx := context.WithValue(context.Background(), callerKey{}, c.Caller.Name)
+				result, err := d.run(ctx, c.Op, c.Input)
+				answer := map[string]any{"ok": result}
+				if r, ok := result.(reply); ok {
+					answer = map[string]any{"ok": r.ok, "entries": r.entries}
 				}
-				if err := post(fmt.Sprintf("%s/v1/providers/%s/calls/%d", node, app, c.ID), reply); err != nil {
+				if err != nil {
+					answer = map[string]any{"error": err.Error()}
+				}
+				if err := post(fmt.Sprintf("%s/v1/providers/%s/calls/%d", node, app, c.ID), answer); err != nil {
 					log.Printf("answering %s: %v", c.Op, err)
 				}
 			}()
@@ -140,13 +155,16 @@ func num(description string) map[string]any {
 
 var desktopArg = str("which desktop, by name; default the only one")
 
-const instructions = "Desktops are Linux desktops on the device that runs them, each with a browser of its own that keeps its sign-ins. " +
-	"To browse: desktops_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":\"default\"} (the profile with the desktop's sign-ins) " +
-	"launches the browser; desktops_use with tool list_windows gives its window_id; desktops_get_browser_state with that pid and window_id gives target_id and tab_id; " +
-	"then desktops_browser_navigate, desktops_browser_click and desktops_browser_type act, and desktops_get_browser_state reads the page. " +
-	"A browser left idle for 5 minutes closes; prepare it again. desktops_screen shows the desktop. When a site needs the person (to sign in, or to solve a challenge), " +
-	"open the page and give them desktops_view's link: they use the desktop in their browser. Never sign in or submit forms for them unless they asked. " +
-	"Everything else on a desktop (apps, windows, keyboard, mouse): desktops_tools lists the tools and desktops_use runs one. With several desktops, pass desktop."
+const instructions = "Desktops are Linux desktops on the user's servers, each with a browser. " +
+	"To browse, borrow a desktop of your own: desktops_borrow with for (what it's for, in a few words: the person sees it) gives you one whose browser starts signed in to the sites in the saved login (default unless you pass login); " +
+	"pass its name as desktop to the other tools, and give it back with desktops_give_back when done: it's deleted, with anything it did to the login. One left 15 minutes without a call is given back for you. " +
+	"Borrow rather than use a lasting desktop (desktops_create makes those, for the person), so agents never share a browser. " +
+	"In it: desktops_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":\"default\"} (the login's name) launches the browser; desktops_use with tool list_windows gives its window_id; " +
+	"desktops_get_browser_state with that pid and window_id gives target_id and tab_id; then desktops_browser_navigate, desktops_browser_click and desktops_browser_type act, and desktops_get_browser_state reads the page. " +
+	"A browser left idle for 5 minutes closes; prepare it again. desktops_screen shows the desktop. When a site needs the person to sign in, call desktops_sign_in with the site's url and give them its link: " +
+	"they sign in there, in the saved login itself, and it's saved when they're done (or desktops_save_login). For a challenge in your own desktop, give them desktops_view's link. " +
+	"Never sign in or submit forms for them unless they asked. Everything else on a desktop (apps, windows, keyboard, mouse): desktops_tools lists the tools and desktops_use runs one. " +
+	"desktops_list shows every server's desktops, who has borrowed which and what for; to act on one on another server, pass server too. A lasting desktop nobody calls or watches for 30 minutes is paused, and unpaused by the next call."
 
 // browsing are the desktop's tools offered as operations of their own; the
 // rest are reached through use.
@@ -154,20 +172,37 @@ var browsing = []string{"get_browser_state", "browser_prepare", "browser_navigat
 
 func ownOps() []map[string]any {
 	name := object(map[string]any{"desktop": str("the desktop's name")}, "desktop")
+	sizeArg := str("small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small")
+	login := str("a saved login's name; default default")
 	return []map[string]any{
-		{"name": "list", "description": "The desktops: each one's name, whether it's running, and when it last started.",
-			"input": object(map[string]any{})},
-		{"name": "create", "description": "Create a desktop and start it: Linux, with a browser of its own. Takes a minute.",
-			"input": object(map[string]any{"desktop": str("its name: lowercase letters, digits and dashes")}, "desktop")},
-		{"name": "start", "description": "Start a stopped desktop. It starts again after the device restarts.", "input": name},
+		{"name": "list", "description": "Every server's desktops: each one's server, whether it's running, paused or stopped, its size, the memory and CPU it uses now, and who has borrowed it and what for (or that it's the spare kept for borrowing).",
+			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only this server's"}})},
+		{"name": "borrow", "description": "Borrow a desktop of your own for as long as you need a browser, starting its browser with a copy of a saved login. Quick: a spare is kept ready. Give it back with give_back when done; it's deleted then, or after 15 minutes without a call, with anything in it.",
+			"input": object(map[string]any{"for": str("what you need it for, in a few words, e.g. Reading Messenger; the person sees it"),
+				"login": str("the saved login its browser starts with; default default if saved, \"\" for none"),
+				"by":    str("who's borrowing, e.g. your app's name; default the device you call from")}, "for")},
+		{"name": "give_back", "description": "Give back a borrowed desktop: it's deleted with everything in it, its browser's changes to the login too. A sign_in desktop's login is saved first.", "input": name},
+		{"name": "sign_in", "description": "For the person: opens a page in a browser on a saved login (made if new) and gives a link to use it from their own devices, to sign in to sites agents then borrow desktops with. It's saved when its time is up, or on give_back or save_login.",
+			"input": object(map[string]any{"login": login, "url": str("the page to open, e.g. a site's sign-in page"), "minutes": num("how long until it's saved and closed; default 30, at most 240")})},
+		{"name": "save_login", "description": "Save a desktop's browser profile as a saved login, closing its browsers first; a sign_in desktop is also given back. Only when the person asked: borrowed desktops start from saved logins.",
+			"input": object(map[string]any{"desktop": str("the desktop's name"), "login": str("the profile and saved login; default the desktop's login, or default")}, "desktop")},
+		{"name": "logins", "description": "The saved logins desktops can be borrowed with, and when each was last saved.", "input": object(map[string]any{})},
+		{"name": "forget_login", "description": "Delete a saved login, signing agents out of every site in it. Only when the person asked.",
+			"input": object(map[string]any{"login": str("the login's name")}, "login")},
+		{"name": "create", "description": "Create a lasting desktop and start it, for the person: Linux, with a browser of its own. Takes a minute. Agents borrow instead.",
+			"input": object(map[string]any{"desktop": str("its name: lowercase letters, digits and dashes"), "size": sizeArg}, "desktop")},
+		{"name": "resize", "description": "Change how much CPU and memory a desktop may use, at once, without restarting it.",
+			"input": object(map[string]any{"desktop": str("the desktop's name"), "size": sizeArg}, "desktop", "size")},
+		{"name": "start", "description": "Start a stopped (or paused) desktop. It starts again after the server restarts.", "input": name},
 		{"name": "stop", "description": "Stop a desktop. Its files and sign-ins stay; it stays stopped until started.", "input": name},
 		{"name": "delete", "description": "Delete a desktop and everything in it, its sign-ins too. Only when the person asked.", "input": name},
-		{"name": "view", "description": "A link to watch and use a desktop in a browser, for the person: to sign in to a site, or to see what an agent is doing. Works on their own devices.",
+		{"name": "view", "description": "A link to watch and use a desktop in a browser, for the person: to solve a challenge, or to see what an agent is doing. Works on their own devices.",
 			"input": object(map[string]any{"desktop": desktopArg, "minutes": num("how long the link works; default 60, at most 1440")})},
 		{"name": "screen", "description": "A small picture of a desktop as it is now.",
 			"input": object(map[string]any{"desktop": desktopArg, "width": num("the picture's width in pixels; default 640, at most 1920")})},
 		{"name": "tools", "description": "The desktop's other tools, for desktops_use; with name, that tool's full description and input.",
 			"input": object(map[string]any{"desktop": desktopArg, "name": str("a tool's name")})},
+		{"name": "refresh_tools", "description": "Read the desktops' tools again from a running desktop, as after its image was updated.", "input": object(map[string]any{})},
 		{"name": "use", "description": "Run one of the desktop's tools, as desktops_tools lists them, e.g. list_windows, launch_app, click, type_text, get_guide.",
 			"input": object(map[string]any{"desktop": desktopArg, "tool": str("the tool's name"), "args": map[string]any{"type": "object", "description": "the tool's input"}}, "tool")},
 	}

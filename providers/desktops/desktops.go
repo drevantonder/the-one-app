@@ -12,6 +12,7 @@ import (
 	_ "image/png"
 	"log"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -20,6 +21,8 @@ import (
 )
 
 type desktops struct {
+	dir   string // this provider's files
+	node  string // its node's local API
 	cache string // the desktops' tools, kept for when none is running
 
 	mu    sync.Mutex
@@ -27,13 +30,22 @@ type desktops struct {
 
 	connMu sync.Mutex
 	conns  map[string]*conn // by desktop
+
+	poolMu sync.Mutex
+	lent   map[string]loan      // borrowed desktops, by name
+	used   map[string]time.Time // each desktop's last call
+	take   sync.Mutex           // one borrow, or spare made, at a time
+	kick   chan struct{}        // tend the pool now
+
+	backupMu sync.Mutex
 }
 
-func newDesktops(cache string) *desktops {
-	ds := &desktops{cache: cache, conns: map[string]*conn{}}
-	if b, err := os.ReadFile(cache); err == nil {
+func newDesktops(dir, node string) *desktops {
+	ds := &desktops{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
+	if b, err := os.ReadFile(ds.cache); err == nil {
 		json.Unmarshal(b, &ds.tools)
 	}
+	ds.loadLoans()
 	return ds
 }
 
@@ -65,20 +77,32 @@ func withDesktop(schema json.RawMessage) map[string]any {
 	return s
 }
 
+// refreshIfEmpty reads the tools if it never has.
+func (ds *desktops) refreshIfEmpty(ctx context.Context) {
+	ds.mu.Lock()
+	empty := len(ds.tools) == 0
+	ds.mu.Unlock()
+	if empty {
+		ds.refresh(ctx)
+	}
+}
+
 // refresh reads the tools from a running desktop: every desktop runs the
-// same image, so any one will do.
-func (ds *desktops) refresh(ctx context.Context) {
+// same image, so any one will do. It gives how many there are.
+func (ds *desktops) refresh(ctx context.Context) (int, error) {
 	all, err := list(ctx)
 	if err != nil {
 		log.Print(err)
-		return
+		return 0, err
 	}
+	err = errors.New("no desktop is running to read them from")
 	for _, d := range all {
 		if d.State != "running" {
 			continue
 		}
 		var tools []tool
-		c, err := ds.conn(ctx, d)
+		var c *conn
+		c, err = ds.conn(ctx, d)
 		if err == nil {
 			tools, err = c.tools(ctx)
 		}
@@ -93,8 +117,9 @@ func (ds *desktops) refresh(ctx context.Context) {
 		if err := os.WriteFile(ds.cache, b, 0o600); err != nil {
 			log.Print(err)
 		}
-		return
+		return len(tools), nil
 	}
+	return 0, err
 }
 
 // conn is the desktop's session, made the first time it's needed. A browser
@@ -106,7 +131,7 @@ func (ds *desktops) conn(ctx context.Context, d desktop) (*conn, error) {
 	if c := ds.conns[d.Name]; c != nil {
 		return c, nil
 	}
-	closeBrowsers(ctx, d)
+	closeBrowsers(ctx, d, false)
 	c, err := dial(ctx, d)
 	if err != nil {
 		return nil, err
@@ -153,7 +178,7 @@ func (ds *desktops) call(ctx context.Context, d desktop, name string, args map[s
 		}
 		if name == "browser_prepare" && bytes.Contains(r.Structured, []byte("browser_endpoint_owner_mismatch")) {
 			// The profile is open in a browser no session of ours owns.
-			closeBrowsers(ctx, d)
+			closeBrowsers(ctx, d, false)
 			r, err = c.call(ctx, name, args)
 		}
 		break
@@ -175,14 +200,19 @@ func (ds *desktops) takesSession(name string) bool {
 	return false
 }
 
-// closeBrowsers closes the browsers the desktop's tools launched, marking
-// their profiles as closed normally, or they'd offer to restore their pages.
-func closeBrowsers(ctx context.Context, d desktop) {
-	err := sh(ctx, d, `profiles=`+home+`/.local/state/cua-driver/browser-profiles/
+// closeBrowsers closes the browsers the desktop's tools launched, and with
+// signIns the one sign_in opened too, marking their profiles as closed
+// normally, or they'd offer to restore their pages.
+func closeBrowsers(ctx context.Context, d desktop, signIns bool) {
+	keep := signInClass
+	if signIns {
+		keep = "--matches-no-browser"
+	}
+	err := sh(ctx, d, `profiles=`+profiles+`
 main() { # each browser's own process, not its helpers
 	for p in $(pgrep -f -- "[-]-user-data-dir=$profiles"); do
 		c=$(tr '\0' ' ' 2>/dev/null </proc/$p/cmdline) || continue
-		case "$c" in *--type=*) ;; *) echo $p ;; esac
+		case "$c" in *--type=*|*`+keep+`*) ;; *) echo $p ;; esac
 	done
 }
 pids=$(main)
@@ -223,38 +253,54 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 	}
 	name, _ := in["desktop"].(string)
 	delete(in, "desktop")
+	text := func(k string) string { s, _ := in[k].(string); return strings.TrimSpace(s) }
+	here, _ := in["here"].(bool)
 	switch op {
 	case "list":
-		all, err := list(ctx)
-		if err != nil || len(all) == 0 {
-			return "No desktops. Make one with create.", err
+		if here {
+			all, err := ds.listHere(ctx)
+			return map[string]any{"desktops": all}, err
 		}
-		var b strings.Builder
-		for _, d := range all {
-			started := ""
-			if !d.Started.IsZero() {
-				started = ", last started " + d.Started.Local().Format(time.DateTime)
-			}
-			fmt.Fprintf(&b, "%s: %s%s\n", d.Name, d.State, started)
-		}
-		return strings.TrimSpace(b.String()), nil
+		return ds.listAll(ctx)
 	case "create":
-		d, err := create(ctx, name)
+		sz, err := sizeNamed(text("size"))
 		if err != nil {
 			return nil, err
 		}
-		ds.refresh(ctx)
-		return fmt.Sprintf("Created desktop %s. Its browser is yours to sign in to sites with: open it with view.", d.Name), nil
+		d, err := create(ctx, name, sz, false, true)
+		if err != nil {
+			return nil, err
+		}
+		ds.touch(d.Name)
+		ds.refreshIfEmpty(ctx)
+		return fmt.Sprintf("Created desktop %s, %s. Its browser is yours to sign in to sites with: open it with view.", d.Name, sz), nil
+	case "resize":
+		sz, err := sizeNamed(text("size"))
+		if err != nil {
+			return nil, err
+		}
+		d, err := find(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if err := resize(ctx, d, sz); err != nil {
+			return nil, err
+		}
+		return fmt.Sprintf("Desktop %s is now %s.", d.Name, sz), nil
 	case "start":
 		d, err := find(ctx, name)
-		if err != nil || d.State == "running" {
+		if err != nil || d.State != "stopped" {
+			if err == nil && d.State == "paused" {
+				_, err = ds.running(ctx, d.Name)
+			}
 			return "It's running.", err
 		}
 		ds.drop(d.Name)
 		if err := start(ctx, d); err != nil {
 			return nil, err
 		}
-		ds.refresh(ctx)
+		ds.touch(d.Name)
+		ds.refreshIfEmpty(ctx)
 		return "Started.", nil
 	case "stop":
 		d, err := find(ctx, name)
@@ -272,9 +318,12 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		if err := remove(ctx, d); err != nil {
 			return nil, err
 		}
+		if _, ok := ds.loans()[d.Name]; ok {
+			ds.setLoan(d.Name, nil)
+		}
 		return fmt.Sprintf("Deleted desktop %s and everything in it.", d.Name), nil
 	case "view":
-		d, err := running(ctx, name)
+		d, err := ds.running(ctx, name)
 		if err != nil {
 			return nil, err
 		}
@@ -288,7 +337,7 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		}
 		return fmt.Sprintf("%s\nThe link works for %d minutes, on the person's own devices.", url, minutes), nil
 	case "screen":
-		d, err := running(ctx, name)
+		d, err := ds.running(ctx, name)
 		if err != nil {
 			return nil, err
 		}
@@ -299,10 +348,95 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		return ds.screen(ctx, d, width)
 	case "tools":
 		return ds.list(ctx, name, in["name"])
+	case "refresh_tools":
+		n, err := ds.refresh(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return fmt.Sprintf("Read %d tools from the desktops.", n), nil
 	case "use":
 		tool, _ := in["tool"].(string)
 		args, _ := in["args"].(map[string]any)
 		return ds.use(ctx, name, tool, args)
+	case "borrow":
+		why := text("for")
+		if why == "" {
+			return nil, errors.New("say what it's for, in a few words: the person sees it")
+		}
+		login, given := in["login"].(string)
+		if !given && ds.savedLogin("default") != "" {
+			login = "default"
+		}
+		d, err := ds.borrow(ctx, loan{By: cmpOr(text("by"), caller(ctx)), For: why, Login: login})
+		if err != nil {
+			return nil, err
+		}
+		me, _, _ := ds.servers(ctx)
+		msg := fmt.Sprintf("Borrowed desktop %s: pass desktop %q to the desktops tools.", d.Name, d.Name)
+		if login != "" {
+			msg += fmt.Sprintf(` Its browser is signed in as the %s login: desktops_browser_prepare with allow_launch true and profile {"mode":"isolated_named","name":%q}.`, login, login)
+		}
+		msg += " Give it back with give_back when done; it's given back for you after 15 minutes without a call."
+		return map[string]any{"desktop": d.Name, "server": me, "login": login, "text": msg}, nil
+	case "give_back":
+		if name == "" {
+			return nil, errors.New("which desktop? pass the one you borrowed")
+		}
+		l, ok := ds.loans()[name]
+		if err := ds.giveBack(ctx, name, "given back by "+caller(ctx)); err != nil {
+			return nil, err
+		}
+		if ok && l.SigningIn {
+			return fmt.Sprintf("Saved the %s login and closed desktop %s.", l.Login, name), nil
+		}
+		return fmt.Sprintf("Gave back desktop %s.", name), nil
+	case "sign_in":
+		login := cmpOr(text("login"), "default")
+		if !validName.MatchString(login) {
+			return nil, errors.New("a login's name is lowercase letters, digits and dashes")
+		}
+		minutes := int(signInFor.Minutes())
+		if m, ok := in["minutes"].(float64); ok {
+			minutes = min(max(int(m), 1), 240)
+		}
+		d, until, err := ds.signIn(ctx, login, text("url"), minutes, cmpOr(text("by"), caller(ctx)))
+		if err != nil {
+			return nil, err
+		}
+		url, err := viewURL(ctx, d, minutes)
+		if err != nil {
+			return nil, err
+		}
+		msg := fmt.Sprintf("Sign in to sites in the %s login here:\n%s\nIt's saved in %d minutes, or as soon as desktop %s is given back (give_back) or saved (save_login).", login, url, minutes, d.Name)
+		return map[string]any{"desktop": d.Name, "login": login, "url": url, "until": until, "text": msg}, nil
+	case "save_login":
+		d, err := ds.running(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		l, lent := ds.loans()[d.Name]
+		login := cmpOr(text("login"), cmpOr(l.Login, "default"))
+		if lent && l.SigningIn && login == l.Login {
+			if err := ds.giveBack(ctx, d.Name, "signed in"); err != nil {
+				return nil, err
+			}
+			return fmt.Sprintf("Saved the %s login and closed desktop %s.", login, d.Name), nil
+		}
+		if err := ds.saveLogin(ctx, d, login); err != nil {
+			return nil, err
+		}
+		return fmt.Sprintf("Saved desktop %s's browser as the %s login: desktops borrowed with it start signed in to the same sites.", d.Name, login), nil
+	case "logins":
+		return map[string]any{"logins": ds.logins()}, nil
+	case "forget_login":
+		login := text("login")
+		if !validName.MatchString(login) || ds.savedLogin(login) == "" {
+			return nil, fmt.Errorf("no saved login %q", login)
+		}
+		if err := os.RemoveAll(ds.loginDir(login)); err != nil {
+			return nil, err
+		}
+		return fmt.Sprintf("Forgot the %s login.", login), nil
 	}
 	if slices.Contains(browsing, op) {
 		return ds.use(ctx, name, op, in)
@@ -314,7 +448,7 @@ func (ds *desktops) use(ctx context.Context, name, tool string, args map[string]
 	if tool == "" {
 		return nil, errors.New("which tool? desktops_tools lists them")
 	}
-	d, err := running(ctx, name)
+	d, err := ds.running(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +468,7 @@ func (ds *desktops) list(ctx context.Context, desktop string, name any) (any, er
 	tools := ds.tools
 	ds.mu.Unlock()
 	if len(tools) == 0 {
-		if _, err := running(ctx, desktop); err != nil {
+		if _, err := ds.running(ctx, desktop); err != nil {
 			return nil, err
 		}
 		ds.refresh(ctx)
@@ -419,4 +553,28 @@ func viewURL(ctx context.Context, d desktop, minutes int) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("https://%s:%s%s", strings.TrimSuffix(st.Self.DNSName, "."), port, path), nil
+}
+
+// reply is a result with entries for the node to write in the caller's log.
+type reply struct {
+	ok      any
+	entries []map[string]any
+}
+
+type callerKey struct{}
+
+// caller is the name of the device the call came from.
+func caller(ctx context.Context) string {
+	name, _ := ctx.Value(callerKey{}).(string)
+	return cmpOr(name, "someone")
+}
+
+func bytesText(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.0f MB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%d KB", n>>10)
 }
