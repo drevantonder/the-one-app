@@ -55,10 +55,10 @@ pub fn run(tag: Option<&str>, space: Option<&str>) -> Result<()> {
     println!("Building {short}");
     step(Command::new(cargo()).current_dir(&src).args(["build", "--release"]))?;
     let binary = src.join("target/release").join(CLI);
-    crate::publish(&binary, space["id"].as_str().map(str::to_string), &Default::default())?;
-
-    let started_at = Instant::now();
+    // Which devices to wait for, asked before this device's own node restarts on the new build.
     let linux: Vec<Value> = devices(&space).into_iter().filter(|d| d["target"] == TARGET).collect();
+    crate::publish(&binary, space["id"].as_str().map(str::to_string), &Default::default())?;
+    let started_at = Instant::now();
     let mut failed = await_builds(&space, &linux, short, started_at, Duration::from_secs(180));
 
     let mut assets = Vec::new();
@@ -187,7 +187,13 @@ fn devices(space: &Value) -> Vec<Value> {
 /// Waits for each of `wanted` to say it runs `commit`, and reports each. True if any didn't.
 fn await_builds(space: &Value, wanted: &[Value], commit: &str, since: Instant, limit: Duration) -> bool {
     let id = |d: &Value| d["device"].as_str().unwrap_or("").to_string();
-    let mut waiting: Vec<(String, String, String)> = wanted.iter().map(|d| (id(d), d["name"].as_str().unwrap_or("").into(), d["build"].as_str().unwrap_or("?").into())).collect();
+    let name = |d: &Value| d["name"].as_str().unwrap_or("").to_string();
+    // Only devices offline from the start count as offline: this device's own node restarting loses its sessions a moment.
+    let (online, offline): (Vec<&Value>, Vec<&Value>) = wanted.iter().partition(|d| d["online"] == true);
+    for d in offline {
+        println!("  {}: offline; it updates itself when it's back", name(d));
+    }
+    let mut waiting: Vec<(String, String, String)> = online.into_iter().map(|d| (id(d), name(d), d["build"].as_str().unwrap_or("?").into())).collect();
     let deadline = Instant::now() + limit;
     loop {
         let now = devices(space);
@@ -199,10 +205,6 @@ fn await_builds(space: &Value, wanted: &[Value], commit: &str, since: Instant, l
                 } else {
                     println!("  {name}: {was} → {commit} ({}s)", since.elapsed().as_secs());
                 }
-                return false;
-            }
-            if d["online"] != true {
-                println!("  {name}: offline; it updates itself when it's back");
                 return false;
             }
             true
