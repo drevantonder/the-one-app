@@ -13,9 +13,9 @@ const OLLAMA: &str = "http://127.0.0.1:11434";
 pub fn describe() -> Value {
     json!({
         "name": "models", "title": "Models", "icon": "cpu", "runs": "here",
-        "instructions": "Local models run on the device that has them. models_here lists a device's models (give device to ask another). models_chat asks one and returns its answer; use it for private or bulk work instead of a hosted model.",
+        "instructions": "Local models run on the device that has them. models_here lists a server's models (give server to ask another). models_chat asks one and returns its answer; use it for private or bulk work instead of a hosted model.",
         "ops": [
-            { "name": "here", "description": "This device's local models (or the device given).", "input": { "type": "object", "properties": {} } },
+            { "name": "here", "description": "This server's local models (or the server given).", "input": { "type": "object", "properties": {} } },
             { "name": "chat", "description": "Ask a local model and get its answer. Give prompt, or messages as [{role, content}]; system sets its instructions; format \"json\" or a JSON schema makes it answer in JSON.",
               "input": { "type": "object", "required": ["model"], "properties": {
                   "model": { "type": "string", "description": "a model's name as here lists it" },

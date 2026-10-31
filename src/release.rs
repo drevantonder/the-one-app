@@ -17,7 +17,7 @@ pub struct Release {
     pub target: String,
     pub blob: String,
     pub size: u64,
-    /// When the commit was made, in seconds since 1970. A device never takes a release older than its build.
+    /// When the commit was made, in seconds since 1970. A server never takes a release older than its build.
     #[serde(default)]
     pub committed: u64,
     /// The publisher's signature over the binary, as `ssh-keygen -Y sign -n release` makes it.
@@ -29,7 +29,7 @@ pub struct Release {
 pub const NAMESPACE: &str = "release";
 
 pub fn content(release: &Release) -> Content {
-    Content { app: APP.into(), kind: "release".into(), data: json!(release) }
+    Content { blobs: vec![release.blob.clone()], ..Content::new(APP, "node-release", json!(release)) }
 }
 
 /// Signs a binary as a release.
@@ -50,10 +50,10 @@ fn signed_by(key: &str, signature: &str) -> bool {
     sig.public_key() == key.key_data() && sig.namespace() == NAMESPACE
 }
 
-/// The newest release for `target` signed with `key`, and the device that published it. Any member may publish or pass
+/// The newest release for `target` signed with `key`, and the server that published it. Any server may publish or pass
 /// on a release: only the signature counts. The newest of any newer ones without it is logged.
 pub fn latest(key: &str, entries: &[Entry], target: &str) -> Option<(Release, Key)> {
-    let releases = entries.iter().rev().filter(|e| e.content.app == APP && e.content.kind == "release");
+    let releases = entries.iter().rev().filter(|e| e.content.app == APP && e.content.kind == "node-release");
     let mut logged = false;
     for e in releases {
         let Ok(r) = serde_json::from_value::<Release>(e.content.data.clone()) else { continue };
@@ -116,9 +116,9 @@ pub fn install(r: &Release, bytes: &[u8]) -> Result<PathBuf> {
     Ok(exe)
 }
 
-/// Says which build a device runs, so everyone can see when a release has landed.
+/// Says which build a server runs, so everyone can see when a release has landed.
 pub fn running() -> Content {
-    Content { app: APP.into(), kind: "running".into(), data: json!({ "commit": crate::brand::BUILD, "target": crate::brand::TARGET }) }
+    Content::new(APP, "running", json!({ "commit": crate::brand::BUILD, "target": crate::brand::TARGET }))
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -128,7 +128,7 @@ pub struct Running {
     pub target: String,
 }
 
-/// The build each device last said it runs.
+/// The build each server last said it runs.
 pub fn builds(entries: &[Entry]) -> std::collections::HashMap<Key, Running> {
     let mut out = std::collections::HashMap::new();
     for e in entries.iter().filter(|e| e.content.app == APP && e.content.kind == "running") {
@@ -157,12 +157,14 @@ mod tests {
         Release { commit: commit.into(), target: "t".into(), blob: "b".repeat(64), size: 3, committed, signature }
     }
 
-    /// One device publishing each release in turn.
+    /// One server publishing each release in turn.
     fn entries(releases: &[Release]) -> Vec<Entry> {
         let device = SigningKey::from([1; 32]);
         let mut out: Vec<Entry> = Vec::new();
         for (i, r) in releases.iter().enumerate() {
-            out.push(Entry::create(&device, [0; 32], i as u64, out.last(), content(r)));
+            let ext = crate::entry::Ext { log: "global".into(), time: i as u64 + 1, user: "a000000000000001".into(), by: None };
+            let prev = out.last().map(Entry::head);
+            out.push(Entry::create(&device, ext, prev, content(r)));
         }
         out
     }

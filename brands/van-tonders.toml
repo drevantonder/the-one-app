@@ -1,4 +1,6 @@
 name = "The Van Tonders App"
 cli = "vantonders"
 port = 4949
+# The apps a new install deploys and installs in global.
+apps = ["../apps/board"]
 accent = "#2F7D5B"

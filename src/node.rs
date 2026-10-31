@@ -1,78 +1,100 @@
-//! A node: this device's space (an app holds one), its store and views, and its iroh endpoint.
+//! A node: this server's install (a brand holds one), its replica and views, its iroh endpoint, and where calls run.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use iroh::endpoint::{Connection, presets};
 use iroh::protocol::{AcceptError, ProtocolHandler, Router};
 use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey};
-use p2panda_core::SigningKey;
+use p2panda_core::{Hash, SigningKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::apps::{Apps, Replay, AppEntry, Me};
-use crate::entry::{Content, Entry, Key, Order, SPACE_LOG, hex, short, unhex};
+use crate::apps::{Append, AppEntry, Apps, Context, Me, Replay, ScopeHandle};
+use crate::entry::{Content, Entry, Key, Order, Scope, hex, new_id, short, unhex};
+use crate::members::{self, Members, Principal, Role, ScopeState};
 use crate::release::{self, Release};
-use crate::space::{self, Members, Role};
-use crate::store::Store;
-use crate::sync::{self, Msg};
+use crate::store::{Frontier, Store};
+use crate::sync::{self, Driver, Handled, Msg, Replica};
 
 const JOIN_ALPN: &[u8] = b"one/join/1";
 const CALL_ALPN: &[u8] = b"one/call/1";
 pub const CLIENT_ALPN: &[u8] = b"one/client/1";
 const BLOB_ALPN: &[u8] = b"one/blob/1";
+/// How long a call may run before it's stopped.
+const CALL_LIMIT: Duration = Duration::from_secs(30);
+/// How long a waking server waits for its first round of dialing before it may call itself ready.
+const FIRST_DIAL: Duration = Duration::from_secs(5);
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
 }
 
 #[derive(Serialize, Deserialize)]
-struct DeviceFile {
+struct ServerFile {
     secret: String,
     name: String,
 }
 
 #[derive(Serialize, Deserialize)]
-struct SpaceFile {
+struct InstallFile {
+    /// The hash of the install's genesis.
+    root: String,
+    /// This server's local user.
     user: String,
-    /// The device whose pairing code this one joined with, to sync with until it sees itself admitted.
+    /// The server whose pairing code this one joined with, to sync with until it sees itself admitted.
     #[serde(default)]
     paired_by: Option<String>,
 }
 
-struct Space {
-    key: Key,
-    store: Store,
-    members: Members,
+struct Session {
+    tx: mpsc::UnboundedSender<Msg>,
+    /// The frontier the peer last said it had.
+    frontier: Option<Frontier>,
+    drivers: Vec<Driver>,
+    /// Whether this server has received everything the peer's first hello offered it.
+    caught_up: bool,
+}
+
+struct Install {
+    r: Replica,
     user: String,
-    paired_by: Option<Key>,
-    /// The build each device last said it runs.
-    builds: HashMap<Key, release::Running>,
-    /// What each of this user's devices announced it provides (SPEC.md, "Providers").
-    provides: Vec<(Key, Value)>,
-    replayed: Option<Order>,
-    /// Senders to every live sync session, by peer device.
-    sessions: HashMap<Key, mpsc::UnboundedSender<Msg>>,
-    /// When each phone last asked this device something.
+    sessions: HashMap<Key, Session>,
+    /// When each client last asked this server something.
     asked: HashMap<Key, u64>,
+    /// The build each server last said it runs.
+    builds: HashMap<Key, release::Running>,
+    /// Each scope's views: how far they've replayed, and what the scope's node entries add up to.
+    views: HashMap<String, (Order, ScopeState)>,
+    /// How long each server took to answer a call lately.
+    nearest: HashMap<Key, Duration>,
+    /// Whether the first round of dialing since this server woke is done.
+    dialed: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Event {
     Changed { apps: Vec<String> },
-    Peers,
-    /// This device created or joined its space.
-    Space,
+    Servers,
+    /// This server created or joined an install.
+    Install,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Pairing {
-    user: Option<String>,
+    /// The user who asked for it.
+    user: String,
+    /// The client that asked for it, if one did.
+    #[serde(default)]
+    by: Option<String>,
+    /// For a new user: their name and role.
+    #[serde(default)]
+    new_user: Option<(String, Role)>,
     /// Milliseconds since 1970 after which it no longer works.
     until: u64,
 }
@@ -81,7 +103,6 @@ const PAIRING_LIFE: u64 = 7 * 86_400_000;
 
 #[derive(Serialize, Deserialize)]
 struct PairingCode {
-    space: Key,
     from: EndpointAddr,
     secret: [u8; 16],
 }
@@ -90,14 +111,67 @@ struct PairingCode {
 struct JoinRequest {
     secret: [u8; 16],
     name: String,
-    #[serde(default)]
-    client: bool,
+    #[serde(rename = "as")]
+    as_: String,
 }
 
 #[derive(Serialize, Deserialize)]
 struct JoinReply {
-    space_name: String,
+    root: String,
     user: String,
+}
+
+/// Who asked for something: this server or another, or a client, as one user.
+#[derive(Clone, Debug)]
+pub struct Caller {
+    pub key: Key,
+    pub user: String,
+}
+
+/// An operation to run: of an app, or of a driver.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct CallRequest {
+    pub app: String,
+    pub op: String,
+    #[serde(default)]
+    pub input: Value,
+    /// The scopes the call touches, named before it runs; by default every scope it may reach.
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+    /// The server to run it on, by name or key prefix; by default the nearest that can.
+    #[serde(default)]
+    pub server: Option<String>,
+    /// A user whose data was opened for the caller, to run as, reading only.
+    #[serde(default, rename = "as")]
+    pub as_user: Option<String>,
+}
+
+/// What a server says to a call.
+enum Reply {
+    Ok(Value),
+    Error(String),
+    /// It can't run here; try another server.
+    Elsewhere(String),
+}
+
+impl Reply {
+    fn json(self) -> Value {
+        match self {
+            Reply::Ok(v) => json!({ "ok": v }),
+            Reply::Error(e) => json!({ "error": e }),
+            Reply::Elsewhere(w) => json!({ "elsewhere": w }),
+        }
+    }
+
+    fn from_json(v: Value) -> Reply {
+        if let Some(w) = v.get("elsewhere") {
+            return Reply::Elsewhere(w.as_str().unwrap_or("").into());
+        }
+        match v.get("error") {
+            Some(e) => Reply::Error(e.as_str().unwrap_or("failed").into()),
+            None => Reply::Ok(v["ok"].clone()),
+        }
+    }
 }
 
 pub struct Inner {
@@ -107,15 +181,18 @@ pub struct Inner {
     name: Mutex<String>,
     endpoint: Endpoint,
     apps: Apps,
-    apps_names: Vec<String>,
     native: Vec<crate::native::Native>,
     pub providers: crate::providers::Providers,
-    space: Mutex<Option<Space>>,
+    install: Mutex<Option<Install>>,
     pairings: Mutex<HashMap<[u8; 16], Pairing>>,
     events: broadcast::Sender<Event>,
+    /// Held while writing or replaying, so views replay in order.
     writes: tokio::sync::Mutex<()>,
-    /// Wakes the task that announces this device when its membership may have changed.
-    membership_changed: tokio::sync::Notify,
+    /// Wakes the task that loads deploys and announces this server.
+    changed: tokio::sync::Notify,
+    /// The bundle each app runs here.
+    bundles: Mutex<BTreeMap<String, String>>,
+    woke: Instant,
 }
 
 #[derive(Clone)]
@@ -128,43 +205,36 @@ impl std::fmt::Debug for Node {
 }
 
 impl Node {
-    /// Starts this device's node with the apps it runs: JavaScript ones and native ones.
-    pub async fn start(dir: &Path, builtin: crate::native::Builtin) -> Result<(Node, Router)> {
+    /// Starts this server's node, with the native apps this build has.
+    pub async fn start(dir: &Path, native: Vec<crate::native::Native>) -> Result<(Node, Router)> {
         std::fs::create_dir_all(dir)?;
-        let device = load_device(dir)?;
-        let secret = unhex(&device.secret)?;
+        let server = load_server(dir)?;
+        let secret = unhex(&server.secret)?;
         let key = SigningKey::from(secret);
         let id = *key.verifying_key().as_bytes();
         let endpoint = Endpoint::builder(presets::N0).secret_key(SecretKey::from_bytes(&secret)).bind().await?;
-        let apps_names: Vec<String> = builtin.apps.iter().map(|(n, _)| n.clone()).collect();
-        // Views used to live here, before apps ran in workerd.
-        let _ = std::fs::remove_dir_all(dir.join("views"));
-        let apps = Apps::start(dir.join("runtime"), builtin.apps).await?;
+        let apps = Apps::start(dir.join("runtime")).await?;
         let (events, _) = broadcast::channel(256);
         let node = Node(Arc::new(Inner {
             dir: dir.to_path_buf(),
             key,
             id,
-            name: Mutex::new(device.name),
+            name: Mutex::new(server.name),
             endpoint: endpoint.clone(),
             apps,
-            apps_names,
-            native: builtin.native,
+            native,
             providers: Default::default(),
-            space: Mutex::new(None),
+            install: Mutex::new(None),
             pairings: Mutex::new(load_pairings(dir)),
             events,
             writes: tokio::sync::Mutex::new(()),
-            membership_changed: tokio::sync::Notify::new(),
+            changed: tokio::sync::Notify::new(),
+            bundles: Mutex::new(BTreeMap::new()),
+            woke: Instant::now(),
         }));
-        let held: Vec<Key> = std::fs::read_dir(dir.join("spaces")).into_iter().flatten().flatten().filter_map(|e| unhex(&e.file_name().to_string_lossy()).ok()).collect();
-        match held.as_slice() {
-            [] => {}
-            [space] => {
-                node.open_space(*space).with_context(|| format!("open space {}", short(space)))?;
-                node.replay_all().await?;
-            }
-            _ => bail!("{} holds several spaces, and an app holds one: keep one in {}", dir.display(), dir.join("spaces").display()),
+        if dir.join("install").join("install.json").exists() {
+            node.open_install().context("open the install")?;
+            node.replay_all().await?;
         }
         let router = Router::builder(endpoint)
             .accept(sync::ALPN, SyncHandler(node.clone()))
@@ -174,20 +244,17 @@ impl Node {
             .accept(BLOB_ALPN, BlobHandler(node.clone()))
             .spawn();
         tokio::spawn(node.clone().dial_loop());
-        let announcer = node.clone();
+        let worker = node.clone();
         tokio::spawn(async move {
             loop {
-                announcer.0.membership_changed.notified().await;
-                if let Err(err) = announcer.announce().await {
-                    tracing::warn!("announce: {err:#}");
+                if let Err(err) = worker.settle().await {
+                    tracing::warn!("{err:#}");
                 }
+                worker.0.changed.notified().await;
             }
         });
-        if node.has_space() {
+        if node.has_install() {
             node.consider_update();
-            if let Err(err) = node.announce().await {
-                tracing::warn!("announce: {err:#}");
-            }
             for native in node.0.native.iter().filter(|n| n.sync.is_some()) {
                 node.sync_native(native.name);
             }
@@ -203,54 +270,32 @@ impl Node {
         &self.0.providers
     }
 
-    /// Registers a provider and announces it to the space.
+    /// Registers a provider; the node advertises it to the servers it syncs with.
     pub async fn provide(&self, app: &str, describe: Value) -> Result<()> {
         self.0.providers.register(app, describe);
-        self.announce().await
-    }
-
-    /// Tells the space what this device is: the build it runs and the providers it has, where the
-    /// space doesn't know yet. Runs when the node starts, when a provider registers, and when this
-    /// device's membership changes, so a device that just created or joined the space announces itself.
-    async fn announce(&self) -> Result<()> {
-        let missing: Vec<Content> = {
-            let space = self.0.space.lock().unwrap();
-            let Some(s) = space.as_ref().filter(|s| s.members.current(&self.0.id).is_some()) else { return Ok(()) };
-            let mut missing: Vec<Content> = self
-                .0
-                .providers
-                .describe()
-                .into_iter()
-                .filter(|d| !s.provides.iter().any(|(dev, v)| *dev == self.0.id && v == d))
-                .map(|d| crate::providers::announcement(&d))
-                .collect();
-            if s.builds.get(&self.0.id).map(|r| r.commit.as_str()) != Some(crate::brand::BUILD) {
-                missing.push(release::running());
-            }
-            missing
-        };
-        for content in missing {
-            self.append(content).await?;
-        }
+        self.say_hello();
         Ok(())
     }
 
-    /// Runs `f` on this device's space.
-    fn with<R>(&self, f: impl FnOnce(&mut Space) -> Result<R>) -> Result<R> {
-        let mut space = self.0.space.lock().unwrap();
-        f(space.as_mut().context("this device is in no space yet: create one, or join with a pairing code")?)
+    /// Runs `f` on this server's install.
+    fn with<R>(&self, f: impl FnOnce(&mut Install) -> Result<R>) -> Result<R> {
+        let mut install = self.0.install.lock().unwrap();
+        f(install.as_mut().context("this server is in no install yet: create one, or join with a pairing code")?)
     }
 
-    pub fn has_space(&self) -> bool {
-        self.0.space.lock().unwrap().is_some()
+    pub fn has_install(&self) -> bool {
+        self.0.install.lock().unwrap().is_some()
     }
 
-    /// Refuses a second space: an app holds one, and another context is another app.
-    fn ensure_no_space(&self) -> Result<()> {
-        let space = self.0.space.lock().unwrap();
-        if let Some(s) = space.as_ref() {
-            let name = if s.members.name.is_empty() { "a space" } else { s.members.name.as_str() };
-            bail!("this device is already in {name}, and {} holds one space; for another, install that context's own app", crate::brand::NAME);
+    /// This server's local user.
+    pub fn user(&self) -> Result<String> {
+        self.with(|i| Ok(i.user.clone()))
+    }
+
+    /// Refuses a second install: a brand holds one, and another context is another brand.
+    fn ensure_no_install(&self) -> Result<()> {
+        if self.has_install() {
+            bail!("this server already belongs to an install, and {} holds one; for another, install that context's own app", crate::brand::NAME);
         }
         Ok(())
     }
@@ -263,221 +308,393 @@ impl Node {
         let _ = self.0.events.send(event);
     }
 
-    fn space_dir(&self, space: &Key) -> PathBuf {
-        self.0.dir.join("spaces").join(hex(space))
+    fn install_dir(&self) -> PathBuf {
+        self.0.dir.join("install")
     }
 
-    fn open_space(&self, key: Key) -> Result<()> {
-        let dir = self.space_dir(&key);
-        let file: SpaceFile = serde_json::from_slice(&std::fs::read(dir.join("space.json"))?)?;
-        let store = Store::open(&dir.join("entries.db"), key)?;
-        let members = Members::replay(&key, &store.ordered()?);
+    fn open_install(&self) -> Result<()> {
+        let dir = self.install_dir();
+        let file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        let store = Store::open(&dir.join("entries.db"))?;
+        let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let paired_by = file.paired_by.and_then(|h| unhex(&h).ok());
-        let space = Space { key, store, members, user: file.user, paired_by, builds: HashMap::new(), provides: Vec::new(), replayed: None, sessions: HashMap::new(), asked: HashMap::new() };
-        *self.0.space.lock().unwrap() = Some(space);
+        let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)), paired_by)?;
+        let install = Install { r, user: file.user, sessions: HashMap::new(), asked: HashMap::new(), builds: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), dialed: false };
+        *self.0.install.lock().unwrap() = Some(install);
         Ok(())
     }
 
-    fn save_space(&self, space: &Key, file: &SpaceFile) -> Result<()> {
-        let dir = self.space_dir(space);
+    fn save_install(&self, file: &InstallFile) -> Result<()> {
+        let dir = self.install_dir();
         std::fs::create_dir_all(&dir)?;
-        write_private(&dir.join("space.json"), &serde_json::to_vec_pretty(file)?)?;
+        write_private(&dir.join("install.json"), &serde_json::to_vec_pretty(file)?)?;
         Ok(())
     }
 
-    pub fn device_name(&self) -> String {
+    pub fn server_name(&self) -> String {
         self.0.name.lock().unwrap().clone()
     }
 
-    /// Creates this device's space, with it as the first admin.
-    pub async fn create_space(&self, name: &str) -> Result<Key> {
-        self.ensure_no_space()?;
-        let root = SigningKey::generate();
-        let space = *root.verifying_key().as_bytes();
-        let user = new_user();
-        self.save_space(&space, &SpaceFile { user: user.clone(), paired_by: None })?;
-        self.open_space(space)?;
-        let genesis = space::genesis(&root, &self.0.id, name, &user, &self.device_name());
-        self.append(genesis).await?;
-        self.emit(Event::Space);
-        Ok(space)
+    /// Creates this server's install, with its local user as the first admin, and deploys the brand's apps in
+    /// `global`. Returns the recovery key's secret, given only this once.
+    pub async fn create(&self, name: &str, user_name: &str) -> Result<String> {
+        self.ensure_no_install()?;
+        ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the install a name, and yourself one");
+        let user = new_id();
+        let recovery = SigningKey::generate();
+        let genesis = members::genesis(name.trim(), &user, user_name.trim(), &self.server_name(), recovery.verifying_key().as_bytes());
+        let time = now_ms();
+        let entry = Entry::create(&self.0.key, crate::entry::Ext { log: "global".into(), time, user: user.clone(), by: None }, None, genesis);
+        self.save_install(&InstallFile { root: entry.hash().to_hex(), user: user.clone(), paired_by: None })?;
+        Store::open(&self.install_dir().join("entries.db"))?.insert_own(&entry, None)?;
+        self.open_install()?;
+        self.replay_all().await?;
+        for (app, files) in crate::brand::APPS {
+            let mut bundle = vec![("app.js".to_string(), files.iter().find(|(p, _)| *p == "app.js").context("a brand app has no app.js")?.1.to_vec())];
+            bundle.extend(files.iter().map(|(p, b)| (format!("src/{p}"), b.to_vec())));
+            let blob = self.put_blob(&crate::bundle::pack(&bundle)?)?;
+            self.append(&Scope::Global, members::node("app", json!({ "name": app, "owner": "admins" }))).await?;
+            self.append(&Scope::Global, deploy(app, &blob)).await?;
+            self.append(&Scope::Global, members::node("install", json!({ "app": app }))).await?;
+        }
+        self.settle().await?;
+        self.emit(Event::Install);
+        Ok(hex(recovery.as_bytes()))
     }
 
-    /// Writes an entry to this device's log.
-    pub async fn append(&self, content: Content) -> Result<Entry> {
+    /// Writes an entry as this server's local user.
+    pub async fn append(&self, scope: &Scope, content: Content) -> Result<Entry> {
+        let user = self.user()?;
+        self.append_as(scope, &user, None, content).await
+    }
+
+    /// Writes an entry to this server's log of `scope`, as `user`, for `by` if it ran for someone else.
+    async fn append_as(&self, scope: &Scope, user: &str, by: Option<Key>, content: Content) -> Result<Entry> {
         let _write = self.0.writes.lock().await;
-        let entry = self.with(|s| {
-            let time = now_ms().max(s.store.max_time()?.saturating_add(1));
-            let prev = s.store.last(&self.0.id, SPACE_LOG)?;
-            let entry = Entry::create(&self.0.key, s.key, time, prev.as_ref(), content);
-            s.store.insert(&entry)?;
-            Ok(entry)
-        })?;
-        self.after(std::slice::from_ref(&entry), None).await?;
+        let (entry, handled) = self.with(|i| i.r.append(scope, user, by, content, now_ms()))?;
+        self.after(handled, None).await?;
         Ok(entry)
     }
 
-    /// Replays new entries into the apps and passes them on to every session but the one they came from.
-    async fn after(&self, new: &[Entry], from: Option<Key>) -> Result<()> {
-        if new.is_empty() {
+    /// Passes on new entries, follows what changed in the members, and replays the views.
+    async fn after(&self, handled: Handled, from: Option<Key>) -> Result<()> {
+        if handled.new.is_empty() && handled.dropped.is_empty() && !handled.members {
             return Ok(());
         }
-        let (jobs, apps) = self.with(|s| {
-            let membership = new.iter().any(|e| e.content.app == space::APP);
-            if membership {
-                s.members = Members::replay(&s.key, &s.store.ordered()?);
-                let members = &s.members;
-                s.sessions.retain(|peer, _| members.current(peer).is_some());
-            }
-            s.builds.extend(release::builds(new));
-            if membership || new.iter().any(|e| e.content.app == release::APP && e.content.kind == "provides") {
-                s.provides = crate::providers::announced(&s.members, &s.store.ordered()?, &s.user);
-            }
-            let msg = sync::entries(s.key, new);
-            for (peer, tx) in &s.sessions {
+        let jobs = self.with(|i| {
+            for (peer, session) in &i.sessions {
                 if Some(*peer) != from {
-                    let _ = tx.send(msg.clone());
+                    if let Some(msg) = i.r.for_peer(peer, &handled.new) {
+                        let _ = session.tx.send(msg);
+                    }
+                }
+                if handled.gained {
+                    let _ = session.tx.send(i.r.hello(Vec::new())?);
+                }
+                if let Some((_, logs)) = handled.peers_gained.iter().find(|(k, _)| k == peer) {
+                    let frontier = session.frontier.clone().unwrap_or_default();
+                    for msg in i.r.missing_in(peer, &frontier, |l| logs.iter().any(|g| g == l))? {
+                        let _ = session.tx.send(msg);
+                    }
                 }
             }
-            // Membership changes who counts, so every view is rebuilt. Otherwise an app is rebuilt only
-            // if an entry arrived late (before something already replayed); the rest just replay what's new.
-            let late: std::collections::BTreeSet<String> =
-                new.iter().filter(|e| membership || s.replayed.is_some_and(|f| e.order() <= f)).map(|e| e.content.app.clone()).collect();
-            let all = if membership || !late.is_empty() { for_apps(&s.members, &s.store.ordered()?) } else { Vec::new() };
-            let fresh = for_apps(&s.members, &sorted(new));
-            let mut apps: Vec<String> = new.iter().map(|e| e.content.app.clone()).collect();
-            apps.sort();
-            apps.dedup();
-            let jobs: Vec<Replay> = if membership {
-                self.0.apps_names.iter().map(|app| Replay { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() }).collect()
-            } else {
-                apps.iter()
-                    .map(|app| match late.contains(app) {
-                        true => Replay { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() },
-                        false => Replay { app: app.clone(), fresh: false, entries: fresh.iter().filter(|e| &e.app == app).cloned().collect() },
-                    })
-                    .collect()
-            };
-            s.replayed = s.replayed.max(new.iter().map(Entry::order).max());
-            Ok((jobs, apps))
+            if handled.members {
+                let r = &i.r;
+                i.sessions.retain(|peer, _| r.may_sync(peer));
+            }
+            for log in &handled.dropped {
+                i.views.remove(log);
+            }
+            i.builds.extend(release::builds(&handled.new));
+            replay_jobs(i, &handled.new, &self.0.apps.names())
         })?;
-        if new.iter().any(|e| e.content.app == release::APP) {
+        for log in &handled.dropped {
+            self.0.apps.drop_scope(log).await;
+        }
+        if handled.new.iter().any(|e| e.content.app == release::APP && e.content.kind == "node-release") {
             self.consider_update();
         }
-        if new.iter().any(|e| e.content.app == space::APP) {
-            self.0.membership_changed.notify_one();
+        if handled.members {
+            self.0.changed.notify_one();
+            self.emit(Event::Servers);
         }
         for native in &self.0.native {
-            if native.sync.is_some() && new.iter().any(|e| e.content.app == native.name) {
+            if native.sync.is_some() && handled.new.iter().any(|e| e.content.app == native.name) {
                 self.sync_native(native.name);
             }
         }
-        self.0.apps.replay(jobs).await?;
+        let mut apps: Vec<String> = jobs.iter().map(|j| j.app.clone()).collect();
+        apps.extend(handled.new.iter().filter(|e| e.content.app != members::APP).map(|e| e.content.app.clone()));
+        apps.sort();
+        apps.dedup();
+        self.0.apps.replay(jobs).await;
         self.emit(Event::Changed { apps });
         Ok(())
     }
 
+    /// Replays every scope's views from the start (when the node starts).
     async fn replay_all(&self) -> Result<()> {
-        let all = self.with(|s| {
-            let entries = s.store.ordered()?;
-            s.replayed = entries.iter().map(Entry::order).max();
-            s.builds = release::builds(&entries);
-            s.provides = crate::providers::announced(&s.members, &entries, &s.user);
-            Ok(for_apps(&s.members, &entries))
+        let _write = self.0.writes.lock().await;
+        let jobs = self.with(|i| {
+            i.views.clear();
+            i.builds = release::builds(&i.r.store.scope("global")?);
+            let all = i.r.store.ordered()?;
+            replay_jobs(i, &all, &self.0.apps.names())
         })?;
-        let jobs = self.0.apps_names.iter().map(|app| Replay { app: app.clone(), fresh: true, entries: all.iter().filter(|e| &e.app == app).cloned().collect() }).collect();
-        self.0.apps.replay(jobs).await
+        self.0.apps.replay(jobs).await;
+        Ok(())
     }
 
-    /// Who `device` is in the space, as apps see them.
-    pub fn me_of(&self, device: &Key) -> Result<Me> {
-        self.with(|s| {
-            ensure!(s.members.current(&self.0.id).is_some(), "this device is not a member of the space yet");
-            let m = s.members.current(device).context("not a member of this space")?;
-            let name = if *device == self.0.id { self.device_name() } else { m.name.clone() };
-            Ok(Me { device: hex(device), user: m.user.clone(), name })
-        })
-    }
-
-    /// Runs an app operation, appending whatever entries it asks for: here, or, for a device feature
-    /// that only another of this user's devices provides, on that device.
-    pub async fn call(&self, app: &str, op: &str, input: Value) -> Result<Value> {
-        let here = self.0.apps_names.iter().any(|a| a == app) || self.0.native.iter().any(|n| n.name == app) || self.0.providers.has(app);
-        if !here {
-            if let Some(device) = self.provider_of(app)? {
-                return self.call_on(device, app, op, input).await;
+    /// Brings this server in line with the members: runs each app's latest deploy, fetching bundles it lacks, and
+    /// says which build it runs.
+    async fn settle(&self) -> Result<()> {
+        let Ok((wanted, author)) = self.with(|i| {
+            let wanted: BTreeMap<String, String> = i.r.members.apps.values().filter_map(|a| Some((a.name.clone(), a.bundle.clone()?))).collect();
+            Ok((wanted, i.r.members.server(&self.0.id).is_some()))
+        }) else {
+            return Ok(());
+        };
+        if !author {
+            return Ok(());
+        }
+        let mut modules = Vec::new();
+        for (app, bundle) in &wanted {
+            match self.blob(bundle).await.and_then(|b| crate::bundle::module(&b)) {
+                Ok(module) => modules.push((app.clone(), module)),
+                Err(err) => tracing::warn!("{app}'s deploy: {err:#}"),
             }
         }
-        self.call_as(self.0.id, app, op, input).await
+        let changed: Vec<String> = {
+            let bundles = self.0.bundles.lock().unwrap();
+            modules.iter().map(|(a, _)| a.clone()).filter(|a| bundles.get(a) != wanted.get(a)).collect()
+        };
+        if !changed.is_empty() || modules.len() != self.0.apps.names().len() {
+            let _write = self.0.writes.lock().await;
+            self.0.apps.load(modules.clone()).await?;
+            *self.0.bundles.lock().unwrap() = modules.iter().map(|(a, _)| (a.clone(), wanted[a].clone())).collect();
+            let jobs = self.with(|i| {
+                let all = i.r.store.ordered()?;
+                i.views.clear();
+                replay_jobs(i, &all, &changed)
+            })?;
+            self.0.apps.replay(jobs).await;
+            self.emit(Event::Changed { apps: changed });
+        }
+        let running = self.with(|i| Ok(i.builds.get(&self.0.id).map(|r| r.commit.clone())))?;
+        if running.as_deref() != Some(crate::brand::BUILD) {
+            self.append(&Scope::Global, release::running()).await?;
+        }
+        Ok(())
     }
 
-    /// Another of this user's devices that provides `app`, preferring one that's online.
-    fn provider_of(&self, app: &str) -> Result<Option<Key>> {
-        self.with(|s| {
-            let mut devices: Vec<Key> = s.provides.iter().filter(|(d, v)| *d != self.0.id && v["name"] == app && s.members.current(d).is_some()).map(|(d, _)| *d).collect();
-            devices.sort_by_key(|d| !s.sessions.contains_key(d));
-            Ok(devices.first().copied())
+    /// Whether this server is ready to run calls: it has replayed what it holds and, since it woke, received
+    /// everything each connected server's hello offered it.
+    pub fn ready(&self) -> bool {
+        self.with(|i| {
+            let alone = i.r.members.servers().all(|s| s.key == self.0.id);
+            let dialed = i.dialed || alone || self.0.woke.elapsed() > FIRST_DIAL;
+            Ok(i.r.members.server(&self.0.id).is_some() && dialed && i.sessions.values().all(|s| s.caught_up))
         })
+        .unwrap_or(false)
     }
 
-    /// Runs an operation on this device for `caller`, another device in the space.
-    pub async fn call_as(&self, caller: Key, app: &str, op: &str, input: Value) -> Result<Value> {
-        let me = self.me_of(&caller)?;
-        let native = self.0.native.iter().find(|n| n.name == app);
-        if native.is_some() || self.0.providers.has(app) {
-            ensure!(me.user == self.me_of(&self.0.id)?.user, "{app} runs only for this device's own user's devices");
-            let (result, appends) = match native {
-                Some(n) => (n.call)(op.to_string(), input, me, if n.entries { self.app_entries(app)? } else { vec![] }).await?,
-                None => self.0.providers.call(app, op, input, me).await?,
+    // Calls.
+
+    /// Runs an operation for this server's local user: here, or on the nearest server that can.
+    pub async fn call(&self, req: CallRequest) -> Result<Value> {
+        let me = Caller { key: self.0.id, user: self.user()? };
+        self.route(req, me).await
+    }
+
+    /// Tries the servers that might run a call, nearest first, one at a time, the next only if one can't be reached
+    /// or says to go elsewhere.
+    async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
+        let mut why = Vec::new();
+        for server in self.candidates(&req, &me)? {
+            let started = Instant::now();
+            let reply = match server == self.0.id {
+                true => Ok(self.run(&req, &me).await),
+                false => self.ask_server(server, &req, &me).await,
             };
-            for content in appends {
-                self.append(content).await?;
+            let name = self.name_of(&server);
+            match reply {
+                Ok(Reply::Ok(v)) => {
+                    let _ = self.with(|i| Ok(i.nearest.insert(server, started.elapsed())));
+                    return Ok(v);
+                }
+                Ok(Reply::Error(e)) => bail!("{e}"),
+                Ok(Reply::Elsewhere(w)) => why.push(format!("{name}: {w}")),
+                Err(err) => {
+                    let _ = self.with(|i| Ok(i.nearest.insert(server, Duration::MAX)));
+                    why.push(format!("{name}: {err:#}"));
+                }
             }
-            return Ok(result);
         }
-        let outcome = self.0.apps.call(app, op, input, me, now_ms()).await?;
-        for content in outcome.appends {
-            self.append(content).await?;
+        if why.is_empty() {
+            bail!("no server runs {} for you", req.app);
         }
-        Ok(outcome.result)
+        bail!("no server could run it ({})", why.join("; "))
     }
 
-    /// Runs an operation on another device in the space.
-    pub async fn call_on(&self, device: Key, app: &str, op: &str, input: Value) -> Result<Value> {
-        if device == self.0.id {
-            return self.call_as(self.0.id, app, op, input).await;
+    /// The servers that might run a call, nearest first.
+    fn candidates(&self, req: &CallRequest, me: &Caller) -> Result<Vec<Key>> {
+        if let Some(server) = &req.server {
+            return Ok(vec![self.find_server(server)?]);
         }
-        let space = self.with(|s| Ok(s.key))?;
-        let conn = self.0.endpoint.connect(EndpointId::from_bytes(&device)?, CALL_ALPN).await?;
+        let here = self.runs_driver_here(&req.app);
+        self.with(|i| {
+            let m = &i.r.members;
+            let mut servers: Vec<Key> = if m.apps.get(&req.app).is_some_and(|a| a.bundle.is_some()) {
+                m.servers().map(|s| s.key).filter(|s| m.serves(s, &me.user)).collect()
+            } else {
+                let mut s: Vec<Key> = i.sessions.iter().filter(|(_, s)| s.drivers.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
+                if here && me.user == i.user {
+                    s.push(self.0.id);
+                }
+                s
+            };
+            let rank = |k: &Key| (*k != self.0.id, !i.sessions.contains_key(k), i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)));
+            servers.sort_by_key(rank);
+            Ok(servers)
+        })
+    }
+
+    fn runs_driver_here(&self, app: &str) -> bool {
+        self.0.native.iter().any(|n| n.name == app) || self.0.providers.has(app)
+    }
+
+    /// Asks another server to run a call.
+    async fn ask_server(&self, server: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
+        let conn = tokio::time::timeout(Duration::from_secs(10), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, CALL_ALPN)).await.context("timed out")??;
         let (mut send, mut recv) = conn.open_bi().await?;
-        let request = serde_json::to_vec(&json!({ "space": hex(&space), "app": app, "op": op, "input": input }))?;
-        send.write_all(&request).await?;
+        let request = json!({ "app": req.app, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "me": { "key": hex(&me.key), "user": me.user } });
+        send.write_all(&serde_json::to_vec(&request)?).await?;
         send.finish()?;
-        let reply: Value = serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?;
-        match reply.get("error") {
-            Some(err) => bail!("{}", err.as_str().unwrap_or("remote error")),
-            None => Ok(reply["ok"].clone()),
+        let reply = tokio::time::timeout(CALL_LIMIT + Duration::from_secs(5), recv.read_to_end(16 << 20)).await.context("timed out")??;
+        Ok(Reply::from_json(serde_json::from_slice(&reply)?))
+    }
+
+    /// Runs a call here, for `me`, or says why it can't.
+    async fn run(&self, req: &CallRequest, me: &Caller) -> Reply {
+        let result = tokio::time::timeout(CALL_LIMIT, self.run_here(req, me)).await;
+        match result {
+            Ok(Ok(reply)) => reply,
+            Ok(Err(err)) => Reply::Error(format!("{err:#}")),
+            Err(_) => Reply::Error(format!("it took longer than {}s and was stopped", CALL_LIMIT.as_secs())),
         }
     }
 
-    pub async fn widgets(&self, viewer: Key) -> Result<Vec<Value>> {
-        let me = self.me_of(&viewer)?;
+    async fn run_here(&self, req: &CallRequest, me: &Caller) -> Result<Reply> {
+        let input = if req.input.is_null() { json!({}) } else { req.input.clone() };
+        if req.app == members::APP {
+            return self.node_op(&req.op, &input, me).await.map(Reply::Ok);
+        }
+        let deployed = self.with(|i| Ok(i.r.members.apps.get(&req.app).is_some_and(|a| a.bundle.is_some())))?;
+        if !deployed {
+            if !self.runs_driver_here(&req.app) {
+                return Ok(Reply::Elsewhere(format!("{} doesn't run here", req.app)));
+            }
+            return self.run_driver(&req.app, &req.op, input, me).await.map(Reply::Ok);
+        }
+        let prepared = self.with(|i| prepare(self, i, req, me));
+        let (ctx, scopes) = match prepared? {
+            Ok(p) => p,
+            Err(why) => return Ok(Reply::Elsewhere(why)),
+        };
+        if !self.ready() {
+            return Ok(Reply::Elsewhere("it isn't ready yet".into()));
+        }
+        let deployed_here = self.0.bundles.lock().unwrap().get(&req.app).cloned();
+        let latest = self.with(|i| Ok(i.r.members.apps.get(&req.app).and_then(|a| a.bundle.clone())))?;
+        if deployed_here.is_none() || deployed_here != latest {
+            return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest deploy yet", req.app)));
+        }
+        let outcome = self.0.apps.call(&req.app, &req.op, input, &ctx).await?;
+        // Every append is checked before any is written: a call that fails writes nothing.
+        let mut writes = Vec::new();
+        for append in outcome.appends {
+            writes.push(self.with(|i| check_append(i, append, &scopes, me))?);
+        }
+        let by = (me.key != self.0.id).then_some(me.key);
+        for (scope, content) in writes {
+            self.append_as(&scope, &me.user, by, content).await?;
+        }
+        Ok(Reply::Ok(outcome.result))
+    }
+
+    /// Runs a native app or provider here, for this server's local user.
+    async fn run_driver(&self, app: &str, op: &str, input: Value, me: &Caller) -> Result<Value> {
+        let user = self.user()?;
+        ensure!(me.user == user, "{app} runs only for {}'s own user", self.server_name());
+        let caller = self.me_for(me)?;
+        let native = self.0.native.iter().find(|n| n.name == app);
+        let (result, appends) = match native {
+            Some(n) => (n.call)(op.to_string(), input, caller, if n.entries { self.app_entries(app)? } else { vec![] }).await?,
+            None => self.0.providers.call(app, op, input, caller).await?,
+        };
+        let by = (me.key != self.0.id).then_some(me.key);
+        for content in appends {
+            self.append_as(&Scope::User(user.clone()), &user, by, content).await?;
+        }
+        Ok(result)
+    }
+
+    /// The node's own operations, which other servers ask for: `open`.
+    async fn node_op(&self, op: &str, input: &Value, me: &Caller) -> Result<Value> {
+        match op {
+            "open" => {
+                let user = input["user"].as_str().context("whose data?")?;
+                let scope = Scope::User(user.into());
+                self.with(|i| {
+                    let m = &i.r.members;
+                    ensure!(m.holds(&self.0.id, &scope), "{} doesn't hold that user's data", self.server_name());
+                    ensure!(m.owners(&self.0.id).iter().any(|o| m.acts_for(&me.user, o)), "only someone acting for an owner of {} opens data on it", self.server_name());
+                    Ok(())
+                })?;
+                let by = (me.key != self.0.id).then_some(me.key);
+                self.append_as(&scope, &me.user, by, members::node("open", json!({ "server": hex(&self.0.id) }))).await?;
+                Ok(json!(format!("Opened for an hour on {}.", self.server_name())))
+            }
+            other => bail!("the node has no operation {other}"),
+        }
+    }
+
+    /// Who a caller is, as apps see them.
+    fn me_for(&self, caller: &Caller) -> Result<Me> {
+        self.with(|i| Ok(node_me(self, &i.r.members, caller)))
+    }
+
+    /// The context a widget, hook or screen of `app` gets for `viewer`: every scope it may reach that's here.
+    fn read_context(&self, app: &str, viewer: &Caller) -> Result<Context> {
+        let me = self.me_for(viewer)?;
+        self.with(|i| {
+            let reach = reachable(i, app, &viewer.user);
+            let scopes: Vec<Scope> = reach.into_iter().filter(|s| i.r.holds(s)).collect();
+            Ok(Context { me, now: now_ms(), scopes: handles(&i.r.members, &scopes, &viewer.user), read_only: true })
+        })
+    }
+
+    pub async fn widgets(&self, viewer: Caller) -> Result<Vec<Value>> {
         let mut out = Vec::new();
-        for app in self.0.apps.describe().await? {
-            let name = app["name"].as_str().unwrap_or_default().to_string();
-            for w in app["widgets"].as_array().into_iter().flatten() {
+        for app in self.0.apps.names() {
+            let ctx = self.read_context(&app, &viewer)?;
+            if ctx.scopes.is_empty() {
+                continue;
+            }
+            let describe = self.0.apps.describe(&app).await?;
+            for w in describe["widgets"].as_array().into_iter().flatten() {
                 let widget = w["name"].as_str().unwrap_or_default();
-                match self.0.apps.widget(&name, widget, me.clone(), now_ms()).await {
-                    Ok(root) => out.push(json!({ "app": name, "widget": widget, "title": w["title"], "root": root })),
-                    Err(err) => tracing::warn!("{name} widget {widget}: {err:#}"),
+                match self.0.apps.widget(&app, widget, &ctx).await {
+                    Ok(root) => out.push(json!({ "app": app, "widget": widget, "title": w["title"], "root": root })),
+                    Err(err) => tracing::warn!("{app} widget {widget}: {err:#}"),
                 }
             }
         }
         Ok(out)
     }
 
-    /// Runs an app's hook for an agent harness on this device (SPEC.md, "Hooks"). The node remembers,
-    /// per session, when the hook last ran, and tells the app as `since` (null on a session's first call).
+    /// Runs an app's hook for an agent harness on this machine (SPEC.md, "Local API"). The node remembers, per
+    /// session, when the hook last ran, and tells the app as `since` (null on a session's first call).
     pub async fn hook(&self, app: &str, name: &str, event: Value) -> Result<Value> {
         let session = event["session_id"].as_str().unwrap_or("").to_string();
         let path = self.0.dir.join("hooks.json");
@@ -485,8 +702,8 @@ impl Node {
         let key = format!("{app}/{name}/{session}");
         let since = seen.get(&key).cloned().unwrap_or(Value::Null);
         let now = now_ms();
-        let me = self.me_of(&self.0.id)?;
-        let out = self.0.apps.hook(app, name, json!({ "event": event, "since": since }), me, now).await?;
+        let ctx = self.read_context(app, &Caller { key: self.0.id, user: self.user()? })?;
+        let out = self.0.apps.hook(app, name, json!({ "event": event, "since": since }), &ctx).await?;
         seen.insert(key, json!(now));
         let week_ago = now.saturating_sub(7 * 86_400_000);
         seen.retain(|_, t| t.as_u64().is_some_and(|t| t > week_ago));
@@ -496,9 +713,9 @@ impl Node {
 
     /// An app screen as a whole page: the app's HTML with the design kit, the bridge, and who's looking.
     /// `scope` is the page a shell opened it from, a hint the app may follow or not.
-    pub async fn screen(&self, viewer: Key, app: &str, name: &str, params: Value, scope: Option<&str>) -> Result<String> {
+    pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>) -> Result<String> {
         let body = self.0.apps.screen(app, name).await?;
-        let me = self.me_of(&viewer)?;
+        let me = self.me_for(&viewer)?;
         let context = json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope });
         // `</` can't appear inside the inline script, so it can't end it early.
         let context = context.to_string().replace("</", "<\\/");
@@ -511,93 +728,168 @@ impl Node {
         ))
     }
 
-    pub async fn apps(&self) -> Result<Vec<Value>> {
-        let mut apps = self.0.apps.describe().await?;
-        apps.extend(self.0.native.iter().map(|n| (n.describe)()));
-        apps.extend(self.0.providers.describe());
-        if let Ok(provides) = self.with(|s| Ok(s.provides.clone())) {
-            for (_, describe) in provides {
-                if !apps.iter().any(|a| a["name"] == describe["name"]) {
-                    apps.push(describe);
+    /// Every app in the install, with what each does for `viewer` where it's installed for them; and the drivers
+    /// that serve them.
+    pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
+        let listed = self.with(|i| {
+            let m = &i.r.members;
+            Ok(m.apps
+                .values()
+                .map(|a| {
+                    let installed: Vec<String> = i.views.iter().filter(|(_, (_, s))| s.installed.contains(&a.name)).map(|(scope, _)| scope.clone()).collect();
+                    let reach = reachable(i, &a.name, &viewer.user);
+                    (a.name.clone(), json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "deploys": a.deploys, "installed": installed }), !reach.is_empty())
+                })
+                .collect::<Vec<_>>())
+        })?;
+        let mut out = Vec::new();
+        for (name, mut info, mine) in listed {
+            if mine && self.0.apps.has(&name) {
+                if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
+                    for (k, v) in d {
+                        info[k] = v;
+                    }
                 }
             }
+            out.push(info);
         }
-        Ok(apps)
+        if viewer.user == self.user()? {
+            out.extend(self.0.native.iter().map(|n| (n.describe)()));
+            out.extend(self.0.providers.describe());
+        }
+        let remote = self.with(|i| {
+            let mut d: Vec<Value> = i.sessions.values().flat_map(|s| s.drivers.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
+            d.sort_by_key(|v| v["name"].as_str().unwrap_or("").to_string());
+            Ok(d)
+        })?;
+        for describe in remote {
+            if !out.iter().any(|a| a["name"] == describe["name"]) {
+                out.push(describe);
+            }
+        }
+        Ok(out)
     }
 
-    /// Everything a shell needs to draw this device and its space.
+    /// Everything a shell needs to draw this server and its install, for this server's local user.
     pub fn state(&self) -> Value {
-        self.state_for(self.0.id)
+        let user = self.user().unwrap_or_default();
+        self.state_for(&Caller { key: self.0.id, user })
     }
 
-    /// The state as `viewer`, this device or a phone it serves, sees it.
-    pub fn state_for(&self, viewer: Key) -> Value {
-        let space = self.0.space.lock().unwrap();
-        let s = space.as_ref().filter(|s| viewer == self.0.id || s.members.current(&viewer).is_some());
-        let viewer_name = if viewer == self.0.id { self.device_name() } else { s.and_then(|s| s.members.current(&viewer)).map(|m| m.name.clone()).unwrap_or_default() };
-        let space = s.map(|s| {
-            let devices: Vec<Value> = s
-                .members
-                .current_devices()
-                .map(|m| {
-                    let mut d = json!({
-                        "device": hex(&m.device), "name": m.name, "user": m.user, "role": m.role, "client": m.client,
-                        "build": s.builds.get(&m.device).map(|r| &r.commit), "target": s.builds.get(&m.device).map(|r| &r.target),
-                        "me": m.device == viewer, "host": m.device == self.0.id,
-                    });
-                    // A phone keeps no sessions, so it's never online; say when it last asked this device instead.
-                    match m.client {
-                        true => d["asked"] = json!(s.asked.get(&m.device)),
-                        false => d["online"] = json!(m.device == self.0.id || s.sessions.contains_key(&m.device)),
-                    }
-                    d
+    /// The state as `viewer`, this server or a client it serves, sees it.
+    pub fn state_for(&self, viewer: &Caller) -> Value {
+        let ready = self.ready();
+        let install = self.0.install.lock().unwrap();
+        let viewer_name = if viewer.key == self.0.id { self.server_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
+        let install = install.as_ref().map(|i| {
+            let m = &i.r.members;
+            let me = &viewer.user;
+            let list = |ps: Vec<Principal>| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+            let servers: Vec<Value> = m
+                .servers()
+                .map(|s| {
+                    let session = i.sessions.get(&s.key);
+                    json!({
+                        "key": hex(&s.key), "name": s.name, "user": s.user, "me": s.key == viewer.key, "here": s.key == self.0.id,
+                        "online": s.key == self.0.id || session.is_some(),
+                        "owners": list(m.owners(&s.key)), "users": list(m.users_of(&s.key)), "privileged": m.privileged(&s.key),
+                        "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(),
+                        "serves_me": m.serves(&s.key, me),
+                        "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
+                        "drivers": session.map(|s| s.drivers.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default(),
+                    })
                 })
                 .collect();
+            let clients: Vec<Value> = m
+                .clients()
+                .map(|c| json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "me": c.key == viewer.key, "asked": i.asked.get(&c.key) }))
+                .collect();
+            let users: Vec<Value> = m.users.values().filter(|u| !u.removed).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role, "me": &u.id == me })).collect();
+            let groups: Vec<Value> = m
+                .groups
+                .values()
+                .map(|g| {
+                    let members: Vec<Value> = g.members.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
+                    let invited: Vec<Value> = g.invited.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
+                    json!({ "id": g.id, "name": g.name, "role": m.group_role(me, &g.id), "members": members, "invited": invited })
+                })
+                .collect();
+            let opens: Vec<Value> = i
+                .views
+                .get(&Scope::User(me.clone()).to_string())
+                .map(|(_, s)| s.opens.iter().map(|(by, server, time)| json!({ "by": by, "by_name": m.users.get(by).map(|u| &u.name), "server": hex(server), "time": time, "until": time + members::OPEN_FOR })).collect())
+                .unwrap_or_default();
             json!({
-                "id": hex(&s.key), "name": s.members.name, "user": s.user,
-                "member": s.members.current(&viewer).is_some(),
-                "role": s.members.current(&viewer).map(|m| m.role.clone()),
-                "devices": devices, "entries": s.store.count().unwrap_or(0),
+                "name": m.name, "root": i.r.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
+                "member": m.server(&self.0.id).is_some(),
+                "users": users, "groups": groups, "servers": servers, "clients": clients, "opens": opens,
+                "entries": i.r.store.count().unwrap_or(0),
             })
         });
         json!({
             "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT, "store": crate::brand::STORE },
-            "device": { "id": hex(&viewer), "name": viewer_name },
-            "host": { "id": hex(&self.0.id), "name": self.device_name() },
-            "space": space,
+            "me": { "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user },
+            "server": { "key": hex(&self.0.id), "name": self.server_name(), "ready": ready },
+            "install": install,
         })
     }
 
-    /// Removes a device from the space. Admins only, as SPEC.md says.
-    pub async fn remove_device(&self, device: Key) -> Result<()> {
-        self.with(|s| {
-            ensure!(s.members.current(&self.0.id).is_some_and(|m| m.role == Role::Admin), "only admins remove devices");
-            ensure!(s.members.current(&device).is_some(), "that device isn't in the space");
-            Ok(())
-        })?;
-        self.append(space::remove(&device)).await?;
+    // Members.
+
+    /// Writes one of `global`'s node entries as the local user, after checking it would count.
+    pub async fn member(&self, kind: &str, data: Value) -> Result<()> {
+        self.member_as(&Caller { key: self.0.id, user: self.user()? }, kind, data).await
+    }
+
+    async fn member_as(&self, caller: &Caller, kind: &str, data: Value) -> Result<()> {
+        let content = members::node(kind, data);
+        let by = (caller.key != self.0.id).then_some(caller.key);
+        // One that wouldn't count would change nothing anywhere: refuse it instead.
+        let counts = self.with(|i| i.r.would_count(&caller.user, by, content.clone(), now_ms()))?;
+        ensure!(counts, "that changes nothing: you may not {kind} that");
+        self.append_as(&Scope::Global, &caller.user, by, content).await?;
         Ok(())
     }
 
-    fn is_member(&self, device: &Key) -> bool {
-        self.with(|s| Ok(s.members.current(device).is_some())).unwrap_or(false)
+    pub async fn rename_server(&self, name: &str) -> Result<()> {
+        ensure!(!name.trim().is_empty(), "give a name");
+        *self.0.name.lock().unwrap() = name.to_string();
+        let path = self.0.dir.join("server.json");
+        let mut file: ServerFile = serde_json::from_slice(&std::fs::read(&path)?)?;
+        file.name = name.to_string();
+        write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
+        if self.has_install() {
+            self.member("rename", json!({ "key": hex(&self.0.id), "name": name })).await?;
+        }
+        Ok(())
     }
 
-    /// Serves a client device (a phone) that keeps no log of its own: one JSON request per stream.
+    /// Opens `user`'s data on `server` for an hour, for the local user (see SPEC.md, "Servers").
+    pub async fn open(&self, user: &str, server: &str) -> Result<Value> {
+        let req = CallRequest { app: members::APP.into(), op: "open".into(), input: json!({ "user": user }), server: Some(server.into()), ..Default::default() };
+        self.call(req).await
+    }
+
+    // Clients.
+
+    fn is_client(&self, key: &Key) -> bool {
+        self.with(|i| Ok(i.r.members.client(key).is_some())).unwrap_or(false)
+    }
+
+    /// Serves a client (a phone) that keeps no log of its own: one JSON request per stream.
     async fn accept_client(&self, conn: Connection) -> Result<()> {
         let caller = *conn.remote_id().as_bytes();
-        tracing::debug!("client {} connected", short(&caller));
-        ensure!(self.is_member(&caller), "{} is not a member of the space here", short(&caller));
+        ensure!(self.is_client(&caller), "{} is not a client of this install", short(&caller));
         loop {
             let (mut send, mut recv) = match conn.accept_bi().await {
                 Ok(s) => s,
                 Err(_) => return Ok(()),
             };
-            if !self.is_member(&caller) {
-                return Ok(());
-            }
-            let _ = self.with(|s| Ok(s.asked.insert(caller, now_ms())));
+            let Ok(user) = self.with(|i| Ok(i.r.members.client(&caller).map(|c| c.user.clone()))) else { return Ok(()) };
+            let Some(user) = user else { return Ok(()) };
+            let _ = self.with(|i| Ok(i.asked.insert(caller, now_ms())));
             let node = self.clone();
+            let me = Caller { key: caller, user };
             tokio::spawn(async move {
                 let result = async {
                     let request: Value = serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?;
@@ -605,14 +897,14 @@ impl Node {
                     if path == "/v1/events" {
                         let mut events = node.subscribe();
                         while let Ok(event) = events.recv().await {
-                            if !node.is_member(&caller) {
+                            if !node.is_client(&caller) {
                                 break;
                             }
                             send.write_all(format!("{}\n", serde_json::to_string(&event)?).as_bytes()).await?;
                         }
                         return anyhow::Ok(());
                     }
-                    let reply = match node.client_request(caller, method, path, request["body"].clone()).await {
+                    let reply = match node.client_request(&me, method, path, request["body"].clone()).await {
                         Ok(ok) => ok,
                         Err(err) => json!({ "error": format!("{err:#}") }),
                     };
@@ -628,75 +920,77 @@ impl Node {
         }
     }
 
-    async fn client_request(&self, caller: Key, method: &str, path: &str, body: Value) -> Result<Value> {
+    async fn client_request(&self, me: &Caller, method: &str, path: &str, body: Value) -> Result<Value> {
+        let serves = self.with(|i| Ok(i.r.members.serves(&self.0.id, &me.user)))?;
+        if !serves && path != "/v1/state" {
+            return Ok(json!({ "elsewhere": format!("{} doesn't serve you", self.server_name()) }));
+        }
         Ok(match (method, path) {
-            ("GET", "/v1/state") => self.state_for(caller),
-            ("GET", "/v1/apps") => json!(self.apps().await?),
-            ("GET", "/v1/widgets") => json!(self.widgets(caller).await?),
+            ("GET", "/v1/state") => self.state_for(me),
+            ("GET", "/v1/apps") => json!(self.apps(me).await?),
+            ("GET", "/v1/widgets") => json!(self.widgets(me.clone()).await?),
             ("GET", "/v1/screen") => {
                 let (app, name) = (body["app"].as_str().unwrap_or(""), body["screen"].as_str().unwrap_or("main"));
-                json!({ "html": self.screen(caller, app, name, body["params"].clone(), body["scope"].as_str()).await? })
+                json!({ "html": self.screen(me.clone(), app, name, body["params"].clone(), body["scope"].as_str()).await? })
             }
             ("POST", "/v1/call") => {
-                let input = if body["input"].is_null() { json!({}) } else { body["input"].clone() };
-                let ok = self.call_as(caller, body["app"].as_str().unwrap_or(""), body["op"].as_str().unwrap_or(""), input).await?;
-                json!({ "ok": ok })
+                let req: CallRequest = serde_json::from_value(body)?;
+                let deployed = self.with(|i| Ok(i.r.members.apps.get(&req.app).is_some_and(|a| a.bundle.is_some())))?;
+                // An app's call runs here or the client tries another server; a driver's goes where the driver is.
+                match deployed || req.app == members::APP {
+                    true => self.run(&req, me).await.json(),
+                    false => match self.route(req, me.clone()).await {
+                        Ok(ok) => json!({ "ok": ok }),
+                        Err(err) => json!({ "error": format!("{err:#}") }),
+                    },
+                }
             }
-            ("POST", "/v1/device") => {
-                self.rename_client(caller, body["name"].as_str().unwrap_or("").trim()).await?;
+            ("POST", "/v1/name") => {
+                let name = body["name"].as_str().unwrap_or("").trim();
+                self.member_as(me, "rename", json!({ "key": hex(&me.key), "name": name })).await?;
                 json!({})
             }
-            ("POST", "/v1/pair") => json!({ "code": self.pair_as(caller, body["new_user"] == true)? }),
+            ("POST", "/v1/pair") => json!({ "code": self.pair_as(me, new_user(&body)?)? }),
+            ("POST", "/v1/trust") => {
+                let server = self.find_server(body["server"].as_str().unwrap_or(""))?;
+                let kind = if body["trust"] == false { "untrust" } else { "trust" };
+                self.member_as(me, kind, json!({ "server": hex(&server) })).await?;
+                json!({})
+            }
+            ("GET", p) if p.starts_with("/v1/blobs/") => {
+                let hash = &p["/v1/blobs/".len()..];
+                ensure!(self.blob_named_for(hash, &me.user)?, "no such blob for you");
+                json!({ "blob": data_encoding::BASE64.encode(&self.blob(hash).await?) })
+            }
             _ => bail!("no such request: {method} {path}"),
         })
     }
 
-    pub async fn rename_device(&self, name: &str) -> Result<()> {
-        *self.0.name.lock().unwrap() = name.to_string();
-        let path = self.0.dir.join("device.json");
-        let mut file: DeviceFile = serde_json::from_slice(&std::fs::read(&path)?)?;
-        file.name = name.to_string();
-        write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
-        if self.has_space() {
-            self.append(space::rename(&self.0.id, name)).await?;
-        }
-        Ok(())
+    // Pairing.
+
+    /// Makes a one-time pairing code for another of the local user's machines, or, for an admin, a new user's.
+    pub fn pair(&self, new_user: Option<(String, Role)>) -> Result<String> {
+        self.pair_as(&Caller { key: self.0.id, user: self.user()? }, new_user)
     }
 
-    /// Renames a client, if this device is an admin: a client writes no entries, and SPEC.md lets only it or an admin rename it.
-    async fn rename_client(&self, client: Key, name: &str) -> Result<()> {
-        ensure!(!name.is_empty(), "a device needs a name");
-        let admin = self.with(|s| Ok(s.members.current(&client).is_some() && s.members.current(&self.0.id).is_some_and(|m| m.role == Role::Admin)))?;
-        ensure!(admin, "only an admin device can rename a phone, and {} isn't one", self.device_name());
-        self.append(space::rename(&client, name)).await?;
-        Ok(())
-    }
-
-    /// Makes a one-time pairing code another device joins the space with.
-    pub fn pair(&self, new_user: bool) -> Result<String> {
-        self.pair_as(self.0.id, new_user)
-    }
-
-    /// A pairing code asked for by `asker` (this device, or a phone it serves): for another of the
-    /// asker's user's devices, or, if `new_user`, for someone new, which only admins may add.
-    fn pair_as(&self, asker: Key, new_user: bool) -> Result<String> {
-        let mine = !new_user;
-        let (space, user) = self.with(|s| {
-            let me = s.members.current(&self.0.id).context("this device is not a member")?;
-            let theirs = s.members.current(&asker).context("not a member")?.user.clone();
-            ensure!(mine || (me.role == Role::Admin && asker == self.0.id), "only admins add new users; pair one of your own devices instead");
-            ensure!(!mine || me.role == Role::Admin || me.user == theirs, "this device can't admit that user's devices; ask one of theirs, or an admin's");
-            Ok((s.key, mine.then_some(theirs)))
+    fn pair_as(&self, asker: &Caller, new_user: Option<(String, Role)>) -> Result<String> {
+        self.with(|i| {
+            let m = &i.r.members;
+            ensure!(m.server(&self.0.id).is_some(), "this server isn't in the install yet");
+            ensure!(new_user.is_none() || m.is_admin(&asker.user), "only admins add users; pair one of your own machines instead");
+            ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.server_name());
+            Ok(())
         })?;
         let secret: [u8; 16] = rand::random();
-        self.add_pairing(secret, Pairing { user, until: now_ms() + PAIRING_LIFE })?;
-        let code = PairingCode { space, from: self.0.endpoint.addr(), secret };
+        let by = (asker.key != self.0.id).then(|| hex(&asker.key));
+        self.add_pairing(secret, Pairing { user: asker.user.clone(), by, new_user, until: now_ms() + PAIRING_LIFE })?;
+        let code = PairingCode { from: self.0.endpoint.addr(), secret };
         let mut bytes = Vec::new();
         ciborium::into_writer(&code, &mut bytes)?;
         Ok(data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase())
     }
 
-    /// Pairing codes are kept in a file, so one still works after the device that made it restarts.
+    /// Pairing codes are kept in a file, so one still works after the server that made it restarts.
     fn add_pairing(&self, secret: [u8; 16], pairing: Pairing) -> Result<()> {
         let mut pairings = self.0.pairings.lock().unwrap();
         pairings.retain(|_, p| p.until > now_ms());
@@ -717,173 +1011,39 @@ impl Node {
         Ok(())
     }
 
-    pub async fn join(&self, code: &str) -> Result<Key> {
+    /// Joins the install a pairing code is for, as a server.
+    pub async fn join(&self, code: &str) -> Result<()> {
         let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).context("that isn't a pairing code")?;
         let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
-        self.ensure_no_space()?;
-        let conn = self.0.endpoint.connect(code.from.clone(), JOIN_ALPN).await.context("couldn't reach the device that made the pairing code")?;
+        self.ensure_no_install()?;
+        let conn = self.0.endpoint.connect(code.from.clone(), JOIN_ALPN).await.context("couldn't reach the server that made the pairing code")?;
         let (mut send, mut recv) = conn.open_bi().await?;
-        send.write_all(&serde_json::to_vec(&JoinRequest { secret: code.secret, name: self.device_name(), client: false })?).await?;
+        send.write_all(&serde_json::to_vec(&JoinRequest { secret: code.secret, name: self.server_name(), as_: "server".into() })?).await?;
         send.finish()?;
         let reply: Value = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
         if let Some(err) = reply.get("error") {
             bail!("{}", err.as_str().unwrap_or("the pairing code was refused"));
         }
         let reply: JoinReply = serde_json::from_value(reply)?;
-        self.save_space(&code.space, &SpaceFile { user: reply.user, paired_by: Some(hex(code.from.id.as_bytes())) })?;
-        self.open_space(code.space)?;
-        let paired_by = code.from.id;
+        let paired_by = *code.from.id.as_bytes();
+        self.save_install(&InstallFile { root: reply.root, user: reply.user, paired_by: Some(hex(&paired_by)) })?;
+        self.open_install()?;
         let node = self.clone();
         tokio::spawn(async move {
-            if let Err(err) = node.connect_sync(*paired_by.as_bytes()).await {
+            if let Err(err) = node.connect_sync(paired_by).await {
                 tracing::warn!("first sync after joining: {err:#}");
             }
         });
-        self.emit(Event::Space);
-        Ok(code.space)
+        self.emit(Event::Install);
+        Ok(())
     }
 
     async fn accept_join(&self, conn: Connection) -> Result<()> {
         let remote = *conn.remote_id().as_bytes();
         let (mut send, mut recv) = conn.accept_bi().await?;
         let request: JoinRequest = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
-        let pairing = self.take_pairing(&request.secret)?.filter(|p| p.until > now_ms());
-        let Some(pairing) = pairing else {
-            send.write_all(br#"{"error":"this pairing code was already used or has expired"}"#).await?;
-            send.finish()?;
-            return Ok(());
-        };
-        let user = pairing.user.unwrap_or_else(new_user);
-        let admit = if request.client { space::admit_client(&remote, &user, &request.name) } else { space::admit(&remote, &user, &request.name, Role::Member) };
-        self.append(admit).await?;
-        if !self.is_member(&remote) {
-            send.write_all(br#"{"error":"this device can no longer admit that one"}"#).await?;
-            send.finish()?;
-            return Ok(());
-        }
-        let space_name = self.with(|s| Ok(s.members.name.clone()))?;
-        send.write_all(&serde_json::to_vec(&JoinReply { space_name, user })?).await?;
-        send.finish()?;
-        conn.closed().await;
-        Ok(())
-    }
-
-    async fn dial_loop(self) {
-        loop {
-            let wanted: Vec<Key> = self
-                .with(|s| {
-                    let mut devices: Vec<Key> = s.members.current_devices().filter(|m| m.device != self.0.id && !m.client).map(|m| m.device).collect();
-                    // Still joining: only the device that made the pairing code knows we're in.
-                    if s.members.current(&self.0.id).is_none() {
-                        devices.extend(s.paired_by);
-                    }
-                    Ok(devices.into_iter().filter(|d| !s.sessions.contains_key(d)).collect())
-                })
-                .unwrap_or_default();
-            for device in wanted {
-                let node = self.clone();
-                tokio::spawn(async move {
-                    if let Err(err) = node.connect_sync(device).await {
-                        tracing::debug!("sync with {}: {err:#}", short(&device));
-                    }
-                });
-            }
-            tokio::time::sleep(Duration::from_secs(15)).await;
-        }
-    }
-
-    async fn connect_sync(&self, device: Key) -> Result<()> {
-        let conn = tokio::time::timeout(Duration::from_secs(20), self.0.endpoint.connect(EndpointId::from_bytes(&device)?, sync::ALPN))
-            .await
-            .context("timed out")??;
-        let (send, recv) = conn.open_bi().await?;
-        self.session(device, send, recv, None).await
-    }
-
-    async fn accept_sync(&self, conn: Connection) -> Result<()> {
-        let remote = *conn.remote_id().as_bytes();
-        let (send, mut recv) = conn.accept_bi().await?;
-        let first = sync::read(&mut recv).await?;
-        let Msg::Hello { space, .. } = &first else { bail!("expected hello") };
-        self.with(|s| {
-            ensure!(s.key == *space, "not in that space");
-            ensure!(s.members.current(&remote).is_some(), "{} is not a member", short(&remote));
-            Ok(())
-        })?;
-        self.session(remote, send, recv, Some(first)).await
-    }
-
-    /// Runs one sync session until the connection drops.
-    async fn session(&self, peer: Key, mut send: iroh::endpoint::SendStream, mut recv: iroh::endpoint::RecvStream, first: Option<Msg>) -> Result<()> {
-        let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
-        self.with(|s| {
-            tx.send(sync::hello(&s.store)?).ok();
-            s.sessions.insert(peer, tx.clone());
-            Ok(())
-        })?;
-        self.emit(Event::Peers);
-        tracing::info!("syncing with {}", short(&peer));
-        let writer = async {
-            while let Some(msg) = rx.recv().await {
-                sync::write(&mut send, &msg).await?;
-            }
-            anyhow::Ok(())
-        };
-        let hellos = async {
-            loop {
-                tokio::time::sleep(Duration::from_secs(30)).await;
-                let hello = self.with(|s| sync::hello(&s.store))?;
-                tx.send(hello).map_err(|_| anyhow!("session closed"))?;
-            }
-        };
-        let reader = async {
-            if let Some(msg) = first {
-                for reply in self.handle(peer, msg).await? {
-                    tx.send(reply).map_err(|_| anyhow!("session closed"))?;
-                }
-            }
-            loop {
-                let msg = sync::read(&mut recv).await?;
-                for reply in self.handle(peer, msg).await? {
-                    tx.send(reply).map_err(|_| anyhow!("session closed"))?;
-                }
-            }
-        };
-        let result: Result<()> = tokio::select! { r = writer => r, r = hellos => r, r = reader => r };
-        let _ = self.with(|s| {
-            if s.sessions.get(&peer).is_some_and(|t| t.same_channel(&tx)) {
-                s.sessions.remove(&peer);
-            }
-            Ok(())
-        });
-        self.emit(Event::Peers);
-        result
-    }
-
-    async fn handle(&self, peer: Key, msg: Msg) -> Result<Vec<Msg>> {
-        let _write = self.0.writes.lock().await;
-        let (new, reply) = self.with(|s| {
-            let joining = s.members.current(&self.0.id).is_none();
-            ensure!(s.members.current(&peer).is_some() || (joining && s.paired_by == Some(peer)), "{} is no longer a member", short(&peer));
-            sync::handle(&s.store, msg, now_ms())
-        })?;
-        self.after(&new, Some(peer)).await?;
-        Ok(reply)
-    }
-
-    async fn accept_call(&self, conn: Connection) -> Result<()> {
-        let remote = *conn.remote_id().as_bytes();
-        let (mut send, mut recv) = conn.accept_bi().await?;
-        let request: Value = serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?;
-        let result = async {
-            let space = unhex(request["space"].as_str().context("no space")?)?;
-            ensure!(self.with(|s| Ok(s.key == space && s.members.current(&remote).is_some()))?, "not a member");
-            let (app, op) = (request["app"].as_str().unwrap_or_default(), request["op"].as_str().unwrap_or_default());
-            self.call_as(remote, app, op, request["input"].clone()).await
-        }
-        .await;
-        let reply = match result {
-            Ok(ok) => json!({ "ok": ok }),
+        let reply = match self.admit(remote, request).await {
+            Ok(reply) => serde_json::to_value(reply)?,
             Err(err) => json!({ "error": format!("{err:#}") }),
         };
         send.write_all(&serde_json::to_vec(&reply)?).await?;
@@ -892,38 +1052,462 @@ impl Node {
         Ok(())
     }
 
-    /// Finds a device in the space by name or id prefix.
-    pub fn find_device(&self, name: &str) -> Result<Key> {
-        let found: Vec<Key> = self.with(|s| Ok(s.members.current_devices().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.device).starts_with(name)).map(|m| m.device).collect()))?;
+    async fn admit(&self, key: Key, request: JoinRequest) -> Result<JoinReply> {
+        let pairing = self.take_pairing(&request.secret)?.filter(|p| p.until > now_ms()).context("this pairing code was already used or has expired")?;
+        let server = match request.as_.as_str() {
+            "server" => true,
+            "client" => false,
+            other => bail!("can't join as {other}"),
+        };
+        let user = match &pairing.new_user {
+            Some(_) => new_id(),
+            None => pairing.user.clone(),
+        };
+        let root = self.with(|i| {
+            let m = &i.r.members;
+            // A phone only asks servers: one must serve its user, or the phone could do nothing.
+            if !server {
+                let served = match &pairing.new_user {
+                    Some(_) => m.servers().any(|s| m.privileged(&s.key) && m.users_of(&s.key).contains(&Principal::Install)),
+                    None => m.servers().any(|s| m.serves(&s.key, &user)),
+                };
+                ensure!(served, "this install has no server for you yet: a phone needs one of your own servers, or one the install shares with everyone");
+            }
+            i.r.root.map(|r| r.to_hex()).context("no install")
+        })?;
+        let by = pairing.by.as_deref().map(unhex).transpose()?;
+        let new_user = pairing.new_user.as_ref().map(|(name, role)| (name.as_str(), *role));
+        let admit = members::admit(&key, &user, &request.name, server, new_user);
+        self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone() }, "admit", admit.data).await.context("this server can no longer admit that machine")?;
+        Ok(JoinReply { root, user })
+    }
+
+    // Sync.
+
+    async fn dial_loop(self) {
+        loop {
+            let wanted: Vec<Key> = self
+                .with(|i| {
+                    let mut servers: Vec<Key> = i.r.members.servers().map(|s| s.key).filter(|k| *k != self.0.id).collect();
+                    // Still joining: only the server that made the pairing code knows this one is in.
+                    if i.r.members.server(&self.0.id).is_none() {
+                        servers.extend(i.r.paired_by);
+                    }
+                    Ok(servers.into_iter().filter(|s| !i.sessions.contains_key(s)).collect())
+                })
+                .unwrap_or_default();
+            let mut dials = tokio::task::JoinSet::new();
+            for server in wanted {
+                let node = self.clone();
+                dials.spawn(async move {
+                    if let Err(err) = node.connect_sync(server).await {
+                        tracing::debug!("sync with {}: {err:#}", short(&server));
+                    }
+                });
+            }
+            // The first round is done once each dial connected or failed, or soon enough; sessions run on.
+            let _ = tokio::time::timeout(FIRST_DIAL, async {
+                while self.with(|i| Ok(!i.dialed)).unwrap_or(false) && !dials.is_empty() {
+                    let all_tried = self.with(|i| Ok(i.r.members.servers().filter(|s| s.key != self.0.id).all(|s| i.sessions.contains_key(&s.key)))).unwrap_or(true);
+                    if all_tried {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await;
+            let _ = self.with(|i| Ok(i.dialed = true));
+            dials.detach_all();
+            tokio::time::sleep(Duration::from_secs(15)).await;
+        }
+    }
+
+    async fn connect_sync(&self, server: Key) -> Result<()> {
+        let conn = tokio::time::timeout(Duration::from_secs(20), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, sync::ALPN))
+            .await
+            .context("timed out")??;
+        let (send, recv) = conn.open_bi().await?;
+        self.session(server, send, recv).await
+    }
+
+    async fn accept_sync(&self, conn: Connection) -> Result<()> {
+        let remote = *conn.remote_id().as_bytes();
+        ensure!(self.with(|i| Ok(i.r.may_sync(&remote)))?, "{} isn't a server of this install", short(&remote));
+        let (send, recv) = conn.accept_bi().await?;
+        self.session(remote, send, recv).await
+    }
+
+    /// What this server's hello says: its frontier, and the drivers serving its local user here.
+    fn hello(&self, i: &Install) -> Result<Msg> {
+        let mut drivers: Vec<Driver> = self.0.native.iter().map(|n| (n.name.to_string(), vec![i.user.clone()], (n.describe)())).collect();
+        drivers.extend(self.0.providers.describe().into_iter().map(|d| (d["name"].as_str().unwrap_or("").to_string(), vec![i.user.clone()], d)));
+        i.r.hello(drivers)
+    }
+
+    /// Says hello to every peer again, as when this server's drivers change.
+    fn say_hello(&self) {
+        let _ = self.with(|i| {
+            let hello = self.hello(i)?;
+            for s in i.sessions.values() {
+                let _ = s.tx.send(hello.clone());
+            }
+            Ok(())
+        });
+    }
+
+    /// Runs one sync session until the connection drops.
+    async fn session(&self, peer: Key, mut send: iroh::endpoint::SendStream, mut recv: iroh::endpoint::RecvStream) -> Result<()> {
+        let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
+        self.with(|i| {
+            tx.send(self.hello(i)?).ok();
+            i.sessions.insert(peer, Session { tx: tx.clone(), frontier: None, drivers: Vec::new(), caught_up: false });
+            Ok(())
+        })?;
+        self.emit(Event::Servers);
+        tracing::info!("syncing with {}", self.name_of(&peer));
+        let writer = async {
+            while let Some(mut msg) = rx.recv().await {
+                // Hellos made inside sync carry no drivers; every hello this server sends does.
+                if let Msg::Hello { drivers, .. } = &mut msg {
+                    if drivers.is_empty() {
+                        if let Ok(Msg::Hello { drivers: d, .. }) = self.with(|i| self.hello(i)) {
+                            *drivers = d;
+                        }
+                    }
+                }
+                sync::write(&mut send, &msg).await?;
+            }
+            anyhow::Ok(())
+        };
+        let hellos = async {
+            loop {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let hello = self.with(|i| self.hello(i))?;
+                tx.send(hello).map_err(|_| anyhow!("session closed"))?;
+            }
+        };
+        let reader = async {
+            loop {
+                let msg = sync::read(&mut recv).await?;
+                for reply in self.handle(peer, msg).await? {
+                    tx.send(reply).map_err(|_| anyhow!("session closed"))?;
+                }
+            }
+        };
+        let result: Result<()> = tokio::select! { r = writer => r, r = hellos => r, r = reader => r };
+        let _ = self.with(|i| {
+            if i.sessions.get(&peer).is_some_and(|s| s.tx.same_channel(&tx)) {
+                i.sessions.remove(&peer);
+            }
+            Ok(())
+        });
+        self.emit(Event::Servers);
+        result
+    }
+
+    async fn handle(&self, peer: Key, msg: Msg) -> Result<Vec<Msg>> {
+        let _write = self.0.writes.lock().await;
+        let drivers_changed = self.with(|i| {
+            let Msg::Hello { frontier, drivers } = &msg else { return Ok(false) };
+            let Some(s) = i.sessions.get_mut(&peer) else { return Ok(false) };
+            s.frontier = Some(frontier.clone());
+            let changed = s.drivers != *drivers;
+            s.drivers = drivers.clone();
+            Ok(changed)
+        })?;
+        let mut handled = self.with(|i| i.r.handle(&peer, msg, now_ms()))?;
+        let replies = std::mem::take(&mut handled.replies);
+        let caught_up = self.with(|i| {
+            let Some(frontier) = i.sessions.get(&peer).and_then(|s| s.frontier.clone()) else { return Ok(false) };
+            if i.sessions[&peer].caught_up {
+                return Ok(false);
+            }
+            let mine: HashMap<(Key, String), u32> = i.r.store.frontier()?.into_iter().map(|(a, l, n)| ((a, l), n)).collect();
+            let lacking = frontier.iter().any(|(a, l, n)| Scope::parse(l).is_ok_and(|s| i.r.holds(&s)) && mine.get(&(*a, l.clone())).copied().unwrap_or(0) < *n);
+            if !lacking {
+                i.sessions.get_mut(&peer).unwrap().caught_up = true;
+            }
+            Ok(!lacking)
+        })?;
+        self.after(handled, Some(peer)).await?;
+        if drivers_changed || caught_up {
+            self.emit(Event::Servers);
+        }
+        Ok(replies)
+    }
+
+    async fn accept_call(&self, conn: Connection) -> Result<()> {
+        let remote = *conn.remote_id().as_bytes();
+        let (mut send, mut recv) = conn.accept_bi().await?;
+        let request: Value = serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?;
+        let reply = match self.check_caller(remote, &request) {
+            Ok(me) => {
+                let req: CallRequest = serde_json::from_value(request)?;
+                self.run(&req, &me).await
+            }
+            Err(err) => Reply::Error(format!("{err:#}")),
+        };
+        send.write_all(&serde_json::to_vec(&reply.json())?).await?;
+        send.finish()?;
+        conn.closed().await;
+        Ok(())
+    }
+
+    /// A call is taken only as a user from one of their clients or a server they trust.
+    fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
+        let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
+        let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
+        self.with(|i| {
+            let m = &i.r.members;
+            let mine = |k: &Key| m.client(k).is_some_and(|c| c.user == user) || m.trusts(&user, k);
+            ensure!(mine(&key) && (remote == key || m.trusts(&user, &remote)), "{} may not call as that user", short(&remote));
+            Ok(())
+        })?;
+        Ok(Caller { key, user })
+    }
+
+    /// Finds a server of the install by name or key prefix.
+    pub fn find_server(&self, name: &str) -> Result<Key> {
+        let found: Vec<Key> = self.with(|i| Ok(i.r.members.servers().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
         match found.as_slice() {
             [one] => Ok(*one),
-            [] => bail!("no device called {name}"),
-            _ => bail!("several devices match {name}"),
+            [] => bail!("no server called {name}"),
+            _ => bail!("several servers match {name}"),
+        }
+    }
+
+    /// Finds a user by name or id.
+    pub fn find_user(&self, name: &str) -> Result<String> {
+        let found: Vec<String> = self.with(|i| Ok(i.r.members.users.values().filter(|u| !u.removed && (u.id == name || u.name.eq_ignore_ascii_case(name))).map(|u| u.id.clone()).collect()))?;
+        match found.as_slice() {
+            [one] => Ok(one.clone()),
+            [] => bail!("no user called {name}"),
+            _ => bail!("several users are called {name}; give their id"),
+        }
+    }
+
+    /// Finds a group by name or id.
+    pub fn find_group(&self, name: &str) -> Result<String> {
+        let found: Vec<String> = self.with(|i| Ok(i.r.members.groups.values().filter(|g| g.id == name || g.name.eq_ignore_ascii_case(name)).map(|g| g.id.clone()).collect()))?;
+        match found.as_slice() {
+            [one] => Ok(one.clone()),
+            [] => bail!("no group called {name}"),
+            _ => bail!("several groups are called {name}; give its id"),
+        }
+    }
+
+    fn name_of(&self, key: &Key) -> String {
+        self.with(|i| Ok(i.r.members.machines.get(key).map(|m| m.name.clone()))).ok().flatten().unwrap_or_else(|| short(key))
+    }
+}
+
+/// Which views to replay for new entries: the new entries that count, onto each scope's views, or, where one sorts
+/// before what a scope's views have replayed (a member entry of `global` included), that whole scope again.
+/// Only `apps`' stores are replayed.
+fn replay_jobs(i: &mut Install, new: &[Entry], apps: &[String]) -> Result<Vec<Replay>> {
+    let earliest_member = new.iter().filter(|e| members::is_member_entry(e)).map(Entry::order).min();
+    let mut logs: Vec<String> = new.iter().map(|e| e.log().to_string()).collect();
+    if let Some(m) = &earliest_member {
+        logs.extend(i.views.iter().filter(|(_, (pos, _))| m <= pos).map(|(log, _)| log.clone()));
+    }
+    logs.sort();
+    logs.dedup();
+    let mut jobs = Vec::new();
+    for log in logs {
+        let Ok(scope) = Scope::parse(&log) else { continue };
+        if !i.r.holds(&scope) {
+            continue;
+        }
+        let mut fresh: Vec<Entry> = new.iter().filter(|e| e.log() == log).cloned().collect();
+        fresh.sort_by_key(Entry::order);
+        let view = i.views.get(&log);
+        let rebuild = match view {
+            None => true,
+            Some((pos, _)) => fresh.first().is_some_and(|e| e.order() <= *pos) || earliest_member.as_ref().is_some_and(|m| m <= pos),
+        };
+        let (entries, state) = match rebuild {
+            true => (i.r.store.scope(&log)?, ScopeState::default()),
+            false => (fresh, view.unwrap().1.clone()),
+        };
+        let Some(last) = entries.last().map(Entry::order) else { continue };
+        let mut counted: Vec<AppEntry> = Vec::new();
+        let (_, state) = members::replay_from(i.r.root, &i.r.member_entries, &entries, state, |e, m, _| {
+            if e.content.app != members::APP && apps.contains(&e.content.app) {
+                counted.push(app_entry(e, m));
+            }
+        });
+        let position = match view {
+            Some((pos, _)) if !rebuild => pos.clone().max(last),
+            _ => last,
+        };
+        i.views.insert(log.clone(), (position, state));
+        for app in apps {
+            let entries: Vec<AppEntry> = counted.iter().filter(|e| &e.app == app).cloned().collect();
+            if rebuild || !entries.is_empty() {
+                jobs.push(Replay { app: app.clone(), scope: log.clone(), fresh: rebuild, entries });
+            }
+        }
+    }
+    Ok(jobs)
+}
+
+/// An entry as apps see it, with the names and roles current when it was written.
+fn app_entry(e: &Entry, m: &Members) -> AppEntry {
+    let scope = e.scope();
+    let named = e.by().unwrap_or(e.author());
+    AppEntry {
+        app: e.content.app.clone(),
+        id: e.id(),
+        scope: e.log().to_string(),
+        kind: e.content.kind.clone(),
+        user: e.user().to_string(),
+        name: m.machines.get(&named).map(|k| k.name.clone()).unwrap_or_default(),
+        role: m.role_in(e.user(), &scope),
+        groups: m.groups_of(e.user()),
+        time: e.time(),
+        data: e.content.data.clone(),
+        blobs: e.content.blobs.clone(),
+    }
+}
+
+/// The scopes a call of `app` as `user` may reach: their own if it's installed for them at all, each of their groups
+/// it's installed for (in the group or in `global`; a group whose installs this server can't see counts), and `global`
+/// if it's installed there.
+fn reachable(i: &Install, app: &str, user: &str) -> Vec<Scope> {
+    let m = &i.r.members;
+    let installed = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|(_, st)| st.installed.contains(app));
+    let global = installed(&Scope::Global);
+    let mut out = Vec::new();
+    for g in m.groups_of(user).keys() {
+        let s = Scope::Group(g.clone());
+        if global || installed(&s) || !i.r.holds(&s) {
+            out.push(s);
+        }
+    }
+    let mine = Scope::User(user.into());
+    if global || installed(&mine) || out.iter().any(|s| installed(s)) {
+        out.insert(0, mine);
+    }
+    if global {
+        out.push(Scope::Global);
+    }
+    out
+}
+
+fn handles(m: &Members, scopes: &[Scope], user: &str) -> Vec<ScopeHandle> {
+    scopes
+        .iter()
+        .map(|s| {
+            let name = match s {
+                Scope::Global => m.name.clone(),
+                Scope::Group(g) => m.groups.get(g).map(|g| g.name.clone()).unwrap_or_default(),
+                Scope::User(u) => m.users.get(u).map(|u| u.name.clone()).unwrap_or_default(),
+            };
+            ScopeHandle { id: s.to_string(), name, role: m.role_in(user, s) }
+        })
+        .collect()
+}
+
+/// Checks a call may run here, and makes its context; or says why it should run elsewhere.
+fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
+    let m = &i.r.members;
+    let here = node.0.id;
+    if let Some(target) = &req.as_user {
+        let scope = Scope::User(target.clone());
+        let open = i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.opens.iter().any(|(by, server, t)| by == &me.user && *server == here && now_ms() < t + members::OPEN_FOR));
+        ensure!(open, "that user's data isn't open for you on {}", node.server_name());
+        let caller = Caller { key: me.key, user: target.clone() };
+        let ctx = Context { me: node_me(node, m, &caller), now: now_ms(), scopes: handles(m, std::slice::from_ref(&scope), target), read_only: true };
+        return Ok(Ok((ctx, vec![scope])));
+    }
+    if !m.serves(&here, &me.user) {
+        return Ok(Err(format!("{} doesn't serve you", node.server_name())));
+    }
+    let reach = reachable(i, &req.app, &me.user);
+    let scopes: Vec<Scope> = match &req.scopes {
+        None => reach.clone(),
+        Some(named) => {
+            let mut out = Vec::new();
+            for s in named {
+                let s = if s == "user" { Scope::User(me.user.clone()) } else { Scope::parse(s)? };
+                ensure!(reach.contains(&s), "{} can't reach {s} for you", req.app);
+                out.push(s);
+            }
+            out
+        }
+    };
+    if reach.is_empty() {
+        bail!("{} isn't installed for you", req.app);
+    }
+    if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
+        return Ok(Err(format!("{} doesn't hold {s}", node.server_name())));
+    }
+    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false };
+    Ok(Ok((ctx, scopes)))
+}
+
+fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
+    let name = if caller.key == node.0.id { node.server_name() } else { m.machine(&caller.key).map(|k| k.name.clone()).unwrap_or_default() };
+    Me { key: hex(&caller.key), user: caller.user.clone(), name, role: m.user(&caller.user).map(|u| u.role) }
+}
+
+/// Checks one of a call's appends: into a scope it named, or an install with the caller's own rights.
+fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller) -> Result<(Scope, Content)> {
+    let m = &i.r.members;
+    Ok(match append {
+        Append::Entry { scope, content } => {
+            let scope = Scope::parse(&scope)?;
+            ensure!(scopes.contains(&scope), "the call didn't name {scope}");
+            ensure!(content.app != members::APP, "apps don't write the node's entries");
+            (scope, content)
+        }
+        Append::Install { app, scope, installed } => {
+            let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
+            let allowed = match &scope {
+                Scope::User(u) => *u == me.user,
+                Scope::Group(g) => m.group_role(&me.user, g) == Some(Role::Admin),
+                Scope::Global => m.is_admin(&me.user),
+            };
+            ensure!(allowed, "you can't install apps in {scope}");
+            ensure!(m.apps.contains_key(&app), "no app named {app}");
+            ensure!(i.r.holds(&scope), "this server doesn't hold {scope}");
+            (scope, members::node(if installed { "install" } else { "uninstall" }, json!({ "app": app })))
+        }
+    })
+}
+
+/// A deploy of `app`: the bundle at blob `bundle`.
+pub fn deploy(app: &str, bundle: &str) -> Content {
+    Content { blobs: vec![bundle.into()], ..members::node("deploy", json!({ "app": app, "bundle": bundle })) }
+}
+
+/// `{ new_user: { name, role } }` in a pairing request.
+pub fn new_user(body: &Value) -> Result<Option<(String, Role)>> {
+    match &body["new_user"] {
+        Value::Null | Value::Bool(false) => Ok(None),
+        v => {
+            let name = v["name"].as_str().filter(|n| !n.trim().is_empty()).context("give the new user a name")?.trim().to_string();
+            let role: Role = serde_json::from_value(v.get("role").cloned().unwrap_or(json!("member")))?;
+            Ok(Some((name, role)))
         }
     }
 }
 
-fn sorted(entries: &[Entry]) -> Vec<Entry> {
-    let mut v = entries.to_vec();
-    v.sort_by_key(Entry::order);
-    v
-}
-
 impl Node {
-    /// Publishes `binary` (a build of this node for `target`, with the release key's `signature` over it) as the space's
-    /// newest release.
+    /// Publishes `binary` (a build of this node for `target`, with the release key's `signature` over it) as the
+    /// install's newest release.
     pub async fn publish(&self, binary: &Path, commit: &str, target: &str, committed: u64, signature: &str) -> Result<Release> {
         let bytes = std::fs::read(binary).with_context(|| format!("read {}", binary.display()))?;
         release::verify(crate::brand::RELEASE_KEY, &bytes, signature).context("no node would take it")?;
-        let blob = release::put_blob(&self.0.dir, &bytes)?;
+        let blob = self.put_blob(&bytes)?;
         let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64, committed, signature: signature.into() };
-        self.append(release::content(&r)).await?;
+        self.append(&Scope::Global, release::content(&r)).await?;
         Ok(r)
     }
 
     /// Updates this node if a newer build for its platform was published, signed with the release key.
     fn consider_update(&self) {
-        let latest = self.with(|s| Ok(release::latest(crate::brand::RELEASE_KEY, &s.store.ordered()?, crate::brand::TARGET)));
+        let latest = self.with(|i| Ok(release::latest(crate::brand::RELEASE_KEY, &i.r.store.scope("global")?, crate::brand::TARGET)));
         let Ok(Some((r, author))) = latest else { return };
         let marker = self.0.dir.join("release");
         if !release::wanted(&r, crate::brand::BUILD, crate::brand::COMMITTED) || std::fs::read_to_string(&marker).is_ok_and(|m| m.trim() == r.blob) {
@@ -957,23 +1541,22 @@ impl Node {
         release::install(r, &bytes)
     }
 
-    /// Keeps `bytes` as a blob, which every member may then fetch. See SPEC.md, "Blobs".
+    /// Keeps `bytes` as a blob. See SPEC.md, "Blobs".
     pub fn put_blob(&self, bytes: &[u8]) -> Result<String> {
         release::put_blob(&self.0.dir, bytes)
     }
 
-    /// A blob from this device, else from any device online in its space.
+    /// A blob from this server, else from a server it syncs with.
     pub async fn blob(&self, hash: &str) -> Result<Vec<u8>> {
         if let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) {
             return Ok(bytes);
         }
-        let peers: Vec<Key> = self.with(|s| Ok(s.sessions.keys().copied().collect())).unwrap_or_default();
-        self.fetch_from(peers, hash, 1 << 30).await
+        self.fetch_from(self.peers(), hash, 1 << 30).await
     }
 
     /// Fetches a blob from the first of `peers` that has it, and keeps it.
     async fn fetch_from(&self, peers: Vec<Key>, hash: &str, size: u64) -> Result<Vec<u8>> {
-        let mut last = anyhow!("no device had it");
+        let mut last = anyhow!("no server had it");
         for peer in peers {
             match self.fetch_blob(peer, hash, size).await {
                 Ok(bytes) => {
@@ -986,9 +1569,18 @@ impl Node {
         Err(last)
     }
 
-    /// Every entry an app has in the space, by members, oldest first.
+    /// Every entry a native app has in the local user's scope, oldest first.
     fn app_entries(&self, app: &str) -> Result<Vec<AppEntry>> {
-        self.with(|s| Ok(for_apps(&s.members, &s.store.ordered()?).into_iter().filter(|e| e.app == app).collect()))
+        self.with(|i| {
+            let mut out = Vec::new();
+            let scope = Scope::User(i.user.clone()).to_string();
+            members::replay(i.r.root, &i.r.member_entries, &i.r.store.scope(&scope)?, |e, m, _| {
+                if e.content.app == app {
+                    out.push(app_entry(e, m));
+                }
+            });
+            Ok(out)
+        })
     }
 
     fn sync_native(&self, app: &'static str) {
@@ -997,12 +1589,18 @@ impl Node {
         tokio::task::spawn_blocking(move || sync(&entries));
     }
 
+    /// The servers this server syncs with now, then the rest.
     fn peers(&self) -> Vec<Key> {
-        self.with(|s| Ok(s.members.current_devices().map(|m| m.device).filter(|d| *d != self.0.id).collect())).unwrap_or_default()
+        self.with(|i| {
+            let mut peers: Vec<Key> = i.r.members.servers().map(|m| m.key).filter(|d| *d != self.0.id).collect();
+            peers.sort_by_key(|k| !i.sessions.contains_key(k));
+            Ok(peers)
+        })
+        .unwrap_or_default()
     }
 
     async fn fetch_blob(&self, peer: Key, hash: &str, size: u64) -> Result<Vec<u8>> {
-        let conn = self.0.endpoint.connect(EndpointId::from_bytes(&peer)?, BLOB_ALPN).await?;
+        let conn = tokio::time::timeout(Duration::from_secs(10), self.0.endpoint.connect(EndpointId::from_bytes(&peer)?, BLOB_ALPN)).await.context("timed out")??;
         let (mut send, mut recv) = conn.open_bi().await?;
         send.write_all(hash.as_bytes()).await?;
         send.finish()?;
@@ -1011,11 +1609,30 @@ impl Node {
         Ok(bytes)
     }
 
+    /// Whether an entry in a scope `holds` says yes to names the blob.
+    fn blob_named(&self, hash: &str, holds: impl Fn(&Scope) -> bool) -> Result<bool> {
+        self.with(|i| {
+            for log in i.r.store.logs()? {
+                if Scope::parse(&log).is_ok_and(|s| holds(&s)) && i.r.store.scope(&log)?.iter().any(|e| e.content.blobs.iter().any(|b| b == hash)) {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        })
+    }
+
+    fn blob_named_for(&self, hash: &str, user: &str) -> Result<bool> {
+        let m = self.with(|i| Ok(i.r.members.clone()))?;
+        self.blob_named(hash, |s| m.may_use(user, s))
+    }
+
     async fn accept_blob(&self, conn: Connection) -> Result<()> {
         let remote = *conn.remote_id().as_bytes();
-        ensure!(self.is_member(&remote), "not a member");
+        let m = self.with(|i| Ok(i.r.members.clone()))?;
+        ensure!(m.server(&remote).is_some(), "not a server of this install");
         let (mut send, mut recv) = conn.accept_bi().await?;
         let hash = String::from_utf8(recv.read_to_end(64).await?)?;
+        ensure!(self.blob_named(&hash, |s| m.holds(&remote, s))?, "no such blob for you");
         let bytes = std::fs::read(release::blob_path(&self.0.dir, &hash)?).context("no such blob here")?;
         send.write_all(&bytes).await?;
         send.finish()?;
@@ -1024,28 +1641,7 @@ impl Node {
     }
 }
 
-/// The entries apps see: by members, minus membership itself.
-fn for_apps(members: &Members, entries: &[Entry]) -> Vec<AppEntry> {
-    entries
-        .iter()
-        .filter(|e| e.content.app != space::APP && e.content.app != release::APP)
-        .filter_map(|e| {
-            let m = members.active(&e.author(), e.order())?;
-            Some(AppEntry {
-                app: e.content.app.clone(),
-                kind: e.content.kind.clone(),
-                author: hex(&e.author()),
-                user: m.user.clone(),
-                name: m.name_at(e.order()).to_string(),
-                time: e.time(),
-                id: format!("{}:{}", short(&e.author()), e.seq()),
-                data: e.content.data.clone(),
-            })
-        })
-        .collect()
-}
-
-/// Writes a file only this account can read: device keys, pairing secrets.
+/// Writes a file only this account can read: server keys, pairing secrets.
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     std::fs::write(path, bytes)?;
     #[cfg(unix)]
@@ -1063,16 +1659,12 @@ fn load_pairings(dir: &Path) -> HashMap<[u8; 16], Pairing> {
         .collect()
 }
 
-fn new_user() -> String {
-    data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>())
-}
-
-fn load_device(dir: &Path) -> Result<DeviceFile> {
-    let path = dir.join("device.json");
+fn load_server(dir: &Path) -> Result<ServerFile> {
+    let path = dir.join("server.json");
     if let Ok(bytes) = std::fs::read(&path) {
         return Ok(serde_json::from_slice(&bytes)?);
     }
-    let file = DeviceFile { secret: hex(&rand::random::<[u8; 32]>()), name: hostname() };
+    let file = ServerFile { secret: hex(&rand::random::<[u8; 32]>()), name: hostname() };
     write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
     Ok(file)
 }
@@ -1083,7 +1675,7 @@ fn hostname() -> String {
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "device".into())
+        .unwrap_or_else(|| "server".into())
 }
 
 #[derive(Clone, Debug)]
@@ -1097,6 +1689,10 @@ struct ClientHandler(Node);
 #[derive(Clone, Debug)]
 struct BlobHandler(Node);
 
+fn accept_err(err: anyhow::Error) -> AcceptError {
+    AcceptError::from_boxed(err.into())
+}
+
 impl ProtocolHandler for BlobHandler {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         self.0.accept_blob(conn).await.map_err(accept_err)
@@ -1107,10 +1703,6 @@ impl ProtocolHandler for ClientHandler {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         self.0.accept_client(conn).await.map_err(accept_err)
     }
-}
-
-fn accept_err(err: anyhow::Error) -> AcceptError {
-    AcceptError::from_boxed(err.into())
 }
 
 impl ProtocolHandler for SyncHandler {

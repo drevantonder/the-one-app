@@ -1,8 +1,8 @@
-// The one Worker the node talks to: /<app>/... goes to that app's Worker.
+// The one Worker the node talks to: /<app>/... goes to that app's Worker. /ready says which config it runs.
 export default {
   fetch(req, env) {
     const app = new URL(req.url).pathname.split("/")[1];
-    if (app === "ready") return new Response("ready");
+    if (app === "ready") return new Response("GENERATION");
     const worker = env[app];
     if (!worker) return new Response(JSON.stringify({ error: `no app named ${app}` }), { status: 404 });
     return worker.fetch(req);

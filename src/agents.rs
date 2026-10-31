@@ -61,7 +61,7 @@ fn state(entries: &[AppEntry]) -> (String, BTreeMap<String, BTreeMap<String, Str
 }
 
 fn content(kind: &str, data: Value) -> Content {
-    Content { app: "agents".into(), kind: kind.into(), data }
+    Content::new("agents", kind, data)
 }
 
 /// A skill's name is one folder, and its files stay inside it.

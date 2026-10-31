@@ -186,15 +186,16 @@ fn quiet(cmd: &mut Command) -> bool {
     cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
 }
 
-/// The space's devices that keep a log, as this device sees them now: none while its node restarts.
+/// This user's own servers, as this one sees them now: none while its node restarts.
 fn devices() -> Vec<Value> {
     let state = get("/v1/state").unwrap_or_default();
-    state["space"]["devices"].as_array().into_iter().flatten().filter(|d| d["client"] != true).cloned().collect()
+    let me = state["install"]["user"].clone();
+    state["install"]["servers"].as_array().into_iter().flatten().filter(|d| d["user"] == me).cloned().collect()
 }
 
 /// Waits for each of `wanted` to say it runs `commit`, and reports each. True if any didn't.
 fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit: Duration) -> bool {
-    let id = |d: &Value| d["device"].as_str().unwrap_or("").to_string();
+    let id = |d: &Value| d["key"].as_str().unwrap_or("").to_string();
     let name = |d: &Value| d["name"].as_str().unwrap_or("").to_string();
     // Only devices offline from the start count as offline: this device's own node restarting loses its sessions a moment.
     let (online, offline): (Vec<&Value>, Vec<&Value>) = wanted.iter().partition(|d| d["online"] == true);
@@ -206,7 +207,7 @@ fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit: Duration)
     loop {
         let now = devices();
         waiting.retain(|(device, name, was)| {
-            let Some(d) = now.iter().find(|d| d["device"] == device.as_str()) else { return true };
+            let Some(d) = now.iter().find(|d| d["key"] == device.as_str()) else { return true };
             if d["build"] == commit {
                 if was == commit {
                     println!("  {name}: already on {commit}");
@@ -231,7 +232,7 @@ fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit: Duration)
 }
 
 fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
-    let r = post("/v1/call", json!({ "device": device["device"], "app": "shell", "op": "run", "input": { "command": command, "timeout": timeout } }))?;
+    let r = post("/v1/call", json!({ "server": device["key"], "app": "shell", "op": "run", "input": { "command": command, "timeout": timeout } }))?;
     Ok(r["ok"].clone())
 }
 

@@ -10,27 +10,40 @@ mod update;
 
 fn help() -> String {
     format!(
-        "{NAME}: your devices as one place for apps and agents.
+        "{NAME}: your machines, and your team's, as one place for apps and agents.
 
 Usage:
-  {CLI} serve                       run this device's node
-  {CLI} status                      this device, its space and its devices
-  {CLI} create <name>               create this device's space
-  {CLI} pair [--new-user]           a pairing code for another of your devices (or a new user's)
-  {CLI} join <code>                 join a space with a pairing code
-  {CLI} rename <name>               rename this device
-  {CLI} remove <device>             remove a device from the space (admins)
-  {CLI} apps                        every app and its operations
-  {CLI} <app> <op> [--key value]    run an operation, e.g. {CLI} board post --text hi
-  {CLI} update                      test and build main's tip on this device and the Macs, and run it everywhere
-  {CLI} release <vX.Y.Z>            the same, signed off and published on GitHub for the installer
-  {CLI} publish [binary]            sign and publish a build you made; every node on its platform updates
-  {CLI} blob put <file>             keep a file as a blob any of your devices can get; prints its hash
-  {CLI} blob get <hash> <file>      get a blob from this device or another
-  {CLI} version                     this build
-  {CLI} mcp                         serve MCP over stdio, for agents
+  {CLI} serve                          run this machine's node
+  {CLI} status                         this server, its install, its users, groups and servers
+  {CLI} create <name> --as <your name> create an install, with you as its first admin
+  {CLI} pair [--new-user <name> [--admin]]
+                                       a pairing code for another of your machines (or, for admins, a new user)
+  {CLI} join <code>                    join an install with a pairing code
+  {CLI} rename <name>                  rename this server
+  {CLI} remove <server|client> | --user <user>
+  {CLI} role <user> admin|member       (admins)
+  {CLI} group create <name>            a group, with you as its admin
+  {CLI} group invite <group> <user> [--admin]
+  {CLI} group accept <group>
+  {CLI} group remove <group> <user>    or leave it, giving yourself
+  {CLI} acl <server> --owners a,b --users c,d
+                                       who owns and uses a server: user or group names, or install
+  {CLI} trust <server> | untrust <server>
+  {CLI} open <user> <server>           read a user's data on a server you own, for an hour; they see it
+  {CLI} apps                           every app and its operations
+  {CLI} deploy <dir> [--owner <owner>] deploy the app in <dir> (its app.js), making it if it's new
+  {CLI} install <app> [--scope user|global|<group>] [--remove]
+  {CLI} <app> <op> [--key value]       run an operation, e.g. {CLI} board post --text hi
+                                       --server <name> runs it there; --scopes a,b names the scopes it touches
+  {CLI} update                         test and build main's tip on this machine and the Macs, and run it everywhere
+  {CLI} release <vX.Y.Z>               the same, signed off and published on GitHub for the installer
+  {CLI} publish [binary]               sign and publish a build you made; every node on its platform updates
+  {CLI} blob put <file>                keep a file as a blob; prints its hash
+  {CLI} blob get <hash> <file>         get a blob from this server or another
+  {CLI} version                        this build
+  {CLI} mcp                            serve MCP over stdio, for agents
 
-{NAME} holds one space. For another context, run that context's own app."
+{NAME} holds one install. For another context, run that context's own app."
     )
 }
 
@@ -74,24 +87,68 @@ fn run(args: Vec<String>) -> Result<()> {
             }
         }
         ["create", name @ ..] if !name.is_empty() => {
-            post("/v1/spaces", json!({ "name": name.join(" ") }))?;
-            println!("Created {}. Add your other devices with: {CLI} pair", name.join(" "));
+            let user_name = flags.get("as").and_then(Value::as_str).context("say what to call you with --as <your name>")?;
+            let r = post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name }))?;
+            println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
         }
         ["pair"] => {
-            let r = post("/v1/pair", json!({ "new_user": flags.contains_key("new-user") }))?;
-            println!("On the other device, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for a week.", r["code"].as_str().unwrap_or(""));
+            let new_user = flags.get("new-user").and_then(Value::as_str).map(|n| json!({ "name": n, "role": if flags.contains_key("admin") { "admin" } else { "member" } }));
+            let r = post("/v1/pair", json!({ "new_user": new_user }))?;
+            println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for a week.", r["code"].as_str().unwrap_or(""));
         }
         ["join", code] => {
             post("/v1/join", json!({ "code": code }))?;
             println!("Joined. Syncing now; {CLI} status shows progress.");
         }
-        ["remove", device] => {
-            let state = get("/v1/state")?;
-            let found = state["space"]["devices"].as_array().into_iter().flatten()
-                .find(|d| d["name"].as_str() == Some(device) || d["device"].as_str().is_some_and(|id| id.starts_with(device)))
-                .with_context(|| format!("no device called {device}"))?;
-            post("/v1/remove", json!({ "device": found["device"] }))?;
-            println!("Removed {}.", found["name"].as_str().unwrap_or(device));
+        ["remove", key] => {
+            post("/v1/remove", json!({ "key": key }))?;
+            println!("Removed {key}.");
+        }
+        ["remove"] if flags.contains_key("user") => {
+            post("/v1/remove", json!({ "user": flags["user"] }))?;
+            println!("Removed them.");
+        }
+        ["role", user, role] => {
+            post("/v1/role", json!({ "user": user, "role": role }))?;
+            println!("{user} is now {role}.");
+        }
+        ["group", "create", name @ ..] if !name.is_empty() => {
+            let r = post("/v1/group", json!({ "name": name.join(" ") }))?;
+            println!("Created {} ({}).", name.join(" "), r["group"].as_str().unwrap_or(""));
+        }
+        ["group", "invite", group, user] => {
+            post("/v1/invite", json!({ "group": group, "user": user, "role": if flags.contains_key("admin") { "admin" } else { "member" } }))?;
+            println!("Invited {user}; they join with {CLI} group accept {group}.");
+        }
+        ["group", "accept", group] => {
+            post("/v1/accept", json!({ "group": group }))?;
+            println!("You're in {group}.");
+        }
+        ["group", "remove", group, user] => {
+            post("/v1/member", json!({ "group": group, "user": user, "role": null }))?;
+            println!("{user} is no longer in {group}.");
+        }
+        ["acl", server] => {
+            let list = |key: &str| flags.get(key).and_then(Value::as_str).map(|s| s.split(',').map(str::trim).collect::<Vec<_>>());
+            let owners = list("owners").context("give --owners")?;
+            let users = list("users").unwrap_or_else(|| owners.clone());
+            post("/v1/acl", json!({ "server": server, "owners": owners, "users": users }))?;
+            println!("{server}'s ACL is set.");
+        }
+        ["trust", server] | ["untrust", server] => {
+            let trust = positional[0] == "trust";
+            post("/v1/trust", json!({ "server": server, "trust": trust }))?;
+            println!("You {} {server}.", if trust { "trust" } else { "no longer trust" });
+        }
+        ["open", user, server] => {
+            let r = post("/v1/open", json!({ "user": user, "server": server }))?;
+            println!("{}", r["ok"].as_str().unwrap_or("Opened."));
+        }
+        ["deploy", dir] => deploy(std::path::Path::new(dir), &flags)?,
+        ["install", app] => {
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            post("/v1/install", json!({ "app": app, "scope": scope, "installed": !flags.contains_key("remove") }))?;
+            println!("{app} is {} in {scope}.", if flags.contains_key("remove") { "no longer installed" } else { "installed" });
         }
         ["update"] => update::run(None)?,
         ["release", tag] => update::run(Some(tag))?,
@@ -116,13 +173,14 @@ fn run(args: Vec<String>) -> Result<()> {
         ["version"] if flags.contains_key("json") => println!("{}", json!({ "commit": one::brand::BUILD, "target": one::brand::TARGET, "committed": one::brand::COMMITTED })),
         ["version"] => println!("{} {} ({})", NAME, one::brand::BUILD, one::brand::TARGET),
         ["rename", name @ ..] if !name.is_empty() => {
-            post("/v1/device", json!({ "name": name.join(" ") }))?;
-            println!("This device is now {}.", name.join(" "));
+            post("/v1/name", json!({ "name": name.join(" ") }))?;
+            println!("This server is now {}.", name.join(" "));
         }
         [app, op] => {
             let mut input = flags.clone();
-            let device = input.remove("device");
-            let r = post("/v1/call", json!({ "device": device, "app": app, "op": op, "input": input }))?;
+            let server = input.remove("server").or(input.remove("device"));
+            let scopes = input.remove("scopes").and_then(|s| s.as_str().map(|s| s.split(',').map(str::trim).map(String::from).collect::<Vec<_>>()));
+            let r = post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input }))?;
             match &r["ok"] {
                 ok if ok["content"].is_array() => print_content(app, op, &ok["content"])?,
                 Value::String(s) => println!("{s}"),
@@ -153,8 +211,27 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
         bail!("that build has uncommitted changes; commit, build again, then publish");
     }
     let signature = one::release::sign(key, &std::fs::read(path)?)?;
-    let r = post("/v1/release", json!({ "path": path, "commit": commit, "target": target, "committed": committed, "signature": signature }))?;
+    let r = post("/v1/node-release", json!({ "path": path, "commit": commit, "target": target, "committed": committed, "signature": signature }))?;
     println!("Published {} for {}. Every node on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
+    Ok(())
+}
+
+/// Deploys the app in `dir`: bundles its app.js with its source, makes the app if the install hasn't one by that
+/// name, and deploys it. Every server runs it now.
+fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
+    let name = dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string();
+    let bundle = one::bundle::from_dir(dir)?;
+    let blob = request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
+    let apps = get("/v1/apps")?;
+    if !apps.as_array().into_iter().flatten().any(|a| a["name"] == name.as_str()) {
+        let owner = match flags.get("owner").and_then(Value::as_str) {
+            Some(owner) => owner.to_string(),
+            None => format!("user:{}", get("/v1/state")?["install"]["user"].as_str().unwrap_or("")),
+        };
+        post("/v1/app", json!({ "name": name, "owner": owner }))?;
+    }
+    post("/v1/deploy", json!({ "app": name, "bundle": blob }))?;
+    println!("Deployed {name} ({}). Every server runs it now.", &blob[..12]);
     Ok(())
 }
 
@@ -222,25 +299,50 @@ fn post(path: &str, body: Value) -> Result<Value> {
 }
 
 fn status(state: &Value) {
-    println!("{} ({})", state["device"]["name"].as_str().unwrap_or(""), &state["device"]["id"].as_str().unwrap_or("")[..8]);
-    let s = &state["space"];
-    if s.is_null() {
-        println!("\nIn no space yet. Create one with {CLI} create <name>, or join with a pairing code.");
+    let server = &state["server"];
+    println!("{} ({}){}", server["name"].as_str().unwrap_or(""), &server["key"].as_str().unwrap_or("")[..8], if server["ready"] == true { "" } else { ", not ready yet" });
+    let i = &state["install"];
+    if i.is_null() {
+        println!("\nIn no install yet. Create one with {CLI} create <name> --as <your name>, or join with a pairing code.");
         return;
     }
-    println!("\n{}  {} entries", s["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("(joining)"), s["entries"]);
-    for d in s["devices"].as_array().into_iter().flatten() {
-        let me = if d["me"] == true { " (this device)" } else { "" };
-        let name = d["name"].as_str().unwrap_or("");
-        if d["client"] == true {
-            // A phone keeps no log and holds no sessions: say when it last asked this device, not that it's offline.
-            let asked = d["asked"].as_u64().map(|t| format!(", asked here {}", ago(t))).unwrap_or_default();
-            println!("  ▯ {name}{me}  phone{asked}");
-            continue;
+    let users: std::collections::HashMap<&str, &str> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, u["name"].as_str()?))).collect();
+    let name = |id: &str| users.get(id).copied().unwrap_or(id).to_string();
+    println!("\n{}  {} entries", i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("(joining)"), i["entries"]);
+    println!("\nUsers");
+    for u in i["users"].as_array().into_iter().flatten() {
+        let me = if u["me"] == true { " (you)" } else { "" };
+        println!("  {}{me}  {}", u["name"].as_str().unwrap_or(""), u["role"].as_str().unwrap_or(""));
+    }
+    let groups = i["groups"].as_array().cloned().unwrap_or_default();
+    if !groups.is_empty() {
+        println!("\nGroups");
+        for g in &groups {
+            let members: Vec<String> = g["members"].as_array().into_iter().flatten().map(|m| format!("{}{}", name(m["user"].as_str().unwrap_or("")), if m["role"] == "admin" { "*" } else { "" })).collect();
+            println!("  {}  {}", g["name"].as_str().unwrap_or(""), members.join(", "));
         }
-        let dot = if d["online"] == true { "●" } else { "○" };
-        let build = d["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
-        println!("  {dot} {name}{me}{build}");
+    }
+    println!("\nServers");
+    for s in i["servers"].as_array().into_iter().flatten() {
+        let dot = if s["online"] == true { "●" } else { "○" };
+        let here = if s["here"] == true { " (this one)" } else { "" };
+        let owners: Vec<String> = s["owners"].as_array().into_iter().flatten().filter_map(|o| o.as_str()).map(|o| o.strip_prefix("user:").map(name).unwrap_or(o.into())).collect();
+        let privileged = if s["privileged"] == true { ", privileged" } else { "" };
+        let serves = if s["serves_me"] == true { "" } else { ", not yours" };
+        let build = s["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
+        println!("  {dot} {}{here}  owned by {}{privileged}{serves}{build}", s["name"].as_str().unwrap_or(""), owners.join(", "));
+    }
+    let clients = i["clients"].as_array().cloned().unwrap_or_default();
+    if !clients.is_empty() {
+        println!("\nPhones");
+        for c in &clients {
+            // A phone keeps no log and holds no sessions: say when it last asked this server, not that it's offline.
+            let asked = c["asked"].as_u64().map(|t| format!(", asked here {}", ago(t))).unwrap_or_default();
+            println!("  ▯ {}  {}{asked}", c["name"].as_str().unwrap_or(""), name(c["user"].as_str().unwrap_or("")));
+        }
+    }
+    for o in i["opens"].as_array().into_iter().flatten() {
+        println!("\n{} opened your data on a server {}.", o["by_name"].as_str().unwrap_or("someone"), ago(o["time"].as_u64().unwrap_or(0)));
     }
 }
 
@@ -304,7 +406,7 @@ fn mcp() -> Result<()> {
 }
 
 fn instructions() -> String {
-    let mut text = format!("{NAME} is this user's apps and agents, shared across their devices. Every tool is also a CLI command ({CLI} <app> <op>).");
+    let mut text = format!("{NAME} is this user's apps and agents, shared across their machines. Every tool is also a CLI command ({CLI} <app> <op>).");
     if let Ok(apps) = get("/v1/apps") {
         for app in apps.as_array().into_iter().flatten() {
             if let Some(i) = app["instructions"].as_str().filter(|i| !i.is_empty()) {
@@ -326,7 +428,7 @@ fn tools() -> Result<Vec<Value>, Value> {
                 schema = json!({ "type": "object", "properties": {} });
             }
             if app["runs"] == "here" {
-                schema["properties"]["device"] = json!({ "type": "string", "description": "which of your devices, by name; default is this one" });
+                schema["properties"]["server"] = json!({ "type": "string", "description": "which of your servers, by name; default is this one" });
             }
             tools.push(json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": schema }));
         }
@@ -337,11 +439,11 @@ fn tools() -> Result<Vec<Value>, Value> {
 fn call_tool(params: &Value) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let mut input = params["arguments"].as_object().cloned().unwrap_or_default();
-    let device = input.remove("device");
+    let server = input.remove("server").or(input.remove("device"));
     let Some((app, op)) = name.split_once('_') else {
         return json!({ "isError": true, "content": [{ "type": "text", "text": format!("no tool {name}") }] });
     };
-    match post("/v1/call", json!({ "device": device, "app": app, "op": op, "input": input })) {
+    match post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input })) {
         Ok(r) => match &r["ok"] {
             ok if ok["content"].is_array() => json!({ "content": ok["content"] }),
             Value::String(s) => json!({ "content": [{ "type": "text", "text": s }] }),

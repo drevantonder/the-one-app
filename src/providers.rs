@@ -1,6 +1,6 @@
-//! Providers: device features written outside the node, in whatever language the platform needs (Swift for
-//! Apple's Reminders, Go for WhatsApp). A provider registers an app with its own device's node, then
-//! long-polls for calls and answers them. To the space it's a native app that runs on that device.
+//! Providers: drivers written outside the node, in whatever language the platform needs (Swift for Apple's Reminders,
+//! Go for WhatsApp). A provider registers with its own server's node, describing its operations, then long-polls for
+//! calls and answers them. The node advertises it in sync, serving the server's local user, like a native app.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -12,8 +12,7 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::apps::Me;
-use crate::entry::{Content, Entry, Key};
-use crate::space::Members;
+use crate::entry::Content;
 
 /// A provider that hasn't asked for calls in this long is gone.
 const GONE_AFTER: Duration = Duration::from_secs(60);
@@ -81,7 +80,7 @@ impl Providers {
             .as_array()
             .into_iter()
             .flatten()
-            .map(|e| Content { app: app.into(), kind: e["kind"].as_str().unwrap_or("").into(), data: e["data"].clone() })
+            .map(|e| Content::new(app, e["kind"].as_str().unwrap_or(""), e["data"].clone()))
             .collect();
         Ok((reply["ok"].clone(), entries))
     }
@@ -102,23 +101,4 @@ impl Providers {
         let _ = tx.send(reply);
         Ok(())
     }
-}
-
-/// A device announces each provider it runs, so its user's other devices list it too (SPEC.md, "Providers").
-pub fn announcement(describe: &Value) -> Content {
-    Content { app: crate::release::APP.into(), kind: "provides".into(), data: describe.clone() }
-}
-
-/// The newest description each of `user`'s devices announced for each app, in replay order.
-pub fn announced(members: &Members, entries: &[Entry], user: &str) -> Vec<(Key, Value)> {
-    let mut newest: HashMap<(Key, String), Value> = HashMap::new();
-    for e in entries.iter().filter(|e| e.content.app == crate::release::APP && e.content.kind == "provides") {
-        let Some(name) = e.content.data["name"].as_str() else { continue };
-        if members.active(&e.author(), e.order()).is_some_and(|m| m.user == user) {
-            newest.insert((e.author(), name.to_string()), e.content.data.clone());
-        }
-    }
-    let mut out: Vec<(Key, Value)> = newest.into_iter().map(|((device, _), d)| (device, d)).collect();
-    out.sort_by(|a, b| (a.0, a.1["name"].as_str()).cmp(&(b.0, b.1["name"].as_str())));
-    out
 }

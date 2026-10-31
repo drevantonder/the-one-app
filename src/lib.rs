@@ -2,13 +2,14 @@ pub mod brand {
     include!(concat!(env!("OUT_DIR"), "/brand.rs"));
 }
 pub mod entry;
-pub mod space;
+pub mod members;
 pub mod store;
 pub mod sync;
 pub mod agents;
 pub mod api;
 pub mod apps;
 pub mod builtin;
+pub mod bundle;
 pub mod models;
 pub mod native;
 pub mod node;

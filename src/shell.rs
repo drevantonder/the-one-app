@@ -1,4 +1,4 @@
-//! Shell: run a command on one of your devices.
+//! Shell: run a command on one of your servers.
 
 use std::time::Duration;
 
@@ -12,10 +12,10 @@ use crate::native::Reply;
 pub fn describe() -> Value {
     json!({
         "name": "shell", "title": "Shell", "icon": "terminal", "runs": "here",
-        "instructions": "Run a shell command on one of your own devices with shell_run; give device to choose which. Every command is logged in the space.",
+        "instructions": "Run a shell command on one of your own servers with shell_run; give server to choose which. Every command is logged in your own scope.",
         "ops": [{
             "name": "run",
-            "description": "Run a shell command on this device (or the device given) and return its exit code and output. Every command is logged.",
+            "description": "Run a shell command on this server (or the server given) and return its exit code and output. Every command is logged.",
             "input": { "type": "object", "required": ["command"], "properties": {
                 "command": { "type": "string", "description": "run by sh -c" },
                 "dir": { "type": "string", "description": "working directory; default is the home directory" },
@@ -43,7 +43,7 @@ pub fn call(op: String, input: Value, caller: Me, _entries: Vec<AppEntry>) -> Re
             Ok(Err(err)) => bail!("couldn't start sh: {err}"),
             Err(_) => (-1, String::new(), format!("timed out after {timeout}s")),
         };
-        let log = Content { app: "shell".into(), kind: "ran".into(), data: json!({ "command": command, "dir": dir, "exit": exit, "by": caller.name }) };
+        let log = Content::new("shell", "ran", json!({ "command": command, "dir": dir, "exit": exit, "by": caller.name }));
         Ok((json!({ "exit": exit, "stdout": stdout, "stderr": stderr }), vec![log]))
     })
 }

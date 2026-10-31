@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 publish = false
 
-# A device that keeps no log of its own (a phone) and asks the space's other devices to do the work.
+# A client that keeps no log of its own (a phone) and asks its user's servers to do the work.
 
 [lib]
 crate-type = ["lib", "staticlib"]

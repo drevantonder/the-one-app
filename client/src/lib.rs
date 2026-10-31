@@ -1,5 +1,6 @@
-//! A client device: one that keeps no log (a phone) and asks the space's other devices to do the work.
-//! It joins like any device (SPEC.md, "Join"), then sends requests over `one/client/1`.
+//! A client: a machine that keeps no log (a phone) and asks its user's servers to do the work.
+//! It joins with a pairing code like a server (SPEC.md, "Join"), then sends requests over `one/client/1` to the servers
+//! its user trusts, nearest first, one at a time, trying the next only if one can't be reached or says to go elsewhere.
 //! The C functions at the bottom are what the iPhone and Android shells call.
 
 use std::ffi::{CStr, CString, c_char};
@@ -19,7 +20,6 @@ const CLIENT_ALPN: &[u8] = b"one/client/1";
 
 #[derive(Serialize, Deserialize)]
 struct PairingCode {
-    space: [u8; 32],
     from: EndpointAddr,
     secret: [u8; 16],
 }
@@ -28,7 +28,10 @@ struct PairingCode {
 struct Saved {
     secret: String,
     name: String,
-    /// Devices to ask, most recently useful first.
+    /// The user this client was admitted for.
+    #[serde(default)]
+    user: String,
+    /// Servers to ask, the one that last answered first.
     peers: Vec<EndpointAddr>,
 }
 
@@ -75,7 +78,7 @@ impl Client {
         !self.saved.lock().unwrap().peers.is_empty()
     }
 
-    /// Sets the name this device gives the space it joins next.
+    /// Sets the name this client gives the install it joins next.
     pub fn set_name(&self, name: &str) -> Result<()> {
         self.saved.lock().unwrap().name = name.to_string();
         self.save()
@@ -83,14 +86,14 @@ impl Client {
 
     pub async fn join(&self, code: &str) -> Result<Value> {
         if self.joined() {
-            bail!("this phone is already in a space, and an app holds one; for another, install that context's own app");
+            bail!("this phone already belongs to an install, and an app holds one; for another, install that context's own app");
         }
         let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).context("that isn't a pairing code")?;
         let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
-        let conn = self.endpoint.connect(code.from.clone(), JOIN_ALPN).await.context("couldn't reach the device that made the pairing code")?;
+        let conn = self.endpoint.connect(code.from.clone(), JOIN_ALPN).await.context("couldn't reach the server that made the pairing code")?;
         let (mut send, mut recv) = conn.open_bi().await?;
         let name = self.saved.lock().unwrap().name.clone();
-        send.write_all(&serde_json::to_vec(&json!({ "secret": code.secret, "name": name, "client": true }))?).await?;
+        send.write_all(&serde_json::to_vec(&json!({ "secret": code.secret, "name": name, "as": "client" }))?).await?;
         send.finish()?;
         let reply: Value = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
         if let Some(err) = reply.get("error") {
@@ -98,11 +101,12 @@ impl Client {
         }
         {
             let mut saved = self.saved.lock().unwrap();
+            saved.user = reply["user"].as_str().unwrap_or("").to_string();
             saved.peers.retain(|p| p.id != code.from.id);
             saved.peers.insert(0, code.from);
         }
         self.save()?;
-        // Learn the space's other devices, so any of them can answer later.
+        // Learn the other servers that serve this user, so any of them can answer later.
         if let Ok(state) = self.request("GET", "/v1/state", Value::Null).await {
             self.learn(&state);
         }
@@ -112,8 +116,8 @@ impl Client {
     fn learn(&self, state: &Value) {
         let me = self.endpoint.id();
         let mut saved = self.saved.lock().unwrap();
-        for d in state["space"]["devices"].as_array().into_iter().flatten().filter(|d| d["client"] != true) {
-            let Some(id) = d["device"].as_str().and_then(|h| data_encoding::HEXLOWER.decode(h.as_bytes()).ok()) else { continue };
+        for d in state["install"]["servers"].as_array().into_iter().flatten().filter(|d| d["serves_me"] == true) {
+            let Some(id) = d["key"].as_str().and_then(|h| data_encoding::HEXLOWER.decode(h.as_bytes()).ok()) else { continue };
             let Ok(id) = <[u8; 32]>::try_from(id.as_slice()) else { continue };
             let Ok(id) = EndpointId::from_bytes(&id) else { continue };
             if id != me && !saved.peers.iter().any(|p| p.id == id) {
@@ -122,33 +126,39 @@ impl Client {
         }
     }
 
-    /// Sends one request to the first device that answers, and remembers which one did.
+    /// Sends one request to the servers that serve this user, one at a time, until one answers it; remembers which.
     pub async fn request(&self, method: &str, path: &str, body: Value) -> Result<Value> {
         let peers = self.saved.lock().unwrap().peers.clone();
         if peers.is_empty() {
-            bail!("join a space first");
+            bail!("join an install first");
         }
         let request = serde_json::to_vec(&json!({ "method": method, "path": path, "body": body }))?;
-        let mut last = anyhow::anyhow!("no device answered");
+        let mut why = Vec::new();
         for peer in peers {
             match tokio::time::timeout(Duration::from_secs(12), self.ask(peer.clone(), &request)).await {
+                Ok(Ok(reply)) if reply.get("elsewhere").is_some() => why.push(reply["elsewhere"].as_str().unwrap_or("it can't").to_string()),
                 Ok(Ok(reply)) => {
                     let mut saved = self.saved.lock().unwrap();
                     if saved.peers.first().map(|p| p.id) != Some(peer.id) {
                         saved.peers.retain(|p| p.id != peer.id);
                         saved.peers.insert(0, peer);
                     }
+                    drop(saved);
+                    let _ = self.save();
+                    if path == "/v1/state" {
+                        self.learn(&reply);
+                    }
                     return Ok(reply);
                 }
-                Ok(Err(err)) => last = err,
-                Err(_) => last = anyhow::anyhow!("timed out"),
+                Ok(Err(err)) => why.push(format!("{err:#}")),
+                Err(_) => why.push("timed out".into()),
             }
         }
-        Err(last.context("none of the space's devices answered"))
+        bail!("none of your servers could answer ({})", why.join("; "))
     }
 
     async fn ask(&self, peer: EndpointAddr, request: &[u8]) -> Result<Value> {
-        // Dial by id: saved addresses go stale when a device restarts, discovery finds the current one.
+        // Dial by id: saved addresses go stale when a server restarts, discovery finds the current one.
         let conn = self.endpoint.connect(EndpointAddr::new(peer.id), CLIENT_ALPN).await?;
         let (mut send, mut recv) = conn.open_bi().await?;
         send.write_all(request).await?;
@@ -156,9 +166,9 @@ impl Client {
         Ok(serde_json::from_slice(&recv.read_to_end(16 << 20).await?)?)
     }
 
-    /// Streams the node's events (`changed`, `peers`, `space`) until the connection drops.
+    /// Streams the node's events (`changed`, `servers`, `install`) until the connection drops.
     pub async fn watch(&self, tx: mpsc::UnboundedSender<Value>) -> Result<()> {
-        let peer = self.saved.lock().unwrap().peers.first().cloned().context("join a space first")?;
+        let peer = self.saved.lock().unwrap().peers.first().cloned().context("join an install first")?;
         let conn = self.endpoint.connect(peer, CLIENT_ALPN).await?;
         let (mut send, mut recv) = conn.open_bi().await?;
         send.write_all(&serde_json::to_vec(&json!({ "method": "GET", "path": "/v1/events" }))?).await?;
@@ -205,7 +215,7 @@ fn client() -> Result<&'static Client> {
     CLIENT.get().context("call one_start first")
 }
 
-/// Starts the client with its files in `dir`, calling this device `name`.
+/// Starts the client with its files in `dir`, calling this phone `name`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn one_start(dir: *const c_char, name: *const c_char) -> *mut c_char {
     let (dir, name) = unsafe { (arg(dir), arg(name)) };
@@ -215,11 +225,11 @@ pub unsafe extern "C" fn one_start(dir: *const c_char, name: *const c_char) -> *
             let _ = CLIENT.set(c);
         }
         let c = client()?;
-        Ok(json!({ "device": c.id(), "joined": c.joined() }))
+        Ok(json!({ "key": c.id(), "joined": c.joined() }))
     }))
 }
 
-/// Joins the space a pairing code is for, as `name` (or the name it started with, if empty).
+/// Joins the install a pairing code is for, as `name` (or the name it started with, if empty).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn one_join(code: *const c_char, name: *const c_char) -> *mut c_char {
     let (code, name) = unsafe { (arg(code), arg(name)) };
@@ -232,7 +242,7 @@ pub unsafe extern "C" fn one_join(code: *const c_char, name: *const c_char) -> *
     }))
 }
 
-/// Sends `method path` with a JSON `body` (or empty) to the space's devices.
+/// Sends `method path` with a JSON `body` (or empty) to this user's servers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn one_request(method: *const c_char, path: *const c_char, body: *const c_char) -> *mut c_char {
     let (method, path, body) = unsafe { (arg(method), arg(path), arg(body)) };

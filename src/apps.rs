@@ -1,6 +1,7 @@
 //! Apps run in workerd, Cloudflare's open-source Workers runtime, which the node starts beside itself.
-//! Each app is an ES module inside `runtime/shim.js`: a Worker with a Durable Object that
-//! holds the app's views in SQLite. The node replays entries into them and asks them to run operations.
+//! Each deployed app is an ES module inside `runtime/shim.js`: a Worker with a Durable Object per scope that holds the
+//! app's store of that scope in SQLite. The node replays entries into them and asks them to run operations.
+//! When the deploys change, the node writes the config again and restarts workerd; the stores stay on disk.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -12,7 +13,10 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::Digest;
 
+use std::collections::BTreeMap;
+
 use crate::entry::Content;
+use crate::members::Role;
 
 /// The workerd build every node runs, and each platform's npm package of it with its sha512.
 const WORKERD: &str = "1.20261031.1";
@@ -28,32 +32,62 @@ const TIME_LIMIT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Me {
-    pub device: String,
+    pub key: String,
     pub user: String,
     pub name: String,
+    pub role: Option<Role>,
 }
 
 /// An entry as an app's `on` handlers see it.
 #[derive(Clone, Debug, Serialize)]
 pub struct AppEntry {
+    #[serde(skip)]
     pub app: String,
+    pub id: String,
+    pub scope: String,
     pub kind: String,
-    pub author: String,
     pub user: String,
     pub name: String,
+    pub role: Option<Role>,
+    pub groups: BTreeMap<String, Role>,
     pub time: u64,
-    pub id: String,
     pub data: Value,
+    pub blobs: Vec<String>,
+}
+
+/// A scope a call may reach, and the caller's role there.
+#[derive(Clone, Debug, Serialize)]
+pub struct ScopeHandle {
+    pub id: String,
+    pub name: String,
+    pub role: Option<Role>,
+}
+
+/// Who a call, widget or hook runs for, and what it may reach.
+#[derive(Clone, Debug, Serialize)]
+pub struct Context {
+    pub me: Me,
+    pub now: u64,
+    pub scopes: Vec<ScopeHandle>,
+    /// A call on data opened for its caller: appends fail.
+    pub read_only: bool,
+}
+
+/// What a call asks the node to write once it returns.
+pub enum Append {
+    Entry { scope: String, content: Content },
+    Install { app: String, scope: String, installed: bool },
 }
 
 pub struct Outcome {
     pub result: Value,
-    pub appends: Vec<Content>,
+    pub appends: Vec<Append>,
 }
 
-/// One app's part of a replay: its new entries, or all of them into fresh views.
+/// One app's store of one scope: its new entries, or all of them into an empty store.
 pub struct Replay {
     pub app: String,
+    pub scope: String,
     pub fresh: bool,
     pub entries: Vec<AppEntry>,
 }
@@ -62,25 +96,27 @@ pub struct Replay {
 pub struct Apps(Arc<Runtime>);
 
 struct Runtime {
+    dir: PathBuf,
     base: String,
-    names: Vec<String>,
+    /// The apps loaded, (name, module source), and how many times the runtime was configured.
+    loaded: Mutex<(Vec<(String, String)>, u64)>,
     /// The running workerd's process id, so a hung one can be stopped and started again.
     pid: Mutex<Option<u32>>,
 }
 
 impl Apps {
-    /// Starts workerd with these apps, (name, ES module source), keeping its files in `dir`.
-    pub async fn start(dir: PathBuf, apps: Vec<(String, String)>) -> Result<Self> {
-        tokio::task::spawn_blocking(move || Apps::start_blocking(&dir, apps)).await?
+    /// Starts workerd with no apps yet, keeping its files in `dir`.
+    pub async fn start(dir: PathBuf) -> Result<Self> {
+        tokio::task::spawn_blocking(move || Apps::start_blocking(&dir)).await?
     }
 
-    fn start_blocking(dir: &Path, apps: Vec<(String, String)>) -> Result<Self> {
+    fn start_blocking(dir: &Path) -> Result<Self> {
         let workerd = workerd()?;
         std::fs::create_dir_all(dir.join("storage"))?;
         stop_previous(dir);
         let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
-        let config = write_config(dir, &apps, port)?;
-        let runtime = Arc::new(Runtime { base: format!("http://127.0.0.1:{port}"), names: apps.into_iter().map(|(n, _)| n).collect(), pid: Mutex::new(None) });
+        let config = write_config(dir, &[], port, 0)?;
+        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), loaded: Mutex::new((Vec::new(), 0)), pid: Mutex::new(None) });
         let watch = runtime.clone();
         let (dir, log) = (dir.to_path_buf(), dir.join("workerd.log"));
         std::thread::Builder::new().name("workerd".into()).spawn(move || loop {
@@ -101,27 +137,48 @@ impl Apps {
                     *watch.pid.lock().unwrap() = Some(child.id());
                     let _ = std::fs::write(dir.join("workerd.pid"), child.id().to_string());
                     let status = child.wait();
-                    tracing::warn!("the app runtime stopped ({status:?}); starting it again");
+                    tracing::debug!("the app runtime stopped ({status:?}); starting it again");
                 }
                 Err(err) => tracing::warn!("couldn't start the app runtime: {err}"),
             }
-            std::thread::sleep(Duration::from_secs(1));
-        })?;
-        let started = Instant::now();
-        while ureq::get(format!("{}/ready", runtime.base)).call().is_err() {
-            ensure!(started.elapsed() < Duration::from_secs(60), "the app runtime didn't start; see {}", dir_log(&runtime));
             std::thread::sleep(Duration::from_millis(100));
-        }
+        })?;
+        runtime.wait_ready(0)?;
         Ok(Apps(runtime))
     }
 
-    pub fn names(&self) -> &[String] {
-        &self.0.names
+    /// Runs exactly these apps, (name, module source), restarting the runtime if they changed. Stores stay on disk.
+    pub async fn load(&self, apps: Vec<(String, String)>) -> Result<()> {
+        let runtime = self.0.clone();
+        tokio::task::spawn_blocking(move || {
+            let generation = {
+                let mut loaded = runtime.loaded.lock().unwrap();
+                if loaded.0 == apps {
+                    return Ok(());
+                }
+                loaded.1 += 1;
+                let port = runtime.base.rsplit(':').next().unwrap().parse()?;
+                write_config(&runtime.dir, &apps, port, loaded.1)?;
+                loaded.0 = apps;
+                loaded.1
+            };
+            runtime.restart();
+            runtime.wait_ready(generation)
+        })
+        .await?
     }
 
-    async fn ask(&self, app: &str, what: &str, body: Value) -> Result<(Value, Vec<Content>)> {
-        if !self.0.names.iter().any(|n| n == app) {
-            bail!("no app named {app}");
+    pub fn names(&self) -> Vec<String> {
+        self.0.loaded.lock().unwrap().0.iter().map(|(n, _)| n.clone()).collect()
+    }
+
+    pub fn has(&self, app: &str) -> bool {
+        self.0.loaded.lock().unwrap().0.iter().any(|(n, _)| n == app)
+    }
+
+    async fn ask(&self, app: &str, what: &str, body: Value) -> Result<Value> {
+        if !self.has(app) {
+            bail!("no app named {app} runs here");
         }
         let url = format!("{}/{app}/{what}", self.0.base);
         let runtime = self.0.clone();
@@ -140,69 +197,86 @@ impl Apps {
         if let Some(err) = reply.get("error") {
             bail!("{}", err.as_str().unwrap_or("the app failed"));
         }
-        let appends = reply["appends"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|a| Content { app: app.into(), kind: a["kind"].as_str().unwrap_or("").into(), data: a["data"].clone() })
-            .collect();
-        Ok((reply["ok"].clone(), appends))
+        Ok(reply)
     }
 
-    pub async fn replay(&self, jobs: Vec<Replay>) -> Result<()> {
+    pub async fn replay(&self, jobs: Vec<Replay>) {
         for job in jobs {
             if job.entries.is_empty() && !job.fresh {
                 continue;
             }
-            if let Err(err) = self.ask(&job.app, "replay", json!({ "fresh": job.fresh, "entries": job.entries })).await {
-                tracing::warn!("{} replay: {err:#}", job.app);
+            if let Err(err) = self.ask(&job.app, "replay", json!({ "scope": job.scope, "fresh": job.fresh, "entries": job.entries })).await {
+                tracing::warn!("{} replay of {}: {err:#}", job.app, job.scope);
             }
         }
-        Ok(())
     }
 
-    pub async fn call(&self, app: &str, op: &str, input: Value, me: Me, now: u64) -> Result<Outcome> {
-        let (result, appends) = self.ask(app, "call", json!({ "op": op, "input": input, "me": me, "now": now })).await?;
-        Ok(Outcome { result, appends })
+    /// Deletes every app's store of a scope.
+    pub async fn drop_scope(&self, scope: &str) {
+        for app in self.names() {
+            if let Err(err) = self.ask(&app, "drop", json!({ "scope": scope })).await {
+                tracing::warn!("{app}: dropping {scope}: {err:#}");
+            }
+        }
     }
 
-    pub async fn widget(&self, app: &str, name: &str, me: Me, now: u64) -> Result<Value> {
-        Ok(self.ask(app, "widget", json!({ "name": name, "me": me, "now": now })).await?.0)
+    pub async fn call(&self, app: &str, op: &str, input: Value, ctx: &Context) -> Result<Outcome> {
+        let reply = self.ask(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only })).await?;
+        let mut appends = Vec::new();
+        for a in reply["appends"].as_array().into_iter().flatten() {
+            let scope = a["scope"].as_str().unwrap_or("").to_string();
+            match a["install"].as_str() {
+                Some(name) => appends.push(Append::Install { app: name.into(), scope, installed: a["installed"] != false }),
+                None => {
+                    let blobs = a["blobs"].as_array().into_iter().flatten().filter_map(|b| b.as_str().map(str::to_string)).collect();
+                    let content = Content { app: app.into(), kind: a["kind"].as_str().unwrap_or("").into(), data: a["data"].clone(), blobs };
+                    appends.push(Append::Entry { scope, content });
+                }
+            }
+        }
+        Ok(Outcome { result: reply["ok"].clone(), appends })
     }
 
-    pub async fn hook(&self, app: &str, name: &str, input: Value, me: Me, now: u64) -> Result<Value> {
-        Ok(self.ask(app, "hook", json!({ "name": name, "input": input, "me": me, "now": now })).await?.0)
+    pub async fn widget(&self, app: &str, name: &str, ctx: &Context) -> Result<Value> {
+        Ok(self.ask(app, "widget", json!({ "name": name, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true })).await?["ok"].clone())
+    }
+
+    pub async fn hook(&self, app: &str, name: &str, input: Value, ctx: &Context) -> Result<Value> {
+        Ok(self.ask(app, "hook", json!({ "name": name, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true })).await?["ok"].clone())
     }
 
     /// A screen's HTML, as the app wrote it.
     pub async fn screen(&self, app: &str, name: &str) -> Result<String> {
-        let (html, _) = self.ask(app, &format!("screen?name={name}"), json!({})).await?;
-        html.as_str().map(str::to_string).context("the screen isn't text")
+        let reply = self.ask(app, &format!("screen?name={name}"), json!({})).await?;
+        reply["ok"].as_str().map(str::to_string).context("the screen isn't text")
     }
 
-    pub async fn describe(&self) -> Result<Vec<Value>> {
-        let mut out = Vec::new();
-        for app in self.0.names.clone() {
-            match self.ask(&app, "describe", json!({})).await {
-                Ok((d, _)) => out.push(d),
-                Err(err) => tracing::warn!("{app}: {err:#}"),
-            }
-        }
-        Ok(out)
+    pub async fn describe(&self, app: &str) -> Result<Value> {
+        Ok(self.ask(app, "describe", json!({})).await?["ok"].clone())
     }
 }
 
 impl Runtime {
-    /// Stops a hung runtime; the watcher starts it again.
+    /// Stops the runtime; the watcher starts it again, with the config as it is now.
     fn restart(&self) {
         if let Some(pid) = *self.pid.lock().unwrap() {
             let _ = std::process::Command::new("kill").arg("-9").arg(pid.to_string()).status();
         }
     }
-}
 
-fn dir_log(runtime: &Runtime) -> String {
-    format!("workerd.log (runtime at {})", runtime.base)
+    /// Waits until the runtime answers with the config of `generation`.
+    fn wait_ready(&self, generation: u64) -> Result<()> {
+        let started = Instant::now();
+        loop {
+            if let Ok(mut r) = ureq::get(format!("{}/ready", self.base)).call() {
+                if r.body_mut().read_to_string().is_ok_and(|g| g.trim() == generation.to_string()) {
+                    return Ok(());
+                }
+            }
+            ensure!(started.elapsed() < Duration::from_secs(60), "the app runtime didn't start; see {}", self.dir.join("workerd.log").display());
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
 }
 
 /// A runtime left behind by an earlier run of the node would hold on to its storage; stop it.
@@ -247,10 +321,11 @@ fn workerd() -> Result<PathBuf> {
 }
 
 /// Writes each app's modules and the workerd config that runs them all behind one router.
-fn write_config(dir: &Path, apps: &[(String, String)], port: u16) -> Result<PathBuf> {
+fn write_config(dir: &Path, apps: &[(String, String)], port: u16, generation: u64) -> Result<PathBuf> {
     let modules = dir.join("apps");
     let _ = std::fs::remove_dir_all(&modules);
-    std::fs::write(dir.join("router.js"), include_str!("runtime/router.js"))?;
+    std::fs::create_dir_all(&modules)?;
+    std::fs::write(dir.join("router.js"), include_str!("runtime/router.js").replace("GENERATION", &generation.to_string()))?;
     let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
     let mut services = vec![
         "(name = \"router\", worker = .router)".to_string(),
@@ -259,7 +334,7 @@ fn write_config(dir: &Path, apps: &[(String, String)], port: u16) -> Result<Path
     let mut bindings = Vec::new();
     let mut workers = Vec::new();
     for (i, (name, source)) in apps.iter().enumerate() {
-        ensure!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'), "app names are lowercase words joined by -");
+        ensure!(crate::members::valid_app_name(name), "app names are lowercase words joined by -");
         let app_dir = modules.join(name);
         std::fs::create_dir_all(&app_dir)?;
         std::fs::write(app_dir.join("app.js"), source)?;
@@ -267,7 +342,7 @@ fn write_config(dir: &Path, apps: &[(String, String)], port: u16) -> Result<Path
         services.push(format!("(name = {}, worker = .app{i})", quote(&format!("app-{name}"))));
         bindings.push(format!("(name = {}, service = {})", quote(name), quote(&format!("app-{name}"))));
         workers.push(format!(
-            "const app{i} :Workerd.Worker = (\n  modules = [(name = \"shim.js\", esModule = embed {}), (name = \"app.js\", esModule = embed {})],\n  compatibilityDate = \"{COMPATIBILITY_DATE}\",\n  bindings = [(name = \"VIEWS\", durableObjectNamespace = \"Views\")],\n  durableObjectNamespaces = [(className = \"Views\", uniqueKey = {}, enableSql = true)],\n  durableObjectStorage = (localDisk = \"storage\"),\n);",
+            "const app{i} :Workerd.Worker = (\n  modules = [(name = \"shim.js\", esModule = embed {}), (name = \"app.js\", esModule = embed {})],\n  compatibilityDate = \"{COMPATIBILITY_DATE}\",\n  bindings = [(name = \"STORES\", durableObjectNamespace = \"Store\")],\n  durableObjectNamespaces = [(className = \"Store\", uniqueKey = {}, enableSql = true)],\n  durableObjectStorage = (localDisk = \"storage\"),\n);",
             quote(&format!("apps/{name}/shim.js")),
             quote(&format!("apps/{name}/app.js")),
             quote(name),

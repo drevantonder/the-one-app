@@ -17,6 +17,20 @@ fn main() {
     );
     let optional = |key: &str| brand.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\npub const STORE: &str = {:?};\n", optional("release_key"), optional("release_signer"), optional("store"));
+    // The apps a new install deploys and installs in `global`: each folder's files, built in.
+    let base = std::path::Path::new(&path).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+    let mut apps = String::new();
+    for dir in brand.get("apps").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()) {
+        let dir = std::fs::canonicalize(base.join(dir)).unwrap_or_else(|_| panic!("brand app {dir} isn't there"));
+        println!("cargo:rerun-if-changed={}", dir.display());
+        let mut files = Vec::new();
+        collect(&dir, &dir, &mut files);
+        files.sort();
+        let name = dir.file_name().unwrap().to_string_lossy().to_string();
+        let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
+        apps.push_str(&format!("({name:?}, &[{}]),", files.join(", ")));
+    }
+    let out = format!("{out}pub const APPS: &[(&str, &[(&str, &[u8])])] = &[{apps}];\n");
     // Which build this is, so a node can tell a release apart from itself.
     let commit = std::process::Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])
@@ -44,4 +58,19 @@ fn main() {
     let out = format!("{out}pub const COMMITTED: u64 = {committed};\npub const BUILD: &str = {commit:?};\npub const TARGET: &str = {:?};\n", std::env::var("TARGET").unwrap());
     let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("brand.rs");
     std::fs::write(dest, out).unwrap();
+}
+
+fn collect(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+    for entry in std::fs::read_dir(dir).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || name == "node_modules" {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            collect(root, &path, out);
+        } else {
+            out.push((path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"), path.to_string_lossy().to_string()));
+        }
+    }
 }

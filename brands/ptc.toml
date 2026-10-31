@@ -1,4 +1,6 @@
 name = "The PTC App"
 cli = "ptc"
 port = 4848
+# The apps a new install deploys and installs in global.
+apps = ["../apps/board"]
 accent = "#3A6E8C"
