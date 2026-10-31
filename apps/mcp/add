@@ -1,0 +1,77 @@
+#!/bin/sh
+# Makes a remote MCP server (streamable HTTP) an app whose operations are its tools, deploys it and installs it:
+#
+#   apps/mcp/add <name> <url> [--title <title>] [--header '<Name>: <value>']... [--scope user|global|<group>]
+#   apps/mcp/add <name>        deploys the server's tools as they are now: after sign_in, or when they change
+#
+# A server that wants OAuth: `one <name> sign_in`, then run this again with just the name. A header's value may hold
+# a secret as {{key}}, set with `one secret set <name> key --hosts <the server's host>`.
+# Apps can't deploy, so this runs where the CLI does: it builds the app from template.js beside it.
+set -eu
+one=${ONE:-one}
+here=$(cd "$(dirname "$0")" && pwd)
+die() { echo "$*" >&2; exit 1; }
+esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+[ $# -ge 1 ] || die "usage: $0 <name> [<url>] [--title <title>] [--header '<Name>: <value>']... [--scope <scope>]"
+name=$1; shift
+url=""; title=""; headers=""; scope=user
+case ${1-} in http*) url=$1; shift ;; esac
+while [ $# -gt 0 ]; do
+  case $1 in
+    --title) title=$2; shift 2 ;;
+    --header)
+      key=${2%%:*}; value=$(printf '%s' "${2#*:}" | sed 's/^ *//')
+      headers="$headers${headers:+, }\"$(esc "$key")\": \"$(esc "$value")\""; shift 2 ;;
+    --scope) scope=$2; shift 2 ;;
+    *) die "what's $1?" ;;
+  esac
+done
+
+dir=$(mktemp -d)/$name
+mkdir -p "$dir"
+trap 'rm -rf "$(dirname "$dir")"' EXIT
+cp "$here/template.js" "$dir/app.js"
+
+new=no
+if ! $one source "$name" >/dev/null 2>&1; then
+  new=yes
+elif ! $one source "$name" src/server.json >/dev/null 2>&1; then
+  die "$name is an app already, and not an MCP server's: pick another name"
+fi
+if [ -n "$url" ]; then
+  printf '{\n  "name": "%s",\n  "url": "%s",\n  "title": "%s",\n  "headers": {%s}\n}\n' "$(esc "$name")" "$(esc "$url")" "$(esc "$title")" "$headers" >"$dir/server.json"
+elif [ $new = yes ]; then
+  die "there's no app $name yet: give its server's url"
+else
+  $one source "$name" src/server.json >"$dir/server.json"
+fi
+if [ $new = yes ] || ! $one source "$name" src/tools.json >"$dir/tools.json" 2>/dev/null; then
+  echo '{ "tools": [], "oauth": false }' >"$dir/tools.json"
+fi
+
+deployed() { # whether the app as deployed has this file as it is here
+  $one source "$name" "src/$1" 2>/dev/null | cmp -s - "$dir/$1"
+}
+if [ $new = yes ] || ! deployed app.js || ! deployed server.json; then
+  $one deploy "$dir"
+fi
+[ $new = no ] || $one install "$name" --scope "$scope"
+
+tries=0 # a deploy takes a moment to reach the servers
+until $one "$name" refresh_tools >"$dir/tools.next" 2>"$dir/error"; do
+  tries=$((tries + 1))
+  if [ $tries -ge 15 ] || ! grep -q "latest deploy" "$dir/error"; then
+    cat "$dir/error" >&2
+    echo "Then run $0 $name again to make its tools $name's operations." >&2
+    exit 0
+  fi
+  sleep 2
+done
+if cmp -s "$dir/tools.next" "$dir/tools.json"; then
+  echo "$name's tools are up to date."
+else
+  mv "$dir/tools.next" "$dir/tools.json"
+  $one deploy "$dir"
+fi
+$one apps | awk -v n="$name" '/^[a-z0-9-]+ \(/ { on = ($1 == n) } on'
