@@ -1,8 +1,16 @@
 name = "The PTC App"
 cli = "ptc"
 port = 4848
+accent = "#3A6E8C"
+# Built from the same main as The One App; `ptc update` takes it to PTC's servers. Its releases aren't on GitHub:
+# install.sh installs another brand.
+repo = "drevantonder/the-one-app"
+release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFjnuPCkEUMe1/HXHZhMXoC1F+j+N6aVeumYmaLG7MnZ"
+release_signer = "ssh mac \"op read 'op://van-tonder-nosudo/The PTC App release key/private key?ssh-format=openssh'\""
 # The apps a new install deploys and installs in global.
 apps = ["../apps/board", "../apps/repos", "../apps/apps"]
 store = "apps"
 made_here = "Made at PTC"
-accent = "#3A6E8C"
+icon = "ptc/AppIcon.png"
+menubar = "ptc/MenuBarIcon.png"
+logo = "ptc/Logo.png"
