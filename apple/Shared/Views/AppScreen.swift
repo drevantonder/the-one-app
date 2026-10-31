@@ -82,7 +82,7 @@ private struct ScreenWebView: Representable {
     func makeUIView(context: Context) -> WKWebView { make(context) }
     func updateUIView(_ web: WKWebView, context: Context) {
         context.coordinator.view = self
-        web.pageZoom = zoom
+        web.evaluateJavaScript(zoomScript)
     }
     #endif
 
@@ -97,7 +97,6 @@ private struct ScreenWebView: Representable {
         web.navigationDelegate = context.coordinator
         web.uiDelegate = context.coordinator
         web.allowsLinkPreview = false
-        web.pageZoom = zoom
         #if os(macOS)
         web.setValue(false, forKey: "drawsBackground")
         #else
@@ -111,13 +110,16 @@ private struct ScreenWebView: Representable {
     }
 
     /// The kit is sized for a phone's 17-point text: an iPhone's follows Dynamic Type (a Mac's is smaller: see platformCSS).
-    private var zoom: CGFloat {
-        #if os(macOS)
-        1
-        #else
-        UIFontMetrics(forTextStyle: .body).scaledValue(for: 17, compatibleWith: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize))) / 17
-        #endif
+    /// It's CSS zoom, which lays the page out to the zoomed width; the web view's pageZoom only scales the drawing, so
+    /// a page at any other text size was narrower than the screen or ran off it.
+    #if os(macOS)
+    private let zoomScript = ""
+    #else
+    private var zoomScript: String {
+        let zoom = UIFontMetrics(forTextStyle: .body).scaledValue(for: 17, compatibleWith: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize))) / 17
+        return "document.documentElement.style.zoom = \"\(zoom)\";"
     }
+    #endif
 
     /// What makes a page sit in the shell as its own: the shell's background shows through, its accent is the
     /// shell's in light and dark, and nothing zooms.
@@ -132,6 +134,7 @@ private struct ScreenWebView: Representable {
           @media (prefers-color-scheme: dark) { :root:root { --accent: \(brandCSS(accent, dark: true)); } }
         \(Self.platformCSS)`;
         document.documentElement.appendChild(style);
+        \(zoomScript)
         """
     }
 
