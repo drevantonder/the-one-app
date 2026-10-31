@@ -169,6 +169,8 @@ const tools = Object.fromEntries(listed.tools.map((tool) => {
   return [opName(tool.name), {
     description: tool.description || tool.title || tool.name,
     input,
+    reads: tool.annotations?.readOnlyHint === true,
+    confirm: tool.annotations?.readOnlyHint !== true && tool.annotations?.destructiveHint === true,
     async run(ctx, args) {
       args = { ...args };
       const named = own ? null : args.account;
@@ -271,6 +273,7 @@ export default {
 
     accounts: {
       description: "The accounts signed in to the server, for you.",
+      reads: true,
       input: { type: "object", properties: {} },
       async run(ctx) {
         const all = await accounts(ctx);
@@ -301,7 +304,7 @@ export default {
         do {
           const asked = await ask(ctx, acct, "tools/list", cursor ? { cursor } : {});
           init = asked.init;
-          out.push(...(asked.result.tools || []).map((t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema })));
+          out.push(...(asked.result.tools || []).map((t) => ({ name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations })));
           cursor = asked.result.nextCursor;
         } while (cursor && out.length < 1000);
         return { title: init.serverInfo?.title || init.serverInfo?.name || null, instructions: init.instructions || "", oauth: !!acct, tools: out };
