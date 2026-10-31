@@ -495,10 +495,11 @@ impl Node {
     }
 
     /// An app screen as a whole page: the app's HTML with the design kit, the bridge, and who's looking.
-    pub async fn screen(&self, viewer: Key, app: &str, name: &str, params: Value) -> Result<String> {
+    /// `scope` is the page a shell opened it from, a hint the app may follow or not.
+    pub async fn screen(&self, viewer: Key, app: &str, name: &str, params: Value, scope: Option<&str>) -> Result<String> {
         let body = self.0.apps.screen(app, name).await?;
         let me = self.me_of(&viewer)?;
-        let context = json!({ "app": app, "screen": name, "params": params, "me": me });
+        let context = json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope });
         // `</` can't appear inside the inline script, so it can't end it early.
         let context = context.to_string().replace("</", "<\\/");
         Ok(format!(
@@ -560,7 +561,7 @@ impl Node {
             })
         });
         json!({
-            "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT },
+            "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT, "store": crate::brand::STORE },
             "device": { "id": hex(&viewer), "name": viewer_name },
             "host": { "id": hex(&self.0.id), "name": self.device_name() },
             "space": space,
@@ -634,7 +635,7 @@ impl Node {
             ("GET", "/v1/widgets") => json!(self.widgets(caller).await?),
             ("GET", "/v1/screen") => {
                 let (app, name) = (body["app"].as_str().unwrap_or(""), body["screen"].as_str().unwrap_or("main"));
-                json!({ "html": self.screen(caller, app, name, body["params"].clone()).await? })
+                json!({ "html": self.screen(caller, app, name, body["params"].clone(), body["scope"].as_str()).await? })
             }
             ("POST", "/v1/call") => {
                 let input = if body["input"].is_null() { json!({}) } else { body["input"].clone() };

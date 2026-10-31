@@ -208,12 +208,13 @@ async fn reply(State(node): State<Node>, axum::extract::Path((app, id)): axum::e
 #[derive(Deserialize)]
 struct ScreenQuery {
     params: Option<String>,
+    scope: Option<String>,
 }
 
 /// An app screen as a page, for shells' web views and for a browser on this device.
 async fn screen(State(node): State<Node>, axum::extract::Path((app, name)): axum::extract::Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    let html = node.screen(node.id(), &app, &name, params).await?;
+    let html = node.screen(node.id(), &app, &name, params, q.scope.as_deref()).await?;
     Ok(axum::response::Html(html).into_response())
 }
 

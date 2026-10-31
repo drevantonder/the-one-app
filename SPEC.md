@@ -81,7 +81,7 @@ Each node serves HTTP on `127.0.0.1:<brand port>` for its own device's shells, C
 - `GET /v1/apps`: every app's name, title, icon, instructions, operations and widgets.
 - `POST /v1/call { device?, app, op, input }` → `{ ok }`.
 - `GET /v1/widgets`: every widget, rendered.
-- `GET /v1/screens/<app>/<screen>?params=`: an app screen as a page (see "Screens").
+- `GET /v1/screens/<app>/<screen>?params=&scope=`: an app screen as a page (see "Screens").
 - `POST /v1/spaces { name }`, `POST /v1/pair { new_user? }` → `{ code }`, `POST /v1/join { code }`, `POST /v1/device { name }`, `POST /v1/remove { device }`. Creating or joining a space is refused once the node holds one.
 - `POST /v1/release { path, commit, target, committed, signature }`: publishes the binary at `path`, if `signature` is the release key's over it.
 - `POST /v1/blobs` with the bytes as the body → `{ blob, size }`: keeps them as a blob. `GET /v1/blobs/<hash>`: a blob, from this device or any member online.
@@ -116,8 +116,9 @@ An app's screens are HTML. The node serves each as a whole page: the app's HTML 
 - `one.title(text)`: the screen's title, shown by the shell.
 - `one.on("changed", fn)`: called when this app's data changes.
 - `one.params`, `one.me`, and helpers `one.esc`, `one.ago`, `one.avatar`.
+- `one.scope`: the page the shell opened the screen from (`user`, `group:<id>` or `global`), or null. Only a hint: the app decides what to show, and draws its own scope picker if it has one.
 
-A shell answers the bridge itself: in WKWebView, the page posts `{ type: "call" | "open" | "title", … }` to the `one` message handler and awaits the reply; the shell passes node events to `one.__event(event)`. In a plain browser on the device, the bridge talks to the node directly. Shells get pages from `GET /v1/screens/<app>/<screen>?params=` (local API) or `GET /v1/screen { app, screen, params }` (clients). A page the node served may call the node it came from.
+A shell answers the bridge itself: in WKWebView, the page posts `{ type: "call" | "open" | "title", … }` to the `one` message handler and awaits the reply; the shell passes node events to `one.__event(event)`. In a plain browser on the device, the bridge talks to the node directly. Shells get pages from `GET /v1/screens/<app>/<screen>?params=&scope=` (local API) or `GET /v1/screen { app, screen, params, scope }` (clients). A page the node served may call the node it came from.
 
 ## Widgets
 

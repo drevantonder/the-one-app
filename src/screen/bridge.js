@@ -20,6 +20,7 @@
     }
     if (message.type === "open") {
       const q = new URLSearchParams({ params: JSON.stringify(message.params || {}) });
+      if (ctx.scope) q.set("scope", ctx.scope);
       location.href = `/v1/screens/${ctx.app}/${message.screen}?${q}`;
     }
     if (message.type === "title") document.title = message.text;
@@ -34,6 +35,8 @@
 
   window.one = {
     app: ctx.app, screen: ctx.screen, params: ctx.params, me: ctx.me,
+    // The page the shell opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
+    scope: ctx.scope ?? null,
     call: (op, input = {}) => host({ type: "call", app: ctx.app, op, input }),
     open: (screen, params = {}) => host({ type: "open", screen, params }),
     title: (text) => host({ type: "title", text }),

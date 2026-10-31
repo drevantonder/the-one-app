@@ -6,7 +6,7 @@ use p2panda_core::{Body, Hash, Header, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL: u32 = 8;
+pub const PROTOCOL: u32 = 9;
 
 /// The audience every entry has in protocol version 1.
 pub const SPACE_LOG: &str = "space";

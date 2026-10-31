@@ -55,5 +55,10 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .composer button:disabled { background: var(--faint); }
 .composer .error { color: var(--danger); font-size: 13px; max-width: 760px; margin: 0 auto 6px; padding: 0 6px; }
 
+/* A segmented control, for an app's own pickers (which scope, which view): buttons in a .segmented, the chosen one .on. */
+.segmented { display: flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--line); margin: 8px 0 12px; }
+.segmented button { flex: 1; font: inherit; font-size: 13px; font-weight: 500; padding: 6px 10px; border: 0; border-radius: 7px; background: none; color: var(--text); }
+.segmented button.on { background: var(--card); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+
 .empty { text-align: center; color: var(--muted); padding: 48px 24px; }
 .error { color: var(--danger); }
