@@ -6,7 +6,7 @@ private let iconSize: CGFloat = 60
 @MainActor private let iconSize: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 76 : 62
 #endif
 
-/// A page: its title, the widgets of the apps installed in its scope, then their icons. Wide, the widgets take
+/// A page: its title (on a Mac; a phone's bar names it instead), the widgets of the apps installed in its scope, then their icons. Wide, the widgets take
 /// a column on the left and the icons the rest.
 struct PageView: View {
     @Environment(Store.self) private var store
@@ -18,7 +18,9 @@ struct PageView: View {
         let apps = store.apps(on: page), widgets = store.widgets(on: page)
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                #if os(macOS)
                 PageHeader(title: page.title, subtitle: page.subtitle)
+                #endif
                 if apps.isEmpty && widgets.isEmpty {
                     EmptyPage(page: page, open: open)
                 } else if width > 700 {
@@ -209,7 +211,9 @@ struct SettingsPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                #if os(macOS)
                 PageHeader(title: String(localized: "Settings"), subtitle: subtitle)
+                #endif
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: iconSize + 18, maximum: iconSize + 34), spacing: 10, alignment: .top)],
                           alignment: .leading, spacing: 20) {
                     ForEach(store.settings) { item in

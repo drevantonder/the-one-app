@@ -4,8 +4,8 @@ import WidgetKit
 /// Settings' place among the pages; no scope is named this.
 private let settingsID = "settings"
 
-/// The pages side by side, then Settings: swipe between them, scroll within one. At the bottom, the current page's
-/// name and a dot per page, with a cog as Settings' dot.
+/// The pages side by side, then Settings: swipe between them, scroll within one. At the bottom, a dot per page, with a
+/// cog as Settings' dot, and the current page's name above them; the pages have no titles of their own.
 struct PagesView: View {
     @Environment(Store.self) private var store
     @Environment(\.scenePhase) private var scenePhase
@@ -30,7 +30,7 @@ struct PagesView: View {
             .scrollClipDisabled()
             .onChange(of: position) { if let position, position != settingsID, position != store.current { store.current = position } }
             .onChange(of: store.current, initial: true) { if position != store.current { withAnimation(.snappy) { position = store.current } } }
-            .safeAreaInset(edge: .bottom) { BottomBar(position: $position).padding(.bottom, 2) }
+            .safeAreaBar(edge: .bottom) { BottomBar(position: $position).padding(.bottom, 2) }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Route.self) { route in
                 RouteView(route: route, open: open)
@@ -79,12 +79,12 @@ struct PagesView: View {
     private func open(_ route: Route) { store.path.append(route) }
 }
 
-/// The current page's name and a dot per page, the last a cog for Settings, in a glass capsule: tap it to list the pages,
-/// tap the cog for Settings, or swipe along it to change page.
+/// A dot per page, the last a cog for Settings, in a glass capsule that stays the same size, with the current page's
+/// name above it: tap the dots to list the pages, tap the cog for Settings, or swipe along the bar to change page.
 private struct BottomBar: View {
     @Environment(Store.self) private var store
     @Binding var position: String?
-    @ScaledMetric(relativeTo: .headline) private var height: CGFloat = 50
+    @ScaledMetric(relativeTo: .headline) private var height: CGFloat = 44
     /// Where a swipe along the bar started, while it lasts.
     @State private var swipeStart: Int?
 
@@ -96,21 +96,25 @@ private struct BottomBar: View {
         let title = onSettings ? String(localized: "Settings") : pages.indices.contains(index) ? pages[index].title : ""
         let go = { (i: Int) in if positions.indices.contains(i) { withAnimation(.snappy) { position = positions[i] } } }
 
-        HStack(spacing: 0) {
-            Menu {
-                Picker("Pages", selection: Binding(get: { position ?? "" }, set: { page in withAnimation(.snappy) { position = page } })) {
-                    ForEach(pages) { Text($0.title).tag($0.scope) }
-                    Text("Settings").tag(settingsID)
-                }
-                .pickerStyle(.inline)
-                Divider()
-                Button("Edit Pages…", systemImage: "list.bullet") { store.sheet = .pages }
-            } label: {
-                HStack(spacing: 10) {
-                    Text(title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+        VStack(spacing: 6) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .contentTransition(.opacity)
+                .padding(.horizontal, 40)
+                .accessibilityHidden(true)
+
+            HStack(spacing: 0) {
+                Menu {
+                    Picker("Pages", selection: Binding(get: { position ?? "" }, set: { page in withAnimation(.snappy) { position = page } })) {
+                        ForEach(pages) { Text($0.title).tag($0.scope) }
+                        Text("Settings").tag(settingsID)
+                    }
+                    .pickerStyle(.inline)
+                    Divider()
+                    Button("Edit Pages…", systemImage: "list.bullet") { store.sheet = .pages }
+                } label: {
                     HStack(spacing: 6) {
                         ForEach(pages.indices, id: \.self) { i in
                             Capsule()
@@ -118,38 +122,39 @@ private struct BottomBar: View {
                                 .frame(width: i == index ? 16 : 7, height: 7)
                         }
                     }
-                }
-                .padding(.leading, 20)
-                .padding(.trailing, 6)
-                .frame(height: height)
-                .contentShape(.rect)
-            }
-            .menuOrder(.fixed)
-            .buttonStyle(.plain)
-            .accessibilityLabel(title)
-            .accessibilityValue(Text("Page \(index + 1) of \(positions.count)"))
-            .accessibilityHint("Shows every page")
-            .accessibilityAdjustableAction { direction in go(direction == .increment ? index + 1 : index - 1) }
-
-            Button { go(positions.count - 1) } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(onSettings ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
-                    .overlay(alignment: .topTrailing) {
-                        if store.hasRequests { Circle().fill(.red).frame(width: 7, height: 7).offset(x: 3, y: -3) }
-                    }
-                    .padding(.trailing, 20)
+                    .padding(.leading, 18)
+                    .padding(.trailing, 6)
                     .frame(height: height)
                     .contentShape(.rect)
+                }
+                .menuOrder(.fixed)
+                .buttonStyle(.plain)
+                .accessibilityLabel(title)
+                .accessibilityValue(Text("Page \(index + 1) of \(positions.count)"))
+                .accessibilityHint("Shows every page")
+                .accessibilityAdjustableAction { direction in go(direction == .increment ? index + 1 : index - 1) }
+
+                Button { go(positions.count - 1) } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(onSettings ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                        .overlay(alignment: .topTrailing) {
+                            if store.hasRequests { Circle().fill(.red).frame(width: 7, height: 7).offset(x: 3, y: -3) }
+                        }
+                        .padding(.trailing, 18)
+                        .frame(height: height)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Settings")
+                .accessibilityValue(store.hasRequests ? Text("Requests waiting") : Text(""))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
-            .accessibilityValue(store.hasRequests ? Text("Requests waiting") : Text(""))
+            .glassEffect(.regular.interactive(), in: .capsule)
         }
         .animation(.snappy, value: index)
-        .glassEffect(.regular.interactive(), in: .capsule)
+        .contentShape(.rect)
         .highPriorityGesture(
-            // A page per 40 points, as a finger slides along the dots.
+            // A page per 40 points, as a finger slides along the bar.
             DragGesture(minimumDistance: 12)
                 .onChanged { drag in
                     let start = swipeStart ?? index
