@@ -603,7 +603,7 @@ async fn a_drivers_screen_is_served_wherever_it_runs() {
     let (b, _rb) = start("screens-b").await;
     a.create("Screens", "Andre").await.unwrap();
     b.join(&a.pair(None).unwrap()).await.unwrap();
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap() };
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
     b.provide("lamps", json!({ "title": "Lamps", "ops": [], "screens": [{ "name": "main", "title": "Lamps" }] })).await.unwrap();
     // b's provider answers the node's `_screen` calls.
     let provider = b.clone();
