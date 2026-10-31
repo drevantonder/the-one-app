@@ -1,0 +1,366 @@
+// Docs: the person's own Google Docs, through Google's API. Signing in is apps/gmail's (and apps/drive's) way: the
+// OAuth client's id is a setting, its secret and each account's refresh token are the app's secrets, sent only to
+// Google's token address, and the browser ends on a 127.0.0.1 address the person pastes back.
+
+const APP = "docs";
+const TITLE = "Docs";
+const OAUTH = "oauth2.googleapis.com";
+const SCOPES = "openid email https://www.googleapis.com/auth/documents";
+const API = "https://docs.googleapis.com/v1/";
+const REDIRECT = `http://127.0.0.1:4747/hooks/${APP}/oauth`;
+
+// ---- signing in, as in apps/gmail ----
+
+const slug = (email) => email.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 56);
+const utf8 = new TextEncoder();
+const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fromB64 = (s) => Uint8Array.from(atob(String(s).replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+
+async function setting(ctx, key) {
+  for (const s of [ctx.user, ctx.global]) {
+    const [row] = s ? await s.query("select value from settings where key = ?", [key]) : [];
+    if (row) return JSON.parse(row.value);
+  }
+  return null;
+}
+
+async function accounts(ctx) {
+  if (!ctx.user) throw new Error("your accounts are in your own scope, which this server doesn't hold");
+  return (await ctx.user.query("select email from accounts order by added, email")).map((a) => a.email);
+}
+
+/// The account named, by its address or a part of it only it has; the first signed in when none is named.
+async function account(ctx, name) {
+  const all = await accounts(ctx);
+  if (!all.length) throw new Error(`no Google account is signed in: ${APP}_sign_in signs one in`);
+  if (!name) return all[0];
+  const n = String(name).toLowerCase();
+  const found = all.find((e) => e.toLowerCase() === n) || (all.filter((e) => e.toLowerCase().includes(n)).length === 1 && all.find((e) => e.toLowerCase().includes(n)));
+  if (!found) throw new Error(`no single account matches "${name}"; they are: ${all.join(", ")}`);
+  return found;
+}
+
+const tokens = new Map(); // `${user}/${email}` → { value, expires }, for this runtime only
+async function token(ctx, email) {
+  const key = `${ctx.user.id}/${email}`;
+  const t = tokens.get(key);
+  if (t && t.expires > Date.now() + 60_000) return t.value;
+  const client = await setting(ctx, "client_id");
+  if (!client) throw new Error(`no OAuth client yet: ${APP}_set_client sets one`);
+  const r = await fetch(`https://${OAUTH}/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: `grant_type=refresh_token&client_id=${encodeURIComponent(client)}&client_secret={{client_secret}}&refresh_token={{refresh_${slug(email)}}}`,
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || !body.access_token) throw new Error(`${email}'s sign-in no longer works (${body.error_description || body.error || r.status}): ${APP}_sign_in signs it in again`);
+  tokens.set(key, { value: body.access_token, expires: Date.now() + (body.expires_in || 3600) * 1000 });
+  return body.access_token;
+}
+
+async function startSignIn(ctx) {
+  const client = await setting(ctx, "client_id");
+  if (!client) throw new Error(`no OAuth client yet: ${APP}_set_client sets one`);
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(verifier))));
+  ctx.user.secret("verifier", verifier, [OAUTH]); // filled in only when the code is exchanged at Google
+  const q = new URLSearchParams({ client_id: client, redirect_uri: REDIRECT, response_type: "code", scope: SCOPES, access_type: "offline", prompt: "consent", code_challenge: challenge, code_challenge_method: "S256" });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
+}
+
+async function finishSignIn(ctx, given) {
+  const client = await setting(ctx, "client_id");
+  const s = String(given || "").trim();
+  const code = s.includes("code=") ? new URL(s.startsWith("http") ? s : `http://x/?${s.split("?").pop()}`).searchParams.get("code") : s;
+  if (!code) throw new Error("that address has no code: copy the whole address the browser ended up on");
+  const r = await fetch(`https://${OAUTH}/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: `grant_type=authorization_code&code=${encodeURIComponent(code)}&client_id=${encodeURIComponent(client)}&client_secret={{client_secret}}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_verifier={{verifier}}`,
+  });
+  const tok = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`sign-in failed: ${tok.error_description || tok.error || r.status}. Start again with ${APP}_sign_in.`);
+  if (!tok.refresh_token) throw new Error("Google didn't give a refresh token, so the sign-in wouldn't last; start again");
+  let email;
+  try { email = JSON.parse(new TextDecoder().decode(fromB64(tok.id_token.split(".")[1]))).email; } catch {}
+  if (!email) throw new Error("Google didn't say which account signed in; start again");
+  ctx.user.secret(`refresh_${slug(email)}`, tok.refresh_token, [OAUTH]);
+  ctx.user.secret("verifier", null);
+  ctx.user.append("account", { email });
+  tokens.set(`${ctx.user.id}/${email}`, { value: tok.access_token, expires: Date.now() + (tok.expires_in || 3600) * 1000 });
+  return `Signed in as ${email}.`;
+}
+
+const str = (description) => ({ type: "string", description });
+const accountInput = str(`which account: its address or a part of it only it has; default the first, as ${APP}_accounts lists them`);
+const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
+
+const signInOps = {
+  accounts: {
+    reads: true,
+    description: "The Google accounts signed in here, and whether each still works. The first is the default.",
+    input: { type: "object", properties: {} },
+    async run(ctx) {
+      const all = await accounts(ctx);
+      if (!all.length) return `No account is signed in: ${APP}_sign_in signs one in.`;
+      const lines = await Promise.all(all.map(async (email, i) => {
+        let line = `${email}: signed in`;
+        try { await token(ctx, email); } catch (e) { line = e.message; }
+        return i ? line : `${line} (the default)`;
+      }));
+      return lines.join("\n");
+    },
+  },
+  sign_in: {
+    description: "Sign in to a Google account, or another one: returns a link to open in a browser; then pass the address the browser ends up on to finish_sign_in.",
+    input: { type: "object", properties: { code: str("the address the browser was sent to after signing in, to finish here instead") } },
+    async run(ctx, { code }) {
+      if (!ctx.user) throw new Error("this server doesn't hold your scope");
+      if (code) return finishSignIn(ctx, code);
+      return `Open this link in a browser on any device and sign in. The browser then fails to load a 127.0.0.1 page: copy that page's whole address and pass it to ${APP}_finish_sign_in.\n\n${await startSignIn(ctx)}`;
+    },
+  },
+  finish_sign_in: {
+    description: "Finish signing in: the address the browser ended up on after sign_in's link (or just its code).",
+    input: { type: "object", required: ["code"], properties: { code: str("the address, or its code") } },
+    run: (ctx, { code }) => finishSignIn(ctx, code),
+  },
+  set_client: {
+    description: "Set the Google OAuth client to sign in with (a Desktop app client): its id here, its secret with one secret set; for you, or with scope global (admins) for everyone.",
+    input: { type: "object", required: ["client_id"], properties: { client_id: str("the client's id"), client_secret: str("its secret, kept as a secret"), scope: str("user (the default) or global") } },
+    run(ctx, { client_id, client_secret, scope }) {
+      const s = scope === "global" ? ctx.global : ctx.user;
+      if (!s) throw new Error(`${APP} isn't installed for ${scope || "you"} here`);
+      if (scope === "global" && s.role !== "admin") throw new Error("only admins set everyone's client");
+      s.append("setting", { key: "client_id", value: String(client_id) });
+      if (client_secret) s.secret("client_secret", client_secret, [OAUTH]);
+      return "Saved.";
+    },
+  },
+  sign_out: {
+    description: "Forget a Google account here.",
+    input: { type: "object", required: ["account"], properties: { account: str("the account's address, or a part of it only it has") } },
+    async run(ctx, { account: name }) {
+      const email = await account(ctx, name);
+      ctx.user.secret(`refresh_${slug(email)}`, null);
+      ctx.user.append("forget", { email });
+      tokens.delete(`${ctx.user.id}/${email}`);
+      return `Signed out ${email}. To revoke access too, remove it at myaccount.google.com/permissions.`;
+    },
+  },
+};
+
+const signInSchema = {
+  user: "create table accounts (email text primary key, added integer not null); create table settings (key text primary key, value text);",
+  global: "create table settings (key text primary key, value text);",
+};
+const signInOn = {
+  account(db, e) { db.exec("insert or ignore into accounts values (?, ?)", [e.data.email, e.time]); },
+  forget(db, e) { db.exec("delete from accounts where email = ?", [e.data.email]); },
+  setting(db, e) {
+    if (e.scope === "global" && e.role !== "admin") return;
+    db.exec("insert or replace into settings values (?, ?)", [e.data.key, JSON.stringify(e.data.value)]);
+  },
+};
+
+/// Calls Google's API as `email`.
+async function api(ctx, email, method, path, { query, json } = {}) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(query || {})) if (v !== undefined && v !== null && v !== "") q.append(k, String(v));
+  const r = await fetch(API + path + ([...q].length ? `?${q}` : ""), {
+    method,
+    headers: { authorization: `Bearer ${await token(ctx, email)}`, ...(json ? { "content-type": "application/json" } : {}) },
+    body: json ? JSON.stringify(json) : undefined,
+  });
+  const text = await r.text();
+  if (r.status === 401) tokens.delete(`${ctx.user.id}/${email}`);
+  if (!r.ok) {
+    let message = text.slice(0, 300) || r.statusText;
+    try { message = JSON.parse(text).error?.message || message; } catch {}
+    throw new Error(`${TITLE}: ${message}`);
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+
+// ---- documents ----
+
+/// A document's id, given it or its address.
+const docId = (v) => {
+  const s = String(v || "").trim();
+  if (!s) throw new Error("give document: its id or address");
+  return /\/d\/([a-zA-Z0-9_-]+)/.exec(s)?.[1] || s;
+};
+const docInput = str("the document's id, or its address (docs.google.com/document/d/…)");
+
+const ORDERED = /DECIMAL|ALPHA|ROMAN|ZERO/;
+
+/// A paragraph's runs as text, with markdown for bold, italic, code and links when `md`.
+function runs(p, md) {
+  let out = "";
+  for (const el of p.elements || []) {
+    const t = el.textRun;
+    if (!t) {
+      if (el.person) out += el.person.personProperties?.name || el.person.personProperties?.email || "";
+      else if (el.richLink) out += md ? `[${el.richLink.richLinkProperties?.title}](${el.richLink.richLinkProperties?.uri})` : el.richLink.richLinkProperties?.uri || "";
+      continue;
+    }
+    let s = t.content.replace(/\n$/, "").replace(/\u000b/g, "\n");
+    if (md && s.trim()) {
+      const st = t.textStyle || {};
+      const [lead, core, trail] = [/^\s*/.exec(s)[0], s.trim(), /\s*$/.exec(s)[0]];
+      let c = core;
+      if (st.weightedFontFamily?.fontFamily && /mono|courier|consol/i.test(st.weightedFontFamily.fontFamily)) c = `\`${c}\``;
+      else {
+        if (st.bold) c = `**${c}**`;
+        if (st.italic) c = `*${c}*`;
+        if (st.strikethrough) c = `~~${c}~~`;
+      }
+      if (st.link?.url) c = `[${c}](${st.link.url})`;
+      s = lead + c + trail;
+    }
+    out += s;
+  }
+  return out;
+}
+
+/// A document's body as markdown (headings, lists, tables, emphasis, links) or plain text.
+function render(doc, md) {
+  const lines = [];
+  const counters = {};
+  const walk = (content, depth = 0) => {
+    for (const el of content || []) {
+      if (el.paragraph) {
+        const p = el.paragraph;
+        const text = runs(p, md);
+        const style = p.paragraphStyle?.namedStyleType || "";
+        if (p.bullet) {
+          const level = p.bullet.nestingLevel || 0;
+          const props = doc.lists?.[p.bullet.listId]?.listProperties?.nestingLevels?.[level] || {};
+          const key = `${p.bullet.listId}/${level}`;
+          counters[key] = (counters[key] || 0) + 1;
+          const mark = ORDERED.test(props.glyphType || "") ? `${counters[key]}.` : "-";
+          lines.push(`${"  ".repeat(level)}${mark} ${text}`);
+          continue;
+        }
+        for (const k of Object.keys(counters)) delete counters[k];
+        const h = /^HEADING_(\d)$/.exec(style)?.[1] || (style === "TITLE" ? "1" : style === "SUBTITLE" ? "2" : "");
+        lines.push(md && h && text.trim() ? `${"#".repeat(Number(h))} ${text}` : text);
+      } else if (el.table) {
+        const rows = el.table.tableRows.map((r) => r.tableCells.map((c) => {
+          const cell = [];
+          for (const x of c.content || []) if (x.paragraph) cell.push(runs(x.paragraph, md));
+          return cell.join(md ? "<br>" : " ").replace(/\|/g, md ? "\\|" : "|").trim();
+        }));
+        if (md && rows.length) {
+          lines.push("", `| ${rows[0].join(" | ")} |`, `| ${rows[0].map(() => "---").join(" | ")} |`, ...rows.slice(1).map((r) => `| ${r.join(" | ")} |`), "");
+        } else for (const r of rows) lines.push(r.join("\t"));
+      } else if (el.tableOfContents) {
+        if (depth === 0) walk(el.tableOfContents.content, depth + 1);
+      }
+    }
+  };
+  walk(doc.body?.content);
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export default {
+  name: APP,
+  title: TITLE,
+  icon: "doc.text",
+  description: "Your Google Docs: read them as markdown or text, make them, and add or replace text.",
+  instructions: `Docs is the person's Google Docs. ${APP}_read reads a document as markdown (or text). ${APP}_create makes one, ${APP}_append adds text at its end, and ${APP}_replace replaces every match of some text: change only what the person asked. Documents are given by id or address. With several accounts, each operation takes account.`,
+  schema: signInSchema,
+
+  ops: {
+    ...signInOps,
+    read: {
+      reads: true,
+      description: "A document's title, address and text, as markdown (headings, lists, tables, bold, italic, links) or plain text.",
+      input: withAccount({ document: docInput, format: str("markdown (the default) or text") }, ["document"]),
+      async run(ctx, { account: a, document, format }) {
+        const d = await api(ctx, await account(ctx, a), "GET", `documents/${encodeURIComponent(docId(document))}`);
+        const text = render(d, format !== "text");
+        return `${d.title}\nhttps://docs.google.com/document/d/${d.documentId}/edit\n\n${text}`;
+      },
+    },
+    create: {
+      description: "Make a document in the person's Drive, with text if given. Answers its id and address.",
+      input: withAccount({ title: str("its title"), text: str("its text, as plain text") }, ["title"]),
+      async run(ctx, { account: a, title, text }) {
+        const email = await account(ctx, a);
+        const d = await api(ctx, email, "POST", "documents", { json: { title } });
+        if (text) await api(ctx, email, "POST", `documents/${d.documentId}:batchUpdate`, { json: { requests: [{ insertText: { text, location: { index: 1 } } }] } });
+        return { id: d.documentId, title: d.title, url: `https://docs.google.com/document/d/${d.documentId}/edit` };
+      },
+    },
+    append: {
+      description: "Add text at the end of a document, as a new paragraph. This changes the person's document: do it only when they asked.",
+      input: withAccount({ document: docInput, text: str("the text, as plain text") }, ["document", "text"]),
+      async run(ctx, { account: a, document, text }) {
+        const id = encodeURIComponent(docId(document));
+        await api(ctx, await account(ctx, a), "POST", `documents/${id}:batchUpdate`, { json: { requests: [{ insertText: { text: `\n${text}`, endOfSegmentLocation: {} } }] } });
+        return "Added it at the end.";
+      },
+    },
+    replace: {
+      confirm: true,
+      description: "Replace every match of some text in a document. Do it only when the person asked.",
+      input: withAccount({
+        document: docInput, find: str("the text to find"), replace: str("what to put instead (empty removes it)"),
+        match_case: { type: "boolean", description: "match capitals exactly (default false)" },
+      }, ["document", "find"]),
+      async run(ctx, { account: a, document, find, replace = "", match_case }) {
+        const id = encodeURIComponent(docId(document));
+        const r = await api(ctx, await account(ctx, a), "POST", `documents/${id}:batchUpdate`,
+          { json: { requests: [{ replaceAllText: { containsText: { text: find, matchCase: !!match_case }, replaceText: replace } }] } });
+        const n = r.replies?.[0]?.replaceAllText?.occurrencesChanged || 0;
+        return n ? `Replaced ${n} matches.` : "Found no match: nothing changed.";
+      },
+    },
+  },
+
+  on: signInOn,
+
+  screens: {
+    main: { title: TITLE, html: signInScreen(TITLE, "Sign in to Google, and your agents can read your documents and, when you ask, write in them.") },
+  },
+};
+
+/// The page that lists the accounts signed in, signs one out, and signs another in by link and pasted address.
+function signInScreen(title, blurb) {
+  return `
+<style>
+  .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
+  button.primary { font: inherit; font-weight: 600; color: white; background: var(--accent); border: 0; border-radius: 10px; padding: 11px 16px; }
+  button.plain { font: inherit; color: var(--accent); background: none; border: 0; padding: 4px 0; }
+  input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
+  ol { padding-left: 20px; margin: 8px 0; }
+</style>
+<div id="list"></div>
+<div class="card" id="connect"></div>
+<script>
+async function show() {
+  const text = await one.call("accounts");
+  const rows = text.startsWith("No account") ? [] : text.split("\\n");
+  document.getElementById("list").innerHTML = rows.length
+    ? '<h2 class="section">Accounts</h2><div class="list">' + rows.map((r) => { const email = (/^[^\\s:']+@[^\\s:']+/.exec(r) || [r])[0]; return \`<div class="row plain"><div class="main"><div class="title">\${one.esc(email)}</div><div class="sub">\${one.esc(r.slice(email.length).replace(/^: /, ""))}</div></div><button class="plain" data-out="\${one.esc(email)}">Sign out</button></div>\`; }).join("") + "</div>"
+    : '<p class="muted">${blurb}</p>';
+  for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => { await one.call("sign_out", { account: b.dataset.out }); show(); };
+  const c = document.getElementById("connect");
+  c.innerHTML = '<button class="primary" id="start">' + (rows.length ? "Add another account" : "Sign in to Google") + '</button><div id="err" class="error small"></div>';
+  document.getElementById("start").onclick = async () => {
+    let link;
+    try { link = (await one.call("sign_in")).split("\\n").pop(); } catch (e) { document.getElementById("err").textContent = e.message; return; }
+    c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
+      <input id="code" placeholder="http://127.0.0.1:4747/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign in</button><div id="err" class="error small"></div>\`;
+    document.getElementById("finish").onclick = async () => {
+      try { await one.call("finish_sign_in", { code: document.getElementById("code").value }); show(); }
+      catch (e) { document.getElementById("err").textContent = e.message; }
+    };
+  };
+}
+one.on("changed", show);
+show();
+</script>`;
+}
