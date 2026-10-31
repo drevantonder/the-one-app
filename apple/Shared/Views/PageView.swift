@@ -201,7 +201,7 @@ private struct EmptyPage: View {
     }
 }
 
-/// The cog's page: the shell's own views, as icons. A phone pushes it, under its own navigation bar.
+/// The cog's page: the shell's own views, as icons. A phone and an iPad show it as the last page.
 struct SettingsPage: View {
     @Environment(Store.self) private var store
     var open: (Route) -> Void
@@ -209,9 +209,7 @@ struct SettingsPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                #if os(macOS)
                 PageHeader(title: String(localized: "Settings"), subtitle: subtitle)
-                #endif
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: iconSize + 18, maximum: iconSize + 34), spacing: 10, alignment: .top)],
                           alignment: .leading, spacing: 20) {
                     ForEach(store.settings) { item in
@@ -227,11 +225,6 @@ struct SettingsPage: View {
             .frame(maxWidth: .infinity)
         }
         .groupedBackground()
-        #if os(iOS)
-        .navigationTitle("Settings")
-        .navigationSubtitle(subtitle)
-        .navigationBarTitleDisplayMode(.large)
-        #endif
     }
 
     private var subtitle: String {
