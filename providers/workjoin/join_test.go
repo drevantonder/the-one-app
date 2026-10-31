@@ -32,7 +32,7 @@ func TestOnlyTheDomainJoinsAndSignsInAgain(t *testing.T) {
 	tokenURL, tokeninfoURL = google.URL+"/token", google.URL+"/tokeninfo"
 	// The install has Andre; Sam is in once Sam's first code is made (as if used at once).
 	users := []string{"andre-id"}
-	asked := 0
+	asked, domain := 0, ""
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/state":
@@ -40,7 +40,7 @@ func TestOnlyTheDomainJoinsAndSignsInAgain(t *testing.T) {
 			for _, u := range users {
 				list = append(list, map[string]string{"id": u})
 			}
-			json.NewEncoder(w).Encode(map[string]any{"install": map[string]any{"users": list}})
+			json.NewEncoder(w).Encode(map[string]any{"install": map[string]any{"users": list, "settings": map[string]string{"join_domain": domain}}})
 		case "/v1/pair":
 			asked++
 			var body struct {
@@ -73,8 +73,12 @@ func TestOnlyTheDomainJoinsAndSignsInAgain(t *testing.T) {
 	if r, _ := noFollow.Get(site.URL + "/start?app=1"); !strings.HasPrefix(r.Header.Get("location"), "work://join?error=") {
 		t.Fatalf("the app hears it's off: %s", r.Header.Get("location"))
 	}
-	cfg, _ := json.Marshal(config{Domain: "work.org", ClientID: "client", ClientSecret: "shh", PublicURL: site.URL})
+	cfg, _ := json.Marshal(config{ClientID: "client", ClientSecret: "shh", PublicURL: site.URL})
 	os.WriteFile(filepath.Join(dir, "config.json"), cfg, 0o600)
+	if r, _ := http.Get(site.URL + "/"); r.StatusCode != 404 {
+		t.Fatalf("off until the install's join_domain setting is set: %d", r.StatusCode)
+	}
+	domain = "work.org"
 	// Andre was in before it was on: an admin wrote him in.
 	os.WriteFile(filepath.Join(dir, "joined.json"), []byte(`{"andre@work.org":{"name":"Andre","user":"andre-id","time":1}}`), 0o600)
 

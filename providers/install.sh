@@ -11,7 +11,7 @@ provider=$1 name=one-$1 node=one env=
 host=${2:-}
 on() { if [ -n "$host" ]; then ssh "$host" "$@" </dev/null; else sh -c "$*"; fi; }
 if [ -n "$config" ]; then
-	field() { sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$config"; }
+	field() { sed -n "/^\[/q; s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$config"; }
 	cli=$(field cli) name=$(field cli)-$1 node=$(field cli)
 	upper=$(echo "$cli" | tr a-z A-Z)
 	home=$(on "systemctl show -p Environment $cli 2>/dev/null | tr ' ' '\n' | sed -n 's/^${upper}_HOME=//p'")

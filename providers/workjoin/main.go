@@ -6,9 +6,13 @@
 //
 // It's off until an admin puts config.json in its folder:
 //
-//	{ "domain": "example.org", "client_id": "…apps.googleusercontent.com",
-//	  "client_secret": "…", "public_url": "https://join.example.org",
-//	  "listen": "127.0.0.1:8790", "group": "<group id to invite them to>" }
+//	{ "client_id": "…apps.googleusercontent.com", "client_secret": "…",
+//	  "public_url": "https://join.example.org", "listen": "127.0.0.1:8790",
+//	  "group": "<group id to invite them to>" }
+//
+// and sets the install's join_domain setting (Settings, or <cli> settings
+// join_domain example.org) to the domain whose Google accounts may join;
+// emptying it turns joining off again. Both are read on each request.
 //
 // and serves listen at public_url (a reverse proxy, Tailscale Funnel). The
 // Google OAuth client's redirect URI is public_url + "/callback". A brand

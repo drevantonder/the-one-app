@@ -1457,7 +1457,8 @@ impl Node {
             }
         };
         let me = self.me_for(&viewer)?;
-        let brand = json!({ "name": crate::brand::NAME, "made_here": crate::brand::MADE_HERE });
+        let made_here = self.with(|i| Ok(settings(&i.r.members).remove("made_here")))?;
+        let brand = json!({ "name": crate::brand::NAME, "made_here": made_here });
         let context = json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope, "brand": brand });
         // `</` can't appear inside the inline script, so it can't end it early.
         let context = context.to_string().replace("</", "<\\/");
@@ -1732,6 +1733,11 @@ impl Node {
         })
     }
 
+    /// Sets one of the install's settings, for an admin; `None` puts back the edition's default.
+    pub async fn set_setting(&self, caller: &Caller, name: &str, value: Option<&str>) -> Result<()> {
+        self.member_as(caller, "setting", json!({ "name": name, "value": value })).await
+    }
+
     /// Everything a shell needs to draw this server and its install, for this server's local user.
     pub fn state(&self) -> Value {
         let user = self.user().unwrap_or_default();
@@ -1745,6 +1751,7 @@ impl Node {
         let install = self.0.install.lock().unwrap();
         let viewer_name = if viewer.key == self.0.id { self.server_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
         let user = install.as_ref().and_then(|i| i.r.members.user(&viewer.user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role }));
+        let settings = settings(install.as_ref().map(|i| &i.r.members).unwrap_or(&Members::default()));
         let install = install.as_ref().map(|i| {
             let m = &i.r.members;
             let me = &viewer.user;
@@ -1795,12 +1802,12 @@ impl Node {
                 "name": m.name, "root": i.r.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
                 "member": m.server(&self.0.id).is_some(),
                 "users": users, "groups": groups, "servers": servers, "clients": clients, "opens": opens,
-                "entries": i.r.store.count().unwrap_or(0),
+                "entries": i.r.store.count().unwrap_or(0), "settings": settings,
             })
         });
         let opens = install.as_ref().map(|i| i["opens"].clone()).unwrap_or(json!([]));
         let mut state = json!({
-            "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT, "store": crate::brand::STORE, "push": crate::brand::PUSH },
+            "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT, "store": settings["store"], "push": settings["push"] },
             "me": { "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user },
             "server": { "key": hex(&self.0.id), "name": self.server_name(), "ready": ready },
             "user": user,
@@ -1998,6 +2005,10 @@ impl Node {
             }
             ("POST", "/v1/accept") => {
                 self.member_as(me, "accept", json!({ "group": self.find_group(body["group"].as_str().unwrap_or(""))? })).await?;
+                json!({})
+            }
+            ("POST", "/v1/settings") => {
+                self.set_setting(me, body["name"].as_str().unwrap_or(""), body["value"].as_str()).await?;
                 json!({})
             }
             ("POST", "/v1/role") => {
@@ -2941,4 +2952,14 @@ impl ProtocolHandler for CallHandler {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         self.0.accept_call(conn).await.map_err(accept_err)
     }
+}
+
+/// The install's settings: the edition's defaults (config.toml's `[settings]`), and what its admins set over them.
+fn settings(m: &Members) -> serde_json::Map<String, Value> {
+    let mut out: serde_json::Map<String, Value> = crate::brand::SETTINGS.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
+    out.extend(m.settings.iter().map(|(k, v)| (k.clone(), json!(v))));
+    for key in ["store", "push"] {
+        out.entry(key).or_insert(json!(""));
+    }
+    out
 }

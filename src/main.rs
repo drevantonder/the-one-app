@@ -24,6 +24,7 @@ Usage:
   {CLI} rename <name>                  rename this server
   {CLI} remove <server|client> | --user <user>
   {CLI} role <user> admin|member       (admins)
+  {CLI} settings [<name> <value>|--default]   the install's settings (admins set them)
   {CLI} group create <name>            a group, with you as its admin
   {CLI} group invite <group> <user> [--admin]
   {CLI} group accept <group>
@@ -141,6 +142,17 @@ fn run(args: Vec<String>) -> Result<()> {
         ["remove"] if flags.contains_key("user") => {
             post("/v1/remove", json!({ "user": flags["user"] }))?;
             println!("Removed them.");
+        }
+        ["settings"] => {
+            let state = get("/v1/state")?;
+            for (name, value) in state["install"]["settings"].as_object().context("not in an install yet")? {
+                println!("{name} = {value}");
+            }
+        }
+        ["settings", name, value @ ..] => {
+            let value = if flags.contains_key("default") { Value::Null } else { json!(value.join(" ")) };
+            post("/v1/settings", json!({ "name": name, "value": value }))?;
+            println!("Set {name}.");
         }
         ["role", user, role] => {
             post("/v1/role", json!({ "user": user, "role": role }))?;

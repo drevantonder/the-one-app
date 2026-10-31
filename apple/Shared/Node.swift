@@ -4,9 +4,9 @@ struct Brand: Codable, Sendable, Equatable {
     var name: String
     var cli: String
     var accent: String
-    /// The app the App Store opens, if the brand names one.
+    /// The app the App Store opens: the install's `store` setting.
     var store: String?
-    /// The driver phones register their push tokens with, if the brand names one.
+    /// The driver phones register their push tokens with: the install's `push` setting, empty when push is off.
     var push: String?
 }
 
@@ -49,6 +49,8 @@ struct Install: Codable, Sendable, Equatable {
     var clients: [ClientInfo]
     /// Whether the server that answered is in the install yet: a new one isn't until its admit reaches it.
     var member: Bool?
+    /// The install's settings, as its admins set them over the edition's defaults.
+    var settings: [String: String]?
 
     var joining: Bool { member == false }
 
@@ -363,6 +365,8 @@ struct NodeClient: Sendable {
     func remove(machine key: String) async throws { try await post("v1/remove", ["key": key]) }
     func remove(user: String) async throws { try await post("v1/remove", ["user": user]) }
     func setRole(user: String, role: String) async throws { try await post("v1/role", ["user": user, "role": role]) }
+    /// Sets one of the install's settings (admins); nil puts back the edition's default.
+    func setSetting(_ name: String, _ value: String?) async throws { try await post("v1/settings", ["name": name, "value": value]) }
     func trust(server: String, _ trust: Bool) async throws { try await post("v1/trust", ["server": server, "trust": trust]) }
 
     // MARK: Groups

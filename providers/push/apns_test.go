@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +54,13 @@ func TestTokenIsSignedWithTheKey(t *testing.T) {
 }
 
 func TestPushesGoToTheCallersPhonesAndOpenTheSendingApp(t *testing.T) {
-	s := &sender{dir: t.TempDir()}
+	// The node, saying what the install's push setting is.
+	push := "push"
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"install": map[string]any{"settings": map[string]string{"push": push}}})
+	}))
+	defer node.Close()
+	s := &sender{dir: t.TempDir(), node: node.URL, client: node.Client()}
 	as := func(user, op, input, from string) (any, error) {
 		c := &call{Op: op, Input: json.RawMessage(input), From: from}
 		c.Caller.User = user
@@ -73,6 +81,10 @@ func TestPushesGoToTheCallersPhonesAndOpenTheSendingApp(t *testing.T) {
 	}
 	if _, err := as("ann", "send", `{"title":"Hi"}`, "gmail"); err == nil || !strings.Contains(err.Error(), "isn't set up") {
 		t.Fatalf("ann's phone, without a key here: %v", err)
+	}
+	push = ""
+	if out, err := as("ann", "send", `{"title":"Hi"}`, "gmail"); err != nil || out.(map[string]any)["accepted"] != 0 {
+		t.Fatalf("push is off: %v %v", out, err)
 	}
 	if _, err := as("bob", "unregister", `{"token":"ab12cd34ef56ab12cd34"}`, ""); err != nil || len(s.mine("ann")) != 1 {
 		t.Fatal("only its owner unregisters a phone")

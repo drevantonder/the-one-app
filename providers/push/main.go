@@ -45,7 +45,7 @@ func main() {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	serve(node, &sender{dir: dir, client: &http.Client{Timeout: 15 * time.Second}})
+	serve(node, &sender{dir: dir, node: node, client: &http.Client{Timeout: 15 * time.Second}})
 }
 
 // serve registers with the node and answers its calls, registering again

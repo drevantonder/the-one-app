@@ -117,6 +117,8 @@ pub struct Members {
     /// (user, server) for each `trust` not since undone by `untrust`.
     pub trusted: BTreeSet<(String, Key)>,
     pub relays: Vec<String>,
+    /// The install's settings its admins set: each name's latest value. The rest are the edition's defaults.
+    pub settings: BTreeMap<String, String>,
     pub apps: BTreeMap<String, App>,
 }
 
@@ -455,6 +457,15 @@ impl Members {
             "relays" => {
                 ensure!(self.is_admin(&w), "admins only");
                 self.relays = data["urls"].as_array().context("no urls")?.iter().filter_map(|u| u.as_str().map(str::to_string)).collect();
+            }
+            "setting" => {
+                ensure!(self.is_admin(&w), "admins only");
+                let name = text("name")?;
+                ensure!(!name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'), "setting names are lowercase words joined by _");
+                match &data["value"] {
+                    Value::Null => self.settings.remove(&name),
+                    value => self.settings.insert(name, value.as_str().context("a setting is text")?.to_string()),
+                };
             }
             "recovery" => {
                 ensure!(self.is_admin(&w), "admins only");
@@ -957,6 +968,20 @@ mod tests {
         assert!(members(&entries).holds(&mac.id(), &group), "a member doesn't remove an admin");
         entries.push(bobs.write("global", BOB, node("member", json!({ "group": GROUP, "user": BOB, "role": null }))));
         assert!(!members(&entries).holds(&bobs.id(), &group), "a member leaves");
+    }
+
+    #[test]
+    fn admins_set_the_installs_settings_and_null_unsets_one() {
+        let (mut mac, mut entries) = setup();
+        entries.push(mac.write("global", ANDRE, admit(&Srv::new(4).id(), BOB, "bob's", true, Some(("Bob", Role::Member)))));
+        entries.push(mac.write("global", ANDRE, node("setting", json!({ "name": "made_here", "value": "Made by us" }))));
+        let mut bobs = Srv::new(4);
+        bobs.time = 100;
+        entries.push(bobs.write("global", BOB, node("setting", json!({ "name": "made_here", "value": "Bob's" }))));
+        assert_eq!(members(&entries).settings["made_here"], "Made by us", "members don't");
+        mac.time = 200;
+        entries.push(mac.write("global", ANDRE, node("setting", json!({ "name": "made_here", "value": null }))));
+        assert!(members(&entries).settings.is_empty());
     }
 
     #[test]

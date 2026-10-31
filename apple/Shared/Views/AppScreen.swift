@@ -397,6 +397,7 @@ struct RouteView: View {
             case .secrets: SecretsView()
             case .access: AccessLogView()
             case .users: UsersView()
+            case .install: InstallSettingsView()
             case .backups: BackupsView()
             case .requests: RequestsView()
             case .appearance: AppearanceView()

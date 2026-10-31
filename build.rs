@@ -35,7 +35,13 @@ fn main() {
         },
     };
     let out = format!("{out}pub const CONFIG_FILE: &str = {:?};\npub const CONFIG_REPO: &str = {repo:?};\n", file.to_string_lossy());
-    let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\npub const STORE: &str = {:?};\npub const PUSH: &str = {:?};\n", optional("release_key"), optional("release_signer"), optional("store"), optional("push_driver"));
+    let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\n", optional("release_key"), optional("release_signer"));
+    // The install settings an install has until its admins set them (`setting` entries).
+    let mut settings = String::new();
+    for (name, value) in brand.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {
+        settings.push_str(&format!("({name:?}, {:?}),", value.as_str().unwrap_or_else(|| panic!("the setting {name} isn't text"))));
+    }
+    let out = format!("{out}pub const SETTINGS: &[(&str, &str)] = &[{settings}];\n");
     // Every app in this repo's apps/ folder ships built in: each folder's files. The config's `apps` are the ones a new
     // install deploys and installs in `global`, by folder name.
     let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("apps");
@@ -58,8 +64,6 @@ fn main() {
         starters.push_str(&format!("{name:?},"));
     }
     let out = format!("{out}pub const BUILT_IN: &[(&str, &[(&str, &[u8])])] = &[{apps}];\npub const STARTERS: &[&str] = &[{starters}];\n");
-    // What the App Store calls the apps made in the install rather than built in.
-    let out = format!("{out}pub const MADE_HERE: &str = {:?};\n", brand.get("made_here").and_then(|v| v.as_str()).unwrap_or("Made here"));
     // Which build this is, so a node can tell a release apart from itself.
     let commit = std::process::Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])

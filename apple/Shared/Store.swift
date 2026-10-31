@@ -34,7 +34,7 @@ struct ScreenRoute: Hashable, Codable {
 
 /// The settings page's icons.
 enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
-    case store, groups, devices, secrets, access, users, backups, requests, appearance
+    case store, groups, devices, secrets, access, users, install, backups, requests, appearance
 
     var id: Self { self }
 
@@ -46,6 +46,7 @@ enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
         case .secrets: String(localized: "Secrets")
         case .access: String(localized: "Access Log")
         case .users: String(localized: "Users")
+        case .install: String(localized: "Install")
         case .backups: String(localized: "Backups")
         case .requests: String(localized: "Requests")
         case .appearance: String(localized: "Appearance")
@@ -60,6 +61,7 @@ enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
         case .secrets: "key.fill"
         case .access: "eye.fill"
         case .users: "person.2.badge.gearshape.fill"
+        case .install: "slider.horizontal.3"
         case .backups: "externaldrive.fill.badge.timemachine"
         case .requests: "tray.full.fill"
         case .appearance: "circle.lefthalf.filled"
@@ -319,10 +321,10 @@ final class Store {
 
     // MARK: Settings
 
-    /// Icons by role: Users and Backups only for admins, Requests first, only while something waits.
+    /// Icons by role: Users, Install and Backups only for admins, Requests first, only while something waits.
     var settings: [Setting] {
         var items: [Setting] = [.store, .groups, .devices, .secrets, .access]
-        if isAdmin { items += [.users, .backups] }
+        if isAdmin { items += [.users, .install, .backups] }
         if requests > 0 { items.insert(.requests, at: 0) }
         return items
     }

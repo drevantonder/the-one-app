@@ -26,7 +26,8 @@ var (
 )
 
 type config struct {
-	Domain       string `json:"domain"`
+	// The install's join_domain setting, which admins set in Settings; empty, nobody joins.
+	Domain       string `json:"-"`
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 	PublicURL    string `json:"public_url"`
@@ -67,8 +68,11 @@ func (j *joiner) config() (config, error) {
 	if err := json.Unmarshal(b, &c); err != nil {
 		return c, err
 	}
-	if c.Domain == "" || c.ClientID == "" || c.ClientSecret == "" || c.PublicURL == "" {
-		return c, errors.New("config.json needs domain, client_id, client_secret and public_url")
+	if c.ClientID == "" || c.ClientSecret == "" || c.PublicURL == "" {
+		return c, errors.New("config.json needs client_id, client_secret and public_url")
+	}
+	if c.Domain = j.state().Install.Settings["join_domain"]; c.Domain == "" {
+		return c, errors.New("joining with a work email is off: an admin turns it on with a domain in Settings")
 	}
 	c.Listen = cmpOr(c.Listen, "127.0.0.1:8790")
 	c.PublicURL = strings.TrimRight(c.PublicURL, "/")
@@ -295,20 +299,27 @@ func (j *joiner) admit(c config, email, name string) (string, error) {
 	return out.Code, nil
 }
 
-// member says whether the install has this user.
-func (j *joiner) member(user string) bool {
+type state struct {
+	Install struct {
+		Users    []struct{ ID string }
+		Settings map[string]string
+	}
+}
+
+// state is what the node says of the install, or nothing if it can't be asked.
+func (j *joiner) state() (s state) {
 	resp, err := http.Get(j.node + "/v1/state")
 	if err != nil {
-		return false
+		return s
 	}
 	defer resp.Body.Close()
-	var state struct {
-		Install struct{ Users []struct{ ID string } }
-	}
-	if json.NewDecoder(resp.Body).Decode(&state) != nil {
-		return false
-	}
-	for _, u := range state.Install.Users {
+	json.NewDecoder(resp.Body).Decode(&s)
+	return s
+}
+
+// member says whether the install has this user.
+func (j *joiner) member(user string) bool {
+	for _, u := range j.state().Install.Users {
 		if u.ID == user {
 			return true
 		}

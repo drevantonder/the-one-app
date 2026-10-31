@@ -34,6 +34,7 @@ type config struct {
 
 type sender struct {
 	dir    string
+	node   string
 	client *http.Client
 
 	mu    sync.Mutex
@@ -117,6 +118,9 @@ func (s *sender) run(ctx context.Context, c *call) (any, error) {
 		if len(in.Devices) == 0 {
 			return map[string]any{"accepted": 0, "devices": 0, "why": "no phone of yours is registered for push"}, nil
 		}
+		if !s.on() {
+			return map[string]any{"accepted": 0, "devices": len(in.Devices), "why": "push is off in this install's settings"}, nil
+		}
 		out, err := s.send(ctx, in, link(c.From, in))
 		if err == nil && registered && len(out["gone"].([]string)) > 0 {
 			gone := out["gone"].([]string)
@@ -129,6 +133,26 @@ func (s *sender) run(ctx context.Context, c *call) (any, error) {
 		return out, err
 	}
 	return nil, fmt.Errorf("push has no operation %s", c.Op)
+}
+
+// on says whether the install's push setting names this driver; an admin
+// turns push off in Settings by emptying it.
+func (s *sender) on() bool {
+	resp, err := s.client.Get(s.node + "/v1/state")
+	if err != nil {
+		return true
+	}
+	defer resp.Body.Close()
+	var state struct {
+		Install *struct {
+			Settings map[string]string `json:"settings"`
+		} `json:"install"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&state) != nil || state.Install == nil || state.Install.Settings == nil {
+		return true
+	}
+	push, set := state.Install.Settings["push"]
+	return !set || push == app
 }
 
 // link is what a tap opens: the screen of the app that sent the push (as the

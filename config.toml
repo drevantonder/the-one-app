@@ -13,15 +13,19 @@ release_signer = "ssh mac \"op read 'op://van-tonder-nosudo/The One App release 
 # Every folder in apps/ ships built into each release, for any install to add. These are the ones a new install
 # deploys and installs in global; each `one update` deploys the release's version of every one an install has.
 apps = ["board", "repos", "apps", "devices"]
-# The app the shells' App Store opens: an ordinary app, whose screens add apps to pages with ctx.install.
-store = "apps"
-# The driver phones register their push tokens with, which apps push through (providers/push).
-push_driver = "push"
-# What the App Store calls the apps made in the install, beside the ones built in.
-made_here = "Made here"
 # Artwork, relative to this file: the app icon (1024px), the menu bar template (18pt, with an @2x),
 # and the logo the apps show inside themselves.
 icon = "brand/AppIcon.png"
 menubar = "brand/MenuBarIcon.png"
 logo = "brand/Logo.png"
 
+# An install's settings until its admins change them in Settings (SPEC.md, "setting"). Every install has:
+# store, the app the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.install);
+# push, the driver phones register their push tokens with and apps push through (providers/push), empty for off;
+# made_here, what the App Store calls the apps made in the install, beside the ones built in; and join_domain, the
+# email domain people may join with by signing in, where the work-email join driver runs (providers/workjoin).
+[settings]
+store = "apps"
+push = "push"
+made_here = "Made here"
+join_domain = ""

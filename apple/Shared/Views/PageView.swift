@@ -405,6 +405,7 @@ struct SettingsPage: View {
                 if store.isAdmin {
                     SettingsSection(footer: String(localized: "Only admins see these.")) {
                         row(.users, value: count(store.install?.users.count ?? 0))
+                        row(.install, value: "")
                         row(.backups, value: "")
                     }
                 }
@@ -631,6 +632,7 @@ extension Setting {
         case .secrets: .indigo
         case .access: .purple
         case .users: .teal
+        case .install: .gray
         case .backups: .orange
         case .requests: .pink
         case .appearance: .blue

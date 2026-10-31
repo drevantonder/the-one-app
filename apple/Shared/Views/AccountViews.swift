@@ -237,6 +237,64 @@ struct UsersView: View {
     }
 }
 
+/// The install's settings, for admins: entries like everything else, so every server and shell has the same ones.
+struct InstallSettingsView: View {
+    @Environment(Store.self) private var store
+    @State private var madeHere = ""
+    @State private var domain = ""
+    @State private var error: String?
+
+    private var settings: [String: String] { store.install?.settings ?? [:] }
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Apps Made Here", text: $madeHere, prompt: Text("Made here"))
+                    .onSubmit { save("made_here", madeHere) }
+            } header: {
+                Text("App Store")
+            } footer: {
+                Text("What the App Store calls the apps made in \(store.install?.name ?? ""), beside the ones built in.")
+            }
+            Section {
+                Toggle("Push Notifications", isOn: Binding(get: { !(settings["push"] ?? "").isEmpty }, set: { set("push", $0 ? nil : "") }))
+            } footer: {
+                Text("Apps push to people’s phones through the push driver on one of the install’s servers. Off, nothing is pushed.")
+            }
+            Section {
+                TextField("Work Email Domain", text: $domain, prompt: Text("example.org"))
+                    .onSubmit { save("join_domain", domain) }
+            } header: {
+                Text("Joining")
+            } footer: {
+                if let error {
+                    Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                } else {
+                    Text("People join by signing in with a Google account at this domain, where the work-email join driver runs. Empty, nobody joins that way.")
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Install")
+        .onAppear { madeHere = settings["made_here"] ?? ""; domain = settings["join_domain"] ?? "" }
+        .onDisappear { save("made_here", madeHere); save("join_domain", domain) }
+    }
+
+    /// A text field's value, if it changed: empty puts back the edition's default.
+    private func save(_ name: String, _ text: String) {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard text != (settings[name] ?? "") else { return }
+        set(name, text.isEmpty ? nil : text)
+    }
+
+    private func set(_ name: String, _ value: String?) {
+        error = nil
+        Task {
+            do { try await store.change { try await $0.setSetting(name, value) } } catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
 /// This server's encrypted backups to a bucket, for admins. The credentials stay on this server.
 struct BackupsView: View {
     @Environment(Store.self) private var store

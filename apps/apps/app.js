@@ -231,9 +231,10 @@ if (CONNECTED) {
   one.title("Connected Apps");
   document.getElementById("search").insertAdjacentHTML("beforebegin", '<p class="muted small" style="margin:4px 4px 10px">Apps that connect an account, for you and your agents. Add one to a page, then sign in from that page\'s Connected Apps.</p>');
 }
-// The sections: the apps built into the release, and those made in this install (each brand words that its own way).
+// The sections: the apps built into the release, and those made in this install (each install words that its own way,
+// in its settings).
 const BUILT_IN = "Built In";
-const MADE_HERE = one.brand.made_here;
+const MADE_HERE = one.brand.made_here || "Made here";
 
 /// A built-in app's state here; for an app made here, what it was forked from.
 function status(a) {

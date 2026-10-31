@@ -36,6 +36,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/remove", post(remove))
         .route("/v1/role", post(role))
         .route("/v1/relays", post(relays))
+        .route("/v1/settings", post(settings))
         .route("/v1/acl", post(acl))
         .route("/v1/trust", post(trust))
         .route("/v1/open", post(open))
@@ -186,6 +187,12 @@ async fn role(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 
 async fn relays(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     node.member("relays", json!({ "urls": body["urls"] })).await?;
+    done()
+}
+
+/// `{ name, value }`: one of the install's settings, for admins; `value: null` puts back the edition's default.
+async fn settings(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    node.member("setting", json!({ "name": text(&body, "name")?, "value": body["value"] })).await?;
     done()
 }
 

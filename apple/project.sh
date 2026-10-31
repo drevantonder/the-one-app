@@ -2,7 +2,8 @@
 # and images, and generates Shells.xcodeproj.
 root=$(cd .. && pwd)
 config=$(cd "$(dirname "${CONFIG:-$root/config.toml}")" && pwd)/$(basename "${CONFIG:-config.toml}")
-field() { sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$config"; }
+# A top-level field: the [settings] after them are the install's, not the build's.
+field() { sed -n "/^\[/q; s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$config"; }
 art() { echo "$(dirname "$config")/$(field "$1")"; }
 # The commit the shells are built from, which Settings shows at its foot.
 export BUILD_COMMIT=$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
@@ -74,7 +75,8 @@ xcodegen generate --quiet
 
 # Push needs the Push Notifications capability on the iPhone app's App ID, which only the team's account holder
 # turns on (developer.apple.com, or Xcode signed in); signing fails without it. So builds leave push out until the
-# brand says `push = true`, or PUSH=1: then the app asks for an APNs token and registers it with the brand's `push_driver`.
+# config says `push = true`, or PUSH=1: then the app asks for an APNs token and registers it with the driver the
+# install's `push` setting names.
 if [ "${PUSH:-}" = 1 ] || [ "$(field push)" = true ]; then
 	/usr/libexec/PlistBuddy -c "Add :aps-environment string development" build/Phone.entitlements
 	/usr/libexec/PlistBuddy -c "Add :Push bool true" build/Phone-Info.plist
