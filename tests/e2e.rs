@@ -58,6 +58,8 @@ async fn devices_and_a_phone_share_a_board() {
     phone.request("POST", "/v1/device", json!({ "name": "Andre's iPhone" })).await.unwrap();
     let state = phone.request("GET", "/v1/state", Value::Null).await.unwrap();
     assert_eq!(state["device"]["name"], "Andre's iPhone", "an admin renames a phone that asks");
+    let shown = a.state()["space"]["devices"].as_array().unwrap().iter().find(|d| d["client"] == true).unwrap().clone();
+    assert!(shown["asked"].is_u64() && shown.get("online").is_none(), "a phone shows when it last asked, not whether it's online: {shown}");
 
     a.remove_device(one::entry::unhex(&phone.id()).unwrap()).await.unwrap();
     let devices = a.state()["space"]["devices"].as_array().unwrap().len();

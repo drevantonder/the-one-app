@@ -77,7 +77,7 @@ A device that keeps no log (a phone) is still a member: it joins with a pairing 
 
 Each node serves HTTP on `127.0.0.1:<brand port>` for its own device's shells, CLI and MCP. It refuses requests with an `Origin` header or a `Host` other than this machine, so no web page can use it.
 
-- `GET /v1/state`: the brand, this device, and its `space` (null until it creates or joins one) with its devices and whether they're online.
+- `GET /v1/state`: the brand, this device, and its `space` (null until it creates or joins one) with its devices: whether each is online, or, for a phone (`client`), when it last asked this device (`asked`, milliseconds, or null).
 - `GET /v1/apps`: every app's name, title, icon, instructions, operations and widgets.
 - `POST /v1/call { device?, app, op, input }` → `{ ok }`.
 - `GET /v1/widgets`: every widget, rendered.

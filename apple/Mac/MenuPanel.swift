@@ -24,12 +24,14 @@ struct MenuPanel: View {
                 ForEach(space.sortedDevices) { device in
                     HStack(spacing: 8) {
                         Circle()
-                            .fill(device.online ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
+                            .fill(device.online ? AnyShapeStyle(.green) : device.phone ? AnyShapeStyle(.clear) : AnyShapeStyle(.quaternary))
                             .frame(width: 7, height: 7)
                         Text(displayName(device.name))
                         Spacer()
                         if device.me {
                             Text("This device").foregroundStyle(.secondary)
+                        } else if device.phone {
+                            Text(device.phoneStatus).foregroundStyle(.tertiary)
                         } else if !device.online {
                             Text("Offline").foregroundStyle(.tertiary)
                         }

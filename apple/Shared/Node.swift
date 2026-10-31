@@ -30,10 +30,14 @@ struct Space: Codable, Sendable, Equatable, Identifiable {
 
     var title: String { name ?? "Joining…" }
 
-    /// This device first, then the online ones, then by name.
+    /// This device first, then the online ones, then phones, then by name.
     var sortedDevices: [Member] {
-        devices.sorted { ($0.me ? 0 : $0.online ? 1 : 2, $0.name.lowercased()) < ($1.me ? 0 : $1.online ? 1 : 2, $1.name.lowercased()) }
+        let rank = { (m: Member) in m.me ? 0 : m.online ? 1 : m.phone ? 2 : 3 }
+        return devices.sorted { (rank($0), $0.name.lowercased()) < (rank($1), $1.name.lowercased()) }
     }
+
+    /// The devices that keep a log: phones are never online, so they don't count.
+    var nodes: [Member] { devices.filter { !$0.phone } }
 }
 
 struct Member: Codable, Sendable, Equatable, Identifiable {
@@ -42,9 +46,27 @@ struct Member: Codable, Sendable, Equatable, Identifiable {
     var user: String
     var role: String
     var me: Bool
-    var online: Bool
+    var client: Bool?
+    /// For a phone: when it last asked the device that answered, in milliseconds.
+    var asked: Double?
+    private var isOnline: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case device, name, user, role, me, client, asked
+        case isOnline = "online"
+    }
 
     var id: String { device }
+    /// A phone keeps no log and holds no sessions, so it's never online: it asks a device that is.
+    var phone: Bool { client == true }
+    var online: Bool { isOnline == true }
+
+    /// What a shell says of a phone instead of online or offline: when it last asked, if the device that answered knows.
+    var phoneStatus: String {
+        guard let asked else { return String(localized: "Phone") }
+        let date = Date(timeIntervalSince1970: asked / 1000)
+        return String(localized: "Phone · asked \(date.formatted(.relative(presentation: .named)))")
+    }
 }
 
 /// An app as `GET /v1/apps` describes it: only what a shell needs to show it.

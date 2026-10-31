@@ -23,7 +23,7 @@ struct HomeView: View {
                         Section {
                             NavigationLink(value: Route.devices) {
                                 LabeledContent {
-                                    Text("\(space.devices.filter(\.online).count) of \(space.devices.count) online")
+                                    Text("\(space.nodes.filter(\.online).count) of \(space.nodes.count) online")
                                 } label: {
                                     Label("Devices", systemImage: "laptopcomputer.and.iphone")
                                 }

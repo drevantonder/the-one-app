@@ -12,7 +12,7 @@ struct Sidebar: View {
                     Label(app.label, systemImage: symbol(app.icon)).tag(store.main(app))
                 }
                 Label("Devices", systemImage: "laptopcomputer.and.iphone")
-                    .badge(store.space.map { "\($0.devices.filter(\.online).count)/\($0.devices.count)" } ?? "")
+                    .badge(store.space.map { "\($0.nodes.filter(\.online).count)/\($0.nodes.count)" } ?? "")
                     .tag(Route.devices)
             }
         }

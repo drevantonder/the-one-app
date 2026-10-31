@@ -57,6 +57,8 @@ struct Space {
     replayed: Option<Order>,
     /// Senders to every live sync session, by peer device.
     sessions: HashMap<Key, mpsc::UnboundedSender<Msg>>,
+    /// When each phone last asked this device something.
+    asked: HashMap<Key, u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -271,7 +273,7 @@ impl Node {
         let store = Store::open(&dir.join("entries.db"), key)?;
         let members = Members::replay(&key, &store.ordered()?);
         let paired_by = file.paired_by.and_then(|h| unhex(&h).ok());
-        let space = Space { key, store, members, user: file.user, paired_by, builds: HashMap::new(), provides: Vec::new(), replayed: None, sessions: HashMap::new() };
+        let space = Space { key, store, members, user: file.user, paired_by, builds: HashMap::new(), provides: Vec::new(), replayed: None, sessions: HashMap::new(), asked: HashMap::new() };
         *self.0.space.lock().unwrap() = Some(space);
         Ok(())
     }
@@ -537,12 +539,17 @@ impl Node {
                 .members
                 .current_devices()
                 .map(|m| {
-                    json!({
+                    let mut d = json!({
                         "device": hex(&m.device), "name": m.name, "user": m.user, "role": m.role, "client": m.client,
                         "build": s.builds.get(&m.device).map(|r| &r.commit), "target": s.builds.get(&m.device).map(|r| &r.target),
                         "me": m.device == viewer, "host": m.device == self.0.id,
-                        "online": m.device == self.0.id || m.device == viewer || s.sessions.contains_key(&m.device),
-                    })
+                    });
+                    // A phone keeps no sessions, so it's never online; say when it last asked this device instead.
+                    match m.client {
+                        true => d["asked"] = json!(s.asked.get(&m.device)),
+                        false => d["online"] = json!(m.device == self.0.id || s.sessions.contains_key(&m.device)),
+                    }
+                    d
                 })
                 .collect();
             json!({
@@ -588,6 +595,7 @@ impl Node {
             if !self.is_member(&caller) {
                 return Ok(());
             }
+            let _ = self.with(|s| Ok(s.asked.insert(caller, now_ms())));
             let node = self.clone();
             tokio::spawn(async move {
                 let result = async {

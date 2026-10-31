@@ -230,10 +230,28 @@ fn status(state: &Value) {
     }
     println!("\n{}  {} entries", s["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("(joining)"), s["entries"]);
     for d in s["devices"].as_array().into_iter().flatten() {
-        let dot = if d["online"] == true { "●" } else { "○" };
         let me = if d["me"] == true { " (this device)" } else { "" };
+        let name = d["name"].as_str().unwrap_or("");
+        if d["client"] == true {
+            // A phone keeps no log and holds no sessions: say when it last asked this device, not that it's offline.
+            let asked = d["asked"].as_u64().map(|t| format!(", asked here {}", ago(t))).unwrap_or_default();
+            println!("  ▯ {name}{me}  phone{asked}");
+            continue;
+        }
+        let dot = if d["online"] == true { "●" } else { "○" };
         let build = d["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
-        println!("  {dot} {}{me}{build}", d["name"].as_str().unwrap_or(""));
+        println!("  {dot} {name}{me}{build}");
+    }
+}
+
+/// How long ago `ms` (milliseconds since 1970) was, roughly.
+fn ago(ms: u64) -> String {
+    let s = one::node::now_ms().saturating_sub(ms) / 1000;
+    match s {
+        0..60 => "just now".into(),
+        60..3600 => format!("{}m ago", s / 60),
+        3600..86400 => format!("{}h ago", s / 3600),
+        _ => format!("{}d ago", s / 86400),
     }
 }
 

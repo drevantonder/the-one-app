@@ -29,7 +29,7 @@ struct DevicesView: View {
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity)
         .navigationTitle("Devices")
-        .navigationSubtitle("\(devices.filter(\.online).count) of \(devices.count) online")
+        .navigationSubtitle("\(devices.filter(\.online).count) of \(space?.nodes.count ?? 0) online")
     }
 }
 
@@ -40,7 +40,7 @@ private struct DeviceRow: View {
         HStack(spacing: 14) {
             Image(systemName: deviceSymbol(device.name))
                 .font(.system(size: 22, weight: .light))
-                .foregroundStyle(device.online ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(device.online || device.phone ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
                 .frame(width: 34)
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName(device.name))
@@ -50,13 +50,19 @@ private struct DeviceRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(device.online ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
-                    .frame(width: 8, height: 8)
-                Text(device.online ? "Online" : "Offline")
+            if device.phone {
+                Text(device.phoneStatus)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(device.online ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
+                        .frame(width: 8, height: 8)
+                    Text(device.online ? "Online" : "Offline")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 6)
