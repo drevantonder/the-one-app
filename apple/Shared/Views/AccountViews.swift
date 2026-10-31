@@ -280,7 +280,7 @@ struct RequestsView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(group.name).font(.body.weight(.medium))
-                                Text("\(group.members.count) members · it gets a page of its own").font(.callout).foregroundStyle(.secondary)
+                                Text(group.members.count == 1 ? "1 member · it gets a page of its own" : "\(group.members.count) members · it gets a page of its own").font(.callout).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Button("Join") { run { try await $0.accept(group: group.id) } }
@@ -305,6 +305,9 @@ struct RequestsView: View {
                 } header: {
                     Text("Servers")
                 }
+            }
+            if store.invites.isEmpty && store.trustOffers.isEmpty {
+                Text("Nothing waits for you.").foregroundStyle(.secondary)
             }
             if let error {
                 Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)

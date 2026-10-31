@@ -97,7 +97,7 @@ private struct PagePill: View {
         HStack(spacing: 0) {
             ForEach(store.pages) { page in
                 item(page.scope) { Text(page.title) }
-                Text("·").foregroundStyle(.tertiary)
+                Text("·").foregroundStyle(.tertiary).padding(.horizontal, 2)
             }
             item("settings") {
                 Image(systemName: "gearshape.fill")

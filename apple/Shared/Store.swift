@@ -287,8 +287,9 @@ final class Store {
         if let json = try? JSONEncoder().encode(event) {
             NotificationCenter.default.post(name: .nodeEvent, object: String(decoding: json, as: UTF8.self))
         }
-        if event.type == "changed" { await refreshWidgets() }
-        if ["changed", "servers", "install", "peers", "space"].contains(event.type) { try? await refreshState() }
+        if ["servers", "install"].contains(event.type) { try? await refreshState() }
+        // Installs, deploys and data all arrive as changes.
+        if event.type == "changed" { await refreshApps() }
     }
 
     private func renameIfHostname() async {
@@ -303,13 +304,22 @@ final class Store {
 
     func refreshApps() async {
         guard install != nil else { return }
-        if let apps = try? await node.apps(), apps != self.apps { self.apps = apps }
+        do {
+            let apps = try await node.apps()
+            if apps != self.apps { self.apps = apps }
+        } catch {
+            // A node that just started may not have its apps running yet.
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                await refreshApps()
+            }
+        }
         if selection == nil { selection = .page("user") }
         await refreshWidgets()
     }
 
     func refreshWidgets() async {
-        guard install?.joining == false else { return }
+        guard let install, !install.joining else { return }
         let node = node
         var fresh: [String: [WidgetInfo]] = [:]
         await withTaskGroup(of: (String, [WidgetInfo]?).self) { tasks in
