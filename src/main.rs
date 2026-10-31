@@ -125,12 +125,30 @@ fn run(args: Vec<String>) -> Result<()> {
             let device = input.remove("device");
             let r = post("/v1/call", json!({ "space": space, "device": device, "app": app, "op": op, "input": input }))?;
             match &r["ok"] {
+                ok if ok["content"].is_array() => print_content(app, op, &ok["content"])?,
                 Value::String(s) => println!("{s}"),
                 Value::Null => {}
                 other => println!("{}", serde_json::to_string_pretty(other)?),
             }
         }
         _ => bail!("unknown command; {CLI} help lists them"),
+    }
+    Ok(())
+}
+
+/// Prints an operation's MCP content (`{ content: [...] }`, as a provider passing on an MCP server's answers gives it):
+/// its text, and the path of each image, saved to a file.
+fn print_content(app: &str, op: &str, content: &Value) -> Result<()> {
+    for (i, c) in content.as_array().into_iter().flatten().enumerate() {
+        match c["type"].as_str() {
+            Some("image") => {
+                let ext = c["mimeType"].as_str().and_then(|m| m.strip_prefix("image/")).unwrap_or("img");
+                let path = std::env::temp_dir().join(format!("{app}-{op}-{i}.{ext}"));
+                std::fs::write(&path, data_encoding::BASE64.decode(c["data"].as_str().unwrap_or("").as_bytes())?)?;
+                println!("{}", path.display());
+            }
+            _ => println!("{}", c["text"].as_str().unwrap_or("")),
+        }
     }
     Ok(())
 }
@@ -290,13 +308,11 @@ fn call_tool(params: &Value) -> Value {
         return json!({ "isError": true, "content": [{ "type": "text", "text": format!("no tool {name}") }] });
     };
     match post("/v1/call", json!({ "space": space, "device": device, "app": app, "op": op, "input": input })) {
-        Ok(r) => {
-            let text = match &r["ok"] {
-                Value::String(s) => s.clone(),
-                other => serde_json::to_string_pretty(other).unwrap_or_default(),
-            };
-            json!({ "content": [{ "type": "text", "text": text }] })
-        }
+        Ok(r) => match &r["ok"] {
+            ok if ok["content"].is_array() => json!({ "content": ok["content"] }),
+            Value::String(s) => json!({ "content": [{ "type": "text", "text": s }] }),
+            other => json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(other).unwrap_or_default() }] }),
+        },
         Err(e) => json!({ "isError": true, "content": [{ "type": "text", "text": format!("{e:#}") }] }),
     }
 }
