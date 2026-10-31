@@ -29,6 +29,9 @@
 </header>
 <div id="banner"></div>
 <div class="grid" id="grid"><div class="empty">Loading…</div></div>
+<h2 class="section">Browser Profiles</h2>
+<div class="list" id="profiles"></div>
+<p class="muted small" style="margin: 6px 4px">Each profile is a browser of its own, with its own sign-ins, like Personal and PTC. Agents' desktops start with a copy of one, and apps like Messenger link to one.</p>
 <script>
   one.title("Desktops");
   const grid = document.getElementById("grid");
@@ -37,6 +40,7 @@
   const links = {}; // by server/name: { url, until }
   let desktops = [];
   let signing = null; // { desktop, server, login, url }, once a sign-in is open
+  let profiles = []; // { profile, server, saved }
 
   const key = (d) => `${d.server || ""}/${d.name}`;
   const at = (d) => (d.server ? { desktop: d.name, server: d.server } : { desktop: d.name });
@@ -89,7 +93,7 @@
   }
   function who(d) {
     const b = d.borrowed;
-    if (b?.signing_in) return b.login && b.login !== "default" ? `Login ${b.login}` : "";
+    if (b?.signing_in) return b.login && b.login !== "default" ? `Profile ${b.login}` : "";
     if (b) return b.by || "An agent";
     if (free(d)) return "Ready for the next agent";
     return "";
@@ -138,9 +142,9 @@
     if (!open) return (banner.innerHTML = "");
     const s = signing || { desktop: open.name, server: open.server, login: open.borrowed.login };
     const url = s.url || links[key({ name: s.desktop, server: s.server })]?.url;
-    banner.innerHTML = `<div class="banner"><div class="text"><b>Signing in on ${one.esc(s.desktop)}</b><div class="muted small">Open the desktop, sign in to your sites in its browser (messenger.com, say), then save. Agents' desktops start signed in to them.</div></div>` +
+    banner.innerHTML = `<div class="banner"><div class="text"><b>Signing in to the ${one.esc(s.login || "default")} profile on ${one.esc(s.desktop)}</b><div class="muted small">Open the desktop, sign in to your sites in its browser (messenger.com, say), then save. Agents' desktops start signed in to them.</div></div>` +
       (url ? `<a class="plain" href="${one.esc(url)}" target="_blank" rel="noopener">Open desktop</a>` : "") +
-      `<button class="primary" id="save">Save login</button></div>`;
+      `<button class="primary" id="save">Save profile</button></div>`;
     document.getElementById("save").onclick = () => save(s);
   }
 
@@ -149,31 +153,52 @@
     button.disabled = true;
     button.textContent = "Saving…";
     try {
-      await one.call("save_login", { desktop: s.desktop, ...(s.server ? { server: s.server } : {}), ...(s.login ? { login: s.login } : {}) });
+      await one.call("save_profile", { desktop: s.desktop, ...(s.server ? { server: s.server } : {}), ...(s.login ? { login: s.login } : {}) });
       signing = null;
       await refresh();
+      await loadProfiles();
     } catch (e) {
       button.disabled = false;
-      button.textContent = "Save login";
+      button.textContent = "Save profile";
       alert(e.message);
     }
   }
 
-  document.getElementById("sign-in").onclick = async (e) => {
-    const button = e.currentTarget;
+  // Opens a desktop's browser on a profile (made if new), for the person to sign in to sites in it.
+  async function signIn(button, profile) {
+    const label = button.textContent;
     button.disabled = true;
     button.textContent = "Opening a desktop…";
     try {
-      const r = await one.call("sign_in", {});
-      signing = { desktop: r.desktop, server: r.server, login: r.login, url: r.url };
+      const r = await one.call("sign_in", profile ? { profile } : {});
+      signing = { desktop: r.desktop, server: r.server, login: r.profile || r.login, url: r.url };
       await refresh();
+      return true;
     } catch (err) {
       alert(err.message);
     } finally {
       button.disabled = false;
-      button.textContent = "Sign in to a site";
+      button.textContent = label;
     }
-  };
+  }
+  document.getElementById("sign-in").onclick = (e) => signIn(e.currentTarget);
+
+  async function loadProfiles() {
+    try { profiles = (await one.call("profiles", {})).profiles || []; } catch { profiles = []; }
+    const list = document.getElementById("profiles");
+    list.innerHTML = profiles.map((p) => `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(p.profile)}</span></div>` +
+      `<div class="sub small">Saved ${one.esc(one.ago(Date.parse(p.saved)))}${p.server ? " on " + one.esc(host(p.server)) : ""}</div></div>` +
+      `<button class="plain" data-profile="${one.esc(p.profile)}">Sign in to a site</button></div>`).join("") +
+      `<div class="row plain"><div class="main"><input id="new-profile" class="search" style="margin:0" placeholder="New profile, like Personal or PTC" autocapitalize="words" autocorrect="off"></div>` +
+      `<button class="plain" id="add-profile">Add</button></div>`;
+    for (const b of list.querySelectorAll("[data-profile]")) b.onclick = () => signIn(b, b.dataset.profile);
+    const add = document.getElementById("add-profile");
+    add.onclick = async () => {
+      const name = document.getElementById("new-profile").value.trim();
+      if (name && (await signIn(add, name))) document.getElementById("new-profile").value = "";
+    };
+  }
+  loadProfiles();
 
   // A picture of each running desktop, and a link to open it, kept until shortly before the link stops working.
   async function pictures() {

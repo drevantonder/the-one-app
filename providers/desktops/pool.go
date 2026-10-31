@@ -127,11 +127,11 @@ func spares(all []desktop, lent map[string]loan) []desktop {
 // borrow lends the spare desktop, or one made for it.
 func (ds *desktops) borrow(ctx context.Context, l loan) (desktop, error) {
 	if l.Login != "" {
-		if !validName.MatchString(l.Login) {
-			return desktop{}, fmt.Errorf("no saved login %q", l.Login)
+		if !validProfile.MatchString(l.Login) {
+			return desktop{}, fmt.Errorf("no profile %q", l.Login)
 		}
 		if ds.savedLogin(l.Login) == "" && !l.SigningIn {
-			return desktop{}, fmt.Errorf("no saved login %q: sign in to sites in one with sign_in", l.Login)
+			return desktop{}, fmt.Errorf("no profile %q: sign in to sites in one with sign_in", l.Login)
 		}
 	}
 	ds.take.Lock()
@@ -324,17 +324,40 @@ func (ds *desktops) saveLogin(ctx context.Context, d desktop, login string) erro
 
 // loginServer is the other server that keeps the saved login, or "".
 func (ds *desktops) loginServer(ctx context.Context, login string) string {
-	got, _ := ds.everywhere(ctx, "logins", nil)
+	got, _ := ds.everywhere(ctx, "profiles", nil)
 	for s, r := range got {
-		var theirs struct{ Logins []struct{ Login string } }
+		var theirs struct{ Profiles []struct{ Profile string } }
 		json.Unmarshal(r, &theirs)
-		for _, l := range theirs.Logins {
-			if l.Login == login {
+		for _, l := range theirs.Profiles {
+			if l.Profile == login {
 				return s
 			}
 		}
 	}
 	return ""
+}
+
+// profileElsewhere passes a call about a profile this server doesn't keep on
+// to the server that does, if one does: each server keeps its own.
+func (ds *desktops) profileElsewhere(ctx context.Context, op string, in map[string]any, login string, here bool) json.RawMessage {
+	if here || login == "" || ds.savedLogin(login) != "" {
+		return nil
+	}
+	s := ds.loginServer(ctx, login)
+	if s == "" {
+		return nil
+	}
+	fwd := map[string]any{"here": true}
+	for k, v := range in {
+		fwd[k] = v
+	}
+	fwd["login"] = login
+	r, err := ds.callNode(ctx, s, op, fwd)
+	if err != nil {
+		log.Printf("%s on %s: %v", op, s, err)
+		return nil
+	}
+	return r
 }
 
 // logins lists this server's saved logins: each server keeps its own.
@@ -350,7 +373,7 @@ func (ds *desktops) logins(me string) []map[string]any {
 		if err != nil {
 			continue
 		}
-		out = append(out, map[string]any{"login": e.Name(), "server": me, "saved": info.ModTime().UTC(), "size": info.Size()})
+		out = append(out, map[string]any{"profile": e.Name(), "server": me, "saved": info.ModTime().UTC(), "size": info.Size()})
 	}
 	return out
 }

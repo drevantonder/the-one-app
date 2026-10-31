@@ -58,7 +58,7 @@ func (ds *desktops) describe() map[string]any {
 			ops = append(ops, map[string]any{"name": t.Name, "description": t.Description, "input": withDesktop(t.InputSchema)})
 		}
 	}
-	return map[string]any{"title": "Desktops", "icon": "monitor", "instructions": instructions, "ops": ops, "widgets": []any{}, "screens": screens}
+	return map[string]any{"title": "Desktops", "icon": "macwindow.on.rectangle", "color": "#a2845e", "instructions": instructions, "ops": ops, "widgets": []any{}, "screens": screens}
 }
 
 // withDesktop adds the desktop argument to a tool's input.
@@ -274,6 +274,19 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 			return nil, fmt.Errorf("bad input: %w", err)
 		}
 	}
+	// Browser profiles were called saved logins: agents and apps may still name them so.
+	switch op {
+	case "logins":
+		op = "profiles"
+	case "save_login":
+		op = "save_profile"
+	case "forget_login":
+		op = "forget_profile"
+	}
+	if p, ok := in["profile"]; ok {
+		in["login"] = p
+		delete(in, "profile")
+	}
 	name, _ := in["desktop"].(string)
 	delete(in, "desktop")
 	text := func(k string) string { s, _ := in[k].(string); return strings.TrimSpace(s) }
@@ -405,6 +418,9 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		if !given && ds.savedLogin("default") != "" {
 			login = "default"
 		}
+		if r := ds.profileElsewhere(ctx, op, in, login, here); r != nil {
+			return r, nil
+		}
 		d, err := ds.borrow(ctx, loan{By: cmpOr(text("by"), caller(ctx)), For: why, Login: login})
 		if err != nil {
 			return nil, err
@@ -412,10 +428,10 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		me, _, _ := ds.servers(ctx)
 		msg := fmt.Sprintf("Borrowed desktop %s: pass desktop %q to the desktops tools.", d.Name, d.Name)
 		if login != "" {
-			msg += fmt.Sprintf(` Its browser is signed in as the %s login: desktops_browser_prepare with allow_launch true and profile {"mode":"isolated_named","name":%q}.`, login, login)
+			msg += fmt.Sprintf(` Its browser starts with a copy of the %s profile: desktops_browser_prepare with allow_launch true and profile {"mode":"isolated_named","name":%q}.`, login, login)
 		}
 		msg += " Give it back with give_back when done; it's given back for you after 15 minutes without a call."
-		return map[string]any{"desktop": d.Name, "server": me, "login": login, "text": msg}, nil
+		return map[string]any{"desktop": d.Name, "server": me, "profile": login, "login": login, "text": msg}, nil
 	case "give_back":
 		if name == "" {
 			return nil, errors.New("which desktop? pass the one you borrowed")
@@ -425,7 +441,7 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 			return nil, err
 		}
 		if ok && l.SigningIn {
-			return fmt.Sprintf("Saved the %s login and closed desktop %s.", l.Login, name), nil
+			return fmt.Sprintf("Saved the %s profile and closed desktop %s.", l.Login, name), nil
 		}
 		return fmt.Sprintf("Gave back desktop %s.", name), nil
 	case "sign_in":
@@ -435,8 +451,11 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 			}
 		}
 		login := cmpOr(text("login"), "default")
-		if !validName.MatchString(login) {
-			return nil, errors.New("a login's name is lowercase letters, digits and dashes")
+		if !validProfile.MatchString(login) {
+			return nil, errors.New("a profile's name is letters, digits and dashes, like Personal or PTC")
+		}
+		if r := ds.profileElsewhere(ctx, op, in, login, here); r != nil {
+			return r, nil
 		}
 		minutes := int(signInFor.Minutes())
 		if m, ok := in["minutes"].(float64); ok {
@@ -450,9 +469,10 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		if err != nil {
 			return nil, err
 		}
-		msg := fmt.Sprintf("Sign in to sites in the %s login here:\n%s\nIt's saved in %d minutes, or as soon as desktop %s is given back (give_back) or saved (save_login).", login, url, minutes, d.Name)
-		return map[string]any{"desktop": d.Name, "login": login, "url": url, "until": until, "text": msg}, nil
-	case "save_login":
+		msg := fmt.Sprintf("Sign in to sites in the %s profile here:\n%s\nIt's saved in %d minutes, or as soon as desktop %s is given back (give_back) or saved (save_profile).", login, url, minutes, d.Name)
+		me, _, _ := ds.servers(ctx)
+		return map[string]any{"desktop": d.Name, "server": me, "profile": login, "login": login, "url": url, "until": until, "text": msg}, nil
+	case "save_profile":
 		d, err := ds.running(ctx, name)
 		if err != nil {
 			return nil, err
@@ -463,46 +483,44 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 			if err := ds.giveBack(ctx, d.Name, "signed in"); err != nil {
 				return nil, err
 			}
-			return fmt.Sprintf("Saved the %s login and closed desktop %s.", login, d.Name), nil
+			return fmt.Sprintf("Saved the %s profile and closed desktop %s.", login, d.Name), nil
 		}
 		if err := ds.saveLogin(ctx, d, login); err != nil {
 			return nil, err
 		}
-		return fmt.Sprintf("Saved desktop %s's browser as the %s login: desktops borrowed with it start signed in to the same sites.", d.Name, login), nil
-	case "logins":
+		return fmt.Sprintf("Saved desktop %s's browser as the %s profile: desktops borrowed with it start signed in to the same sites.", d.Name, login), nil
+	case "profiles":
 		me, _, err := ds.servers(ctx)
 		if err != nil {
 			return nil, err
 		}
 		mine := ds.logins(me)
 		if here {
-			return map[string]any{"logins": mine}, nil
+			return map[string]any{"profiles": mine}, nil
 		}
-		got, failed := ds.everywhere(ctx, "logins", nil)
+		got, failed := ds.everywhere(ctx, "profiles", nil)
 		for _, r := range got {
-			var theirs struct{ Logins []map[string]any }
+			var theirs struct{ Profiles []map[string]any }
 			json.Unmarshal(r, &theirs)
-			mine = append(mine, theirs.Logins...)
+			mine = append(mine, theirs.Profiles...)
 		}
-		out := map[string]any{"logins": mine}
+		out := map[string]any{"profiles": mine}
 		if len(failed) > 0 {
 			out["unreachable"] = failed
 		}
 		return out, nil
-	case "forget_login":
+	case "forget_profile":
 		login := text("login")
-		if ds.savedLogin(login) == "" && !here {
-			if s := ds.loginServer(ctx, login); s != "" {
-				return ds.callNode(ctx, s, op, map[string]any{"login": login, "here": true})
-			}
+		if r := ds.profileElsewhere(ctx, op, in, login, here); r != nil {
+			return r, nil
 		}
-		if !validName.MatchString(login) || ds.savedLogin(login) == "" {
-			return nil, fmt.Errorf("no saved login %q", login)
+		if !validProfile.MatchString(login) || ds.savedLogin(login) == "" {
+			return nil, fmt.Errorf("no profile %q", login)
 		}
 		if err := os.RemoveAll(ds.loginDir(login)); err != nil {
 			return nil, err
 		}
-		return fmt.Sprintf("Forgot the %s login.", login), nil
+		return fmt.Sprintf("Deleted the %s profile.", login), nil
 	case "backup":
 		d, err := ds.running(ctx, name)
 		if err != nil {
@@ -696,7 +714,7 @@ func viewURL(ctx context.Context, d desktop, minutes int) (string, error) {
 
 // local are the operations that act on this server even when given a
 // desktop it doesn't have.
-var local = []string{"list", "create", "borrow", "sign_in", "logins", "forget_login", "backups", "restore", "refresh_tools"}
+var local = []string{"list", "create", "borrow", "sign_in", "profiles", "forget_profile", "backups", "restore", "refresh_tools"}
 
 // reply is a result with entries for the node to write in the caller's log.
 type reply struct {

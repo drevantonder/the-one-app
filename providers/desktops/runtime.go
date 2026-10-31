@@ -41,6 +41,9 @@ type desktop struct {
 
 var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
+// validProfile is a browser profile's name, as people name them: Personal, PTC.
+var validProfile = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,39}$`)
+
 // A containers runs desktops' containers.
 type containers interface {
 	list(ctx context.Context) ([]desktop, error)
