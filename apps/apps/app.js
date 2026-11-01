@@ -53,15 +53,15 @@ function untar(bytes) {
 }
 
 /// What a built-in app the install hasn't added says about itself: nothing runs it yet, so its code says (the first
-/// `title`, `icon`, `color` and `description` after `export default` given as plain strings, as the built-in apps
-/// give them before their ops).
+/// `title`, `icon`, `color`, `tagline` and `description` after `export default` given as plain strings, as the built-in
+/// apps give them before their ops).
 async function described(ctx, bundle) {
   const file = untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
   const all = file ? new TextDecoder().decode(file.bytes) : "";
   const code = all.slice(Math.max(0, all.indexOf("export default")));
   const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
   const parts = code.match(/\buses:\s*\{[^}]*\bsidecars:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
-  return { title: field("title"), icon: field("icon"), color: field("color"), description: field("description"), needs: field("needs"), uses: { apps: [], sidecars: parts } };
+  return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), uses: { apps: [], sidecars: parts } };
 }
 
 /// Whether an app is a connector (SPEC.md "Connectors"): it says so (`connector: true`), or it has accounts, sign_in
@@ -180,7 +180,7 @@ export default {
   ops: {
     list: {
       reads: true,
-      description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; owner, where it's installed (that you can see), forks, and the places you may add it to. Each says whether it's a connector: it only connects an account (Gmail, say), and shells keep it in each page's Connectors folder. With connector, only those.",
+      description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; its tagline, if it has one, and description; owner, where it's installed (that you can see), forks, and the places you may add it to. Each says whether it's a connector: it only connects an account (Gmail, say), and shells keep it in each page's Connectors folder. With connector, only those.",
       // `connected` is connector's old name, which shells built before still send.
       input: { type: "object", properties: { connector: { type: "boolean", description: "only connectors" }, connected: { type: "boolean", description: "the same as connector" } } },
       async run(ctx, { connector, connected } = {}) {
@@ -192,7 +192,8 @@ export default {
           const added = a.deploys > 0;
           const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
           return {
-            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, image: a.image || null, image_kind: a.image_kind || null, description: d.description || a.description || null,
+            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, image: a.image || null, image_kind: a.image_kind || null,
+            tagline: d.tagline || a.tagline || null, description: d.description || a.description || null,
             owner: a.owner, owner_name: name(a.owner),
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], sidecars: [] },
@@ -347,13 +348,14 @@ const MADE_HERE = one.config?.made_here || "Made here";
 
 const row = (a) => \`<div class="row" data-app="\${one.esc(a.name)}">
     \${one.appIcon(a, 48)}
-    <div class="main"><div class="title"><span>\${one.esc(a.title)}</span></div><div class="sub">\${one.esc(a.description || "")}</div></div>
-    \${a.deleted ? "" : '<button class="button capsule" data-add="' + one.esc(a.name) + '">' + (onAPage(a, data.places) ? "Manage" : "Add to…") + "</button>"}
+    <div class="main"><div class="title"><span>\${one.esc(a.title)}</span></div><div class="sub">\${one.esc(a.tagline || a.description || "")}</div></div>
+    \${a.deleted ? (a.mine ? '<button class="button capsule" data-restore="' + one.esc(a.name) + '">Restore</button>' : "")
+      : '<button class="button capsule" data-add="' + one.esc(a.name) + '">' + (onAPage(a, data.places) ? "Manage" : "Add to…") + "</button>"}
   </div>\`;
 const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(title) + '</h2><div class="list">' + list.map(row).join("") + "</div>" : "";
 
 function html() {
-  const found = data.apps.filter((a) => !!a.connector === (tab === "connectors") && (!query || [a.title, a.name, a.description || ""].some((t) => t.toLowerCase().includes(query))));
+  const found = data.apps.filter((a) => !!a.connector === (tab === "connectors") && (!query || [a.title, a.name, a.tagline || "", a.description || ""].some((t) => t.toLowerCase().includes(query))));
   if (!found.length) return one.empty({ icon: "search", title: "No Results", text: query ? one.esc("Nothing matches “" + query + "”.") : "" });
   return section("Built In", found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted));
 }
@@ -363,6 +365,8 @@ function draw() {
 document.getElementById("list").addEventListener("click", (e) => {
   const add = e.target.closest("[data-add]");
   if (add) return addTo(add.dataset.add, data);
+  const restore = e.target.closest("[data-restore]");
+  if (restore) return (restore.disabled = true), one.call("restore", { app: restore.dataset.restore }).catch(show);
   const r = e.target.closest("[data-app]");
   if (r) one.open("app", { app: r.dataset.app });
 });
@@ -400,21 +404,26 @@ let data = null;
 
 /// The app's page, section by section: each takes what show() loaded and gives HTML, or "" to leave itself out.
 const sections = [
+  // Under the name, a line only where there's one apart from the description, which follows in full: when a deleted
+  // app was deleted, or a tagline the app declares.
   function hero({ a, places }) {
-    const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : a.description || "";
+    const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : a.tagline || "";
     const act = a.deleted
       ? (a.mine ? '<button class="button capsule" onclick="retire(this, \\'restore\\')">Restore</button>' : "")
       : '<button class="button capsule" data-add>' + (onAPage(a, places) ? "Manage" : "Add to…") + "</button>";
     return \`<div class="hero">\${one.appIcon(a, 100)}<div class="text"><h1>\${one.esc(a.title)}</h1>
-      <div class="tag">\${one.esc(tag)}</div><div class="act">\${act}</div></div></div>
-      \${a.description && !a.deleted ? '<div class="about" hidden>' + one.esc(a.description) + "</div>" : ""}\`;
+      \${tag ? '<div class="tag">' + one.esc(tag) + "</div>" : ""}<div class="act">\${act}</div></div></div>
+      \${a.description ? '<div class="about">' + one.esc(a.description) + "</div>" : ""}\`;
   },
+  // A connector's servers, under what it needs: those it runs on, with Remove for their owners, then those of theirs an
+  // owner removed it from, to install it again.
   function needs({ where }) {
     if (!where) return "";
-    const place = (server, op, label) => '<div class="row plain"><div class="main"><div class="title"><span>' + one.esc(label + " " + server) + "</span></div></div>"
-      + '<button class="button' + (op === "remove_from" ? "" : " primary") + '" data-op="' + op + '" data-server="' + one.esc(server) + '">' + (op === "remove_from" ? "Remove" : "Install") + "</button></div>";
-    const rows = [...where.install.map((s) => place(s, "install_on", "Install on")), ...where.remove.map((s) => place(s, "remove_from", "Remove from"))];
-    return '<div class="needs">' + one.esc(where.line) + "</div>" + (rows.length ? '<div class="list" style="margin-top:12px">' + rows.join("") + "</div>" : "");
+    const server = (name, op) => '<div class="row plain"><div class="main"><div class="title"><span>' + one.esc(name) + "</span></div></div>"
+      + (op ? '<button class="button' + (op === "install_on" ? " primary" : "") + '" data-op="' + op + '" data-server="' + one.esc(name) + '">' + (op === "install_on" ? "Install" : "Remove") + "</button>" : "") + "</div>";
+    const rows = [...where.runs.map((s) => server(s, where.remove.includes(s) && "remove_from")), ...where.install.map((s) => server(s, "install_on"))];
+    if (!rows.length) return '<div class="needs">' + one.esc(where.line) + "</div>";
+    return '<h2 class="section">' + one.esc(where.needs || "Runs On") + '</h2><div class="list">' + rows.join("") + "</div>";
   },
   function schedules({ health }) {
     // One a deploy removed no longer runs: it isn't the app's any more.
@@ -466,9 +475,6 @@ async function show() {
   const a = list.apps.find((x) => x.name === name);
   if (!a) return (document.getElementById("app").innerHTML = one.notFound({ title: name + " was erased.", text: "It's gone from every list.", home: "Back to the App Store" }));
   document.getElementById("app").innerHTML = sections.map((s) => s({ a, apps: list.apps, places: list.places, admin: list.admin, code, health, where })).join("");
-  // The description shows in full only where its line under the name was cut short.
-  const tag = document.querySelector(".hero .tag"), about = document.querySelector(".about");
-  if (about && tag.scrollWidth > tag.clientWidth + 1) about.hidden = false;
   new IntersectionObserver(([e]) => one.title(e.isIntersecting ? "" : a.title)).observe(document.querySelector(".hero h1"));
   document.querySelector("[data-add]")?.addEventListener("click", () => addTo(name, data));
   for (const b of document.querySelectorAll("[data-op]")) b.onclick = () => place(b, b.dataset.op, b.dataset.server);
