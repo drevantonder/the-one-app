@@ -1520,11 +1520,11 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     for text in ["broken once", "broken twice"] {
         a.call(board("post", json!({ "text": text }))).await.unwrap();
         a.back_up_now();
-        eventually("a failed run", async || a.backups().unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used"))).await;
+        eventually("a failed run", async || a.backups().unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used") || t.contains("won't let"))).await;
     }
     let problem = a.state()["backups"].clone();
     assert_eq!(problem["fix"], "Check the disk on backup-a is plugged in and has room.", "{problem}");
-    assert!(problem["text"].as_str().unwrap().starts_with("T7 Shield couldn't be used"), "{problem}");
+    assert!(problem["text"].as_str().unwrap().starts_with("T7 Shield "), "{problem}");
     std::fs::remove_file(&objects).unwrap();
     std::fs::rename(dir.join("objects-aside"), &objects).unwrap();
     a.call(board("post", json!({ "text": "fixed" }))).await.unwrap();

@@ -243,7 +243,8 @@ struct BackupsView: View {
 
     /// Status first, in words: backed up when; or what's wrong, since when, and its fix.
     @ViewBuilder private func status(_ places: [Backups.Place]) -> some View {
-        let problem = places.compactMap(\.problem).min { $0.since < $1.since }
+        let failing = places.filter { $0.problem != nil }.min { $0.problem!.since < $1.problem!.since }
+        let problem = failing?.problem
         let newest = places.compactMap(\.last).max { $0.time < $1.time }
         let color: Color = problem != nil ? .red : newest == nil ? .secondary : .green
         VStack(alignment: .leading, spacing: 12) {
@@ -255,7 +256,8 @@ struct BackupsView: View {
                     .background(Circle().fill(color.opacity(0.15)))
                 VStack(alignment: .leading, spacing: 3) {
                     if let problem {
-                        Text(newest.map { "Not backed up since \(when($0.time, style: .relative))" } ?? "Not backed up yet").font(.title3.weight(.semibold))
+                        let title = failing?.title ?? ""
+                        Text(failing?.last.map { "Not backed up to \(title) since \(when($0.time, style: .relative))" } ?? "Not backed up to \(title) yet").font(.title3.weight(.semibold))
                         Text(problem.text).foregroundStyle(.secondary)
                         Text(problem.fix).foregroundStyle(.secondary)
                     } else if let newest {

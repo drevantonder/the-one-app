@@ -226,9 +226,16 @@ impl std::fmt::Display for Failed {
 
 impl std::error::Error for Failed {}
 
-/// A folder's I/O error, as a disk's trouble.
+/// A folder's I/O error, as a disk's trouble, in words.
 fn disk(dir: &std::path::Path, err: std::io::Error) -> anyhow::Error {
-    Failed(Trouble::Disk, format!("couldn't be used ({}: {err})", dir.display())).into()
+    use std::io::ErrorKind::*;
+    let said = match err.kind() {
+        ReadOnlyFilesystem => "is read-only".to_string(),
+        StorageFull | QuotaExceeded => "is full".to_string(),
+        PermissionDenied => format!("won't let this server write to {}", dir.display()),
+        _ => format!("couldn't be used: {}", err.to_string().split(" (os error").next().unwrap_or_default().to_lowercase()),
+    };
+    Failed(Trouble::Disk, said).into()
 }
 
 /// Where backups go.
