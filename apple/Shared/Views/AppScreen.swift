@@ -113,6 +113,8 @@ private struct ScreenWebView: Representable {
     /// It's CSS zoom, which lays the page out to the zoomed width; the web view's pageZoom only scales the drawing, so
     /// a page at any other text size was narrower than the screen or ran off it. It never leaves the page less than
     /// 320 CSS pixels wide, the narrowest phone layouts are made for, so the largest sizes zoom only as far as that.
+    /// Before the page's viewport tag is read its width isn't the screen's, and reading the tag fires no resize, so it
+    /// fits again once the page has loaded.
     #if os(macOS)
     private let zoomScript = ""
     #else
@@ -123,6 +125,8 @@ private struct ScreenWebView: Representable {
         if (!window.__oneFit) {
           window.__oneFit = () => { const z = window.__oneZoom; document.documentElement.style.zoom = String(innerWidth ? Math.min(z, innerWidth / 320) : z); };
           addEventListener("resize", window.__oneFit);
+          document.addEventListener("DOMContentLoaded", window.__oneFit);
+          addEventListener("load", window.__oneFit);
         }
         window.__oneFit();
         """
