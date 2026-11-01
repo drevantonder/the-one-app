@@ -4,15 +4,13 @@ import UniformTypeIdentifiers
 /// A request for an item an app may use: who asks and why, then the person's items that have the fields it wants, to
 /// pick one, or a new one, whose values go to the node and nowhere else. The asker never sees a secret.
 /// With `ask`, the shell's own request for something of the install's that isn't an app (push), made here rather than
-/// as an entry: the item picked or made is switched on for `ask.app` directly, drawn with `icon` on `color`.
+/// as an entry: the item picked or made is switched on for `ask.app` directly.
 struct VaultRequestSheet: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     var scope: String
     var id: String
     var ask: VaultRequest? = nil
-    var icon: String? = nil
-    var color: String? = nil
     @State private var request: VaultRequest?
     /// The file chosen for each file field, by name, and the field choosing one.
     @State private var files: [String: String] = [:]
@@ -31,11 +29,7 @@ struct VaultRequestSheet: View {
                     let app = store.app(request.app)
                     Section {
                         HStack(spacing: 12) {
-                            if let app {
-                                AppTile(app: app, seed: request.app, size: 44)
-                            } else {
-                                AppTile(icon: icon, seed: request.app, color: color, size: 44)
-                            }
+                            AppTile(app: app, seed: request.app, size: 44)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(app.map { "\($0.label) wants \(request.label)" } ?? request.label).font(.headline)
                                 if let why = request.why, !why.isEmpty {
@@ -135,7 +129,7 @@ struct VaultRequestSheet: View {
             }
         }
         #if os(macOS)
-        .frame(width: 460, height: 560)
+        .frame(width: 460, height: 460)
         #endif
     }
 

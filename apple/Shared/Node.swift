@@ -357,7 +357,7 @@ struct VaultItem: Decodable, Sendable, Equatable, Identifiable, Hashable {
 
 /// A request for an item an app may use (SPEC.md "The Vault"): the person picks one of theirs or makes one, so the
 /// asker never sees its secrets.
-struct VaultRequest: Decodable, Sendable, Equatable, Identifiable {
+struct VaultRequest: Decodable, Sendable, Hashable, Identifiable {
     struct Field: Decodable, Sendable, Equatable, Hashable, Identifiable {
         var name: String
         var secret: Bool

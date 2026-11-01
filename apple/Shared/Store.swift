@@ -102,6 +102,8 @@ enum Sheet: Hashable, Identifiable {
     /// A request for a Vault item, from a `<cli>://vault?id=…&scope=…` link (or `<cli>://secret?…`, as before), or an
     /// app screen's `one.vault(need)`.
     case vault(scope: String, id: String)
+    /// The shell's own request for an item, made here rather than as an entry (push's Apple key, from Settings).
+    case ask(VaultRequest)
     /// The widget gallery, adding to a page: its scope.
     case addWidget(String)
     /// A page's Connectors folder, on a Mac: its scope.

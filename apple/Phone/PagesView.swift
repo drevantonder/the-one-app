@@ -67,6 +67,7 @@ struct PagesView: View {
             case .addWidget(let scope): AddWidgetSheet(scope: scope)
             case .join, .connectors: EmptyView()
             case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
+            case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
             }
         }
         .onChange(of: store.pages) {

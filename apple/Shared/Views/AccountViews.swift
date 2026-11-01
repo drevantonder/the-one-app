@@ -105,9 +105,8 @@ struct InstallSettingsView: View {
     @State private var madeHere = ""
     @State private var domain = ""
     @State private var error: String?
-    /// The Vault item on Everyone switched on for push, by its title, and whether its sheet is open.
+    /// The Vault item on Everyone switched on for push, by its title.
     @State private var pushKey: String?
-    @State private var askingKey = false
 
     private var settings: [String: String] { store.install?.settings ?? [:] }
     /// The sidecar that sends pushes, empty for off: its Apple key is a Vault item switched on for its name.
@@ -124,7 +123,7 @@ struct InstallSettingsView: View {
             Section {
                 Toggle("Push Notifications", isOn: Binding(get: { !push.isEmpty }, set: { set("push", $0 ? nil : "") }))
                 if !push.isEmpty && store.isAdmin {
-                    Button { askingKey = true } label: {
+                    Button { store.sheet = .ask(pushAsk) } label: {
                         HStack {
                             LabeledContent("Apple Push Key", value: pushKey ?? "")
                             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
@@ -151,9 +150,7 @@ struct InstallSettingsView: View {
         .navigationTitle("Install")
         .onAppear { madeHere = settings["made_here"] ?? ""; domain = settings["join_domain"] ?? "" }
         .task(id: push) { await loadKey() }
-        .sheet(isPresented: $askingKey, onDismiss: { Task { await loadKey() } }) {
-            VaultRequestSheet(scope: "global", id: "", ask: pushAsk, icon: "bell.badge.fill", color: "#ff3b30")
-        }
+        .onChange(of: store.sheet) { if store.sheet == nil { Task { await loadKey() } } }
         .onDisappear { save("made_here", madeHere); save("join_domain", domain) }
     }
 
