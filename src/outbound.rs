@@ -42,6 +42,9 @@ async fn out(node: Node, req: Request) -> Result<Response> {
     }
     let scheme = header("x-forwarded-proto").filter(|p| p == "https").unwrap_or_else(|| "http".into());
     let port = authority.rsplit_once(':').and_then(|(_, p)| p.parse().ok()).unwrap_or(if scheme == "https" { 443 } else { 80 });
+    if node.names_app(&host) {
+        return Ok((StatusCode::FORBIDDEN, format!("{host} is an app's name, not a site's: apps reach a sidecar with ctx.sidecars")).into_response());
+    }
     if own_port(&node, &host, port) {
         return Ok((StatusCode::FORBIDDEN, "apps can't reach the node's own ports").into_response());
     }

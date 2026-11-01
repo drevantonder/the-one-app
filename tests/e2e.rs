@@ -1085,6 +1085,34 @@ async fn agents_and_sidecars_use_the_items_switched_on_for_them_without_seeing_t
     assert_eq!(got["theirs"]["Ok"], "{{token}}", "not another app's item");
     assert!(a.sidecar_fill("keeper", 9999, "{{key}}", "api.example.com").is_err(), "only while a call waits");
 
+    // An app's call to a sidecar has the fields of its items filled into its input, a secret one only for a sidecar
+    // its item names among its hosts, and blotted out of the answer; a key it asks for is made for it, unseen.
+    a.register_sidecar("holder", json!({ "title": "Holder", "ops": [{ "name": "open" }] })).await.unwrap();
+    let sidecar = a.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Ok(Some(c)) = sidecar.sidecars().next("holder").await {
+                let key = c.input["key"].as_str().unwrap_or_default().to_string();
+                sidecar.sidecars().reply("holder", c.id, json!({ "ok": { "length": key.len(), "echo": key } })).unwrap();
+            }
+        }
+    });
+    deploy_module(&a, "opener", r#"export default { name: "opener", uses: { sidecars: ["holder"] }, ops: {
+  make: { run: (ctx, { hosts }) => ctx.vault.create({ title: "Held", type: "Held", fields: { key: { generate: true } }, hosts }) },
+  open: { run: (ctx, { id }) => ctx.sidecars.holder.open({ key: `{{${id}:key}}` }) },
+  peek: { run: async () => (await fetch("http://holder/x")).status },
+} };"#).await;
+    a.install(&person, "opener", &mine, true).await.unwrap();
+    let held = a.call(call("opener", "make", json!({ "hosts": ["holder"] }))).await.unwrap();
+    let opened = a.call(call("opener", "open", json!({ "id": held }))).await.unwrap();
+    assert_eq!((opened["length"].as_u64(), opened["echo"].as_str()), (Some(43), Some("••••")), "{opened}");
+    let direct = CallRequest { sidecar: Some("holder".into()), ..call("", "open", json!({ "key": format!("{{{{{}:key}}}}", held.as_str().unwrap()) })) };
+    assert_eq!(a.call(direct).await.unwrap()["length"], 24, "not filled for a call no app made");
+    let elsewhere = a.call(call("opener", "make", json!({ "hosts": ["api.example.com"] }))).await.unwrap();
+    assert!(a.call(call("opener", "open", json!({ "id": elsewhere }))).await.is_err(), "never to a sidecar its item doesn't name");
+    assert_eq!(a.call(call("opener", "peek", json!({}))).await.unwrap(), 403, "an app's name is never a site's");
+    assert!(!a.vault(&person, Some(&mine)).await.unwrap().iter().any(|i| i["fields"].to_string().contains("value") && i["title"] == "Held"), "nobody sees the key");
+
     // An app on a person's own page sees Everyone's items switched on for it too, as its placeholders are filled.
     deploy_module(&a, "reader", r#"export default { name: "reader", ops: { items: { run: (ctx) => ctx.vault.items() } } };"#).await;
     a.install(&person, "reader", &mine, true).await.unwrap();

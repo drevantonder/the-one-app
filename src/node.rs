@@ -1048,11 +1048,27 @@ impl Node {
         let user = if everyone { me.user.clone() } else { self.user()? };
         ensure!(me.user == user, "{app} runs only for {}'s own user", self.server_name());
         let caller = self.me_for(me)?;
+        // An app's call has the fields of the items it's switched on for filled in, a secret one only for a sidecar
+        // named among its item's hosts, and blotted out of the answer.
+        let mut input = input;
+        let used = std::sync::Mutex::new(Vec::<String>::new());
+        if let Some(from) = &from {
+            vault::fill_value(&mut input, app, &|name| {
+                let found = self.vault_for(from, &me.user, name);
+                if let Some((hosts, value)) = &found {
+                    if !hosts.is_empty() {
+                        used.lock().unwrap().push(value.clone());
+                    }
+                }
+                found
+            })?;
+        }
         let built_in = self.0.built_in_sidecars.iter().find(|n| n.name == app);
-        let (result, appends) = match built_in {
+        let (mut result, appends) = match built_in {
             Some(n) => (n.call)(op.to_string(), input, caller, if n.entries { self.app_entries(app)? } else { vec![] }).await?,
             None => self.0.sidecars.call(app, op, input, caller, from).await?,
         };
+        vault::blot(&mut result, &used.into_inner().unwrap());
         let by = (me.key != self.0.id).then_some(me.key);
         for content in appends {
             self.append_as(&Scope::User(user.clone()), &user, by, content).await?;
@@ -1358,10 +1374,17 @@ impl Node {
         .flatten()
     }
 
+    /// Whether `host` is the name of an app or sidecar, which an item's hosts name to let its fields into calls to
+    /// that sidecar: never a site's, so a web request to it gets none.
+    pub fn names_app(&self, host: &str) -> bool {
+        self.0.built_in_sidecars.iter().any(|n| n.name == host) || self.0.sidecars.has(host) || self.with(|i| Ok(i.r.members.apps.contains_key(host) || i.r.members.sidecars.keys().any(|(_, name)| name == host))).unwrap_or(false)
+    }
+
     /// Fills `text` for a sidecar's call while it waits for the sidecar's answer, as its app's requests are filled: from
     /// the items switched on for the app of the sidecar's name that the call's user may use, a secret field only when
     /// `host` is one of its item's hosts. The sidecar then sends it to `host` itself.
     pub fn sidecar_fill(&self, sidecar: &str, call: u64, text: &str, host: &str) -> Result<String> {
+        ensure!(!self.names_app(host), "{host} is an app's name, not a site's");
         let me = self.0.sidecars.caller_of(sidecar, call).with_context(|| format!("no call {call} of {sidecar}'s is waiting"))?;
         vault::fill(text, host, |name| self.vault_for(sidecar, &me.user, name))
     }
@@ -1377,6 +1400,7 @@ impl Node {
         let host = uri.host().context("the address has no host")?.trim_start_matches('[').trim_end_matches(']').to_lowercase();
         let port = uri.port_u16().unwrap_or(if uri.scheme_str() == Some("https") { 443 } else { 80 });
         ensure!(!crate::outbound::own_port(self, &host, port), "that's this server's own port");
+        ensure!(!self.names_app(&host), "{host} is an app's name, not a site's");
         let used = std::sync::Mutex::new(Vec::<String>::new());
         let fill = |text: &str| {
             vault::fill(text, &host, |name| {
@@ -1505,6 +1529,7 @@ impl Node {
     pub async fn set_item(&self, caller: &Caller, scope: &Scope, mut data: Value) -> Result<String> {
         let id = data["id"].as_str().map(str::to_string).unwrap_or_else(new_id);
         data["id"] = json!(id);
+        vault::generate(&mut data);
         // Only the node says which app's call made an item.
         data.as_object_mut().context("an item is an object")?.remove("app");
         let content = self.with(|i| {
@@ -2885,7 +2910,11 @@ impl Node {
         let request: Value = serde_json::from_slice(&recv.read_to_end(MESSAGE_LIMIT).await?)?;
         let reply = match self.check_caller(remote, &request) {
             Ok(me) => {
-                let req: CallRequest = serde_json::from_value(request)?;
+                let mut req: CallRequest = serde_json::from_value(request)?;
+                // Only a server says an app made a call (whose items fill it in), and how deep it is.
+                if !self.with(|i| Ok(i.r.members.trusts(&me.user, &remote)))? {
+                    (req.from, req.depth) = (None, 0);
+                }
                 self.run(&req, &me).await
             }
             Err(err) => Reply::Error(format!("{err:#}")),
@@ -3269,6 +3298,7 @@ fn item_entry(i: &Install, user: &str, scope: &Scope, data: Value) -> Result<Con
 fn vault_entry(i: &Install, app: &str, me: &Caller, scopes: &[Scope], id: &str, scope: Option<String>, mut data: Value, same: Option<String>, release: bool) -> Result<(Scope, Content)> {
     ensure!(crate::entry::is_id(id), "an item's id is 16 hex characters");
     let fields_given = |it: &vault::Item, data: &Value| it.fields.iter().filter(|(_, f)| f.secret).all(|(n, _)| data["fields"][n]["value"].is_string());
+    vault::generate(&mut data);
     let obj = data.as_object_mut().context("an item is an object")?;
     for key in ["id", "app", "apps", "deleted", "request"] {
         obj.remove(key);

@@ -22,7 +22,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - **Trust decides who holds what.** A server holds a user's data only if that user trusts it, and a group's only if its owners can read it. No one reads another user's data except by an `open`, which that user sees. Privileged servers are trusted by admins, not built in: any server can be made one, and the install keeps working without them.
 - **A key belongs to one install, forever.** Installs (white labels, workplaces) never talk to each other. A key that isn't a current server or client can't sync, call or ask.
 - **A call runs once.** It names the scopes it touches before it runs, so a server that can't run it says so before doing anything, and failing over never repeats a side effect. It writes nothing if it fails.
-- **Secrets stay put.** A secret field's value leaves the node only inside a request to one of its item's hosts, by an app switched on for that item. Nothing reads one back.
+- **Secrets stay put.** A secret field's value leaves the node only inside a request to one of its item's hosts, or a call to a sidecar its hosts name, by an app switched on for that item. Nothing reads one back.
 - **The node never names an app or sidecar.** Apps are deployed into the install while it runs, and every app runs its latest deploy, everywhere; sidecars run only where a server's owner installed them.
 - **An older device can safely ignore it.** Phones and Macs run behind the servers, so anything machines see changes only in ways an older one can ignore: new fields and kinds are skipped, and old names keep working for as long as something built before sends them.
 

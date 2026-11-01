@@ -1,6 +1,7 @@
 //! The Vault: items, each in one scope, with named fields (secret ones set, never read back), the hosts its secret
 //! fields go to, and the apps switched on for it. Apps write `{{<item id>:field}}` (or `{{field}}`) where a field
-//! goes, and the node fills it in on the way out.
+//! goes, and the node fills it in on the way out: into a web request to one of its hosts, or into the input of a call
+//! to a sidecar whose name is one of them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -190,6 +191,43 @@ pub fn fill(text: &str, host: &str, lookup: impl Fn(&str) -> Option<(Vec<String>
     Ok(out)
 }
 
+/// Fills every text in `value` as `fill` fills one, for a call to a sidecar (`host` is its name).
+pub fn fill_value(value: &mut Value, host: &str, lookup: &impl Fn(&str) -> Option<(Vec<String>, String)>) -> Result<()> {
+    match value {
+        Value::String(text) if text.contains("{{") => *text = fill(text, host, lookup)?,
+        Value::Array(all) => all.iter_mut().try_for_each(|v| fill_value(v, host, lookup))?,
+        Value::Object(all) => all.values_mut().try_for_each(|v| fill_value(v, host, lookup))?,
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Blots each of `secrets` out of every text in `value`, wherever an answer echoes one back.
+pub fn blot(value: &mut Value, secrets: &[String]) {
+    match value {
+        Value::String(text) => {
+            for s in secrets.iter().filter(|s| !s.is_empty()) {
+                if text.contains(s.as_str()) {
+                    *text = text.replace(s.as_str(), "••••");
+                }
+            }
+        }
+        Value::Array(all) => all.iter_mut().for_each(|v| blot(v, secrets)),
+        Value::Object(all) => all.values_mut().for_each(|v| blot(v, secrets)),
+        _ => {}
+    }
+}
+
+/// Gives each field of an item's change that asks for one (`{ generate: true }`) a new random value, a secret one:
+/// a key nobody, not even the app that asked, ever sees.
+pub fn generate(data: &mut Value) {
+    for field in data["fields"].as_object_mut().into_iter().flat_map(|f| f.values_mut()) {
+        if field["generate"] == true {
+            *field = json!({ "value": data_encoding::BASE64URL_NOPAD.encode(&rand::random::<[u8; 32]>()), "secret": true });
+        }
+    }
+}
+
 /// Whether `name` could be a placeholder: `field`, `<group id>/field` or `<item id>:field`.
 fn placeholder(name: &str) -> bool {
     let field = match (name.split_once('/'), name.split_once(':')) {
@@ -230,6 +268,25 @@ fn fills_fields_only_for_their_hosts() {
     assert!(fill("Bearer {{token}}", "evil.example.com", lookup).is_err(), "never to another host");
     assert_eq!(fill("{{0123456789abcdef:user}}", "evil.example.com", lookup).unwrap(), "andre", "a plain field goes anywhere");
     assert_eq!(fill("{{nope}} {{ not one }} {{", "evil.example.com", lookup).unwrap(), "{{nope}} {{ not one }} {{");
+}
+
+#[test]
+fn fills_a_sidecars_input_and_blots_what_it_echoes() {
+    let lookup = |name: &str| match name {
+        "0123456789abcdef:key" => Some((vec!["keeper".to_string()], "k3y".to_string())),
+        _ => None,
+    };
+    let mut input = json!({ "profile": { "key": "{{0123456789abcdef:key}}" }, "list": ["{{0123456789abcdef:key}}", 1], "other": "{{nope}}" });
+    fill_value(&mut input, "keeper", &lookup).unwrap();
+    assert_eq!(input, json!({ "profile": { "key": "k3y" }, "list": ["k3y", 1], "other": "{{nope}}" }));
+    assert!(fill_value(&mut json!(["{{0123456789abcdef:key}}"]), "shell", &lookup).is_err(), "never to another sidecar");
+    let mut answer = json!({ "text": "used k3y", "n": 2 });
+    blot(&mut answer, &["k3y".to_string()]);
+    assert_eq!(answer, json!({ "text": "used ••••", "n": 2 }));
+    let mut made = json!({ "fields": { "key": { "generate": true }, "name": { "value": "PTC" } } });
+    generate(&mut made);
+    assert!(made["fields"]["key"]["secret"] == true && made["fields"]["key"]["value"].as_str().unwrap().len() == 43, "{made}");
+    assert_eq!(made["fields"]["name"], json!({ "value": "PTC" }));
 }
 
 #[test]
