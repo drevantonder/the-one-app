@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -72,5 +73,17 @@ func TestLoansKept(t *testing.T) {
 	ds.setLoan("pool-a", nil)
 	if _, ok := newDesktops(dir, "").loans()["pool-a"]; ok {
 		t.Error("a given-back loan is forgotten")
+	}
+}
+
+func TestAddedProfileListed(t *testing.T) {
+	ds := newDesktops(t.TempDir(), "")
+	if ds.keeps("PTC") {
+		t.Fatal("no profile yet")
+	}
+	os.MkdirAll(ds.loginDir("PTC"), 0o700)
+	got := ds.logins("linux")
+	if !ds.keeps("PTC") || len(got) != 1 || got[0]["profile"] != "PTC" || got[0]["saved"] != nil {
+		t.Errorf("an added profile is listed, unsaved: %v", got)
 	}
 }

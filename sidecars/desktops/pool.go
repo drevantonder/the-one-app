@@ -269,6 +269,12 @@ func (ds *desktops) signIn(ctx context.Context, login, url string, minutes int, 
 
 func (ds *desktops) loginDir(login string) string { return filepath.Join(ds.dir, "logins", login) }
 
+// keeps reports whether this server keeps the profile, saved or added with no sign-ins yet.
+func (ds *desktops) keeps(login string) bool {
+	info, err := os.Stat(ds.loginDir(login))
+	return err == nil && info.IsDir()
+}
+
 // savedLogin is the newest copy of a saved login's profile, or "".
 func (ds *desktops) savedLogin(login string) string {
 	all := ds.savedCopies(login)
@@ -340,7 +346,7 @@ func (ds *desktops) loginServer(ctx context.Context, login string) string {
 // profileElsewhere passes a call about a profile this server doesn't keep on
 // to the server that does, if one does: each server keeps its own.
 func (ds *desktops) profileElsewhere(ctx context.Context, op string, in map[string]any, login string, here bool) json.RawMessage {
-	if here || login == "" || ds.savedLogin(login) != "" {
+	if here || login == "" || ds.keeps(login) {
 		return nil
 	}
 	s := ds.loginServer(ctx, login)
@@ -360,13 +366,18 @@ func (ds *desktops) profileElsewhere(ctx context.Context, op string, in map[stri
 	return r
 }
 
-// logins lists this server's saved logins: each server keeps its own.
+// logins lists this server's profiles, those with no sign-ins yet without
+// saved: each server keeps its own.
 func (ds *desktops) logins(me string) []map[string]any {
 	dirs, _ := os.ReadDir(filepath.Join(ds.dir, "logins"))
 	out := []map[string]any{}
 	for _, e := range dirs {
+		if !e.IsDir() {
+			continue
+		}
 		saved := ds.savedLogin(e.Name())
 		if saved == "" {
+			out = append(out, map[string]any{"profile": e.Name(), "server": me})
 			continue
 		}
 		info, err := os.Stat(saved)

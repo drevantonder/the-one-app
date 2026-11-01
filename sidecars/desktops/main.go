@@ -187,6 +187,8 @@ func ownOps() []map[string]any {
 		{"name": "save_profile", "description": "Save a desktop's browser profile, closing its browsers first; a sign_in desktop is also given back. Only when the person asked: borrowed desktops start from saved profiles.",
 			"input": object(map[string]any{"desktop": str("the desktop's name"), "profile": str("the profile; default the desktop's, or default")}, "desktop")},
 		{"name": "profiles", "description": "The browser profiles desktops can be borrowed with, like Personal and PTC, each with its own sign-ins: which server keeps it, and when it was last saved.", "input": object(map[string]any{})},
+		{"name": "add_profile", "description": "Add a browser profile with no sign-ins yet, for the person to sign in to sites in with sign_in.",
+			"input": object(map[string]any{"profile": str("its name: letters, digits and dashes, like Personal or PTC")}, "profile")},
 		{"name": "forget_profile", "description": "Delete a browser profile, signing agents out of every site in it. Only when the person asked.",
 			"input": object(map[string]any{"profile": str("the profile's name")}, "profile")},
 		{"name": "create", "description": "Create a lasting desktop and start it, for the person: Linux, with a browser of its own. Takes a minute. Agents borrow instead.",

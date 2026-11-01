@@ -81,6 +81,11 @@ export default {
       input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}, "profile": {"description": "the profile; default the desktop's, or default", "type": "string"}}, "required": ["desktop"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "save_profile", input),
     },
+    add_profile: {
+      description: "Add a browser profile with no sign-ins yet, for the person to sign in to sites in with sign_in.",
+      input: {"properties": {"profile": {"description": "its name: letters, digits and dashes, like Personal or PTC", "type": "string"}}, "required": ["profile"], "type": "object"},
+      run: (ctx, input) => sidecar(ctx, "add_profile", input),
+    },
     forget_profile: {
       description: "Delete a browser profile, signing agents out of every site in it. Only when the person asked.",
       input: {"properties": {"profile": {"description": "the profile's name", "type": "string"}}, "required": ["profile"], "type": "object"},
@@ -146,7 +151,7 @@ export default {
   .meter { display: inline-flex; align-items: center; gap: 4px; flex: none; }
   button.primary { font: inherit; font-size: 15px; font-weight: 600; border: 0; border-radius: 980px; padding: 7px 16px; color: white; background: var(--accent); cursor: pointer; }
   button.primary:disabled { opacity: 0.5; cursor: default; }
-  button.plain { font: inherit; font-size: 15px; border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; }
+  button.plain, a.plain { font: inherit; font-size: 15px; border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; text-decoration: none; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 40vw), 1fr)); gap: 20px 14px; }
   .tile { display: block; color: inherit; min-width: 0; }
   .pic { aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: var(--card); border: 0.5px solid var(--line); display: grid; place-items: center; color: var(--muted); font-size: 13px; }
@@ -179,7 +184,10 @@ export default {
 <p class="footer">Stop an agent from the device's menu bar.</p>
 </div>
 <h2 class="section">Browser Profiles</h2>
-<div class="list" id="profiles"></div>
+<div class="list" id="profiles">
+  <div class="row plain" id="add-row"><div class="main"><input id="new-profile" class="search" style="margin:0" placeholder="New profile, like Personal or PTC" autocapitalize="words" autocorrect="off"></div>
+  <button class="plain" id="add-profile">Add</button></div>
+</div>
 <p class="footer">Each is a browser with its own sign-ins.</p>
 <script>
   one.title("Desktops");
@@ -333,6 +341,7 @@ export default {
     const total = cpus[""] || [];
     document.getElementById("uses").innerHTML = [names && one.esc(names), running.some((d) => d.memory != null) && meters(used, limit, cpu, total)].filter(Boolean).join(" · ");
     drawBanner();
+    drawProfiles();
   }
 
   function drawBanner() {
@@ -344,11 +353,11 @@ export default {
     banner.innerHTML = \`<div class="banner"><div class="text"><b>Signing in to the \${one.esc(s.login || "default")} profile on \${one.esc(s.desktop)}</b><div class="muted small">Open the desktop, sign in to your sites in its browser (messenger.com, say), then save. Agents' desktops start signed in to them.</div></div>\` +
       (url ? \`<a class="plain" href="\${one.esc(url)}" target="_blank" rel="noopener">Open desktop</a>\` : "") +
       \`<button class="primary" id="save">Save profile</button></div>\`;
-    document.getElementById("save").onclick = () => save(s);
+    document.getElementById("save").onclick = (e) => save(e.currentTarget, s);
   }
 
-  async function save(s) {
-    const button = document.getElementById("save");
+  async function save(button, s) {
+    const label = button.textContent;
     button.disabled = true;
     button.textContent = "Saving…";
     try {
@@ -358,7 +367,7 @@ export default {
       await loadProfiles();
     } catch (e) {
       button.disabled = false;
-      button.textContent = "Save profile";
+      button.textContent = label;
       alert(e.message);
     }
   }
@@ -382,21 +391,60 @@ export default {
   }
   document.getElementById("sign-in").onclick = (e) => signIn(e.currentTarget);
 
+  // The profiles being signed in to, by name: { desktop, server, login, url }. A new one is listed from the start, before it's saved.
+  function signingIn() {
+    const open = {};
+    for (const d of desktops) if (d.borrowed?.signing_in) open[d.borrowed.login || "default"] = { desktop: d.name, server: d.server, login: d.borrowed.login };
+    if (signing) open[signing.login || "default"] ||= signing;
+    return open;
+  }
+
+  // Each profile, saved or being signed in to; the row to add one stays as it is, with whatever is typed in it.
+  let drawn = "";
+  function drawProfiles() {
+    const open = signingIn();
+    const names = [...new Set([...profiles.map((p) => p.profile), ...Object.keys(open)])];
+    const html = names.map((name) => {
+      const p = profiles.find((p) => p.profile === name), s = open[name];
+      const on = p?.server ? " on " + one.esc(host(p.server)) : "";
+      const saved = p?.saved ? \`Saved \${one.esc(one.ago(Date.parse(p.saved)))}\${on}\` : p ? \`No sign-ins yet\${on}\` : "";
+      const url = s && (s.url || links[key({ name: s.desktop, server: s.server })]?.url);
+      const sub = s ? \`Signing in\${s.server ? " on " + one.esc(host(s.server)) : ""} · \${p?.saved ? "saved " + one.esc(one.ago(Date.parse(p.saved))) : "not saved yet"}\` : saved;
+      const actions = s
+        ? (url ? \`<a class="plain" href="\${one.esc(url)}" target="_blank" rel="noopener">Open desktop</a>\` : "") + \`<button class="plain" data-save="\${one.esc(name)}">Save</button>\`
+        : \`<button class="plain" data-profile="\${one.esc(name)}">Sign in to a site</button>\`;
+      return \`<div class="row plain" data-row><div class="main"><div class="title"><span>\${one.esc(name)}</span></div><div class="sub small">\${sub}</div></div>\${actions}</div>\`;
+    }).join("");
+    if (html === drawn) return;
+    drawn = html;
+    const list = document.getElementById("profiles");
+    for (const r of list.querySelectorAll("[data-row]")) r.remove();
+    document.getElementById("add-row").insertAdjacentHTML("beforebegin", html);
+    for (const b of list.querySelectorAll("[data-profile]")) b.onclick = () => signIn(b, b.dataset.profile);
+    for (const b of list.querySelectorAll("[data-save]")) b.onclick = () => save(b, open[b.dataset.save]);
+  }
+
   async function loadProfiles() {
     try { profiles = (await one.call("_profiles", {})).profiles || []; } catch { profiles = []; }
-    const list = document.getElementById("profiles");
-    list.innerHTML = profiles.map((p) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(p.profile)}</span></div>\` +
-      \`<div class="sub small">Saved \${one.esc(one.ago(Date.parse(p.saved)))}\${p.server ? " on " + one.esc(host(p.server)) : ""}</div></div>\` +
-      \`<button class="plain" data-profile="\${one.esc(p.profile)}">Sign in to a site</button></div>\`).join("") +
-      \`<div class="row plain"><div class="main"><input id="new-profile" class="search" style="margin:0" placeholder="New profile, like Personal or PTC" autocapitalize="words" autocorrect="off"></div>\` +
-      \`<button class="plain" id="add-profile">Add</button></div>\`;
-    for (const b of list.querySelectorAll("[data-profile]")) b.onclick = () => signIn(b, b.dataset.profile);
-    const add = document.getElementById("add-profile");
-    add.onclick = async () => {
-      const name = document.getElementById("new-profile").value.trim();
-      if (name && (await signIn(add, name))) document.getElementById("new-profile").value = "";
-    };
+    drawProfiles();
   }
+  const add = document.getElementById("add-profile");
+  const input = document.getElementById("new-profile");
+  add.onclick = async () => {
+    const name = input.value.trim();
+    if (!name) return input.focus();
+    add.disabled = true;
+    try {
+      await one.call("add_profile", { profile: name });
+      input.value = "";
+      await loadProfiles();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      add.disabled = false;
+    }
+  };
+  input.onkeydown = (e) => e.key === "Enter" && add.click();
   loadProfiles();
 
   // A picture of each running desktop, and a link to open it, kept until shortly before the link stops working.

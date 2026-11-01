@@ -509,12 +509,31 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 			out["unreachable"] = failed
 		}
 		return out, nil
+	case "add_profile":
+		login := text("login")
+		if !validProfile.MatchString(login) {
+			return nil, errors.New("a profile's name is letters, digits and dashes, like Personal or PTC")
+		}
+		if ds.keeps(login) || !here && ds.loginServer(ctx, login) != "" {
+			return nil, fmt.Errorf("there's already a %s profile", login)
+		}
+		// Kept where sign-ins are made, so signing in to it opens a desktop on the same server.
+		if !here && !ds.makesHere(ctx) {
+			if r := ds.borrowElsewhere(ctx, op, in); r != nil {
+				return r, nil
+			}
+		}
+		if err := os.MkdirAll(ds.loginDir(login), 0o700); err != nil {
+			return nil, err
+		}
+		me, _, _ := ds.servers(ctx)
+		return map[string]any{"profile": login, "server": me, "text": fmt.Sprintf("Added the %s profile. It has no sign-ins yet: sign in to sites in it with sign_in.", login)}, nil
 	case "forget_profile":
 		login := text("login")
 		if r := ds.profileElsewhere(ctx, op, in, login, here); r != nil {
 			return r, nil
 		}
-		if !validProfile.MatchString(login) || ds.savedLogin(login) == "" {
+		if !validProfile.MatchString(login) || !ds.keeps(login) {
 			return nil, fmt.Errorf("no profile %q", login)
 		}
 		if err := os.RemoveAll(ds.loginDir(login)); err != nil {
@@ -714,7 +733,7 @@ func viewURL(ctx context.Context, d desktop, minutes int) (string, error) {
 
 // local are the operations that act on this server even when given a
 // desktop it doesn't have.
-var local = []string{"list", "create", "borrow", "sign_in", "profiles", "forget_profile", "backups", "restore", "refresh_tools"}
+var local = []string{"list", "create", "borrow", "sign_in", "profiles", "add_profile", "forget_profile", "backups", "restore", "refresh_tools"}
 
 // reply is a result with entries for the node to write in the caller's log.
 type reply struct {
