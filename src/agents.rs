@@ -257,25 +257,9 @@ fn set_up(entries: &[AppEntry]) {
 /// Where the board answers a harness's prompt hook with what other agents posted since that session last looked.
 const HOOK_PATH: &str = "/hooks/board/news";
 
-/// Harnesses without settings hooks get a plugin of their own that does what the hook does.
-const OPENCODE_PLUGIN: &str = r#"// Installed by {{name}}'s Board: adds to each prompt what other
-// agents have posted since this session last looked.
-const url = "http://{{addr}}/hooks/board/news"
-
-export default {
-  id: "{{cli}}-board",
-  async setup(ctx) {
-    await ctx.session.hook("prompt", async (event) => {
-      try {
-        const res = await fetch(url, { method: "POST", headers: { connection: "close" }, keepalive: false, body: JSON.stringify({ session_id: "opencode:" + event.sessionID }), signal: AbortSignal.timeout(3000) })
-        const text = res.ok ? (await res.text()).trim() : ""
-        if (text) event.prompt.text += "\n\n" + text
-      } catch {}
-    })
-  },
-}
-"#;
-
+/// Harnesses without settings hooks but with a way to add a message of their own get an extension that does what the
+/// hook does. OpenCode gets none: it could only add to the person's own message, where they see it; the board's
+/// instructions reach it in AGENTS.md and the MCP server's.
 const PI_EXTENSION: &str = r#"// Installed by {{name}}'s Board: adds to each prompt what other
 // agents have posted since this session last looked.
 const url = "http://{{addr}}/hooks/board/news"
@@ -339,7 +323,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     }
     let opencode = config.join("opencode");
     if opencode.is_dir() {
-        written.write(&opencode.join("plugins").join(format!("{}-board.js", crate::config::CLI)), &plugin(OPENCODE_PLUGIN));
+        written.remove(&opencode.join("plugins").join(format!("{}-board.js", crate::config::CLI)));
         let entry = CstInputValue::Object(vec![("type".into(), s("local")), ("command".into(), CstInputValue::Array([vec![s(&cli)], args("opencode")].concat())), ("enabled".into(), true.into())]);
         edit(&json_or_jsonc(&opencode, "opencode"), true, |t| with_mcp(t, "mcp", &server, entry));
     }
@@ -539,6 +523,15 @@ impl Written {
             return;
         }
         self.hashes.insert(key, hash(text));
+    }
+
+    /// Deletes a file this app wrote and no longer writes, unless it was edited on this device.
+    fn remove(&mut self, file: &Path) {
+        let key = file.to_string_lossy().to_string();
+        let Some(hash) = self.hashes.remove(&key) else { return };
+        if std::fs::read(file).is_ok_and(|now| blake3::hash(&now).to_hex().to_string() == hash) {
+            let _ = std::fs::remove_file(file);
+        }
     }
 
     fn save(&self) {
