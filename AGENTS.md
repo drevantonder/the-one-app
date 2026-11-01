@@ -4,7 +4,7 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 
 ## Principles
 
-- Six primitives: key, log, view, blob, call, app. Scopes, servers, deploys, drivers, secrets and backups are made of them. A feature that needs a seventh is designed wrong until proven otherwise.
+- Six primitives: key, log, view, blob, call, app. Scopes, servers, deploys, drivers, the Vault and backups are made of them. A feature that needs a seventh is designed wrong until proven otherwise.
 - The core never names an app. The starter apps use exactly what anyone's app can.
 - Privileged servers are trusted by admins, not built in: any server can be made one, and the install keeps working without them. If something only a privileged server can do is in code rather than in trust, the design is wrong.
 - Entries are the truth; views are caches. The same entries replayed in the same order give the same views, on every server, every time.
