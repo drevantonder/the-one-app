@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// One collapsible section per page, listing its apps; a section's name shows the page. Settings sit at the bottom.
+/// One section per page, listing its apps; a section's name shows the page, its apps staying listed (a collapsible
+/// section's header folds it when clicked, so choosing a page hid its apps). Settings sit at the bottom.
 /// Folded (⌘\), it shows only the apps' icons, each where it was, with a page's dot standing for its name.
 struct Sidebar: View {
     @Environment(Store.self) private var store
-    @AppStorage("collapsedPages") private var collapsed = ""
 
     var body: some View {
         if store.sidebarFolded { folded } else { full }
@@ -54,7 +54,7 @@ struct Sidebar: View {
         @Bindable var store = store
         return List(selection: $store.selection) {
             ForEach(store.pages) { page in
-                Section(isExpanded: expanded(page)) {
+                Section {
                     ForEach(store.apps(on: page)) { app in
                         Label {
                             Text(app.label)
@@ -91,16 +91,6 @@ struct Sidebar: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { SettingsRow() }
-    }
-
-    private func expanded(_ page: Page) -> Binding<Bool> {
-        Binding {
-            !collapsed.split(separator: " ").contains(Substring(page.scope))
-        } set: { open in
-            var set = Set(collapsed.split(separator: " ").map(String.init))
-            if open { set.remove(page.scope) } else { set.insert(page.scope) }
-            collapsed = set.sorted().joined(separator: " ")
-        }
     }
 }
 
