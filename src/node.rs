@@ -1317,32 +1317,91 @@ impl Node {
 
     // The Vault.
 
-    /// What a call's placeholder names, as (hosts, value; no hosts for a plain field): `<item id>:field` of an item
-    /// in a scope its caller may use, `field` of the oldest item that has it in the caller's own scope, else in
-    /// `global`, or `<group id>/field` in that group's; always of an item the call's app is switched on for.
-    pub fn vault_for(&self, grant: &Grant, name: &str) -> Option<(Vec<String>, String)> {
+    /// What a placeholder in a request of `app`'s for `user` names, as (hosts, value; no hosts for a plain field):
+    /// `<item id>:field` of an item in a scope the user may use, `field` of the oldest item that has it in the user's
+    /// own scope, else in `global`, or `<group id>/field` in that group's; always of an item `app` is switched on for.
+    pub fn vault_for(&self, app: &str, user: &str, name: &str) -> Option<(Vec<String>, String)> {
         self.with(|i| {
             let m = &i.r.members;
-            let user = &grant.caller.user;
             let items = |scope: &Scope| i.views.get(&scope.to_string()).map(|(_, s)| &s.items);
-            let oldest = |scope: &Scope, field: &str| items(scope).and_then(|its| vault::find(its, &grant.app, field)).and_then(|(_, it)| vault::filled(it, field));
+            let oldest = |scope: &Scope, field: &str| items(scope).and_then(|its| vault::find(its, app, field)).and_then(|(_, it)| vault::filled(it, field));
             Ok(match (name.split_once(':'), name.split_once('/')) {
                 (Some((id, field)), _) => i
                     .views
                     .iter()
                     .filter(|(log, _)| Scope::parse(log).is_ok_and(|s| m.may_use(user, &s)))
                     .find_map(|(_, (_, s))| s.items.get(id))
-                    .filter(|it| it.apps.contains(&grant.app))
+                    .filter(|it| it.apps.contains(app))
                     .and_then(|it| vault::filled(it, field)),
                 (None, Some((group, field))) => {
                     let scope = Scope::Group(group.to_string());
                     if m.may_use(user, &scope) { oldest(&scope, field) } else { None }
                 }
-                (None, None) => oldest(&Scope::User(user.clone()), name).or_else(|| oldest(&Scope::Global, name)),
+                (None, None) => oldest(&Scope::User(user.to_string()), name).or_else(|| oldest(&Scope::Global, name)),
             })
         })
         .ok()
         .flatten()
+    }
+
+    /// Fills `text` for a sidecar's call while it waits for the sidecar's answer, as its app's requests are filled: from
+    /// the items switched on for the app of the sidecar's name that the call's user may use, a secret field only when
+    /// `host` is one of its item's hosts. The sidecar then sends it to `host` itself.
+    pub fn sidecar_fill(&self, sidecar: &str, call: u64, text: &str, host: &str) -> Result<String> {
+        let me = self.0.sidecars.caller_of(sidecar, call).with_context(|| format!("no call {call} of {sidecar}'s is waiting"))?;
+        vault::fill(text, host, |name| self.vault_for(sidecar, &me.user, name))
+    }
+
+    /// Makes an HTTP request for an agent of `caller`'s (`{ url, method?, headers?, body? }`), as the built-in agents
+    /// sidecar: the fields of the items a person switched Agents on for are filled in, a secret one only for its item's
+    /// hosts, as an app's requests are. → `{ status, headers, body }`, a secret field's value blotted out wherever the
+    /// site echoes it back, so the agent never sees one.
+    pub async fn vault_fetch(&self, caller: &Caller, req: &Value) -> Result<Value> {
+        let url = req["url"].as_str().context("give url")?;
+        let uri: ureq::http::Uri = url.parse().with_context(|| format!("{url} isn't a web address"))?;
+        ensure!(matches!(uri.scheme_str(), Some("https" | "http")), "only http and https addresses");
+        let host = uri.host().context("the address has no host")?.trim_start_matches('[').trim_end_matches(']').to_lowercase();
+        let port = uri.port_u16().unwrap_or(if uri.scheme_str() == Some("https") { 443 } else { 80 });
+        ensure!(!crate::outbound::own_port(self, &host, port), "that's this server's own port");
+        let used = std::sync::Mutex::new(Vec::<String>::new());
+        let fill = |text: &str| {
+            vault::fill(text, &host, |name| {
+                let found = self.vault_for(crate::agents::NAME, &caller.user, name);
+                if let Some((hosts, value)) = &found {
+                    if !hosts.is_empty() {
+                        used.lock().unwrap().push(value.clone());
+                    }
+                }
+                found
+            })
+        };
+        let filled = fill(url)?;
+        let mut headers = Vec::new();
+        for (name, value) in req["headers"].as_object().into_iter().flatten() {
+            headers.push((name.clone(), fill(value.as_str().context("a header's value is text")?)?.into_bytes()));
+        }
+        let body = match &req["body"] {
+            Value::Null => Vec::new(),
+            Value::String(text) => fill(text)?.into_bytes(),
+            other => fill(&other.to_string())?.into_bytes(),
+        };
+        let method = req["method"].as_str().unwrap_or(if body.is_empty() { "GET" } else { "POST" }).to_uppercase();
+        let (status, headers, bytes) = tokio::task::spawn_blocking(move || crate::outbound::send(&method, &filled, headers, body)).await??;
+        let secrets = used.into_inner().unwrap();
+        let blot = |text: &str| secrets.iter().filter(|s| !s.is_empty()).fold(text.to_string(), |t, s| t.replace(s.as_str(), "••••"));
+        let headers: serde_json::Map<String, Value> = headers.iter().map(|(n, v)| (n.clone(), json!(blot(&String::from_utf8_lossy(v))))).collect();
+        const SHOWN: usize = 1 << 20;
+        let cut = bytes.len() > SHOWN;
+        let shown = &bytes[..bytes.len().min(SHOWN)];
+        let mut out = json!({ "status": status, "headers": headers });
+        match std::str::from_utf8(shown) {
+            Ok(text) => out["body"] = json!(blot(text)),
+            Err(_) => out["body_base64"] = json!(data_encoding::BASE64.encode(shown)),
+        }
+        if cut {
+            out["cut"] = json!(format!("only the first {SHOWN} of {} bytes", bytes.len()));
+        }
+        Ok(out)
     }
 
     /// The items `app` is switched on for in `scopes`, as its calls see them (`ctx.vault.items()`).
@@ -1428,7 +1487,13 @@ impl Node {
         data["id"] = json!(id);
         // Only the node says which app's call made an item.
         data.as_object_mut().context("an item is an object")?.remove("app");
-        let content = self.with(|i| item_entry(i, &caller.user, scope, data))?;
+        let content = self.with(|i| {
+            // Agents use an item (vault_fetch) only once its person switched Agents on for it, never by themselves.
+            let had = i.views.get(&scope.to_string()).and_then(|(_, s)| s.items.get(&id)).is_some_and(|it| it.apps.contains(crate::agents::NAME));
+            let wants = data["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == crate::agents::NAME));
+            ensure!(caller.agent.is_none() || had || !wants, "only the person switches Agents on for an item: ask them with vault_request (app agents), and they pick or make it");
+            item_entry(i, &caller.user, scope, data)
+        })?;
         let by = (caller.key != self.0.id).then_some(caller.key);
         self.append_as(scope, &caller.user, by, content).await?;
         Ok(id)
@@ -1562,6 +1627,7 @@ impl Node {
                 self.answer_request(me, &scope(Some("user"))?.unwrap(), body["id"].as_str().unwrap_or(""), body).await?;
                 json!({})
             }
+            ("POST", "/v1/vault/fetch") => self.vault_fetch(me, body).await?,
             ("GET", "/v1/secrets") => json!(self.secrets(me, scope(None)?.as_ref())?),
             ("POST", "/v1/secrets") => {
                 let scope = scope(Some("user"))?.unwrap();

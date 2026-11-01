@@ -12,23 +12,45 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// vaultNode is a node that fills a push call's fields from an item, the key
+// only for Apple's push host, as the node does.
+func vaultNode(t *testing.T, fields map[string]string, push *string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/state" {
+			json.NewEncoder(w).Encode(map[string]any{"install": map[string]any{"settings": map[string]string{"push": *push}}})
+			return
+		}
+		if !strings.HasSuffix(r.URL.Path, "/vault") {
+			t.Errorf("asked the node for %s", r.URL.Path)
+		}
+		var in struct{ Text, Host string }
+		json.NewDecoder(r.Body).Decode(&in)
+		name := strings.Trim(in.Text, "{}")
+		text, ok := fields[name]
+		if !ok || (name == "key" && in.Host != apns) {
+			text = in.Text
+		}
+		json.NewEncoder(w).Encode(map[string]string{"text": text})
+	}))
+}
+
 func TestTokenIsSignedWithTheKey(t *testing.T) {
-	dir := t.TempDir()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	der, _ := x509.MarshalPKCS8PrivateKey(key)
-	os.WriteFile(filepath.Join(dir, "AuthKey.p8"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600)
-	s := &sender{dir: dir}
-	if _, _, err := s.load(); err == nil || !strings.Contains(err.Error(), "isn't set up") {
-		t.Fatalf("without config.json: %v", err)
+	fields := map[string]string{"team_id": "TEAM123456", "key_id": "KEY1234567"}
+	push := "push"
+	node := vaultNode(t, fields, &push)
+	defer node.Close()
+	s := &sender{dir: t.TempDir(), node: node.URL, client: node.Client()}
+	if _, _, err := s.load(1); err == nil || !strings.Contains(err.Error(), "isn't set up") {
+		t.Fatalf("without the whole item: %v", err)
 	}
-	os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"team_id":"TEAM123456","key_id":"KEY1234567","topic":"app.one.phone"}`), 0o600)
-	c, k, err := s.load()
+	fields["topic"], fields["key"] = "app.one.phone", string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+	c, k, err := s.load(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,11 +76,9 @@ func TestTokenIsSignedWithTheKey(t *testing.T) {
 }
 
 func TestPushesGoToTheCallersPhonesAndOpenTheSendingApp(t *testing.T) {
-	// The node, saying what the install's push setting is.
+	// The node, saying what the install's push setting is, with no Apple push item in the Vault.
 	push := "push"
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"install": map[string]any{"settings": map[string]string{"push": push}}})
-	}))
+	node := vaultNode(t, map[string]string{}, &push)
 	defer node.Close()
 	s := &sender{dir: t.TempDir(), node: node.URL, client: node.Client()}
 	as := func(user, op, input, from string) (any, error) {

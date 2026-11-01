@@ -15,6 +15,9 @@ use crate::apps::{AppEntry, Me};
 use crate::entry::Content;
 use crate::sidecars::Reply;
 
+/// The built-in sidecar's name, which agents act as when the Vault fills their requests (`vault_fetch`).
+pub const NAME: &str = "agents";
+
 /// Marks a skill folder as this edition's to replace, so the nodes of two editions on one machine leave each other's alone.
 fn marker() -> String {
     format!(".synced-{}", crate::config::CLI)

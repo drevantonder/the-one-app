@@ -1009,6 +1009,56 @@ async fn agents_ask_for_items_and_never_see_them() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn agents_and_sidecars_use_the_items_switched_on_for_them_without_seeing_them() {
+    let (a, _ra) = start("fetch").await;
+    a.create("Fetch", "Andre").await.unwrap();
+    let person = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    let agent = one::node::Caller { agent: Some("Claude Code".into()), ..person.clone() };
+    let mine = one::entry::Scope::User(person.user.clone());
+    let port = echo().await;
+    let token = json!({ "title": "Example key", "fields": { "token": { "value": "s3cret", "secret": true } }, "hosts": ["127.0.0.1"] });
+    let id = a.set_item(&agent, &mine, token).await.unwrap();
+
+    // An agent never switches Agents on for an item itself: its person does.
+    assert!(a.set_item(&agent, &mine, json!({ "id": id, "apps": ["agents"] })).await.is_err());
+    let fetch = |url: String| {
+        let (a, agent) = (a.clone(), agent.clone());
+        async move { a.vault_fetch(&agent, &json!({ "url": url, "headers": { "authorization": "Bearer {{token}}" }, "body": "t={{token}}" })).await }
+    };
+    let got = fetch(format!("http://127.0.0.1:{port}/x")).await.unwrap();
+    assert!(got["body"].as_str().unwrap().contains("Bearer {{token}}"), "not filled before the person switched Agents on: {got}");
+    a.set_item(&person, &mine, json!({ "id": id, "apps": ["agents"] })).await.unwrap();
+
+    // Filled for its host, and the site's echo of it blotted out.
+    let got = fetch(format!("http://127.0.0.1:{port}/x")).await.unwrap();
+    assert_eq!(got["status"], 200);
+    let echoed: Value = serde_json::from_str(got["body"].as_str().unwrap()).unwrap();
+    assert_eq!((echoed["authorization"].as_str(), echoed["body"].as_str()), (Some("Bearer ••••"), Some("t=••••")), "{got}");
+    assert!(!got.to_string().contains("s3cret"));
+    let refused = fetch(format!("http://localhost:{port}/x")).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("sent only to 127.0.0.1"), "{refused:#}");
+
+    // A sidecar's text is filled for a call of its that waits, from the items of the app of its name, for their hosts.
+    a.set_item(&person, &mine, json!({ "title": "Example push", "fields": { "key": { "value": "k3y", "secret": true }, "team": { "value": "T1" } }, "hosts": ["api.example.com"], "apps": ["keeper"] })).await.unwrap();
+    a.register_sidecar("keeper", json!({ "title": "Keeper", "ops": [{ "name": "use" }] })).await.unwrap();
+    let sidecar = a.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Ok(Some(c)) = sidecar.sidecars().next("keeper").await {
+                let fill = |text: &str, host: &str| sidecar.sidecar_fill("keeper", c.id, text, host).map_err(|e| format!("{e:#}"));
+                let answer = json!({ "here": fill("{{team}} {{key}}", "api.example.com"), "elsewhere": fill("{{key}}", "evil.example.com"), "theirs": fill("{{token}}", "127.0.0.1") });
+                sidecar.sidecars().reply("keeper", c.id, json!({ "ok": answer })).unwrap();
+            }
+        }
+    });
+    let got = a.call(call("keeper", "use", json!({}))).await.unwrap();
+    assert_eq!(got["here"]["Ok"], "T1 k3y", "{got}");
+    assert!(got["elsewhere"]["Err"].as_str().unwrap().contains("sent only to api.example.com"), "{got}");
+    assert_eq!(got["theirs"]["Ok"], "{{token}}", "not another app's item");
+    assert!(a.sidecar_fill("keeper", 9999, "{{key}}", "api.example.com").is_err(), "only while a call waits");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn apps_use_only_the_items_they_are_switched_on_for() {
     let (a, _ra) = start("vault").await;
     a.create("Vault", "Andre").await.unwrap();

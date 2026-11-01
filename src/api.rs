@@ -72,6 +72,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/sidecars/{app}", post(register))
         .route("/v1/sidecars/{app}/calls", get(next_call))
         .route("/v1/sidecars/{app}/calls/{id}", post(reply))
+        .route("/v1/sidecars/{app}/calls/{id}/vault", post(fill))
         // Where sidecars registered before they were called that, as the ones installed then still do.
         .route("/v1/providers/{app}", post(register))
         .route("/v1/providers/{app}/calls", get(next_call))
@@ -392,6 +393,12 @@ async fn next_call(State(node): State<Node>, Path(app): Path<String>) -> Result<
 async fn reply(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
     node.sidecars().reply(&app, id, body)?;
     done()
+}
+
+/// A sidecar's text filled from the Vault for a call of its that waits, for the host it's going to.
+async fn fill(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
+    let text = node.sidecar_fill(&app, id, text(&body, "text")?, text(&body, "host")?)?;
+    Ok(Json(json!({ "text": text })))
 }
 
 #[derive(Deserialize)]

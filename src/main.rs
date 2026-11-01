@@ -52,7 +52,11 @@ Usage:
   {CLI} vault set <item> <field> [--secret] [--hosts a,b] [--app <app>] [--scope s]
                                        set a field of an item (by title or id; a new one by that title), its value
                                        read from stdin; for a person's value, vault request asks them instead
-  {CLI} vault use <item> <app> [--off] switch an app on (or off) for an item
+  {CLI} vault use <item> <app> [--off] switch an app on (or off) for an item; only the person switches agents on
+  {CLI} vault fetch <url> [--method M] [--headers <json object>] [--body text]
+                                       make a request with {{{{field}}}} filled in from the items the person switched
+                                       Agents on for, a secret field only for its item's sites: you get the answer,
+                                       never the secret
   {CLI} vault remove <item> [<field>]  delete an item, or one of its fields
   {CLI} vault request <app> (--need <name> | --title <t> --fields a,b [--secret-fields b] --hosts a,b) [--why text]
                                        ask the person for an item an app may use: a link to a sheet where they pick
@@ -259,11 +263,22 @@ fn run(args: Vec<String>) -> Result<()> {
             anyhow::ensure!(!value.is_empty(), "give the value on stdin");
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             let hosts = flags.get("hosts").and_then(Value::as_str).map(|h| h.split(',').map(|h| h.trim().to_string()).collect());
-            println!("{}", vault_set(scope, item, field, &value, flags.get("secret").map(|_| true), hosts, flags.get("app").and_then(Value::as_str))?);
+            println!("{}", vault_set(scope, item, field, &value, flags.get("secret").map(|_| true), hosts, flags.get("app").and_then(Value::as_str), agent_from_env().as_deref())?);
         }
         ["vault", "use", item, app] => {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            println!("{}", vault_use(scope, item, app, !flags.contains_key("off"))?);
+            println!("{}", vault_use(scope, item, app, !flags.contains_key("off"), agent_from_env().as_deref())?);
+        }
+        ["vault", "fetch", url] => {
+            let r = post("/v1/vault/fetch", json!({ "url": url, "method": flags.get("method"), "headers": flags.get("headers"), "body": flags.get("body"), "agent": agent_from_env() }))?;
+            eprintln!("{}", r["status"]);
+            match r["body"].as_str() {
+                Some(body) => println!("{body}"),
+                None => println!("{}", r["body_base64"].as_str().unwrap_or("")),
+            }
+            if let Some(cut) = r["cut"].as_str() {
+                eprintln!("({cut})");
+            }
         }
         ["vault", "remove", item] | ["vault", "remove", item, _] => {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
@@ -762,7 +777,7 @@ fn agent_name(raw: &str) -> String {
 
 fn instructions() -> String {
     let mut text = format!("{NAME} is this user's apps and agents, shared across their machines. Every tool is also a CLI command ({CLI} <app> <op>).");
-    text.push_str("\n\n## Vault\n\nThe Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat. Call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. If someone pastes one anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.");
+    text.push_str("\n\n## Vault\n\nThe Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat, and never paste one yourself. To keep one, call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. To use one yourself, ask with app agents, then call vault_fetch with {{<field>}} where it goes: your server fills it in, only for the item's sites, and you get the answer. If someone pastes a secret anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.");
     if let Ok(apps) = get("/v1/apps") {
         for app in apps.as_array().into_iter().flatten() {
             if let Some(i) = app["instructions"].as_str().filter(|i| !i.is_empty()) {
@@ -773,8 +788,8 @@ fn instructions() -> String {
     text
 }
 
-/// An item, as one line: its title, what it is, its page, its fields (secret ones never shown), where they go and
-/// the apps switched on for it.
+/// An item, as one line: its title, what it is, its page, its fields (secret ones never shown), where they go, the
+/// apps switched on for it, and for an account, the app it signed in with.
 fn item_line(it: &Value) -> String {
     let fields: Vec<String> = it["fields"].as_array().into_iter().flatten().map(|f| match f["secret"] == true {
         true => format!("{} ••••", f["name"].as_str().unwrap_or("")),
@@ -790,7 +805,7 @@ fn item_line(it: &Value) -> String {
         fields.join(", "),
         list(&it["hosts"]),
         list(&it["apps"]),
-        it["app"].as_str().map(|a| format!("  (kept by {a})")).unwrap_or_default(),
+        it["app"].as_str().filter(|_| it["account"] == true).map(|a| format!("  (signed in with {a})")).unwrap_or_default(),
     )
 }
 
@@ -803,10 +818,10 @@ fn find_item(scope: &str, name: &str) -> Result<Option<Value>> {
 }
 
 /// Sets `field` of `item` in `scope` (a new item by that title if there's none), secret if asked or if it was.
-fn vault_set(scope: &str, item: &str, field: &str, value: &str, secret: Option<bool>, hosts: Option<Vec<String>>, app: Option<&str>) -> Result<String> {
+fn vault_set(scope: &str, item: &str, field: &str, value: &str, secret: Option<bool>, hosts: Option<Vec<String>>, app: Option<&str>, agent: Option<&str>) -> Result<String> {
     let found = find_item(scope, item)?;
     let was = found.as_ref().and_then(|it| it["fields"].as_array()?.iter().find(|f| f["name"] == field).map(|f| f["secret"] == true));
-    let mut data = json!({ "scope": scope, "fields": { field: { "value": value, "secret": secret.or(was).unwrap_or(false) } } });
+    let mut data = json!({ "scope": scope, "agent": agent, "fields": { field: { "value": value, "secret": secret.or(was).unwrap_or(false) } } });
     if let Some(hosts) = hosts {
         data["hosts"] = json!(hosts);
     }
@@ -836,13 +851,13 @@ fn vault_set(scope: &str, item: &str, field: &str, value: &str, secret: Option<b
 }
 
 /// Switches `app` on or off for `item` in `scope`.
-fn vault_use(scope: &str, item: &str, app: &str, on: bool) -> Result<String> {
+fn vault_use(scope: &str, item: &str, app: &str, on: bool, agent: Option<&str>) -> Result<String> {
     let it = find_item(scope, item)?.with_context(|| format!("no item {item} in {scope}"))?;
     let mut apps: Vec<Value> = it["apps"].as_array().cloned().unwrap_or_default().into_iter().filter(|a| a != app).collect();
     if on {
         apps.push(json!(app));
     }
-    post("/v1/vault", json!({ "scope": scope, "id": it["id"], "apps": apps }))?;
+    post("/v1/vault", json!({ "scope": scope, "id": it["id"], "apps": apps, "agent": agent }))?;
     Ok(format!("{app} is switched {} for {}.", if on { "on" } else { "off" }, it["title"].as_str().unwrap_or(item)))
 }
 
@@ -870,9 +885,10 @@ fn vault_tools() -> Vec<Value> {
     vec![
         json!({ "name": "vault_list", "description": "The Vault's items you may change: title, type, fields (a secret one never with its value), the sites they're sent to (hosts), the apps switched on for each (apps) and those that want it (wanted_by), and app when an app's sign-in keeps it.", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": { "readOnlyHint": true } }),
         json!({ "name": "vault_set", "description": "Set a field of an item, making the item if no item has that title. An app puts {{<item id>:<field>}} in a request and your server fills it in, a secret field only for the item's hosts; nobody reads a secret back. When the person has the value, use vault_request instead: never ask them to paste it into the chat.", "inputSchema": { "type": "object", "required": ["item", "field", "value"], "properties": { "item": item, "field": { "type": "string" }, "value": { "type": "string" }, "secret": { "type": "boolean", "description": "never shown again; true for keys, passwords and tokens" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "app": { "type": "string", "description": "an app to switch on for it" }, "scope": scope } } }),
-        json!({ "name": "vault_use", "description": "Switch an app on (or off) for an item, so its calls may use the item's fields.", "inputSchema": { "type": "object", "required": ["item", "app"], "properties": { "item": item, "app": { "type": "string" }, "on": { "type": "boolean", "description": "false switches it off" }, "scope": scope } } }),
+        json!({ "name": "vault_use", "description": "Switch an app on (or off) for an item, so its calls may use the item's fields. Only the person switches agents on (for vault_fetch): ask them with vault_request.", "inputSchema": { "type": "object", "required": ["item", "app"], "properties": { "item": item, "app": { "type": "string" }, "on": { "type": "boolean", "description": "false switches it off" }, "scope": scope } } }),
         json!({ "name": "vault_remove", "annotations": { "destructiveHint": true }, "description": "Delete an item, or with field, one of its fields.", "inputSchema": { "type": "object", "required": ["item"], "properties": { "item": item, "field": { "type": "string" }, "scope": scope } } }),
         json!({ "name": "vault_request", "description": "Ask the person for an item an app may use, instead of handling its values yourself: need names what the app declares (its vault), or give title, fields and hosts. Returns a link to give them; it opens a sheet where they pick one of their items or make one (and their Settings lists it). You never see a secret; poll vault_status with the id until it's set or declined.", "inputSchema": { "type": "object", "required": ["app"], "properties": { "app": { "type": "string" }, "need": { "type": "string" }, "title": { "type": "string" }, "fields": { "type": "object", "description": "field name → { secret: true|false }", "additionalProperties": { "type": "object", "properties": { "secret": { "type": "boolean" } } } }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "why": { "type": "string", "description": "one line the person sees: what it's for and where to find it" }, "scope": scope } } }),
+        json!({ "name": "vault_fetch", "description": "Make an HTTP request with your person's Vault items filled in, without seeing them: write {{<field>}} (or {{<item id>:<field>}}) where a value goes, in url, headers or body, and your server fills it in from the items they switched Agents on for, a secret field only for its item's sites. You get { status, headers, body }; a secret the site echoes back is blotted out. To get an item, ask with vault_request (app agents).", "inputSchema": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string" }, "method": { "type": "string", "description": "GET by default, POST with a body" }, "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "like { \"authorization\": \"Bearer {{token}}\" }" }, "body": { "type": "string" } } }, "annotations": { "openWorldHint": true } }),
         json!({ "name": "vault_status", "description": "How a request for an item went: waiting, set, declined or expired, and who answered. Never a value.", "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }, "annotations": { "readOnlyHint": true } }),
     ]
 }
@@ -884,9 +900,10 @@ fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Resu
         "list" => get(&format!("/v1/vault?scope={scope}")),
         "set" => {
             let hosts = input.get("hosts").and_then(Value::as_array).map(|h| h.iter().filter_map(Value::as_str).map(str::to_string).collect());
-            Ok(json!(vault_set(scope, text("item")?, text("field")?, text("value")?, input.get("secret").and_then(Value::as_bool), hosts, input.get("app").and_then(Value::as_str))?))
+            Ok(json!(vault_set(scope, text("item")?, text("field")?, text("value")?, input.get("secret").and_then(Value::as_bool), hosts, input.get("app").and_then(Value::as_str), agent)?))
         }
-        "use" => Ok(json!(vault_use(scope, text("item")?, text("app")?, input.get("on") != Some(&json!(false)))?)),
+        "use" => Ok(json!(vault_use(scope, text("item")?, text("app")?, input.get("on") != Some(&json!(false)), agent)?)),
+        "fetch" => post("/v1/vault/fetch", json!({ "url": text("url")?, "method": input.get("method"), "headers": input.get("headers"), "body": input.get("body"), "agent": agent })),
         "remove" => Ok(json!(vault_remove(scope, text("item")?, input.get("field").and_then(Value::as_str))?)),
         "request" => {
             let r = post("/v1/vault/request", json!({ "scope": scope, "app": input.get("app"), "need": input.get("need"), "title": input.get("title"), "fields": input.get("fields"), "hosts": input.get("hosts"), "why": input.get("why"), "agent": agent }))?;

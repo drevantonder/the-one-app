@@ -41,17 +41,15 @@ async fn out(node: Node, req: Request) -> Result<Response> {
         return node.internal(&header("x-one-call").unwrap_or_default(), parts.method.as_str(), parts.uri.path(), body.to_vec()).await;
     }
     let scheme = header("x-forwarded-proto").filter(|p| p == "https").unwrap_or_else(|| "http".into());
-    // The node's own ports would let an app act as someone else (the local API, workerd) or loop back here.
     let port = authority.rsplit_once(':').and_then(|(_, p)| p.parse().ok()).unwrap_or(if scheme == "https" { 443 } else { 80 });
-    let loopback = host == "localhost" || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified());
-    if loopback && node.own_ports().contains(&port) {
+    if own_port(&node, &host, port) {
         return Ok((StatusCode::FORBIDDEN, "apps can't reach the node's own ports").into_response());
     }
     let url = format!("{scheme}://{authority}{}", parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
     let body = axum::body::to_bytes(body, LIMIT).await?.to_vec();
     let fill = |text: &str| -> Result<String> {
         match &grant {
-            Some(g) => crate::vault::fill(text, &host, |name| node.vault_for(g, name)),
+            Some(g) => crate::vault::fill(text, &host, |name| node.vault_for(&g.app, &g.caller.user, name)),
             None => Ok(text.to_string()),
         }
     };
@@ -72,10 +70,23 @@ async fn out(node: Node, req: Request) -> Result<Response> {
         Err(e) => e.into_bytes(),
     };
     let method = parts.method.as_str().to_string();
-    tokio::task::spawn_blocking(move || send(&method, &url, headers, body)).await?
+    let (status, headers, bytes) = tokio::task::spawn_blocking(move || send(&method, &url, headers, body)).await??;
+    let mut out = Response::builder().status(status);
+    for (name, value) in headers {
+        out = out.header(name, value);
+    }
+    Ok(out.body(Body::from(bytes))?)
 }
 
-fn send(method: &str, url: &str, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>) -> Result<Response> {
+/// Whether `host:port` is one of the node's own ports on this machine, which would let a request act as someone else
+/// (the local API, workerd) or loop back here.
+pub fn own_port(node: &Node, host: &str, port: u16) -> bool {
+    let loopback = host == "localhost" || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified());
+    loopback && node.own_ports().contains(&port)
+}
+
+/// Makes a request, filled in already: → its status, headers and body.
+pub fn send(method: &str, url: &str, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>) -> Result<(u16, Vec<(String, Vec<u8>)>, Vec<u8>)> {
     // Redirects go back to the app, whose next request comes here again: a secret never follows one to another host.
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
     let mut builder = ureq::http::Request::builder().method(method).uri(url);
@@ -90,12 +101,7 @@ fn send(method: &str, url: &str, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>)
         ureq::Error::Timeout(_) => bail!("{url} took longer than 30s"),
         err => Err(err.into()),
     })?;
-    let mut out = Response::builder().status(resp.status().as_u16());
-    for (name, value) in resp.headers() {
-        if !matches!(name.as_str(), "content-length" | "transfer-encoding" | "connection") {
-            out = out.header(name.as_str(), value.as_bytes());
-        }
-    }
+    let headers = resp.headers().iter().filter(|(name, _)| !matches!(name.as_str(), "content-length" | "transfer-encoding" | "connection")).map(|(name, value)| (name.as_str().to_string(), value.as_bytes().to_vec())).collect();
     let bytes = resp.body_mut().with_config().limit(LIMIT as u64).read_to_vec()?;
-    Ok(out.body(Body::from(bytes))?)
+    Ok((resp.status().as_u16(), headers, bytes))
 }

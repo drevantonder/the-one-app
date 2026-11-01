@@ -48,7 +48,7 @@ pub struct BuiltIn {
 pub fn built_in() -> Vec<BuiltIn> {
     vec![
         BuiltIn { name: "shell", describe: crate::shell::describe, entries: false, call: crate::shell::call, sync: None },
-        BuiltIn { name: "agents", describe: crate::agents::describe, entries: true, call: crate::agents::call, sync: Some(crate::agents::sync) },
+        BuiltIn { name: crate::agents::NAME, describe: crate::agents::describe, entries: true, call: crate::agents::call, sync: Some(crate::agents::sync) },
         BuiltIn { name: "models", describe: crate::models::describe, entries: false, call: crate::models::call, sync: None },
     ]
 }
@@ -70,7 +70,8 @@ struct Registered {
     describe: Value,
     calls: mpsc::UnboundedSender<Call>,
     waiting: tokio::sync::Mutex<mpsc::UnboundedReceiver<Call>>,
-    replies: Mutex<HashMap<u64, oneshot::Sender<Value>>>,
+    /// The calls waiting for its answer, with whom each is for.
+    replies: Mutex<HashMap<u64, (oneshot::Sender<Value>, Me)>>,
     seen: Mutex<Instant>,
 }
 
@@ -119,7 +120,7 @@ impl Sidecars {
         let p = self.get(app).ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        p.replies.lock().unwrap().insert(id, tx);
+        p.replies.lock().unwrap().insert(id, (tx, caller.clone()));
         p.calls.send(Call { id, op: op.into(), input, caller, from }).map_err(|_| anyhow!("{app} stopped"))?;
         let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{app} didn't answer"))??;
         if let Some(why) = reply.get("elsewhere") {
@@ -149,8 +150,15 @@ impl Sidecars {
 
     pub fn reply(&self, app: &str, id: u64, reply: Value) -> Result<()> {
         let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("no sidecar {app}"))?;
-        let tx = p.replies.lock().unwrap().remove(&id).ok_or_else(|| anyhow!("no call {id} waiting"))?;
+        let (tx, _) = p.replies.lock().unwrap().remove(&id).ok_or_else(|| anyhow!("no call {id} waiting"))?;
         let _ = tx.send(reply);
         Ok(())
+    }
+
+    /// Whom a call of `app`'s that waits for its answer is for.
+    pub fn caller_of(&self, app: &str, id: u64) -> Option<Me> {
+        let p = self.get(app)?;
+        let replies = p.replies.lock().unwrap();
+        replies.get(&id).map(|(_, me)| me.clone())
     }
 }

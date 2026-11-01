@@ -24,13 +24,17 @@ import (
 	"time"
 )
 
-// config is what the push folder's config.json says: the Apple developer team,
+// config is what the Vault's Apple push item says: the Apple developer team,
 // the APNs key's id, and the app's bundle id that pushes go to (its topic).
 type config struct {
 	TeamID string `json:"team_id"`
 	KeyID  string `json:"key_id"`
 	Topic  string `json:"topic"`
 }
+
+// apns is the host the key is filled in for: the item's sites are Apple's
+// push hosts, and the token made with it goes only there.
+const apns = "api.push.apple.com"
 
 type sender struct {
 	dir    string
@@ -97,11 +101,11 @@ func (s *sender) run(ctx context.Context, c *call) (any, error) {
 		}
 		return mine, nil
 	case "status":
-		c, _, err := s.load()
+		cfg, _, err := s.load(c.ID)
 		if err != nil {
 			return map[string]any{"ready": false, "why": err.Error()}, nil
 		}
-		return map[string]any{"ready": true, "team_id": c.TeamID, "key_id": c.KeyID, "topic": c.Topic}, nil
+		return map[string]any{"ready": true, "team_id": cfg.TeamID, "key_id": cfg.KeyID, "topic": cfg.Topic}, nil
 	case "send":
 		var in sendInput
 		if err := json.Unmarshal(input, &in); err != nil {
@@ -121,7 +125,7 @@ func (s *sender) run(ctx context.Context, c *call) (any, error) {
 		if !s.on() {
 			return map[string]any{"accepted": 0, "devices": len(in.Devices), "why": "push is off in this install's settings"}, nil
 		}
-		out, err := s.send(ctx, in, link(c.From, in))
+		out, err := s.send(ctx, c.ID, in, link(c.From, in))
 		if err == nil && registered && len(out["gone"].([]string)) > 0 {
 			gone := out["gone"].([]string)
 			err = s.change(func(all map[string]device) {
@@ -212,34 +216,62 @@ func (s *sender) devices() map[string]device {
 	return all
 }
 
-// load reads the config and the APNs key.
-func (s *sender) load() (config, *ecdsa.PrivateKey, error) {
+// load reads the config and the APNs key from the Vault: the fields of an
+// item switched on for push (on Everyone, or the caller's own), which the node
+// fills in for this call, the key only for Apple's push hosts.
+func (s *sender) load(call uint64) (config, *ecdsa.PrivateKey, error) {
 	var c config
-	notSet := fmt.Errorf("push isn't set up here: put the APNs key in %s and config.json { team_id, key_id, topic } beside it", filepath.Join(s.dir, "AuthKey.p8"))
-	b, err := os.ReadFile(filepath.Join(s.dir, "config.json"))
-	if err != nil {
-		return c, nil, notSet
+	notSet := errors.New("push isn't set up: an admin adds an item to the Vault on Everyone with team_id, key_id and topic, and key, the APNs key's text, secret and sent to api.push.apple.com and api.sandbox.push.apple.com, and switches push on for it")
+	fields := map[string]*string{"team_id": &c.TeamID, "key_id": &c.KeyID, "topic": &c.Topic}
+	var p8 string
+	fields["key"] = &p8
+	for name, to := range fields {
+		v, err := s.field(call, name)
+		if err != nil {
+			return c, nil, err
+		}
+		if v == "" {
+			return c, nil, notSet
+		}
+		*to = v
 	}
-	if err := json.Unmarshal(b, &c); err != nil || c.TeamID == "" || c.KeyID == "" || c.Topic == "" {
-		return c, nil, notSet
-	}
-	p8, err := os.ReadFile(filepath.Join(s.dir, "AuthKey.p8"))
-	if err != nil {
-		return c, nil, notSet
-	}
-	block, _ := pem.Decode(p8)
+	block, _ := pem.Decode([]byte(p8))
 	if block == nil {
-		return c, nil, errors.New("AuthKey.p8 isn't a PEM key")
+		return c, nil, errors.New("the Vault's APNs key isn't a PEM key")
 	}
 	k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return c, nil, fmt.Errorf("AuthKey.p8: %w", err)
+		return c, nil, fmt.Errorf("the Vault's APNs key: %w", err)
 	}
 	key, ok := k.(*ecdsa.PrivateKey)
 	if !ok {
-		return c, nil, errors.New("AuthKey.p8 isn't an ES256 key")
+		return c, nil, errors.New("the Vault's APNs key isn't an ES256 key")
 	}
 	return c, key, nil
+}
+
+// field is one of the Vault item's fields, as the node fills it in for this
+// call; empty when no item has it.
+func (s *sender) field(call uint64, name string) (string, error) {
+	placeholder := "{{" + name + "}}"
+	body, _ := json.Marshal(map[string]string{"text": placeholder, "host": apns})
+	resp, err := s.client.Post(fmt.Sprintf("%s/v1/sidecars/%s/calls/%d/vault", s.node, app, call), "application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("the Vault: %s", b)
+	}
+	var out struct{ Text string }
+	if err := json.Unmarshal(b, &out); err != nil {
+		return "", err
+	}
+	if out.Text == placeholder {
+		return "", nil
+	}
+	return out.Text, nil
 }
 
 // jwt is the provider token APNs takes, made again every 50 minutes (it
@@ -271,8 +303,8 @@ func pad(n *big.Int) []byte {
 
 // send pushes to each iPhone or iPad, and says how many APNs accepted and
 // which tokens it said no longer work (the app was deleted, say).
-func (s *sender) send(ctx context.Context, in sendInput, link map[string]any) (map[string]any, error) {
-	c, key, err := s.load()
+func (s *sender) send(ctx context.Context, call uint64, in sendInput, link map[string]any) (map[string]any, error) {
+	c, key, err := s.load(call)
 	if err != nil {
 		return nil, err
 	}
