@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use one::config::{CLI, NAME};
-use one::guide::Mode;
+use one::skills::Mode;
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
 
@@ -86,7 +86,8 @@ Usage:
   {CLI} file put <file>                keep a file in the install, for apps and agents; prints its hash
   {CLI} file get <hash> <file>         get a kept file from this server or another
   {CLI} version                        this build
-  {CLI} guide                          how agents connect to {NAME} and find their way, as /llms.txt says it
+  {CLI} skills [<name> [<file>]]       the skills agents load: {NAME}'s own (how to connect, the rules, which MCP to
+                                       add; also {CLI} guide, and /llms.txt), and each area's and app's
   {CLI} search <words>                 the operations for a task in every app: how to call each, and its app's guide
   {CLI} run <file>                     run a short script that calls operations, as tools.<app>.<op>({{ ... }}) (- reads
                                        it from stdin), and print what it returns; {CLI} search gives each call
@@ -144,7 +145,22 @@ fn run(args: Vec<String>) -> Result<()> {
                 false => bail!("{}", code::shown(&result)),
             }
         }
-        ["guide"] => print!("{}", one::guide::full()),
+        // `guide` was the root skill's name before there were skills.
+        ["guide"] => print!("{}", skills()[0].skill_md()),
+        ["skills"] => {
+            let skills = skills();
+            let width = skills.iter().map(|s| s.name.len()).max().unwrap_or(0);
+            for s in &skills {
+                println!("{:width$}  {}", s.name, s.description);
+            }
+            println!("\n{CLI} skills <name> prints one; {CLI} skills <name> <file> one of its other files.");
+        }
+        ["skills", name, path @ ..] => {
+            let skill = skills().into_iter().find(|s| s.name == *name || s.name.strip_prefix(&format!("{}-", one::skills::server_name())) == Some(*name));
+            let skill = skill.with_context(|| format!("no skill {name}: {CLI} skills lists them"))?;
+            let path = path.first().copied().unwrap_or("SKILL.md");
+            print!("{}", skill.file(path).with_context(|| format!("{} has no {path}: it has {}", skill.name, skill.all_files().iter().map(|f| f.0.as_str()).collect::<Vec<_>>().join(", ")))?);
+        }
         ["search", words @ ..] if !words.is_empty() => {
             let limit = flags.get("limit").and_then(|l| l.as_str().and_then(|l| l.parse().ok()).or(l.as_u64().map(|l| l as usize))).unwrap_or(8);
             println!("{}", code::search(&code::catalog()?, &words.join(" "), limit, code::For::Cli));
@@ -726,7 +742,7 @@ async fn serve() -> Result<()> {
     let (node, router) = Node::start(&dir, one::sidecars::built_in()).await?;
     let listener = tokio::net::TcpListener::bind(addr()).await.with_context(|| format!("listen on {}", addr()))?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
-    tokio::spawn(api::serve_guide());
+    tokio::spawn(api::serve_guide(node.clone()));
     let http = axum::serve(listener, api::router(node));
     tokio::select! {
         r = http => r?,
@@ -754,7 +770,7 @@ fn mcp(mode: Mode) -> Result<()> {
                 }
                 json!({
                 "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
-                "capabilities": { "tools": {}, "resources": {} },
+                "capabilities": { "tools": {}, "resources": {}, "extensions": { "io.modelcontextprotocol/skills": {} } },
                 "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
                 "instructions": instructions(mode),
                 })
@@ -772,7 +788,16 @@ fn mcp(mode: Mode) -> Result<()> {
                 .unwrap_or_else(|| call_tool(&msg["params"], agent.as_deref(), mode))),
             // Apps' widgets and screens, as MCP Apps (src/mcp_apps.rs).
             "resources/list" => Ok(json!({ "resources": mcp_apps::resources() })),
-            "resources/read" => mcp_apps::read(msg["params"]["uri"].as_str().unwrap_or("")),
+            "resources/read" => match msg["params"]["uri"].as_str().unwrap_or("") {
+                uri if uri.starts_with("skill://") => skill_resource(uri),
+                uri => mcp_apps::read(uri),
+            },
+            // Skills over MCP (SEP-2640): the same skills the Agents sidecar writes into harnesses' folders.
+            "skills/list" => Ok(json!({ "resultType": "complete", "skills": skills().iter().map(skill_entry).collect::<Vec<_>>(), "ttlMs": 60_000, "cacheScope": "session" })),
+            "skills/get" => {
+                let uri = msg["params"]["uri"].as_str().unwrap_or("");
+                skills().iter().find(|s| format!("skill://{}/SKILL.md", s.name) == uri).map(|s| json!({ "skill": skill_entry(s) })).ok_or_else(|| json!({ "code": -32602, "message": format!("no skill {uri}") }))
+            }
             other => Err(json!({ "code": -32601, "message": format!("unknown method {other}") })),
         };
         let reply = match result {
@@ -783,6 +808,30 @@ fn mcp(mode: Mode) -> Result<()> {
         out.flush()?;
     }
     Ok(())
+}
+
+/// The skills for this person: the root first (src/skills.rs).
+fn skills() -> Vec<one::skills::Skill> {
+    let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    one::skills::all(&apps)
+}
+
+/// A skill as `skills/list` lists it: where its SKILL.md is, its frontmatter, and each of its files with its digest.
+fn skill_entry(s: &one::skills::Skill) -> Value {
+    use sha2::Digest;
+    let files: Vec<Value> = s
+        .all_files()
+        .iter()
+        .map(|(path, text)| json!({ "uri": format!("skill://{}/{path}", s.name), "digest": format!("sha256:{}", data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()))), "size": text.len() }))
+        .collect();
+    json!({ "uri": format!("skill://{}/SKILL.md", s.name), "frontmatter": { "name": s.name, "description": s.description }, "resources": files })
+}
+
+/// One of a skill's files, as `resources/read` gives it: `skill://<name>/<path>`.
+fn skill_resource(uri: &str) -> Result<Value, Value> {
+    let (name, path) = uri.trim_start_matches("skill://").split_once('/').unwrap_or((uri, ""));
+    let text = skills().into_iter().find(|s| s.name == name).and_then(|s| s.file(path)).ok_or_else(|| json!({ "code": -32002, "message": format!("no resource {uri}") }))?;
+    Ok(json!({ "contents": [{ "uri": uri, "mimeType": "text/markdown", "text": text }] }))
 }
 
 /// The agent running this command, if one is: `<CLI>_AGENT`, else what agent harnesses say about themselves.
@@ -818,7 +867,7 @@ fn agent_name(raw: &str) -> String {
 /// The server's instructions (src/guide.rs): the rules first, short enough that every harness keeps all of them.
 fn instructions(mode: Mode) -> String {
     let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-    one::guide::instructions(mode, &apps)
+    one::skills::instructions(mode, &apps)
 }
 
 /// An item, as one line: its title, what it is, its page, its fields (secret ones never shown), where they go and
@@ -909,21 +958,6 @@ fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> 
     }
 }
 
-/// The Vault is the node's, not an app's: agents list its items (never a secret field's value), set and remove
-/// fields, switch apps on for items, and ask the person for one.
-fn vault_tools() -> Vec<Value> {
-    let scope = json!({ "type": "string", "description": "user (yours, the default), global (everyone's), or a group's name or id" });
-    let item = json!({ "type": "string", "description": "the item's title or id" });
-    vec![
-        json!({ "name": "vault_list", "description": "The Vault's items you may change: title, type, fields (a secret one never with its value), the sites they're sent to (hosts), the apps switched on for each (apps) and those that want it (wanted_by), and app when an app's sign-in keeps it.", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": { "readOnlyHint": true } }),
-        json!({ "name": "vault_set", "description": "Set a field of an item, making the item if no item has that title. An app puts {{<item id>:<field>}} in a request and your server fills it in, a secret field only for the item's hosts; nobody reads a secret back. When the person has the value, use vault_request instead: never ask them to paste it into the chat.", "inputSchema": { "type": "object", "required": ["item", "field", "value"], "properties": { "item": item, "field": { "type": "string" }, "value": { "type": "string" }, "secret": { "type": "boolean", "description": "never shown again; true for keys, passwords and tokens" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "app": { "type": "string", "description": "an app to switch on for it" }, "scope": scope } } }),
-        json!({ "name": "vault_use", "description": "Switch an app on (or off) for an item, so its calls may use the item's fields. Only the person switches agents on (for vault_fetch): ask them with vault_request.", "inputSchema": { "type": "object", "required": ["item", "app"], "properties": { "item": item, "app": { "type": "string" }, "on": { "type": "boolean", "description": "false switches it off" }, "scope": scope } } }),
-        json!({ "name": "vault_remove", "annotations": { "destructiveHint": true }, "description": "Delete an item, or with field, one of its fields.", "inputSchema": { "type": "object", "required": ["item"], "properties": { "item": item, "field": { "type": "string" }, "scope": scope } } }),
-        json!({ "name": "vault_request", "description": "Ask the person for an item an app may use, instead of handling its values yourself: need names what the app declares (its vault), or give title, fields and hosts. Returns a link to give them; it opens a sheet where they pick one of their items or make one (and their Settings lists it). You never see a secret; poll vault_status with the id until it's set or declined.", "inputSchema": { "type": "object", "required": ["app"], "properties": { "app": { "type": "string" }, "need": { "type": "string" }, "title": { "type": "string" }, "fields": { "type": "object", "description": "field name → { secret: true|false }", "additionalProperties": { "type": "object", "properties": { "secret": { "type": "boolean" } } } }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "why": { "type": "string", "description": "one line the person sees: what it's for and where to find it" }, "scope": scope } } }),
-        json!({ "name": "vault_fetch", "description": "Make an HTTP request with your person's Vault items filled in, without seeing them: write {{<field>}} (or {{<item id>:<field>}}) where a value goes, in url, headers or body, and your server fills it in from the items they switched Agents on for, a secret field only for its item's sites. You get { status, headers, body }; a secret the site echoes back is blotted out. To get an item, ask with vault_request (app agents).", "inputSchema": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string" }, "method": { "type": "string", "description": "GET by default, POST with a body" }, "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "like { \"authorization\": \"Bearer {{token}}\" }" }, "body": { "type": "string" } } }, "annotations": { "openWorldHint": true } }),
-        json!({ "name": "vault_status", "description": "How a request for an item went: waiting, set, declined or expired, and who answered. Never a value.", "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }, "annotations": { "readOnlyHint": true } }),
-    ]
-}
 
 fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
     let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
@@ -973,7 +1007,7 @@ fn secret_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Res
 
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
-    let mut tools = vault_tools();
+    let mut tools = one::vault::tools();
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
         // Operations starting with `_` are for the node, such as a sidecar's `_screen`.

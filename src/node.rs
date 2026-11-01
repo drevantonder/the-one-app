@@ -2329,7 +2329,7 @@ impl Node {
             // `brand` is the same, for shells built before it was `config`.
             "config": config, "brand": config,
             "me": { "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user },
-            "server": { "key": hex(&self.0.id), "name": self.server_name(), "ready": ready, "guide": crate::guide::address() },
+            "server": { "key": hex(&self.0.id), "name": self.server_name(), "ready": ready, "guide": crate::skills::address() },
             "user": user,
             "install": install,
             "opens": opens,

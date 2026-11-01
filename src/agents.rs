@@ -194,6 +194,11 @@ pub fn sync(entries: &[AppEntry]) {
         std::thread::spawn(|| {
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(60));
+                // The person's apps, for their skills: asked here, where waiting for an answer holds nothing up.
+                let apps = ureq::get(&format!("http://{}/v1/apps", crate::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<Value>().ok());
+                if let Some(apps) = apps.and_then(|a| a.as_array().cloned()) {
+                    *APPS.lock().unwrap_or_else(|e| e.into_inner()) = Some(apps);
+                }
                 let entries = LATEST.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 set_up(&entries);
             }
@@ -202,17 +207,24 @@ pub fn sync(entries: &[AppEntry]) {
     set_up(entries);
 }
 
+/// The apps installed for this server's person, as the local API last listed them.
+static APPS: Mutex<Option<Vec<Value>>> = Mutex::new(None);
+
 fn set_up(entries: &[AppEntry]) {
     static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return };
     let mut written = Written::load();
     harnesses(&home, &mut written);
-    if entries.is_empty() {
-        written.save();
-        return;
+    let (text, mut skills) = state(entries);
+    // The built-in skills (src/skills.rs) go beside the person's own, which win a name they share. Until the apps are
+    // known, those already written stay.
+    let apps = APPS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let built_in = crate::skills::all(apps.as_deref().unwrap_or_default());
+    for skill in &built_in {
+        skills.entry(skill.name.clone()).or_insert_with(|| skill.all_files().into_iter().collect());
     }
-    let (text, skills) = state(entries);
+    let keep = |name: &str| skills.contains_key(name) || (apps.is_none() && name.starts_with(&format!("{}-", crate::skills::server_name())));
     let codex = std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
     if !text.is_empty() {
         for dir in [codex, home.join(".config/amp"), home.join(".config/opencode")] {
@@ -234,7 +246,7 @@ fn set_up(entries: &[AppEntry]) {
         // Skills this app made that are no longer in the log go.
         for dir in std::fs::read_dir(&root).into_iter().flatten().flatten() {
             let name = dir.file_name().to_string_lossy().to_string();
-            if !skills.contains_key(&name) && ours(&dir.path()) {
+            if !keep(&name) && ours(&dir.path()) {
                 let _ = std::fs::remove_dir_all(dir.path());
             }
         }
@@ -292,7 +304,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     let hook = format!("curl -sf --max-time 3 --data-binary @- http://{addr}{HOOK_PATH} || true");
     // Another edition's node on this machine has a hook of its own, on its own port.
     let port = format!(":{}{HOOK_PATH}", addr.rsplit(':').next().unwrap_or_default());
-    let server = crate::guide::server_name();
+    let server = crate::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
     // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
     let installed = home.join(".local/bin").join(crate::config::CLI);
@@ -622,7 +634,7 @@ mod tests {
 
     #[test]
     fn the_server_is_named_after_the_edition() {
-        let name = crate::guide::server_name();
+        let name = crate::skills::server_name();
         assert!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !name.starts_with('-') && !name.ends_with('-'), "{name}");
     }
 

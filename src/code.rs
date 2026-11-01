@@ -8,13 +8,10 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 use one::config::CLI;
-use one::guide::Mode;
+use one::skills::{Mode, path, ts};
 use serde_json::{Value, json};
 
 use crate::{get, ops};
-
-/// How the Vault's tools are explained, as an app's guide is.
-const VAULT_GUIDE: &str = "The Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat, and never paste one yourself. To keep one, call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. To use one yourself, ask with app agents, then call vault_fetch with {{<field>}} where it goes: your server fills it in, only for the item's sites, and you get the answer. If someone pastes a secret anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.";
 
 /// Who a search answers: someone at the command line, or an MCP client in one of its modes.
 #[derive(Clone, Copy)]
@@ -26,17 +23,7 @@ pub enum For {
 /// Every app installed for this user that has operations, as `GET /v1/apps` gives them, with each operation's input as
 /// MCP takes it (files explained, `server` and `confirm` where they apply), and the Vault's tools as an app.
 pub fn catalog() -> Result<Vec<Value>> {
-    let mut apps = vec![json!({
-        "name": "vault", "title": "Vault", "description": "Keys, sign-ins and accounts, used without being seen", "instructions": VAULT_GUIDE,
-        "ops": crate::vault_tools().into_iter().map(|t| json!({
-            "name": t["name"].as_str().unwrap_or("").trim_start_matches("vault_"), "description": t["description"],
-            "reads": t["annotations"]["readOnlyHint"] == true, "confirm": t["annotations"]["destructiveHint"] == true,
-            "input": match t["annotations"]["destructiveHint"] == true {
-                true => { let mut i = t["inputSchema"].clone(); i["properties"]["confirm"] = json!({ "type": "boolean", "description": "true once the person has agreed: this can't be undone" }); i }
-                false => t["inputSchema"].clone(),
-            },
-        })).collect::<Vec<_>>(),
-    })];
+    let mut apps = vec![one::skills::vault_app()];
     for mut app in get("/v1/apps")?.as_array().cloned().unwrap_or_default() {
         let ops: Vec<Value> = app["ops"]
             .as_array()
@@ -90,30 +77,6 @@ fn score(app: &Value, op: &Value, query: &[String]) -> u32 {
     query.iter().map(|w| if has(&name, w) { 6 } else { 0 } + if has(&app_name, w) { 4 } else { 0 } + if has(&about, w) { 2 } else { 0 } + if has(&guide, w) { 1 } else { 0 }).sum()
 }
 
-/// A JSON Schema as a TypeScript type, as code mode's signatures show it.
-pub fn ts(schema: &Value) -> String {
-    if let Some(choices) = schema["enum"].as_array() {
-        return choices.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(" | ");
-    }
-    match schema["type"].as_str() {
-        Some("string") => "string".into(),
-        Some("integer" | "number") => "number".into(),
-        Some("boolean") => "boolean".into(),
-        Some("array") => format!("{}[]", match ts(&schema["items"]) { t if t.contains(' ') => format!("({t})"), t => t }),
-        Some("object") | None if schema["properties"].is_object() => {
-            let required: Vec<&str> = schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-            // The required ones first, as they're asked for.
-            let props = schema["properties"].as_object().cloned().unwrap_or_default();
-            let mut keys: Vec<&String> = required.iter().filter_map(|r| props.get_key_value(*r).map(|(k, _)| k)).collect();
-            keys.extend(props.keys().filter(|k| !required.contains(&k.as_str())));
-            let props: Vec<String> = keys.iter().map(|k| format!("{k}{}: {}", if required.contains(&k.as_str()) { "" } else { "?" }, ts(&props[*k]))).collect();
-            if props.is_empty() { "{}".into() } else { format!("{{ {} }}", props.join(", ")) }
-        }
-        Some("object") => "object".into(),
-        _ => "unknown".into(),
-    }
-}
-
 /// The exact way to call an operation, for whoever asked.
 fn call(app: &Value, op: &Value, how: For) -> String {
     let (a, o) = (app["name"].as_str().unwrap_or(""), op["name"].as_str().unwrap_or(""));
@@ -136,15 +99,6 @@ fn call(app: &Value, op: &Value, how: For) -> String {
             line
         }
     }
-}
-
-/// An operation's path in a code mode script: `tools.gmail.search`, or `tools["google-calendar"].events`.
-pub fn path(app: &str, op: &str) -> String {
-    let key = |k: &str| match k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !k.starts_with(|c: char| c.is_ascii_digit()) {
-        true => format!(".{k}"),
-        false => format!("[{k:?}]"),
-    };
-    format!("tools{}{}", key(app), key(op))
 }
 
 /// The operations that best match `query`, best first, each with how to call it and what it does, then the guide of

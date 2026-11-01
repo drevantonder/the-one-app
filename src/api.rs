@@ -24,7 +24,8 @@ pub fn addr() -> String {
 
 pub fn router(node: Node) -> Router {
     Router::new()
-        .route("/llms.txt", get(guide))
+        .route("/llms.txt", get(llms))
+        .route("/skills/{name}/{*path}", get(skill_file))
         .route("/v1/state", get(state))
         .route("/v1/apps", get(apps))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
@@ -83,14 +84,38 @@ pub fn router(node: Node) -> Router {
         .with_state(node)
 }
 
-/// The guide for agents (src/guide.rs), as Markdown.
-async fn guide() -> Response {
-    ([(axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8")], crate::guide::full()).into_response()
+/// The skills for this machine's person (src/skills.rs).
+async fn skills(node: &Node) -> Vec<crate::skills::Skill> {
+    let apps = match local(node) {
+        Ok(me) => node.apps(&me).await.map(|a| json!(a)).unwrap_or_default(),
+        Err(_) => json!([]),
+    };
+    crate::skills::all(apps.as_array().map(Vec::as_slice).unwrap_or_default())
 }
 
-/// Serves the guide, and nothing else, on this machine's Tailscale address and the local API's port, so an agent on
-/// any of the person's devices can read it. Looks again every minute: Tailscale may come up later, or move.
-pub async fn serve_guide() {
+fn markdown(text: String) -> Response {
+    ([(axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8")], text).into_response()
+}
+
+/// The root skill's body, each skill under it linked at this server, as whoever asked reached it.
+async fn llms(State(node): State<Node>, headers: axum::http::HeaderMap) -> Response {
+    let host = headers.get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("127.0.0.1").to_string();
+    let deeper = skills(&node).await.split_off(1);
+    markdown(crate::skills::root(&deeper, |s| format!("[{}](http://{host}/skills/{}/SKILL.md)", s.name, s.name)).body)
+}
+
+/// One of a skill's files.
+async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, String)>) -> Response {
+    match skills(&node).await.into_iter().find(|s| s.name == name).and_then(|s| s.file(&path)) {
+        Some(text) => markdown(text),
+        None => (StatusCode::NOT_FOUND, "no such skill or file").into_response(),
+    }
+}
+
+/// Serves the skills, and nothing else, on this machine's Tailscale address and the local API's port, so an agent on
+/// any of the person's devices can read them, starting at /llms.txt. Looks again every minute: Tailscale may come up
+/// later, or move.
+pub async fn serve_guide(node: Node) {
     let port = addr().rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(crate::config::PORT);
     let mut serving: Option<(std::net::Ipv4Addr, tokio::task::JoinHandle<()>)> = None;
     loop {
@@ -99,15 +124,15 @@ pub async fn serve_guide() {
             if let Some((_, task)) = serving.take() {
                 task.abort();
             }
-            crate::guide::set_address(None);
+            crate::skills::set_address(None);
             if let Some(ip) = ip {
                 match tokio::net::TcpListener::bind((ip, port)).await {
                     Ok(listener) => {
-                        crate::guide::set_address(Some(format!("http://{ip}:{port}/llms.txt")));
-                        let app = Router::new().route("/llms.txt", get(guide));
+                        crate::skills::set_address(Some(format!("http://{ip}:{port}/llms.txt")));
+                        let app = Router::new().route("/llms.txt", get(llms)).route("/skills/{name}/{*path}", get(skill_file)).with_state(node.clone());
                         serving = Some((ip, tokio::spawn(async move { axum::serve(listener, app).await.ok(); })));
                     }
-                    Err(e) => tracing::debug!("can't serve the guide on {ip}:{port}: {e}"),
+                    Err(e) => tracing::debug!("can't serve the skills on {ip}:{port}: {e}"),
                 }
             }
         }
