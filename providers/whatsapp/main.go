@@ -175,7 +175,7 @@ var account = str("which account: its number, as whatsapp_accounts lists them; d
 var describe = map[string]any{
 	"title":       "WhatsApp",
 	"description": "Links a phone's WhatsApp to this server, as WhatsApp Desktop is linked, and keeps its messages here",
-	"version":     version(),
+	"version":     built,
 	"icon":        "phone.bubble.fill",
 	"color":       "#25d366",
 	"domain":      "whatsapp.com",

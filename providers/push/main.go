@@ -128,7 +128,7 @@ func object(props map[string]any, required ...string) map[string]any {
 var describe = map[string]any{
 	"title":        "Push",
 	"description":  "Sends the install's apps' notifications to people's phones, through Apple",
-	"version":      version(),
+	"version":      built,
 	"icon":         "bell.badge",
 	"serves":       "everyone",
 	"instructions": "Push sends a notification to your own phones through Apple's push service: push_send with a title and a body. An app pushes with ctx.drivers.push.send, and tapping its push opens its screen. It says whether APNs accepted it, never whether anyone saw it.",

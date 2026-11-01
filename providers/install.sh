@@ -23,7 +23,7 @@ allow() { on "~/.local/bin/$node drivers add $provider" || echo "$node drivers a
 set -- $(on uname -sm)
 os=$(echo "$1" | tr A-Z a-z)
 case $2 in x86_64) arch=amd64 ;; *) arch=arm64 ;; esac
-CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -o "$name" .
+CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "-X main.built=$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- . || echo +dirty)" -o "$name" .
 if [ -n "$host" ]; then scp -q "$name" "$host:/tmp/$name"; else cp "$name" "/tmp/$name"; fi
 rm "$name"
 if [ "$os" = darwin ]; then

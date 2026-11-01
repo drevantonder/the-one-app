@@ -329,7 +329,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let on = server.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
             match *how {
                 "remove" => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} drivers add {name})."),
-                _ => println!("{name} is allowed {on} again: it serves there while it runs."),
+                _ => println!("{name} is installed {on}: it serves there while it runs."),
             }
         }
         ["schedules"] => {
