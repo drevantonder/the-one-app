@@ -499,6 +499,12 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
     Ok(Some(snap))
 }
 
+/// Whether the server `at` places down a scope's line backs it up itself: the scope's first change the place lacks
+/// (`waiting`) has waited `TAKE_OVER` for each server before it, counting from when the place was added at the earliest.
+pub fn takes_over(at: usize, waiting: Option<u64>, added: u64, now: u64) -> bool {
+    at == 0 || waiting.is_some_and(|t| now.saturating_sub(t.max(added)) >= TAKE_OVER * at as u64)
+}
+
 /// A snapshot's file name: its time, so names sort by it, and its server.
 fn snapshot_name(time: u64, server: &Key) -> String {
     format!("{time:013}-{}", crate::entry::short(server))
@@ -735,6 +741,17 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn the_next_server_in_line_takes_over_only_once_changes_have_waited() {
+        let hour = 3_600_000;
+        assert!(takes_over(0, None, 0, 0), "the first in line always does");
+        assert!(!takes_over(1, None, 0, 100 * hour), "nothing waits");
+        assert!(!takes_over(1, Some(hour), 10 * hour, 10 * hour), "a place just added: old changes wait from when it was");
+        assert!(takes_over(1, Some(hour), 10 * hour, 12 * hour));
+        assert!(!takes_over(2, Some(hour), 10 * hour, 12 * hour), "the third waits for two");
+        assert!(takes_over(2, Some(hour), 0, 5 * hour));
     }
 
     #[test]

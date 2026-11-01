@@ -16,6 +16,8 @@ struct PlaceItem {
     place: Result<Place>,
     /// For a folder: the server whose disk it's on.
     server: Option<Key>,
+    /// When it was added.
+    made: u64,
 }
 
 /// What a place's item says, read from global's items.
@@ -35,7 +37,7 @@ fn places(state: &ScopeState) -> Vec<PlaceItem> {
                 }
                 Place::Folder(_) => Ok(p),
             });
-            PlaceItem { id: id.clone(), title: it.title.clone(), place, server: fields.get("server").and_then(|s| unhex(s).ok()) }
+            PlaceItem { id: id.clone(), title: it.title.clone(), place, server: fields.get("server").and_then(|s| unhex(s).ok()), made: it.made }
         })
         .collect()
 }
@@ -143,9 +145,8 @@ impl Node {
                         // server before it.
                         if at > 0 {
                             let covered = global.backups.iter().filter(|r| r.place == p.id && r.error.is_none()).flat_map(|r| &r.snapshots).filter(|s| s.scope == log).map(|s| s.upto).max().unwrap_or(0);
-                            match i.r.store.first_change(&log, covered)? {
-                                Some(t) if now.saturating_sub(t) >= b::TAKE_OVER * at as u64 => {}
-                                _ => continue,
+                            if !b::takes_over(at, i.r.store.first_change(&log, covered)?, p.made, now) {
+                                continue;
                             }
                         }
                     }

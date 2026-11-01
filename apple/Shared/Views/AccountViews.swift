@@ -214,7 +214,7 @@ struct BackupsView: View {
             if let snapshots = backups?.snapshots, !snapshots.isEmpty {
                 Section("Snapshots") {
                     ForEach(snapshots.prefix(8), id: \.self) { s in
-                        LabeledContent(when(s.time, style: .day), value: s.place)
+                        LabeledContent(when(s.time, style: .day), value: "\(s.place) · \(displayName(s.server))")
                     }
                 }
             }
