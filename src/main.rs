@@ -788,8 +788,8 @@ fn instructions() -> String {
     text
 }
 
-/// An item, as one line: its title, what it is, its page, its fields (secret ones never shown), where they go, the
-/// apps switched on for it, and for an account, the app it signed in with.
+/// An item, as one line: its title, what it is, its page, its fields (secret ones never shown), where they go and
+/// the apps switched on for it.
 fn item_line(it: &Value) -> String {
     let fields: Vec<String> = it["fields"].as_array().into_iter().flatten().map(|f| match f["secret"] == true {
         true => format!("{} ••••", f["name"].as_str().unwrap_or("")),
@@ -797,15 +797,14 @@ fn item_line(it: &Value) -> String {
     }).collect();
     let list = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
     format!(
-        "{}  {}{}  [{}]  {}  → {}  used by: {}{}",
+        "{}  {}{}  [{}]  {}{}  used by: {}",
         it["id"].as_str().unwrap_or(""),
         it["title"].as_str().unwrap_or(""),
         it["type"].as_str().filter(|t| !t.is_empty()).map(|t| format!(" ({t})")).unwrap_or_default(),
         it["scope_name"].as_str().unwrap_or(""),
         fields.join(", "),
-        list(&it["hosts"]),
+        Some(list(&it["hosts"])).filter(|h| !h.is_empty()).map(|h| format!("  → {h}")).unwrap_or_default(),
         list(&it["apps"]),
-        it["app"].as_str().filter(|_| it["account"] == true).map(|a| format!("  (signed in with {a})")).unwrap_or_default(),
     )
 }
 
