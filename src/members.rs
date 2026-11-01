@@ -576,6 +576,9 @@ pub struct ScopeState {
     pub opens: Vec<(String, Key, u64, Option<String>)>,
     /// Each app's secrets here, by (app, name).
     pub secrets: BTreeMap<(String, String), Secret>,
+    /// In a user's own scope: how they arranged each page, by page (`user`, `group:<id>` or `global`):
+    /// `{ items, hidden }`, as their latest `arrange` of it said.
+    pub arrangements: BTreeMap<String, Value>,
 }
 
 /// How many runs of each schedule a scope's state keeps.
@@ -666,6 +669,11 @@ pub fn manages_scope(m: &Members, user: &str, scope: &Scope) -> bool {
         Scope::Group(g) => m.group_role(user, g) == Some(Role::Admin),
         Scope::Global => m.is_admin(user),
     }
+}
+
+/// A page a person arranges: their own (`user`), a group's (`group:<id>`) or everyone's (`global`).
+pub fn valid_page(page: &str) -> bool {
+    page == "user" || page == "global" || page.strip_prefix("group:").is_some_and(is_id)
 }
 
 /// A secret's name: letters, digits, `_`, `-` and `.`.
@@ -801,6 +809,24 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let why = data["why"].as_str().unwrap_or("").to_string();
             let agent = data["agent"].as_str().map(str::to_string);
             state.requests.insert(id, SecretRequest { app, name, hosts, why, user: w.to_string(), agent, time: e.time(), answer: None });
+        }
+        "arrange" => {
+            ensure!(scope == Scope::User(w.to_string()), "each person arranges pages in their own scope");
+            let data = &e.content.data;
+            let page = data["page"].as_str().context("no page")?;
+            ensure!(valid_page(page), "a page is user, group:<id> or global");
+            let items = data["items"].as_array().context("no items")?;
+            ensure!(items.len() <= 500, "too many items on one page");
+            for item in items {
+                ensure!(item["app"].as_str().is_some_and(valid_app_name), "each item names an app");
+                if !item["widget"].is_null() {
+                    ensure!(item["widget"].is_string() && item["id"].as_str().is_some_and(|id| !id.is_empty() && id.len() <= 64), "a widget on a page has an id");
+                    ensure!(item["options"].is_null() || item["options"].is_object(), "a widget's options are an object");
+                }
+            }
+            let hidden = data["hidden"].as_array().cloned().unwrap_or_default();
+            ensure!(hidden.iter().all(|a| a.as_str().is_some_and(valid_app_name)), "hidden lists apps");
+            state.arrangements.insert(page.to_string(), json!({ "items": items, "hidden": hidden, "time": e.time() }));
         }
         "open" => {
             let Scope::User(_) = &scope else { bail!("only a user's data is opened") };

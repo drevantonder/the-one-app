@@ -1436,29 +1436,60 @@ impl Node {
     }
 
     /// Every widget, rendered for `viewer`; with `scope` (`user`, `group:<id>` or `global`), those of the apps
-    /// installed there, for a shell's page of that scope, each reaching only it.
+    /// installed there, for a shell's page of that scope, each reaching only it. Each comes at its own options at every
+    /// size it draws, with its options (choices worked out now), and as each widget the viewer put on that page with
+    /// options of their own (`placed`, by its id, at its size).
     pub async fn widgets(&self, viewer: Caller, scope: Option<&str>) -> Result<Vec<Value>> {
+        let page = scope.map(|s| if s == format!("user:{}", viewer.user) { "user" } else { s });
+        let placed: Vec<Value> = page
+            .and_then(|p| self.arrangements(&viewer.user).remove(p))
+            .and_then(|a| a["items"].as_array().cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|item| item["widget"].is_string() && item["options"].as_object().is_some_and(|o| !o.is_empty()))
+            .collect();
+        let none = json!({});
         let mut out = Vec::new();
         for (app, ctx, _granted) in self.page_contexts(&viewer, scope)? {
             let describe = self.0.apps.describe(&app).await?;
             for w in describe["widgets"].as_array().into_iter().flatten() {
                 let widget = w["name"].as_str().unwrap_or_default();
                 let size = w["size"].as_str().unwrap_or("medium");
-                match self.0.apps.widget(&app, widget, size, &ctx).await {
+                let options = match w["options"].as_array().is_some_and(|o| !o.is_empty()) {
+                    true => self.0.apps.widget_options(&app, widget, &ctx).await.unwrap_or_else(|_| w["options"].clone()),
+                    false => Value::Null,
+                };
+                match self.0.apps.widget(&app, widget, size, &none, &ctx).await {
                     Ok(root) => {
                         // Each other size it draws, as its own tree; one that fails is left out, and shells draw `root`.
                         let mut sizes = serde_json::Map::new();
                         for other in w["sizes"].as_array().into_iter().flatten().filter_map(|s| s.as_str()).filter(|s| *s != size) {
-                            if let Ok(tree) = self.0.apps.widget(&app, widget, other, &ctx).await {
+                            if let Ok(tree) = self.0.apps.widget(&app, widget, other, &none, &ctx).await {
                                 sizes.insert(other.to_string(), tree);
                             }
                         }
                         sizes.insert(size.to_string(), root.clone());
-                        out.push(json!({ "app": app, "widget": widget, "title": w["title"], "size": size, "sizes": sizes, "root": root }))
+                        let mut mine = serde_json::Map::new();
+                        for item in placed.iter().filter(|i| i["app"] == app.as_str() && i["widget"] == widget) {
+                            let at = item["size"].as_str().unwrap_or(size);
+                            let tree = match self.0.apps.widget(&app, widget, at, &item["options"], &ctx).await {
+                                Ok(tree) => json!({ "sizes": { at: tree } }),
+                                Err(err) => json!({ "error": format!("{err:#}") }),
+                            };
+                            mine.insert(item["id"].as_str().unwrap_or_default().to_string(), tree);
+                        }
+                        let mut one = json!({ "app": app, "widget": widget, "title": w["title"], "description": w["description"], "size": size, "sizes": sizes, "root": root });
+                        if !options.is_null() {
+                            one["options"] = options;
+                        }
+                        if !mine.is_empty() {
+                            one["placed"] = Value::Object(mine);
+                        }
+                        out.push(one)
                     }
                     // A shell that knows `error` says the widget is broken; one that doesn't still draws `root`.
                     Err(err) => out.push(json!({
-                        "app": app, "widget": widget, "title": w["title"], "size": size, "error": format!("{err:#}"),
+                        "app": app, "widget": widget, "title": w["title"], "description": w["description"], "size": size, "error": format!("{err:#}"),
                         "root": { "t": "text", "text": "This widget stopped working.", "tone": "muted" },
                     })),
                 }
@@ -1776,6 +1807,25 @@ impl Node {
         Ok(())
     }
 
+    /// Arranges a page for `caller` alone: the order of its apps and widgets, which widgets, their sizes and options,
+    /// and the apps taken off it, kept in their own scope so it follows them to every device.
+    pub async fn arrange(&self, caller: &Caller, page: &str, items: Value, hidden: Value) -> Result<()> {
+        let scope = Scope::User(caller.user.clone());
+        let content = self.with(|i| {
+            ensure!(members::valid_page(page), "a page is user, group:<id> or global");
+            ensure!(i.r.holds(&scope), "this server doesn't hold your data");
+            Ok(members::node("arrange", json!({ "page": page, "items": items, "hidden": if hidden.is_null() { json!([]) } else { hidden } })))
+        })?;
+        let by = (caller.key != self.0.id).then_some(caller.key);
+        self.append_as(&scope, &caller.user, by, content).await?;
+        Ok(())
+    }
+
+    /// How `user` arranged their pages, by page, as their own scope's `arrange` entries say.
+    fn arrangements(&self, user: &str) -> BTreeMap<String, Value> {
+        self.with(|i| Ok(i.views.get(&Scope::User(user.to_string()).to_string()).map(|(_, s)| s.arrangements.clone()).unwrap_or_default())).unwrap_or_default()
+    }
+
     /// Switches one of an app's schedules on or off in `scope`, for `caller`; switching one on makes it run as them.
     pub async fn switch_schedule(&self, caller: &Caller, app: &str, schedule: &str, scope: &Scope, on: bool) -> Result<()> {
         let content = self.with(|i| switch_entry(i, &caller.user, scope, app, schedule, on))?;
@@ -1874,6 +1924,7 @@ impl Node {
     pub fn state_for(&self, viewer: &Caller) -> Value {
         let ready = self.ready();
         let waiting = self.secret_requests(viewer, None, None).map(|r| r.iter().filter(|r| r["state"] == "waiting").count()).unwrap_or(0);
+        let arrangements = self.arrangements(&viewer.user);
         let install = self.0.install.lock().unwrap();
         let viewer_name = if viewer.key == self.0.id { self.server_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
         let user = install.as_ref().and_then(|i| i.r.members.user(&viewer.user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role }));
@@ -1946,6 +1997,8 @@ impl Node {
             "opens": opens,
             // Secret requests waiting for this user to answer (see GET /v1/secrets/requests).
             "secret_requests": waiting,
+            // How this user arranged each of their pages (see `arrange`).
+            "arrangements": arrangements,
         });
         if viewer.key != self.0.id {
             state["client"] = json!({ "key": hex(&viewer.key), "name": viewer_name });
@@ -2108,6 +2161,10 @@ impl Node {
             }
             ("POST", "/v1/retire") => {
                 self.retire(me, body["app"].as_str().unwrap_or(""), body["how"].as_str().unwrap_or("")).await?;
+                json!({})
+            }
+            ("POST", "/v1/arrange") => {
+                self.arrange(me, body["page"].as_str().unwrap_or(""), body["items"].clone(), body["hidden"].clone()).await?;
                 json!({})
             }
             ("POST", "/v1/schedule") => {

@@ -542,12 +542,31 @@ show();
   widgets: {
     latest: {
       title: "Board",
+      description: "The newest posts, from a topic or every one.",
       size: "medium",
       sizes: ["small", "medium", "large", "xl"],
+      options: {
+        topic: {
+          title: "Topic",
+          default: "",
+          choices: async (ctx) => [{ value: "", title: "All Topics" }, ...(await board(ctx).query("select path from topics order by path")).map((t) => ({ value: t.path, title: t.path }))],
+        },
+        from: {
+          title: "Posts From",
+          default: "everyone",
+          choices: [{ value: "everyone", title: "Everyone" }, { value: "people", title: "People" }, { value: "agents", title: "Agents" }],
+        },
+      },
       async render(ctx) {
         const many = { small: 1, medium: 2, large: 5, xl: 5 }[ctx.size] || 2;
-        const posts = await board(ctx).query("select * from posts order by time desc limit ?", [many]);
-        if (!posts.length) return { t: "text", text: "Nothing on the board yet", size: "sm", tone: "muted" };
+        const { topic: only, from } = ctx.options;
+        // A topic takes in its subtopics' posts too.
+        const posts = await board(ctx).query(
+          `select * from posts where (? = '' or topic = ? or topic like ? || '/%')
+             and (? = 'everyone' or (? = 'agents') = (agent is not null and agent != '')) order by time desc limit ?`,
+          [only || "", only || "", only || "", from || "everyone", from || "everyone", many],
+        );
+        if (!posts.length) return { t: "text", text: only ? `Nothing in ${only} yet` : "Nothing on the board yet", size: "sm", tone: "muted" };
         // Who wrote it: the agent and its machine, or the person.
         const who = (p) => (p.agent ? `${p.agent} · ${p.name}` : p.user_name || p.name);
         const topic = (p) => (p.topic || "top").split("/").pop();

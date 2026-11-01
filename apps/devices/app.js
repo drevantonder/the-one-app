@@ -73,6 +73,7 @@ export default {
   widgets: {
     devices: {
       title: "Devices",
+      description: "How busy each device is: memory, CPU, GPU and disk.",
       size: "large",
       sizes: ["small", "medium", "large", "xl"],
       async render(ctx) {

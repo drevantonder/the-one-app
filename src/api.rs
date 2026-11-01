@@ -48,6 +48,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/deploy", post(deploy))
         .route("/v1/install", post(install))
         .route("/v1/schedule", post(schedule))
+        .route("/v1/arrange", post(arrange))
         .route("/v1/retire", post(retire))
         .route("/v1/driver", post(driver))
         .route("/v1/fork", post(fork))
@@ -129,6 +130,12 @@ async fn driver(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 /// `{ app, how }`: deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`).
 async fn retire(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     node.retire(&local(&node)?, text(&body, "app")?, text(&body, "how")?).await?;
+    done()
+}
+
+/// `{ page, items, hidden }`: how the local user arranges one of their pages.
+async fn arrange(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    node.arrange(&local(&node)?, text(&body, "page")?, body["items"].clone(), body["hidden"].clone()).await?;
     done()
 }
 

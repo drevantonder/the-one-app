@@ -24,7 +24,8 @@ function describe() {
     ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}) })),
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => {
       const size = w.size || "medium";
-      return { name, title: w.title || name, size, sizes: w.sizes?.length ? w.sizes : [size] };
+      const options = Object.entries(w.options || {}).map(([name, o]) => ({ name, title: o.title || name, default: o.default ?? null }));
+      return { name, title: w.title || name, description: w.description || "", size, sizes: w.sizes?.length ? w.sizes : [size], ...(options.length ? { options } : {}) };
     }),
     badge: typeof app.badge === "function",
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
@@ -119,6 +120,23 @@ async function finish(token, later, appends) {
     error ||= String(err?.message ?? err);
   }
   await askNode(token, "done", { method: "POST", body: JSON.stringify({ error }) }).catch(() => {});
+}
+
+/// A widget's options' defaults, as its render sees them when a person chose none.
+function optionDefaults(widget) {
+  return Object.fromEntries(Object.entries(widget?.options || {}).map(([name, o]) => [name, o.default ?? null]));
+}
+
+/// A widget's options for a shell to offer: each one's choices (`{ value, title }`), worked out from the data where
+/// the app says how; one with none and a true or false default is a switch.
+async function widgetOptions(widget, ctx) {
+  const out = [];
+  for (const [name, o] of Object.entries(widget?.options || {})) {
+    const raw = typeof o.choices === "function" ? await o.choices(ctx) : o.choices;
+    const choices = Array.isArray(raw) ? raw.map((c) => (typeof c === "object" && c ? { value: c.value ?? null, title: String(c.title ?? c.value) } : { value: c, title: String(c) })) : undefined;
+    out.push({ name, title: o.title || name, default: o.default ?? null, ...(choices ? { choices } : {}) });
+  }
+  return out;
 }
 
 /// What a call, widget or hook gets: the caller, and a handle on each scope the node lets it reach.
@@ -243,8 +261,12 @@ export default {
         if (!op) throw new Error(`${app.name} has no operation ${body.op}`);
         run = () => op.run(ctx, body.input ?? {});
       } else if (what === "widget") {
-        ctx.size = body.size || app.widgets[body.name].size || "medium";
-        run = () => app.widgets[body.name].render(ctx);
+        const widget = app.widgets[body.name];
+        ctx.size = body.size || widget.size || "medium";
+        ctx.options = { ...optionDefaults(widget), ...(body.options || {}) };
+        run = () => widget.render(ctx);
+      } else if (what === "options") {
+        run = () => widgetOptions(app.widgets[body.name], ctx);
       } else if (what === "badge") {
         run = () => app.badge(ctx);
       } else if (what === "hook") {

@@ -1031,3 +1031,55 @@ async fn deleted_apps_wait_in_recently_deleted_until_restored_or_erased() {
     assert!(listed(&a).await.is_none(), "erased, it's gone from every list");
     assert!(a.member("app", json!({ "name": "scratch", "owner": format!("user:{}", me.user) })).await.is_err(), "and its name isn't used again");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_person_arranges_their_pages_and_their_widgets_options() {
+    let (andre, _r1) = start("arrange-andre").await;
+    let (laptop, _r2) = start("arrange-laptop").await;
+    andre.create("Home", "Andre").await.unwrap();
+    deploy_module(&andre, "notes", r#"export default {
+        name: "notes", schema: { user: "create table notes (topic text, text text)" },
+        ops: { add: { run: (ctx, i) => ctx.user.append("note", i) } },
+        on: { note: (db, e) => db.exec("insert into notes values (?, ?)", [e.data.topic, e.data.text]) },
+        widgets: { latest: {
+            title: "Notes", description: "The newest note", sizes: ["small", "medium"],
+            options: {
+                topic: { title: "Topic", default: "", choices: async (ctx) => [{ value: "", title: "All" }, ...(await ctx.user.query("select distinct topic from notes")).map((r) => r.topic)] },
+                loud: { title: "Loud", default: false },
+            },
+            async render(ctx) {
+                const rows = await ctx.user.query("select text from notes where ? = '' or topic = ?", [ctx.options.topic, ctx.options.topic]);
+                return { t: "text", text: `${ctx.size} ${rows.map((r) => r.text).join(",")}${ctx.options.loud ? "!" : ""}` };
+            },
+        } },
+    };"#).await;
+    let me = one::node::Caller { key: andre.id(), user: andre.user().unwrap(), agent: None };
+    andre.install(&me, "notes", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
+    andre.call(call("notes", "add", json!({ "topic": "work", "text": "ship" }))).await.unwrap();
+    andre.call(call("notes", "add", json!({ "topic": "home", "text": "cook" }))).await.unwrap();
+
+    // A page shows every widget its apps draw, with their options' choices worked out from the data.
+    let widgets = andre.widgets(me.clone(), Some("user")).await.unwrap();
+    let w = widgets.iter().find(|w| w["app"] == "notes").unwrap();
+    assert_eq!(w["description"], "The newest note");
+    assert_eq!(w["options"][0]["choices"].as_array().unwrap().len(), 3, "{w}");
+    assert_eq!(w["options"][1]["default"], false, "{w}");
+    assert!(w.get("placed").is_none(), "nothing's placed until someone chooses to: {w}");
+
+    // Arranging a page is the person's own entry: the widget they placed renders with the options they chose.
+    let items = json!([{ "app": "notes", "widget": "latest", "id": "w1", "size": "small", "options": { "topic": "work", "loud": true } }, { "app": "notes" }]);
+    andre.arrange(&me, "user", items.clone(), json!([])).await.unwrap();
+    assert_eq!(andre.state()["arrangements"]["user"]["items"], items);
+    let widgets = andre.widgets(me.clone(), Some("user")).await.unwrap();
+    let w = widgets.iter().find(|w| w["app"] == "notes").unwrap();
+    assert_eq!(w["placed"]["w1"]["sizes"]["small"]["text"], "small ship!", "{w}");
+    assert_eq!(w["sizes"]["medium"]["text"], "medium ship,cook", "the gallery's copy keeps its defaults: {w}");
+    assert!(andre.arrange(&me, "elsewhere", json!([]), json!([])).await.is_err(), "a page is a scope's");
+
+    // It follows the person to their other devices, and the latest arrangement counts.
+    laptop.join(&andre.pair(None).unwrap()).await.unwrap();
+    eventually("the laptop to get the arrangement", async || laptop.state()["arrangements"]["user"]["items"] == items).await;
+    let theirs = one::node::Caller { key: laptop.id(), user: laptop.user().unwrap(), agent: None };
+    laptop.arrange(&theirs, "global", json!([{ "app": "notes" }]), json!(["board"])).await.unwrap();
+    eventually("andre to get the laptop's arrangement", async || andre.state()["arrangements"]["global"]["hidden"] == json!(["board"])).await;
+}

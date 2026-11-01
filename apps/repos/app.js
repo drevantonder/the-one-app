@@ -258,12 +258,20 @@ export default {
   widgets: {
     latest: {
       title: "Repos",
+      description: "The newest commits, across repos or in one.",
       size: "small",
       sizes: ["small", "medium", "large", "xl"],
+      options: {
+        repo: {
+          title: "Repo",
+          default: "",
+          choices: async (ctx) => [{ value: "", title: "All Repos" }, ...(ctx.global ? await ctx.global.query("select name from repos order by name") : []).map((r) => r.name)],
+        },
+      },
       async render(ctx) {
         if (!ctx.global) return { t: "col", c: [] };
         const many = { small: 1, medium: 3, large: 6, xl: 6 }[ctx.size] || 3;
-        const commits = await recent(ctx, many);
+        const commits = await recent(ctx, many, ctx.options.repo);
         if (!commits.length) return { t: "text", text: "No repos yet", size: "sm", tone: "muted" };
         const link = (c) => ({ screen: "commit", params: { repo: c.repo, sha: c.sha } });
         if (ctx.size === "small") {
@@ -301,8 +309,8 @@ export default {
 
 /// The newest `many` commits across repos' main branches, each with its repo and branch: the branches pushed to last,
 /// and their history, newest first. A repo whose packs can't be read is left out.
-async function recent(ctx, many) {
-  const heads = await ctx.global.query("select repo, branch from branches where branch not like '%@%' order by time desc limit ?", [many]);
+async function recent(ctx, many, repo = "") {
+  const heads = await ctx.global.query("select repo, branch from branches where branch not like '%@%' and (? = '' or repo = ?) order by time desc limit ?", [repo || "", repo || "", many]);
   const all = [];
   for (const { repo, branch } of heads) {
     try {
