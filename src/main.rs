@@ -48,7 +48,7 @@ Usage:
                                        a new app from <app>'s code, with data of its own
   {CLI} secret set <app> <name> --hosts a,b [--scope user|global|<group>]
                                        set an app's secret, read from stdin: it's sent only to those hosts, and
-                                       never read back
+                                       never read back; for a person's value, secret request asks them instead
   {CLI} secret list [--scope s]        the secrets you may set: names and hosts, never values, and which the
                                        app's own code keeps (an account's sign-in)
   {CLI} secret remove <app> <name> [--scope s]
@@ -690,6 +690,7 @@ fn agent_name(raw: &str) -> String {
 
 fn instructions() -> String {
     let mut text = format!("{NAME} is this user's apps and agents, shared across their machines. Every tool is also a CLI command ({CLI} <app> <op>).");
+    text.push_str("\n\n## Secrets\n\nNever ask the person to paste a secret (an API key, a password, a token) into the chat. Call secrets_request and give them its link: they type it into a sheet on their own device, and you never see it. If someone pastes one anyway, keep it with secrets_set and don't repeat it.");
     if let Ok(apps) = get("/v1/apps") {
         for app in apps.as_array().into_iter().flatten() {
             if let Some(i) = app["instructions"].as_str().filter(|i| !i.is_empty()) {
@@ -704,7 +705,7 @@ fn instructions() -> String {
 fn secret_tools() -> Vec<Value> {
     let scope = json!({ "type": "string", "description": "user (yours, the default), global (everyone's), or a group's name or id" });
     vec![
-        json!({ "name": "secrets_set", "description": "Set (or replace) a secret of an app: it puts {{name}} in a request's headers or body and your server fills it in, only for requests to these hosts. Nobody can read it back.", "inputSchema": { "type": "object", "required": ["app", "name", "value", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "scope": scope } } }),
+        json!({ "name": "secrets_set", "description": "Set (or replace) a secret of an app: it puts {{name}} in a request's headers or body and your server fills it in, only for requests to these hosts. Nobody can read it back. When the person has the value, use secrets_request instead: never ask them to paste it into the chat.", "inputSchema": { "type": "object", "required": ["app", "name", "value", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "scope": scope } } }),
         json!({ "name": "secrets_list", "description": "The secrets you may set: app, name and hosts, never values; given is true for one a person or agent set, false for one the app's own code keeps (an account's sign-in).", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": { "readOnlyHint": true } }),
         json!({ "name": "secrets_remove", "annotations": { "destructiveHint": true }, "description": "Delete a secret of an app.", "inputSchema": { "type": "object", "required": ["app", "name"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "scope": scope } } }),
         json!({ "name": "secrets_request", "description": "Ask the person to set a secret of an app, instead of handling its value yourself: returns a link to give them, which opens a sheet in the app where they type it (and their Settings lists it as a request). You never see the value; poll secrets_status with the id until it's set or declined.", "inputSchema": { "type": "object", "required": ["app", "name", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "why": { "type": "string", "description": "one line the person sees: what it's for and where to find it" }, "scope": scope } } }),
