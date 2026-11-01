@@ -80,6 +80,13 @@ async function api(ctx, email, method, path, { query, json, raw, type } = {}) {
 const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const accountInput = { type: "string", description: "which Drive account, by address; the first when left out" };
 
+/// A sign-in that's over without an account (Google takes each code once): it answers why rather than failing, so
+/// the verifier's deletion is written, as a failed call writes nothing.
+function failed(ctx, why) {
+  ctx.user.secret("verifier", null);
+  return { signed_in: false, why };
+}
+
 export default {
   name: "drive",
   title: "Google Drive",
@@ -129,12 +136,14 @@ export default {
       },
     },
     finish_sign_in: {
-      description: "Finish connecting Drive: the address the browser ended up on after sign_in's link (or just its code).",
+      description: "Finish connecting Drive: the address the browser ended up on after sign_in's link (or just its code). Answers { signed_in: false, why } when Google didn't sign in.",
       input: { type: "object", required: ["code"], properties: { code: { type: "string" } } },
       async run(ctx, { code }) {
         const client = await setting(ctx, "client_id");
         const given = String(code).trim();
         const value = given.includes("code=") ? new URL(given.startsWith("http") ? given : `http://x/?${given.split("?").pop()}`).searchParams.get("code") : given;
+        const refused = given.match(/[?&]error=([^&#]+)/)?.[1];
+        if (refused) return failed(ctx, `Google didn't sign you in (${decodeURIComponent(refused)}). Start again with sign_in.`);
         if (!value) throw new Error("that address has no code: copy the whole address the browser ended up on");
         const r = await fetch(`https://${OAUTH}/token`, {
           method: "POST",
@@ -142,9 +151,9 @@ export default {
           body: `grant_type=authorization_code&code=${encodeURIComponent(value)}&client_id=${encodeURIComponent(client)}&client_secret={{client_secret}}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_verifier={{verifier}}`,
         });
         const body = await r.json().catch(() => ({}));
-        if (!r.ok || !body.refresh_token) throw new Error(`Google didn't sign you in: ${body.error_description || body.error || r.status}. Start again with sign_in.`);
+        if (!r.ok || !body.refresh_token) return failed(ctx, `Google didn't sign you in: ${body.error_description || body.error || r.status}. Start again with sign_in.`);
         const who = await (await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${body.access_token}` } })).json();
-        if (!who.email) throw new Error("Google didn't say which account that is");
+        if (!who.email) return failed(ctx, "Google didn't say which account that is. Start again with sign_in.");
         ctx.user.secret(`refresh_${slug(who.email)}`, body.refresh_token, [OAUTH]);
         ctx.user.secret("verifier", null);
         ctx.user.append("account", { email: who.email });
@@ -254,7 +263,7 @@ async function start() {
   c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
     <input id="code" placeholder="http://127.0.0.1:4747/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign in</button><div id="err" class="error small"></div>\`;
   document.getElementById("finish").onclick = async () => {
-    try { await one.call("finish_sign_in", { code: document.getElementById("code").value }); show(); }
+    try { const r = await one.call("finish_sign_in", { code: document.getElementById("code").value }); if (r?.signed_in === false) throw new Error(r.why); show(); }
     catch (e) { document.getElementById("err").textContent = e.message; }
   };
 }

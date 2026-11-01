@@ -220,7 +220,7 @@ export default {
     ...tools,
 
     sign_in: {
-      description: "Sign in to the server, or to another account: returns a link to open in a browser. After consent the browser fails to load a 127.0.0.1 page: pass that page's whole address as code.",
+      description: "Sign in to the server, or to another account: returns a link to open in a browser. After consent the browser fails to load a 127.0.0.1 page: pass that page's whole address as code. Answers { signed_in: false, why } when that didn't sign in.",
       input: {
         type: "object",
         properties: {
@@ -313,20 +313,26 @@ export default {
   },
 };
 
+/// A sign-in that's over without an account (a code is taken once): it answers why rather than failing, so the
+/// verifier's deletion is written, as a failed call writes nothing.
+function failed(ctx, why) {
+  ctx.user.secret("verifier", null, []);
+  return { signed_in: false, why };
+}
+
 /// The second half of sign_in: trades the code the browser came back with for tokens.
 async function finish(ctx, code, name) {
   const p = (await ctx.user.query("select * from pending"))[0];
   if (!p) throw new Error("no sign-in is in progress: call sign_in without code first");
-  let state = null;
+  let state = null, refused = null;
   try {
     const u = new URL(code);
-    if (u.searchParams.get("error")) throw new Error(`sign-in failed: ${u.searchParams.get("error_description") || u.searchParams.get("error")}`);
+    refused = u.searchParams.get("error_description") || u.searchParams.get("error");
     state = u.searchParams.get("state");
     code = u.searchParams.get("code") || code;
-  } catch (e) {
-    if (e.message.startsWith("sign-in failed")) throw e;
-  }
+  } catch {}
   if (state && state !== p.state) throw new Error("that address is from an older sign-in: use the newest link sign_in gave");
+  if (refused) return failed(ctx, `Sign-in failed: ${refused}. Start again with sign_in.`);
   const r = await fetch(p.token_endpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
@@ -336,8 +342,8 @@ async function finish(ctx, code, name) {
     }),
   });
   const tok = await r.json().catch(() => ({}));
-  if (!r.ok || !tok.access_token) throw new Error(`sign-in failed: ${tok.error_description || tok.error || r.status}`);
-  if (!tok.refresh_token) throw new Error("the server gave no refresh token, so the sign-in wouldn't last");
+  if (!r.ok || !tok.access_token) return failed(ctx, `Sign-in failed: ${tok.error_description || tok.error || r.status}. Start again with sign_in.`);
+  if (!tok.refresh_token) return failed(ctx, "The server gave no refresh token, so the sign-in wouldn't last. Start again with sign_in.");
   const acct = name || p.account || email(tok.id_token || "") || "default";
   ctx.user.secret(access(acct), tok.access_token, [host(server.url)]);
   ctx.user.secret(refresh(acct), tok.refresh_token, [host(p.token_endpoint)]);

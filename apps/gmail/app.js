@@ -396,9 +396,18 @@ async function startSignIn(ctx) {
   return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
 }
 
+/// A sign-in that's over without an account (Google takes each code once): it answers why rather than failing, so
+/// the verifier's deletion is written, as a failed call writes nothing.
+function failed(ctx, why) {
+  ctx.user.secret("verifier", null);
+  return { signed_in: false, why };
+}
+
 async function finishSignIn(ctx, given) {
   const client = await setting(ctx, "client_id");
   const code = codeOf(given);
+  const refused = String(given).match(/[?&]error=([^&#]+)/)?.[1];
+  if (refused) return failed(ctx, `Google didn't sign you in (${decodeURIComponent(refused)}). Start again with gmail_sign_in.`);
   if (!code) throw new Error("that address has no code: copy the whole address the browser ended up on");
   const r = await fetch(`https://${OAUTH}/token`, {
     method: "POST",
@@ -406,10 +415,10 @@ async function finishSignIn(ctx, given) {
     body: `grant_type=authorization_code&code=${encodeURIComponent(code)}&client_id=${encodeURIComponent(client)}&client_secret={{client_secret}}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_verifier={{verifier}}`,
   });
   const tok = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`sign-in failed: ${tok.error_description || tok.error || r.status}. Start again with gmail_sign_in.`);
-  if (!tok.refresh_token) throw new Error("Google didn't give a refresh token, so the sign-in wouldn't last; start again");
+  if (!r.ok) return failed(ctx, `Sign-in failed: ${tok.error_description || tok.error || r.status}. Start again with gmail_sign_in.`);
+  if (!tok.refresh_token) return failed(ctx, "Google didn't give a refresh token, so the sign-in wouldn't last; start again.");
   const email = await signedIn(ctx, tok);
-  if (!email) throw new Error("Google didn't say which account signed in; start again");
+  if (!email) return failed(ctx, "Google didn't say which account signed in; start again.");
   ctx.user.secret(`refresh_${slug(email)}`, tok.refresh_token, [OAUTH]);
   ctx.user.secret("verifier", null);
   ctx.user.append("account", { email });
@@ -471,7 +480,7 @@ export default {
       },
     },
     finish_sign_in: {
-      description: "Finish signing in: the address the browser ended up on after sign_in's link (or just its code).",
+      description: "Finish signing in: the address the browser ended up on after sign_in's link (or just its code). Answers { signed_in: false, why } when Google didn't sign in.",
       input: { type: "object", required: ["code"], properties: { code: str("the address, or its code") } },
       run: (ctx, { code }) => finishSignIn(ctx, need(code, "code")),
     },
@@ -734,7 +743,7 @@ async function start() {
   c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
     <input id="code" placeholder="http://127.0.0.1:4747/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign in</button><div id="err" class="error small"></div>\`;
   document.getElementById("finish").onclick = async () => {
-    try { await one.call("finish_sign_in", { code: document.getElementById("code").value }); show(); }
+    try { const r = await one.call("finish_sign_in", { code: document.getElementById("code").value }); if (r?.signed_in === false) throw new Error(r.why); show(); }
     catch (e) { document.getElementById("err").textContent = e.message; }
   };
 }
