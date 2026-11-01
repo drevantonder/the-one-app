@@ -105,8 +105,13 @@ struct InstallSettingsView: View {
     @State private var madeHere = ""
     @State private var domain = ""
     @State private var error: String?
+    /// The Vault item on Everyone switched on for push, by its title, and whether its sheet is open.
+    @State private var pushKey: String?
+    @State private var askingKey = false
 
     private var settings: [String: String] { store.install?.settings ?? [:] }
+    /// The sidecar that sends pushes, empty for off: its Apple key is a Vault item switched on for its name.
+    private var push: String { settings["push"] ?? "" }
 
     var body: some View {
         Form {
@@ -117,7 +122,14 @@ struct InstallSettingsView: View {
                 Text("App Store")
             }
             Section {
-                Toggle("Push Notifications", isOn: Binding(get: { !(settings["push"] ?? "").isEmpty }, set: { set("push", $0 ? nil : "") }))
+                Toggle("Push Notifications", isOn: Binding(get: { !push.isEmpty }, set: { set("push", $0 ? nil : "") }))
+                if !push.isEmpty && store.isAdmin {
+                    Button { askingKey = true } label: {
+                        LabeledContent("Apple Push Key", value: pushKey ?? "")
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             Section {
                 TextField("Work Email Domain", text: $domain, prompt: Text("example.org"))
@@ -135,7 +147,27 @@ struct InstallSettingsView: View {
         .formStyle(.grouped)
         .navigationTitle("Install")
         .onAppear { madeHere = settings["made_here"] ?? ""; domain = settings["join_domain"] ?? "" }
+        .task(id: push) { await loadKey() }
+        .sheet(isPresented: $askingKey, onDismiss: { Task { await loadKey() } }) {
+            VaultRequestSheet(scope: "global", id: "", ask: pushAsk, icon: "bell.badge.fill", color: "#ff3b30")
+        }
         .onDisappear { save("made_here", madeHere); save("join_domain", domain) }
+    }
+
+    /// What push asks the Vault for: Apple's APNs key (its .p8 file), the team and key it's from, and the app's bundle
+    /// id pushes go to, sent only to Apple's push servers.
+    private var pushAsk: VaultRequest {
+        let fields = [VaultRequest.Field(name: "key", secret: true, file: true), VaultRequest.Field(name: "team_id", secret: false),
+                      VaultRequest.Field(name: "key_id", secret: false), VaultRequest.Field(name: "topic", secret: false)]
+        return VaultRequest(id: "", scope: "global", scope_name: String(localized: "Everyone"), app: push, title: String(localized: "Apple Push Key"),
+                            fields: fields, hosts: ["api.push.apple.com", "api.sandbox.push.apple.com"],
+                            why: String(localized: "Phones get notifications through Apple with it."), by: store.me?.name ?? "",
+                            time: Date.now.timeIntervalSince1970 * 1000, state: "waiting")
+    }
+
+    private func loadKey() async {
+        guard !push.isEmpty else { return }
+        pushKey = try? await store.node.vault(scope: "global").first { $0.apps.contains(push) }?.title
     }
 
     /// A text field's value, if it changed: empty puts back the edition's default.

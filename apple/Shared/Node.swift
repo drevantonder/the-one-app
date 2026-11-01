@@ -359,6 +359,8 @@ struct VaultRequest: Decodable, Sendable, Equatable, Identifiable {
     struct Field: Decodable, Sendable, Equatable, Hashable, Identifiable {
         var name: String
         var secret: Bool
+        /// Its value is a file's text (a key's PEM), chosen rather than typed; only a shell's own asks say so.
+        var file: Bool?
         var id: String { name }
     }
     struct Match: Decodable, Sendable, Equatable, Hashable, Identifiable {
