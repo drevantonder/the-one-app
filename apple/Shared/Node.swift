@@ -324,9 +324,9 @@ struct VaultItem: Decodable, Sendable, Equatable, Identifiable, Hashable {
     var app: String?
     var account: Bool?
 
-    /// Its one short line: what it is, else its first plain field.
+    /// Its one short line: what it is, else its first plain field; none when what it is is its title.
     var line: String? {
-        if let type, !type.isEmpty { return type }
+        if let type, !type.isEmpty { return type == title ? nil : type }
         return fields.first { !$0.secret && !($0.value ?? "").isEmpty }?.value
     }
     var isAccount: Bool { account == true }
