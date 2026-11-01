@@ -1369,13 +1369,16 @@ impl Node {
                 }
                 let scope_name = handles(m, std::slice::from_ref(&s), &viewer.user).remove(0).name;
                 for (id, it) in &state.items {
-                    let wanted: Vec<&String> = needs.iter().filter(|(_, _, fields)| fields.iter().all(|f| it.fields.contains_key(f))).map(|(app, ..)| app).collect();
+                    let has = |fields: &[String]| fields.iter().all(|f| it.fields.contains_key(f));
+                    let wanted: Vec<&String> = needs.iter().filter(|(_, _, fields, _)| has(fields)).map(|(app, ..)| app).collect();
+                    // An account: what a sign-in made, by an app that asks for accounts with those fields.
+                    let account = needs.iter().any(|(app, _, fields, accounts)| *accounts && it.app.as_ref() == Some(app) && has(fields));
                     let mut wanted_by: Vec<&String> = wanted.into_iter().chain(&it.apps).collect();
                     wanted_by.sort();
                     wanted_by.dedup();
                     out.push(json!({
                         "id": id, "scope": log, "scope_name": scope_name, "title": it.title, "type": it.kind, "domain": it.domain,
-                        "hosts": it.hosts, "fields": vault::fields_shown(it), "apps": it.apps, "wanted_by": wanted_by, "app": it.app,
+                        "hosts": it.hosts, "fields": vault::fields_shown(it), "apps": it.apps, "wanted_by": wanted_by, "app": it.app, "account": account,
                         "user": name(&it.user), "time": it.time, "made": it.made,
                     }));
                 }
@@ -1394,8 +1397,9 @@ impl Node {
         Ok(out)
     }
 
-    /// What the apps installed for `viewer` ask the Vault for: (app, need, its fields), from their `vault`.
-    async fn vault_needs(&self, viewer: &Caller) -> Result<Vec<(String, String, Vec<String>)>> {
+    /// What the apps installed for `viewer` ask the Vault for: (app, need, its fields, whether it's accounts), from
+    /// their `vault`.
+    async fn vault_needs(&self, viewer: &Caller) -> Result<Vec<(String, String, Vec<String>, bool)>> {
         let mut out = Vec::new();
         for app in self.apps(viewer).await? {
             let (Some(name), Some(needs)) = (app["name"].as_str(), app["vault"].as_object()) else { continue };
@@ -1405,7 +1409,7 @@ impl Node {
             for (need, d) in needs {
                 let fields: Vec<String> = d["fields"].as_object().map(|f| f.keys().cloned().collect()).unwrap_or_default();
                 if !fields.is_empty() {
-                    out.push((name.to_string(), need.clone(), fields));
+                    out.push((name.to_string(), need.clone(), fields, d["accounts"] == true));
                 }
             }
         }
