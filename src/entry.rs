@@ -1,4 +1,4 @@
-//! Entries: the one kind of thing anyone ever writes. See SPEC.md, "Entries".
+//! Entries: the one kind of thing anyone ever writes.
 
 use std::fmt;
 
@@ -7,8 +7,6 @@ use p2panda_core::traits::Provenance;
 use p2panda_core::{Body, Hash, Header, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-pub const PROTOCOL: u32 = 11;
 
 pub type Key = [u8; 32];
 
@@ -39,7 +37,7 @@ impl Content {
     }
 }
 
-/// Where everything lives. See SPEC.md, "Scopes".
+/// Where everything lives.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Scope {
     Global,

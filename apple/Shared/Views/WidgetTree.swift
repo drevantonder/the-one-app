@@ -188,7 +188,7 @@ enum WidgetLink: Codable, Sendable, Hashable {
     }
 }
 
-/// A node of a widget's tree (SPEC.md "Widgets"). Fields a renderer doesn't know are skipped, and so are children
+/// A node of a widget's tree. Fields a renderer doesn't know are skipped, and so are children
 /// it can't read.
 struct WidgetNode: Codable, Sendable, Equatable {
     var t: String

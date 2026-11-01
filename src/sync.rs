@@ -1,4 +1,4 @@
-//! Sync: what two servers say to each other, and which scope goes where. See SPEC.md, "Sync".
+//! Sync: what two servers say to each other, and which scope goes where.
 //! The protocol has no clock and no network of its own; `node.rs` carries it over iroh and
 //! `tests/sim.rs` over a simulated network.
 

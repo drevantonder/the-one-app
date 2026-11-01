@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
 
-/// An app's screen: the page the node serves for it, in a web view that answers its bridge (SPEC.md "Screens").
+/// An app's screen: the page the node serves for it, in a web view that answers its bridge.
 struct AppScreen: View {
     @Environment(Store.self) private var store
     var route: ScreenRoute

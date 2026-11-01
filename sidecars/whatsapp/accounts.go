@@ -1,6 +1,6 @@
 package main
 
-// Several WhatsApp accounts (SPEC.md "Connectors"): each linked phone is
+// Several WhatsApp accounts: each linked phone is
 // a link of its own, with its own database. whatsapp.db is the first, as it
 // was when there could be only one; each linked since is whatsapp-<time>.db.
 

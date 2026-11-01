@@ -33,8 +33,6 @@ A new install starts with the apps `config.toml` lists:
 
 Fork any app under a new name, or write your own, and `one deploy` it. Every operation is also an MCP tool and a CLI command.
 
-Not all of this is built yet: "Built so far" in `ARCHITECTURE.md` says what is.
-
 ## Start
 
 ```sh
@@ -59,4 +57,4 @@ Each context is its own app: The One App is yours, a workplace's edition is thei
 
 ## How it works
 
-`ARCHITECTURE.md` is the map, and `SPEC.md` is the protocol every machine speaks. `tests/sim.rs` runs hundreds of servers over simulated links that drop, duplicate and reorder messages, split apart and skew clocks, and checks each ends up with exactly what it should hold.
+`ARCHITECTURE.md` is the map and its few rules; the code, and its tests, are the rest. `tests/sim.rs` runs hundreds of servers over simulated links that drop, duplicate and reorder messages, split apart and skew clocks, and checks each ends up with exactly what it should hold.

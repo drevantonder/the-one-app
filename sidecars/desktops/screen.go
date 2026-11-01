@@ -8,7 +8,7 @@ import (
 
 // The Desktops page: every desktop as a live picture, what each uses, who
 // borrowed it, and a button to sign in to sites. The node serves it as this
-// sidecar's screen (SPEC.md, "Sidecars"); it calls this sidecar's operations.
+// sidecar's screen; it calls this sidecar's operations.
 
 //go:embed page.html
 var page string

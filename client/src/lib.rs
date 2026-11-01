@@ -1,5 +1,5 @@
 //! A client: a machine that keeps no log (a phone) and asks its user's servers to do the work.
-//! It joins with a pairing code like a server (SPEC.md, "Join"), then sends requests over `one/client/1` to the servers
+//! It joins with a pairing code like a server, then sends requests over `one/client/1` to the servers
 //! its user trusts, nearest first, one at a time, trying the next only if one can't be reached or says to go elsewhere.
 //! The C functions at the bottom are what the iPhone and Android shells call.
 

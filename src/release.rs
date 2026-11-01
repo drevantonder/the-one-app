@@ -1,4 +1,4 @@
-//! Releases of the node itself. See SPEC.md, "Releases" and "Blobs".
+//! Releases of the node itself.
 
 use std::path::{Path, PathBuf};
 

@@ -1,7 +1,7 @@
 import AppKit
 
-/// A server sidecar the Mac app hosts: a device feature it offers the person's devices through this Mac's node
-/// (SPEC.md, "Sidecars"). Apple's apps are reached from here, not the node, because this app is what macOS grants
+/// A server sidecar the Mac app hosts: a device feature it offers the person's devices through this Mac's node.
+/// Apple's apps are reached from here, not the node, because this app is what macOS grants
 /// privacy permissions to.
 protocol Sidecar: Sendable {
     var app: String { get }

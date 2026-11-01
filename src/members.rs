@@ -1,5 +1,5 @@
 //! Members: users, groups, servers and clients, ACLs and trust, apps and deploys, made by replaying `global`'s
-//! node entries; and which entries count. See SPEC.md, "Servers" and "Node entries". Pure: entries in, members out.
+//! node entries; and which entries count. Pure: entries in, members out.
 
 use std::collections::{BTreeMap, BTreeSet};
 

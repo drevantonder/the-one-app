@@ -1,5 +1,5 @@
 //! Bundles: what a deploy names. A tar holding `app.js`, the built ES module, and `src/`, the files it was built from.
-//! See SPEC.md, "Apps". Plain ustar, written the same way every time, so the same files give the same blob.
+//! Plain ustar, written the same way every time, so the same files give the same blob.
 
 use std::path::Path;
 

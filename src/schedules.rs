@@ -1,4 +1,4 @@
-//! Schedules: an app's operations that run on their own, every so often or at a time of day (SPEC.md, "Schedules").
+//! Schedules: an app's operations that run on their own, every so often or at a time of day.
 //! Which server runs each is decided from the members alone, so every server agrees without asking: no leases.
 
 use anyhow::{Context as _, Result, bail, ensure};

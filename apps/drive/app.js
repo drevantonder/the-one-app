@@ -284,7 +284,7 @@ export default {
   },
 };
 
-/// The settings screen a shell opens for a connector (SPEC.md "Connectors"): the accounts signed in, each with
+/// The settings screen a shell opens for a connector: the accounts signed in, each with
 /// whether it works, a way to allow it again and to sign it out, and signing in another, by link and pasted address.
 /// Opened with { add: true } (a shell's Add Account), it starts signing in at once.
 function settingsScreen(title, blurb) {

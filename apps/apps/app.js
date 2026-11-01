@@ -64,7 +64,7 @@ async function described(ctx, bundle) {
   return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), uses: { apps: [], sidecars: parts } };
 }
 
-/// Whether an app is a connector (SPEC.md "Connectors"): it says so (`connector: true`), or it has accounts, sign_in
+/// Whether an app is a connector: it says so (`connector: true`), or it has accounts, sign_in
 /// and sign_out, and a settings screen but no main one. What it says about itself where it's installed for the caller,
 /// or the install's list says; elsewhere, its code.
 async function isConnector(ctx, a) {

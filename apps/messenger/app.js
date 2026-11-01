@@ -1,6 +1,6 @@
 // Messenger: the person's Facebook Messenger, read through messenger.com in a desktop's browser. The messenger sidecar
 // drives the browser, on each server whose owner installed it; this app is what people and agents use, and a
-// connector (SPEC.md "Connectors"): each account is a browser profile signed in to Messenger.
+// connector: each account is a browser profile signed in to Messenger.
 
 /// Runs one of the messenger sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
 /// says what's needed instead of how the call failed.

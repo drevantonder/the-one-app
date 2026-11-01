@@ -1,6 +1,6 @@
 //! The Vault: items, each in one scope, with named fields (secret ones set, never read back), the hosts its secret
 //! fields go to, and the apps switched on for it. Apps write `{{<item id>:field}}` (or `{{field}}`) where a field
-//! goes, and the node fills it in on the way out. See SPEC.md, "The Vault".
+//! goes, and the node fills it in on the way out.
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -1831,7 +1831,7 @@ impl Node {
         Ok(out)
     }
 
-    /// Runs an app's hook for an agent harness on this machine (SPEC.md, "Local API"). The node remembers, per
+    /// Runs an app's hook for an agent harness on this machine. The node remembers, per
     /// session, when the hook last ran, and tells the app as `since` (null on a session's first call).
     pub async fn hook(&self, app: &str, name: &str, event: Value) -> Result<Value> {
         let session = event["session_id"].as_str().unwrap_or("").to_string();
@@ -2410,7 +2410,7 @@ impl Node {
         Ok(())
     }
 
-    /// Opens `user`'s data on `server` for an hour, for the local user (see SPEC.md, "Servers").
+    /// Opens `user`'s data on `server` for an hour, for the local user.
     pub async fn open(&self, user: &str, server: &str, agent: Option<String>) -> Result<Value> {
         let req = CallRequest { app: members::APP.into(), op: "open".into(), input: json!({ "user": user }), server: Some(server.into()), agent, ..Default::default() };
         self.call(req).await
@@ -3350,7 +3350,7 @@ impl Node {
         release::install(r, &bytes)
     }
 
-    /// Keeps `bytes` as a blob. See SPEC.md, "Blobs".
+    /// Keeps `bytes` as a blob.
     pub fn put_blob(&self, bytes: &[u8]) -> Result<String> {
         release::put_blob(&self.0.dir, bytes)
     }

@@ -1,6 +1,6 @@
 // WhatsApp: the person's WhatsApp accounts, each a phone linked to one of their servers as WhatsApp Desktop is linked.
 // The whatsapp sidecar links the phone and keeps its messages, on each server whose owner installed it; this app is
-// what people and agents use, and a connector (SPEC.md "Connectors").
+// what people and agents use, and a connector.
 
 /// Runs one of the whatsapp sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
 /// says what's needed instead of how the call failed.

@@ -1,6 +1,6 @@
 // Every app runs inside this shim, in workerd. The app module (./app.js) is the app's deployed code; this turns it
 // into a Worker with a store per scope (a Durable Object holding SQLite) that answers the node: replays, operations,
-// widgets, hooks and screens. See SPEC.md, "Apps".
+// widgets, hooks and screens.
 import app from "./app.js";
 import { DurableObject } from "cloudflare:workers";
 import { AsyncLocalStorage } from "node:async_hooks";

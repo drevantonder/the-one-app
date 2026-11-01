@@ -1,7 +1,7 @@
 package main
 
-// Messenger's accounts are the desktops' browser profiles it's linked to
-// (SPEC.md "Connectors"): each profile signed in to messenger.com is one
+// Messenger's accounts are the desktops' browser profiles it's linked to:
+// each profile signed in to messenger.com is one
 // account, read through a browser of its own.
 
 import (

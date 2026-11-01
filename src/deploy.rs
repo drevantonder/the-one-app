@@ -1,5 +1,5 @@
 //! `one deploy <dir>`: builds an app with a pinned Bun, npm packages and all, into a bundle that holds the built module
-//! and the files it was built from, as written. See SPEC.md, "Apps".
+//! and the files it was built from, as written.
 
 use std::path::{Path, PathBuf};
 

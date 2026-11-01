@@ -1,7 +1,7 @@
 // The Desktops sidecar: Linux desktops for agents, each a Podman container
 // running Cua's desktop image (github.com/trycua/cua) with a browser that
 // keeps its sign-ins, offered to the person's devices through this device's
-// node (SPEC.md, "Local API"). The server inside each desktop speaks MCP; its
+// node. The server inside each desktop speaks MCP; its
 // browser tools become this app's operations.
 package main
 

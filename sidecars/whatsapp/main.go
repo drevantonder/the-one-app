@@ -1,6 +1,6 @@
 // The WhatsApp sidecar: links this device to a WhatsApp account, as
 // WhatsApp Desktop is linked, keeps the messages it sees, and offers them to
-// the person's devices through this device's node (SPEC.md, "Local API").
+// the person's devices through this device's node.
 //
 // It never tells WhatsApp the user is online or has read a message, so the
 // phone keeps notifying and senders don't see reads.

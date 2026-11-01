@@ -10,7 +10,7 @@ struct Config: Codable, Sendable, Equatable {
     var push: String?
 }
 
-/// `GET /v1/state` (SPEC.md "Local API"): this machine, its user and the install.
+/// `GET /v1/state`: this machine, its user and the install.
 struct NodeState: Decodable, Sendable, Equatable {
     var config: Config
     /// The machine this shell runs on: this server, or a phone.
@@ -35,7 +35,7 @@ struct NodeState: Decodable, Sendable, Equatable {
     }
 }
 
-/// How one person arranged a page (SPEC.md `arrange`): its apps and the widgets they put there, in order, and the
+/// How one person arranged a page: its apps and the widgets they put there, in order, and the
 /// apps they took off it.
 struct Arrangement: Codable, Sendable, Equatable {
     struct Item: Codable, Sendable, Equatable, Hashable {
@@ -113,7 +113,7 @@ struct Server: Codable, Sendable, Equatable, Identifiable {
     /// The commit its node was built from.
     var build: String?
     var drivers: [String]?
-    /// How loaded it is, as it last said (SPEC.md "Sync").
+    /// How loaded it is, as it last said.
     var load: Load?
 
     var id: String { key }
@@ -182,7 +182,7 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     /// The scopes it is installed in that the asker may use: `user:<id>`, `group:<id>`, `global`.
     var installed: [String]?
     var deploys: Int?
-    /// What it asks the Vault for, by name (SPEC.md "Apps").
+    /// What it asks the Vault for, by name.
     var vault: [String: VaultNeed]?
     /// It says it's a connector: it brings something in from outside (an account, a Mac's own app, a device's ability).
     var connector: Bool?
@@ -195,7 +195,7 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     var label: String { title ?? name }
     /// Only apps with a `main` screen get an icon; the rest still give widgets and tools.
     var hasScreens: Bool { has(screen: "main") }
-    /// A connector with nothing to open (SPEC.md "Connectors"): it says it's a connector, or only connects accounts,
+    /// A connector with nothing to open: it says it's a connector, or only connects accounts,
     /// so it goes in a page's Connectors folder, with its accounts, rather than having an icon of its own. A connector
     /// with a page of its own gets an icon.
     var isConnector: Bool {
@@ -231,7 +231,7 @@ struct NodeError: LocalizedError, Sendable {
 protocol NodeTransport: Sendable {
     /// Sends a request and returns the local API's JSON reply, or throws its error.
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data
-    /// An app screen's page (SPEC.md "Screens"), and the address it may call back to.
+    /// An app screen's page, and the address it may call back to.
     func page(app: String, screen: String, params: String, scope: String?) async throws -> (html: String, base: URL?)
     /// The node's events, until the connection drops.
     func events() -> AsyncThrowingStream<NodeEvent, Error>
@@ -355,7 +355,7 @@ struct VaultItem: Decodable, Sendable, Equatable, Identifiable, Hashable {
     }
 }
 
-/// A request for an item an app may use (SPEC.md "The Vault"): the person picks one of theirs or makes one, so the
+/// A request for an item an app may use: the person picks one of theirs or makes one, so the
 /// asker never sees its secrets.
 struct VaultRequest: Decodable, Sendable, Hashable, Identifiable {
     struct Field: Decodable, Sendable, Equatable, Hashable, Identifiable {
