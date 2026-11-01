@@ -95,6 +95,8 @@ pub enum Append {
     Forget { scope: String, blob: String },
     /// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), with the caller's own rights.
     Retire { app: String, how: String },
+    /// Sets (or with an empty link, clears) where an app's code is kept, with the caller's own rights.
+    Source { app: String, link: String },
     /// Removes a sidecar from a server (or lets it register there again), for someone acting for one of its owners.
     Sidecar { server: String, name: String, installed: bool },
     /// What the call spent on AI: `{ model, usd, input, output }`, for the insights of the app that called it.
@@ -141,6 +143,10 @@ pub fn appends(app: &str, list: &Value) -> Result<Vec<Append>> {
         }
         if let Some(name) = a["retire"].as_str() {
             appends.push(Append::Retire { app: name.into(), how: a["how"].as_str().unwrap_or("").into() });
+            continue;
+        }
+        if let Some(name) = a["app_source"].as_str() {
+            appends.push(Append::Source { app: name.into(), link: a["link"].as_str().unwrap_or("").into() });
             continue;
         }
         if a["cost"].is_object() {

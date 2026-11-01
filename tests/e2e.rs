@@ -1256,6 +1256,30 @@ async fn deleted_apps_wait_in_recently_deleted_until_restored_or_erased() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_apps_owners_link_where_its_code_is() {
+    let (a, _ra) = start("source").await;
+    a.create("Source", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    deploy_module(&a, "scratch", r#"export default { name: "scratch", ops: { hi: { run: () => "hi" } } };"#).await;
+    eventually("the App Store to run", async || a.call(call("apps", "list", json!({}))).await.is_ok()).await;
+    let source = async |app: &str| a.apps(&me).await.unwrap().into_iter().find(|x| x["name"] == app).unwrap()["source"].clone();
+    let set = async |link: &str| a.call(call("apps", "source", json!({ "app": "scratch", "link": link }))).await;
+
+    assert_eq!(source("scratch").await, Value::Null, "an app made here has none until its owners say");
+    let board = source("board").await;
+    assert!(board.as_str().is_some_and(|l| l.starts_with(&format!("https://github.com/{}/tree/", one::config::REPO)) && l.ends_with("/apps/board")), "a built-in app links to its folder: {board}");
+    set("https://example.com/scratch").await.unwrap();
+    assert_eq!(source("scratch").await, "https://example.com/scratch");
+    set(&format!("{}://scratch", one::config::CLI)).await.unwrap();
+    assert_eq!(source("scratch").await, format!("{}://scratch", one::config::CLI), "or a repo in Repos");
+    assert!(set("javascript:alert(1)").await.is_err(), "only web addresses and repos");
+    set("").await.unwrap();
+    assert_eq!(source("scratch").await, Value::Null, "an empty link clears it");
+    a.call(call("apps", "source", json!({ "app": "board", "link": "" }))).await.unwrap();
+    assert_eq!(source("board").await, Value::Null, "a built-in app's owners clear its link too");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn each_person_arranges_their_pages_and_their_widgets_options() {
     let (andre, _r1) = start("arrange-andre").await;
     let (laptop, _r2) = start("arrange-laptop").await;

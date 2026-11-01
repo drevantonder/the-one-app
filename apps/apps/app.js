@@ -194,7 +194,7 @@ export default {
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], sidecars: [] },
             built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
-            mine: mine(ctx, a.owner), deleted: a.deleted || null, service: services[all.indexOf(a)],
+            source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, service: services[all.indexOf(a)],
             // service's old names, for whatever read them before
             connector: services[all.indexOf(a)], connected: services[all.indexOf(a)],
           };
@@ -245,6 +245,17 @@ export default {
       async run(ctx, { app }) {
         ctx.retire(app, "erased");
         return `Erased ${app}.`;
+      },
+    },
+    source: {
+      description: "Set where an app you own keeps its code, shown on its page as Source: a web address (GitHub, any git host or page) or one://<repo> for one in Repos. An empty link clears it. Built-in apps start with their folder in the open-source repo; forks start with none.",
+      input: { type: "object", required: ["app", "link"], properties: { app: { type: "string" }, link: { type: "string", description: "https://… or one://<repo>; empty for none" } } },
+      async run(ctx, { app, link }) {
+        const a = await find(ctx, app);
+        if (!mine(ctx, a.owner)) throw new Error(`only ${app}'s owners set its source link`);
+        if (!a.deploys && a.built_in) throw new Error(`${app} isn't added to this install yet: add it first`);
+        ctx.source(app, (link || "").trim());
+        return link?.trim() ? `${app}'s source is ${link.trim()}.` : `${app} has no source link now.`;
       },
     },
     health: {
@@ -388,6 +399,8 @@ show();
   .works .row + .row::before { left: 58px; }
   #error { margin: 8px 4px; }
   .danger-row { color: var(--danger); justify-content: center; }
+  .action-row { color: var(--accent); justify-content: center; }
+  .link-field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
 </style>
 <div id="app"></div>
 <div id="ask"></div>
@@ -448,6 +461,13 @@ const sections = [
     return (a.from ? '<h2 class="section">Forked From</h2><div class="list works">' + link(find(a.from)) + "</div>" : "")
       + (a.forks.length ? '<h2 class="section">Forks</h2><div class="list works">' + a.forks.map((n) => link(find(n))).join("") + "</div>" : "");
   },
+  // Where its code is kept: Source opens it, a repo in Repos or a page in the browser; its owners add or change it.
+  function source({ a }) {
+    const rows = [];
+    if (a.source) rows.push(sourceRow(a.source));
+    if (a.mine && a.added && !a.deleted) rows.push('<a class="row plain action-row" onclick="editSource()">' + (a.source ? "Edit Source Link" : "Add Source Link") + "</a>");
+    return rows.length ? '<div class="list" style="margin-top:28px">' + rows.join("") + "</div>" : "";
+  },
   function owner({ a, health }) {
     const busy = health && (health.activity?.length || health.insights?.errors?.length || health.insights?.usage?.length || health.insights?.cost?.length);
     const rows = [];
@@ -460,6 +480,38 @@ const sections = [
     return '<div class="made">Made by ' + one.esc(a.owner_name) + (code ? \` · <a onclick='one.open("code", \${JSON.stringify({ app: a.name, dir: "" })})'>View code</a>\` : "") + "</div>";
   },
 ];
+
+/// The Source row: \`<cli>://<repo>\` opens the repo in Repos, anything else in the browser.
+function sourceRow(link) {
+  const prefix = (one.config?.cli || "one") + "://";
+  const repo = link.startsWith(prefix) ? link.slice(prefix.length).replace(/[/]$/, "").replace(/[.]git$/, "") : null;
+  const open = repo && /^[a-z0-9][a-z0-9._-]*$/.test(repo) ? \` onclick='one.open("repo", \${JSON.stringify({ repo })}, "repos")'\` : ' href="' + one.esc(link) + '" target="_blank" rel="noopener"';
+  return '<a class="row plain"' + open + '><div class="main"><div class="title"><span>Source</span></div></div><div class="chev">›</div></a>';
+}
+
+/// The sheet that sets the source link, or with Remove Link (or an empty field) clears it.
+function editSource() {
+  const a = data.apps.find((x) => x.name === name);
+  const sheet = one.sheet({ title: "Source Link", done: "Save" });
+  sheet.body.innerHTML = '<div class="list"><div class="row plain"><input id="link" class="link-field" type="url" placeholder="https://github.com/… or ' + one.esc(one.config?.cli || "one") + '://repo" autocapitalize="none" autocorrect="off" spellcheck="false"></div></div>'
+    + '<div id="link-error" class="footer error"></div>'
+    + (a.source ? '<div class="list" style="margin-top:20px"><a class="row plain danger-row" id="unlink">Remove Link</a></div>' : "");
+  const field = sheet.body.querySelector("#link");
+  field.value = a.source || "";
+  setTimeout(() => field.focus(), 300);
+  const save = async (link) => {
+    try {
+      await one.call("source", { app: name, link });
+      sheet.close();
+      show();
+    } catch (err) {
+      sheet.body.querySelector("#link-error").textContent = one.plain(err).title;
+    }
+  };
+  sheet.body.closest(".sheet").querySelector("[data-done]").onclick = () => save(field.value.trim());
+  field.addEventListener("keydown", (e) => e.key === "Enter" && save(field.value.trim()));
+  sheet.body.querySelector("#unlink")?.addEventListener("click", () => save(""));
+}
 
 /// A row that opens another app's page: its icon and name.
 function link(x) {

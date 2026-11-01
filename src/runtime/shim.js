@@ -260,6 +260,12 @@ function context(env, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ retire: name, how });
     },
+    /// Sets where an app's code is kept (a web address or `<cli>://<repo>`), or with "" clears it, for someone acting
+    /// for its owner.
+    source: (name, link) => {
+      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+      appends.push({ app_source: name, link: String(link ?? "") });
+    },
     /// Removes a sidecar from a server (by name), or with installed lets it run there again, for someone acting for one
     /// of the server's owners.
     sidecar: (name, server, installed = false) => {

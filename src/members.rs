@@ -103,6 +103,9 @@ pub struct App {
     pub deleted: Option<(u64, String)>,
     /// Erased for good: gone from every list, and its name never used again.
     pub erased: bool,
+    /// Where its code is kept, as its owners last said: a web address or `<cli>://<repo>`; empty once they cleared it.
+    /// None if they never did, so a built-in app links to its folder in the release's repo.
+    pub source: Option<String>,
 }
 
 /// The latest `sidecar` entry for a sidecar on a server: removed there, or let register there again.
@@ -511,10 +514,13 @@ impl Members {
                         } else if let Some(deleted) = data["deleted"].as_bool() {
                             app.deleted = deleted.then(|| (e.time(), w.clone()));
                         }
+                        if let Some(source) = data.get("source") {
+                            app.source = Some(source_link(source)?);
+                        }
                     }
                     None => {
                         let from = data["from"].as_str().map(str::to_string);
-                        self.apps.insert(name.clone(), App { name, owner, from, bundle: None, deploys: 0, history: Vec::new(), deleted: None, erased: false });
+                        self.apps.insert(name.clone(), App { name, owner, from, bundle: None, deploys: 0, history: Vec::new(), deleted: None, erased: false, source: None });
                     }
                 }
             }
@@ -547,6 +553,18 @@ impl Members {
         }
         Ok(())
     }
+}
+
+/// An app's source link as an `app` entry gives it: a web address or `<cli>://<repo>`, or empty (or null) for none.
+pub fn source_link(v: &Value) -> Result<String> {
+    let link = match v {
+        Value::Null => "",
+        v => v.as_str().context("a source link is text")?.trim(),
+    };
+    let scheme = link.split_once("://").map(|(s, _)| s);
+    ensure!(link.is_empty() || (link.len() <= 500 && (matches!(scheme, Some("https" | "http")) || scheme == Some(crate::config::CLI))), "a source link is a web address (https://…) or {}://<repo>", crate::config::CLI);
+    ensure!(!link.chars().any(char::is_whitespace), "a source link has no spaces");
+    Ok(link.to_string())
 }
 
 pub fn valid_app_name(name: &str) -> bool {

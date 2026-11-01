@@ -1938,6 +1938,11 @@ impl Node {
                     if let Some(bundle) = self.built_in(a) {
                         info["built_in"] = json!(bundle);
                     }
+                    match &a.source {
+                        Some(link) if !link.is_empty() => info["source"] = json!(link),
+                        Some(_) => {}
+                        None => info["source"] = json!(self.built_in(a).and(built_in_source(&a.name))),
+                    }
                     // A deleted app leaves every page; its owners see it in Recently Deleted.
                     if let Some((time, by)) = &a.deleted {
                         info["installed"] = json!([]);
@@ -1949,7 +1954,7 @@ impl Node {
                 .collect::<Vec<_>>())
         })?;
         let missing: Vec<Value> = if not_added {
-            self.with(|i| Ok(self.0.built_in.iter().filter(|(name, _)| !i.r.members.apps.contains_key(*name)).map(|(name, bundle)| json!({ "name": name, "owner": "admins", "from": null, "forks": [], "deploys": 0, "bundle": null, "history": [], "installed": [], "built_in": bundle })).collect()))?
+            self.with(|i| Ok(self.0.built_in.iter().filter(|(name, _)| !i.r.members.apps.contains_key(*name)).map(|(name, bundle)| json!({ "name": name, "owner": "admins", "from": null, "forks": [], "deploys": 0, "bundle": null, "history": [], "installed": [], "built_in": bundle, "source": built_in_source(name) })).collect()))?
         } else {
             Vec::new()
         };
@@ -3147,10 +3152,25 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
             }
             (Scope::Global, members::node("app", data))
         }
+        Append::Source { app: name, link } => {
+            let m = &i.r.members;
+            let a = m.apps.get(&name).filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
+            ensure!(m.acts_for(&me.user, &a.owner), "only someone acting for {name}'s owner sets its source link");
+            let link = members::source_link(&json!(link))?;
+            (Scope::Global, members::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
+        }
         Append::Sidecar { server, name, installed } => (Scope::Global, sidecar_entry(&i.r.members, &me.user, &server, &name, installed)?),
         Append::Vault { id, scope, data, same, release } => vault_entry(i, app, me, scopes, &id, scope, data, same, release)?,
         Append::Install { .. } | Append::Cost { .. } => bail!("installs and costs are written on their own"),
     })
+}
+
+/// Where a built-in app's code is: its folder of `apps/` in the repo releases come from, at this build's commit when
+/// it's one (else main); none for an edition with no repo.
+fn built_in_source(app: &str) -> Option<String> {
+    let repo = crate::config::REPO;
+    let commit = crate::config::BUILD.split(['-', '+']).next().filter(|c| !crate::config::BUILD.contains('+') && c.len() >= 7 && c.bytes().all(|b| b.is_ascii_hexdigit()));
+    (!repo.is_empty()).then(|| format!("https://github.com/{repo}/tree/{}/apps/{app}", commit.unwrap_or("main")))
 }
 
 /// What a server says of each sidecar serving there, as `GET /v1/state` lists it: what it is, its version (a

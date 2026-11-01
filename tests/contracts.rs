@@ -253,6 +253,7 @@ async fn the_apple_apps_decode_what_the_node_sends() {
     let me = one::node::Caller { key: node.id(), user: node.user().unwrap(), agent: None };
     node.member("app", json!({ "name": "lamps", "owner": format!("user:{}", me.user) })).await.unwrap();
     node.deploy(&me, "lamps", &blob).await.unwrap();
+    node.member("app", json!({ "name": "lamps", "owner": format!("user:{}", me.user), "source": "https://example.com/lamps" })).await.unwrap();
     api(&addr, "POST", "/v1/install", json!({ "app": "lamps", "scope": "user", "installed": true })).await;
     api(&addr, "POST", "/v1/arrange", json!({ "page": "user", "items": [{ "app": "lamps", "widget": "glance", "id": "w1", "size": "small", "options": { "room": "kitchen" } }, { "app": "lamps" }], "hidden": [] })).await;
     api(&addr, "POST", "/v1/group", json!({ "name": "Home" })).await;
