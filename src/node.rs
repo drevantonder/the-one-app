@@ -1330,7 +1330,7 @@ impl Node {
 
     /// Sets (or with no value, deletes) a secret of `app` in `scope`, for `caller`. Nothing reads it back.
     pub async fn set_secret(&self, caller: &Caller, scope: &Scope, app: &str, name: &str, hosts: Vec<String>, value: Option<String>) -> Result<()> {
-        let content = self.with(|i| secret_entry(i, &caller.user, scope, app, name, hosts, value))?;
+        let content = self.with(|i| secret_entry(i, &caller.user, scope, app, name, hosts, value, true))?;
         let by = (caller.key != self.0.id).then_some(caller.key);
         self.append_as(scope, &caller.user, by, content).await?;
         Ok(())
@@ -1340,7 +1340,7 @@ impl Node {
     /// `{ id, link, scope }`. The person's shell opens the link, or lists the request, and they type the value.
     pub async fn request_secret(&self, caller: &Caller, scope: &Scope, app: &str, name: &str, hosts: Vec<String>, why: &str) -> Result<Value> {
         let id = new_id();
-        self.with(|i| secret_entry(i, &caller.user, scope, app, name, hosts.clone(), Some(String::new())).map(|_| ()))?;
+        self.with(|i| secret_entry(i, &caller.user, scope, app, name, hosts.clone(), Some(String::new()), true).map(|_| ()))?;
         let data = json!({ "id": id, "app": app, "name": name, "hosts": hosts, "why": why, "agent": caller.agent });
         let by = (caller.key != self.0.id).then_some(caller.key);
         self.append_as(scope, &caller.user, by, members::node("secret-request", data)).await?;
@@ -1354,7 +1354,7 @@ impl Node {
             ensure!(r.answer.is_none(), "that request was already answered");
             Ok(match value {
                 Some(value) => {
-                    let mut c = secret_entry(i, &caller.user, scope, &r.app, &r.name, r.hosts.clone(), Some(value))?;
+                    let mut c = secret_entry(i, &caller.user, scope, &r.app, &r.name, r.hosts.clone(), Some(value), true)?;
                     c.data["request"] = json!(id);
                     c
                 }
@@ -1412,7 +1412,7 @@ impl Node {
                     continue;
                 }
                 for ((app, name), secret) in &state.secrets {
-                    out.push(json!({ "scope": log, "app": app, "name": name, "hosts": secret.hosts, "user": secret.user, "time": secret.time }));
+                    out.push(json!({ "scope": log, "app": app, "name": name, "hosts": secret.hosts, "user": secret.user, "time": secret.time, "given": secret.given }));
                 }
             }
             out.sort_by_key(|v| (v["scope"].to_string(), v["app"].to_string(), v["name"].to_string()));
@@ -2631,6 +2631,12 @@ impl Node {
 /// before what a scope's views have replayed (a member entry of `global` included), that whole scope again.
 /// Only `apps`' stores are replayed.
 fn replay_jobs(i: &mut Install, new: &[Entry], apps: &[String]) -> Result<Vec<Replay>> {
+    // An erase takes the app's secrets from every scope's view, as replaying the scope again would.
+    for e in new.iter().filter(|e| members::is_member_entry(e)) {
+        for (_, state) in i.views.values_mut() {
+            members::forget_erased(&i.r.members, state, e);
+        }
+    }
     let earliest_member = new.iter().filter(|e| members::is_member_entry(e)).map(Entry::order).min();
     let mut logs: Vec<String> = new.iter().map(|e| e.log().to_string()).collect();
     if let Some(m) = &earliest_member {
@@ -2799,7 +2805,7 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
         Append::Secret { scope, name, value, hosts } => {
             let scope = Scope::parse(&scope)?;
             ensure!(scopes.contains(&scope), "the call didn't name {scope}");
-            (scope.clone(), secret_entry(i, &me.user, &scope, app, &name, hosts, value)?)
+            (scope.clone(), secret_entry(i, &me.user, &scope, app, &name, hosts, value, false)?)
         }
         Append::Switch { app, schedule, scope, on } => {
             let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
@@ -2882,15 +2888,21 @@ fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, schedule: &st
     Ok(members::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
 }
 
-/// A `secret` entry `user` may write in `scope`, setting (or with no value, deleting) a secret of `app`.
-fn secret_entry(i: &Install, user: &str, scope: &Scope, app: &str, name: &str, hosts: Vec<String>, value: Option<String>) -> Result<Content> {
+/// A `secret` entry `user` may write in `scope`, setting (or with no value, deleting) a secret of `app`: `given` when
+/// a person or agent gives its value, rather than the app's own code.
+fn secret_entry(i: &Install, user: &str, scope: &Scope, app: &str, name: &str, hosts: Vec<String>, value: Option<String>, given: bool) -> Result<Content> {
     let m = &i.r.members;
     ensure!(members::manages_scope(m, user, scope), "you can't set secrets in {scope}");
-    ensure!(m.apps.contains_key(app), "no app named {app}");
+    ensure!(m.apps.get(app).is_some_and(|a| !a.erased), "no app named {app}");
     ensure!(members::valid_secret_name(name), "a secret's name is letters, digits, _, - and .");
     ensure!(value.is_none() || (!hosts.is_empty() && hosts.iter().all(|h| members::valid_host(h))), "give the hosts it's sent to, as host names (api.example.com)");
     ensure!(i.r.holds(scope), "this server doesn't hold {scope}");
-    Ok(members::node("secret", json!({ "app": app, "name": name, "hosts": hosts, "value": value })))
+    let given = given && value.is_some();
+    let mut data = json!({ "app": app, "name": name, "hosts": hosts, "value": value });
+    if given {
+        data["given"] = json!(true);
+    }
+    Ok(members::node("secret", data))
 }
 
 /// A deploy of `app`: the bundle at blob `bundle`.

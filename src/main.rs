@@ -49,7 +49,8 @@ Usage:
   {CLI} secret set <app> <name> --hosts a,b [--scope user|global|<group>]
                                        set an app's secret, read from stdin: it's sent only to those hosts, and
                                        never read back
-  {CLI} secret list [--scope s]        the secrets you may set: names and hosts, never values
+  {CLI} secret list [--scope s]        the secrets you may set: names and hosts, never values, and which the
+                                       app's own code keeps (an account's sign-in)
   {CLI} secret remove <app> <name> [--scope s]
   {CLI} secret request <app> <name> --hosts a,b [--why text] [--scope s]
                                        ask the person to set a secret: a link to a sheet where they type it, so
@@ -287,7 +288,8 @@ fn run(args: Vec<String>) -> Result<()> {
             let q = flags.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default();
             for s in get(&format!("/v1/secrets{q}"))?.as_array().into_iter().flatten() {
                 let hosts: Vec<&str> = s["hosts"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-                println!("{}  {}/{}  → {}", s["scope"].as_str().unwrap_or(""), s["app"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), hosts.join(", "));
+                let kept = if s["given"] == true { "" } else { "  (kept by the app)" };
+                println!("{}  {}/{}  → {}{kept}", s["scope"].as_str().unwrap_or(""), s["app"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), hosts.join(", "));
             }
         }
         ["secret", "remove", app, name] => {
@@ -703,7 +705,7 @@ fn secret_tools() -> Vec<Value> {
     let scope = json!({ "type": "string", "description": "user (yours, the default), global (everyone's), or a group's name or id" });
     vec![
         json!({ "name": "secrets_set", "description": "Set (or replace) a secret of an app: it puts {{name}} in a request's headers or body and your server fills it in, only for requests to these hosts. Nobody can read it back.", "inputSchema": { "type": "object", "required": ["app", "name", "value", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "scope": scope } } }),
-        json!({ "name": "secrets_list", "description": "The secrets you may set: app, name and hosts, never values.", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": { "readOnlyHint": true } }),
+        json!({ "name": "secrets_list", "description": "The secrets you may set: app, name and hosts, never values; given is true for one a person or agent set, false for one the app's own code keeps (an account's sign-in).", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": { "readOnlyHint": true } }),
         json!({ "name": "secrets_remove", "annotations": { "destructiveHint": true }, "description": "Delete a secret of an app.", "inputSchema": { "type": "object", "required": ["app", "name"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "scope": scope } } }),
         json!({ "name": "secrets_request", "description": "Ask the person to set a secret of an app, instead of handling its value yourself: returns a link to give them, which opens a sheet in the app where they type it (and their Settings lists it as a request). You never see the value; poll secrets_status with the id until it's set or declined.", "inputSchema": { "type": "object", "required": ["app", "name", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "why": { "type": "string", "description": "one line the person sees: what it's for and where to find it" }, "scope": scope } } }),
         json!({ "name": "secrets_status", "description": "How a secret request went: waiting, set, declined or expired, and who answered. Never the value.", "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }, "annotations": { "readOnlyHint": true } }),

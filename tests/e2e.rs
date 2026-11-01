@@ -355,6 +355,10 @@ async fn secrets_are_set_never_read_and_go_only_to_their_hosts() {
     a.call(call("keeper", "keep", json!({ "value": "given" }))).await.unwrap();
     let got = a.call(send(format!("http://127.0.0.1:{port}/"), "{{kept}}", "")).await.unwrap();
     assert_eq!(got["authorization"], "given");
+    // The list says which a person or agent gave, and which the app's own code keeps.
+    let given = |name: &str| a.secrets(&me, None).unwrap().into_iter().find(|s| s["name"] == name).map(|s| s["given"].clone());
+    assert_eq!(given("token"), Some(json!(true)));
+    assert_eq!(given("kept"), Some(json!(false)));
 
     // Deleted, it's no longer filled in; and only someone who manages a scope sets secrets there.
     a.set_secret(&me, &one::entry::Scope::User(me.user.clone()), "keeper", "token", vec![], None).await.unwrap();
@@ -1024,11 +1028,18 @@ async fn deleted_apps_wait_in_recently_deleted_until_restored_or_erased() {
 
     a.retire(&me, "scratch", "restored").await.unwrap();
     assert_eq!(a.call(call("scratch", "hi", json!({}))).await.unwrap(), "hi", "restored, it runs on the pages it was on");
+    let secret = async |scope: one::entry::Scope| a.set_secret(&me, &scope, "scratch", "key", vec!["example.com".into()], Some("v".into())).await;
+    secret(one::entry::Scope::User(me.user.clone())).await.unwrap();
+    secret(one::entry::Scope::Global).await.unwrap();
+    let kept = || a.secrets(&me, None).unwrap().into_iter().filter(|s| s["app"] == "scratch").count();
 
     assert!(a.retire(&me, "scratch", "erased").await.is_err(), "deleted before erased");
     a.retire(&me, "scratch", "deleted").await.unwrap();
+    assert_eq!(kept(), 2, "deleted, it keeps its secrets, so restoring it works");
     a.retire(&me, "scratch", "erased").await.unwrap();
     assert!(listed(&a).await.is_none(), "erased, it's gone from every list");
+    assert_eq!(kept(), 0, "erased, its secrets go from every scope");
+    assert!(secret(one::entry::Scope::Global).await.is_err(), "and none is set again");
     assert!(a.member("app", json!({ "name": "scratch", "owner": format!("user:{}", me.user) })).await.is_err(), "and its name isn't used again");
 }
 

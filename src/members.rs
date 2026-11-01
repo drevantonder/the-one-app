@@ -653,6 +653,8 @@ pub struct Secret {
     pub value: String,
     pub user: String,
     pub time: u64,
+    /// Whether a person or agent gave it (the CLI, MCP, the API, a request's sheet), not an app's own code.
+    pub given: bool,
 }
 
 impl std::fmt::Debug for Secret {
@@ -739,7 +741,7 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let data = &e.content.data;
             let app = data["app"].as_str().context("no app")?.to_string();
             let name = data["name"].as_str().context("no name")?.to_string();
-            ensure!(m.apps.contains_key(&app), "no such app");
+            ensure!(m.apps.get(&app).is_some_and(|a| !a.erased), "no such app");
             ensure!(valid_secret_name(&name), "not a secret's name");
             match data["value"].as_str() {
                 None => {
@@ -753,7 +755,8 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
                             r.answer = Some(("set".into(), w.to_string(), e.time()));
                         }
                     }
-                    state.secrets.insert((app, name), Secret { hosts, value: value.to_string(), user: w.to_string(), time: e.time() });
+                    let given = data["given"] == true;
+                    state.secrets.insert((app, name), Secret { hosts, value: value.to_string(), user: w.to_string(), time: e.time(), given });
                 }
             }
         }
@@ -856,10 +859,13 @@ pub fn replay_from(root: Option<Hash>, member_entries: &[Entry], scope_entries: 
         let order = e.order();
         while let Some(me) = members.next_if(|me| me.order() < order) {
             m.step(me);
+            forget_erased(&m, &mut state, me);
         }
         let counted = if is_member_entry(e) {
             members.next_if(|me| me.order() == order);
-            m.step(e) && (!matches!(e.content.kind.as_str(), "install" | "uninstall" | "secret") || apply_in_scope(&m, &mut state, e).is_ok())
+            let counted = m.step(e) && (!matches!(e.content.kind.as_str(), "install" | "uninstall" | "secret") || apply_in_scope(&m, &mut state, e).is_ok());
+            forget_erased(&m, &mut state, e);
+            counted
         } else if e.content.app == APP && e.log() == "global" {
             // A scope-only node entry of `global`'s.
             m.counts(e) && apply_in_scope(&m, &mut state, e).is_ok()
@@ -874,8 +880,18 @@ pub fn replay_from(root: Option<Hash>, member_entries: &[Entry], scope_entries: 
     }
     for me in members {
         m.step(me);
+        forget_erased(&m, &mut state, me);
     }
     (m, state)
+}
+
+/// After `e`, an `app` that erased an app: its secrets go from the scope, as no app of its name runs again.
+pub fn forget_erased(m: &Members, state: &mut ScopeState, e: &Entry) {
+    if e.content.app == APP && e.content.kind == "app" && e.content.data["erased"] == true {
+        if let Some(name) = e.content.data["name"].as_str().filter(|n| m.apps.get(*n).is_some_and(|a| a.erased)) {
+            state.secrets.retain(|(app, _), _| app != name);
+        }
+    }
 }
 
 /// The members as they were just before `order`.
