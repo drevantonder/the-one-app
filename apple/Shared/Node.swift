@@ -53,6 +53,8 @@ struct Arrangement: Codable, Sendable, Equatable {
 struct Machine: Codable, Sendable, Equatable {
     var key: String
     var name: String
+    /// Where a server serves its skills on the tailnet (its `/llms.txt`), once it does.
+    var guide: String?
 }
 
 struct Person: Codable, Sendable, Equatable, Identifiable {

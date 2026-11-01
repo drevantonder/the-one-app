@@ -12,6 +12,7 @@ struct WelcomeView: View {
     @State private var typing = false
     @State private var pairing = false
     @State private var signingIn = false
+    @State private var asking = false
 
     private var named: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -56,6 +57,8 @@ struct WelcomeView: View {
                             .padding(.horizontal, 16)
                     }
                 }
+                Button("Or Ask Your Agent") { asking = true }
+                    .font(.callout.weight(.medium))
             }
             .padding(.horizontal, 24)
         }
@@ -112,6 +115,9 @@ struct WelcomeView: View {
             .padding(.bottom, 8)
         }
         .animation(.snappy, value: phone.joinError)
+        .sheet(isPresented: $asking) {
+            AskYourAgentSheet(prompt: agentPrompt(name: appName, cli: Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "", guide: nil))
+        }
         .sheet(isPresented: $scanning) {
             ScannerSheet { code in
                 scanning = false

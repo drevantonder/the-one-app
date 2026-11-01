@@ -55,7 +55,7 @@ struct ScreenRoute: Hashable, Codable {
 
 /// The settings page's icons.
 enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
-    case store, groups, devices, vault, access, users, install, backups, requests, appearance
+    case store, groups, devices, agents, vault, access, users, install, backups, requests, appearance
 
     var id: Self { self }
 
@@ -67,6 +67,7 @@ enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
         case .store: String(localized: "App Store")
         case .groups: String(localized: "Groups")
         case .devices: String(localized: "Devices")
+        case .agents: String(localized: "Agents")
         case .vault: String(localized: "Vault")
         case .access: String(localized: "Access Log")
         case .users: String(localized: "Users")
@@ -82,6 +83,7 @@ enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
         case .store: "square.grid.2x2.fill"
         case .groups: "person.3.fill"
         case .devices: "laptopcomputer.and.iphone"
+        case .agents: "sparkles"
         case .vault: "lock.fill"
         case .access: "eye.fill"
         case .users: "person.2.badge.gearshape.fill"
@@ -167,6 +169,8 @@ final class Store {
     var install: Install? { state?.install }
     var me: Person? { state?.user }
     var isAdmin: Bool { me?.admin == true }
+    /// What to paste into an agent to connect it: the answering server's skills, if it serves them on the tailnet.
+    var askYourAgent: String { agentPrompt(name: config?.name ?? appName, cli: config?.cli ?? Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "", guide: state?.host?.guide) }
 
     func app(_ name: String) -> AppInfo? { apps.first { $0.name == name } }
     func userName(_ id: String) -> String {

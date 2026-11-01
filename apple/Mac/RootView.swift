@@ -118,6 +118,7 @@ private struct WelcomeView: View {
     @State private var error: String?
     @State private var recovery: String?
     @State private var signingIn = false
+    @State private var asking = false
 
     private var ready: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty && !you.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -146,6 +147,7 @@ private struct WelcomeView: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(item: Binding(get: { recovery.map(RecoveryKey.init) }, set: { if $0 == nil { recovery = nil } })) { RecoverySheet(key: $0.key) }
+        .sheet(isPresented: $asking) { AskYourAgentSheet(prompt: store.askYourAgent) }
     }
 
     private func signInForm(_ signIn: SignIn) -> some View {
@@ -164,6 +166,8 @@ private struct WelcomeView: View {
                     .frame(maxWidth: 440)
             }
             Button("Have a pairing code? Join…") { store.sheet = .join }
+                .buttonStyle(.link)
+            Button("Or ask your agent to set it up…") { asking = true }
                 .buttonStyle(.link)
         }
     }
@@ -201,6 +205,8 @@ private struct WelcomeView: View {
                 Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
             }
             Button("Have a pairing code? Join…") { store.sheet = .join }
+                .buttonStyle(.link)
+            Button("Or ask your agent to set it up…") { asking = true }
                 .buttonStyle(.link)
         }
     }

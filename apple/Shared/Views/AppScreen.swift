@@ -433,6 +433,7 @@ struct RouteView: View {
                 }
             case .groups: GroupsView(open: open)
             case .devices: DevicesView()
+            case .agents: AgentsView()
             case .vault: VaultView()
             case .access: AccessLogView()
             case .users: UsersView()

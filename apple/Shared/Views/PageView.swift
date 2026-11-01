@@ -580,6 +580,7 @@ struct SettingsPage: View {
                     row(.store, value: "")
                     row(.groups, value: "")
                     row(.devices, value: "")
+                    row(.agents, value: "")
                 }
                 SettingsSection {
                     row(.vault, value: "")
@@ -798,6 +799,7 @@ extension Setting {
         case .store: .blue
         case .groups: .green
         case .devices: .gray
+        case .agents: .pink
         case .vault: .indigo
         case .access: .purple
         case .users: .teal
