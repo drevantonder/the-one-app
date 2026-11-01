@@ -16,10 +16,11 @@ function places(ctx) {
   return out;
 }
 
-/// Whether the caller acts for an app's owner: it's theirs, a group's they're an admin of, or admins' and they're one.
+/// Whether the caller acts for an owner (an app's, a server's): it's theirs, a group's they're an admin of, or admins'
+/// or the install's and they're an admin.
 function mine(ctx, owner) {
   if (owner === `user:${ctx.me.user}`) return true;
-  if (owner === "admins") return ctx.me.role === "admin";
+  if (owner === "admins" || owner === "install") return ctx.me.role === "admin";
   return ctx.groups.some((g) => g.id === owner && g.role === "admin");
 }
 
