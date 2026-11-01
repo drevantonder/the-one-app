@@ -1015,6 +1015,7 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     let port = echo().await;
     let module = |name: &str| format!(r#"export default {{
   name: "{name}",
+  vault: {{ account: {{ title: "Example account", type: "Example account", accounts: true, hosts: ["127.0.0.1"], fields: {{ email: {{}}, token: {{ secret: true }} }} }} }},
   ops: {{
     send: {{ run: async (ctx, {{ url, auth }}) => {{
       const r = await fetch(url, {{ method: "POST", headers: {{ authorization: auth }}, body: "" }});
@@ -1048,7 +1049,12 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     assert!(a.call(call("one", "rehost", json!({ "id": id }))).await.is_err(), "an app can't send a secret somewhere else");
     let listed = a.vault(&me, None).await.unwrap();
     assert_eq!(listed[0]["app"], "one", "kept by the app whose sign-in made it");
-    assert_eq!(listed[0]["wanted_by"], json!(["one"]));
+    assert_eq!(listed[0]["account"], true, "an account, since one asks for accounts with its fields");
+    assert_eq!(listed[0]["wanted_by"], json!(["one", "two"]), "both ask for its fields");
+    // A request for what an app declares asks for its fields, and offers the item that has them.
+    let asked = a.request_item(&me, &mine, "two", Some("account"), &json!({}), "").await.unwrap();
+    let asked = &a.item_requests(&me, None, asked["id"].as_str()).unwrap()[0];
+    assert_eq!((asked["title"].as_str(), asked["matches"][0]["id"].as_str()), (Some("Example account"), Some(id.as_str())));
 
     // The same account signed in from another app is the same item, now switched on for both.
     let again = a.call(call("two", "sign_in", json!({ "email": "a@example.com", "token": "t2" }))).await.unwrap();
