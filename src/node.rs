@@ -717,12 +717,12 @@ impl Node {
         })
     }
 
-    /// A call as the node runs it: one that names an app with no deploy is its driver's, as older machines ask for
-    /// a driver; one that names a driver is that driver's, whatever app shares its name.
+    /// A call as the node runs it: one that names a driver is that driver's, whatever app shares its name. As older
+    /// machines ask for a driver, so is one that names an app with no deploy, or that runs on every server.
     fn resolve(&self, mut req: CallRequest) -> CallRequest {
         if let Some(driver) = &req.driver {
             req.app = driver.clone();
-        } else if req.app != members::APP && !self.deployed(&req.app) {
+        } else if req.app != members::APP && (!self.deployed(&req.app) || req.server.as_deref() == Some("all")) {
             req.driver = Some(req.app.clone());
         }
         req
@@ -730,6 +730,13 @@ impl Node {
 
     fn deployed(&self, app: &str) -> bool {
         self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some()))).unwrap_or(false)
+    }
+
+    /// The drivers serving on this server, by name.
+    fn local_drivers(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.0.native.iter().map(|n| n.name.to_string()).collect();
+        names.extend(self.0.providers.describe().iter().filter_map(|d| d["name"].as_str().map(str::to_string)));
+        names
     }
 
     fn runs_driver_here(&self, app: &str) -> bool {
@@ -1855,7 +1862,7 @@ impl Node {
                         "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(),
                         "serves_me": m.serves(&s.key, me),
                         "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
-                        "drivers": session.map(|s| s.drivers.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default(),
+                        "drivers": if s.key == self.0.id { self.local_drivers() } else { session.map(|s| s.drivers.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },
                         "load": load,
                     })
                 })

@@ -625,6 +625,9 @@ async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
     assert_eq!((board["built_in"].clone(), board["added"].clone(), board["title"].clone()), (json!(true), json!(false), json!("Board")), "{board}");
     assert!(board["description"].as_str().is_some_and(|d| d.contains("posts")), "a built-in app's code describes it before it's added: {board}");
     assert_eq!((board["color"].clone(), board["image"].clone()), (json!("#ff9500"), json!(null)), "{board}");
+    let (whatsapp, desktops) = (app(&listed, "whatsapp"), app(&listed, "desktops"));
+    assert_eq!((whatsapp["connected"].clone(), desktops["connected"].clone()), (json!(true), json!(false)), "an app wrapping a driver is listed as any app is: {whatsapp} {desktops}");
+    assert_eq!(whatsapp["uses"], json!({ "apps": [], "drivers": [] }), "nothing runs it yet: {whatsapp}");
     let drive = app(&listed, "drive");
     assert!(drive["image"].as_str().is_some_and(|i| i.starts_with("data:image/png;base64,")), "icon.png in an app's folder is its picture");
     let everyone = listed["places"].as_array().unwrap().iter().find(|p| p["name"] == "Everyone").unwrap().clone();
@@ -634,6 +637,11 @@ async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
     assert!(!a.apps(&me).await.unwrap().iter().any(|x| x["name"] == "board"), "the install's own list has only what it added");
     let code = a.call(call("apps", "code", json!({ "app": "board", "path": "src/app.js" }))).await.unwrap();
     assert!(code["text"].as_str().unwrap().contains("name: \"board\""), "a built-in app's code reads before it's added");
+
+    a.call(call("apps", "add", json!({ "app": "whatsapp", "scope": "user" }))).await.unwrap();
+    eventually("whatsapp to run", async || a.call(call("whatsapp", "accounts", json!({}))).await.is_ok_and(|v| v == json!([]))).await;
+    let needs = a.call(call("whatsapp", "chats", json!({}))).await.unwrap_err();
+    assert!(format!("{needs:#}").contains("needs the WhatsApp driver on one of your servers"), "{needs:#}");
 
     a.call(call("apps", "add", json!({ "app": "board", "scope": "user" }))).await.unwrap();
     let board = app(&a.call(call("apps", "list", json!({}))).await.unwrap(), "board");
