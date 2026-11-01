@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds the Mac app with this checkout's node inside it, signs it and installs it to ~/Applications; with --release, it
-# also notarizes it. CONFIG=path/to/config.toml builds another context.
+# also notarizes it. CONFIG=path/to/config.toml builds another white label.
 set -euo pipefail
 cd "$(dirname "$0")"
 . ./project.sh
@@ -12,7 +12,7 @@ label=$BUNDLE_ID.node
 xcodebuild -project Shells.xcodeproj -scheme Mac -configuration Release -destination generic/platform=macOS -derivedDataPath build/derived build -quiet
 
 app="build/derived/Build/Products/Release/$CONFIG_NAME.app"
-# Cargo names the binary after the package, whatever the context.
+# Cargo names the binary after the package, whatever the white label.
 cp "$root/target/release/one" "$app/Contents/MacOS/$CONFIG_CLI"
 mkdir -p "$app/Contents/Resources" && cp build/AppIcon.icns "$app/Contents/Resources/"
 plutil -replace CFBundleIconFile -string AppIcon "$app/Contents/Info.plist"

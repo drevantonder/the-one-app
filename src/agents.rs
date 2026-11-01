@@ -18,7 +18,7 @@ use crate::sidecars::Reply;
 /// The built-in sidecar's name, which agents act as when the Vault fills their requests (`vault_fetch`).
 pub const NAME: &str = "agents";
 
-/// Marks a skill folder as this context's to replace, so the nodes of two contexts on one machine leave each other's alone.
+/// Marks a skill folder as this white label's to replace, so the nodes of two white labels on one machine leave each other's alone.
 fn marker() -> String {
     format!(".synced-{}", crate::config::CLI)
 }
@@ -296,7 +296,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     let pi = dir("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
     let addr = crate::api::addr();
     let hook = format!("curl -sf --max-time 3 --data-binary @- http://{addr}{HOOK_PATH} || true");
-    // Another context's node on this machine has a hook of its own, on its own port.
+    // Another white label's node on this machine has a hook of its own, on its own port.
     let port = format!(":{}{HOOK_PATH}", addr.rsplit(':').next().unwrap_or_default());
     let server = crate::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
@@ -585,7 +585,7 @@ mod tests {
         assert_eq!(hooks(&out), [HOOK, "echo hi"]);
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["hooks"]["UserPromptSubmit"].as_array().unwrap().len(), 1, "the emptied group goes: {out}");
-        // Another context's board hook, on another port, stays.
+        // Another white label's board hook, on another port, stays.
         let other = "curl -sf --max-time 3 --data-binary @- http://127.0.0.1:4848/hooks/board/news || true";
         let text = format!("{{\"hooks\":{{\"UserPromptSubmit\":[{{\"hooks\":[{{\"type\":\"command\",\"command\":\"{other}\"}}]}}]}}}}");
         assert_eq!(hooks(&with_hook(&text, HOOK, OURS).unwrap().unwrap()), [other, HOOK]);
@@ -645,7 +645,7 @@ mod tests {
     }
 
     #[test]
-    fn the_server_is_named_after_the_context() {
+    fn the_server_is_named_after_the_white_label() {
         let name = crate::skills::server_name();
         assert!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !name.starts_with('-') && !name.ends_with('-'), "{name}");
     }

@@ -12,12 +12,12 @@ fn main() {
         get("cli").as_str().unwrap(),
         get("port").as_integer().unwrap(),
         get("accent").as_str().unwrap(),
-        // The GitHub repo releases come from; a context without one isn't released.
+        // The GitHub repo releases come from; a white label without one isn't released.
         config.get("repo").and_then(|r| r.as_str()).unwrap_or(""),
     );
     let optional = |key: &str| config.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    // Where the config file is, so `update` builds the same context from fresh checkouts: inside this repo, or inside
-    // the git repo it's in (another context's own, `CONFIG_REPO`), or else wherever it is on this machine.
+    // Where the config file is, so `update` builds the same white label from fresh checkouts: inside this repo, or inside
+    // the git repo it's in (another white label's own, `CONFIG_REPO`), or else wherever it is on this machine.
     let manifest = std::fs::canonicalize(std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
     let file = std::fs::canonicalize(&path).unwrap();
     let git = |args: &[&str]| {
@@ -88,7 +88,7 @@ fn main() {
     // A build with uncommitted changes isn't that commit; say so, so it can't be released as it.
     let dirty = std::process::Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).output().is_ok_and(|o| !o.stdout.is_empty());
     let dirty = dirty || config_commit.as_ref().is_some_and(|c| c.2);
-    // A context's build is main's commit and its config's, so a change to either is a new build that nodes take.
+    // A white label's build is main's commit and its config's, so a change to either is a new build that nodes take.
     let commit = match &config_commit {
         Some((config, ..)) => format!("{commit}-{config}"),
         None => commit,

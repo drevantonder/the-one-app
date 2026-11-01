@@ -138,7 +138,7 @@ pub struct Members {
     /// (user, server) for each `trust` not since undone by `untrust`.
     pub trusted: BTreeSet<(String, Key)>,
     pub relays: Vec<String>,
-    /// The install's settings its admins set: each name's latest value. The rest are the context's defaults.
+    /// The install's settings its admins set: each name's latest value. The rest are the white label's defaults.
     pub settings: BTreeMap<String, String>,
     pub apps: BTreeMap<String, App>,
     /// The latest `sidecar` entry of each sidecar on each server: (server, sidecar).

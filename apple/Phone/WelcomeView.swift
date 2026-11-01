@@ -2,7 +2,7 @@ import SwiftUI
 import VisionKit
 import AuthenticationServices
 
-/// The first run: name this iPhone, then join with the pairing code another device shows. For a context with one
+/// The first run: name this iPhone, then join with the pairing code another device shows. For a white label with one
 /// install, sign in to it instead, a pairing code still there for anyone without the account.
 struct WelcomeView: View {
     @Environment(Phone.self) private var phone

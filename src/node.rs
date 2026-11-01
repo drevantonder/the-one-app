@@ -1,4 +1,4 @@
-//! A node: this server's install (a context holds one), its replica and views, its iroh endpoint, and where calls run.
+//! A node: this server's install (a white label holds one), its replica and views, its iroh endpoint, and where calls run.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -435,7 +435,7 @@ impl Node {
         self.with(|i| Ok(i.user.clone()))
     }
 
-    /// Refuses a second install: a context holds one install, and another context is another app.
+    /// Refuses a second install: a white label holds one install, and another context is another white label.
     fn ensure_no_install(&self) -> Result<()> {
         if self.has_install() {
             bail!("this server already belongs to an install, and {} holds one; for another, install that context's own app", crate::config::NAME);
@@ -2250,7 +2250,7 @@ impl Node {
         })
     }
 
-    /// Sets one of the install's settings, for an admin; `None` puts back the context's default.
+    /// Sets one of the install's settings, for an admin; `None` puts back the white label's default.
     pub async fn set_setting(&self, caller: &Caller, name: &str, value: Option<&str>) -> Result<()> {
         self.member_as(caller, "setting", json!({ "name": name, "value": value })).await
     }
@@ -3166,7 +3166,7 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
 }
 
 /// Where a built-in app's code is: its folder of `apps/` in the repo releases come from, at this build's commit when
-/// it's one (else main); none for a context with no repo.
+/// it's one (else main); none for a white label with no repo.
 fn built_in_source(app: &str) -> Option<String> {
     let repo = crate::config::REPO;
     let commit = crate::config::BUILD.split(['-', '+']).next().filter(|c| !crate::config::BUILD.contains('+') && c.len() >= 7 && c.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -3569,7 +3569,7 @@ impl ProtocolHandler for CallHandler {
     }
 }
 
-/// The install's settings: the context's defaults (config.toml's `[settings]`), and what its admins set over them.
+/// The install's settings: the white label's defaults (config.toml's `[settings]`), and what its admins set over them.
 fn settings(m: &Members) -> serde_json::Map<String, Value> {
     let mut out: serde_json::Map<String, Value> = crate::config::SETTINGS.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
     out.extend(m.settings.iter().map(|(k, v)| (k.clone(), json!(v))));

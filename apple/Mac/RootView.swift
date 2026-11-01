@@ -110,7 +110,7 @@ private struct ServicesSheet: View {
     }
 }
 
-/// Creating an install, or joining one with a pairing code; or, for a context with one install, signing in to it.
+/// Creating an install, or joining one with a pairing code; or, for a white label with one install, signing in to it.
 private struct WelcomeView: View {
     @Environment(Store.self) private var store
     @Environment(\.webAuthenticationSession) private var session

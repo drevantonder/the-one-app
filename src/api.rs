@@ -300,7 +300,7 @@ async fn relays(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-/// `{ name, value }`: one of the install's settings, for admins; `value: null` puts back the context's default.
+/// `{ name, value }`: one of the install's settings, for admins; `value: null` puts back the white label's default.
 async fn settings(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     node.member("setting", json!({ "name": text(&body, "name")?, "value": body["value"] })).await?;
     done()

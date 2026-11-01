@@ -15,7 +15,7 @@
 // emptying it turns joining off again. Both are read on each request.
 //
 // and serves listen at public_url (a reverse proxy, Tailscale Funnel). The
-// Google OAuth client's redirect URI is public_url + "/callback". A context
+// Google OAuth client's redirect URI is public_url + "/callback". A white label
 // whose shells sign people in has public_url as config.toml's `sign_in`: the
 // shells open public_url + "/start?app=1", which ends at <cli>://join.
 package main

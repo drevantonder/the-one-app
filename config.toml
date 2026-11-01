@@ -1,4 +1,4 @@
-# The context this build is: The One App. Another context is this code built with its own config.toml
+# The white label this build is: The One App. Another white label is this code built with its own config.toml
 # (CONFIG=path/to/config.toml), kept in its own repo; nothing else in the code names the product.
 name = "The One App"
 cli = "one"

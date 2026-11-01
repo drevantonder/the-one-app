@@ -2,7 +2,7 @@
 # Builds a sidecar and installs it as the one-<sidecar> service on a device,
 # here or over ssh: ./install.sh whatsapp [host]. On Linux it's a systemd
 # service; on a Mac, a launch agent of the user's. CONFIG=path/to/config.toml
-# installs it as <cli>-<sidecar>, for that context's node: its port, CLI and
+# installs it as <cli>-<sidecar>, for that white label's node: its port, CLI and
 # data folder (the node service's <CLI>_HOME, if it has one).
 set -eu
 config=${CONFIG:+$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")}

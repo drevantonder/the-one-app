@@ -55,7 +55,7 @@ async fn servers_and_a_phone_share_a_deployed_board() {
 
     let recovery = a.create("Test", "Andre").await.unwrap();
     assert_eq!(recovery.len(), 64, "creating gives the recovery key's secret once");
-    assert!(a.create("Another", "Andre").await.is_err(), "a context holds one install");
+    assert!(a.create("Another", "Andre").await.is_err(), "a white label holds one install");
     let apps = a.apps(&one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None }).await.unwrap();
     let listed = apps.iter().find(|app| app["name"] == "board").expect("the config's board is deployed");
     assert_eq!(listed["owner"], "admins");
@@ -612,7 +612,7 @@ async fn the_app_store_lists_adds_and_shows_code() {
     a.member("group", json!({ "group": "b000000000000001", "name": "Team" })).await.unwrap();
     assert_eq!(a.state()["config"]["store"], "apps");
     assert_eq!(a.state()["brand"], a.state()["config"], "shells built before it was config read brand");
-    // The install's settings are the context's until an admin sets one, and null puts it back.
+    // The install's settings are the white label's until an admin sets one, and null puts it back.
     let default = one::config::SETTINGS.iter().find(|(k, _)| *k == "made_here").map_or(serde_json::Value::Null, |(_, v)| json!(v));
     assert_eq!(a.state()["install"]["settings"]["made_here"], default);
     a.set_setting(&me, "made_here", Some("Made by the team")).await.unwrap();
