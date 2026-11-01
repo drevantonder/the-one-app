@@ -20,6 +20,28 @@ async function running(ctx) {
   return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("whatsapp")).map((s) => s.name);
 }
 
+// Each account is a Vault item too, so the person's Vault lists it: its number and the server it's linked on, plain,
+// with no secret, since the link itself stays in the sidecar on that server. Linking finishes on the phone after
+// sign_in returns, so listing the accounts makes the items of new ones, and lets go of those whose server, online,
+// no longer has them.
+const TYPE = "WhatsApp account";
+const VAULT = {
+  account: { title: TYPE, type: TYPE, domain: "whatsapp.com", accounts: true, fields: { phone: { label: "Number" }, server: { label: "Linked on" } } },
+};
+
+async function keep(ctx, listed, servers) {
+  if (!ctx.user) return;
+  const items = (await ctx.vault.items()).filter((i) => i.type === TYPE && i.scope === ctx.user.id);
+  for (const a of listed) {
+    const item = items.find((i) => i.fields.phone?.value === a.account);
+    if (!item) await ctx.vault.create({ title: a.account, type: TYPE, domain: "whatsapp.com", hosts: [], same: "phone", fields: { phone: { value: a.account }, server: { value: a.server } } });
+    else if (item.fields.server?.value !== a.server) ctx.vault.update(item.id, { fields: { server: { value: a.server } } });
+  }
+  for (const item of items) {
+    if (servers.includes(item.fields.server?.value) && !listed.some((a) => a.account === item.fields.phone?.value)) ctx.vault.release(item.id);
+  }
+}
+
 export default {
   name: "whatsapp",
   title: "WhatsApp",
@@ -31,6 +53,7 @@ export default {
   needs: "Needs a server of yours to link your phone to",
   instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their servers, as WhatsApp Desktop is linked; calls find the server. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another server; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
   uses: { sidecars: ["whatsapp"] },
+  vault: VAULT,
 
   ops: {
     accounts: {
@@ -38,7 +61,13 @@ export default {
       description: "The WhatsApp accounts linked on any of your servers, this one's first: each { account, ok, server }, with why when ok is false.",
       input: {"properties": {}, "type": "object"},
       // A connector lists no accounts, rather than failing, where no server runs its sidecar; its settings say why.
-      run: async (ctx, input) => ((await running(ctx)).length ? sidecar(ctx, "accounts", input) : []),
+      async run(ctx, input) {
+        const servers = await running(ctx);
+        if (!servers.length) return [];
+        const listed = await sidecar(ctx, "accounts", input);
+        await keep(ctx, listed, servers).catch(() => {}); // a call that only reads lists them all the same
+        return listed;
+      },
     },
     status: {
       reads: true,
@@ -83,7 +112,12 @@ export default {
       confirm: true,
       description: "Unlink a WhatsApp account: removes this server from its linked devices and deletes the messages kept here. Destructive: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
       input: {"properties": {"account": {"description": "the account's number; needed when several are linked here", "type": "string"}}, "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "sign_out", input),
+      async run(ctx, input) {
+        const out = await sidecar(ctx, "sign_out", input);
+        const servers = await running(ctx);
+        await keep(ctx, await sidecar(ctx, "accounts", {}), servers);
+        return out;
+      },
     },
     _pairing: {
       reads: true,

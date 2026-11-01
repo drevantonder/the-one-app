@@ -20,6 +20,25 @@ async function running(ctx) {
   return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("messenger")).map((s) => s.name);
 }
 
+// Each account is a Vault item too, so the person's Vault lists it: the browser profile, plain, with no secret, since
+// the sign-in itself stays in the profile. Signing in finishes in the browser after sign_in returns, so listing the
+// accounts makes the items of new ones, and lets go of those no longer linked.
+const TYPE = "Messenger account";
+const VAULT = {
+  account: { title: TYPE, type: TYPE, domain: "messenger.com", accounts: true, fields: { profile: { label: "Browser profile" } } },
+};
+
+async function keep(ctx, listed) {
+  if (!ctx.user) return;
+  const items = (await ctx.vault.items()).filter((i) => i.type === TYPE && i.scope === ctx.user.id);
+  for (const a of listed) {
+    if (!items.some((i) => i.fields.profile?.value === a.account)) await ctx.vault.create({ title: a.account, type: TYPE, domain: "messenger.com", hosts: [], same: "profile", fields: { profile: { value: a.account } } });
+  }
+  for (const item of items) {
+    if (!listed.some((a) => a.account === item.fields.profile?.value)) ctx.vault.release(item.id);
+  }
+}
+
 export default {
   name: "messenger",
   title: "Messenger",
@@ -31,6 +50,7 @@ export default {
   needs: "Needs Computer Use on one of your servers",
   instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in a desktop's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
   uses: { sidecars: ["messenger"] },
+  vault: VAULT,
 
   ops: {
     accounts: {
@@ -38,7 +58,12 @@ export default {
       description: "The browser profiles Messenger reads, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
       input: {"properties": {}, "type": "object"},
       // A connector lists no accounts, rather than failing, where no server runs its sidecar; its settings say why.
-      run: async (ctx, input) => ((await running(ctx)).length ? sidecar(ctx, "accounts", input) : []),
+      async run(ctx, input) {
+        if (!(await running(ctx)).length) return [];
+        const listed = await sidecar(ctx, "accounts", input);
+        await keep(ctx, listed).catch(() => {}); // a call that only reads lists them all the same
+        return listed;
+      },
     },
     chats: {
       reads: true,
@@ -71,7 +96,11 @@ export default {
     sign_out: {
       description: "Stop reading a browser profile's Messenger. The profile, and its sign-ins to other sites, stay.",
       input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}}, "required": ["account"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "sign_out", input),
+      async run(ctx, input) {
+        const out = await sidecar(ctx, "sign_out", input);
+        await keep(ctx, await sidecar(ctx, "accounts", {}));
+        return out;
+      },
     },
     _profiles: {
       reads: true,
