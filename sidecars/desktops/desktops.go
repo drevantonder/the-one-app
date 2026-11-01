@@ -538,6 +538,30 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return fmt.Sprintf("Deleted the %s profile.", login), nil
+	case "rename_profile":
+		login, to := text("login"), text("to")
+		if r := ds.profileElsewhere(ctx, op, in, login, here); r != nil {
+			return r, nil
+		}
+		if !validProfile.MatchString(login) || !ds.keeps(login) {
+			return nil, fmt.Errorf("no profile %q", login)
+		}
+		if !validProfile.MatchString(to) {
+			return nil, errors.New("a profile's name is letters, digits and dashes, like Personal or PTC")
+		}
+		if ds.keeps(to) || !here && ds.loginServer(ctx, to) != "" {
+			return nil, fmt.Errorf("there's already a %s profile", to)
+		}
+		// A sign-in saves under the name it opened with, which would bring the old name back.
+		for _, l := range ds.loans() {
+			if l.SigningIn && l.Login == login {
+				return nil, fmt.Errorf("the %s profile is being signed in to: save it first", login)
+			}
+		}
+		if err := os.Rename(ds.loginDir(login), ds.loginDir(to)); err != nil {
+			return nil, err
+		}
+		return fmt.Sprintf("Renamed the %s profile to %s.", login, to), nil
 	case "backup":
 		d, err := ds.running(ctx, name)
 		if err != nil {
@@ -731,7 +755,7 @@ func viewURL(ctx context.Context, d desktop, minutes int) (string, error) {
 
 // local are the operations that act on this server even when given a
 // desktop it doesn't have.
-var local = []string{"list", "create", "borrow", "sign_in", "profiles", "add_profile", "delete_profile", "backups", "restore", "refresh_tools"}
+var local = []string{"list", "create", "borrow", "sign_in", "profiles", "add_profile", "delete_profile", "rename_profile", "backups", "restore", "refresh_tools"}
 
 // reply is a result with entries for the node to write in the caller's log.
 type reply struct {

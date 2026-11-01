@@ -86,6 +86,11 @@ export default {
       input: {"properties": {"profile": {"description": "its name: letters, digits and dashes, like Personal or PTC", "type": "string"}}, "required": ["profile"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "add_profile", input),
     },
+    rename_profile: {
+      description: "Rename a browser profile. Agents borrow desktops with it by its new name.",
+      input: {"properties": {"profile": {"description": "the profile's name", "type": "string"}, "to": {"description": "its new name: letters, digits and dashes", "type": "string"}}, "required": ["profile", "to"], "type": "object"},
+      run: (ctx, input) => sidecar(ctx, "rename_profile", input),
+    },
     delete_profile: {
       description: "Delete a browser profile, signing agents out of every site in it. Only when the person asked.",
       input: {"properties": {"profile": {"description": "the profile's name", "type": "string"}}, "required": ["profile"], "type": "object"},
@@ -402,11 +407,17 @@ export default {
   }
 
   // Each profile, saved or being signed in to; the row to add one stays as it is, with whatever is typed in it.
-  let drawn = "";
-  function drawProfiles() {
+  // While one is being renamed, its row is a field the page's refreshes leave alone.
+  let drawn = "", renaming = null;
+  function drawProfiles(force) {
+    if (renaming && !force) return;
     const open = signingIn();
     const names = [...new Set([...profiles.map((p) => p.profile), ...Object.keys(open)])];
     const html = names.map((name) => {
+      if (name === renaming) {
+        return \`<div class="row plain" data-row><div class="main"><input id="rename" class="search" style="margin:0" value="\${one.esc(name)}" autocapitalize="words" autocorrect="off"></div>\` +
+          \`<button class="plain" id="rename-save">Save</button><button class="plain" id="rename-cancel">Cancel</button></div>\`;
+      }
       const p = profiles.find((p) => p.profile === name), s = open[name];
       const on = p?.server ? " on " + one.esc(host(p.server)) : "";
       const saved = p?.saved ? \`Saved \${one.esc(one.ago(Date.parse(p.saved)))}\${on}\` : p ? \`No sign-ins yet\${on}\` : "";
@@ -414,7 +425,7 @@ export default {
       const sub = s ? \`Signing in\${s.server ? " on " + one.esc(host(s.server)) : ""} · \${p?.saved ? "saved " + one.esc(one.ago(Date.parse(p.saved))) : "not saved yet"}\` : saved;
       const actions = s
         ? (url ? \`<a class="plain" href="\${one.esc(url)}" target="_blank" rel="noopener">Open desktop</a>\` : "") + \`<button class="plain" data-save="\${one.esc(name)}">Save</button>\`
-        : \`<button class="plain" data-profile="\${one.esc(name)}">Sign in to a site</button><button class="plain danger" data-delete="\${one.esc(name)}">Delete</button>\`;
+        : \`<button class="plain" data-profile="\${one.esc(name)}">Sign in to a site</button><button class="plain" data-rename="\${one.esc(name)}">Rename</button><button class="plain danger" data-delete="\${one.esc(name)}">Delete</button>\`;
       return \`<div class="row plain" data-row><div class="main"><div class="title"><span>\${one.esc(name)}</span></div><div class="sub small">\${sub}</div></div>\${actions}</div>\`;
     }).join("");
     if (html === drawn) return;
@@ -424,6 +435,35 @@ export default {
     document.getElementById("add-row").insertAdjacentHTML("beforebegin", html);
     for (const b of list.querySelectorAll("[data-profile]")) b.onclick = () => signIn(b, b.dataset.profile);
     for (const b of list.querySelectorAll("[data-save]")) b.onclick = () => save(b, open[b.dataset.save]);
+    for (const b of list.querySelectorAll("[data-rename]")) b.onclick = () => {
+      renaming = b.dataset.rename;
+      drawProfiles(true);
+      const input = document.getElementById("rename");
+      input.focus();
+      input.select();
+    };
+    if (renaming) {
+      const input = document.getElementById("rename"), save = document.getElementById("rename-save");
+      const cancel = () => { renaming = null; drawProfiles(true); };
+      save.onclick = async () => {
+        const to = input.value.trim();
+        if (!to || to === renaming) return cancel();
+        save.disabled = true;
+        try {
+          await one.call("rename_profile", { profile: renaming, to });
+          renaming = null;
+          await loadProfiles();
+        } catch (err) {
+          save.disabled = false;
+          alert(err.message);
+        }
+      };
+      document.getElementById("rename-cancel").onclick = cancel;
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") save.click();
+        if (e.key === "Escape") cancel();
+      };
+    }
     for (const b of list.querySelectorAll("[data-delete]")) b.onclick = async () => {
       const profile = b.dataset.delete;
       if (await one.confirm("#profile-confirm", { title: \`Delete the \${profile} profile?\`, detail: "Agents are signed out of every site in it, and can't borrow a desktop with it.",
@@ -451,7 +491,9 @@ export default {
       add.disabled = false;
     }
   };
-  input.onkeydown = (e) => e.key === "Enter" && add.click();
+  input.onkeydown = (e) => {
+    if (e.key === "Enter") add.click();
+  };
   loadProfiles();
 
   // A picture of each running desktop, and a link to open it, kept until shortly before the link stops working.
