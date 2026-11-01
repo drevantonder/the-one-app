@@ -90,7 +90,7 @@ async function show() {
       + (d.yours ? '<button class="button capsule" onclick="restore(this)">Restore</button>' : "") + danger(d);
   if (d.file) return one.open("file", { repo: d.repo, ref: refOf(d), path: at });
   if (d.empty)
-    return head(d) + danger(d) + one.empty({ icon: "code", title: "No code yet.", text: `Push some with <code>git push ${one.config?.cli || "one"}://${esc(d.repo)} main</code>` });
+    return head(d) + one.empty({ icon: "code", title: "No code yet.", text: `Push some with <code>git push ${one.config?.cli || "one"}://${esc(d.repo)} main</code>` }) + danger(d);
   const list = d.entries.length
     ? `<div class="list files">${at ? `<a class="row plain entry up" onclick="${go("repo", { repo: d.repo, ref: refOf(d), path: at.split("/").slice(0, -1).join("/") })}">${one.icon("folder", "entry-icon")}<span class="entry-name">..</span></a>` : ""}${d.entries.map((e) => entry(d, e)).join("")}</div>`
     : one.empty({ icon: "folder", title: "This folder is empty." });
