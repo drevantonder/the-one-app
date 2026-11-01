@@ -125,7 +125,7 @@ struct ConnectorsView: View {
                 }
             }
             if apps.isEmpty {
-                Text("No connectors on \(page.title) yet.").foregroundStyle(.secondary)
+                Text("No connectors yet.").foregroundStyle(.secondary)
             }
             if store.canArrange(page.scope), let route = store.connectorStoreRoute {
                 Section {
@@ -143,9 +143,11 @@ struct ConnectorsView: View {
         .navigationTitle("Connectors")
         .navigationSubtitle(subtitle(apps.count))
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(editing ? "Done" : "Edit") { withAnimation { editing.toggle() } }
-                    .disabled(accounts.values.allSatisfy { (try? $0.get())?.isEmpty ?? true })
+            if !apps.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(editing ? "Done" : "Edit") { withAnimation { editing.toggle() } }
+                        .disabled(accounts.values.allSatisfy { (try? $0.get())?.isEmpty ?? true })
+                }
             }
         }
         .task(id: apps.map(\.name)) { await load(apps) }
@@ -166,14 +168,18 @@ struct ConnectorsView: View {
         .deleteAppDialog($deleting, error: $error)
     }
 
-    /// "For you only · 4 connectors": whose page it is, and how many connectors it has.
+    /// "For you only · 4 connectors": whose page it is, and how many connectors it has, if any.
     private func subtitle(_ count: Int) -> String {
         let whose = switch page.scope {
         case "user": String(localized: "For you only")
         case "global": String(localized: "For everyone")
         default: String(localized: "For \(page.title)")
         }
-        return count == 1 ? String(localized: "\(whose) · 1 connector") : String(localized: "\(whose) · \(count) connectors")
+        return switch count {
+        case 0: whose
+        case 1: String(localized: "\(whose) · 1 connector")
+        default: String(localized: "\(whose) · \(count) connectors")
+        }
     }
 
     private func header(_ app: AppInfo) -> some View {

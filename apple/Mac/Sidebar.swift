@@ -22,14 +22,11 @@ struct Sidebar: View {
                             .accessibilityLabel(app.label)
                             .tag(store.open(app, from: page))
                     }
-                    let connectors = store.connectors(on: page)
-                    if !connectors.isEmpty {
-                        FolderTile(apps: connectors, size: 24)
-                            .frame(maxWidth: .infinity)
-                            .help("Connectors")
-                            .accessibilityLabel("Connectors")
-                            .tag(Route.connectors(page.scope))
-                    }
+                    FolderTile(apps: store.connectors(on: page), size: 24)
+                        .frame(maxWidth: .infinity)
+                        .help("Connectors")
+                        .accessibilityLabel("Connectors")
+                        .tag(Route.connectors(page.scope))
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {
                         Text(initials(page.title))
@@ -67,16 +64,13 @@ struct Sidebar: View {
                         .badge(store.appBadge(app.name, on: page) ?? 0)
                         .tag(store.open(app, from: page))
                     }
-                    // Its connectors, in one row, as the page has them in one folder.
-                    let connectors = store.connectors(on: page)
-                    if !connectors.isEmpty {
-                        Label {
-                            Text("Connectors")
-                        } icon: {
-                            FolderTile(apps: connectors, size: 20)
-                        }
-                        .tag(Route.connectors(page.scope))
+                    // Its connectors, in one row, as the page has them in one folder, there even with none.
+                    Label {
+                        Text("Connectors")
+                    } icon: {
+                        FolderTile(apps: store.connectors(on: page), size: 20)
                     }
+                    .tag(Route.connectors(page.scope))
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {
                         Text(page.title)

@@ -7,7 +7,7 @@ private let iconSize: CGFloat = 60
 #endif
 
 /// A page: its title (on a Mac; a phone's bar names it instead), then one grid, as the Home Screen's: its widgets in
-/// their sizes, then its apps' icons, which flow around them, then the Connectors folder.
+/// their sizes, then its apps' icons, which flow around them, then the Connectors folder, there even with none.
 struct PageView: View {
     @Environment(Store.self) private var store
     var page: Page
@@ -24,9 +24,10 @@ struct PageView: View {
                 #if os(macOS)
                 PageHeader(title: page.title, subtitle: page.subtitle)
                 #endif
-                if apps.isEmpty && widgets.isEmpty && connectors.isEmpty {
+                if apps.isEmpty && widgets.isEmpty {
                     EmptyPage(page: page, open: open)
-                } else if width > 0 {
+                }
+                if width > 0 {
                     HomeGrid(grid: grid) {
                         ForEach(widgets) { widget in
                             let size = grid.fit(store.size(of: widget, on: page))
@@ -39,11 +40,8 @@ struct PageView: View {
                             }
                             .contextMenu { AppActions(app: app, page: page, open: open, deleting: $deleting, error: $error) }
                         }
-                        if !connectors.isEmpty {
-                            IconButton(title: String(localized: "Connectors")) { open(.connectors(page.scope)) } icon: {
-                                FolderTile(apps: connectors, size: grid.icon)
-                            }
-                            .accessibilityLabel("Connectors, \(connectors.count) apps")
+                        IconButton(title: String(localized: "Connectors")) { open(.connectors(page.scope)) } icon: {
+                            FolderTile(apps: connectors, size: grid.icon)
                         }
                     }
                 }
