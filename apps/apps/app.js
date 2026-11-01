@@ -4,15 +4,16 @@
 // An ordinary app: it installs with ctx.install, with the caller's own rights. Installing a built-in app the install
 // hasn't added yet adds it (admins only).
 
-/// The caller's pages, where apps install: [{ scope, id, name, may, why }]; `why` says who can when they can't.
+/// The caller's pages, where apps install: [{ scope, id, name, may, why }]; `why` says who can, in two words, when they
+/// can't.
 function places(ctx) {
   const out = [{ scope: "user", id: `user:${ctx.me.user}`, name: "You", may: true }];
   for (const g of ctx.groups) {
     const may = g.role === "admin";
-    out.push({ scope: g.id, id: g.id, name: g.name, may, why: may ? null : `Only ${g.name}'s admins can add apps to its page.` });
+    out.push({ scope: g.id, id: g.id, name: g.name, may, why: may ? null : "Only admins" });
   }
   const admin = ctx.me.role === "admin";
-  out.push({ scope: "global", id: "global", name: "Everyone", may: admin, why: admin ? null : "Only the install's admins can add apps for everyone. Settings shows who they are." });
+  out.push({ scope: "global", id: "global", name: "Everyone", may: admin, why: admin ? null : "Only admins" });
   return out;
 }
 
@@ -121,6 +122,46 @@ function folder(files, dir) {
       <div class="main"><div class="title"><span>${one.esc(n.replace(/\/$/, ""))}</span><span class="when">${f.dir ? "" : one.size(f.size)}</span></div></div><div class="chev">›</div></a>`;
   };
   return '<div class="list code-list">' + names.map(row).join("") + "</div>";
+}
+
+/// The Add to… sheet, from an app's row or its page: a switch for each of the person's pages, dimmed with two words of
+/// reason where they can't use it. Runs in the page: the screens include it.
+function addTo(name, { apps, places, admin }) {
+  let error = "";
+  const sheet = one.sheet({ title: apps.find((a) => a.name === name)?.title || name });
+  const draw = () => {
+    const a = apps.find((x) => x.name === name);
+    if (!a) return sheet.close();
+    const first = !a.added && !admin ? "Only admins" : null;
+    const row = (p) => {
+      const why = first || p.why, on = a.installed.includes(p.id);
+      return '<div class="row plain' + (why ? " dim" : "") + '"><div class="main"><div class="title"><span>' + one.esc(p.name) + "</span></div>"
+        + (why ? '<div class="sub">' + one.esc(why) + "</div>" : "") + "</div>"
+        + '<input type="checkbox" class="switch" aria-label="' + one.esc(p.name) + '" data-scope="' + one.esc(p.scope) + '"' + (on ? " checked" : "") + (why ? " disabled" : "") + "></div>";
+    };
+    sheet.body.innerHTML = '<div style="display:flex;justify-content:center;margin:2px 0 14px">' + one.appIcon(a, 64) + "</div>"
+      + '<div class="list">' + places.map(row).join("") + "</div>"
+      + (error ? '<div class="footer error">' + one.esc(error) + "</div>" : "");
+    for (const box of sheet.body.querySelectorAll("[data-scope]")) box.onchange = () => flip(box);
+  };
+  const flip = async (box) => {
+    one.tap();
+    box.disabled = true;
+    error = "";
+    try {
+      await one.call(box.checked ? "add" : "remove", { app: name, scope: box.dataset.scope, confirm: true });
+      ({ apps, places, admin } = await one.call("list"));
+    } catch (err) {
+      error = one.plain(err).title;
+    }
+    draw();
+  };
+  draw();
+}
+
+/// Whether an app is on any of the person's pages, so its button says Manage instead of Add to….
+function onAPage(a, places) {
+  return a.installed.some((id) => places.some((p) => p.id === id));
 }
 
 export default {
@@ -275,66 +316,57 @@ export default {
       title: "App Store",
       html: `
 <style>
-  .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
-  .tag { font-size: 12px; padding: 1px 7px; border-radius: 10px; background: var(--line); color: var(--muted); }
+  #tabs { margin: 10px 0 4px; }
+  .store .row { padding-top: 10px; padding-bottom: 10px; }
+  .store .row + .row::before { left: 76px; }
+  .store .row .title { font-weight: 500; }
 </style>
+<div id="top"></div>
+<div id="search"></div>
 <div class="segmented" id="tabs"><button data-tab="apps">Apps</button><button data-tab="connectors">Connectors</button></div>
-<p id="about" class="muted small" style="margin:0 4px 10px" hidden></p>
-<input id="search" class="search" type="search" placeholder="Find an app" autocomplete="off">
-<div id="list"></div>
+<div id="list" class="store"></div>
 <script>
+${addTo}
+${onAPage}
+document.getElementById("top").innerHTML = one.largeTitle("App Store");
 // Connectors would bury the rest, so they get their own tab. A shell's Add a Connector opens it with { connector: true }
 // ({ connected: true } from shells built before), on that tab.
 let tab = one.params.connector || one.params.connected ? "connectors" : "apps";
-const ABOUT = {
-  connectors: "Connectors bring things in for you and your agents: your accounts, your Mac’s apps, what your devices can do. Add one to a page; it shows in that page’s Connectors.",
-};
+let query = "";
+let data = null;
 function pick(t) {
   tab = t;
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
-  const about = document.getElementById("about");
-  about.textContent = ABOUT[tab] || "";
-  about.hidden = !ABOUT[tab];
   draw();
 }
 document.getElementById("tabs").addEventListener("click", (e) => e.target.dataset.tab && pick(e.target.dataset.tab));
+one.search("#search", { placeholder: "Search", onSearch: (q) => ((query = q.trim().toLowerCase()), draw()) });
 // The sections: the apps built into the release, and those made in this install (each install words that its own way,
 // in its settings).
-const BUILT_IN = "Built In";
 const MADE_HERE = one.config?.made_here || "Made here";
-const CLI = one.config?.cli || "one";
 
-/// A built-in app's state here; for an app made here, what it was forked from.
-function status(a) {
-  if (!a.built_in) return a.from ? "Fork of " + a.from : "";
-  if (!a.added) return "Not added";
-  return a.up_to_date ? "Up to date" : "Other version";
-}
-
-let apps = [];
-const row = (a) => \`<a class="row" onclick='one.open("app", \${JSON.stringify({ app: a.name })})'>
-    \${one.appIcon(a, 44)}
-    <div class="main">
-      <div class="title"><span>\${one.esc(a.title)}</span><span class="when">\${one.esc(status(a))}</span></div>
-      <div class="sub">\${one.esc(a.description || "Made by " + a.owner_name)}</div>
-      \${a.installed.length ? '<div class="tags">' + a.installed_names.map((n) => '<span class="tag">' + one.esc(n) + "</span>").join("") + "</div>" : ""}
-    </div>
-    <div class="chev">›</div>
-  </a>\`;
+const row = (a) => \`<div class="row" data-app="\${one.esc(a.name)}">
+    \${one.appIcon(a, 48)}
+    <div class="main"><div class="title"><span>\${one.esc(a.title)}</span></div><div class="sub">\${one.esc(a.description || "")}</div></div>
+    \${a.deleted ? "" : '<button class="button capsule" data-add="' + one.esc(a.name) + '">' + (onAPage(a, data.places) ? "Manage" : "Add to…") + "</button>"}
+  </div>\`;
 const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(title) + '</h2><div class="list">' + list.map(row).join("") + "</div>" : "";
 
+function html() {
+  const found = data.apps.filter((a) => !!a.connector === (tab === "connectors") && (!query || [a.title, a.name, a.description || ""].some((t) => t.toLowerCase().includes(query))));
+  if (!found.length) return one.empty({ icon: "search", title: "No Results", text: query ? one.esc("Nothing matches “" + query + "”.") : "" });
+  return section("Built In", found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted));
+}
 function draw() {
-  const q = document.getElementById("search").value.trim().toLowerCase();
-  const found = apps.filter((a) => !!a.connector === (tab === "connectors") && (!q || [a.title, a.name, a.description || ""].some((t) => t.toLowerCase().includes(q))));
-  document.getElementById("list").innerHTML = found.length
-    ? section(BUILT_IN, found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted))
-    : '<div class="empty">No apps match.<div class="small" style="margin-top:6px">Make your own: put an app.js in a folder and run <code>' + one.esc(CLI) + ' deploy</code> on it.</div></div>';
+  if (data) document.getElementById("list").innerHTML = html();
 }
-async function show() {
-  apps = (await one.call("list")).apps;
-  draw();
-}
-document.getElementById("search").addEventListener("input", draw);
+document.getElementById("list").addEventListener("click", (e) => {
+  const add = e.target.closest("[data-add]");
+  if (add) return addTo(add.dataset.add, data);
+  const r = e.target.closest("[data-app]");
+  if (r) one.open("app", { app: r.dataset.app });
+});
+const show = () => one.render("#list", async () => ((data = await one.call("list")), html()), { loading: "Loading apps" });
 one.on("changed", show);
 pick(tab);
 show();
@@ -344,149 +376,102 @@ show();
       title: "App",
       html: `
 <style>
-  .head { display: flex; gap: 14px; align-items: center; margin: 12px 4px 4px; }
-  .head h1 { font-size: 22px; margin: 0; }
-  .about { margin: 12px 4px 0; }
-  .pill { font: inherit; font-size: 15px; font-weight: 600; padding: 5px 14px; border-radius: 15px; border: 0; background: var(--accent); color: white; }
-  .pill.off { background: var(--line); color: var(--accent); }
-  .pill:disabled { opacity: 0.4; }
-  .pill.danger { background: var(--danger); }
+  .hero { display: flex; gap: 16px; margin: 14px 4px 20px; }
+  .hero .text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .hero h1 { font-size: 22px; font-weight: 700; margin: 4px 0 2px; line-height: 1.2; }
+  .hero .tag { color: var(--muted); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hero .act { margin-top: auto; padding-top: 10px; }
+  .about { margin: 0 4px; line-height: 1.45; }
+  .needs { margin: 14px 4px 0; color: var(--muted); }
+  .made { text-align: center; color: var(--muted); font-size: 13px; margin: 32px 16px 0; }
+  .works .row + .row::before { left: 58px; }
   #error { margin: 8px 4px; }
-  .code-icon { width: 20px; height: 20px; color: var(--muted); }
+  .danger-row { color: var(--danger); justify-content: center; }
 </style>
 <div id="app"></div>
 <div id="ask"></div>
 <div id="error" class="error small"></div>
 <script>
-${folder}
+${addTo}
+${onAPage}
 const name = one.params.app;
-one.title(name);
+one.title("");
+let data = null;
 
 /// The app's page, section by section: each takes what show() loaded and gives HTML, or "" to leave itself out.
 const sections = [
-  function head({ a }) {
-    const state = a.built_in ? (!a.added ? "Built in, not added" : a.up_to_date ? "Built in, up to date" : "Built in, running another version than this release's: the next update deploys the release's") : "Made by " + a.owner_name;
-    return \`<div class="head">\${one.appIcon(a, 60)}
-      <div><h1>\${one.esc(a.title)}</h1><div class="muted small">\${one.esc(a.name)} · \${one.esc(state)} · \${a.deploys} deploy\${a.deploys === 1 ? "" : "s"}</div></div></div>
-      \${a.description ? '<div class="about">' + one.esc(a.description) + "</div>" : ""}\`;
+  function hero({ a, places }) {
+    const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : a.description || "";
+    const act = a.deleted
+      ? (a.mine ? '<button class="button capsule" onclick="retire(this, \\'restore\\')">Restore</button>' : "")
+      : '<button class="button capsule" data-add>' + (onAPage(a, places) ? "Manage" : "Add to…") + "</button>";
+    return \`<div class="hero">\${one.appIcon(a, 100)}<div class="text"><h1>\${one.esc(a.title)}</h1>
+      <div class="tag">\${one.esc(tag)}</div><div class="act">\${act}</div></div></div>
+      \${a.description && !a.deleted ? '<div class="about" hidden>' + one.esc(a.description) + "</div>" : ""}\`;
   },
-  function deleted({ a }) {
-    if (!a.deleted) return "";
-    const by = a.deleted.by ? " by " + one.esc(a.deleted.by) : "";
-    const buttons = a.mine
-      ? \`<div class="row plain"><div class="main"><div class="title"><span>Restore</span></div><div class="sub small">It runs again, on the pages it was on.</div></div><button class="pill" onclick="retire(this, 'restore')">Restore</button></div>
-         <div class="row plain"><div class="main"><div class="title"><span>Erase</span></div><div class="sub small">Gone for good: its name can't be used again.</div></div><button class="pill danger" onclick="retire(this, 'erase')">Erase</button></div>\`
-      : '<div class="row plain"><div class="main sub small">Only its owners can restore or erase it.</div></div>';
-    return '<h2 class="section">Deleted ' + ago(a.deleted.time) + by + '</h2><div class="list">' + buttons + "</div>";
-  },
-  function runsOn({ where }) {
+  function needs({ where }) {
     if (!where) return "";
     const place = (server, op, label) => '<div class="row plain"><div class="main"><div class="title"><span>' + one.esc(label + " " + server) + "</span></div></div>"
-      + '<button class="pill' + (op === "remove_from" ? " off" : "") + '" data-op="' + op + '" data-server="' + one.esc(server) + '">' + (op === "remove_from" ? "Remove" : "Install") + "</button></div>";
+      + '<button class="button' + (op === "remove_from" ? "" : " primary") + '" data-op="' + op + '" data-server="' + one.esc(server) + '">' + (op === "remove_from" ? "Remove" : "Install") + "</button></div>";
     const rows = [...where.install.map((s) => place(s, "install_on", "Install on")), ...where.remove.map((s) => place(s, "remove_from", "Remove from"))];
-    return '<div class="about muted">' + one.esc(where.line) + "</div>"
-      + (rows.length ? '<div class="list" style="margin-top:12px">' + rows.join("") + "</div>" : "")
-      + (where.ask ? '<div class="about muted small">Ask an owner to install it.</div>' : "");
-  },
-  function addTo({ a, places, admin }) {
-    if (a.deleted) return "";
-    const first = !a.added && !admin ? \`Only an admin can add \${a.title} to this install. Settings shows who they are.\` : null;
-    const place = (p) => {
-      const on = a.installed.includes(p.id);
-      const why = first || p.why;
-      return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(p.name)}</span></div>
-          \${why ? '<div class="sub small">' + one.esc(why) + "</div>" : ""}</div>
-        <button class="pill\${on ? " off" : ""}"\${why ? " disabled" : ""} onclick='toggle(this, \${JSON.stringify(p.scope)}, \${on})'>\${on ? "Remove" : "Add"}</button></div>\`;
-    };
-    return '<h2 class="section">Add to…</h2><div class="list">' + places.map(place).join("") + "</div>";
+    return '<div class="needs">' + one.esc(where.line) + "</div>" + (rows.length ? '<div class="list" style="margin-top:12px">' + rows.join("") + "</div>" : "");
   },
   function schedules({ health }) {
     const list = health?.schedules || [];
     if (!list.length) return "";
     const places = new Set(list.map((s) => s.scope)).size > 1;
     const row = (s) => {
-      const notes = [];
-      if (s.invalid) notes.push('<span class="error">' + one.esc(s.invalid) + "</span>");
-      else if (s.removed) notes.push("Removed by a deploy" + (s.was ? ": it ran " + one.esc(s.was) : "") + ".");
-      else {
-        notes.push(one.esc(cap(s.when)) + (places ? " · " + one.esc(s.scope_name) : ""));
-        if (s.changed) notes.push("A deploy changed it " + ago(s.changed.time) + "; it ran " + one.esc(s.changed.was) + " before.");
-        if (s.on && s.runs_as) notes.push("Runs as " + one.esc(s.runs_as) + (s.next ? ", next " + soon(s.next) : ""));
-        else if (s.on) notes.push("Nobody can run it: whoever added it here can't any more. Switch it on to run it as you.");
-        else if (s.switched) notes.push("Switched off by " + one.esc(s.switched.by) + " " + ago(s.switched.time));
-        if (s.last && !s.last.ok) notes.push('<span class="error">Its last run failed ' + ago(s.last.time) + ": " + one.esc(s.last.error || "") + "</span>");
-      }
+      let line;
+      if (s.invalid) line = '<span class="error">' + one.esc(s.invalid) + "</span>";
+      else if (s.removed) line = "Removed by a deploy";
+      else if (s.last && !s.last.ok) line = '<span class="error">Failed ' + ago(s.last.time) + ": " + one.esc(s.last.error || "") + "</span>";
+      else if (s.on && s.runs_as) line = one.esc(cap(s.when)) + (places ? " · " + one.esc(s.scope_name) : "") + (s.next ? " · next " + soon(s.next) : "");
+      else if (s.on) line = "Nobody can run it: switch it on to run it as you";
+      else line = one.esc(cap(s.when)) + (s.switched ? " · off since " + ago(s.switched.time) : "");
       const live = !s.invalid && !s.removed;
       const toggle = live ? \`<input type="checkbox" class="switch"\${s.on && s.runs_as ? " checked" : ""}\${s.may_switch ? "" : " disabled"} onchange='switchIt(this, \${JSON.stringify({ schedule: s.name, scope: s.scope })})'>\` : "";
-      return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(s.description || s.name)}</span></div>
-        \${notes.map((n) => '<div class="sub small">' + n + "</div>").join("")}</div>\${toggle}</div>\`;
+      return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(s.description || s.name)}</span></div><div class="sub">\${line}</div></div>\${toggle}</div>\`;
     };
     return '<h2 class="section">Schedules</h2><div class="list">' + list.map(row).join("") + "</div>";
   },
-  function errors({ health }) {
-    const list = health?.insights?.errors || [];
-    if (!list.length) return "";
-    const total = list.reduce((n, e) => n + e.count, 0);
-    const row = (e) => \`<div class="row plain"><div class="main"><div class="title"><span class="error">\${one.esc(e.error || "Failed")}</span><span class="when">\${e.count}×</span></div>
-        <div class="sub small">\${one.esc(e.op)} · last \${ago(e.last)}\${e.user ? " by " + one.esc(e.user) : ""}</div></div></div>\`;
-    return '<h2 class="section">Errors · ' + total + '</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>";
+  function works({ a, apps }) {
+    const rows = a.uses.apps.map((n) => link(apps.find((x) => x.name === n) || { name: n, title: n }));
+    return rows.length ? '<h2 class="section">Works With</h2><div class="list works">' + rows.join("") + "</div>" : "";
   },
-  function activity({ health }) {
-    const runs = health?.activity || [];
-    if (!runs.length) return "";
-    const failed = runs.filter((r) => !r.ok).length;
-    const row = (r) => \`<div class="row plain"><div class="main"><div class="title"><span>\${r.ok ? "✓" : '<span class="error">✕</span>'} \${one.esc(r.schedule)}</span><span class="when">\${one.ago(r.time)}</span></div>
-        \${r.ok ? "" : '<div class="sub small error">' + one.esc(r.error || "Failed") + "</div>"}
-        <div class="sub small">\${r.ok ? "Ran" : "Failed"} on \${one.esc(r.server || "a server")} as \${one.esc(r.user)} · \${r.ms < 1000 ? r.ms + " ms" : (r.ms / 1000).toFixed(1) + " s"}</div></div></div>\`;
-    return '<h2 class="section">Activity' + (failed ? " · " + failed + " failed" : "") + '</h2><div class="list">' + runs.slice(0, 8).map(row).join("") + "</div>";
+  function forks({ a, apps }) {
+    const find = (n) => apps.find((x) => x.name === n) || { name: n, title: n };
+    return (a.from ? '<h2 class="section">Forked From</h2><div class="list works">' + link(find(a.from)) + "</div>" : "")
+      + (a.forks.length ? '<h2 class="section">Forks</h2><div class="list works">' + a.forks.map((n) => link(find(n))).join("") + "</div>" : "");
   },
-  function usage({ health }) {
-    const list = health?.insights?.usage || [];
-    if (!list.length) return "";
-    const what = { cli: "CLI", mcp: "Agent", phone: "iPhone", mac: "Mac", browser: "Browser", schedule: "Schedule", app: "Another app", node: "The server", api: "A program on the server" };
-    const row = (u) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(u.user)}</span><span class="when">\${one.ago(u.last)}</span></div>
-        <div class="sub small">\${one.esc(u.agent || what[u.client] || u.client)} · \${u.days} day\${u.days === 1 ? "" : "s"}</div></div></div>\`;
-    return '<h2 class="section">Used by</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>";
+  function owner({ a, health }) {
+    const busy = health && (health.activity?.length || health.insights?.errors?.length || health.insights?.usage?.length || health.insights?.cost?.length);
+    const rows = [];
+    if (busy) rows.push(\`<a class="row plain" onclick='one.open("activity", \${JSON.stringify({ app: a.name })})'><div class="main"><div class="title"><span>Activity</span></div></div><div class="chev">›</div></a>\`);
+    if (a.mine && a.added && !a.deleted) rows.push('<a class="row plain danger-row" onclick="retire(null, \\'delete\\')">Delete App</a>');
+    if (a.mine && a.deleted) rows.push('<a class="row plain danger-row" onclick="retire(null, \\'erase\\')">Erase App</a>');
+    return rows.length ? '<div class="list" style="margin-top:28px">' + rows.join("") + "</div>" : "";
   },
-  function cost({ health }) {
-    const list = health?.insights?.cost || [];
-    if (!list.length) return "";
-    const usd = (n) => "$" + (n < 1 ? n.toFixed(4) : n.toFixed(2));
-    const total = list.reduce((n, c) => n + c.usd, 0);
-    const row = (c) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(c.model)}</span><span class="when">\${usd(c.usd)}</span></div>
-        <div class="sub small">\${c.calls} call\${c.calls === 1 ? "" : "s"} · \${c.input.toLocaleString()} tokens in, \${c.output.toLocaleString()} out</div></div></div>\`;
-    return '<h2 class="section">AI cost · ' + usd(total) + '</h2><div class="list">' + list.map(row).join("") + "</div>";
-  },
-  function uses({ a }) {
-    const all = a.uses.apps;
-    return all.length ? '<h2 class="section">Uses</h2><div class="list">' + all.map((u) => '<div class="row plain"><div class="main">' + one.esc(u) + "</div></div>").join("") + "</div>" : "";
-  },
-  function forkedFrom({ a }) {
-    return a.from ? '<h2 class="section">Forked from</h2><div class="list">' + link(a.from) + "</div>" : "";
-  },
-  function forks({ a }) {
-    return a.forks.length ? '<h2 class="section">Forks</h2><div class="list">' + a.forks.map(link).join("") + "</div>" : "";
-  },
-  function remove({ a }) {
-    if (!a.mine || a.deleted || !a.added) return "";
-    return \`<div class="list" style="margin-top:24px"><a class="row plain" onclick="retire(null, 'delete')"><div class="main"><div class="title"><span class="error">Delete App</span></div></div></a></div>
-      <div class="muted small" style="margin:6px 16px">It leaves every page and stops running. You can restore it from Recently Deleted.</div>\`;
-  },
-  function code({ code }) {
-    return code ? '<h2 class="section">Code</h2>' + folder(code.files, "") : "";
+  function made({ a, code }) {
+    return '<div class="made">Made by ' + one.esc(a.owner_name) + (code ? \` · <a onclick='one.open("code", \${JSON.stringify({ app: a.name, dir: "" })})'>View code</a>\` : "") + "</div>";
   },
 ];
 
-function link(n) {
-  return \`<a class="row plain" onclick='one.open("app", \${JSON.stringify({ app: n })})'><div class="main"><div class="title"><span>\${one.esc(n)}</span></div></div><div class="chev">›</div></a>\`;
+/// A row that opens another app's page: its icon and name.
+function link(x) {
+  return \`<a class="row plain" onclick='one.open("app", \${JSON.stringify({ app: x.name })})'>\${one.appIcon(x, 30)}<div class="main"><div class="title"><span>\${one.esc(x.title)}</span></div></div><div class="chev">›</div></a>\`;
 }
 
 async function show() {
-  const [{ apps, places, admin }, code, health, where] = await Promise.all([one.call("list"), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("servers", { app: name }).catch(() => null)]);
-  const a = apps.find((x) => x.name === name);
-  if (!a) return (document.getElementById("app").innerHTML = '<div class="empty">' + one.esc(name) + " was erased.</div>");
-  one.title(a.title);
-  document.getElementById("app").innerHTML = sections.map((s) => s({ a, places, admin, code, health, where })).join("");
+  const [list, code, health, where] = await Promise.all([one.call("list"), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("servers", { app: name }).catch(() => null)]);
+  data = list;
+  const a = list.apps.find((x) => x.name === name);
+  if (!a) return (document.getElementById("app").innerHTML = one.notFound({ title: name + " was erased.", text: "It's gone from every list.", home: "Back to the App Store" }));
+  document.getElementById("app").innerHTML = sections.map((s) => s({ a, apps: list.apps, places: list.places, admin: list.admin, code, health, where })).join("");
+  // The description shows in full only where its line under the name was cut short.
+  const tag = document.querySelector(".hero .tag"), about = document.querySelector(".about");
+  if (about && tag.scrollWidth > tag.clientWidth + 1) about.hidden = false;
+  new IntersectionObserver(([e]) => one.title(e.isIntersecting ? "" : a.title)).observe(document.querySelector(".hero h1"));
+  document.querySelector("[data-add]")?.addEventListener("click", () => addTo(name, data));
   for (const b of document.querySelectorAll("[data-op]")) b.onclick = () => place(b, b.dataset.op, b.dataset.server);
 }
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
@@ -500,13 +485,13 @@ async function retire(button, op) {
   };
   if (op === "restore") {
     button.disabled = true;
-    return go().catch((err) => { document.getElementById("error").textContent = err.message; show(); });
+    return go().catch((err) => { document.getElementById("error").textContent = one.plain(err).title; show(); });
   }
   const erase = op === "erase";
   document.getElementById("ask").scrollIntoView({ behavior: "smooth", block: "center" });
   await one.confirm("#ask", {
     title: erase ? "Erase " + name + " for good?" : "Delete " + name + "?",
-    detail: erase ? "It's gone from every list, and its name can't be used again." : "It leaves every page and stops running. You can restore it from Recently Deleted.",
+    detail: erase ? "Its name can't be used again." : "You can restore it from Recently Deleted.",
     action: erase ? "Erase" : "Delete", danger: true, run: go,
   });
 }
@@ -521,7 +506,7 @@ async function switchIt(box, { schedule, scope }) {
   try {
     await one.call("switch", { app: name, schedule, scope, on: box.checked });
   } catch (err) {
-    document.getElementById("error").textContent = err.message;
+    document.getElementById("error").textContent = one.plain(err).title;
   }
   show();
 }
@@ -532,22 +517,50 @@ async function place(button, op, server) {
   try {
     await one.call(op, { app: name, server, confirm: true });
   } catch (err) {
-    document.getElementById("error").textContent = err.message;
-  }
-  show();
-}
-async function toggle(button, scope, on) {
-  button.disabled = true;
-  document.getElementById("error").textContent = "";
-  try {
-    await one.call(on ? "remove" : "add", { app: name, scope });
-  } catch (err) {
-    document.getElementById("error").textContent = err.message;
+    document.getElementById("error").textContent = one.plain(err).title;
   }
   show();
 }
 one.on("changed", show);
-show();
+one.render("#app", async () => void (await show()), { loading: "Loading" });
+</script>`,
+    },
+    activity: {
+      title: "Activity",
+      html: `
+<div id="activity"></div>
+<script>
+/// How an app is doing, for its owners: its errors, its schedules' recent runs, who used it, and its AI cost.
+const sections = [
+  function errors({ insights }) {
+    const list = insights?.errors || [];
+    const row = (e) => \`<div class="row plain"><div class="main"><div class="title"><span class="error">\${one.esc(e.error || "Failed")}</span><span class="when">\${e.count}×</span></div>
+        <div class="sub">\${one.esc(e.op)} · \${one.ago(e.last)}\${e.user ? " · " + one.esc(e.user) : ""}</div></div></div>\`;
+    return list.length ? '<h2 class="section">Errors</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>" : "";
+  },
+  function runs({ activity }) {
+    const row = (r) => \`<div class="row plain"><div class="main"><div class="title"><span>\${r.ok ? "" : '<span class="error">✕</span> '}\${one.esc(r.schedule)}</span><span class="when">\${one.ago(r.time)}</span></div>
+        <div class="sub\${r.ok ? "" : " error"}">\${r.ok ? one.esc(r.server || "") + " · " + (r.ms < 1000 ? r.ms + " ms" : (r.ms / 1000).toFixed(1) + " s") : one.esc(r.error || "Failed")}</div></div></div>\`;
+    return activity?.length ? '<h2 class="section">Runs</h2><div class="list">' + activity.slice(0, 12).map(row).join("") + "</div>" : "";
+  },
+  function usedBy({ insights }) {
+    const list = insights?.usage || [];
+    const what = { cli: "CLI", mcp: "Agent", phone: "iPhone", mac: "Mac", browser: "Browser", schedule: "Schedule", app: "Another app", node: "The server", api: "A program on the server" };
+    const row = (u) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(u.user)}</span><span class="when">\${one.ago(u.last)}</span></div>
+        <div class="sub">\${one.esc(u.agent || what[u.client] || u.client)}</div></div></div>\`;
+    return list.length ? '<h2 class="section">Used By</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>" : "";
+  },
+  function cost({ insights }) {
+    const list = insights?.cost || [];
+    const usd = (n) => "$" + (n < 1 ? n.toFixed(4) : n.toFixed(2));
+    return list.length ? '<h2 class="section">AI Cost</h2>' + one.info(list.map((c) => [c.model, usd(c.usd)])) : "";
+  },
+];
+one.render("#activity", async () => {
+  const h = await one.call("health", { app: one.params.app });
+  const html = sections.map((s) => s(h)).join("");
+  return html || one.empty({ icon: "history", title: "Nothing yet" });
+});
 </script>`,
     },
     code: {
@@ -557,7 +570,7 @@ show();
 <div id="code"></div>
 <script>
 const name = one.params.app;
-one.title(one.params.dir.replace(/\\/$/, "").split("/").pop());
+one.title(one.params.dir.replace(/\\/$/, "").split("/").pop() || "Code");
 ${folder}
 one.render("#code", async () => folder((await one.call("code", { app: name })).files, one.params.dir), { loading: "Loading code" });
 </script>`,
