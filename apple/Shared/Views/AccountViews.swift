@@ -170,7 +170,7 @@ struct InstallSettingsView: View {
         pushKey = try? await store.node.vault(scope: "global").first { $0.apps.contains(push) }?.title
     }
 
-    /// A text field's value, if it changed: empty puts back the edition's default.
+    /// A text field's value, if it changed: empty puts back the context's default.
     private func save(_ name: String, _ text: String) {
         let text = text.trimmingCharacters(in: .whitespaces)
         guard text != (settings[name] ?? "") else { return }

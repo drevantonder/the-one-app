@@ -55,7 +55,7 @@ pub fn mcp_entries() -> String {
     )
 }
 
-/// How to get the command onto a device, for this edition.
+/// How to get the command onto a device, for this context.
 fn install() -> String {
     match REPO.is_empty() {
         false => format!("install it with `curl -fsSL https://github.com/{REPO}/releases/latest/download/install.sh | sh`"),

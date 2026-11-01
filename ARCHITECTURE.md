@@ -20,7 +20,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - **Six primitives**: key, log, view, blob, call, app. Scopes, servers, deploys, sidecars, the Vault and backups are made of them.
 - **Entries are the truth; views are caches.** Everything anyone does is a signed entry in its author's log for one scope (a user's, a group's, or the install's, `global`). Every view is made by replaying a scope's entries, with `global`'s member entries, in one order, `(time, author, log, seq)`, so the same entries give the same views on every server. An entry, once appended, is never lost.
 - **Trust decides who holds what.** A server holds a user's data only if that user trusts it, and a group's only if its owners can read it. No one reads another user's data except by an `open`, which that user sees. Privileged servers are trusted by admins, not built in: any server can be made one, and the install keeps working without them.
-- **A key belongs to one install, forever.** Installs (editions, workplaces) never talk to each other. A key that isn't a current server or client can't sync, call or ask.
+- **A key belongs to one install, forever.** Installs (contexts, workplaces) never talk to each other. A key that isn't a current server or client can't sync, call or ask.
 - **A call runs once.** It names the scopes it touches before it runs, so a server that can't run it says so before doing anything, and failing over never repeats a side effect. It writes nothing if it fails.
 - **Secrets stay put.** A secret field's value leaves the node only inside a request to one of its item's hosts, by an app switched on for that item. Nothing reads one back.
 - **The node never names an app or sidecar.** Apps are deployed into the install while it runs, and every app runs its latest deploy, everywhere; sidecars run only where a server's owner installed them.
@@ -47,7 +47,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/update.rs`, `src/release.rs`: building, signing and publishing the node; tooling, not protocol.
 - `client/`: the library phones link. `apple/`: the Mac app (a server's node inside, and the Apple sidecars) and the iPhone app and widget (a client).
 - `apps/`: the built-in apps, which every release ships and any install's admins may add. Everything else is deployed by an install's own people.
-- `config.toml`: the edition: its name, CLI, port, accent, icons, release key and starter apps. Nothing else names the product.
+- `config.toml`: the context: its name, CLI, port, accent, icons, release key and starter apps. Nothing else names the product.
 - `tests/`: `sim.rs`, hundreds of servers over bad links; `e2e.rs`, real nodes; `contracts.rs`, wherever two languages must agree; `agents/`, fresh agents doing everyday tasks.
 - `vendor/`: two iroh dependencies patched so the client builds for iPhone; drop them when upstream builds there.
 

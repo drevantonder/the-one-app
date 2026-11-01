@@ -17,11 +17,11 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 
 /// Builds the tip of main and has every device run it; with a tag, also signs it off and publishes it on GitHub.
 pub fn run(tag: Option<&str>) -> Result<()> {
-    ensure!(!REPO.is_empty(), "this edition names no repo, so it has nothing to update from");
+    ensure!(!REPO.is_empty(), "this context names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
     if let Some(tag) = tag {
         ensure!(version_tag(tag), "a release is named like v1.2.3");
-        ensure!(installer_is_ours(), "install.sh installs another edition, so {NAME} isn't released on GitHub; {CLI} update runs main on its servers");
+        ensure!(installer_is_ours(), "install.sh installs another context, so {NAME} isn't released on GitHub; {CLI} update runs main on its servers");
         ensure!(quiet(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     }
     let key = release_key()?;
@@ -58,7 +58,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     println!("Building {short}");
     step(Command::new(cargo()).current_dir(&src).env("CONFIG", &config).args(["build", "--release"]))?;
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
-    // The build devices say they run: main's commit, and an edition's config's.
+    // The build devices say they run: main's commit, and a context's config's.
     let version: Value = serde_json::from_slice(&Command::new(&binary).args(["version", "--json"]).output()?.stdout).context("ask the new build what it is")?;
     let short = version["commit"].as_str().context("the new build doesn't say what it is")?.to_string();
     let short = short.as_str();
@@ -147,7 +147,7 @@ fn version_tag(tag: &str) -> bool {
     parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Whether install.sh, which gets releases from GitHub, installs this edition. Only that edition is released there.
+/// Whether install.sh, which gets releases from GitHub, installs this context. Only that context is released there.
 fn installer_is_ours() -> bool {
     include_str!("../install.sh").contains(&format!("\ncli={CLI}\n"))
 }
@@ -160,7 +160,7 @@ fn app_zip() -> String {
 /// The release key's private half, from the publisher's password manager by way of the config's release_signer, kept
 /// only in memory. It must be the key every build checks releases against.
 pub fn release_key() -> Result<ssh_key::PrivateKey> {
-    ensure!(!RELEASE_KEY.is_empty() && !RELEASE_SIGNER.is_empty(), "this edition has no release key, so nothing it builds can be released");
+    ensure!(!RELEASE_KEY.is_empty() && !RELEASE_SIGNER.is_empty(), "this context has no release key, so nothing it builds can be released");
     let out = Command::new("sh").args(["-c", RELEASE_SIGNER]).stdin(std::process::Stdio::null()).output().context("run release_signer")?;
     ensure!(
         out.status.success(),
@@ -185,7 +185,7 @@ fn checkout() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// The config to build with: this checkout's own, or, for an edition whose config lives in its own repo, that repo's
+/// The config to build with: this checkout's own, or, for a context whose config lives in its own repo, that repo's
 /// latest, fetched beside it; and then the commit it's at.
 fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
     if CONFIG_REPO.is_empty() {
@@ -280,7 +280,7 @@ fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
 /// which the new app replaces) that builds `commit`'s app in a clean clone and installs it. For a release it also
 /// leaves the app, zipped, and the node binary as blobs, listed in assets.txt.
 fn mac_job(commit: &str, config_commit: Option<&str>, assets: bool) -> String {
-    // An edition whose config is in its own repo gets that repo too, at the commit this server builds with.
+    // A context whose config is in its own repo gets that repo too, at the commit this server builds with.
     let config = match config_commit {
         None => format!(r#"config="$c/src/{CONFIG_FILE}""#),
         Some(at) => format!(
@@ -381,7 +381,7 @@ mod tests {
     }
 
     #[test]
-    fn the_installer_gets_this_editions_releases_and_checks_them_with_its_key() {
+    fn the_installer_gets_this_contexts_releases_and_checks_them_with_its_key() {
         if !super::installer_is_ours() {
             return;
         }
