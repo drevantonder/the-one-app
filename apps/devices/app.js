@@ -103,10 +103,10 @@ export default {
 .guests { margin: 12px -16px -14px; border-top: .5px solid var(--line); }
 .guest { display: flex; align-items: center; gap: 10px; padding: 9px 16px 9px 28px; font-size: 15px; }
 .guest + .guest { border-top: .5px solid var(--line); }
-.guest .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.guest .k { color: var(--muted); font-size: 13px; }
+.guest .n { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guest .k { flex: 0 2 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; }
 .guest .m { color: var(--muted); font-size: 13px; white-space: nowrap; }
-.guest .bar { width: 64px; }
+.guest .bar { flex: 0 3 64px; min-width: 16px; }
 </style>
 <div id="list"></div>
 <script>
