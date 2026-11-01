@@ -18,8 +18,6 @@ struct DevicesView: View {
                     .onSubmit(rename)
             } header: {
                 Text("This Device")
-            } footer: {
-                Text("Others in \(install?.name ?? "the install") see it by this name.")
             }
 
             Section {
@@ -28,8 +26,6 @@ struct DevicesView: View {
                 Button("Pair a Phone or Computer…", systemImage: "qrcode") { store.sheet = .pair }
             } header: {
                 Text("Your Devices")
-            } footer: {
-                Text("A computer you pair is a server: it keeps your data. A phone keeps none and asks your servers.")
             }
 
             if !others.isEmpty {
@@ -37,8 +33,6 @@ struct DevicesView: View {
                     ForEach(others) { ServerRow(server: $0, here: false) }
                 } header: {
                     Text("Servers")
-                } footer: {
-                    Text("Servers you may use. One you trust keeps your own data too; privileged servers keep everyone’s.")
                 }
             }
 
@@ -51,7 +45,7 @@ struct DevicesView: View {
                 if let error {
                     Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
                 } else {
-                    Text("Your own data is kept only on these servers: yours, ones you trust, and privileged ones.")
+                    Text("Only these keep your own data.")
                 }
             }
         }

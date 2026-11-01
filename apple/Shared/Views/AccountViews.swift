@@ -22,7 +22,7 @@ struct AccessLogView: View {
                 }
                 if opens.isEmpty { Text("Nobody has opened your data.").foregroundStyle(.secondary) }
             } footer: {
-                Text("Only someone who runs a server that keeps your data can open it, for an hour, to read. Every time is shown here.")
+                Text("Whoever runs a server with your data can read it for an hour, and it shows here.")
             }
         }
         .formStyle(.grouped)
@@ -61,8 +61,6 @@ struct UsersView: View {
             } footer: {
                 if let error {
                     Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
-                } else {
-                    Text("Admins add apps for everyone, run its servers and add people. An install always keeps one admin.")
                 }
             }
             Section {
@@ -76,7 +74,7 @@ struct UsersView: View {
             } header: {
                 Text("Add Someone")
             } footer: {
-                Text("They scan it on their own device, which joins as them.")
+                Text("They scan it on their own device.")
             }
         }
         .formStyle(.grouped)
@@ -117,13 +115,9 @@ struct InstallSettingsView: View {
                     .onSubmit { save("made_here", madeHere) }
             } header: {
                 Text("App Store")
-            } footer: {
-                Text("What the App Store calls the apps made in \(store.install?.name ?? ""), beside the ones built in.")
             }
             Section {
                 Toggle("Push Notifications", isOn: Binding(get: { !(settings["push"] ?? "").isEmpty }, set: { set("push", $0 ? nil : "") }))
-            } footer: {
-                Text("Apps push to people’s phones through the server that holds Apple’s push key. Off, nothing is pushed.")
             }
             Section {
                 TextField("Work Email Domain", text: $domain, prompt: Text("example.org"))
@@ -134,7 +128,7 @@ struct InstallSettingsView: View {
                 if let error {
                     Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
                 } else {
-                    Text("People join by signing in with a Google account at this domain, where one of the install’s servers signs them in. Empty, nobody joins that way.")
+                    Text("People with an email at this domain join by signing in.")
                 }
             }
         }
@@ -182,7 +176,7 @@ struct BackupsView: View {
                 if let error {
                     Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
                 } else {
-                    Text(status ?? "Everything this server keeps goes to the bucket, encrypted with the backup key. The bucket sees only how many objects there are and their sizes.")
+                    Text(status ?? "Encrypted with the backup key before it leaves.")
                 }
             }
             Section {
@@ -240,7 +234,7 @@ struct RequestsView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(group.name).font(.body.weight(.medium))
-                                Text(group.members.count == 1 ? "1 member · it gets a page of its own" : "\(group.members.count) members · it gets a page of its own").font(.callout).foregroundStyle(.secondary)
+                                Text(group.members.map { store.userName($0.user) }.formatted(.list(type: .and))).font(.callout).foregroundStyle(.secondary).lineLimit(1)
                             }
                             Spacer()
                             Button("Join") { run { try await $0.accept(group: group.id) } }
@@ -255,7 +249,7 @@ struct RequestsView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(displayName(server.name)).font(.body.weight(.medium))
-                                Text("Offered to you; trusting it lets it keep your own data").font(.callout).foregroundStyle(.secondary)
+                                Text("Lets it keep your own data").font(.callout).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Button("Trust") { run { try await $0.trust(server: server.key, true) } }

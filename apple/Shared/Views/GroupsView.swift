@@ -16,9 +16,10 @@ struct GroupsView: View {
                             SymbolTile(symbol: "person.3.fill", color: .green, size: 36)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(group.name).font(.body.weight(.semibold)).foregroundStyle(.primary)
-                                Text(group.members.count == 1 ? "1 member" : "\(group.members.count) members")
+                                Text(group.members.map { store.userName($0.user) }.formatted(.list(type: .and)))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(1)
                             }
                             Spacer()
                             if group.role(of: store.me?.id ?? "") == "admin" {
@@ -31,9 +32,7 @@ struct GroupsView: View {
                     .buttonStyle(.plain)
                 }
             } footer: {
-                Text(mine.isEmpty
-                     ? "You’re in no groups yet. A group shares its own apps and data, and has a page of its own."
-                     : "Each group has a page of its own. Being in a group never shows its members your own data.")
+                if mine.isEmpty { Text("A group shares its apps and data, on a page of its own.") }
             }
         }
         .navigationTitle("Groups")
@@ -43,7 +42,7 @@ struct GroupsView: View {
             }
         }
         .sheet(isPresented: $creating) {
-            NameSheet(title: "New Group", prompt: "Name", action: "Create", footer: "You’ll be its first admin. Invite people once it exists.") { name in
+            NameSheet(title: "New Group", prompt: "Name", action: "Create", footer: "You’ll be its first admin.") { name in
                 try await store.change { _ = try await $0.createGroup(name) }
             }
         }
@@ -84,9 +83,9 @@ struct GroupView: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
                     } else if !admin {
-                        Text("Only its admins can change who’s in it.")
+                        Text("Only its admins change who’s in it.")
                     } else if group.admins.count == 1 {
-                        Text("A group always keeps one admin: make someone else an admin before you step down.")
+                        Text("Make someone else an admin before you step down.")
                     }
                 }
                 if let invited = group.invited, !invited.isEmpty {
@@ -106,9 +105,7 @@ struct GroupView: View {
                         .disabled(lastAdmin && group.members.count > 1)
                 } footer: {
                     if lastAdmin && group.members.count > 1 {
-                        Text("You’re its only admin: make someone else an admin before you leave.")
-                    } else if admin {
-                        Text("As an admin you arrange its page, add apps to it and keep its Vault.")
+                        Text("Make someone else an admin before you leave.")
                     }
                 }
             }
@@ -212,9 +209,9 @@ private struct InviteSheet: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
                     } else if others.isEmpty {
-                        Text("Everyone in \(store.install?.name ?? "the install") is in this group already. An admin adds new people in Users.")
+                        Text("Everyone is in this group already.")
                     } else {
-                        Text("They join once they accept, from Requests.")
+                        Text("They join once they accept.")
                     }
                 }
             }

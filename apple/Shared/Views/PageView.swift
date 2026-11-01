@@ -577,18 +577,18 @@ struct SettingsPage: View {
                     }
                 }
                 SettingsSection {
-                    row(.store, value: appsValue)
-                    row(.groups, value: count(myGroups))
-                    row(.devices, value: count(myDevices))
+                    row(.store, value: "")
+                    row(.groups, value: "")
+                    row(.devices, value: "")
                 }
                 SettingsSection {
                     row(.vault, value: "")
-                    row(.access, value: (store.state?.opens.isEmpty ?? true) ? String(localized: "None") : count(store.state?.opens.count ?? 0))
+                    row(.access, value: "")
                     row(.appearance, value: (Appearance(rawValue: appearance) ?? .automatic).title)
                 }
                 if store.isAdmin {
-                    SettingsSection(footer: String(localized: "Only admins see these.")) {
-                        row(.users, value: count(store.install?.users.count ?? 0))
+                    SettingsSection {
+                        row(.users, value: "")
                         row(.install, value: "")
                         row(.backups, value: "")
                     }
@@ -613,24 +613,6 @@ struct SettingsPage: View {
 
     private func row(_ item: Setting, value: String, badge: Bool = false) -> some View {
         SettingsRow(item: item, value: value, badge: badge) { open(.setting(item)) }
-    }
-
-    private func count(_ n: Int) -> String { n.formatted() }
-
-    private var myGroups: Int {
-        guard let me = store.me else { return 0 }
-        return store.install?.groups.filter { $0.role(of: me.id) != nil }.count ?? 0
-    }
-
-    private var myDevices: Int {
-        guard let me = store.me, let install = store.install else { return 0 }
-        return install.servers.filter { $0.user == me.id }.count + install.clients.filter { $0.user == me.id }.count
-    }
-
-    /// "4 of 9": the apps on your pages, of all there are.
-    private var appsValue: String {
-        let all = store.apps.count, mine = store.apps.filter { !$0.scopes.isEmpty }.count
-        return all == 0 ? "" : String(localized: "\(mine) of \(all)")
     }
 
     /// The app's version and build, and the node's, for telling which build a device runs.
@@ -763,8 +745,6 @@ struct AppearanceView: View {
                     }
                 }
                 .padding(.vertical, 10)
-            } footer: {
-                Text("Automatic follows this device’s own setting. App screens follow it too.")
             }
         }
         .formStyle(.grouped)

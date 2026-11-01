@@ -102,7 +102,7 @@ struct PagesEditor: View {
                     }
                     .onMove { store.movePages(from: $0, to: $1) }
                 } footer: {
-                    Text("Drag to reorder your groups’ pages; switch one off to hide it. You stays first and Everyone last.")
+                    Text("Drag to reorder; switch one off to hide it.")
                 }
             }
             #if os(iOS)
