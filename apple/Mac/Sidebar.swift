@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// One section per page, listing its apps; a section's name shows the page, its apps staying listed (a collapsible
-/// section's header folds it when clicked, so choosing a page hid its apps). Settings sit at the bottom.
+/// One section per page, listing its apps; a section's name shows the page, and its apps stay listed. Settings sit
+/// at the bottom.
 /// Folded (⌘\), it shows only the apps' icons, each where it was, with a page's dot standing for its name.
 struct Sidebar: View {
     @Environment(Store.self) private var store
@@ -88,6 +88,8 @@ struct Sidebar: View {
                         Button("Edit Pages…") { store.sheet = .pages }
                     }
                 }
+                // A sidebar's section folds when its header is clicked, and here the header opens the page.
+                .collapsible(false)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { SettingsRow() }
