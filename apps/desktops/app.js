@@ -328,12 +328,10 @@ export default {
       const [u, l] = memory(d);
       used += u; limit += l; cpu += d.cpu || 0;
     }
-    const borrowed = desktops.filter((d) => d.borrowed && !d.borrowed.signing_in).length;
-    const parts = [\`\${running.length} running\`];
-    if (borrowed) parts.push(\`\${borrowed} borrowed\`);
+    // Which are running, by their tiles' titles (the free one waiting for an agent aside), or nothing when none is.
+    const names = running.filter((d) => !free(d)).map(title).join(", ");
     const total = cpus[""] || [];
-    document.getElementById("uses").innerHTML = parts.map(one.esc).join(" · ") +
-      (running.some((d) => d.memory != null) ? \` · \${meters(used, limit, cpu, total)}\` : "");
+    document.getElementById("uses").innerHTML = [names && one.esc(names), running.some((d) => d.memory != null) && meters(used, limit, cpu, total)].filter(Boolean).join(" · ");
     drawBanner();
   }
 
