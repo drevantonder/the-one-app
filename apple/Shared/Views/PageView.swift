@@ -683,6 +683,7 @@ struct SettingsSection<Content: View>: View {
 
 /// A row of Settings: its icon, its name, its value, and a chevron.
 private struct SettingsRow: View {
+    @Environment(Store.self) private var store
     var item: Setting
     var value: String
     var badge = false
@@ -691,7 +692,12 @@ private struct SettingsRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 14) {
-                SymbolTile(symbol: item.symbol, color: item.color, size: 30)
+                // A row that opens an app shows that app's tile, as its page does.
+                if let app = store.app(for: item) {
+                    AppTile(app: app, seed: app.name, size: 30)
+                } else {
+                    SymbolTile(symbol: item.symbol, color: item.color, size: 30)
+                }
                 Text(item.title)
                     .foregroundStyle(.primary)
                 Spacer(minLength: 8)

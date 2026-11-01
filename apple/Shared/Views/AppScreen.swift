@@ -426,7 +426,7 @@ struct RouteView: View {
             switch setting {
             case .store:
                 // The install's store app, once it exists; until then, a list of every app.
-                if let name = store.config?.store, let app = store.app(name), app.hasScreens {
+                if let app = store.app(for: .store) {
                     AppScreen(route: ScreenRoute(app: app.name)).id(app.name)
                 } else {
                     AppStoreView()

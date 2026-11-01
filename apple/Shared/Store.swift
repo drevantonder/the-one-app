@@ -79,7 +79,7 @@ enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .store: "bag.fill"
+        case .store: "square.grid.2x2.fill"
         case .groups: "person.3.fill"
         case .devices: "laptopcomputer.and.iphone"
         case .vault: "lock.fill"
@@ -241,6 +241,12 @@ final class Store {
     func storeRoute(for app: AppInfo) -> Route? {
         guard let name = config?.store, let store = self.app(name), store.has(screen: "app"), (app.deploys ?? 0) > 0 else { return nil }
         return .screen(ScreenRoute(app: name, screen: "app", params: Self.params(["app": app.name])))
+    }
+
+    /// The app a setting opens, if it opens one: the App Store is the install's store app, once it's here.
+    func app(for setting: Setting) -> AppInfo? {
+        guard setting == .store, let name = config?.store, let app = app(name), app.hasScreens else { return nil }
+        return app
     }
 
     /// The App Store's Connectors tab, if the install's store app is here.
