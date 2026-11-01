@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// podmanRT runs desktops as rootless Podman containers, in the user's own
+// podmanRT runs computers as rootless Podman containers, in the user's own
 // systemd instance rather than this service, so restarting it leaves them
 // running; with --restart=always and podman-restart they start again after a
 // reboot.
@@ -45,7 +45,7 @@ func podman(ctx context.Context, args ...string) ([]byte, error) {
 	return command(ctx, "podman", args...)
 }
 
-func (podmanRT) list(ctx context.Context) ([]desktop, error) {
+func (podmanRT) list(ctx context.Context) ([]computer, error) {
 	out, err := podman(ctx, "ps", "--all", "--filter", "label=one.token", "--format", "json")
 	if err != nil {
 		return nil, err
@@ -59,12 +59,12 @@ func (podmanRT) list(ctx context.Context) ([]desktop, error) {
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, err
 	}
-	var all []desktop
+	var all []computer
 	for _, r := range raw {
 		if len(r.Names) == 0 || !strings.HasPrefix(r.Names[0], prefix) {
 			continue
 		}
-		d := desktop{Name: strings.TrimPrefix(r.Names[0], prefix), State: "stopped", token: r.Labels["one.token"], pool: r.Labels["one.pool"] != ""}
+		d := computer{Name: strings.TrimPrefix(r.Names[0], prefix), State: "stopped", token: r.Labels["one.token"], pool: r.Labels["one.pool"] != ""}
 		if r.State == "running" || r.State == "paused" {
 			d.State = r.State
 		}
@@ -77,13 +77,13 @@ func (podmanRT) list(ctx context.Context) ([]desktop, error) {
 	return all, nil
 }
 
-func (podmanRT) run(ctx context.Context, d desktop, sz size) error {
+func (podmanRT) run(ctx context.Context, d computer, sz size) error {
 	c := prefix + d.Name
 	args := append([]string{"run", "--detach", "--name", c, "--restart=always"}, d.labels()...)
 	args = append(args, sz.limits()...)
 	_, err := podman(ctx, append(args,
 		"--env", "CUA_ENV_TOKEN="+d.token,
-		// The image says HOME=/root, which its desktop user inherits; there
+		// The image says HOME=/root, which its computer user inherits; there
 		// Chromium can't keep crash reports, and won't start.
 		"--env", "HOME="+home,
 		"--publish", fmt.Sprintf("127.0.0.1:%d:3211", d.port),
@@ -94,7 +94,7 @@ func (podmanRT) run(ctx context.Context, d desktop, sz size) error {
 	return err
 }
 
-func (podmanRT) start(ctx context.Context, d desktop) error {
+func (podmanRT) start(ctx context.Context, d computer) error {
 	if _, err := podman(ctx, "update", "--restart=always", prefix+d.Name); err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (podmanRT) start(ctx context.Context, d desktop) error {
 	return err
 }
 
-func (podmanRT) stop(ctx context.Context, d desktop) error {
+func (podmanRT) stop(ctx context.Context, d computer) error {
 	if _, err := podman(ctx, "update", "--restart=no", prefix+d.Name); err != nil {
 		return err
 	}
@@ -110,12 +110,12 @@ func (podmanRT) stop(ctx context.Context, d desktop) error {
 	return err
 }
 
-func (podmanRT) restart(ctx context.Context, d desktop) error {
+func (podmanRT) restart(ctx context.Context, d computer) error {
 	_, err := podman(ctx, "restart", "--time", "10", prefix+d.Name)
 	return err
 }
 
-func (podmanRT) remove(ctx context.Context, d desktop) error {
+func (podmanRT) remove(ctx context.Context, d computer) error {
 	out, err := podman(ctx, "inspect", "--format", "{{range .Mounts}}{{.Name}} {{end}}", prefix+d.Name)
 	if err != nil {
 		return err
@@ -131,21 +131,21 @@ func (podmanRT) remove(ctx context.Context, d desktop) error {
 	return nil
 }
 
-func (podmanRT) pause(ctx context.Context, d desktop) error {
+func (podmanRT) pause(ctx context.Context, d computer) error {
 	_, err := podman(ctx, "pause", prefix+d.Name)
 	return err
 }
 
-func (podmanRT) unpause(ctx context.Context, d desktop) error {
+func (podmanRT) unpause(ctx context.Context, d computer) error {
 	_, err := podman(ctx, "unpause", prefix+d.Name)
 	return err
 }
 
-func (podmanRT) exec(ctx context.Context, d desktop, stdin io.Reader, stdout io.Writer, args ...string) error {
+func (podmanRT) exec(ctx context.Context, d computer, stdin io.Reader, stdout io.Writer, args ...string) error {
 	return execIn(ctx, "podman", prefix+d.Name, stdin, stdout, args...)
 }
 
-func (podmanRT) limits(ctx context.Context, all []desktop) (map[string]limit, error) {
+func (podmanRT) limits(ctx context.Context, all []computer) (map[string]limit, error) {
 	out := map[string]limit{}
 	if len(all) == 0 {
 		return out, nil
@@ -176,7 +176,7 @@ func (podmanRT) limits(ctx context.Context, all []desktop) (map[string]limit, er
 	return out, nil
 }
 
-func (podmanRT) resize(ctx context.Context, d desktop, sz size) error {
+func (podmanRT) resize(ctx context.Context, d computer, sz size) error {
 	_, err := podman(ctx, append([]string{"update"}, append(sz.limits(), prefix+d.Name)...)...)
 	return err
 }

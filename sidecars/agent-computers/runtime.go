@@ -18,19 +18,19 @@ import (
 	"time"
 )
 
-// A desktop is a container running Cua's desktop image, named prefix+name,
+// A computer is a container running Cua's desktop image, named prefix+name,
 // its home folder on a volume of its own, so its sign-ins survive restarts
 // and image updates. Its server's port and token are labels on the container,
-// where the old app kept them too, so its desktops carry on here. The
+// where the old app kept them too, so its computers carry on here. The
 // container runtime is Podman on Linux and Apple's container on a Mac.
 const (
-	prefix    = "desktop-"
+	prefix    = "computer-"
 	cuaImage  = "ghcr.io/trycua/linux:24.04"
 	home      = "/home/cua"
 	firstPort = 32100
 )
 
-type desktop struct {
+type computer struct {
 	Name    string    `json:"name"`
 	State   string    `json:"state"` // running, paused or stopped
 	Started time.Time `json:"started,omitzero"`
@@ -44,26 +44,26 @@ var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 // validProfile is a browser profile's name, as people name them: Personal, PTC.
 var validProfile = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,39}$`)
 
-// A containers runs desktops' containers.
+// A containers runs computers' containers.
 type containers interface {
-	list(ctx context.Context) ([]desktop, error)
-	// run makes the desktop's container and home volume, and starts it.
-	run(ctx context.Context, d desktop, sz size) error
-	// start starts a desktop, and again after the server restarts; stop
+	list(ctx context.Context) ([]computer, error)
+	// run makes the computer's container and home volume, and starts it.
+	run(ctx context.Context, d computer, sz size) error
+	// start starts a computer, and again after the server restarts; stop
 	// stops it until it's started again.
-	start(ctx context.Context, d desktop) error
-	stop(ctx context.Context, d desktop) error
-	restart(ctx context.Context, d desktop) error
+	start(ctx context.Context, d computer) error
+	stop(ctx context.Context, d computer) error
+	restart(ctx context.Context, d computer) error
 	// remove deletes the container and its volumes.
-	remove(ctx context.Context, d desktop) error
-	// pause freezes a desktop's processes: it keeps its memory but uses no
+	remove(ctx context.Context, d computer) error
+	// pause freezes a computer's processes: it keeps its memory but uses no
 	// CPU until unpaused, which takes a moment.
-	pause(ctx context.Context, d desktop) error
-	unpause(ctx context.Context, d desktop) error
-	// exec runs a command in a running desktop, as root.
-	exec(ctx context.Context, d desktop, stdin io.Reader, stdout io.Writer, args ...string) error
-	limits(ctx context.Context, all []desktop) (map[string]limit, error)
-	resize(ctx context.Context, d desktop, sz size) error
+	pause(ctx context.Context, d computer) error
+	unpause(ctx context.Context, d computer) error
+	// exec runs a command in a running computer, as root.
+	exec(ctx context.Context, d computer, stdin io.Reader, stdout io.Writer, args ...string) error
+	limits(ctx context.Context, all []computer) (map[string]limit, error)
+	resize(ctx context.Context, d computer, sz size) error
 	stats(ctx context.Context) (map[string]usage, error)
 }
 
@@ -80,23 +80,23 @@ func setup(dir string) error {
 	return err
 }
 
-func list(ctx context.Context) ([]desktop, error)          { return rt.list(ctx) }
-func pause(ctx context.Context, d desktop) error           { return rt.pause(ctx, d) }
-func unpause(ctx context.Context, d desktop) error         { return rt.unpause(ctx, d) }
-func resize(ctx context.Context, d desktop, sz size) error { return rt.resize(ctx, d, sz) }
-func stats(ctx context.Context) (map[string]usage, error)  { return rt.stats(ctx) }
-func limits(ctx context.Context, all []desktop) (map[string]limit, error) {
+func list(ctx context.Context) ([]computer, error)          { return rt.list(ctx) }
+func pause(ctx context.Context, d computer) error           { return rt.pause(ctx, d) }
+func unpause(ctx context.Context, d computer) error         { return rt.unpause(ctx, d) }
+func resize(ctx context.Context, d computer, sz size) error { return rt.resize(ctx, d, sz) }
+func stats(ctx context.Context) (map[string]usage, error)   { return rt.stats(ctx) }
+func limits(ctx context.Context, all []computer) (map[string]limit, error) {
 	return rt.limits(ctx, all)
 }
 
-// in runs a command in a running desktop, as root. An exitError keeps its
+// in runs a command in a running computer, as root. An exitError keeps its
 // exit code, which some callers accept.
-func in(ctx context.Context, d desktop, stdin io.Reader, stdout io.Writer, args ...string) error {
+func in(ctx context.Context, d computer, stdin io.Reader, stdout io.Writer, args ...string) error {
 	return rt.exec(ctx, d, stdin, stdout, args...)
 }
 
-// pick is the desktop named, or with no name the only one.
-func pick(all []desktop, name string) (desktop, error) {
+// pick is the computer named, or with no name the only one.
+func pick(all []computer, name string) (computer, error) {
 	var names []string
 	for _, d := range all {
 		if d.Name == name || name == "" && len(all) == 1 {
@@ -106,23 +106,23 @@ func pick(all []desktop, name string) (desktop, error) {
 	}
 	switch {
 	case len(all) == 0:
-		return desktop{}, fmt.Errorf("no desktops: make one with create")
+		return computer{}, fmt.Errorf("no computers: make one with create")
 	case name == "":
-		return desktop{}, fmt.Errorf("which desktop? pass desktop: %s", strings.Join(names, ", "))
+		return computer{}, fmt.Errorf("which computer? pass computer: %s", strings.Join(names, ", "))
 	}
-	return desktop{}, fmt.Errorf("no desktop named %q: there's %s", name, strings.Join(names, ", "))
+	return computer{}, fmt.Errorf("no computer named %q: there's %s", name, strings.Join(names, ", "))
 }
 
-func find(ctx context.Context, name string) (desktop, error) {
+func find(ctx context.Context, name string) (computer, error) {
 	all, err := list(ctx)
 	if err != nil {
-		return desktop{}, err
+		return computer{}, err
 	}
 	return pick(all, name)
 }
 
-// nextPort is the first port after every desktop's.
-func nextPort(all []desktop) int {
+// nextPort is the first port after every computer's.
+func nextPort(all []computer) int {
 	port := firstPort
 	for _, d := range all {
 		port = max(port, d.port+1)
@@ -130,30 +130,30 @@ func nextPort(all []desktop) int {
 	return port
 }
 
-// creating keeps two desktops being made at once from taking the same port.
+// creating keeps two computers being made at once from taking the same port.
 var creating sync.Mutex
 
-// create makes a desktop and starts it, waiting for its server to answer
+// create makes a computer and starts it, waiting for its server to answer
 // if wait.
-func create(ctx context.Context, name string, sz size, pool, wait bool) (desktop, error) {
+func create(ctx context.Context, name string, sz size, pool, wait bool) (computer, error) {
 	if !validName.MatchString(name) {
-		return desktop{}, fmt.Errorf("a desktop's name is lowercase letters, digits and dashes")
+		return computer{}, fmt.Errorf("a computer's name is lowercase letters, digits and dashes")
 	}
 	creating.Lock()
 	defer creating.Unlock()
 	all, err := list(ctx)
 	if err != nil {
-		return desktop{}, err
+		return computer{}, err
 	}
 	if _, err := pick(all, name); err == nil {
-		return desktop{}, fmt.Errorf("desktop %s already exists", name)
+		return computer{}, fmt.Errorf("computer %s already exists", name)
 	}
 	b := make([]byte, 24)
 	rand.Read(b)
-	d := desktop{Name: name, State: "running", pool: pool, port: nextPort(all), token: hex.EncodeToString(b)}
+	d := computer{Name: name, State: "running", pool: pool, port: nextPort(all), token: hex.EncodeToString(b)}
 	if err := rt.run(ctx, d, sz); err != nil {
 		remove(context.WithoutCancel(ctx), d)
-		return desktop{}, err
+		return computer{}, err
 	}
 	if !wait {
 		return d, nil
@@ -161,8 +161,8 @@ func create(ctx context.Context, name string, sz size, pool, wait bool) (desktop
 	return d, ready(ctx, d)
 }
 
-// labels are what a desktop's container carries.
-func (d desktop) labels() []string {
+// labels are what a computer's container carries.
+func (d computer) labels() []string {
 	l := []string{"--label", fmt.Sprintf("one.port=%d", d.port), "--label", "one.token=" + d.token}
 	if d.pool {
 		l = append(l, "--label", "one.pool=1")
@@ -170,16 +170,16 @@ func (d desktop) labels() []string {
 	return l
 }
 
-// start starts a desktop, and again after the server restarts.
-func start(ctx context.Context, d desktop) error {
+// start starts a computer, and again after the server restarts.
+func start(ctx context.Context, d computer) error {
 	if err := rt.start(ctx, d); err != nil {
 		return err
 	}
 	return ready(ctx, d)
 }
 
-// stop stops a desktop until it's started again, restarts of the server too.
-func stop(ctx context.Context, d desktop) error {
+// stop stops a computer until it's started again, restarts of the server too.
+func stop(ctx context.Context, d computer) error {
 	if d.State == "paused" {
 		if err := unpause(ctx, d); err != nil {
 			return err
@@ -188,8 +188,8 @@ func stop(ctx context.Context, d desktop) error {
 	return rt.stop(ctx, d)
 }
 
-// remove deletes a desktop's container and its volumes.
-func remove(ctx context.Context, d desktop) error {
+// remove deletes a computer's container and its volumes.
+func remove(ctx context.Context, d computer) error {
 	if err := rt.remove(ctx, d); err != nil {
 		return err
 	}
@@ -199,8 +199,8 @@ func remove(ctx context.Context, d desktop) error {
 	return nil
 }
 
-// sh runs a script in a running desktop, as root.
-func sh(ctx context.Context, d desktop, script string) error {
+// sh runs a script in a running computer, as root.
+func sh(ctx context.Context, d computer, script string) error {
 	var out bytes.Buffer
 	return in(ctx, d, strings.NewReader(script), &out, "sh", "-s")
 }
@@ -244,10 +244,10 @@ func tarred(err error) bool {
 	return err == nil || errors.As(err, &exit) && exit.ExitCode() == 1
 }
 
-func (d desktop) local() string { return fmt.Sprintf("http://127.0.0.1:%d", d.port) }
+func (d computer) local() string { return fmt.Sprintf("http://127.0.0.1:%d", d.port) }
 
-// ready waits for a desktop's server to answer.
-func ready(ctx context.Context, d desktop) error {
+// ready waits for a computer's server to answer.
+func ready(ctx context.Context, d computer) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	for {
@@ -260,7 +260,7 @@ func ready(ctx context.Context, d desktop) error {
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("desktop %s didn't start: %w", d.Name, ctx.Err())
+			return fmt.Errorf("computer %s didn't start: %w", d.Name, ctx.Err())
 		case <-time.After(time.Second):
 		}
 	}

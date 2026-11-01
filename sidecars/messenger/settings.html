@@ -10,7 +10,7 @@
 <div id="list"></div>
 <div class="card" id="connect"></div>
 <script>
-// Messenger's accounts are browser profiles (the Desktops page's): adding one picks a profile, or makes one, and opens
+// Messenger's accounts are browser profiles (the Agent Computers page's): adding one picks a profile, or makes one, and opens
 // messenger.com in it to sign in.
 async function show() {
   const accounts = await one.call("accounts");
@@ -39,7 +39,7 @@ async function pick(accounts) {
     const profile = select.value || name.value.trim();
     if (!profile) return name.focus();
     e.target.disabled = true;
-    e.target.textContent = "Opening a desktop…";
+    e.target.textContent = "Opening a computer…";
     try { signingIn(await one.call("sign_in", { profile })); }
     catch (err) { document.getElementById("err").textContent = err.message; e.target.disabled = false; e.target.textContent = "Sign in to Messenger"; }
   };
@@ -47,13 +47,13 @@ async function pick(accounts) {
 
 function signingIn(r) {
   const c = document.getElementById("connect");
-  c.innerHTML = `<ol><li><a href="${one.esc(r.url)}">Open the desktop</a>: its browser is on messenger.com, in the ${one.esc(r.profile)} profile.</li>
+  c.innerHTML = `<ol><li><a href="${one.esc(r.url)}">Open the computer</a>: its browser is on messenger.com, in the ${one.esc(r.profile)} profile.</li>
     <li>Sign in there, and tick Keep me signed in.</li><li>Come back and press Done.</li></ol>
     <button class="primary" id="done">Done</button><div id="err" class="error small"></div>`;
   document.getElementById("done").onclick = async (e) => {
     e.target.disabled = true;
     e.target.textContent = "Saving…";
-    try { await one.call("_save", { desktop: r.desktop, server: r.server, profile: r.profile }); show(); }
+    try { await one.call("_save", { computer: r.computer, server: r.server, profile: r.profile }); show(); }
     catch (err) { document.getElementById("err").textContent = err.message; e.target.disabled = false; e.target.textContent = "Done"; }
   };
 }

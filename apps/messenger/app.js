@@ -104,7 +104,7 @@ export default {
     },
     _profiles: {
       reads: true,
-      description: "The desktops' browser profiles, for the settings screen to pick one.",
+      description: "The browser profiles, for the settings screen to pick one.",
       input: { type: "object", properties: {} },
       run: (ctx, input) => sidecar(ctx, "_profiles", input),
     },
@@ -137,7 +137,7 @@ export default {
 <div id="list"></div>
 <div class="card" id="connect"></div>
 <script>
-// Messenger's accounts are browser profiles (the Desktops page's): adding one picks a profile, or makes one, and opens
+// Messenger's accounts are browser profiles (the Agent Computers page's): adding one picks a profile, or makes one, and opens
 // messenger.com in it to sign in.
 async function show() {
   const accounts = await one.call("accounts");

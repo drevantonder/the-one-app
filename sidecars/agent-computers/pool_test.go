@@ -7,11 +7,11 @@ import (
 )
 
 func TestSpares(t *testing.T) {
-	all := []desktop{{Name: "main", State: "running"}, {Name: "pool-a", State: "running", pool: true},
+	all := []computer{{Name: "main", State: "running"}, {Name: "pool-a", State: "running", pool: true},
 		{Name: "pool-b", State: "paused", pool: true}, {Name: "pool-c", State: "stopped", pool: true}, {Name: "pool-d", State: "running", pool: true}}
 	got := spares(all, map[string]loan{"pool-d": {By: "x", For: "y"}})
 	if len(got) != 2 || got[0].Name != "pool-a" || got[1].Name != "pool-b" {
-		t.Errorf("unborrowed pool desktops that aren't stopped: %v", got)
+		t.Errorf("unborrowed pool computers that aren't stopped: %v", got)
 	}
 }
 
@@ -26,7 +26,7 @@ func TestSizes(t *testing.T) {
 		t.Error("an unknown size must be an error")
 	}
 	if n := (limit{Memory: 4 << 30}).sizeOf(); n != "small" {
-		t.Errorf("a desktop from before sizes is named by its memory: %s", n)
+		t.Errorf("a computer from before sizes is named by its memory: %s", n)
 	}
 	if n := (limit{Memory: 16 << 30, CPUs: 8}).sizeOf(); n != "large" {
 		t.Errorf("%s", n)
@@ -51,7 +51,7 @@ func TestQuote(t *testing.T) {
 }
 
 func TestIdle(t *testing.T) {
-	ds := newDesktops(t.TempDir(), "")
+	ds := newComputers(t.TempDir(), "")
 	if d := ds.idle("main"); d != 0 {
 		t.Errorf("first seen counts as just used: %v", d)
 	}
@@ -65,19 +65,19 @@ func TestIdle(t *testing.T) {
 
 func TestLoansKept(t *testing.T) {
 	dir := t.TempDir()
-	ds := newDesktops(dir, "")
+	ds := newComputers(dir, "")
 	ds.setLoan("pool-a", &loan{By: "Messenger", For: "Reading chats"})
-	if l := newDesktops(dir, "").loans()["pool-a"]; l.By != "Messenger" {
+	if l := newComputers(dir, "").loans()["pool-a"]; l.By != "Messenger" {
 		t.Errorf("loans outlive the program: %v", l)
 	}
 	ds.setLoan("pool-a", nil)
-	if _, ok := newDesktops(dir, "").loans()["pool-a"]; ok {
+	if _, ok := newComputers(dir, "").loans()["pool-a"]; ok {
 		t.Error("a given-back loan is forgotten")
 	}
 }
 
 func TestAddedProfileListed(t *testing.T) {
-	ds := newDesktops(t.TempDir(), "")
+	ds := newComputers(t.TempDir(), "")
 	if ds.keeps("PTC") {
 		t.Fatal("no profile yet")
 	}

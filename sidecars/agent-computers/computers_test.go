@@ -7,10 +7,10 @@ import (
 )
 
 func TestPick(t *testing.T) {
-	one := []desktop{{Name: "main"}}
-	two := []desktop{{Name: "main"}, {Name: "work"}}
+	one := []computer{{Name: "main"}}
+	two := []computer{{Name: "main"}, {Name: "work"}}
 	if d, err := pick(one, ""); err != nil || d.Name != "main" {
-		t.Errorf("the only desktop is the default: %v %v", d, err)
+		t.Errorf("the only computer is the default: %v %v", d, err)
 	}
 	if d, err := pick(two, "work"); err != nil || d.Name != "work" {
 		t.Errorf("by name: %v %v", d, err)
@@ -19,10 +19,10 @@ func TestPick(t *testing.T) {
 		t.Errorf("with several, ask which: %v", err)
 	}
 	if _, err := pick(nil, ""); err == nil {
-		t.Error("no desktops must be an error")
+		t.Error("no computers must be an error")
 	}
 	if _, err := pick(one, "work"); err == nil {
-		t.Error("a missing desktop must be an error")
+		t.Error("a missing computer must be an error")
 	}
 }
 
@@ -30,7 +30,7 @@ func TestNextPort(t *testing.T) {
 	if p := nextPort(nil); p != firstPort {
 		t.Errorf("first: %d", p)
 	}
-	if p := nextPort([]desktop{{port: firstPort + 3}, {port: firstPort}}); p != firstPort+4 {
+	if p := nextPort([]computer{{port: firstPort + 3}, {port: firstPort}}); p != firstPort+4 {
 		t.Errorf("after the highest: %d", p)
 	}
 }
@@ -51,14 +51,14 @@ func TestEvent(t *testing.T) {
 	}
 }
 
-func TestWithDesktop(t *testing.T) {
-	s := withDesktop(json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}`))
+func TestWithComputer(t *testing.T) {
+	s := withComputer(json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}`))
 	props := s["properties"].(map[string]any)
-	if props["url"] == nil || props["desktop"] == nil || s["required"] == nil {
-		t.Errorf("keeps the tool's input and adds desktop: %v", s)
+	if props["url"] == nil || props["computer"] == nil || s["required"] == nil {
+		t.Errorf("keeps the tool's input and adds computer: %v", s)
 	}
-	if s := withDesktop(nil); s["properties"].(map[string]any)["desktop"] == nil {
-		t.Errorf("a tool with no input still takes desktop: %v", s)
+	if s := withComputer(nil); s["properties"].(map[string]any)["computer"] == nil {
+		t.Errorf("a tool with no input still takes computer: %v", s)
 	}
 }
 

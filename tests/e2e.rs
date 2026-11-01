@@ -657,16 +657,16 @@ async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
     assert_eq!((board["built_in"].clone(), board["added"].clone(), board["title"].clone()), (json!(true), json!(false), json!("Board")), "{board}");
     assert!(board["description"].as_str().is_some_and(|d| d.contains("posts")), "a built-in app's code describes it before it's added: {board}");
     assert_eq!((board["color"].clone(), board["image"].clone()), (json!("#ff9500"), json!(null)), "{board}");
-    let (whatsapp, desktops) = (app(&listed, "whatsapp"), app(&listed, "desktops"));
+    let (whatsapp, computers) = (app(&listed, "whatsapp"), app(&listed, "agent-computers"));
     let (computer, agents) = (app(&listed, "computer"), app(&listed, "agents"));
     let service = |a: &Value| (a["service"].clone(), a["connector"].clone(), a["connected"].clone());
     let yes = (json!(true), json!(true), json!(true));
     assert_eq!((service(&whatsapp), service(&computer), service(&agents)), (yes.clone(), yes.clone(), yes), "an app with no screen and no widget is a service, under its old names too: {whatsapp} {computer} {agents}");
-    assert_eq!((desktops["service"].clone(), board["service"].clone()), (json!(false), json!(false)), "an app with a page isn't one: {desktops} {board}");
+    assert_eq!((computers["service"].clone(), board["service"].clone()), (json!(false), json!(false)), "an app with a page isn't one: {computers} {board}");
     for only in [json!({ "service": true }), json!({ "connector": true }), json!({ "connected": true })] {
         let listed = a.call(call("apps", "list", only.clone())).await.unwrap();
         let names: Vec<_> = listed["apps"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap().to_string()).collect();
-        assert!(names.contains(&"whatsapp".into()) && names.contains(&"agents".into()) && !names.contains(&"desktops".into()), "{only} lists only services: {names:?}");
+        assert!(names.contains(&"whatsapp".into()) && names.contains(&"agents".into()) && !names.contains(&"agent-computers".into()), "{only} lists only services: {names:?}");
     }
     assert_eq!(whatsapp["uses"], json!({ "apps": [], "sidecars": [] }), "nothing runs it yet: {whatsapp}");
     let drive = app(&listed, "drive");
@@ -769,7 +769,7 @@ async fn an_app_wraps_the_sidecar_of_its_name_on_another_server() {
 async fn agents_use_a_device_its_owner_let_them_through_computer_use_and_each_session_is_logged() {
     let (a, _ra) = start("device-a").await;
     let (b, _rb) = start("device-b").await;
-    a.create_with("Devices", "Andre", &["computer", "desktops"]).await.unwrap();
+    a.create_with("Devices", "Andre", &["computer", "agent-computers"]).await.unwrap();
     b.join(&a.pair(None).unwrap()).await.unwrap();
     // b is a Mac whose owner let agents use it: its computer sidecar answers as the Mac app's does.
     b.register_sidecar("computer", json!({ "title": "Computer Use", "ops": [{ "name": "_status" }, { "name": "_use" }] })).await.unwrap();
@@ -791,17 +791,17 @@ async fn agents_use_a_device_its_owner_let_them_through_computer_use_and_each_se
         }
     });
     let listed = async || a.call(call("computer", "list", json!({}))).await;
-    eventually("the device among the desktops", async || listed().await.is_ok_and(|l| l["desktops"].as_array().is_some_and(|d| d.iter().any(|d| d["device"] == true)))).await;
-    let device = listed().await.unwrap()["desktops"][0].clone();
-    assert_eq!((device["title"].clone(), device["state"].clone()), (json!("Andre's Mac"), json!("running")), "listed with no desktops sidecar anywhere: {device}");
+    eventually("the device among the computers", async || listed().await.is_ok_and(|l| l["computers"].as_array().is_some_and(|d| d.iter().any(|d| d["device"] == true)))).await;
+    let device = listed().await.unwrap()["computers"][0].clone();
+    assert_eq!((device["title"].clone(), device["state"].clone()), (json!("Andre's Mac"), json!("running")), "listed with no agent computers anywhere: {device}");
     let name = device["name"].as_str().unwrap().to_string();
 
     for tool in ["list_windows", "click"] {
-        let used = a.call(call("computer", "use", json!({ "desktop": name, "tool": tool, "args": {} }))).await.unwrap();
+        let used = a.call(call("computer", "use", json!({ "computer": name, "tool": tool, "args": {} }))).await.unwrap();
         assert_eq!(used["content"][0]["text"], json!(tool), "use reaches the device's sidecar: {used}");
     }
-    // The Desktops page reads them through Computer Use.
-    let devices = a.call(call("desktops", "_devices", json!({}))).await.unwrap();
+    // The Agent Computers page reads them through Computer Use.
+    let devices = a.call(call("agent-computers", "_devices", json!({}))).await.unwrap();
     let sessions = devices["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 1, "a session is logged once, when it starts: {devices}");
     assert_eq!((sessions[0]["device"].clone(), sessions[0]["title"].clone()), (json!(name), json!("Andre's Mac")), "{devices}");

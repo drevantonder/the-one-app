@@ -17,20 +17,20 @@ import (
 	"time"
 )
 
-// appleRT runs desktops with Apple's container (github.com/apple/container),
-// each in a light VM of its own, on a Mac. A desktop's server is reached
+// appleRT runs computers with Apple's container (github.com/apple/container),
+// each in a light VM of its own, on a Mac. A computer's server is reached
 // through a Unix socket the VM publishes on the Mac, not over the VM's
 // network or a published port: macOS treats that network as the local
 // network, which a background service isn't allowed to reach. A small bridge
-// in the desktop joins the socket to its server, and this serves the socket
+// in the computer joins the socket to its server, and this serves the socket
 // on 127.0.0.1:<port>. Apple's container can't pause or resize a container,
-// and has no restart policy: revive starts desktops not stopped with stop.
+// and has no restart policy: revive starts computers not stopped with stop.
 type appleRT struct {
-	dir string // sockets, and which desktops were stopped
+	dir string // sockets, and which computers were stopped
 
 	mu       sync.Mutex
-	forwards map[string]net.Listener // by desktop
-	cpu      map[string]cpuSample    // last CPU reading, by desktop
+	forwards map[string]net.Listener // by computer
+	cpu      map[string]cpuSample    // last CPU reading, by computer
 }
 
 type cpuSample struct {
@@ -40,13 +40,13 @@ type cpuSample struct {
 
 var errCant = errors.New("Apple's container can't do that")
 
-const desktopSocket = "/run/one-desktop.sock" // the bridge's end, in the desktop
+const computerSocket = "/run/one-computer.sock" // the bridge's end, in the computer
 
-// bridge joins desktopSocket to the desktop's server. It runs in the desktop,
-// which has Python, and is started again whenever the desktop has restarted.
+// bridge joins computerSocket to the computer's server. It runs in the computer,
+// which has Python, and is started again whenever the computer has restarted.
 const bridge = `
 import os, socket, threading
-path = "` + desktopSocket + `"
+path = "` + computerSocket + `"
 try: os.unlink(path)
 except OSError: pass
 s = socket.socket(socket.AF_UNIX); s.bind(path); s.listen(64)
@@ -107,19 +107,19 @@ func (a *appleRT) containers(ctx context.Context) ([]appleContainer, error) {
 	return all, json.Unmarshal(out, &all)
 }
 
-func (a *appleRT) list(ctx context.Context) ([]desktop, error) {
+func (a *appleRT) list(ctx context.Context) ([]computer, error) {
 	all, err := a.containers(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var out []desktop
+	var out []computer
 	for _, c := range all {
 		l := c.Configuration.Labels
 		name, ok := strings.CutPrefix(c.Configuration.ID, prefix)
 		if !ok || l["one.token"] == "" {
 			continue
 		}
-		d := desktop{Name: name, State: "stopped", Started: c.Status.StartedDate, token: l["one.token"], pool: l["one.pool"] != ""}
+		d := computer{Name: name, State: "stopped", Started: c.Status.StartedDate, token: l["one.token"], pool: l["one.pool"] != ""}
 		if c.Status.State == "running" {
 			d.State = "running"
 		}
@@ -130,7 +130,7 @@ func (a *appleRT) list(ctx context.Context) ([]desktop, error) {
 	return out, nil
 }
 
-func (a *appleRT) run(ctx context.Context, d desktop, sz size) error {
+func (a *appleRT) run(ctx context.Context, d computer, sz size) error {
 	c, vol := prefix+d.Name, prefix+d.Name+"-home"
 	if _, err := ctr(ctx, "volume", "create", vol); err != nil {
 		return err
@@ -148,7 +148,7 @@ func (a *appleRT) run(ctx context.Context, d desktop, sz size) error {
 		"--env", "CUA_ENV_TOKEN="+d.token,
 		"--env", "HOME="+home, // see podmanRT.run
 		"--volume", vol+":"+home,
-		"--publish-socket", sock+":"+desktopSocket,
+		"--publish-socket", sock+":"+computerSocket,
 		"--shm-size", "1G", "--memory", fmt.Sprintf("%dG", sz.GB), "--cpus", strconv.Itoa(sz.CPUs),
 		cuaImage)...); err != nil {
 		return err
@@ -157,13 +157,13 @@ func (a *appleRT) run(ctx context.Context, d desktop, sz size) error {
 	return a.bridge(ctx, d.Name)
 }
 
-// bridge starts the bridge in a running desktop.
+// bridge starts the bridge in a running computer.
 func (a *appleRT) bridge(ctx context.Context, name string) error {
 	_, err := ctr(ctx, "exec", "--detach", "--user", "root", prefix+name, "python3", "-c", bridge)
 	return err
 }
 
-func (a *appleRT) start(ctx context.Context, d desktop) error {
+func (a *appleRT) start(ctx context.Context, d computer) error {
 	os.Remove(a.stopped(d.Name))
 	if _, err := ctr(ctx, "start", prefix+d.Name); err != nil {
 		return err
@@ -171,7 +171,7 @@ func (a *appleRT) start(ctx context.Context, d desktop) error {
 	return a.bridge(ctx, d.Name)
 }
 
-func (a *appleRT) stop(ctx context.Context, d desktop) error {
+func (a *appleRT) stop(ctx context.Context, d computer) error {
 	if err := os.WriteFile(a.stopped(d.Name), nil, 0o600); err != nil {
 		return err
 	}
@@ -179,7 +179,7 @@ func (a *appleRT) stop(ctx context.Context, d desktop) error {
 	return err
 }
 
-func (a *appleRT) restart(ctx context.Context, d desktop) error {
+func (a *appleRT) restart(ctx context.Context, d computer) error {
 	if _, err := ctr(ctx, "stop", prefix+d.Name); err != nil {
 		return err
 	}
@@ -189,7 +189,7 @@ func (a *appleRT) restart(ctx context.Context, d desktop) error {
 	return a.bridge(ctx, d.Name)
 }
 
-func (a *appleRT) remove(ctx context.Context, d desktop) error {
+func (a *appleRT) remove(ctx context.Context, d computer) error {
 	a.mu.Lock()
 	if ln := a.forwards[d.Name]; ln != nil {
 		ln.Close()
@@ -207,14 +207,14 @@ func (a *appleRT) remove(ctx context.Context, d desktop) error {
 	return nil
 }
 
-func (a *appleRT) pause(context.Context, desktop) error   { return errCant }
-func (a *appleRT) unpause(context.Context, desktop) error { return errCant }
+func (a *appleRT) pause(context.Context, computer) error   { return errCant }
+func (a *appleRT) unpause(context.Context, computer) error { return errCant }
 
-func (a *appleRT) exec(ctx context.Context, d desktop, stdin io.Reader, stdout io.Writer, args ...string) error {
+func (a *appleRT) exec(ctx context.Context, d computer, stdin io.Reader, stdout io.Writer, args ...string) error {
 	return execIn(ctx, "container", prefix+d.Name, stdin, stdout, args...)
 }
 
-func (a *appleRT) limits(ctx context.Context, _ []desktop) (map[string]limit, error) {
+func (a *appleRT) limits(ctx context.Context, _ []computer) (map[string]limit, error) {
 	all, err := a.containers(ctx)
 	if err != nil {
 		return nil, err
@@ -229,7 +229,7 @@ func (a *appleRT) limits(ctx context.Context, _ []desktop) (map[string]limit, er
 	return out, nil
 }
 
-func (a *appleRT) resize(context.Context, desktop, size) error {
+func (a *appleRT) resize(context.Context, computer, size) error {
 	return fmt.Errorf("%w: back it up and restore it with another size", errCant)
 }
 
@@ -266,8 +266,8 @@ func (a *appleRT) stats(ctx context.Context) (map[string]usage, error) {
 	return all, nil
 }
 
-// dial connects to a desktop's server through its socket, starting the
-// bridge once if it isn't answering, as after the desktop restarted.
+// dial connects to a computer's server through its socket, starting the
+// bridge once if it isn't answering, as after the computer restarted.
 func (a *appleRT) dial(name string) (net.Conn, error) {
 	c, err := net.DialTimeout("unix", a.socket(name), 2*time.Second)
 	if err == nil {
@@ -282,7 +282,7 @@ func (a *appleRT) dial(name string) (net.Conn, error) {
 	return net.DialTimeout("unix", a.socket(name), 2*time.Second)
 }
 
-// forward serves a desktop on 127.0.0.1:port.
+// forward serves a computer on 127.0.0.1:port.
 func (a *appleRT) forward(name string, port int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -305,7 +305,7 @@ func (a *appleRT) forward(name string, port int) {
 				defer conn.Close()
 				backend, err := a.dial(name)
 				if err != nil {
-					log.Printf("desktop %s: %v", name, err)
+					log.Printf("computer %s: %v", name, err)
 					return
 				}
 				defer backend.Close()

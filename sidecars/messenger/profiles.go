@@ -1,6 +1,6 @@
 package main
 
-// Messenger's accounts are the desktops' browser profiles it's linked to:
+// Messenger's accounts are the agent computers' browser profiles it's linked to:
 // each profile signed in to messenger.com is one
 // account, read through a browser of its own.
 
@@ -38,7 +38,7 @@ type saved struct {
 }
 
 // load reads which profiles are linked. Before profiles, Messenger read the
-// desktops' default saved login: that is its first account.
+// agent computers' default saved login: that is its first account.
 func load(node, dir string) (*messenger, error) {
 	m := &messenger{node: node, path: filepath.Join(dir, "profiles.json"), linked: []string{"default"}, out: map[string]string{}, browsers: map[string]*browser{}}
 	raw, err := os.ReadFile(m.path)
@@ -129,7 +129,7 @@ func (m *messenger) keepGivingBack() {
 
 func (m *messenger) run(op string, raw json.RawMessage) (any, error) {
 	var in struct {
-		Account, Profile, Desktop, Server, Name string
+		Account, Profile, Computer, Server, Name string
 	}
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &in); err != nil {
@@ -158,16 +158,16 @@ func (m *messenger) run(op string, raw json.RawMessage) (any, error) {
 		return m.signIn(strings.TrimSpace(cmpOr(in.Profile, in.Account)))
 	case "sign_out":
 		return m.signOut(in.Account)
-	case "_profiles": // the desktops' profiles, for the settings screen to pick one
+	case "_profiles": // the agent computers' profiles, for the settings screen to pick one
 		b := &browser{node: m.node}
-		return b.desktops("profiles", map[string]any{})
+		return b.computers("profiles", map[string]any{})
 	case "_save": // the settings screen's Done: saves the profile signed in
 		b := &browser{node: m.node}
-		input := map[string]any{"desktop": in.Desktop, "profile": in.Profile, "login": in.Profile}
+		input := map[string]any{"computer": in.Computer, "profile": in.Profile}
 		if in.Server != "" {
 			input["server"] = in.Server
 		}
-		if _, err := b.desktops("save_profile", input); err != nil {
+		if _, err := b.computers("save_profile", input); err != nil {
 			return nil, err
 		}
 		m.found(in.Profile, nil)
@@ -196,7 +196,7 @@ func (m *messenger) signIn(profile string) (any, error) {
 	}
 	m.mu.Unlock()
 	b := &browser{node: m.node}
-	got, err := b.desktops("sign_in", map[string]any{"profile": profile, "login": profile, "url": home})
+	got, err := b.computers("sign_in", map[string]any{"profile": profile, "url": home})
 	if err != nil {
 		return nil, err
 	}
@@ -210,8 +210,8 @@ func (m *messenger) signIn(profile string) (any, error) {
 	err = m.save()
 	m.mu.Unlock()
 	return map[string]any{
-		"profile": profile, "url": url, "desktop": r["desktop"], "server": r["server"],
-		"text": fmt.Sprintf("Give the person this link: %s\nThey sign in to Messenger there, in the %s browser profile (tick Keep me signed in), then press Save profile on the Desktops page or Done on Messenger's settings; it's saved by itself after 30 minutes otherwise.", url, profile),
+		"profile": profile, "url": url, "computer": r["computer"], "server": r["server"],
+		"text": fmt.Sprintf("Give the person this link: %s\nThey sign in to Messenger there, in the %s browser profile (tick Keep me signed in), then press Save profile on the Agent Computers page or Done on Messenger's settings; it's saved by itself after 30 minutes otherwise.", url, profile),
 	}, err
 }
 
@@ -229,11 +229,11 @@ func (m *messenger) signOut(account string) (string, error) {
 	delete(m.out, profile)
 	if b := m.browsers[profile]; b != nil {
 		b.mu.Lock()
-		if b.desktop != "" {
-			b.desktops("give_back", map[string]any{"desktop": b.desktop})
+		if b.computer != "" {
+			b.computers("give_back", map[string]any{"computer": b.computer})
 		}
 		b.mu.Unlock()
 		delete(m.browsers, profile)
 	}
-	return fmt.Sprintf("Messenger no longer reads the %s profile. The profile and its other sign-ins stay, on the Desktops page.", profile), m.save()
+	return fmt.Sprintf("Messenger no longer reads the %s profile. The profile and its other sign-ins stay, on the Agent Computers page.", profile), m.save()
 }

@@ -211,7 +211,7 @@ func (b *browser) send(chat, text string) (any, error) {
 		time.Sleep(500 * time.Millisecond)
 		b.dirty = true
 	}
-	return nil, fmt.Errorf("typed the message to %s, but it didn't show as sent: look at the Desktops page", name)
+	return nil, fmt.Errorf("typed the message to %s, but it didn't show as sent: look at the Agent Computers page", name)
 }
 
 // openChat opens a recent chat, or else the one person Messenger suggests
@@ -259,7 +259,7 @@ func (b *browser) openChat(want string) (string, error) {
 			_, err := b.tool("browser_click", map[string]any{"ref": exact[0], "input_route": "dom_event"})
 			return strings.TrimSpace(want), err
 		case len(exact) > 1:
-			return "", fmt.Errorf("several people are called %q: send from the desktop yourself", want)
+			return "", fmt.Errorf("several people are called %q: send from the agent computer yourself", want)
 		}
 	}
 	if len(found) == 0 {

@@ -11,10 +11,10 @@ import (
 )
 
 // viewerPath mints a viewer ticket: a credential that only lets a browser
-// watch and use the desktop (with the clipboard and the home folder), for
+// watch and use the computer (with the clipboard and the home folder), for
 // ttl seconds. It is SystemService.CreateViewerTicket over gRPC-Web; the
 // two messages are small enough to encode by hand.
-func viewerPath(ctx context.Context, d desktop, ttl int) (string, error) {
+func viewerPath(ctx context.Context, d computer, ttl int) (string, error) {
 	var msg []byte
 	ttlMsg := append([]byte{0x08}, binary.AppendUvarint(nil, uint64(ttl))...) // Duration.seconds
 	msg = append(msg, 0x0a, byte(len(ttlMsg)))                                // 1: ttl

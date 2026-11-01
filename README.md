@@ -29,7 +29,7 @@ A new install starts with the apps `config.toml` lists, and the App Store adds t
 - **AGENTS.md**: one AGENTS.md and one set of skills, written into every agent harness on every one of your servers.
 - **Repos**: git hosting. `git clone one://board` gives you an app to start from; you push your own branches (`main@you`) to anyone's repo as suggestions, and its owner moves `main`.
 - **Shell** and **Models**: run a command, or ask a local model, on whichever of your servers can.
-- **iMessage**, **Reminders**, **Calendar**, **Contacts**, from your Mac; **Gmail**, **WhatsApp** and **Desktops**, where your agents also use your Mac once you let them.
+- **iMessage**, **Reminders**, **Calendar**, **Contacts**, from your Mac; **Gmail**, **WhatsApp** and **Agent Computers**, where your agents also use your Mac once you let them.
 
 Fork any app under a new name, or write your own, and `one deploy` it. Every operation is also an MCP tool and a CLI command.
 

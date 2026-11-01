@@ -5,14 +5,14 @@ import ApplicationServices
 /// (github.com/trycua/cua). It runs as this app's child, embedded, so the Accessibility and Screen Recording
 /// permissions it needs are this app's, granted once, rather than Cua Driver's own. Its tools act in the background
 /// where they can, with an agent cursor of their own, so the person's pointer stays theirs. The node serves a sidecar
-/// only to its Mac's local user, so only the owner's agents reach it. The Desktops app lists it beside its desktops.
+/// only to its Mac's local user, so only the owner's agents reach it. Computer Use lists it beside the agent computers.
 struct ComputerApp: Sidecar {
     let app = "computer"
 
     var description: [String: Any] {
         ["title": "Computer Use", "icon": "cursorarrow.rays", "color": "#ff9500",
          "description": "Lets your own agents use this Mac's apps, keyboard and pointer, once you turn it on",
-         "instructions": "Agents use this Mac through Desktops, as a desktop named after this device.",
+         "instructions": "Agents use this Mac through Computer Use, as a computer named after this device.",
          "ops": [
             op("_status", "Whether agents may use this Mac, its name, the permissions macOS gave, and the agent using it now."),
             op("_allow", "Turns letting agents use this Mac on or off. Turning it on asks the person at the Mac first.", ["on": flag("on or off")], required: ["on"]),
@@ -62,7 +62,7 @@ struct ComputerApp: Sidecar {
 }
 
 /// Whether agents may use this Mac, and who is using it now. Off until the person turns it on, in the menu bar's
-/// panel or from the Desktops page; turning it off stops Cua Driver, so no call gets through after.
+/// panel or from the Agent Computers page; turning it off stops Cua Driver, so no call gets through after.
 @MainActor @Observable
 final class ComputerUse {
     static let shared = ComputerUse()
@@ -73,7 +73,7 @@ final class ComputerUse {
 
     private(set) var on = UserDefaults.standard.bool(forKey: "computerUse")
     /// The agent using this Mac now, and since when: from its first call until two minutes after its last; and
-    /// whether a call's answer has said it started, so the Desktops app logs it.
+    /// whether a call's answer has said it started, so Computer Use logs it.
     private(set) var session: (agent: String, since: Date, reported: Bool)?
     private var last = Date.distantPast
     private var asking = false
@@ -98,7 +98,7 @@ final class ComputerUse {
 
     /// Fails unless agents may use this Mac now.
     func ready() throws {
-        guard on else { throw Refusal("Agents can't use \(title): its owner hasn't let them. They can, in \(appName)'s menu on that Mac, or on the Desktops page.") }
+        guard on else { throw Refusal("Agents can't use \(title): its owner hasn't let them. They can, in \(appName)'s menu on that Mac, or on the Agent Computers page.") }
         guard CuaDriver.path != nil else { throw Refusal("Cua Driver isn't installed on \(title): get it from github.com/trycua/cua.") }
         guard AXIsProcessTrusted() else { throw Refusal("macOS hasn't let \(appName) use Accessibility on \(title) yet: System Settings → Privacy & Security → Accessibility → \(appName) on.") }
     }

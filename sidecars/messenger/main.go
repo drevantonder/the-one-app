@@ -1,5 +1,5 @@
 // The Messenger sidecar: Facebook Messenger, read and sent through the
-// browser of a desktop borrowed from the desktops sidecar, with a copy of a
+// browser of a computer borrowed from the agent-computers sidecar, with a copy of a
 // browser profile signed in to messenger.com: one per account. Messenger has
 // no API for personal accounts and its chats are end-to-end encrypted, so
 // messenger.com in a browser is the way in.
@@ -75,12 +75,12 @@ func describe() map[string]any {
 	}
 	return map[string]any{
 		"title":       "Messenger",
-		"description": "Reads and sends your Messenger chats in a desktop's browser",
+		"description": "Reads and sends your Messenger chats in an agent computer's browser",
 		"version":     built,
 		"icon":        "message.fill",
 		"color":       "#0866ff",
 		"domain":      "messenger.com",
-		"instructions": "Messenger is the person's Facebook Messenger, read through messenger.com in a desktop's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. " +
+		"instructions": "Messenger is the person's Facebook Messenger, read through messenger.com in an agent computer's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. " +
 			"messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. " +
 			"If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. " +
 			"messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",

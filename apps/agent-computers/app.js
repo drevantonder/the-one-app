@@ -1,84 +1,84 @@
-// Desktops: the person's page for their computers: each desktop as a live picture with a browser in it, to watch,
-// take over and lend, their own devices agents may use, and the browser profiles desktops start with. The desktops
-// sidecar runs the desktops (Incus, or a Mac's containers); Computer Use (apps/computer) is what agents use them with,
+// Agent Computers: the person's page for their computers: each computer as a live picture with a browser in it, to watch,
+// take over and lend, their own devices agents may use, and the browser profiles computers start with. The agent-computers
+// sidecar runs the computers (Incus, or a Mac's containers); Computer Use (apps/computer) is what agents use them with,
 // and this page reads the computers through it.
 
-/// Runs one of the desktops sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the agent-computers sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
 /// says what's needed instead of how the call failed.
 async function sidecar(ctx, op, input) {
   try {
-    return await ctx.sidecars.desktops[op](input);
+    return await ctx.sidecars["agent-computers"][op](input);
   } catch (err) {
-    if (String(err.message).includes("no server runs desktops for you")) throw new Error(NEEDS);
+    if (String(err.message).includes("no server runs agent-computers for you")) throw new Error(NEEDS);
     throw err;
   }
 }
 
-const NEEDS = "Desktops needs a Linux server with Incus, or a Mac, and none of yours runs it.";
+const NEEDS = "Agent Computers needs a Linux server with Incus, or a Mac, and none of yours runs it.";
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
-  return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("desktops")).map((s) => s.name);
+  return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("agent-computers")).map((s) => s.name);
 }
 
 export default {
-  name: "desktops",
-  title: "Desktops",
+  name: "agent-computers",
+  title: "Agent Computers",
   icon: "macwindow.on.rectangle",
   color: "#a2845e",
   description: "See, watch and lend your computers, and keep your browser profiles",
-  instructions: "Desktops is the person's page for their computers: making and sizing lasting desktops, starting, stopping and deleting them, backing them up and moving them, and keeping browser profiles. To use a computer, agents use Computer Use (computer_*), not these.",
-  uses: { apps: ["computer"], sidecars: ["desktops"] },
+  instructions: "Agent Computers is the person's page for their computers: making and sizing lasting computers, starting, stopping and deleting them, backing them up and moving them, and keeping browser profiles. To use a computer, agents use Computer Use (computer_*), not these.",
+  uses: { apps: ["computer"], sidecars: ["agent-computers"] },
 
   ops: {
     create: {
-      description: "Create a lasting desktop and start it, for the person: Linux, with a browser of its own. Takes a minute. Agents borrow instead.",
-      input: {"properties": {"desktop": {"description": "its name: lowercase letters, digits and dashes", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "required": ["desktop"], "type": "object"},
+      description: "Create a lasting computer and start it, for the person: Linux, with a browser of its own. Takes a minute. Agents borrow instead.",
+      input: {"properties": {"computer": {"description": "its name: lowercase letters, digits and dashes", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "required": ["computer"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "create", input),
     },
     resize: {
-      description: "Change how much CPU and memory a desktop may use, at once, without restarting it.",
-      input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "required": ["desktop", "size"], "type": "object"},
+      description: "Change how much CPU and memory a computer may use, at once, without restarting it.",
+      input: {"properties": {"computer": {"description": "the computer's name", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "required": ["computer", "size"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "resize", input),
     },
     start: {
-      description: "Start a stopped (or paused) desktop. It starts again after the server restarts.",
-      input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}}, "required": ["desktop"], "type": "object"},
+      description: "Start a stopped (or paused) computer. It starts again after the server restarts.",
+      input: {"properties": {"computer": {"description": "the computer's name", "type": "string"}}, "required": ["computer"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "start", input),
     },
     stop: {
-      description: "Stop a desktop. Its files and sign-ins stay; it stays stopped until started.",
-      input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}}, "required": ["desktop"], "type": "object"},
+      description: "Stop a computer. Its files and sign-ins stay; it stays stopped until started.",
+      input: {"properties": {"computer": {"description": "the computer's name", "type": "string"}}, "required": ["computer"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "stop", input),
     },
     delete: {
-      description: "Delete a desktop and everything in it, its sign-ins too. Only when the person asked.",
-      input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}}, "required": ["desktop"], "type": "object"},
+      description: "Delete a computer and everything in it, its sign-ins too. Only when the person asked.",
+      input: {"properties": {"computer": {"description": "the computer's name", "type": "string"}}, "required": ["computer"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "delete", input),
     },
     backup: {
-      description: "Back up a desktop's home folder (its files and sign-ins, without caches) as a blob any server can fetch, keeping the newest 5. Not off-site: backups to a bucket aren't built yet.",
-      input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}}, "required": ["desktop"], "type": "object"},
+      description: "Back up a computer's home folder (its files and sign-ins, without caches) as a blob any server can fetch, keeping the newest 5. Not off-site: backups to a bucket aren't built yet.",
+      input: {"properties": {"computer": {"description": "the computer's name", "type": "string"}}, "required": ["computer"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "backup", input),
     },
     backups: {
-      description: "Every server's backups of desktops, newest first.",
-      input: {"properties": {"desktop": {"description": "only this desktop's", "type": "string"}, "here": {"description": "only this server's", "type": "boolean"}}, "type": "object"},
+      description: "Every server's backups of computers, newest first.",
+      input: {"properties": {"computer": {"description": "only this computer's", "type": "string"}, "here": {"description": "only this server's", "type": "boolean"}}, "type": "object"},
       run: (ctx, input) => sidecar(ctx, "backups", input),
     },
     restore: {
-      description: "Make a desktop on this server from a backup: the newest of the desktop named, from any server, or the one with blob.",
-      input: {"properties": {"as": {"description": "the new desktop's name; default the same", "type": "string"}, "blob": {"description": "a particular backup's blob", "type": "string"}, "desktop": {"description": "the backed-up desktop's name", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "type": "object"},
+      description: "Make a computer on this server from a backup: the newest of the computer named, from any server, or the one with blob.",
+      input: {"properties": {"as": {"description": "the new computer's name; default the same", "type": "string"}, "blob": {"description": "a particular backup's blob", "type": "string"}, "computer": {"description": "the backed-up computer's name", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "type": "object"},
       run: (ctx, input) => sidecar(ctx, "restore", input),
     },
     move: {
-      description: "Move a desktop to another server: backs it up, restores it there and stops it here, kept until you delete it. Takes a few minutes.",
-      input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}, "to": {"description": "the server to move it to", "type": "string"}}, "required": ["desktop", "to"], "type": "object"},
+      description: "Move a computer to another server: backs it up, restores it there and stops it here, kept until you delete it. Takes a few minutes.",
+      input: {"properties": {"computer": {"description": "the computer's name", "type": "string"}, "to": {"description": "the server to move it to", "type": "string"}}, "required": ["computer", "to"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "move", input),
     },
     save_profile: {
-      description: "Save a desktop's browser profile, closing its browsers first; a sign_in desktop is also given back. Only when the person asked: borrowed desktops start from saved profiles.",
-      input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}, "profile": {"description": "the profile; default the desktop's, or default", "type": "string"}}, "required": ["desktop"], "type": "object"},
+      description: "Save a computer's browser profile, closing its browsers first; a sign_in computer is also given back. Only when the person asked: borrowed computers start from saved profiles.",
+      input: {"properties": {"computer": {"description": "the computer's name", "type": "string"}, "profile": {"description": "the profile; default the computer's, or default", "type": "string"}}, "required": ["computer"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "save_profile", input),
     },
     add_profile: {
@@ -87,7 +87,7 @@ export default {
       run: (ctx, input) => sidecar(ctx, "add_profile", input),
     },
     rename_profile: {
-      description: "Rename a browser profile. Agents borrow desktops with it by its new name.",
+      description: "Rename a browser profile. Agents borrow computers with it by its new name.",
       input: {"properties": {"profile": {"description": "the profile's name", "type": "string"}, "to": {"description": "its new name: letters, digits and dashes", "type": "string"}}, "required": ["profile", "to"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "rename_profile", input),
     },
@@ -147,7 +147,7 @@ export default {
 
   screens: {
     main: {
-      title: "Desktops",
+      title: "Agent Computers",
       html: `
 <style>
   body { max-width: 1120px; }
@@ -197,20 +197,20 @@ export default {
 <div id="profile-confirm"></div>
 <p class="footer">Each is a browser with its own sign-ins.</p>
 <script>
-  one.title("Desktops");
+  one.title("Agent Computers");
   const grid = document.getElementById("grid");
   const pics = {}; // by server/name: a data URL
   const cpus = {}; // by server/name: recent CPU percentages, oldest first
   const links = {}; // by server/name: { url, until }
-  let desktops = [];
+  let computers = [];
   let devs = []; // the person's devices: { server, title, on, using, permissions, asking, why }
   let sessions = []; // { agent, device, title, came_from, time }
   const asking = new Set(); // devices this page is asking to let agents in
-  let signing = null; // { desktop, server, login, url }, once a sign-in is open
+  let signing = null; // { computer, server, login, url }, once a sign-in is open
   let profiles = []; // { profile, server, saved }
 
   const key = (d) => \`\${d.server || ""}/\${d.name}\`;
-  const at = (d) => (d.server ? { desktop: d.name, server: d.server } : { desktop: d.name });
+  const at = (d) => (d.server ? { computer: d.name, server: d.server } : { computer: d.name });
   const host = (s) => String(s || "").split(".")[0];
 
   function size(bytes) {
@@ -239,10 +239,10 @@ export default {
     return \`<span class="meter">\${ring(share)}\${size(used)}</span><span class="meter">\${spark(history)}\${Math.round(cpu || 0)}%</span>\`;
   }
 
-  // The sidecar's list: { desktops: [...] }, or, from a sidecar before that, lines of "name: state, ...".
+  // The sidecar's list: { computers: [...] }, or, from a sidecar before that, lines of "name: state, ...".
   function parse(listed) {
-    if (listed && Array.isArray(listed.desktops)) return listed.desktops;
-    if (typeof listed !== "string" || listed.startsWith("No desktops")) return [];
+    if (listed && Array.isArray(listed.computers)) return listed.computers;
+    if (typeof listed !== "string" || listed.startsWith("No computers")) return [];
     return listed.split("\\n").map((l) => {
       const [name, rest = ""] = l.split(": ");
       return { name, state: rest.split(",")[0] };
@@ -250,7 +250,7 @@ export default {
   }
 
   const free = (d) => d.spare && !d.borrowed;
-  // A tile's title says what the desktop is doing; its line, who for.
+  // A tile's title says what the computer is doing; its line, who for.
   function title(d) {
     const b = d.borrowed;
     if (b?.signing_in) return "Signing in to sites";
@@ -260,7 +260,7 @@ export default {
   }
   function who(d) {
     const b = d.borrowed;
-    if (b?.signing_in) return b.login && b.login !== "default" ? \`Profile \${b.login}\` : "";
+    if (b?.signing_in) return b.profile && b.profile !== "default" ? \`Profile \${b.profile}\` : "";
     if (b) return b.by || "An agent";
     if (free(d)) return "Ready for the next agent";
     return "";
@@ -312,13 +312,13 @@ export default {
   function draw() {
     drawSessions();
     const mine = devs.map(deviceTile).join("");
-    if (!desktops.length && mine) {
+    if (!computers.length && mine) {
       grid.innerHTML = mine;
-    } else if (!desktops.length) {
-      grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">No desktops yet. An agent makes one when it needs a browser, or sign in to a site to start one.</div>\`;
+    } else if (!computers.length) {
+      grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">No computers yet. An agent makes one when it needs a browser, or sign in to a site to start one.</div>\`;
     } else {
       const order = (d) => (d.borrowed?.signing_in ? 0 : d.borrowed ? 1 : d.spare ? 3 : 2);
-      const shown = [...desktops].sort((a, b) => order(a) - order(b) || (Date.parse(a.borrowed?.since) || 0) - (Date.parse(b.borrowed?.since) || 0) || a.name.localeCompare(b.name));
+      const shown = [...computers].sort((a, b) => order(a) - order(b) || (Date.parse(a.borrowed?.since) || 0) - (Date.parse(b.borrowed?.since) || 0) || a.name.localeCompare(b.name));
       grid.innerHTML = mine + shown.map((d) => {
         const k = key(d), running = d.state === "running";
         const pic = free(d) ? "" : pics[k] ? \`<img src="\${pics[k]}" alt="">\` : running ? "" : one.esc(d.state || "stopped");
@@ -337,7 +337,7 @@ export default {
     for (const b of grid.querySelectorAll("[data-allow]")) b.onclick = () => allow(b.dataset.allow, true);
     for (const b of grid.querySelectorAll("[data-stop]")) b.onclick = () => allow(b.dataset.stop, false);
     // What they all use, together.
-    const running = desktops.filter((d) => d.state === "running");
+    const running = computers.filter((d) => d.state === "running");
     let used = 0, limit = 0, cpu = 0;
     for (const d of running) {
       const [u, l] = memory(d);
@@ -353,12 +353,12 @@ export default {
 
   function drawBanner() {
     const banner = document.getElementById("banner");
-    const open = signing || desktops.find((d) => d.borrowed?.signing_in);
+    const open = signing || computers.find((d) => d.borrowed?.signing_in);
     if (!open) return (banner.innerHTML = "");
-    const s = signing || { desktop: open.name, server: open.server, login: open.borrowed.login };
-    const url = s.url || links[key({ name: s.desktop, server: s.server })]?.url;
-    banner.innerHTML = \`<div class="banner"><div class="text"><b>Signing in to the \${one.esc(s.login || "default")} profile on \${one.esc(s.desktop)}</b><div class="muted small">Open the desktop, sign in to your sites in its browser (messenger.com, say), then save. Agents' desktops start signed in to them.</div></div>\` +
-      (url ? \`<a class="plain" href="\${one.esc(url)}" target="_blank" rel="noopener">Open desktop</a>\` : "") +
+    const s = signing || { computer: open.name, server: open.server, login: open.borrowed.profile };
+    const url = s.url || links[key({ name: s.computer, server: s.server })]?.url;
+    banner.innerHTML = \`<div class="banner"><div class="text"><b>Signing in to the \${one.esc(s.login || "default")} profile on \${one.esc(s.computer)}</b><div class="muted small">Open the computer, sign in to your sites in its browser (messenger.com, say), then save. Agents' computers start signed in to them.</div></div>\` +
+      (url ? \`<a class="plain" href="\${one.esc(url)}" target="_blank" rel="noopener">Open computer</a>\` : "") +
       \`<button class="primary" id="save">Save profile</button></div>\`;
     document.getElementById("save").onclick = (e) => save(e.currentTarget, s);
   }
@@ -368,7 +368,7 @@ export default {
     button.disabled = true;
     button.textContent = "Saving…";
     try {
-      await one.call("save_profile", { desktop: s.desktop, ...(s.server ? { server: s.server } : {}), ...(s.login ? { login: s.login } : {}) });
+      await one.call("save_profile", { computer: s.computer, ...(s.server ? { server: s.server } : {}), ...(s.login ? { profile: s.login } : {}) });
       signing = null;
       await refresh();
       await loadProfiles();
@@ -379,14 +379,14 @@ export default {
     }
   }
 
-  // Opens a desktop's browser on a profile (made if new), for the person to sign in to sites in it.
+  // Opens a computer's browser on a profile (made if new), for the person to sign in to sites in it.
   async function signIn(button, profile) {
     const label = button.textContent;
     button.disabled = true;
-    button.textContent = "Opening a desktop…";
+    button.textContent = "Opening a computer…";
     try {
       const r = await one.call("_sign_in", profile ? { profile } : {});
-      signing = { desktop: r.desktop, server: r.server, login: r.profile || r.login, url: r.url };
+      signing = { computer: r.computer, server: r.server, login: r.profile, url: r.url };
       await refresh();
       return true;
     } catch (err) {
@@ -398,10 +398,10 @@ export default {
   }
   document.getElementById("sign-in").onclick = (e) => signIn(e.currentTarget);
 
-  // The profiles being signed in to, by name: { desktop, server, login, url }. A new one is listed from the start, before it's saved.
+  // The profiles being signed in to, by name: { computer, server, login, url }. A new one is listed from the start, before it's saved.
   function signingIn() {
     const open = {};
-    for (const d of desktops) if (d.borrowed?.signing_in) open[d.borrowed.login || "default"] = { desktop: d.name, server: d.server, login: d.borrowed.login };
+    for (const d of computers) if (d.borrowed?.signing_in) open[d.borrowed.profile || "default"] = { computer: d.name, server: d.server, login: d.borrowed.profile };
     if (signing) open[signing.login || "default"] ||= signing;
     return open;
   }
@@ -421,10 +421,10 @@ export default {
       const p = profiles.find((p) => p.profile === name), s = open[name];
       const on = p?.server ? " on " + one.esc(host(p.server)) : "";
       const saved = p?.saved ? \`Saved \${one.esc(one.ago(Date.parse(p.saved)))}\${on}\` : p ? \`No sign-ins yet\${on}\` : "";
-      const url = s && (s.url || links[key({ name: s.desktop, server: s.server })]?.url);
+      const url = s && (s.url || links[key({ name: s.computer, server: s.server })]?.url);
       const sub = s ? \`Signing in\${s.server ? " on " + one.esc(host(s.server)) : ""} · \${p?.saved ? "saved " + one.esc(one.ago(Date.parse(p.saved))) : "not saved yet"}\` : saved;
       const actions = s
-        ? (url ? \`<a class="plain" href="\${one.esc(url)}" target="_blank" rel="noopener">Open desktop</a>\` : "") + \`<button class="plain" data-save="\${one.esc(name)}">Save</button>\`
+        ? (url ? \`<a class="plain" href="\${one.esc(url)}" target="_blank" rel="noopener">Open computer</a>\` : "") + \`<button class="plain" data-save="\${one.esc(name)}">Save</button>\`
         : \`<button class="plain" data-profile="\${one.esc(name)}">Sign in to a site</button><button class="plain" data-rename="\${one.esc(name)}">Rename</button><button class="plain danger" data-delete="\${one.esc(name)}">Delete</button>\`;
       return \`<div class="row plain" data-row><div class="main"><div class="title"><span>\${one.esc(name)}</span></div><div class="sub small">\${sub}</div></div>\${actions}</div>\`;
     }).join("");
@@ -466,7 +466,7 @@ export default {
     }
     for (const b of list.querySelectorAll("[data-delete]")) b.onclick = async () => {
       const profile = b.dataset.delete;
-      if (await one.confirm("#profile-confirm", { title: \`Delete the \${profile} profile?\`, detail: "Agents are signed out of every site in it, and can't borrow a desktop with it.",
+      if (await one.confirm("#profile-confirm", { title: \`Delete the \${profile} profile?\`, detail: "Agents are signed out of every site in it, and can't borrow a computer with it.",
         action: "Delete Profile", danger: true, run: () => one.call("delete_profile", { profile }) })) await loadProfiles();
     };
   }
@@ -496,16 +496,16 @@ export default {
   };
   loadProfiles();
 
-  // A picture of each running desktop, and a link to open it, kept until shortly before the link stops working.
+  // A picture of each running computer, and a link to open it, kept until shortly before the link stops working.
   async function pictures() {
     await Promise.all(devs.filter((d) => d.on && d.using).map(async (d) => {
       try {
-        const r = await one.call("_screen", { desktop: d.server, width: 480 });
+        const r = await one.call("_screen", { computer: d.server, width: 480 });
         const img = (r.content || []).find((c) => c.type === "image");
         if (img) pics["device/" + d.server] = \`data:\${img.mimeType};base64,\${img.data}\`;
       } catch {}
     }));
-    await Promise.all(desktops.filter((d) => d.state === "running" && !free(d)).map(async (d) => {
+    await Promise.all(computers.filter((d) => d.state === "running" && !free(d)).map(async (d) => {
       const k = key(d);
       try {
         const r = await one.call("_screen", { ...at(d), width: 480 });
@@ -527,10 +527,10 @@ export default {
       ({ devices: devs, sessions } = await one.call("_devices", {}));
     } catch {}
     try {
-      desktops = parse(await one.call("_list", {})).filter((d) => !d.device);
+      computers = parse(await one.call("_list", {})).filter((d) => !d.device);
     } catch (e) {
       if (devs.length) {
-        desktops = [];
+        computers = [];
         draw();
       } else {
         grid.innerHTML = \`<div class="empty error" style="grid-column:1/-1">\${one.esc(e.message)}</div>\`;
@@ -538,7 +538,7 @@ export default {
       return;
     }
     let all = 0;
-    for (const d of desktops.filter((d) => d.state === "running")) {
+    for (const d of computers.filter((d) => d.state === "running")) {
       const h = (cpus[key(d)] ||= []);
       h.push(d.cpu || 0);
       if (h.length > 20) h.shift();

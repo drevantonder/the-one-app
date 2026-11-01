@@ -17,12 +17,12 @@ import (
 
 // This sidecar reaches the same sidecar on the user's other servers through
 // its own node's local API, as any app would: list and backups show every
-// server's, and move restores a desktop on another. Calls passed on carry
+// server's, and move restores a computer on another. Calls passed on carry
 // here: true, so they go no further.
 
 // callNode runs op on server (by name; "" for wherever the node picks) and
 // returns its result.
-func (ds *desktops) callNode(ctx context.Context, server, op string, input map[string]any) (json.RawMessage, error) {
+func (ds *computers) callNode(ctx context.Context, server, op string, input map[string]any) (json.RawMessage, error) {
 	req := map[string]any{"app": app, "sidecar": app, "op": op, "input": input}
 	if server != "" {
 		req["server"] = server
@@ -58,8 +58,8 @@ func cmpOr(a, b string) string {
 }
 
 // servers are this server's name and the other online servers that run
-// desktops, as the node says.
-func (ds *desktops) servers(ctx context.Context) (me string, others []string, err error) {
+// computers, as the node says.
+func (ds *computers) servers(ctx context.Context) (me string, others []string, err error) {
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, ds.node+"/v1/state", nil)
 	if err != nil {
 		return "", nil, err
@@ -91,9 +91,9 @@ func (ds *desktops) servers(ctx context.Context) (me string, others []string, er
 	return st.Me.Name, others, nil
 }
 
-// everywhere runs op on every other server that runs desktops, at once,
+// everywhere runs op on every other server that runs computers, at once,
 // giving each one's result, or why it couldn't.
-func (ds *desktops) everywhere(ctx context.Context, op string, input map[string]any) (map[string]json.RawMessage, map[string]string) {
+func (ds *computers) everywhere(ctx context.Context, op string, input map[string]any) (map[string]json.RawMessage, map[string]string) {
 	_, others, err := ds.servers(ctx)
 	got, failed := map[string]json.RawMessage{}, map[string]string{}
 	if err != nil {
@@ -124,7 +124,7 @@ func (ds *desktops) everywhere(ctx context.Context, op string, input map[string]
 	return got, failed
 }
 
-// listed is a desktop as list shows it.
+// listed is a computer as list shows it.
 type listed struct {
 	Name        string    `json:"name"`
 	Server      string    `json:"server"`
@@ -140,8 +140,8 @@ type listed struct {
 	LastCall    time.Time `json:"last_call,omitzero"`
 }
 
-// listHere is this server's desktops.
-func (ds *desktops) listHere(ctx context.Context) ([]listed, error) {
+// listHere is this server's computers.
+func (ds *computers) listHere(ctx context.Context) ([]listed, error) {
 	me, _, err := ds.servers(ctx)
 	if err != nil {
 		return nil, err
@@ -173,23 +173,23 @@ func (ds *desktops) listHere(ctx context.Context) ([]listed, error) {
 	return out, nil
 }
 
-// listAll is every server's desktops, this one's first.
-func (ds *desktops) listAll(ctx context.Context) (map[string]any, error) {
+// listAll is every server's computers, this one's first.
+func (ds *computers) listAll(ctx context.Context) (map[string]any, error) {
 	all, err := ds.listHere(ctx)
 	if err != nil {
 		return nil, err
 	}
 	got, failed := ds.everywhere(ctx, "list", nil)
 	for _, s := range slices.Sorted(maps.Keys(got)) {
-		var r struct{ Desktops []listed }
+		var r struct{ Computers []listed }
 		if err := json.Unmarshal(got[s], &r); err != nil {
 			failed[s] = err.Error()
 		}
-		all = append(all, r.Desktops...)
+		all = append(all, r.Computers...)
 	}
-	out := map[string]any{"desktops": all}
+	out := map[string]any{"computers": all}
 	if len(all) == 0 {
-		out["note"] = "No desktops. Borrow one with borrow, or make a lasting one with create."
+		out["note"] = "No computers. Borrow one with borrow, or make a lasting one with create."
 	}
 	if len(failed) > 0 {
 		var why []string
@@ -202,13 +202,13 @@ func (ds *desktops) listAll(ctx context.Context) (map[string]any, error) {
 	return out, nil
 }
 
-// located is the other server that has the desktop named, or "".
-func (ds *desktops) located(ctx context.Context, name string) string {
+// located is the other server that has the computer named, or "".
+func (ds *computers) located(ctx context.Context, name string) string {
 	got, _ := ds.everywhere(ctx, "list", nil)
 	for s, r := range got {
-		var theirs struct{ Desktops []listed }
+		var theirs struct{ Computers []listed }
 		json.Unmarshal(r, &theirs)
-		for _, d := range theirs.Desktops {
+		for _, d := range theirs.Computers {
 			if d.Name == name {
 				return s
 			}
@@ -218,8 +218,8 @@ func (ds *desktops) located(ctx context.Context, name string) string {
 }
 
 // borrowElsewhere runs op (borrow or sign_in) on another server that runs
-// desktops, for a server that shouldn't make one itself; nil if none could.
-func (ds *desktops) borrowElsewhere(ctx context.Context, op string, input map[string]any) json.RawMessage {
+// computers, for a server that shouldn't make one itself; nil if none could.
+func (ds *computers) borrowElsewhere(ctx context.Context, op string, input map[string]any) json.RawMessage {
 	_, others, err := ds.servers(ctx)
 	if err != nil {
 		return nil
