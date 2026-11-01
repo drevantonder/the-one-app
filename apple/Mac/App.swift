@@ -20,13 +20,27 @@ struct MacApp: App {
         }
     }
 
+    /// `<cli>://open?app=…&screen=…&params=…&scope=…` opens an app's screen in the window, as on a phone (a widget's
+    /// link); `<cli>://settings`, or `…/settings/<item>`, opens Settings or one of its views.
+    private func open(_ url: URL) {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let value = { (name: String) in query.first { $0.name == name }?.value?.trimmingCharacters(in: .whitespaces) }
+        if url.host() == "open", let app = value("app") {
+            store.path = []
+            store.selection = .screen(ScreenRoute(app: app, screen: value("screen") ?? "main", params: value("params") ?? "{}", scope: value("scope")))
+        } else if url.host() == "settings" {
+            store.selection = .settings
+            store.path = url.pathComponents.dropFirst().first.flatMap(Setting.named).map { [.setting($0)] } ?? []
+        }
+    }
+
     var body: some Scene {
         Window(appName, id: "main") {
             RootView()
                 .environment(store)
                 .tint(accent)
                 .frame(minWidth: 760, minHeight: 500)
-                .onOpenURL { store.open($0) }
+                .onOpenURL { if !store.open($0) { open($0) } }
                 // Every app's badge and the requests on the Dock icon, as Mail counts unread mail.
                 .onChange(of: store.iconBadge, initial: true) { NSApp.dockTile.badgeLabel = store.iconBadge > 0 ? "\(store.iconBadge)" : nil }
         }
