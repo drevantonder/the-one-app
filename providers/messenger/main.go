@@ -97,7 +97,7 @@ func describe() map[string]any {
 				"input": withAccount(map[string]any{"chat": map[string]any{"type": "string", "description": "the chat's name, or a part of it only one recent chat has; anyone else by their exact name"},
 					"text": map[string]any{"type": "string", "description": "the message"}}, "chat", "text")},
 			{"name": "sign_in", "description": "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, to sign in there themselves. The default profile's again when none is given.",
-				"input": object(map[string]any{"profile": map[string]any{"type": "string", "description": "the browser profile, like Personal or PTC; desktops_profiles lists them"}})},
+				"input": object(map[string]any{"profile": map[string]any{"type": "string", "description": "the browser profile, like Personal or PTC; computer_profiles lists them"}})},
 			{"name": "sign_out", "description": "Stop reading a browser profile's Messenger. The profile, and its sign-ins to other sites, stay.",
 				"input": object(map[string]any{"account": account}, "account")},
 		},

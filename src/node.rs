@@ -1881,7 +1881,7 @@ impl Node {
                 if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
                     // A fork's module may still give its first name; the install's name for it is the one that counts.
                     let declared = Schedule::all(&Value::Object(d.clone()));
-                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "description" | "uses"))) {
+                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "description" | "uses" | "connector" | "needs"))) {
                         info[k] = v;
                     }
                     if mine {
@@ -2150,6 +2150,18 @@ impl Node {
                 ok(json!({}))
             }
             ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
+            // A push to the caller's phones, from this app: the install delivers it through the sidecar its `push`
+            // setting names, wherever that runs (the server with Apple's push key); with push off, it isn't sent.
+            ("POST", "/notify") => {
+                ensure!(!grant.read_only, "this call only reads: it can't push");
+                let push = self.with(|i| Ok(settings(&i.r.members).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()))?;
+                if push.is_empty() {
+                    return Ok(ok(json!({ "ok": { "sent": false, "why": "push is off in this install" } })));
+                }
+                let input: Value = serde_json::from_slice(&body)?;
+                let call = CallRequest { app: push.clone(), driver: Some(push), op: "send".into(), input, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
+                ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
+            }
             ("GET", "/servers") => ok(self.state_for(&grant.caller)["install"]["servers"].take()),
             _ => bail!("the node has no {method} {path}"),
         })

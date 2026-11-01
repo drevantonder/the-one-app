@@ -20,10 +20,27 @@ export default {
   icon: "checklist",
   color: "#007aff",
   description: "Reminders on your Mac, for your apps and agents",
+  connector: true,
+  needs: "Needs a Mac",
   instructions: "Reminders are the person's Apple Reminders, through their Mac, and sync to their other Apple devices. reminders_lists lists the lists; reminders_list lists reminders, soonest due first, leaving out completed ones unless asked. reminders_update also completes one.",
   uses: { drivers: ["reminders"] },
 
   ops: {
+    accounts: {
+      reads: true,
+      description: "The Macs it runs on: each { account, ok }, the server’s name, ok while it’s online.",
+      input: { type: "object", properties: {} },
+      run: async (ctx) => (await ctx.servers()).filter((s) => (s.drivers || []).includes("reminders")).map((s) => ({ account: s.name, ok: s.online })),
+    },
+    sign_out: {
+      confirm: true,
+      description: "Stop using Reminders on one of your servers: removes it from that server, for one of its owners.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the server, by name" } } },
+      run: (ctx, { account }) => {
+        ctx.driver("reminders", account, false);
+        return `Reminders is removed from ${account}.`;
+      },
+    },
     lists: {
       description: "The reminder lists.",
       input: {"properties": {}, "type": "object"},

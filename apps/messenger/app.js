@@ -13,7 +13,7 @@ async function driver(ctx, op, input) {
   }
 }
 
-const NEEDS = "Messenger needs the Messenger driver on one of your servers, and none of them runs it. A server's owner installs it there: Drivers, in the App Store, shows how.";
+const NEEDS = "Messenger needs Computer Use on one of your servers, and none of them runs it. Ask an owner of one to install it.";
 
 /// The caller's online servers that run the driver, by name.
 async function running(ctx) {
@@ -27,6 +27,8 @@ export default {
   color: "#0866ff",
   domain: "messenger.com",
   description: "Your Messenger chats, for your agents: read, search and send",
+  connector: true,
+  needs: "Needs Computer Use on one of your servers",
   instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in a desktop's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
   uses: { drivers: ["messenger"] },
 
@@ -63,7 +65,7 @@ export default {
     },
     sign_in: {
       description: "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, to sign in there themselves. The default profile's again when none is given.",
-      input: {"properties": {"profile": {"description": "the browser profile, like Personal or PTC; desktops_profiles lists them", "type": "string"}}, "type": "object"},
+      input: {"properties": {"profile": {"description": "the browser profile, like Personal or PTC; computer_profiles lists them", "type": "string"}}, "type": "object"},
       run: (ctx, input) => driver(ctx, "sign_in", input),
     },
     sign_out: {
@@ -84,7 +86,7 @@ export default {
     },
     _running: {
       reads: true,
-      description: "Which of your servers run the driver, for the screens to say when none does.",
+      description: "Which of your servers it runs on, for the screens to say when none does.",
       input: { type: "object", properties: {} },
       run: async (ctx) => ({ servers: await running(ctx), needs: NEEDS }),
     },

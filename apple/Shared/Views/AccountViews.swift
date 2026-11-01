@@ -123,7 +123,7 @@ struct InstallSettingsView: View {
             Section {
                 Toggle("Push Notifications", isOn: Binding(get: { !(settings["push"] ?? "").isEmpty }, set: { set("push", $0 ? nil : "") }))
             } footer: {
-                Text("Apps push to people’s phones through the push driver on one of the install’s servers. Off, nothing is pushed.")
+                Text("Apps push to people’s phones through the server that holds Apple’s push key. Off, nothing is pushed.")
             }
             Section {
                 TextField("Work Email Domain", text: $domain, prompt: Text("example.org"))
@@ -134,7 +134,7 @@ struct InstallSettingsView: View {
                 if let error {
                     Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
                 } else {
-                    Text("People join by signing in with a Google account at this domain, where the work-email join driver runs. Empty, nobody joins that way.")
+                    Text("People join by signing in with a Google account at this domain, where one of the install’s servers signs them in. Empty, nobody joins that way.")
                 }
             }
         }

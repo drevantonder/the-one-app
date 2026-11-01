@@ -13,7 +13,7 @@ async function driver(ctx, op, input) {
   }
 }
 
-const NEEDS = "WhatsApp needs the WhatsApp driver on one of your servers, and none of them runs it. A server's owner installs it there: Drivers, in the App Store, shows how.";
+const NEEDS = "WhatsApp needs one of your servers to link your phone to, and none of them runs it. Ask an owner of one to install it.";
 
 /// The caller's online servers that run the driver, by name.
 async function running(ctx) {
@@ -27,6 +27,8 @@ export default {
   color: "#25d366",
   domain: "whatsapp.com",
   description: "Your WhatsApp chats, for your agents: read, search and send",
+  connector: true,
+  needs: "Needs a server of yours to link your phone to",
   instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their servers, as WhatsApp Desktop is linked; calls find the server. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another server; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
   uses: { drivers: ["whatsapp"] },
 
@@ -91,7 +93,7 @@ export default {
     },
     _running: {
       reads: true,
-      description: "Which of your servers run the driver, for the screens to say when none does.",
+      description: "Which of your servers it runs on, for the screens to say when none does.",
       input: { type: "object", properties: {} },
       run: async (ctx) => ({ servers: await running(ctx), needs: NEEDS }),
     },

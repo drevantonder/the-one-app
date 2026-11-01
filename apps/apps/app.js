@@ -59,46 +59,41 @@ async function described(ctx, bundle) {
   const all = file ? new TextDecoder().decode(file.bytes) : "";
   const code = all.slice(Math.max(0, all.indexOf("export default")));
   const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
-  return { title: field("title"), icon: field("icon"), color: field("color"), description: field("description") };
+  const parts = code.match(/\buses:\s*\{[^}]*\bdrivers:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
+  return { title: field("title"), icon: field("icon"), color: field("color"), description: field("description"), needs: field("needs"), uses: { apps: [], drivers: parts } };
 }
 
-/// Whether an app is a connector (SPEC.md "Connectors"): it has accounts, sign_in and sign_out, and a settings screen
-/// but no main one. What it says about itself where it's installed for the caller; elsewhere, its code.
+/// Whether an app is a connector (SPEC.md "Connectors"): it says so (`connector: true`), or it has accounts, sign_in
+/// and sign_out, and a settings screen but no main one. What it says about itself where it's installed for the caller,
+/// or the install's list says; elsewhere, its code.
 async function isConnector(ctx, a) {
   const has = (list, name) => (list || []).some((x) => x.name === name);
+  if (a.connector) return true;
   if (a.ops) return has(a.ops, "accounts") && has(a.ops, "sign_in") && has(a.ops, "sign_out") && !has(a.screens, "main");
   const bundle = a.bundle || a.built_in;
   const file = bundle && untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
   const code = file ? new TextDecoder().decode(file.bytes) : "";
+  if (/\bconnector:\s*true\b/.test(code)) return true;
   return ["accounts", "sign_in", "sign_out", "settings"].every((k) => new RegExp(`\\b${k}:\\s*\\{`).test(code)) && !/\bmain:\s*\{/.test(code);
 }
 
-/// Every driver on the caller's servers, and each driver an app uses that none of them runs: what it is, where it runs
-/// (version, who installed it, whether the caller may remove it there), where it was removed, and the apps that use it.
-async function drivers(ctx) {
-  const [servers, catalog] = await Promise.all([ctx.servers(), ctx.catalog()]);
+/// Where a connector runs, in a few words, and what each of the caller's servers offers for it: "Runs on linux, mac",
+/// or what it needs (its `needs`) when none of their servers runs it; the servers they own it may be installed on (where
+/// an owner removed it) or removed from; and whether they own none, so they ask an owner instead. Its server parts are the
+/// sidecars it uses, by their names.
+async function where(ctx, a) {
+  const servers = await ctx.servers();
+  const parts = a.uses?.drivers || [];
+  if (!parts.length) return null;
   const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
-  const by = new Map();
-  const driver = (name) => {
-    if (!by.has(name)) by.set(name, { name, title: name, icon: null, color: null, image: null, image_kind: null, description: null, install: null, servers: [], removed: [], apps: [] });
-    return by.get(name);
+  const runs = servers.filter((s) => (s.drivers || []).some((d) => parts.includes(d)));
+  const removed = servers.filter((s) => !runs.includes(s) && (s.removed_drivers || []).some((d) => parts.includes(d.name)));
+  const line = runs.length ? "Runs on " + runs.map((s) => s.name).join(", ") : a.needs || "Runs on none of your servers";
+  return {
+    line, runs: runs.map((s) => s.name), needs: a.needs || null,
+    install: removed.filter(owns).map((s) => s.name), remove: runs.filter(owns).map((s) => s.name),
+    ask: !runs.some(owns) && !removed.some(owns),
   };
-  for (const s of servers) {
-    for (const d of s.installed_drivers || []) {
-      const it = driver(d.name);
-      for (const k of ["title", "icon", "color", "image", "image_kind", "description", "install"]) it[k] = it[k] && it[k] !== it.name ? it[k] : d[k] ?? it[k];
-      it.servers.push({ server: s.name, online: s.online, here: s.here, version: d.version || null, built_in: !!d.built_in, installed_by: d.installed_by || null, users: d.users || [], may_remove: owns(s) });
-    }
-    for (const d of s.removed_drivers || []) driver(d.name).removed.push({ server: s.name, by: d.by || null, time: d.time, may_allow: owns(s) });
-  }
-  for (const a of catalog.filter((a) => !a.deleted)) for (const name of a.uses?.drivers || []) driver(name).apps.push({ name: a.name, title: a.title || a.name });
-  // A driver without a picture of its own (its Mac app's icon) shows its app's.
-  for (const d of by.values()) {
-    const app = catalog.find((a) => a.name === d.name);
-    if (!d.image && app?.image) [d.image, d.image_kind] = [app.image, app.image_kind || null];
-    if (d.title === d.name && app?.title) d.title = app.title;
-  }
-  return { drivers: [...by.values()].sort((a, b) => a.title.localeCompare(b.title)), servers: servers.filter(owns).map((s) => s.name) };
 }
 
 async function find(ctx, name) {
@@ -126,17 +121,6 @@ function folder(files, dir) {
       <div class="main"><div class="title"><span>${one.esc(n.replace(/\/$/, ""))}</span><span class="when">${f.dir ? "" : one.size(f.size)}</span></div></div><div class="chev">›</div></a>`;
   };
   return '<div class="list code-list">' + names.map(row).join("") + "</div>";
-}
-
-/// How to install a driver on a server you own, for the Drivers screens. Runs in the page: the screens include it.
-function install(servers, name) {
-  const driver = name || "<driver>";
-  const where = servers.length ? servers[0] : "<server>";
-  return `<h2 class="section">Install a driver</h2><div class="list"><div class="row plain"><div class="main">
-    <div class="sub">A server's owner installs a driver there. From ${one.esc(one.config.name)}'s code, on any machine that reaches the server over ssh:</div>
-    <pre class="small" style="margin:8px 0;white-space:pre-wrap"><code>providers/install.sh ${one.esc(driver)} ${one.esc(where)}</code></pre>
-    <div class="sub small">${servers.length ? "You own " + one.esc(servers.join(", ")) + "." : "You own none of the servers, so ask one of a server's owners."} Settings shows each server's owners.</div>
-  </div></div></div>`;
 }
 
 export default {
@@ -240,30 +224,33 @@ export default {
         return `${schedule} is ${on ? "on" : "off"}.`;
       },
     },
-    drivers: {
+    servers: {
       reads: true,
-      description: "Every driver on your servers, the native code apps use (a shell, WhatsApp's linked phone, a browser), and each one an app uses that none of them runs: what it is, which servers run it (its version there, who installed it, whom it serves), where an owner removed it, and the apps that use it. servers lists the servers you own, where you may install and remove drivers.",
-      input: { type: "object", properties: { name: { type: "string", description: "only this driver" } } },
-      async run(ctx, { name } = {}) {
-        const all = await drivers(ctx);
-        return name ? { ...all, drivers: all.drivers.filter((d) => d.name === name) } : all;
+      description: "Where a connector runs (\"Runs on linux, mac\"), or what it needs when none of your servers runs it; the servers you own it may be installed on or removed from; and ask: true when you own none of those, so you ask a server's owner to install it.",
+      input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
+      async run(ctx, { app }) {
+        const a = await find(ctx, app);
+        return where(ctx, a.ops || a.uses ? a : { ...a, ...(await described(ctx, a.built_in).catch(() => ({}))) });
       },
     },
-    remove_driver: {
+    install_on: {
+      description: "Install a connector on a server you own, where an owner removed it: it runs there again.",
+      input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
+      async run(ctx, { app, server }) {
+        const a = await find(ctx, app);
+        for (const part of a.uses?.drivers || []) ctx.driver(part, server, true);
+        return `${a.title || app} is installed on ${server}.`;
+      },
+    },
+    remove_from: {
       confirm: true,
-      description: "Remove a driver from a server you own: it stops serving there, and apps that use it go to another server that runs it, or say none does. Its own data stays on the server; allow_driver undoes it.",
-      input: { type: "object", required: ["driver", "server"], properties: { driver: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
-      async run(ctx, { driver, server }) {
-        ctx.driver(driver, server, false);
-        return `Removed ${driver} from ${server}.`;
-      },
-    },
-    allow_driver: {
-      description: "Allow a driver an owner removed from a server you own again: it serves there again while it runs.",
-      input: { type: "object", required: ["driver", "server"], properties: { driver: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
-      async run(ctx, { driver, server }) {
-        ctx.driver(driver, server, true);
-        return `${driver} is allowed on ${server} again.`;
+      description: "Remove a connector from a server you own: it stops running there, and goes on running on your other servers that have it. What it keeps on that server stays, and install_on puts it back.",
+      input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
+      async run(ctx, { app, server }) {
+        const a = await find(ctx, app);
+        const there = (await ctx.servers()).find((s) => s.name === server);
+        for (const part of a.uses?.drivers || []) if ((there?.drivers || []).includes(part)) ctx.driver(part, server, false);
+        return `${a.title || app} is removed from ${server}.`;
       },
     },
     code: {
@@ -291,18 +278,16 @@ export default {
   .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
   .tag { font-size: 12px; padding: 1px 7px; border-radius: 10px; background: var(--line); color: var(--muted); }
 </style>
-<div class="segmented" id="tabs"><button data-tab="apps">Apps</button><button data-tab="connectors">Connectors</button><button data-tab="drivers">Drivers</button></div>
+<div class="segmented" id="tabs"><button data-tab="apps">Apps</button><button data-tab="connectors">Connectors</button></div>
 <p id="about" class="muted small" style="margin:0 4px 10px" hidden></p>
 <input id="search" class="search" type="search" placeholder="Find an app" autocomplete="off">
 <div id="list"></div>
 <script>
-${install}
 // Connectors would bury the rest, so they get their own tab. A shell's Add a Connector opens it with { connector: true }
 // ({ connected: true } from shells built before), on that tab.
-let tab = one.params.connector || one.params.connected ? "connectors" : one.params.drivers ? "drivers" : "apps";
+let tab = one.params.connector || one.params.connected ? "connectors" : "apps";
 const ABOUT = {
   connectors: "Connectors link an account for you and your agents. Add one to a page, then sign in from that page’s Connectors.",
-  drivers: "Drivers are the native code apps use: a shell, a local model, WhatsApp’s linked phone, a desktop’s browser. Each runs on the servers whose owners installed it.",
 };
 function pick(t) {
   tab = t;
@@ -310,7 +295,6 @@ function pick(t) {
   const about = document.getElementById("about");
   about.textContent = ABOUT[tab] || "";
   about.hidden = !ABOUT[tab];
-  document.getElementById("search").placeholder = tab === "drivers" ? "Find a driver" : "Find an app";
   draw();
 }
 document.getElementById("tabs").addEventListener("click", (e) => e.target.dataset.tab && pick(e.target.dataset.tab));
@@ -339,37 +323,15 @@ const row = (a) => \`<a class="row" onclick='one.open("app", \${JSON.stringify({
   </a>\`;
 const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(title) + '</h2><div class="list">' + list.map(row).join("") + "</div>" : "";
 
-let drivers = null;
-/// Where a driver runs, in a few words.
-const runsOn = (d) => d.servers.length ? "On " + d.servers.map((s) => s.server).join(", ") : d.removed.length ? "Removed from " + d.removed.map((r) => r.server).join(", ") : "On none of your servers";
-const driverRow = (d) => \`<a class="row" onclick='one.open("driver", \${JSON.stringify({ driver: d.name })})'>
-    \${one.appIcon(d, 44)}
-    <div class="main">
-      <div class="title"><span>\${one.esc(d.title)}</span></div>
-      \${d.description ? '<div class="sub">' + one.esc(d.description) + "</div>" : ""}
-      <div class="sub small">\${one.esc(runsOn(d))}</div>
-    </div>
-    <div class="chev">›</div>
-  </a>\`;
-function drawDrivers(q) {
-  if (!drivers) return (document.getElementById("list").innerHTML = '<div class="empty">Loading drivers…</div>');
-  const found = drivers.drivers.filter((d) => !q || [d.title, d.name, d.description || ""].some((t) => t.toLowerCase().includes(q)));
-  const running = found.filter((d) => d.servers.length), not = found.filter((d) => !d.servers.length);
-  document.getElementById("list").innerHTML = (found.length
-    ? (running.length ? '<h2 class="section">On your servers</h2><div class="list">' + running.map(driverRow).join("") + "</div>" : "")
-      + (not.length ? '<h2 class="section">Not running</h2><div class="list">' + not.map(driverRow).join("") + "</div>" : "")
-    : '<div class="empty">No drivers match.</div>') + install(drivers.servers);
-}
 function draw() {
   const q = document.getElementById("search").value.trim().toLowerCase();
-  if (tab === "drivers") return drawDrivers(q);
   const found = apps.filter((a) => !!a.connector === (tab === "connectors") && (!q || [a.title, a.name, a.description || ""].some((t) => t.toLowerCase().includes(q))));
   document.getElementById("list").innerHTML = found.length
     ? section(BUILT_IN, found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted))
     : '<div class="empty">No apps match.<div class="small" style="margin-top:6px">Make your own: put an app.js in a folder and run <code>' + one.esc(CLI) + ' deploy</code> on it.</div></div>';
 }
 async function show() {
-  [apps, drivers] = await Promise.all([one.call("list").then((l) => l.apps), one.call("drivers").catch(() => ({ drivers: [], servers: [] }))]);
+  apps = (await one.call("list")).apps;
   draw();
 }
 document.getElementById("search").addEventListener("input", draw);
@@ -416,6 +378,15 @@ const sections = [
          <div class="row plain"><div class="main"><div class="title"><span>Erase</span></div><div class="sub small">Gone for good: its name can't be used again.</div></div><button class="pill danger" onclick="retire(this, 'erase')">Erase</button></div>\`
       : '<div class="row plain"><div class="main sub small">Only its owners can restore or erase it.</div></div>';
     return '<h2 class="section">Deleted ' + ago(a.deleted.time) + by + '</h2><div class="list">' + buttons + "</div>";
+  },
+  function runsOn({ where }) {
+    if (!where) return "";
+    const place = (server, op, label) => '<div class="row plain"><div class="main"><div class="title"><span>' + one.esc(label + " " + server) + "</span></div></div>"
+      + '<button class="pill' + (op === "remove_from" ? " off" : "") + '" data-op="' + op + '" data-server="' + one.esc(server) + '">' + (op === "remove_from" ? "Remove" : "Install") + "</button></div>";
+    const rows = [...where.install.map((s) => place(s, "install_on", "Install on")), ...where.remove.map((s) => place(s, "remove_from", "Remove from"))];
+    return '<div class="about muted">' + one.esc(where.line) + "</div>"
+      + (rows.length ? '<div class="list" style="margin-top:12px">' + rows.join("") + "</div>" : "")
+      + (where.ask ? '<div class="about muted small">Ask an owner to install it.</div>' : "");
   },
   function addTo({ a, places, admin }) {
     if (a.deleted) return "";
@@ -487,7 +458,7 @@ const sections = [
     return '<h2 class="section">AI cost · ' + usd(total) + '</h2><div class="list">' + list.map(row).join("") + "</div>";
   },
   function uses({ a }) {
-    const all = [...a.uses.apps, ...a.uses.drivers];
+    const all = a.uses.apps;
     return all.length ? '<h2 class="section">Uses</h2><div class="list">' + all.map((u) => '<div class="row plain"><div class="main">' + one.esc(u) + "</div></div>").join("") + "</div>" : "";
   },
   function forkedFrom({ a }) {
@@ -511,11 +482,12 @@ function link(n) {
 }
 
 async function show() {
-  const [{ apps, places, admin }, code, health] = await Promise.all([one.call("list"), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null)]);
+  const [{ apps, places, admin }, code, health, where] = await Promise.all([one.call("list"), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("servers", { app: name }).catch(() => null)]);
   const a = apps.find((x) => x.name === name);
   if (!a) return (document.getElementById("app").innerHTML = '<div class="empty">' + one.esc(name) + " was erased.</div>");
   one.title(a.title);
-  document.getElementById("app").innerHTML = sections.map((s) => s({ a, places, admin, code, health })).join("");
+  document.getElementById("app").innerHTML = sections.map((s) => s({ a, places, admin, code, health, where })).join("");
+  for (const b of document.querySelectorAll("[data-op]")) b.onclick = () => place(b, b.dataset.op, b.dataset.server);
 }
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 /// "just now", "5 min ago".
@@ -553,6 +525,17 @@ async function switchIt(box, { schedule, scope }) {
   }
   show();
 }
+/// Installs a connector on a server, or removes it from one, then shows where it runs now.
+async function place(button, op, server) {
+  button.disabled = true;
+  document.getElementById("error").textContent = "";
+  try {
+    await one.call(op, { app: name, server, confirm: true });
+  } catch (err) {
+    document.getElementById("error").textContent = err.message;
+  }
+  show();
+}
 async function toggle(button, scope, on) {
   button.disabled = true;
   document.getElementById("error").textContent = "";
@@ -561,66 +544,6 @@ async function toggle(button, scope, on) {
   } catch (err) {
     document.getElementById("error").textContent = err.message;
   }
-  show();
-}
-one.on("changed", show);
-show();
-</script>`,
-    },
-    driver: {
-      title: "Driver",
-      html: `
-<style>
-  .head { display: flex; gap: 14px; align-items: center; margin: 12px 4px 4px; }
-  .head h1 { font-size: 22px; margin: 0; }
-  .about { margin: 12px 4px 0; }
-  .pill { font: inherit; font-size: 15px; font-weight: 600; padding: 5px 14px; border-radius: 15px; border: 0; background: var(--accent); color: white; }
-  .pill.danger { background: var(--danger); }
-  .pill:disabled { opacity: 0.4; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #34c759; flex: none; margin-right: 12px; }
-  .dot.off { background: var(--muted); }
-  #error { margin: 8px 4px; }
-</style>
-<div id="driver"></div>
-<div id="ask"></div>
-<div id="error" class="error small"></div>
-<script>
-${install}
-const name = one.params.driver;
-one.title(name);
-async function show() {
-  const { drivers, servers } = await one.call("drivers", { name });
-  const d = drivers[0];
-  if (!d) return (document.getElementById("driver").innerHTML = '<div class="empty">None of your servers runs ' + one.esc(name) + ", and no app uses it.</div>");
-  one.title(d.title);
-  const by = (s) => s.built_in ? "Built into every server" : s.installed_by ? "Installed by " + s.installed_by : "";
-  const server = (s) => \`<div class="row plain"><span class="dot\${s.online ? "" : " off"}"></span><div class="main">
-      <div class="title"><span>\${one.esc(s.server)}</span></div>
-      <div class="sub small">\${one.esc([s.online ? "Running" : "Offline", by(s), s.users.length ? "for " + s.users.join(", ") : ""].filter(Boolean).join(" · "))}</div></div>
-      \${s.may_remove ? \`<button class="pill danger" onclick='removeIt(\${JSON.stringify(s.server)})'>Remove</button>\` : ""}</div>\`;
-  const removed = (r) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(r.server)}</span></div>
-      <div class="sub small">Removed\${r.by ? " by " + one.esc(r.by) : ""} \${one.esc(one.ago(r.time))} ago</div></div>
-      \${r.may_allow ? \`<button class="pill" onclick='allow(this, \${JSON.stringify(r.server)})'>Allow</button>\` : ""}</div>\`;
-  const app = (a) => \`<a class="row plain" onclick='one.open("app", \${JSON.stringify({ app: a.name })})'><div class="main"><div class="title"><span>\${one.esc(a.title)}</span></div></div><div class="chev">›</div></a>\`;
-  document.getElementById("driver").innerHTML = \`<div class="head">\${one.appIcon(d, 60)}<div><h1>\${one.esc(d.title)}</h1><div class="muted small">\${one.esc(d.name)} · driver</div></div></div>
-    \${d.description ? '<div class="about">' + one.esc(d.description) + "</div>" : ""}
-    <h2 class="section">Runs on</h2><div class="list">\${d.servers.length ? d.servers.map(server).join("") : '<div class="row plain"><div class="main sub">None of your servers runs it.</div></div>'}</div>
-    \${d.removed.length ? '<h2 class="section">Removed</h2><div class="list">' + d.removed.map(removed).join("") + "</div>" : ""}
-    \${d.apps.length ? '<h2 class="section">Used by</h2><div class="list">' + d.apps.map(app).join("") + "</div>" : ""}
-    \${d.install ? '<h2 class="section">Install</h2><div class="list"><div class="row plain"><div class="main sub">' + one.esc(d.install) + "</div></div></div>" : install(servers, name)}\`;
-}
-async function removeIt(server) {
-  document.getElementById("ask").scrollIntoView({ behavior: "smooth", block: "center" });
-  await one.confirm("#ask", {
-    title: "Remove " + name + " from " + server + "?",
-    detail: "It stops serving there, and apps that use it go to another server that runs it, or say none does. What it keeps on the server stays, and you can allow it again.",
-    action: "Remove", danger: true, run: () => one.call("remove_driver", { driver: name, server, confirm: true }).then(show),
-  });
-}
-async function allow(button, server) {
-  button.disabled = true;
-  document.getElementById("error").textContent = "";
-  try { await one.call("allow_driver", { driver: name, server }); } catch (err) { document.getElementById("error").textContent = err.message; }
   show();
 }
 one.on("changed", show);

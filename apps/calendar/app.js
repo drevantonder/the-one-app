@@ -20,10 +20,27 @@ export default {
   icon: "calendar",
   color: "#ff3b30",
   description: "Calendar on your Mac, for your apps and agents",
+  connector: true,
+  needs: "Needs a Mac",
   instructions: "Calendar is the person's Apple Calendar through their Mac: every account it has, such as iCloud, Google or Exchange. calendar_events lists events in a time range, by default the coming week. Times are ISO 8601; without an offset they're in the Mac's time zone.",
   uses: { drivers: ["calendar"] },
 
   ops: {
+    accounts: {
+      reads: true,
+      description: "The Macs it runs on: each { account, ok }, the server’s name, ok while it’s online.",
+      input: { type: "object", properties: {} },
+      run: async (ctx) => (await ctx.servers()).filter((s) => (s.drivers || []).includes("calendar")).map((s) => ({ account: s.name, ok: s.online })),
+    },
+    sign_out: {
+      confirm: true,
+      description: "Stop using Calendar on one of your servers: removes it from that server, for one of its owners.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the server, by name" } } },
+      run: (ctx, { account }) => {
+        ctx.driver("calendar", account, false);
+        return `Calendar is removed from ${account}.`;
+      },
+    },
     calendars: {
       description: "The calendars, with whether each can be changed.",
       input: {"properties": {}, "type": "object"},

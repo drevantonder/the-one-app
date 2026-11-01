@@ -637,7 +637,8 @@ async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
     assert!(board["description"].as_str().is_some_and(|d| d.contains("posts")), "a built-in app's code describes it before it's added: {board}");
     assert_eq!((board["color"].clone(), board["image"].clone()), (json!("#ff9500"), json!(null)), "{board}");
     let (whatsapp, desktops) = (app(&listed, "whatsapp"), app(&listed, "desktops"));
-    assert_eq!((whatsapp["connector"].clone(), desktops["connector"].clone()), (json!(true), json!(false)), "an app wrapping a driver is listed as any app is: {whatsapp} {desktops}");
+    let computer = app(&listed, "computer");
+    assert_eq!((whatsapp["connector"].clone(), computer["connector"].clone(), desktops["connector"].clone()), (json!(true), json!(true), json!(false)), "a connector says so, or keeps the accounts contract; an app with a page isn't one: {whatsapp} {computer} {desktops}");
     assert_eq!(whatsapp["connected"], json!(true), "connector's old name is still sent: {whatsapp}");
     for only in [json!({ "connector": true }), json!({ "connected": true })] {
         let listed = a.call(call("apps", "list", only.clone())).await.unwrap();
@@ -658,7 +659,7 @@ async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
     a.call(call("apps", "add", json!({ "app": "whatsapp", "scope": "user" }))).await.unwrap();
     eventually("whatsapp to run", async || a.call(call("whatsapp", "accounts", json!({}))).await.is_ok_and(|v| v == json!([]))).await;
     let needs = a.call(call("whatsapp", "chats", json!({}))).await.unwrap_err();
-    assert!(format!("{needs:#}").contains("needs the WhatsApp driver on one of your servers"), "{needs:#}");
+    assert!(format!("{needs:#}").contains("WhatsApp needs one of your servers to link your phone to"), "{needs:#}");
 
     a.call(call("apps", "add", json!({ "app": "board", "scope": "user" }))).await.unwrap();
     let board = app(&a.call(call("apps", "list", json!({}))).await.unwrap(), "board");
@@ -742,10 +743,10 @@ async fn an_app_wraps_the_driver_of_its_name_on_another_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn agents_use_a_device_its_owner_let_them_through_desktops_and_each_session_is_logged() {
+async fn agents_use_a_device_its_owner_let_them_through_computer_use_and_each_session_is_logged() {
     let (a, _ra) = start("device-a").await;
     let (b, _rb) = start("device-b").await;
-    a.create_with("Devices", "Andre", &["desktops"]).await.unwrap();
+    a.create_with("Devices", "Andre", &["computer", "desktops"]).await.unwrap();
     b.join(&a.pair(None).unwrap()).await.unwrap();
     // b is a Mac whose owner let agents use it: its computer driver answers as the Mac app's does.
     b.provide("computer", json!({ "title": "Computer Use", "ops": [{ "name": "_status" }, { "name": "_use" }] })).await.unwrap();
@@ -766,16 +767,17 @@ async fn agents_use_a_device_its_owner_let_them_through_desktops_and_each_sessio
             }
         }
     });
-    let listed = async || a.call(call("desktops", "list", json!({}))).await;
+    let listed = async || a.call(call("computer", "list", json!({}))).await;
     eventually("the device among the desktops", async || listed().await.is_ok_and(|l| l["desktops"].as_array().is_some_and(|d| d.iter().any(|d| d["device"] == true)))).await;
     let device = listed().await.unwrap()["desktops"][0].clone();
     assert_eq!((device["title"].clone(), device["state"].clone()), (json!("Andre's Mac"), json!("running")), "listed with no desktops driver anywhere: {device}");
     let name = device["name"].as_str().unwrap().to_string();
 
     for tool in ["list_windows", "click"] {
-        let used = a.call(call("desktops", "use", json!({ "desktop": name, "tool": tool, "args": {} }))).await.unwrap();
+        let used = a.call(call("computer", "use", json!({ "desktop": name, "tool": tool, "args": {} }))).await.unwrap();
         assert_eq!(used["content"][0]["text"], json!(tool), "use reaches the device's driver: {used}");
     }
+    // The Desktops page reads them through Computer Use.
     let devices = a.call(call("desktops", "_devices", json!({}))).await.unwrap();
     let sessions = devices["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 1, "a session is logged once, when it starts: {devices}");
@@ -808,19 +810,23 @@ async fn a_servers_owner_removes_a_driver_there_and_allows_it_again() {
     let shell = on_b(&a.state(), "installed_drivers").as_array().unwrap().iter().any(|d| d["name"] == "shell" && d["built_in"] == true);
     assert!(shell, "the node's own drivers are listed as built in");
 
-    eventually("the App Store to run", async || a.call(call("apps", "drivers", json!({}))).await.is_ok()).await;
-    let store = a.call(call("apps", "drivers", json!({ "name": "lamps" }))).await.unwrap();
-    let on = &store["drivers"][0]["servers"][0];
-    assert_eq!((on["server"].as_str(), on["version"].as_str(), on["may_remove"].as_bool()), (Some(b_name.as_str()), Some("abc123"), Some(true)), "the App Store lists it: {store}");
+    // An app over it is a connector whose page says where it runs, and offers its owner to remove it there.
+    deploy_module(&a, "lamps", r#"export default { name: "lamps", connector: true, needs: "Needs a lamp", uses: { drivers: ["lamps"] }, ops: {} };"#).await;
+    a.install(&me, "lamps", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
+    let servers = async || a.call(call("apps", "servers", json!({ "app": "lamps" }))).await;
+    eventually("the App Store to say where lamps runs", async || servers().await.is_ok_and(|w| w["runs"] == json!([b_name.as_str()]))).await;
+    let place = servers().await.unwrap();
+    assert_eq!((place["line"].as_str(), place["remove"].clone(), place["ask"].clone()), (Some(format!("Runs on {b_name}").as_str()), json!([b_name.as_str()]), json!(false)), "{place}");
 
     // Its owner removes it from b: b stops serving it and refuses it until it's allowed again.
-    a.set_driver(&me, Some(&b_name), "lamps", false).await.unwrap();
-    eventually("b to stop serving lamps", async || a.call(call("lamps", "on", json!({}))).await.is_err()).await;
+    a.call(call("apps", "remove_from", json!({ "app": "lamps", "server": b_name }))).await.unwrap();
+    eventually("b to stop serving lamps", async || a.call(CallRequest { driver: Some("lamps".into()), ..call("", "on", json!({})) }).await.is_err()).await;
+    eventually("the App Store to offer it back", async || servers().await.is_ok_and(|w| w["install"] == json!([b_name.as_str()]) && w["line"] == "Needs a lamp")).await;
     assert!(b.provide("lamps", describe.clone()).await.is_err_and(|e| format!("{e:#}").contains("removed")), "b refuses it");
     eventually("a to see it removed", async || on_b(&a.state(), "removed_drivers").as_array().is_some_and(|l| l.len() == 1)).await;
-    a.set_driver(&me, Some(&b_name), "lamps", true).await.unwrap();
+    a.call(call("apps", "install_on", json!({ "app": "lamps", "server": b_name }))).await.unwrap();
     eventually("b to take lamps again", async || b.provide("lamps", describe.clone()).await.is_ok()).await;
-    eventually("a to reach lamps again", async || a.call(call("lamps", "on", json!({}))).await.is_ok()).await;
+    eventually("a to reach lamps again", async || a.call(CallRequest { driver: Some("lamps".into()), ..call("", "on", json!({})) }).await.is_ok()).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -909,16 +915,16 @@ async fn loop_guards_cap_depth_and_stop_a_looping_app() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn apps_badge_their_icons_and_push_through_a_driver_that_knows_who_sent_it() {
+async fn apps_badge_their_icons_and_the_install_pushes_through_the_sidecar_its_setting_names() {
     let (a, _ra) = start("push").await;
     a.create("Push", "Andre").await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
     let mine = one::entry::Scope::User(me.user.clone());
-    deploy_module(&a, "reminders", r#"export default { name: "reminders", uses: { drivers: ["push"] },
+    deploy_module(&a, "reminders", r#"export default { name: "reminders",
         schema: { user: "create table due (id text primary key)" },
         on: { due(db, e) { db.exec("insert or ignore into due values (?)", [e.id]); } },
         async badge(ctx) { return (await ctx.user.query("select count(*) as n from due"))[0].n; },
-        ops: { nudge: { async run(ctx) { ctx.user.append("due", {}); return ctx.drivers.push.send({ title: "Pay the rent", screen: "bills" }); } } } };"#).await;
+        ops: { nudge: { async run(ctx) { ctx.user.append("due", {}); return ctx.notify({ title: "Pay the rent", screen: "bills" }); } } } };"#).await;
     a.install(&me, "reminders", &mine, true).await.unwrap();
 
     // With no push driver anywhere, the app's call fails there, and its badge still counts.
@@ -946,6 +952,11 @@ async fn apps_badge_their_icons_and_push_through_a_driver_that_knows_who_sent_it
     // An agent's or the CLI's push comes from no app.
     a.call(call("push", "send", json!({ "title": "Done" }))).await.unwrap();
     assert_eq!(hear.recv().await.unwrap().from, None);
+
+    // With the install's push off, an app's push isn't sent, and says so.
+    a.set_setting(&me, "push", Some("")).await.unwrap();
+    let off = a.call(call("reminders", "nudge", json!({}))).await.unwrap();
+    assert_eq!(off["sent"], false, "{off}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

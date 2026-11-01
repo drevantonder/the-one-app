@@ -20,10 +20,27 @@ export default {
   icon: "person.crop.circle",
   color: "#8e8e93",
   description: "Contacts on your Mac, for your apps and agents",
+  connector: true,
+  needs: "Needs a Mac",
   instructions: "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; contacts_me is the person's own card.",
   uses: { drivers: ["contacts"] },
 
   ops: {
+    accounts: {
+      reads: true,
+      description: "The Macs it runs on: each { account, ok }, the server’s name, ok while it’s online.",
+      input: { type: "object", properties: {} },
+      run: async (ctx) => (await ctx.servers()).filter((s) => (s.drivers || []).includes("contacts")).map((s) => ({ account: s.name, ok: s.online })),
+    },
+    sign_out: {
+      confirm: true,
+      description: "Stop using Contacts on one of your servers: removes it from that server, for one of its owners.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the server, by name" } } },
+      run: (ctx, { account }) => {
+        ctx.driver("contacts", account, false);
+        return `Contacts is removed from ${account}.`;
+      },
+    },
     search: {
       description: "Find contacts by name, email address or phone number.",
       input: {"properties": {"limit": {"description": "at most this many; default 25", "type": "integer"}, "query": {"description": "a name or part of one, an email address, or a phone number", "type": "string"}}, "required": ["query"], "type": "object"},

@@ -21,6 +21,7 @@ const json = (v, status = 200) => new Response(JSON.stringify(v ?? null), { stat
 function describe() {
   return {
     name: app.name, title: app.title, icon: app.icon, color: app.color, domain: app.domain, description: app.description || "", instructions: app.instructions || "",
+    ...(app.connector ? { connector: true } : {}), ...(app.needs ? { needs: String(app.needs) } : {}),
     ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}) })),
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => {
       const size = w.size || "medium";
@@ -232,6 +233,12 @@ function context(env, body, appends, later) {
         if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
         appends.push({ vault: String(id), release: true });
       },
+    },
+    /// Pushes a notification to the caller's phones, { title, body?, screen?, params? }; tapping it opens this app's
+    /// screen. The install delivers it, if its push setting is on: { sent: false, why } when it's off.
+    notify: async (push) => {
+      if (body.read_only) throw new Error("this call only reads: it can't push");
+      return (await (await ask("notify", { method: "POST", body: JSON.stringify(push) })).json()).ok;
     },
     /// Every app in the install, as `GET /v1/apps` gives them to the caller.
     catalog: async () => (await ask("catalog")).json(),

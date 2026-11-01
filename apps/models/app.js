@@ -21,10 +21,27 @@ export default {
   icon: "cpu",
   color: "#32ade6",
   description: "AI models on your own devices",
+  connector: true,
+  needs: "Needs a server with a GPU",
   instructions: "Local models run on the device that has them. models_here lists this server's models; give server \"all\" for every server's, and which are loaded. models_chat asks one and returns its answer, on whichever of your servers has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
   uses: { drivers: ["models"] },
 
   ops: {
+    accounts: {
+      reads: true,
+      description: "The servers it runs on: each { account, ok }, the server’s name, ok while it’s online.",
+      input: { type: "object", properties: {} },
+      run: async (ctx) => (await ctx.servers()).filter((s) => (s.drivers || []).includes("models")).map((s) => ({ account: s.name, ok: s.online })),
+    },
+    sign_out: {
+      confirm: true,
+      description: "Stop using Models on one of your servers: removes it from that server, for one of its owners.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the server, by name" } } },
+      run: (ctx, { account }) => {
+        ctx.driver("models", account, false);
+        return `Models is removed from ${account}.`;
+      },
+    },
     here: {
       reads: true,
       description: "This server's local models, and whether each is loaded; give server \"all\" for every server's.",

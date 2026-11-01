@@ -20,10 +20,27 @@ export default {
   icon: "message.fill",
   color: "#34c759",
   description: "Messages on your Mac, for your apps and agents",
+  connector: true,
+  needs: "Needs a Mac",
   instructions: "iMessage is the person's Messages on their Mac, iMessage and SMS. imessage_chats lists recent chats; imessage_read reads one, newest last; imessage_search finds messages. imessage_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never marks a message read.",
   uses: { drivers: ["imessage"] },
 
   ops: {
+    accounts: {
+      reads: true,
+      description: "The Macs it runs on: each { account, ok }, the server’s name, ok while it’s online.",
+      input: { type: "object", properties: {} },
+      run: async (ctx) => (await ctx.servers()).filter((s) => (s.drivers || []).includes("imessage")).map((s) => ({ account: s.name, ok: s.online })),
+    },
+    sign_out: {
+      confirm: true,
+      description: "Stop using iMessage on one of your servers: removes it from that server, for one of its owners.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the server, by name" } } },
+      run: (ctx, { account }) => {
+        ctx.driver("imessage", account, false);
+        return `iMessage is removed from ${account}.`;
+      },
+    },
     chats: {
       description: "Recent chats, most recent first: who, when, the last message, and how many are unread.",
       input: {"properties": {"limit": {"description": "at most this many; default 30", "type": "integer"}, "skip": {"description": "skip this many of the most recent, to page back", "type": "integer"}, "unread": {"description": "only chats with unread messages", "type": "boolean"}}, "type": "object"},
