@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// A device feature this app offers the person's devices through this device's node (SPEC.md, "Local API").
 /// Apple's apps are provided from here, not the node, because this app is what macOS grants privacy permissions to.
@@ -174,10 +174,29 @@ func object(_ fields: [String: Any?]) -> [String: Any] {
     fields.compactMapValues { $0 }
 }
 
-/// A driver's description: what it is, and, for the App Store's Drivers, the Mac app's build and how it's installed.
-func describe(title: String, icon: String, summary: String, instructions: String, ops: [[String: Any]]) -> [String: Any] {
-    ["title": title, "icon": icon, "description": summary, "instructions": instructions, "ops": ops, "widgets": [Any](),
-     "version": Bundle.main.object(forInfoDictionaryKey: "BuildCommit") as? String ?? "", "install": "Comes with the Mac app: it runs on each Mac with the app open."]
+/// A driver's description: what it is, the Mac app it reaches (`localApp`, a bundle id) and that app's icon as its
+/// picture, and, for the App Store's Drivers, the Mac app's build and how it's installed.
+func describe(title: String, icon: String, localApp: String, summary: String, instructions: String, ops: [[String: Any]]) -> [String: Any] {
+    var d: [String: Any] = ["title": title, "icon": icon, "local_app": localApp, "description": summary, "instructions": instructions, "ops": ops, "widgets": [Any](),
+                            "version": Bundle.main.object(forInfoDictionaryKey: "BuildCommit") as? String ?? "", "install": "Comes with the Mac app, on each Mac it's open on."]
+    if let image = appIcon(localApp) { d["image"] = image }
+    return d
+}
+
+/// A Mac app's icon, as a PNG data URL small enough to travel in every Hello: 88 pixels, a 44-point tile at 2x.
+func appIcon(_ bundle: String) -> String? {
+    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) else { return nil }
+    let icon = NSWorkspace.shared.icon(forFile: url.path)
+    let size = 88
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                     isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+          let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    icon.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
+    NSGraphicsContext.restoreGraphicsState()
+    guard let png = rep.representation(using: .png, properties: [:]) else { return nil }
+    return "data:image/png;base64," + png.base64EncodedString()
 }
 
 func op(_ name: String, _ description: String, _ properties: [String: [String: Any]] = [:], required: [String] = []) -> [String: Any] {

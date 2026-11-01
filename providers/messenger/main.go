@@ -75,7 +75,7 @@ func describe() map[string]any {
 	}
 	return map[string]any{
 		"title":       "Messenger",
-		"description": "Reads and sends Messenger in a desktop's browser",
+		"description": "Reads and sends your Messenger chats in a desktop's browser",
 		"version":     built,
 		"icon":        "message.fill",
 		"color":       "#0866ff",

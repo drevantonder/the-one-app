@@ -127,7 +127,7 @@ func object(props map[string]any, required ...string) map[string]any {
 
 var describe = map[string]any{
 	"title":        "Push",
-	"description":  "Sends the install's apps' notifications to people's phones, through Apple",
+	"description":  "Sends notifications to your phone",
 	"version":      built,
 	"icon":         "bell.badge",
 	"serves":       "everyone",

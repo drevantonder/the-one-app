@@ -2789,7 +2789,7 @@ fn installed_drivers(m: &Members, server: &members::Machine, drivers: &[Driver],
                 None => name_of(&server.user),
             };
             json!({
-                "name": name, "title": d["title"].as_str().unwrap_or(name), "icon": d["icon"], "color": d["color"], "domain": d["domain"],
+                "name": name, "title": d["title"].as_str().unwrap_or(name), "icon": d["icon"], "color": d["color"], "domain": d["domain"], "image": d["image"], "local_app": d["local_app"],
                 "description": d["description"], "version": d["version"].as_str().or(built_in.then_some(build).flatten()),
                 "built_in": built_in, "installed_by": by, "installed": installed.map(|i| i.time), "users": users.iter().filter_map(name_of).collect::<Vec<_>>(),
             })

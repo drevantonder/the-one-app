@@ -140,7 +140,7 @@ func post(url string, body, out any) error {
 
 var describe = map[string]any{
 	"title":        "Work email join",
-	"description":  "Lets people join the install by signing in with a work email",
+	"description":  "Lets people join by signing in with their work email",
 	"version":      built,
 	"icon":         "person.badge.key",
 	"instructions": "Lets people join this install by signing in with Google on the workplace's domain. workjoin_status says whether it's on, for which domain, and who joined through it.",

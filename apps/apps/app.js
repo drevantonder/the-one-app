@@ -79,22 +79,22 @@ async function drivers(ctx) {
   const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
   const by = new Map();
   const driver = (name) => {
-    if (!by.has(name)) by.set(name, { name, title: name, icon: null, color: null, description: null, install: null, servers: [], removed: [], apps: [] });
+    if (!by.has(name)) by.set(name, { name, title: name, icon: null, color: null, image: null, description: null, install: null, servers: [], removed: [], apps: [] });
     return by.get(name);
   };
   for (const s of servers) {
     for (const d of s.installed_drivers || []) {
       const it = driver(d.name);
-      for (const k of ["title", "icon", "color", "description", "install"]) it[k] = it[k] && it[k] !== it.name ? it[k] : d[k] ?? it[k];
+      for (const k of ["title", "icon", "color", "image", "description", "install"]) it[k] = it[k] && it[k] !== it.name ? it[k] : d[k] ?? it[k];
       it.servers.push({ server: s.name, online: s.online, here: s.here, version: d.version || null, built_in: !!d.built_in, installed_by: d.installed_by || null, users: d.users || [], may_remove: owns(s) });
     }
     for (const d of s.removed_drivers || []) driver(d.name).removed.push({ server: s.name, by: d.by || null, time: d.time, may_allow: owns(s) });
   }
   for (const a of catalog.filter((a) => !a.deleted)) for (const name of a.uses?.drivers || []) driver(name).apps.push({ name: a.name, title: a.title || a.name });
-  // An app of a driver's name shows its picture.
+  // A driver without a picture of its own (its Mac app's icon) shows its app's.
   for (const d of by.values()) {
     const app = catalog.find((a) => a.name === d.name);
-    d.image = app?.image || null;
+    d.image = d.image || app?.image || null;
     if (d.title === d.name && app?.title) d.title = app.title;
   }
   return { drivers: [...by.values()].sort((a, b) => a.title.localeCompare(b.title)), servers: servers.filter(owns).map((s) => s.name) };
@@ -339,20 +339,17 @@ const row = (a) => \`<a class="row" onclick='one.open("app", \${JSON.stringify({
 const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(title) + '</h2><div class="list">' + list.map(row).join("") + "</div>" : "";
 
 let drivers = null;
-const driverRow = (d) => {
-  const on = d.servers.map((s) => s.server);
-  const sub = on.length ? "On " + on.join(", ") : d.removed.length ? "Removed from " + d.removed.map((r) => r.server).join(", ") : "On none of your servers";
-  const used = d.apps.length ? " · " + d.apps.map((a) => a.title).join(", ") : "";
-  return \`<a class="row" onclick='one.open("driver", \${JSON.stringify({ driver: d.name })})'>
+/// Where a driver runs, in a few words.
+const runsOn = (d) => d.servers.length ? "On " + d.servers.map((s) => s.server).join(", ") : d.removed.length ? "Removed from " + d.removed.map((r) => r.server).join(", ") : "On none of your servers";
+const driverRow = (d) => \`<a class="row" onclick='one.open("driver", \${JSON.stringify({ driver: d.name })})'>
     \${one.appIcon(d, 44)}
     <div class="main">
-      <div class="title"><span>\${one.esc(d.title)}</span><span class="when">\${one.esc(d.servers[0]?.version?.slice(0, 7) || "")}</span></div>
-      <div class="sub">\${one.esc(d.description || sub)}</div>
-      <div class="sub small">\${one.esc((d.description ? sub : "") + used)}</div>
+      <div class="title"><span>\${one.esc(d.title)}</span></div>
+      \${d.description ? '<div class="sub">' + one.esc(d.description) + "</div>" : ""}
+      <div class="sub small">\${one.esc(runsOn(d))}</div>
     </div>
     <div class="chev">›</div>
   </a>\`;
-};
 function drawDrivers(q) {
   if (!drivers) return (document.getElementById("list").innerHTML = '<div class="empty">Loading drivers…</div>');
   const found = drivers.drivers.filter((d) => !q || [d.title, d.name, d.description || ""].some((t) => t.toLowerCase().includes(q)));
@@ -597,7 +594,7 @@ async function show() {
   one.title(d.title);
   const by = (s) => s.built_in ? "Built into every server" : s.installed_by ? "Installed by " + s.installed_by : "";
   const server = (s) => \`<div class="row plain"><span class="dot\${s.online ? "" : " off"}"></span><div class="main">
-      <div class="title"><span>\${one.esc(s.server)}</span><span class="when">\${one.esc(s.version ? s.version.slice(0, 12) : "")}</span></div>
+      <div class="title"><span>\${one.esc(s.server)}</span></div>
       <div class="sub small">\${one.esc([s.online ? "Running" : "Offline", by(s), s.users.length ? "for " + s.users.join(", ") : ""].filter(Boolean).join(" · "))}</div></div>
       \${s.may_remove ? \`<button class="pill danger" onclick='removeIt(\${JSON.stringify(s.server)})'>Remove</button>\` : ""}</div>\`;
   const removed = (r) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(r.server)}</span></div>

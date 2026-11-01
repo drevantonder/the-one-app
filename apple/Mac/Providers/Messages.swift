@@ -8,7 +8,7 @@ struct MessagesApp: Provider {
     var description: [String: Any] {
         let chat = str("the chat's name, a part of it only one chat has, a phone number or email address, or an id chats gives")
         let since = str("only messages after this: an ISO 8601 date or date-time")
-        return describe(title: "iMessage", icon: "message-square", summary: "Messages (iMessage and SMS) on this Mac", instructions:
+        return describe(title: "iMessage", icon: "message-square", localApp: "com.apple.MobileSMS", summary: "Lets your apps and agents read and send your Messages", instructions:
             "iMessage is the person's Messages on their Mac, iMessage and SMS. imessage_chats lists recent chats; imessage_read reads one, newest last; " +
             "imessage_search finds messages. imessage_send sends a real message to a real person: send only what the user asked to send, to whom they asked. " +
             "Reading never marks a message read.", ops: [
