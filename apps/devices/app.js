@@ -198,10 +198,17 @@ function icon(d, w) {
   return { t: "icon", path: ICONS[kind] || ICONS.desktop, w, ...(LOGOS[os] ? { badge: LOGOS[os] } : {}) };
 }
 
-/// "This device · On linux · 6d7ba15", or "Offline".
-function detail(d) {
+/// "This device · On linux", "Not updated yet" when it runs another build than most servers, or "Offline".
+function detail(d, latest) {
   if (!d.online) return "Offline";
-  return [d.here && "This device", d.host && `On ${d.host}`, d.kind && (d.kind === "podman" ? "Podman" : "Container"), d.build && d.build.slice(0, 7)].filter(Boolean).join(" · ");
+  return [d.here && "This device", d.host && `On ${d.host}`, d.kind && (d.kind === "podman" ? "Podman" : "Container"), d.build && latest && d.build !== latest && "Not updated yet"].filter(Boolean).join(" · ");
+}
+
+/// The build most online servers run.
+function usual(list) {
+  const n = {};
+  for (const d of list) if (d.online && d.build) n[d.build] = (n[d.build] || 0) + 1;
+  return Object.keys(n).sort((a, b) => n[b] - n[a])[0];
 }
 
 function table(list, size) {
@@ -209,6 +216,7 @@ function table(list, size) {
   // A medium widget fits only the servers, a line each; larger ones show every container, and a line under each name.
   const rows = size === "medium" ? list.filter((d) => !d.kind) : list;
   const details = size !== "medium";
+  const latest = usual(list);
   const stats = (d) => d.online
     ? { t: "row", gap: k.gap, c: [cell(k.ram, ring(d.memory, k.ring)), cell(k.cpu, d.kind ? null : spark(d.cpu, "blue", k.cpu, k.spark)),
         cell(k.gpu, d.kind ? null : spark(d.gpu, "purple", k.gpu, k.spark)), cell(k.disk, bar(d.disk, k.disk))] }
@@ -217,7 +225,7 @@ function table(list, size) {
     t: "row", gap: 10, dim: !d.online,
     c: [
       icon(d, k.icon),
-      { t: "col", grow: true, gap: 1, c: [{ t: "text", text: d.name, size: "sm", lines: 1 }, ...(details ? [{ t: "text", text: detail(d), size: "xs", tone: "muted", lines: 1 }] : [])] },
+      { t: "col", grow: true, gap: 1, c: [{ t: "text", text: d.name, size: "sm", lines: 1 }, ...(details ? [{ t: "text", text: detail(d, latest), size: "xs", tone: "muted", lines: 1 }] : [])] },
       stats(d),
     ].filter(Boolean),
   });
