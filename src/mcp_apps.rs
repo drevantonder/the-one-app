@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use one::brand::CLI;
+use one::config::CLI;
 
 use crate::{agent, addr, get};
 

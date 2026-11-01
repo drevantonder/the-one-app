@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use one::brand::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
+use one::config::{CLI, CONFIG_FILE, CONFIG_REPO, NAME, RELEASE_KEY, RELEASE_SIGNER, REPO, TARGET};
 use one::{cache, release};
 use serde_json::{Value, json};
 
@@ -17,11 +17,11 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 
 /// Builds the tip of main and has every device run it; with a tag, also signs it off and publishes it on GitHub.
 pub fn run(tag: Option<&str>) -> Result<()> {
-    ensure!(!REPO.is_empty(), "this brand names no repo, so it has nothing to update from");
+    ensure!(!REPO.is_empty(), "this edition names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
     if let Some(tag) = tag {
         ensure!(version_tag(tag), "a release is named like v1.2.3");
-        ensure!(installer_is_ours(), "install.sh installs another brand, so {NAME} isn't released on GitHub; {CLI} update runs main on its servers");
+        ensure!(installer_is_ours(), "install.sh installs another edition, so {NAME} isn't released on GitHub; {CLI} update runs main on its servers");
         ensure!(quiet(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     }
     let key = release_key()?;
@@ -143,7 +143,7 @@ fn version_tag(tag: &str) -> bool {
     parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Whether install.sh, which gets releases from GitHub, installs this brand. Only that brand is released there.
+/// Whether install.sh, which gets releases from GitHub, installs this edition. Only that edition is released there.
 fn installer_is_ours() -> bool {
     include_str!("../install.sh").contains(&format!("\ncli={CLI}\n"))
 }
@@ -153,10 +153,10 @@ fn app_zip() -> String {
     format!("{CLI}-macos.zip")
 }
 
-/// The release key's private half, from the publisher's password manager by way of the brand's release_signer, kept
+/// The release key's private half, from the publisher's password manager by way of the config's release_signer, kept
 /// only in memory. It must be the key every build checks releases against.
 pub fn release_key() -> Result<ssh_key::PrivateKey> {
-    ensure!(!RELEASE_KEY.is_empty() && !RELEASE_SIGNER.is_empty(), "this brand has no release key, so nothing it builds can be released");
+    ensure!(!RELEASE_KEY.is_empty() && !RELEASE_SIGNER.is_empty(), "this edition has no release key, so nothing it builds can be released");
     let out = Command::new("sh").args(["-c", RELEASE_SIGNER]).stdin(std::process::Stdio::null()).output().context("run release_signer")?;
     ensure!(
         out.status.success(),
@@ -377,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn the_installer_gets_this_brands_releases_and_checks_them_with_its_key() {
+    fn the_installer_gets_this_editions_releases_and_checks_them_with_its_key() {
         if !super::installer_is_ours() {
             return;
         }

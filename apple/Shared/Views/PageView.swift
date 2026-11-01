@@ -514,7 +514,7 @@ struct SettingsPage: View {
     /// The app's version and build, and the node's, for telling which build a device runs.
     private var version: String {
         let info = Bundle.main.infoDictionary ?? [:]
-        let app = "\(store.brand?.name ?? appName), app \(info["BuildCommit"] as? String ?? "")"
+        let app = "\(store.config?.name ?? appName), app \(info["BuildCommit"] as? String ?? "")"
         let host = store.state?.host ?? store.state?.machine
         let server = store.install?.servers.first { $0.key == host?.key }
         guard let build = server?.build else { return app }

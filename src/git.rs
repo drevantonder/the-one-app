@@ -14,7 +14,7 @@ const APP: &str = "repos";
 /// Runs the helper for `url`, talking to git over stdin and stdout.
 pub fn remote(url: &str) -> Result<()> {
     let repo = url.split_once("://").map(|(_, r)| r).unwrap_or(url).trim_end_matches('/').trim_end_matches(".git").to_string();
-    ensure!(!repo.is_empty(), "which repo? {}://<repo>", crate::brand::CLI);
+    ensure!(!repo.is_empty(), "which repo? {}://<repo>", crate::config::CLI);
     let api = Api(crate::api::addr());
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
@@ -84,7 +84,7 @@ fn fetch(api: &Api, repo: &str, wanted: &[String]) -> Result<()> {
         return Ok(());
     }
     let r = api.repo(repo)?;
-    let seen_path = std::path::PathBuf::from(text(&["rev-parse", "--git-dir"])?).join(crate::brand::CLI).join("packs");
+    let seen_path = std::path::PathBuf::from(text(&["rev-parse", "--git-dir"])?).join(crate::config::CLI).join("packs");
     let seen = std::fs::read_to_string(&seen_path).unwrap_or_default();
     let mut kept = seen.clone();
     for pack in r["packs"].as_array().into_iter().flatten().filter_map(Value::as_str) {
@@ -175,7 +175,7 @@ impl Api {
     }
 
     fn reply(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
-        let mut resp = resp.with_context(|| format!("no node is running here: start one with {} serve", crate::brand::CLI))?;
+        let mut resp = resp.with_context(|| format!("no node is running here: start one with {} serve", crate::config::CLI))?;
         let body: Value = resp.body_mut().with_config().limit(64 << 20).read_json()?;
         if let Some(err) = body.get("error") {
             bail!("{}", err.as_str().unwrap_or("failed"));

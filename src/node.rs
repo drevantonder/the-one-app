@@ -1,4 +1,4 @@
-//! A node: this server's install (a brand holds one), its replica and views, its iroh endpoint, and where calls run.
+//! A node: this server's install (an edition holds one), its replica and views, its iroh endpoint, and where calls run.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -318,7 +318,7 @@ impl Node {
         let apps = Apps::start(dir.join("runtime"), outbound.local_addr()?.port()).await?;
         let (events, _) = broadcast::channel(256);
         let mut built_in = BTreeMap::new();
-        for (app, files) in crate::brand::BUILT_IN {
+        for (app, files) in crate::config::BUILT_IN {
             built_in.insert(app.to_string(), release::put_blob(dir, &built_in_bundle(files)?)?);
         }
         let node = Node(Arc::new(Inner {
@@ -418,10 +418,10 @@ impl Node {
         self.with(|i| Ok(i.user.clone()))
     }
 
-    /// Refuses a second install: a brand holds one, and another context is another brand.
+    /// Refuses a second install: an edition holds one, and another context is another edition.
     fn ensure_no_install(&self) -> Result<()> {
         if self.has_install() {
-            bail!("this server already belongs to an install, and {} holds one; for another, install that context's own app", crate::brand::NAME);
+            bail!("this server already belongs to an install, and {} holds one; for another, install that context's own app", crate::config::NAME);
         }
         Ok(())
     }
@@ -461,10 +461,10 @@ impl Node {
         self.0.name.lock().unwrap().clone()
     }
 
-    /// Creates this server's install, with its local user as the first admin, and deploys the brand's apps in
+    /// Creates this server's install, with its local user as the first admin, and deploys the config's apps in
     /// `global`. Returns the recovery key's secret, given only this once.
     pub async fn create(&self, name: &str, user_name: &str) -> Result<String> {
-        self.create_with(name, user_name, crate::brand::STARTERS).await
+        self.create_with(name, user_name, crate::config::STARTERS).await
     }
 
     /// Creates the install, starting with these built-in apps.
@@ -613,7 +613,7 @@ impl Node {
             self.emit(Event::Changed { apps: changed });
         }
         let running = self.with(|i| Ok(i.builds.get(&self.0.id).map(|r| r.commit.clone())))?;
-        if running.as_deref() != Some(crate::brand::BUILD) {
+        if running.as_deref() != Some(crate::config::BUILD) {
             self.append(&Scope::Global, release::running()).await?;
         }
         Ok(())
@@ -1260,7 +1260,7 @@ impl Node {
 
     /// The ports this node serves on this machine: its local API, workerd, and apps' outbound requests.
     pub fn own_ports(&self) -> Vec<u16> {
-        let api = crate::api::addr().rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(crate::brand::PORT);
+        let api = crate::api::addr().rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(crate::config::PORT);
         vec![api, self.0.apps.port(), self.0.outbound]
     }
 
@@ -1305,7 +1305,7 @@ impl Node {
         let data = json!({ "id": id, "app": app, "name": name, "hosts": hosts, "why": why, "agent": caller.agent });
         let by = (caller.key != self.0.id).then_some(caller.key);
         self.append_as(scope, &caller.user, by, members::node("secret-request", data)).await?;
-        Ok(json!({ "id": id, "scope": scope.to_string(), "link": format!("{}://secret?id={id}&scope={scope}", crate::brand::CLI) }))
+        Ok(json!({ "id": id, "scope": scope.to_string(), "link": format!("{}://secret?id={id}&scope={scope}", crate::config::CLI) }))
     }
 
     /// Answers a secret request in `scope`: sets the secret it asks for to `value`, or with none, declines it.
@@ -1505,15 +1505,15 @@ impl Node {
         };
         let me = self.me_for(&viewer)?;
         let made_here = self.with(|i| Ok(settings(&i.r.members).remove("made_here")))?;
-        let brand = json!({ "name": crate::brand::NAME, "made_here": made_here });
-        let context = json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope, "brand": brand });
+        let config = json!({ "name": crate::config::NAME, "made_here": made_here });
+        let context = json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope, "config": config });
         // `</` can't appear inside the inline script, so it can't end it early.
         let context = context.to_string().replace("</", "<\\/");
         Ok(format!(
             "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\
              <style>{kit}:root{{--accent:{accent}}}</style><script>window.__one={context};{bridge}</script></head><body>{body}</body></html>",
             kit = include_str!("screen/kit.css"),
-            accent = crate::brand::ACCENT,
+            accent = crate::config::ACCENT,
             bridge = concat!(include_str!("screen/bridge.js"), include_str!("screen/kit.js"), include_str!("screen/code.js"), include_str!("screen/markdown.js")),
         ))
     }
@@ -1894,8 +1894,10 @@ impl Node {
             })
         });
         let opens = install.as_ref().map(|i| i["opens"].clone()).unwrap_or(json!([]));
+        let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "accent": crate::config::ACCENT, "store": settings["store"], "push": settings["push"] });
         let mut state = json!({
-            "brand": { "name": crate::brand::NAME, "cli": crate::brand::CLI, "accent": crate::brand::ACCENT, "store": settings["store"], "push": settings["push"] },
+            // `brand` is the same, for shells built before it was `config`.
+            "config": config, "brand": config,
             "me": { "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user },
             "server": { "key": hex(&self.0.id), "name": self.server_name(), "ready": ready },
             "user": user,
@@ -2799,7 +2801,7 @@ impl Node {
     /// install's newest release.
     pub async fn publish(&self, binary: &Path, commit: &str, target: &str, committed: u64, signature: &str) -> Result<Release> {
         let bytes = std::fs::read(binary).with_context(|| format!("read {}", binary.display()))?;
-        release::verify(crate::brand::RELEASE_KEY, &bytes, signature).context("no node would take it")?;
+        release::verify(crate::config::RELEASE_KEY, &bytes, signature).context("no node would take it")?;
         let blob = self.put_blob(&bytes)?;
         let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64, committed, signature: signature.into() };
         self.append(&Scope::Global, release::content(&r)).await?;
@@ -2808,10 +2810,10 @@ impl Node {
 
     /// Updates this node if a newer build for its platform was published, signed with the release key.
     fn consider_update(&self) {
-        let latest = self.with(|i| Ok(release::latest(crate::brand::RELEASE_KEY, &i.r.store.scope("global")?, crate::brand::TARGET)));
+        let latest = self.with(|i| Ok(release::latest(crate::config::RELEASE_KEY, &i.r.store.scope("global")?, crate::config::TARGET)));
         let Ok(Some((r, author))) = latest else { return };
         let marker = self.0.dir.join("release");
-        if !release::wanted(&r, crate::brand::BUILD, crate::brand::COMMITTED) || std::fs::read_to_string(&marker).is_ok_and(|m| m.trim() == r.blob) {
+        if !release::wanted(&r, crate::config::BUILD, crate::config::COMMITTED) || std::fs::read_to_string(&marker).is_ok_and(|m| m.trim() == r.blob) {
             return;
         }
         let node = self.clone();
@@ -2838,7 +2840,7 @@ impl Node {
                 self.fetch_from(peers, &r.blob, r.size).await?
             }
         };
-        release::verify(crate::brand::RELEASE_KEY, &bytes, &r.signature)?;
+        release::verify(crate::config::RELEASE_KEY, &bytes, &r.signature)?;
         release::install(r, &bytes)
     }
 
@@ -3043,7 +3045,7 @@ impl ProtocolHandler for CallHandler {
 
 /// The install's settings: the edition's defaults (config.toml's `[settings]`), and what its admins set over them.
 fn settings(m: &Members) -> serde_json::Map<String, Value> {
-    let mut out: serde_json::Map<String, Value> = crate::brand::SETTINGS.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
+    let mut out: serde_json::Map<String, Value> = crate::config::SETTINGS.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
     out.extend(m.settings.iter().map(|(k, v)| (k.clone(), json!(v))));
     for key in ["store", "push"] {
         out.entry(key).or_insert(json!(""));

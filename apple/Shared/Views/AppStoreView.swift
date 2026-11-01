@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The App Store, until the brand's store app exists: every app in the install, and where each is installed.
+/// The App Store, until the install's store app exists: every app in the install, and where each is installed.
 /// Adding one to a page installs it in that page's scope, with the user's own rights.
 struct AppStoreView: View {
     @Environment(Store.self) private var store

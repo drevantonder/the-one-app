@@ -1,24 +1,21 @@
 // Turns config.toml (or the one CONFIG names) into constants, so the code never names the product.
 fn main() {
-    // Builds that still say BRAND= would otherwise build The One App under another edition's name.
-    assert!(std::env::var_os("BRAND").is_none(), "BRAND= is CONFIG= now, naming a config.toml");
     let path = std::env::var("CONFIG").unwrap_or_else(|_| "config.toml".into());
     println!("cargo:rerun-if-changed={path}");
     println!("cargo:rerun-if-env-changed=CONFIG");
-    println!("cargo:rerun-if-env-changed=BRAND");
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
-    let brand: toml::Table = text.parse().expect("parse config file");
-    let get = |key: &str| brand.get(key).unwrap_or_else(|| panic!("config file lacks {key}")).clone();
+    let config: toml::Table = text.parse().expect("parse config file");
+    let get = |key: &str| config.get(key).unwrap_or_else(|| panic!("config file lacks {key}")).clone();
     let out = format!(
         "pub const NAME: &str = {:?};\npub const CLI: &str = {:?};\npub const PORT: u16 = {};\npub const ACCENT: &str = {:?};\npub const REPO: &str = {:?};\n",
         get("name").as_str().unwrap(),
         get("cli").as_str().unwrap(),
         get("port").as_integer().unwrap(),
         get("accent").as_str().unwrap(),
-        // The GitHub repo releases come from; a brand without one isn't released.
-        brand.get("repo").and_then(|r| r.as_str()).unwrap_or(""),
+        // The GitHub repo releases come from; an edition without one isn't released.
+        config.get("repo").and_then(|r| r.as_str()).unwrap_or(""),
     );
-    let optional = |key: &str| brand.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let optional = |key: &str| config.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
     // Where the config file is, so `update` builds the same edition from fresh checkouts: inside this repo, or inside
     // the git repo it's in (another edition's own, `CONFIG_REPO`), or else wherever it is on this machine.
     let manifest = std::fs::canonicalize(std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
@@ -38,7 +35,7 @@ fn main() {
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\n", optional("release_key"), optional("release_signer"));
     // The install settings an install has until its admins set them (`setting` entries).
     let mut settings = String::new();
-    for (name, value) in brand.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {
+    for (name, value) in config.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {
         settings.push_str(&format!("({name:?}, {:?}),", value.as_str().unwrap_or_else(|| panic!("the setting {name} isn't text"))));
     }
     let out = format!("{out}pub const SETTINGS: &[(&str, &str)] = &[{settings}];\n");
@@ -59,7 +56,7 @@ fn main() {
         apps.push_str(&format!("({name:?}, &[{}]),", files.join(", ")));
     }
     let mut starters = String::new();
-    for name in brand.get("apps").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()) {
+    for name in config.get("apps").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()) {
         assert!(dirs.iter().any(|d| d.file_name().is_some_and(|f| f == name)), "the config's app {name} isn't in apps/");
         starters.push_str(&format!("{name:?},"));
     }
@@ -89,7 +86,7 @@ fn main() {
         .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
         .unwrap_or(0);
     let out = format!("{out}pub const COMMITTED: u64 = {committed};\npub const BUILD: &str = {commit:?};\npub const TARGET: &str = {:?};\n", std::env::var("TARGET").unwrap());
-    let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("brand.rs");
+    let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("config.rs");
     std::fs::write(dest, out).unwrap();
 }
 

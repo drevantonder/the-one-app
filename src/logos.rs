@@ -105,7 +105,7 @@ pub fn fetch(domain: &str) -> Result<(Vec<u8>, &'static str)> {
     ensure!(valid(domain), "{domain:?} isn't a site's name");
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(20)))
-        .user_agent(format!("{}/{}", crate::brand::NAME, env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("{}/{}", crate::config::NAME, env!("CARGO_PKG_VERSION")))
         .build()
         .into();
     let home = format!("https://{domain}/");

@@ -1,7 +1,7 @@
 import SwiftUI
 import UserNotifications
 
-/// Apps' pushes: the phone registers its APNs token with the brand's push driver each launch, shows a push that
+/// Apps' pushes: the phone registers its APNs token with the push driver the install names each launch, shows a push that
 /// arrives while it's open, and opens a tapped one's `link`, the screen of the app that sent it.
 @MainActor
 final class PhoneDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -41,12 +41,12 @@ final class PhoneDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCe
 }
 
 extension Phone {
-    /// Asks to notify once the phone is in an install whose brand pushes, then registers for pushes: each launch, since
+    /// Asks to notify once the phone is in an install that pushes, then registers for pushes: each launch, since
     /// a token can change.
     func setUpPush() async {
-        // A build has push only once it's on for the brand (apple/project.sh): without the entitlement, no token.
+        // A build has push only once it's on in the config (apple/project.sh): without the entitlement, no token.
         guard Bundle.main.object(forInfoDictionaryKey: "Push") as? Bool == true else { return }
-        guard Self.nodeURL == nil, store.install != nil, store.brand?.push?.isEmpty == false else { return }
+        guard Self.nodeURL == nil, store.install != nil, store.config?.push?.isEmpty == false else { return }
         let center = UNUserNotificationCenter.current()
         var status = await center.notificationSettings().authorizationStatus
         if status == .notDetermined {
@@ -60,7 +60,7 @@ extension Phone {
     /// Tells the push driver where to push this user's notifications: APNs' sandbox for a build signed for development,
     /// its production service for one from the App Store or TestFlight.
     func register(token: String) async {
-        guard let push = store.brand?.push, !push.isEmpty else { return }
+        guard let push = store.config?.push, !push.isEmpty else { return }
         let input = ["token": token, "platform": "ios", "env": Self.apnsEnvironment, "name": store.state?.machine.name ?? UIDevice.current.name]
         guard let data = try? JSONSerialization.data(withJSONObject: input) else { return }
         do {

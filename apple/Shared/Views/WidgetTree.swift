@@ -142,7 +142,7 @@ enum WidgetLink: Codable, Sendable, Hashable {
         switch self {
         case .url(let url): return url
         case .screen(let screen, let params):
-            let cli = Bundle.main.object(forInfoDictionaryKey: "BrandCLI") as? String ?? "one"
+            let cli = Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "one"
             var parts = URLComponents()
             parts.scheme = cli
             parts.host = "open"
@@ -426,7 +426,7 @@ func toned(_ tone: String?, otherwise: some ShapeStyle = .primary) -> AnyShapeSt
     }
 }
 
-/// The colour tones `blue` and `purple`, as the old widgets drew CPU and GPU.
+/// The colour tones `blue` and `purple`, as widgets draw CPU and GPU.
 let widgetBlue = Color(red: 0x0a / 255, green: 0x9e / 255, blue: 0xdc / 255)
 let widgetPurple = Color(red: 0xa5 / 255, green: 0x50 / 255, blue: 0xd9 / 255)
 

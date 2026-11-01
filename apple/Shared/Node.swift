@@ -1,6 +1,6 @@
 import Foundation
 
-struct Brand: Codable, Sendable, Equatable {
+struct Config: Codable, Sendable, Equatable {
     var name: String
     var cli: String
     var accent: String
@@ -12,7 +12,7 @@ struct Brand: Codable, Sendable, Equatable {
 
 /// `GET /v1/state` (SPEC.md "Local API"): this machine, its user and the install.
 struct NodeState: Decodable, Sendable, Equatable {
-    var brand: Brand
+    var config: Config
     /// The machine this shell runs on: this server, or a phone.
     var machine: Machine
     /// The server that answered: this one, or for a phone, the server acting for it.
@@ -25,7 +25,7 @@ struct NodeState: Decodable, Sendable, Equatable {
     /// How many requests for a secret wait for this user.
     var secretRequests: Int?
 
-    enum CodingKeys: String, CodingKey { case brand, machine = "me", host = "server", user, install, opens, secretRequests = "secret_requests" }
+    enum CodingKeys: String, CodingKey { case config, machine = "me", host = "server", user, install, opens, secretRequests = "secret_requests" }
 }
 
 struct Machine: Codable, Sendable, Equatable {

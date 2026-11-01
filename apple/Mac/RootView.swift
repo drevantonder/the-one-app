@@ -109,7 +109,7 @@ private struct ConnectedSheet: View {
     }
 }
 
-/// Creating an install, or joining one with a pairing code; or, for a brand with one install, signing in to it.
+/// Creating an install, or joining one with a pairing code; or, for an edition with one install, signing in to it.
 private struct WelcomeView: View {
     @Environment(Store.self) private var store
     @Environment(\.webAuthenticationSession) private var session
@@ -127,10 +127,10 @@ private struct WelcomeView: View {
                 Image("Logo")
                     .resizable()
                     .frame(width: 112, height: 112)
-                Text("Welcome to \(store.brand?.name ?? appName)")
+                Text("Welcome to \(store.config?.name ?? appName)")
                     .font(.largeTitle.weight(.semibold))
                 Group {
-                    if SignIn.brand == nil {
+                    if SignIn.configured == nil {
                         Text("Your devices, and your team’s, as one place for apps and agents.\nStart it here, or join from another device.")
                     } else {
                         Text("Your devices, and your team’s, as one place for apps and agents.")
@@ -141,7 +141,7 @@ private struct WelcomeView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 520)
             }
-            if let signIn = SignIn.brand { signInForm(signIn) } else { createForm }
+            if let signIn = SignIn.configured { signInForm(signIn) } else { createForm }
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

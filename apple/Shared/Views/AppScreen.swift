@@ -132,14 +132,14 @@ private struct ScreenWebView: Representable {
     /// What makes a page sit in the shell as its own: the shell's background shows through, its accent is the
     /// shell's in light and dark, and nothing zooms.
     private var look: String {
-        let accent = store.brand?.accent ?? Bundle.main.object(forInfoDictionaryKey: "BrandAccent") as? String ?? ""
+        let accent = store.config?.accent ?? Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? ""
         return """
         const style = document.createElement("style");
         style.textContent = `
           html, body { background: transparent !important; }
           html { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
-          :root:root { --accent: \(brandCSS(accent, dark: false)); }
-          @media (prefers-color-scheme: dark) { :root:root { --accent: \(brandCSS(accent, dark: true)); } }
+          :root:root { --accent: \(accentCSS(accent, dark: false)); }
+          @media (prefers-color-scheme: dark) { :root:root { --accent: \(accentCSS(accent, dark: true)); } }
         \(Self.platformCSS)`;
         document.documentElement.appendChild(style);
         \(zoomScript)
@@ -397,8 +397,8 @@ struct RouteView: View {
         case .setting(let setting):
             switch setting {
             case .store:
-                // The brand's store app, once it exists; until then, a list of every app.
-                if let name = store.brand?.store, let app = store.app(name), app.hasScreens {
+                // The install's store app, once it exists; until then, a list of every app.
+                if let name = store.config?.store, let app = store.app(name), app.hasScreens {
                     AppScreen(route: ScreenRoute(app: app.name)).id(app.name)
                 } else {
                     AppStoreView()

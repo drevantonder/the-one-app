@@ -46,7 +46,7 @@ A server **holds**:
 - every scope its owners can read: a user owner reads their own scope and their groups'; a group owner reads its own; `install` reads every scope;
 - the scope of each user who trusts it.
 
-A server owned by `install` holds everything and serves everyone in its users: it is **privileged**. All others are **unprivileged**. A brand may name its privileged servers ("the Acme servers"). A group's data goes only to servers whose owners can read it: its members' servers, servers it owns, and privileged servers. It never follows a user's trust.
+A server owned by `install` holds everything and serves everyone in its users: it is **privileged**. All others are **unprivileged**. An edition may name its privileged servers ("the Acme servers"). A group's data goes only to servers whose owners can read it: its members' servers, servers it owns, and privileged servers. It never follows a user's trust.
 
 Examples: a laptop has owners `[user:you]`, users `[user:you]`. A team box: owners `[group:finance]`, users `[group:finance]`, holding the group's data and that of each member who trusts it. A shared box: owners `[user:carol]`, users `[user:carol, user:dan, user:eve]`.
 
@@ -134,7 +134,7 @@ A secret is set, never read: nothing (CLI, MCP, API, query, view, app or agent) 
 - `node-release { commit, target, blob, size, committed, signature }`, in `global`: `target` is a Rust target triple, `blob` holds the binary, `committed` is when the commit was made (seconds since 1970), and `signature` is the publisher's signature over the binary.
 - `running { commit, target }`: each server writes one per build, so everyone can see what each runs.
 
-Each brand has a **release key**, Ed25519, whose public half every build carries and whose secret only the publisher holds. A signature is OpenSSH's (`ssh-keygen -Y sign -n release`: the armored "sshsig" format, SHA-512). Any server may publish or pass on a release; who wrote the entry doesn't matter. A node takes the newest release for its target whose signature is by its release key. If its own build differs and isn't newer, it fetches the blob and checks the signature over it; then, since the entry's other fields aren't signed, it checks that the binary itself says (`version --json`) it's that commit, for its target, and no older than its own build. Only then does it replace its binary and exit; its service manager starts the new one.
+Each edition has a **release key**, Ed25519, whose public half every build carries and whose secret only the publisher holds. A signature is OpenSSH's (`ssh-keygen -Y sign -n release`: the armored "sshsig" format, SHA-512). Any server may publish or pass on a release; who wrote the entry doesn't matter. A node takes the newest release for its target whose signature is by its release key. If its own build differs and isn't newer, it fetches the blob and checks the signature over it; then, since the entry's other fields aren't signed, it checks that the binary itself says (`version --json`) it's that commit, for its target, and no older than its own build. Only then does it replace its binary and exit; its service manager starts the new one.
 
 ## Sync (ALPN `one/sync/1`)
 
@@ -263,9 +263,9 @@ A client joins with a pairing code like a server, then asks the servers its user
 
 ## Local API
 
-Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CLI, MCP, git helpers and drivers, acting as its local user. It refuses requests with an `Origin` header or a `Host` other than this machine, so no web page can use it.
+Each server serves HTTP on `127.0.0.1:<config port>` for its machine's shells, CLI, MCP, git helpers and drivers, acting as its local user. It refuses requests with an `Origin` header or a `Host` other than this machine, so no web page can use it.
 
-- `GET /v1/state`: the brand (with its `store` app and `push` driver, from the install's settings), `me` (who's asking: key, name, user; also as `client` when a client asks), this `server` (and whether it's ready), the asker's `user` (id, name, role), every `open` of their data (`opens`), and the `install` (null until it creates or joins one): its users, groups, servers (online, owners, users, privileged, who trusts each, whether each serves me, build, target, drivers, and `load`, as its last `Hello` said, or null; its `containers` only for someone acting for one of its owners) and clients (`asked`: when each last asked this server, milliseconds, or null), and its `settings` (each one's value, set or the edition's default); and every `open` of this user's data.
+- `GET /v1/state`: `config`, the edition's (its `name`, `cli` and `accent`, with the `store` app and `push` driver from the install's settings; also as `brand`, for shells built before), `me` (who's asking: key, name, user; also as `client` when a client asks), this `server` (and whether it's ready), the asker's `user` (id, name, role), every `open` of their data (`opens`), and the `install` (null until it creates or joins one): its users, groups, servers (online, owners, users, privileged, who trusts each, whether each serves me, build, target, drivers, and `load`, as its last `Hello` said, or null; its `containers` only for someone acting for one of its owners) and clients (`asked`: when each last asked this server, milliseconds, or null), and its `settings` (each one's value, set or the edition's default); and every `open` of this user's data.
 - `GET /v1/apps`: every app in the install (owner, `from`, its `forks`, its running `bundle`, every deploy as `history`, where installed, title, icon, `color`, `image`, `description` and `uses`, and `built_in`, the bundle this server's release has of it, if it's built in), with instructions, operations, widgets and screens for each installed for this user, and its `schedules` where it's installed for them (each `{ name, description, when, scope, on, runs_as, next, last, changed?, removed, invalid? }`) and their runs as `activity`, newest first.
 - `GET /v1/source/<app>?bundle=&path=`: an app's code as deployed, its latest deploy's or, with `bundle` (or its first characters), an earlier one's: `{ files: [{ path, size }] }`, or with `path` that file, `{ path, text }` (`base64` if it isn't text).
 - `POST /v1/call { app | driver, op, input, scopes?, server?, as?, agent? }` → `{ ok }`. `server` (a name or key prefix) runs it there, or `all`, a driver's call on every server that runs it for you, answering `{ <server>: answer | { error } }`; otherwise it runs on the nearest server that can. `agent` names the agent asking (an MCP client's name), for apps to credit.
@@ -289,7 +289,7 @@ Each server serves HTTP on `127.0.0.1:<brand port>` for its machine's shells, CL
 
 ## Screens
 
-An app's screens are HTML. A server serves each as a whole page: the app's HTML inside the design kit (CSS that follows light and dark and the brand's accent) with a bridge, `one`:
+An app's screens are HTML. A server serves each as a whole page: the app's HTML inside the design kit (CSS that follows light and dark and the edition's accent) with a bridge, `one`:
 
 - `one.call(op, input)`: runs one of this app's operations as the user looking, and resolves to its result.
 - `one.open(screen, params, app?)`: opens another of this app's screens, or with `app`, another app's (a notification's link); the shell pushes it with its own navigation.
@@ -297,7 +297,7 @@ An app's screens are HTML. A server serves each as a whole page: the app's HTML 
 - `one.on("changed", fn)`: called when this app's data changes.
 - `one.params`, `one.me`, and helpers `one.esc`, `one.ago`, `one.avatar`.
 - `one.appIcon(app, size)`: an app's icon (`{ name, title, icon, color, image }`, as `catalog()` gives it), which the shell draws as it draws apps on its pages; a browser shows its `image`, or its first letter on its `color`.
-- `one.brand`: the product's `name`, and `made_here`, what an App Store calls the apps made in the install (its setting).
+- `one.config` (also `one.brand`, for apps written before): the product's `name`, and `made_here`, what an App Store calls the apps made in the install (its setting).
 - `one.save(file)` and `one.preview(file)`: saves or shares a file (`{ name, type, base64 }`, or `{ name, type, blob }`), or shows it. `one.scan()`, where `one.can.scan` says the shell has a document camera: resolves to the pages scanned, each a JPEG `{ name, type, size, base64 }` (none if cancelled).
 - Links, `window.open` and anything else that would take the page away open outside it (the browser, Mail); `<a download>` and blob or data URLs save the file. File inputs work in every shell.
 - `one.scope`: the page the shell opened the screen from (`user`, `group:<id>` or `global`), or null. Only a hint: the app decides what to show, and draws its own scope picker if it has one.

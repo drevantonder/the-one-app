@@ -1,4 +1,4 @@
-# Sourced by the build scripts: exports the brand from config.toml (or $CONFIG), turns its artwork into the apps' icons
+# Sourced by the build scripts: exports config.toml's fields (or $CONFIG's), turns its artwork into the apps' icons
 # and images, and generates Shells.xcodeproj.
 root=$(cd .. && pwd)
 config=$(cd "$(dirname "${CONFIG:-$root/config.toml}")" && pwd)/$(basename "${CONFIG:-config.toml}")
@@ -7,16 +7,16 @@ field() { sed -n "/^\[/q; s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$conf
 art() { echo "$(dirname "$config")/$(field "$1")"; }
 # The commit the shells are built from, which Settings shows at its foot.
 export BUILD_COMMIT=$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
-export BRAND_NAME=$(field name) BRAND_CLI=$(field cli) BRAND_PORT=$(field port) BRAND_ACCENT=$(field accent)
-# A brand with one install signs people in to it (SignIn.swift) instead of offering to start one.
-export BRAND_SIGN_IN=$(field sign_in) BRAND_ACCOUNT=$(field account)
+export CONFIG_NAME=$(field name) CONFIG_CLI=$(field cli) CONFIG_PORT=$(field port) CONFIG_ACCENT=$(field accent)
+# An edition with one install signs people in to it (SignIn.swift) instead of offering to start one.
+export CONFIG_SIGN_IN=$(field sign_in) CONFIG_ACCOUNT=$(field account)
 # The iPhone app signs with the team of this Mac's Apple Development certificate, unless APPLE_TEAM names one.
 export APPLE_TEAM=${APPLE_TEAM:-$(security find-certificate -c "Apple Development" -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p')}
 
 # Runs a command as a one-shot job in the logged-in session, and prints its output: over SSH the keychain, which
 # codesign needs, is out of reach.
 session() {
-	local job=app.$BRAND_CLI.session.$$ out status plist
+	local job=app.$CONFIG_CLI.session.$$ out status plist
 	out=$(mktemp) status=$(mktemp) plist=$(mktemp).plist
 	printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<plist version="1.0"><dict>' \
 		"<key>Label</key><string>$job</string><key>RunAtLoad</key><true/><key>WorkingDirectory</key><string>$PWD</string>" \
@@ -34,7 +34,7 @@ icon=$(art icon) menubar=$(art menubar) logo=$(art logo)
 mkdir -p build
 contents() { printf '{"images":[%s],"info":{"author":"xcode","version":1}%s}\n' "$1" "${2:-}"; }
 
-# The Mac's icon is the brand's icon as it is.
+# The Mac's icon is the config's icon as it is.
 rm -rf build/AppIcon.iconset && mkdir build/AppIcon.iconset
 for s in 16 32 128 256 512; do
 	sips -z $s $s "$icon" --out build/AppIcon.iconset/icon_${s}x${s}.png >/dev/null
@@ -42,7 +42,7 @@ for s in 16 32 128 256 512; do
 done
 iconutil -c icns build/AppIcon.iconset -o build/AppIcon.icns
 
-# The iPhone's is its tile, full bleed: brand icons are drawn on Apple's Mac grid, an 824-pixel tile in 1024.
+# The iPhone's is its tile, full bleed: the icons are drawn on Apple's Mac grid, an 824-pixel tile in 1024.
 # iPhone icons can't be transparent, so what's left of the tile's corners takes the colour of its edge.
 icons=build/Phone.xcassets/AppIcon.appiconset
 mkdir -p "$icons"
@@ -61,7 +61,7 @@ contents '{"filename":"icon.png","idiom":"universal","platform":"ios","size":"10
 contents "" > build/Phone.xcassets/Contents.json
 
 # The logo the apps show, and the Mac's menu bar mark (a template, with its @2x).
-assets=build/Brand.xcassets
+assets=build/Artwork.xcassets
 rm -rf "$assets" && mkdir -p "$assets/Logo.imageset" "$assets/MenuBarIcon.imageset"
 contents "" > "$assets/Contents.json"
 cp "$logo" "$assets/Logo.imageset/logo.png"

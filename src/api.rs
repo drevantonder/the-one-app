@@ -17,9 +17,9 @@ use crate::entry::hex;
 use crate::members::Role;
 use crate::node::{CallRequest, Caller, Node};
 
-/// Where this machine's node serves its local API: the brand's port, or `<CLI>_ADDR`.
+/// Where this machine's node serves its local API: the config's port, or `<CLI>_ADDR`.
 pub fn addr() -> String {
-    std::env::var(format!("{}_ADDR", crate::brand::CLI.to_uppercase())).unwrap_or_else(|_| format!("127.0.0.1:{}", crate::brand::PORT))
+    std::env::var(format!("{}_ADDR", crate::config::CLI.to_uppercase())).unwrap_or_else(|_| format!("127.0.0.1:{}", crate::config::PORT))
 }
 
 pub fn router(node: Node) -> Router {

@@ -1,4 +1,4 @@
-# The native shells. project.sh fills in the brand from config.toml and runs xcodegen.
+# The native shells. project.sh fills in config.toml's fields and runs xcodegen.
 name: Shells
 options:
   deploymentTarget:
@@ -14,32 +14,32 @@ targets:
   Mac:
     type: application
     platform: macOS
-    sources: [Shared, Mac, build/Brand.xcassets]
+    sources: [Shared, Mac, build/Artwork.xcassets]
     settings:
       base:
-        PRODUCT_NAME: ${BRAND_NAME}
-        PRODUCT_BUNDLE_IDENTIFIER: app.${BRAND_CLI}.mac
+        PRODUCT_NAME: ${CONFIG_NAME}
+        PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.mac
         CODE_SIGNING_ALLOWED: NO
     info:
       path: build/Info.plist
       properties:
-        CFBundleDisplayName: ${BRAND_NAME}
-        CFBundleName: ${BRAND_NAME}
+        CFBundleDisplayName: ${CONFIG_NAME}
+        CFBundleName: ${CONFIG_NAME}
         LSApplicationCategoryType: public.app-category.productivity
         NSHumanReadableCopyright: ""
-        NodeCLI: ${BRAND_CLI}
-        NodePort: "${BRAND_PORT}"
-        BrandAccent: ${BRAND_ACCENT}
+        CLI: ${CONFIG_CLI}
+        NodePort: "${CONFIG_PORT}"
+        Accent: ${CONFIG_ACCENT}
         BuildCommit: ${BUILD_COMMIT}
-        SignIn: ${BRAND_SIGN_IN}
-        SignInAccount: ${BRAND_ACCOUNT}
+        SignIn: ${CONFIG_SIGN_IN}
+        SignInAccount: ${CONFIG_ACCOUNT}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         # <cli>://secret?id=…&scope=…: an agent's request that the person set a secret.
         CFBundleURLTypes:
-          - CFBundleURLName: app.${BRAND_CLI}.mac
+          - CFBundleURLName: app.${CONFIG_CLI}.mac
             CFBundleURLSchemes:
-              - ${BRAND_CLI}
+              - ${CONFIG_CLI}
         # Asked for on the first call that needs each (Mac/Providers).
         NSRemindersFullAccessUsageDescription: Your agents and other devices read and change your reminders through this Mac.
         NSCalendarsFullAccessUsageDescription: Your agents and other devices read and change your calendars through this Mac.
@@ -50,7 +50,7 @@ targets:
   Phone:
     type: application
     platform: iOS
-    sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Phone.xcassets, build/Brand.xcassets]
+    sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Phone.xcassets, build/Artwork.xcassets]
     dependencies:
       - framework: build/OneClient.xcframework
         embed: false
@@ -59,8 +59,8 @@ targets:
       - target: Widgets
     settings:
       base:
-        PRODUCT_NAME: ${BRAND_NAME}
-        PRODUCT_BUNDLE_IDENTIFIER: app.${BRAND_CLI}.phone
+        PRODUCT_NAME: ${CONFIG_NAME}
+        PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.phone
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
@@ -68,25 +68,25 @@ targets:
     entitlements:
       path: build/Phone.entitlements
       properties:
-        com.apple.security.application-groups: ["group.app.${BRAND_CLI}.phone"]
+        com.apple.security.application-groups: ["group.app.${CONFIG_CLI}.phone"]
         # aps-environment, for apps' pushes, is added by project.sh only once push is on (see there).
     info:
       path: build/Phone-Info.plist
       properties:
-        CFBundleDisplayName: ${BRAND_NAME}
-        BrandAccent: ${BRAND_ACCENT}
-        BrandCLI: ${BRAND_CLI}
+        CFBundleDisplayName: ${CONFIG_NAME}
+        Accent: ${CONFIG_ACCENT}
+        CLI: ${CONFIG_CLI}
         BuildCommit: ${BUILD_COMMIT}
-        SignIn: ${BRAND_SIGN_IN}
-        SignInAccount: ${BRAND_ACCOUNT}
-        AppGroup: group.app.${BRAND_CLI}.phone
+        SignIn: ${CONFIG_SIGN_IN}
+        SignInAccount: ${CONFIG_ACCOUNT}
+        AppGroup: group.app.${CONFIG_CLI}.phone
         NSCameraUsageDescription: Scan the code another device shows to join its space.
         # <cli>://join?code=…&name=…: joining from a link, without the camera; <cli>://secret?id=…&scope=…: an
         # agent's request that the person set a secret.
         CFBundleURLTypes:
-          - CFBundleURLName: app.${BRAND_CLI}.join
+          - CFBundleURLName: app.${CONFIG_CLI}.join
             CFBundleURLSchemes:
-              - ${BRAND_CLI}
+              - ${CONFIG_CLI}
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
@@ -94,11 +94,11 @@ targets:
   Widgets:
     type: app-extension
     platform: iOS
-    sources: [Widget, Shared/Views/Style.swift, Shared/Views/WidgetTree.swift, Shared/Views/SVGPath.swift, build/Brand.xcassets]
+    sources: [Widget, Shared/Views/Style.swift, Shared/Views/WidgetTree.swift, Shared/Views/SVGPath.swift, build/Artwork.xcassets]
     settings:
       base:
         PRODUCT_NAME: Widgets
-        PRODUCT_BUNDLE_IDENTIFIER: app.${BRAND_CLI}.phone.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.phone.widgets
         TARGETED_DEVICE_FAMILY: "1,2"
         # WidgetTree draws buttons, toggles and links as intents and links, and images from the app group.
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WIDGET
@@ -107,13 +107,13 @@ targets:
     entitlements:
       path: build/Widgets.entitlements
       properties:
-        com.apple.security.application-groups: ["group.app.${BRAND_CLI}.phone"]
+        com.apple.security.application-groups: ["group.app.${CONFIG_CLI}.phone"]
     info:
       path: build/Widgets-Info.plist
       properties:
-        CFBundleDisplayName: ${BRAND_NAME}
-        BrandAccent: ${BRAND_ACCENT}
-        BrandCLI: ${BRAND_CLI}
-        AppGroup: group.app.${BRAND_CLI}.phone
+        CFBundleDisplayName: ${CONFIG_NAME}
+        Accent: ${CONFIG_ACCENT}
+        CLI: ${CONFIG_CLI}
+        AppGroup: group.app.${CONFIG_CLI}.phone
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

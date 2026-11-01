@@ -61,7 +61,7 @@ struct MenuPanel: View {
             }
 
             MenuButton(action: open) {
-                Text("Open \(store.brand?.name ?? appName)")
+                Text("Open \(store.config?.name ?? appName)")
             }
             MenuButton {
                 openAtLogin.toggle()
@@ -87,14 +87,14 @@ struct MenuPanel: View {
     }
 }
 
-/// The app's own menu bar item: the brand's mark. It also lends the widget items a way to open the window.
+/// The app's own menu bar item: the config's mark. It also lends the widget items a way to open the window.
 struct MenuBarMark: View {
     var store: Store
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Image("MenuBarIcon")
-            .accessibilityLabel(store.brand?.name ?? appName)
+            .accessibilityLabel(store.config?.name ?? appName)
             .onAppear { WidgetItems.shared.openWindow = { openWindow(id: "main") } }
     }
 }

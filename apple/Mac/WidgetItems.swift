@@ -163,8 +163,8 @@ private struct WidgetPopover: View {
         }
         .padding(14)
         .frame(width: 340, alignment: .leading)
-        .tint(Color(brandHex: accentHex))
+        .tint(Color(accentHex: accentHex))
     }
 
-    private var accentHex: String { Bundle.main.object(forInfoDictionaryKey: "BrandAccent") as? String ?? "" }
+    private var accentHex: String { Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? "" }
 }

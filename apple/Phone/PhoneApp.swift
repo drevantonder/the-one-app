@@ -27,7 +27,7 @@ struct PhoneApp: App {
                     await phone.start()
                 }
                 .onOpenURL { phone.open($0) }
-                .onChange(of: phone.store.brand?.push, initial: true) { Task { await phone.setUpPush() } }
+                .onChange(of: phone.store.config?.push, initial: true) { Task { await phone.setUpPush() } }
                 .onChange(of: phone.store.iconBadge) { phone.showBadge(phone.store.iconBadge) }
         }
     }
@@ -51,9 +51,9 @@ final class Phone {
     let store = Store(node: Phone.transport)
     private var running: Task<Void, Never>?
 
-    /// The brand's accent: the build's until a server sends its own.
+    /// The accent: the build's until a server sends its own.
     var accent: Color {
-        Color(brandHex: store.brand?.accent ?? Bundle.main.object(forInfoDictionaryKey: "BrandAccent") as? String ?? "")
+        Color(accentHex: store.config?.accent ?? Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? "")
     }
 
     /// In the simulator, NODE_URL points the app at a server's local API instead of joining over the network.

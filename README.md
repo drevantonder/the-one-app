@@ -55,7 +55,7 @@ On a Mac, `apple/build.sh` builds the app with the node and the Apple drivers in
 
 The app is whitelabelled: `config.toml` sets its name, CLI name, port, accent colour, icons, release key and starter apps, and nothing else in the code names the product. Another edition is this code built with its own `config.toml`, kept in its own repo, its paths relative to it: `CONFIG=../acme/config.toml cargo build --release`, then install it under its CLI name. Its `update` fetches that repo's latest config beside main. What an install does (what its App Store calls the apps made there, push, joining with a work email) is in its settings, which admins change in Settings.
 
-Each context is its own app: The One App is yours, a workplace's edition is theirs. Each has its own CLI, port, data, keys and MCP server, so someone in several runs several side by side. A brand may give its privileged servers a name of its own ("the Acme servers").
+Each context is its own app: The One App is yours, a workplace's edition is theirs. Each has its own CLI, port, data, keys and MCP server, so someone in several runs several side by side. An edition may give its privileged servers a name of its own ("the Acme servers").
 
 ## How it works
 

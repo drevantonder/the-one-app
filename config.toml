@@ -15,9 +15,9 @@ release_signer = "ssh mac \"op read 'op://van-tonder-nosudo/The One App release 
 apps = ["board", "repos", "apps", "devices"]
 # Artwork, relative to this file: the app icon (1024px), the menu bar template (18pt, with an @2x),
 # and the logo the apps show inside themselves.
-icon = "brand/AppIcon.png"
-menubar = "brand/MenuBarIcon.png"
-logo = "brand/Logo.png"
+icon = "icons/AppIcon.png"
+menubar = "icons/MenuBarIcon.png"
+logo = "icons/Logo.png"
 
 # An install's settings until its admins change them in Settings (SPEC.md, "setting"). Every install has:
 # store, the app the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.install);

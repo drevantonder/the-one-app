@@ -2,7 +2,7 @@ use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use one::brand::{CLI, NAME};
+use one::config::{CLI, NAME};
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
 
@@ -339,8 +339,8 @@ fn run(args: Vec<String>) -> Result<()> {
             }
             std::fs::write(file, resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)?;
         }
-        ["version"] if flags.contains_key("json") => println!("{}", json!({ "commit": one::brand::BUILD, "target": one::brand::TARGET, "committed": one::brand::COMMITTED })),
-        ["version"] => println!("{} {} ({})", NAME, one::brand::BUILD, one::brand::TARGET),
+        ["version"] if flags.contains_key("json") => println!("{}", json!({ "commit": one::config::BUILD, "target": one::config::TARGET, "committed": one::config::COMMITTED })),
+        ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
         ["rename", name @ ..] if !name.is_empty() => {
             post("/v1/name", json!({ "name": name.join(" ") }))?;
             println!("This server is now {}.", name.join(" "));

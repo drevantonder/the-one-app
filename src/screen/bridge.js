@@ -48,7 +48,9 @@
   window.one = {
     app: ctx.app, screen: ctx.screen, params: ctx.params, me: ctx.me,
     // The product: its `name`, and `made_here`, what an App Store calls the apps made in the install (its setting).
-    brand: ctx.brand,
+    config: ctx.config,
+    // The same, for apps written before it was `config`.
+    brand: ctx.config,
     // The page the shell opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
     scope: ctx.scope ?? null,
     call: (op, input = {}) => host({ type: "call", app: ctx.app, op, input }),

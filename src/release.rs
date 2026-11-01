@@ -107,10 +107,10 @@ pub fn install(r: &Release, bytes: &[u8]) -> Result<PathBuf> {
     }
     // The entry's commit and date aren't signed; the binary's own are.
     let version = std::process::Command::new(&tmp).args(["version", "--json"]).output().ok().and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok());
-    let is = |v: &serde_json::Value| v["commit"] == r.commit.as_str() && v["target"] == crate::brand::TARGET && v["committed"].as_u64().is_some_and(|c| c >= crate::brand::COMMITTED);
+    let is = |v: &serde_json::Value| v["commit"] == r.commit.as_str() && v["target"] == crate::config::TARGET && v["committed"].as_u64().is_some_and(|c| c >= crate::config::COMMITTED);
     if !version.as_ref().is_some_and(is) {
         let _ = std::fs::remove_file(&tmp);
-        anyhow::bail!("the binary says it's {}, not {} for {}", version.map_or("nothing".into(), |v| v.to_string()), r.commit, crate::brand::TARGET);
+        anyhow::bail!("the binary says it's {}, not {} for {}", version.map_or("nothing".into(), |v| v.to_string()), r.commit, crate::config::TARGET);
     }
     std::fs::rename(&tmp, &exe).context("replace the binary")?;
     Ok(exe)
@@ -118,7 +118,7 @@ pub fn install(r: &Release, bytes: &[u8]) -> Result<PathBuf> {
 
 /// Says which build a server runs, so everyone can see when a release has landed.
 pub fn running() -> Content {
-    Content::new(APP, "running", json!({ "commit": crate::brand::BUILD, "target": crate::brand::TARGET }))
+    Content::new(APP, "running", json!({ "commit": crate::config::BUILD, "target": crate::config::TARGET }))
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

@@ -1,14 +1,14 @@
 import SwiftUI
 import AuthenticationServices
 
-/// The brand's own sign-in (config.toml's `sign_in` and `account`), for a brand with one install: the first run offers
+/// The config's own sign-in (config.toml's `sign_in` and `account`), for an edition with one install: the first run offers
 /// it instead of starting an install. It's the work-email join driver's page, which signs the person in with their
 /// work account and ends at `<cli>://join?code=…&user=…`, a pairing code for this device and their name.
 struct SignIn {
     var url: URL
     var account: String
 
-    static let brand: SignIn? = {
+    static let configured: SignIn? = {
         let info = Bundle.main.infoDictionary ?? [:]
         guard let text = info["SignIn"] as? String, !text.isEmpty, let url = URL(string: text) else { return nil }
         return SignIn(url: url, account: info["SignInAccount"] as? String ?? "")
@@ -22,7 +22,7 @@ struct SignIn {
     /// they cancelled.
     func run(_ session: WebAuthenticationSession) async throws -> (code: String, name: String)? {
         let info = Bundle.main.infoDictionary ?? [:]
-        let cli = (info["NodeCLI"] ?? info["BrandCLI"]) as? String ?? ""
+        let cli = info["CLI"] as? String ?? ""
         let start = url.appending(path: "start").appending(queryItems: [URLQueryItem(name: "app", value: "1")])
         let back: URL
         do {

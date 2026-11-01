@@ -52,7 +52,7 @@ struct PairSheet: View {
             .padding(.trailing, 4)
             .padding(.vertical, 4)
             .background(.quaternary.opacity(0.5), in: .capsule)
-            Text("Scan it with the other device’s camera, or run \(store.brand?.cli ?? "") join with the code there. It works once, for seven days.")
+            Text("Scan it with the other device’s camera, or run \(store.config?.cli ?? "") join with the code there. It works once, for seven days.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

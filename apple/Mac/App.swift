@@ -57,14 +57,14 @@ struct MacApp: App {
     }
 
     private var accent: Color {
-        store.brand.map { Color(brandHex: $0.accent) } ?? .accentColor
+        store.config.map { Color(accentHex: $0.accent) } ?? .accentColor
     }
 }
 
 /// Keeps this device's node running: a login-persistent launch agent, or a child process if that's refused.
 @MainActor
 enum NodeLauncher {
-    static var cli: String { Bundle.main.object(forInfoDictionaryKey: "NodeCLI") as? String ?? "" }
+    static var cli: String { Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "" }
     static var label: String { "\(Bundle.main.bundleIdentifier ?? "").node" }
     private static var child: Process?
 

@@ -375,8 +375,8 @@ fn stop_previous(dir: &Path) {
 fn workerd() -> Result<PathBuf> {
     let (_, package, integrity) = PACKAGES
         .iter()
-        .find(|(target, _, _)| *target == crate::brand::TARGET)
-        .ok_or_else(|| anyhow!("apps can't run on {} yet: workerd has no build for it", crate::brand::TARGET))?;
+        .find(|(target, _, _)| *target == crate::config::TARGET)
+        .ok_or_else(|| anyhow!("apps can't run on {} yet: workerd has no build for it", crate::config::TARGET))?;
     let url = format!("https://registry.npmjs.org/@cloudflare/workerd-{package}/-/workerd-{package}-{WORKERD}.tgz");
     pinned(&format!("workerd-{WORKERD}"), "workerd", &url, integrity)
 }

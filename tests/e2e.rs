@@ -55,9 +55,9 @@ async fn servers_and_a_phone_share_a_deployed_board() {
 
     let recovery = a.create("Test", "Andre").await.unwrap();
     assert_eq!(recovery.len(), 64, "creating gives the recovery key's secret once");
-    assert!(a.create("Another", "Andre").await.is_err(), "a brand holds one install");
+    assert!(a.create("Another", "Andre").await.is_err(), "an edition holds one install");
     let apps = a.apps(&one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None }).await.unwrap();
-    let listed = apps.iter().find(|app| app["name"] == "board").expect("the brand's board is deployed");
+    let listed = apps.iter().find(|app| app["name"] == "board").expect("the config's board is deployed");
     assert_eq!(listed["owner"], "admins");
     assert!(listed["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == "post")), "{listed}");
     assert_eq!(a.call(board("post", json!({ "text": "from a" }))).await.unwrap(), "Posted as #1 in the top.");
@@ -223,7 +223,7 @@ async fn cli(addr: &str, dir: &std::path::Path, args: &[&str]) -> Result<String,
     let (addr, dir) = (addr.to_string(), dir.to_path_buf());
     let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
     tokio::task::spawn_blocking(move || {
-        let out = std::process::Command::new(env!("CARGO_BIN_EXE_one")).args(&args).current_dir(&dir).env(format!("{}_ADDR", one::brand::CLI.to_uppercase()), &addr).output().unwrap();
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_one")).args(&args).current_dir(&dir).env(format!("{}_ADDR", one::config::CLI.to_uppercase()), &addr).output().unwrap();
         match out.status.success() {
             true => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
             false => Err(String::from_utf8_lossy(&out.stderr).to_string()),
@@ -457,7 +457,7 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
 async fn git(addr: &str, dir: &std::path::Path, args: &[&str]) -> Result<String, String> {
     let bin = std::env::temp_dir().join(format!("one-e2e-bin-{}", std::process::id()));
     std::fs::create_dir_all(&bin).unwrap();
-    let helper = bin.join(format!("git-remote-{}", one::brand::CLI));
+    let helper = bin.join(format!("git-remote-{}", one::config::CLI));
     if !helper.exists() {
         let _ = std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_one"), &helper);
     }
@@ -469,7 +469,7 @@ async fn git(addr: &str, dir: &std::path::Path, args: &[&str]) -> Result<String,
             .args(&args)
             .current_dir(&dir)
             .env("PATH", path)
-            .env(format!("{}_ADDR", one::brand::CLI.to_uppercase()), &addr)
+            .env(format!("{}_ADDR", one::config::CLI.to_uppercase()), &addr)
             .envs([("GIT_AUTHOR_NAME", "T"), ("GIT_AUTHOR_EMAIL", "t@example.com"), ("GIT_COMMITTER_NAME", "T"), ("GIT_COMMITTER_EMAIL", "t@example.com"), ("GIT_CONFIG_NOSYSTEM", "1"), ("HOME", dir.to_str().unwrap())])
             .output()
             .unwrap();
@@ -486,7 +486,7 @@ async fn repos_clone_push_and_take_suggestions_with_real_git() {
     let (bob, _rb) = start("git-bob").await;
     a.create("Repos", "Andre").await.unwrap();
     let (api_a, work) = (serve_api(&a).await, temp("git"));
-    let cli = one::brand::CLI;
+    let cli = one::config::CLI;
 
     // A new repo, pushed from a local one.
     let src = work.join("src");
@@ -579,21 +579,22 @@ async fn the_app_store_lists_adds_and_shows_code() {
     a.create("Store", "Andre").await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
     a.member("group", json!({ "group": "b000000000000001", "name": "Team" })).await.unwrap();
-    assert_eq!(a.state()["brand"]["store"], "apps");
+    assert_eq!(a.state()["config"]["store"], "apps");
+    assert_eq!(a.state()["brand"], a.state()["config"], "shells built before it was config read brand");
     // The install's settings are the edition's until an admin sets one, and null puts it back.
-    let edition = one::brand::SETTINGS.iter().find(|(k, _)| *k == "made_here").map_or(serde_json::Value::Null, |(_, v)| json!(v));
+    let edition = one::config::SETTINGS.iter().find(|(k, _)| *k == "made_here").map_or(serde_json::Value::Null, |(_, v)| json!(v));
     assert_eq!(a.state()["install"]["settings"]["made_here"], edition);
     a.set_setting(&me, "made_here", Some("Made by the team")).await.unwrap();
     assert_eq!(a.state()["install"]["settings"]["made_here"], "Made by the team");
     let html = a.screen(me.clone(), "apps", "main", json!({}), None).await.unwrap();
-    assert!(html.contains("\"made_here\":\"Made by the team\""), "screens get it as one.brand.made_here");
+    assert!(html.contains("\"made_here\":\"Made by the team\""), "screens get it as one.config.made_here");
     a.set_setting(&me, "push", Some("")).await.unwrap();
-    assert_eq!(a.state()["brand"]["push"], "", "push is off");
+    assert_eq!(a.state()["config"]["push"], "", "push is off");
     a.set_setting(&me, "made_here", None).await.unwrap();
     assert_eq!(a.state()["install"]["settings"]["made_here"], edition);
     let listed = a.call(call("apps", "list", json!({}))).await.unwrap();
     let names: Vec<&str> = listed["apps"].as_array().unwrap().iter().filter(|x| x["installed"].as_array().unwrap().contains(&json!("global"))).map(|x| x["name"].as_str().unwrap()).collect();
-    assert!(["board", "repos", "apps", "devices"].iter().all(|n| names.contains(n)), "a new install starts with the brand's apps, for everyone: {names:?}");
+    assert!(["board", "repos", "apps", "devices"].iter().all(|n| names.contains(n)), "a new install starts with the config's apps, for everyone: {names:?}");
     let places: Vec<&str> = listed["places"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
     assert_eq!(places, ["You", "Team", "Everyone"]);
 

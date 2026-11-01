@@ -5,30 +5,30 @@ import AppKit
 import UIKit
 #endif
 
-/// The brand's accent as red, green and blue, lifted a little in dark mode so it keeps its contrast there,
+/// An accent as red, green and blue, lifted a little in dark mode so it keeps its contrast there,
 /// yet still carries white text.
-func brandRGB(_ hex: String, dark: Bool) -> (CGFloat, CGFloat, CGFloat) {
+func accentRGB(_ hex: String, dark: Bool) -> (CGFloat, CGFloat, CGFloat) {
     let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0x808080
     let rgb = [16, 8, 0].map { CGFloat((value >> $0) & 0xFF) / 255 }.map { dark ? $0 + (1 - $0) * 0.2 : $0 }
     return (rgb[0], rgb[1], rgb[2])
 }
 
 /// The same, as CSS.
-func brandCSS(_ hex: String, dark: Bool) -> String {
-    let (r, g, b) = brandRGB(hex, dark: dark)
+func accentCSS(_ hex: String, dark: Bool) -> String {
+    let (r, g, b) = accentRGB(hex, dark: dark)
     return "rgb(\(Int(r * 255)), \(Int(g * 255)), \(Int(b * 255)))"
 }
 
 extension Color {
-    init(brandHex hex: String) {
+    init(accentHex hex: String) {
         #if canImport(AppKit)
         self.init(nsColor: NSColor(name: nil) { appearance in
-            let (r, g, b) = brandRGB(hex, dark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+            let (r, g, b) = accentRGB(hex, dark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
             return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
         })
         #else
         self.init(uiColor: UIColor { traits in
-            let (r, g, b) = brandRGB(hex, dark: traits.userInterfaceStyle == .dark)
+            let (r, g, b) = accentRGB(hex, dark: traits.userInterfaceStyle == .dark)
             return UIColor(red: r, green: g, blue: b, alpha: 1)
         })
         #endif
@@ -59,7 +59,7 @@ func displayName(_ name: String) -> String {
     name.hasSuffix(".local") ? String(name.dropLast(6)) : name
 }
 
-/// The app's name before the node tells us its brand.
+/// The app's name before the node tells us its config.
 var appName: String {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? ""
 }
@@ -95,7 +95,7 @@ struct AppTile: View {
                     .clipShape(shape)
                     .overlay { shape.strokeBorder(.black.opacity(0.1), lineWidth: 0.5) }
             } else {
-                let (r, g, b) = brandRGB(color ?? Self.colors[steadyHash(seed) % Self.colors.count], dark: false)
+                let (r, g, b) = accentRGB(color ?? Self.colors[steadyHash(seed) % Self.colors.count], dark: false)
                 shape.fill(Color(red: r, green: g, blue: b).gradient)
                     .overlay {
                         Image(systemName: symbol(icon))

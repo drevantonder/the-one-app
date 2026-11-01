@@ -19,7 +19,7 @@ const ENTRIES: &[&str] = &["app.ts", "app.js", "index.ts", "index.js"];
 
 fn bun() -> Result<PathBuf> {
     let (_, package, integrity) =
-        PACKAGES.iter().find(|(target, _, _)| *target == crate::brand::TARGET).ok_or_else(|| anyhow!("deploying from {} isn't possible yet: Bun has no build for it", crate::brand::TARGET))?;
+        PACKAGES.iter().find(|(target, _, _)| *target == crate::config::TARGET).ok_or_else(|| anyhow!("deploying from {} isn't possible yet: Bun has no build for it", crate::config::TARGET))?;
     let url = format!("https://registry.npmjs.org/@oven/bun-{package}/-/bun-{package}-{BUN}.tgz");
     crate::apps::pinned(&format!("bun-{BUN}"), "bun", &url, integrity)
 }
@@ -85,7 +85,7 @@ pub fn build_files(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
 }
 
 fn tempdir() -> Result<PathBuf> {
-    let dir = std::env::temp_dir().join(format!("{}-build-{}", crate::brand::CLI, rand::random::<u64>()));
+    let dir = std::env::temp_dir().join(format!("{}-build-{}", crate::config::CLI, rand::random::<u64>()));
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }

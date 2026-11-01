@@ -160,7 +160,7 @@ setInterval(show, 5000);
   },
 };
 
-// The widget, as the old Devices widget drew it: a header of column labels, then a row per device, its icon with
+// The widget: a header of column labels, then a row per device, its icon with
 // its OS's logo, its name (and in larger sizes a line under it), a memory ring, CPU and GPU sparklines and a disk bar,
 // in columns that line up across the rows.
 

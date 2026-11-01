@@ -137,7 +137,7 @@ final class Store {
         self.node = node
     }
 
-    var brand: Brand? { state?.brand }
+    var config: Config? { state?.config }
     var install: Install? { state?.install }
     var me: Person? { state?.user }
     var isAdmin: Bool { me?.admin == true }
@@ -211,15 +211,15 @@ final class Store {
         return owner.hasPrefix("group:") && install?.group(String(owner.dropFirst(6)))?.role(of: me.id) == "admin"
     }
 
-    /// The App Store's page for an app, if the brand's store app is here and the app is one it lists (drivers aren't).
+    /// The App Store's page for an app, if the install's store app is here and the app is one it lists (drivers aren't).
     func storeRoute(for app: AppInfo) -> Route? {
-        guard let name = brand?.store, let store = self.app(name), store.has(screen: "app"), (app.deploys ?? 0) > 0 else { return nil }
+        guard let name = config?.store, let store = self.app(name), store.has(screen: "app"), (app.deploys ?? 0) > 0 else { return nil }
         return .screen(ScreenRoute(app: name, screen: "app", params: Self.params(["app": app.name])))
     }
 
-    /// The App Store, showing only connected apps, if the brand's store app is here.
+    /// The App Store, showing only connected apps, if the install's store app is here.
     var connectedStoreRoute: Route? {
-        guard let name = brand?.store, app(name)?.hasScreens == true else { return nil }
+        guard let name = config?.store, app(name)?.hasScreens == true else { return nil }
         return .screen(ScreenRoute(app: name, params: Self.params(["connected": true])))
     }
 

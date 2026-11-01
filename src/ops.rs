@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
-use one::brand::CLI;
+use one::config::CLI;
 use serde_json::{Map, Value, json};
 
 use crate::{agent_from_env, get, post};

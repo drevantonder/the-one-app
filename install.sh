@@ -57,8 +57,8 @@ else
 	if [ -d /run/systemd/system ]; then $sudo systemctl stop "$cli" 2>/dev/null || true; fi
 	# The old app's data has no device key; keep it aside rather than mistake it for this one's.
 	if [ -d "$data" ] && [ ! -f "$data/device.json" ]; then
-		mv "$data" "$data-legacy"
-		echo "Kept the previous data in $data-legacy"
+		mv "$data" "$data-previous"
+		echo "Kept the previous data in $data-previous"
 	fi
 	install -m 755 "$bin" "$HOME/.local/bin/$cli"
 	if [ -d /run/systemd/system ]; then

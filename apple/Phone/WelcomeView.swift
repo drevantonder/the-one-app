@@ -2,7 +2,7 @@ import SwiftUI
 import VisionKit
 import AuthenticationServices
 
-/// The first run: name this iPhone, then join with the pairing code another device shows. For a brand with one
+/// The first run: name this iPhone, then join with the pairing code another device shows. For an edition with one
 /// install, sign in to it instead, a pairing code still there for anyone without the account.
 struct WelcomeView: View {
     @Environment(Phone.self) private var phone
@@ -26,7 +26,7 @@ struct WelcomeView: View {
                     Text("Welcome to \(appName)")
                         .font(.largeTitle.bold())
                     Group {
-                        if SignIn.brand == nil {
+                        if SignIn.configured == nil {
                             Text("On a computer that’s already set up, open Settings, then Devices, and choose Pair a Phone or Computer. Scan its code here.")
                         } else {
                             Text("Your devices, and your team’s, as one place for apps and agents.")
@@ -38,7 +38,7 @@ struct WelcomeView: View {
                 .multilineTextAlignment(.center)
                 .padding(.top, 48)
 
-                if SignIn.brand == nil {
+                if SignIn.configured == nil {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Name")
                             .font(.footnote)
@@ -69,7 +69,7 @@ struct WelcomeView: View {
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.leading)
                 }
-                if let signIn = SignIn.brand {
+                if let signIn = SignIn.configured {
                     Button { start(signIn) } label: {
                         Group {
                             if phone.joining || signingIn {
@@ -234,7 +234,7 @@ private struct CodeSheet: View {
                         .textInputAutocapitalization(.never)
                         .focused($focused)
                 } footer: {
-                    Text("Copy the code from Pair a Phone or Computer on your other device, or run \(Bundle.main.object(forInfoDictionaryKey: "BrandCLI") as? String ?? "") pair there. Each code works once.")
+                    Text("Copy the code from Pair a Phone or Computer on your other device, or run \(Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "") pair there. Each code works once.")
                 }
             }
             .navigationTitle("Enter a Pairing Code")

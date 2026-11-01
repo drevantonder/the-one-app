@@ -240,7 +240,7 @@ document.getElementById("tabs").addEventListener("click", (e) => e.target.datase
 // The sections: the apps built into the release, and those made in this install (each install words that its own way,
 // in its settings).
 const BUILT_IN = "Built In";
-const MADE_HERE = one.brand.made_here || "Made here";
+const MADE_HERE = one.config.made_here || "Made here";
 
 /// A built-in app's state here; for an app made here, what it was forked from.
 function status(a) {

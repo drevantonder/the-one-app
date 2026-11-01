@@ -15,9 +15,9 @@ use crate::apps::{AppEntry, Me};
 use crate::entry::Content;
 use crate::native::Reply;
 
-/// Marks a skill folder as this brand's to replace, so the nodes of two brands on one machine leave each other's alone.
+/// Marks a skill folder as this edition's to replace, so the nodes of two editions on one machine leave each other's alone.
 fn marker() -> String {
-    format!(".synced-{}", crate::brand::CLI)
+    format!(".synced-{}", crate::config::CLI)
 }
 
 /// What earlier versions marked their folders with: taken over by the next write, never removed.
@@ -181,7 +181,7 @@ fn description(skill_md: &str) -> String {
 /// It looks again every minute, so a harness installed later gets them too.
 pub fn sync(entries: &[AppEntry]) {
     // A node given a home of its own (one being tried out, say) writes nowhere else, so it leaves the harnesses alone.
-    if std::env::var_os(format!("{}_HOME", crate::brand::CLI.to_uppercase())).is_some() {
+    if std::env::var_os(format!("{}_HOME", crate::config::CLI.to_uppercase())).is_some() {
         return;
     }
     static LATEST: Mutex<Vec<AppEntry>> = Mutex::new(Vec::new());
@@ -243,7 +243,7 @@ fn set_up(entries: &[AppEntry]) {
 const HOOK_PATH: &str = "/hooks/board/news";
 
 /// Harnesses without settings hooks get a plugin of their own that does what the hook does.
-const OPENCODE_PLUGIN: &str = r#"// Installed by {{name}}'s Agent Board: adds to each prompt what other
+const OPENCODE_PLUGIN: &str = r#"// Installed by {{name}}'s Board: adds to each prompt what other
 // agents have posted since this session last looked.
 const url = "http://{{addr}}/hooks/board/news"
 
@@ -261,7 +261,7 @@ export default {
 }
 "#;
 
-const PI_EXTENSION: &str = r#"// Installed by {{name}}'s Agent Board: adds to each prompt what other
+const PI_EXTENSION: &str = r#"// Installed by {{name}}'s Board: adds to each prompt what other
 // agents have posted since this session last looked.
 const url = "http://{{addr}}/hooks/board/news"
 
@@ -287,18 +287,18 @@ fn harnesses(home: &Path, written: &mut Written) {
     let pi = dir("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
     let addr = crate::api::addr();
     let hook = format!("curl -sf --max-time 3 --data-binary @- http://{addr}{HOOK_PATH} || true");
-    // Another brand's node on this machine has a hook of its own, on its own port.
+    // Another edition's node on this machine has a hook of its own, on its own port.
     let port = format!(":{}{HOOK_PATH}", addr.rsplit(':').next().unwrap_or_default());
     let server = server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
     // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
-    let installed = home.join(".local/bin").join(crate::brand::CLI);
+    let installed = home.join(".local/bin").join(crate::config::CLI);
     let exe = std::env::current_exe().and_then(|e| e.canonicalize()).ok();
     let cli = match exe {
         Some(exe) if installed.canonicalize().ok() != Some(exe.clone()) => exe.to_string_lossy().to_string(),
         _ => installed.to_string_lossy().to_string(),
     };
-    let plugin = |text: &str| text.replace("{{name}}", crate::brand::NAME).replace("{{cli}}", crate::brand::CLI).replace("{{addr}}", &addr);
+    let plugin = |text: &str| text.replace("{{name}}", crate::config::NAME).replace("{{cli}}", crate::config::CLI).replace("{{addr}}", &addr);
     let s = |v: &str| CstInputValue::String(v.to_string());
     if claude.is_dir() {
         edit(&claude.join("settings.json"), true, |t| with_hook(t, &hook, &port));
@@ -313,7 +313,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     }
     let opencode = config.join("opencode");
     if opencode.is_dir() {
-        written.write(&opencode.join("plugins").join(format!("{}-board.js", crate::brand::CLI)), &plugin(OPENCODE_PLUGIN));
+        written.write(&opencode.join("plugins").join(format!("{}-board.js", crate::config::CLI)), &plugin(OPENCODE_PLUGIN));
         let entry = CstInputValue::Object(vec![("type".into(), s("local")), ("command".into(), CstInputValue::Array(vec![s(&cli), s("mcp")])), ("enabled".into(), true.into())]);
         edit(&json_or_jsonc(&opencode, "opencode"), true, |t| with_mcp(t, "mcp", &server, entry));
     }
@@ -323,13 +323,13 @@ fn harnesses(home: &Path, written: &mut Written) {
         edit(&json_or_jsonc(&amp, "settings"), true, |t| with_mcp(t, "amp.mcpServers", &server, entry));
     }
     if pi.is_dir() {
-        written.write(&pi.join("extensions").join(format!("{}-board.ts", crate::brand::CLI)), &plugin(PI_EXTENSION));
+        written.write(&pi.join("extensions").join(format!("{}-board.ts", crate::config::CLI)), &plugin(PI_EXTENSION));
     }
 }
 
-/// What harnesses call this install's MCP server: the brand's name in kebab case, like the-one-app.
+/// What harnesses call this install's MCP server: the config's name in kebab case, like the-one-app.
 fn server_name() -> String {
-    let name: String = crate::brand::NAME.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let name: String = crate::config::NAME.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
     name.split('-').filter(|w| !w.is_empty()).collect::<Vec<_>>().join("-")
 }
 
@@ -373,7 +373,7 @@ fn once(said: String) {
 /// Writes `text` over `file` all at once, so a harness reading it never sees half, keeping its permissions.
 fn replace(file: &Path, text: &str) -> Result<()> {
     let name = file.file_name().context("no file name")?.to_string_lossy();
-    let tmp = file.with_file_name(format!(".{name}.{}-tmp", crate::brand::CLI));
+    let tmp = file.with_file_name(format!(".{name}.{}-tmp", crate::config::CLI));
     std::fs::write(&tmp, text)?;
     if let Ok(meta) = std::fs::metadata(file) {
         std::fs::set_permissions(&tmp, meta.permissions())?;
@@ -562,9 +562,9 @@ mod tests {
 
     #[test]
     fn the_same_hook_is_left_alone_and_an_old_one_swapped() {
-        // What the legacy app wrote: the same command, so nothing to do.
-        let legacy = format!("{{\n  \"hooks\": {{\n    \"UserPromptSubmit\": [\n      {{\n        \"hooks\": [\n          {{\n            \"command\": \"{HOOK}\",\n            \"type\": \"command\"\n          }}\n        ]\n      }}\n    ]\n  }}\n}}\n");
-        assert_eq!(with_hook(&legacy, HOOK, OURS).unwrap(), None);
+        // What the old One App wrote: the same command, so nothing to do.
+        let old_app = format!("{{\n  \"hooks\": {{\n    \"UserPromptSubmit\": [\n      {{\n        \"hooks\": [\n          {{\n            \"command\": \"{HOOK}\",\n            \"type\": \"command\"\n          }}\n        ]\n      }}\n    ]\n  }}\n}}\n");
+        assert_eq!(with_hook(&old_app, HOOK, OURS).unwrap(), None);
         // An older command for the same node is replaced where it is, and a duplicate goes.
         let old = "curl -s http://127.0.0.1:4747/hooks/board/news";
         let text = format!("{{\"hooks\":{{\"UserPromptSubmit\":[{{\"hooks\":[{{\"type\":\"command\",\"command\":\"{old}\"}},{{\"type\":\"command\",\"command\":\"echo hi\"}}]}},{{\"hooks\":[{{\"type\":\"command\",\"command\":\"{HOOK}\"}}]}}]}}}}");
@@ -572,7 +572,7 @@ mod tests {
         assert_eq!(hooks(&out), [HOOK, "echo hi"]);
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["hooks"]["UserPromptSubmit"].as_array().unwrap().len(), 1, "the emptied group goes: {out}");
-        // Another brand's board hook, on another port, stays.
+        // Another edition's board hook, on another port, stays.
         let other = "curl -sf --max-time 3 --data-binary @- http://127.0.0.1:4848/hooks/board/news || true";
         let text = format!("{{\"hooks\":{{\"UserPromptSubmit\":[{{\"hooks\":[{{\"type\":\"command\",\"command\":\"{other}\"}}]}}]}}}}");
         assert_eq!(hooks(&with_hook(&text, HOOK, OURS).unwrap().unwrap()), [other, HOOK]);
@@ -624,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn the_server_is_named_after_the_brand() {
+    fn the_server_is_named_after_the_edition() {
         let name = server_name();
         assert!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !name.starts_with('-') && !name.ends_with('-'), "{name}");
     }
