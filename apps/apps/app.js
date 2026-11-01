@@ -287,7 +287,7 @@ export default {
 // ({ connected: true } from shells built before), on that tab.
 let tab = one.params.connector || one.params.connected ? "connectors" : "apps";
 const ABOUT = {
-  connectors: "Connectors link an account for you and your agents. Add one to a page, then sign in from that page’s Connectors.",
+  connectors: "Connectors bring things in for you and your agents: your accounts, your Mac’s apps, what your devices can do. Add one to a page; it shows in that page’s Connectors.",
 };
 function pick(t) {
   tab = t;
