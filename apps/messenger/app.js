@@ -90,7 +90,7 @@ export default {
     },
     sign_in: {
       description: "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, to sign in there themselves. The default profile's again when none is given.",
-      input: {"properties": {"profile": {"description": "the browser profile, like Personal or PTC; computer_profiles lists them", "type": "string"}}, "type": "object"},
+      input: {"properties": {"profile": {"description": "the browser profile, like Personal or PTC; agent-computers_profiles lists them", "type": "string"}}, "type": "object"},
       run: (ctx, input) => sidecar(ctx, "sign_in", input),
     },
     sign_out: {
@@ -137,7 +137,7 @@ export default {
 <div id="list"></div>
 <div class="card" id="connect"></div>
 <script>
-// Messenger's accounts are browser profiles (the Agent Computers page's): adding one picks a profile, or makes one, and opens
+// Messenger's accounts are browser profiles (Vault items of type Browser profile): adding one picks a profile, or makes one, and opens
 // messenger.com in it to sign in.
 async function show() {
   const accounts = await one.call("accounts");
@@ -154,7 +154,7 @@ async function show() {
 async function pick(accounts) {
   const c = document.getElementById("connect");
   let profiles = [];
-  try { profiles = ((await one.call("_profiles")).profiles || []).map((p) => p.profile); } catch {}
+  try { profiles = ((await one.call("_profiles")) || []).map((p) => p.profile); } catch {}
   const free = [...new Set(profiles)].filter((p) => !accounts.some((a) => a.account === p));
   c.innerHTML = \`<div class="small muted">Which browser profile? Each has its own sign-ins, like Personal or PTC.</div>
     <select id="profile">\${free.map((p) => \`<option>\${one.esc(p)}</option>\`).join("")}<option value="">New profile…</option></select>
@@ -180,7 +180,7 @@ function signingIn(r) {
   document.getElementById("done").onclick = async (e) => {
     e.target.disabled = true;
     e.target.textContent = "Saving…";
-    try { await one.call("_save", { desktop: r.desktop, server: r.server, profile: r.profile }); show(); }
+    try { await one.call("_save", { profile: r.profile }); show(); }
     catch (err) { document.getElementById("err").textContent = err.message; e.target.disabled = false; e.target.textContent = "Done"; }
   };
 }

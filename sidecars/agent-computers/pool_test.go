@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,14 +78,17 @@ func TestLoansKept(t *testing.T) {
 	}
 }
 
-func TestAddedProfileListed(t *testing.T) {
-	ds := newComputers(t.TempDir(), "")
-	if ds.keeps("PTC") {
-		t.Fatal("no profile yet")
+func TestLoansKeepNoKey(t *testing.T) {
+	dir := t.TempDir()
+	ds := newComputers(dir, "")
+	ds.setLoan("pool-a", &loan{By: "Messenger", For: "Reading chats", Profile: "PTC", Item: "0123456789abcdef"})
+	ds.hold("pool-a", &profile{Item: "0123456789abcdef", Name: "PTC", Key: "s3cret"})
+	b, _ := os.ReadFile(filepath.Join(dir, "lent.json"))
+	if strings.Contains(string(b), "s3cret") || ds.heldProfile("pool-a") == nil {
+		t.Errorf("a profile's key is held in memory only: %s", b)
 	}
-	os.MkdirAll(ds.loginDir("PTC"), 0o700)
-	got := ds.logins("linux")
-	if !ds.keeps("PTC") || len(got) != 1 || got[0]["profile"] != "PTC" || got[0]["saved"] != nil {
-		t.Errorf("an added profile is listed, unsaved: %v", got)
+	ds.setLoan("pool-a", nil)
+	if ds.heldProfile("pool-a") != nil {
+		t.Error("given back, its key is forgotten")
 	}
 }

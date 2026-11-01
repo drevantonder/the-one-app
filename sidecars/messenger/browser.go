@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -19,13 +20,13 @@ type browser struct {
 	node  string
 	login string // the browser profile
 
-	mu      sync.Mutex
+	mu       sync.Mutex
 	computer string // the borrowed computer; given back when idle
-	session string // the computer's tools keep a browser in a session
-	target  string
-	tab     string
-	used    time.Time
-	dirty   bool // off the chat list: a conversation, or search results
+	session  string // the computer's tools keep a browser in a session
+	target   string
+	tab      string
+	used     time.Time
+	dirty    bool // off the chat list: a conversation, or search results
 }
 
 const (
@@ -36,9 +37,15 @@ const (
 
 var errNotSignedIn = errors.New("Messenger isn't signed in on that browser profile. Ask the person to sign in again: messenger_sign_in with the profile gives them a link, where they sign in at messenger.com (with Keep me signed in), then save the profile")
 
-// computers runs one of the agent-computers sidecar's operations, wherever it runs.
+// computers runs one of Agent Computers' operations: those with a browser
+// profile (whose Vault item only the app's calls may use) the app's, the rest
+// its sidecar's, wherever it runs.
 func (b *browser) computers(op string, input map[string]any) (any, error) {
-	body, _ := json.Marshal(map[string]any{"app": "agent-computers", "sidecar": "agent-computers", "op": op, "input": input})
+	call := map[string]any{"app": "agent-computers", "op": op, "input": input}
+	if !slices.Contains([]string{"borrow", "give_back", "profiles", "sign_in", "save_profile", "add_profile"}, op) {
+		call["sidecar"] = "agent-computers"
+	}
+	body, _ := json.Marshal(call)
 	client := &http.Client{Timeout: 3 * time.Minute}
 	resp, err := client.Post(b.node+"/v1/call", "application/json", bytes.NewReader(body))
 	if err != nil {

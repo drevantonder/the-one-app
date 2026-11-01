@@ -164,26 +164,20 @@ var browsing = []string{"get_browser_state", "browser_prepare", "browser_navigat
 func ownOps() []map[string]any {
 	name := object(map[string]any{"computer": str("the computer's name")}, "computer")
 	sizeArg := str("small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small")
-	login := str("a browser profile's name, like Personal or PTC; default default")
+	prof := map[string]any{"type": "object", "description": "a browser profile, as the app gives it from its Vault item: item, name, key (filled in by the node), blob and salt"}
 	return []map[string]any{
 		{"name": "list", "description": "Every server's computers: each one's server, whether it's running, paused or stopped, its size, the memory and CPU it uses now, and who has borrowed it and what for (or that it's the spare kept for borrowing).",
 			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only this server's"}})},
 		{"name": "borrow", "description": "Borrow a computer of your own for as long as you need a browser, starting its browser with a copy of a browser profile. Quick: a spare is kept ready. Give it back with give_back when done; it's deleted then, or after 15 minutes without a call, with anything in it.",
 			"input": object(map[string]any{"for": str("what you need it for, in a few words, e.g. Reading Messenger; the person sees it"),
-				"profile": str("the browser profile its browser starts with; default default if saved, \"\" for none"),
-				"by":      str("who's borrowing, e.g. your app's name; default the device you call from")}, "for")},
+				"profile": prof, "screen": map[string]any{"type": "boolean", "description": "false for a computer nobody watches: no view link"},
+				"by": str("who's borrowing, e.g. your app's name; default the device you call from")}, "for")},
 		{"name": "give_back", "description": "Give back a borrowed computer: it's deleted with everything in it, its browser's changes to the profile too. A sign_in computer's profile is saved first.", "input": name},
-		{"name": "sign_in", "description": "For the person: opens a page in a browser on a browser profile (made if new) and gives a link to use it from their own devices, to sign in to sites agents then borrow computers with. It's saved when its time is up, or on give_back or save_profile.",
-			"input": object(map[string]any{"profile": login, "url": str("the page to open, e.g. a site's sign-in page"), "minutes": num("how long until it's saved and closed; default 30, at most 240")})},
-		{"name": "save_profile", "description": "Save a computer's browser profile, closing its browsers first; a sign_in computer is also given back. Only when the person asked: borrowed computers start from saved profiles.",
-			"input": object(map[string]any{"computer": str("the computer's name"), "profile": str("the profile; default the computer's, or default")}, "computer")},
-		{"name": "profiles", "description": "The browser profiles computers can be borrowed with, like Personal and PTC, each with its own sign-ins: which server keeps it, and when it was last saved.", "input": object(map[string]any{})},
-		{"name": "add_profile", "description": "Add a browser profile with no sign-ins yet, for the person to sign in to sites in with sign_in.",
-			"input": object(map[string]any{"profile": str("its name: letters, digits and dashes, like Personal or PTC")}, "profile")},
-		{"name": "rename_profile", "description": "Rename a browser profile. Agents borrow computers with it by its new name.",
-			"input": object(map[string]any{"profile": str("the profile's name"), "to": str("its new name: letters, digits and dashes")}, "profile", "to")},
-		{"name": "delete_profile", "description": "Delete a browser profile, signing agents out of every site in it. Only when the person asked.",
-			"input": object(map[string]any{"profile": str("the profile's name")}, "profile")},
+		{"name": "sign_in", "description": "For the person: opens a page in a browser on a browser profile and gives a link to use it from their own devices, to sign in to sites. It's saved when its time is up, or on save_profile.",
+			"input": object(map[string]any{"profile": prof, "url": str("the page to open, e.g. a site's sign-in page"), "minutes": num("how long until it's saved and closed; default 30, at most 240")}, "profile")},
+		{"name": "save_profile", "description": "Save a browser profile from the computer signing in to it (closing that computer), or from the computer named.",
+			"input": object(map[string]any{"computer": str("the computer's name"), "profile": prof})},
+		{"name": "signing_in", "description": "The browser profiles being signed in to on each server: item, profile, computer, server and until.", "input": object(map[string]any{})},
 		{"name": "create", "description": "Create a lasting computer and start it, for the person: Linux, with a browser of its own. Takes a minute. Agents borrow instead.",
 			"input": object(map[string]any{"computer": str("its name: lowercase letters, digits and dashes"), "size": sizeArg}, "computer")},
 		{"name": "resize", "description": "Change how much CPU and memory a computer may use, at once, without restarting it.",

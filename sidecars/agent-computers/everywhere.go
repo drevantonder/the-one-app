@@ -237,3 +237,31 @@ func (ds *computers) borrowElsewhere(ctx context.Context, op string, input map[s
 	}
 	return nil
 }
+
+// signingIn reports whether a computer here is signing in to the profile.
+func (ds *computers) signingIn(item string) bool {
+	for _, l := range ds.loans() {
+		if l.SigningIn && l.Item == item {
+			return true
+		}
+	}
+	return false
+}
+
+// signingInElsewhere is the other server with a computer signing in to the
+// profile, or "".
+func (ds *computers) signingInElsewhere(ctx context.Context, item string) string {
+	got, _ := ds.everywhere(ctx, "signing_in", nil)
+	for s, r := range got {
+		var theirs struct {
+			SigningIn []struct{ Item string } `json:"signing_in"`
+		}
+		json.Unmarshal(r, &theirs)
+		for _, l := range theirs.SigningIn {
+			if l.Item == item {
+				return s
+			}
+		}
+	}
+	return ""
+}

@@ -21,33 +21,34 @@ import (
 // Borrowed computers: an agent borrows a computer of its own for as long as it
 // needs a browser, and gives it back, which deletes it. They come from a pool:
 // one spare is kept running, so borrowing is quick. A borrowed computer's
-// browser starts with a copy of a saved login, a browser profile the person
-// signed in to sites in once (sign_in); the copy is thrown away with the
-// computer, so only sign_in and save_login change a saved login. Saved logins
-// are files on this server, the last few of each kept.
+// browser starts with a copy of a browser profile (profiles.go), which the
+// person signed in to sites in once (sign_in); the copy is thrown away with
+// the computer, so only sign_in and save_profile change a profile.
 
 const (
 	poolPrefix   = "pool-"
 	idleBorrowed = 15 * time.Minute // a borrowed computer left this long is given back
 	signInFor    = 30 * time.Minute // a sign-in is saved and closed after this, by default
 	profiles     = home + "/.local/state/cua-driver/browser-profiles/"
-	keepLogins   = 3
 	// signInClass marks the browser sign_in opens, which the tools didn't, so
 	// closing the tools' leftover browsers leaves it open.
 	signInClass = "--class=one-sign-in"
 )
 
-// A loan is a borrowed computer's: who has it and what for.
+// A loan is a borrowed computer's: who has it and what for, and the browser
+// profile it started with. Its profile's key is kept only in memory, in held.
 type loan struct {
 	By        string    `json:"by"`
 	For       string    `json:"for"`
-	Profile   string    `json:"profile,omitempty"`
+	Profile   string    `json:"profile,omitempty"` // the profile's name
+	Item      string    `json:"item,omitempty"`    // its Vault item
 	Since     time.Time `json:"since"`
 	SigningIn bool      `json:"signing_in,omitempty"`
-	Until     time.Time `json:"until,omitzero"` // a sign-in's end
+	Until     time.Time `json:"until,omitzero"`     // a sign-in's end
+	NoScreen  bool      `json:"no_screen,omitempty"` // made without a screen: nobody watches it
 }
 
-// caches are left out of saved logins and backups: they are most of a
+// caches are left out of saved profiles and backups: they are most of a
 // browser profile's size and rebuild themselves. So are a running browser's
 // locks, which would make a copy look in use by another computer.
 var caches = []string{"./.cache", "*/Cache", "*/Code Cache", "*/GPUCache", "*/DawnCache", "*/GrShaderCache", "*/ShaderCache",
@@ -66,6 +67,7 @@ func (ds *computers) setLoan(name string, l *loan) {
 	defer ds.poolMu.Unlock()
 	if l == nil {
 		delete(ds.lent, name)
+		delete(ds.held, name)
 	} else {
 		ds.lent[name] = *l
 	}
@@ -124,15 +126,11 @@ func spares(all []computer, lent map[string]loan) []computer {
 	return out
 }
 
-// borrow lends the spare computer, or one made for it.
-func (ds *computers) borrow(ctx context.Context, l loan) (computer, error) {
-	if l.Profile != "" {
-		if !validProfile.MatchString(l.Profile) {
-			return computer{}, fmt.Errorf("no profile %q", l.Profile)
-		}
-		if ds.savedLogin(l.Profile) == "" && !l.SigningIn {
-			return computer{}, fmt.Errorf("no profile %q: sign in to sites in one with sign_in", l.Profile)
-		}
+// borrow lends the spare computer, or one made for it, its browser starting
+// with the profile p, if one is given.
+func (ds *computers) borrow(ctx context.Context, l loan, p *profile) (computer, error) {
+	if p != nil {
+		l.Profile, l.Item = p.Name, p.Item
 	}
 	ds.take.Lock()
 	all, err := list(ctx)
@@ -152,9 +150,10 @@ func (ds *computers) borrow(ctx context.Context, l loan) (computer, error) {
 	}
 	l.Since = time.Now().UTC()
 	ds.setLoan(d.Name, &l)
+	ds.hold(d.Name, p)
 	ds.touch(d.Name)
 	ds.take.Unlock()
-	log.Printf("%s borrowed %s for %q, login %q", l.By, d.Name, l.For, l.Profile)
+	log.Printf("%s borrowed %s for %q, profile %q", l.By, d.Name, l.For, l.Profile)
 	ds.poke() // for another spare
 	if d.State == "paused" {
 		if err := unpause(ctx, d); err != nil {
@@ -164,11 +163,30 @@ func (ds *computers) borrow(ctx context.Context, l loan) (computer, error) {
 	if err := ready(ctx, d); err != nil {
 		return d, err
 	}
-	if err := ds.prepare(ctx, d, l); err != nil {
-		ds.giveBack(context.WithoutCancel(ctx), d.Name, "couldn't prepare it")
-		return d, err
+	if p != nil {
+		if err := ds.unpack(ctx, d, p); err != nil {
+			ds.giveBack(context.WithoutCancel(ctx), d.Name, "couldn't prepare it")
+			return d, err
+		}
 	}
 	return d, nil
+}
+
+// hold keeps a borrowed computer's profile, with its key, while it's lent.
+func (ds *computers) hold(name string, p *profile) {
+	ds.poolMu.Lock()
+	defer ds.poolMu.Unlock()
+	if p == nil {
+		delete(ds.held, name)
+	} else {
+		ds.held[name] = p
+	}
+}
+
+func (ds *computers) heldProfile(name string) *profile {
+	ds.poolMu.Lock()
+	defer ds.poolMu.Unlock()
+	return ds.held[name]
 }
 
 func newPoolName() string {
@@ -177,48 +195,27 @@ func newPoolName() string {
 	return poolPrefix + hex.EncodeToString(b)
 }
 
-// prepare puts the saved login in the computer's browser profiles.
-func (ds *computers) prepare(ctx context.Context, d computer, l loan) error {
-	if l.Profile == "" {
-		return nil
-	}
-	saved := ds.savedLogin(l.Profile)
-	if saved == "" {
-		return sh(ctx, d, owned(l.Profile))
-	}
-	f, err := os.Open(saved)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	dir := profiles + l.Profile
-	if err := in(ctx, d, f, nil, "sh", "-c", `mkdir -p "$1" && tar -C "$1" -xzf - && `+owned(l.Profile), "sh", dir); err != nil {
-		return fmt.Errorf("unpacking the %s login: %w", l.Profile, err)
-	}
-	return nil
-}
-
-// owned makes the login's profile one the browser tools will open: they only
-// open profiles they made, as a file in it says.
-func owned(login string) string {
-	dir := profiles + login
+// owned makes the profile one the browser tools will open: they only open
+// profiles they made, as a file in it says.
+func owned(name string) string {
+	dir := profiles + name
 	return fmt.Sprintf(`mkdir -p %s && printf '%%s' '{"schema":"cua-driver-browser-profile-v1","mode":"isolated_named","name":%q}' > %s/.cua-driver-owned-profile.json && chmod 700 %s && chown -R cua:cua %s/.local`,
-		dir, login, dir, dir, home)
+		dir, name, dir, dir, home)
 }
 
-// open opens a page in a browser on the login's profile, the person's to use
+// openPage opens a page in a browser on the profile, the person's to use
 // through view.
-func open(ctx context.Context, d computer, login, url string) error {
+func openPage(ctx context.Context, d computer, name, url string) error {
 	if url == "" {
 		url = "about:blank"
 	}
-	return sh(ctx, d, owned(login)+` && (runuser -u cua -- env DISPLAY=:1 HOME=`+home+` setsid chromium `+signInClass+
-		` --user-data-dir=`+profiles+login+` --password-store=basic --no-first-run --start-maximized `+quote(url)+` >/dev/null 2>&1 </dev/null &)`)
+	return sh(ctx, d, owned(name)+` && (runuser -u cua -- env DISPLAY=:1 HOME=`+home+` setsid chromium `+signInClass+
+		` --user-data-dir=`+profiles+name+` --password-store=basic --no-first-run --start-maximized `+quote(url)+` >/dev/null 2>&1 </dev/null &)`)
 }
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// giveBack deletes a borrowed computer; a sign-in's login is saved first.
+// giveBack deletes a borrowed computer; a sign-in's profile is saved first.
 func (ds *computers) giveBack(ctx context.Context, name, why string) error {
 	l, ok := ds.loans()[name]
 	if !ok {
@@ -226,12 +223,11 @@ func (ds *computers) giveBack(ctx context.Context, name, why string) error {
 	}
 	d, err := find(ctx, name)
 	if err == nil {
-		if l.SigningIn {
-			if d.State == "paused" {
-				unpause(ctx, d)
-			}
-			if err := ds.saveLogin(ctx, d, l.Profile); err != nil {
-				return fmt.Errorf("not given back: saving the %s login failed: %w", l.Profile, err)
+		if p := ds.heldProfile(name); l.SigningIn && p == nil {
+			log.Printf("%s: not saving the %s profile: its key is gone, as after this program restarted", name, l.Profile)
+		} else if l.SigningIn {
+			if err := ds.saveProfile(ctx, d, p); err != nil {
+				return fmt.Errorf("not given back: saving the %s profile failed: %w", l.Profile, err)
 			}
 		}
 		ds.drop(name)
@@ -245,148 +241,50 @@ func (ds *computers) giveBack(ctx context.Context, name, why string) error {
 	return nil
 }
 
-// signIn opens a page in a computer on the saved login, for the person to sign
-// in to sites in, reusing one already signing in to it.
-func (ds *computers) signIn(ctx context.Context, login, url string, minutes int, by string) (computer, time.Time, error) {
+// saveProfile saves the computer's copy of a profile as its newest save,
+// recorded on its Vault item by the app.
+func (ds *computers) saveProfile(ctx context.Context, d computer, p *profile) error {
+	if p == nil {
+		return errors.New("its profile's key is gone, as after this server restarted: save it with save_profile")
+	}
+	if d.State == "paused" {
+		unpause(ctx, d)
+	}
+	s, err := ds.pack(ctx, d, p)
+	if err != nil {
+		return err
+	}
+	if err := ds.saved(ctx, s); err != nil {
+		return err
+	}
+	// The next save starts from this one.
+	p.Blob, p.Salt = s.Blob, s.Salt
+	return nil
+}
+
+// signIn opens a page in a computer on the profile, for the person to sign in
+// to sites in, reusing one already signing in to it.
+func (ds *computers) signIn(ctx context.Context, p *profile, url string, minutes int, by string) (computer, time.Time, error) {
 	until := time.Now().Add(time.Duration(minutes) * time.Minute).UTC()
 	for name, l := range ds.loans() {
-		if l.SigningIn && l.Profile == login {
+		if l.SigningIn && l.Item == p.Item {
 			d, err := ds.running(ctx, name)
 			if err != nil {
 				return d, until, err
 			}
-			l.Until = until
+			l.Until, l.Profile = until, p.Name
 			ds.setLoan(name, &l)
-			return d, until, open(ctx, d, login, url)
+			if ds.heldProfile(name) == nil {
+				ds.hold(name, p)
+			}
+			return d, until, openPage(ctx, d, p.Name, url)
 		}
 	}
-	d, err := ds.borrow(ctx, loan{By: by, For: "Signing in to sites", Profile: login, SigningIn: true, Until: until})
+	d, err := ds.borrow(ctx, loan{By: by, For: "Signing in to sites", SigningIn: true, Until: until}, p)
 	if err != nil {
 		return d, until, err
 	}
-	return d, until, open(ctx, d, login, url)
-}
-
-func (ds *computers) loginDir(login string) string { return filepath.Join(ds.dir, "logins", login) }
-
-// keeps reports whether this server keeps the profile, saved or added with no sign-ins yet.
-func (ds *computers) keeps(login string) bool {
-	info, err := os.Stat(ds.loginDir(login))
-	return err == nil && info.IsDir()
-}
-
-// savedLogin is the newest copy of a saved login's profile, or "".
-func (ds *computers) savedLogin(login string) string {
-	all := ds.savedCopies(login)
-	if len(all) == 0 {
-		return ""
-	}
-	return all[0]
-}
-
-// savedCopies are a saved login's copies, newest first.
-func (ds *computers) savedCopies(login string) []string {
-	files, _ := filepath.Glob(filepath.Join(ds.loginDir(login), "*.tar.gz"))
-	slices.Sort(files)
-	slices.Reverse(files)
-	return files
-}
-
-// saveLogin closes the computer's browsers, so their profiles are written out,
-// and keeps a copy of the login's profile as the saved login.
-func (ds *computers) saveLogin(ctx context.Context, d computer, login string) error {
-	if err := sh(ctx, d, "test -d "+profiles+login); err != nil {
-		return fmt.Errorf("computer %s's browser has no %s profile", d.Name, login)
-	}
-	closeBrowsers(ctx, d, true)
-	if err := os.MkdirAll(ds.loginDir(login), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(ds.loginDir(login), ".saving-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	args := []string{"tar", "-C", profiles + login, "--warning=no-file-changed"}
-	for _, c := range caches {
-		args = append(args, "--exclude="+c)
-	}
-	err = in(ctx, d, nil, tmp, append(args, "-czf", "-", ".")...)
-	tmp.Close()
-	if !tarred(err) {
-		return err
-	}
-	name := filepath.Join(ds.loginDir(login), time.Now().UTC().Format("20060102T150405Z")+".tar.gz")
-	if err := os.Rename(tmp.Name(), name); err != nil {
-		return err
-	}
-	copies := ds.savedCopies(login)
-	for _, old := range copies[min(keepLogins, len(copies)):] {
-		os.Remove(old)
-	}
-	log.Printf("saved the %s login from %s", login, d.Name)
-	return nil
-}
-
-// loginServer is the other server that keeps the saved login, or "".
-func (ds *computers) loginServer(ctx context.Context, login string) string {
-	got, _ := ds.everywhere(ctx, "profiles", nil)
-	for s, r := range got {
-		var theirs struct{ Profiles []struct{ Profile string } }
-		json.Unmarshal(r, &theirs)
-		for _, l := range theirs.Profiles {
-			if l.Profile == login {
-				return s
-			}
-		}
-	}
-	return ""
-}
-
-// profileElsewhere passes a call about a profile this server doesn't keep on
-// to the server that does, if one does: each server keeps its own.
-func (ds *computers) profileElsewhere(ctx context.Context, op string, in map[string]any, login string, here bool) json.RawMessage {
-	if here || login == "" || ds.keeps(login) {
-		return nil
-	}
-	s := ds.loginServer(ctx, login)
-	if s == "" {
-		return nil
-	}
-	fwd := map[string]any{"here": true}
-	for k, v := range in {
-		fwd[k] = v
-	}
-	fwd["profile"] = login
-	r, err := ds.callNode(ctx, s, op, fwd)
-	if err != nil {
-		log.Printf("%s on %s: %v", op, s, err)
-		return nil
-	}
-	return r
-}
-
-// logins lists this server's profiles, those with no sign-ins yet without
-// saved: each server keeps its own.
-func (ds *computers) logins(me string) []map[string]any {
-	dirs, _ := os.ReadDir(filepath.Join(ds.dir, "logins"))
-	out := []map[string]any{}
-	for _, e := range dirs {
-		if !e.IsDir() {
-			continue
-		}
-		saved := ds.savedLogin(e.Name())
-		if saved == "" {
-			out = append(out, map[string]any{"profile": e.Name(), "server": me})
-			continue
-		}
-		info, err := os.Stat(saved)
-		if err != nil {
-			continue
-		}
-		out = append(out, map[string]any{"profile": e.Name(), "server": me, "saved": info.ModTime().UTC(), "size": info.Size()})
-	}
-	return out
+	return d, until, openPage(ctx, d, p.Name, url)
 }
 
 // keep gives back borrowed computers left idle or whose sign-in time is up,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -33,6 +34,7 @@ type computers struct {
 
 	poolMu sync.Mutex
 	lent   map[string]loan      // borrowed computers, by name
+	held   map[string]*profile  // their profiles, with their keys
 	used   map[string]time.Time // each computer's last call
 	take   sync.Mutex           // one borrow, or spare made, at a time
 	kick   chan struct{}        // tend the pool now
@@ -41,7 +43,7 @@ type computers struct {
 }
 
 func newComputers(dir, node string) *computers {
-	ds := &computers{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
+	ds := &computers{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, held: map[string]*profile{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
 	if b, err := os.ReadFile(ds.cache); err == nil {
 		json.Unmarshal(b, &ds.tools)
 	}
@@ -357,6 +359,9 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		if err != nil {
 			return nil, err
 		}
+		if ds.loans()[d.Name].NoScreen {
+			return nil, fmt.Errorf("computer %s was made without a screen: there's nothing to watch", d.Name)
+		}
 		minutes := 60
 		if m, ok := in["minutes"].(float64); ok {
 			minutes = min(max(int(m), 1), 1440)
@@ -393,29 +398,28 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		if why == "" {
 			return nil, errors.New("say what it's for, in a few words: the person sees it")
 		}
+		p, err := profileIn(in)
+		if err != nil {
+			return nil, err
+		}
 		if !here && !ds.makesHere(ctx) {
 			if r := ds.borrowElsewhere(ctx, op, in); r != nil {
 				return r, nil
 			}
 		}
-		login, given := in["profile"].(string)
-		if !given && ds.savedLogin("default") != "" {
-			login = "default"
-		}
-		if r := ds.profileElsewhere(ctx, op, in, login, here); r != nil {
-			return r, nil
-		}
-		d, err := ds.borrow(ctx, loan{By: cmpOr(text("by"), caller(ctx)), For: why, Profile: login})
+		d, err := ds.borrow(ctx, loan{By: cmpOr(text("by"), caller(ctx)), For: why, NoScreen: in["screen"] == false}, p)
 		if err != nil {
 			return nil, err
 		}
 		me, _, _ := ds.servers(ctx)
-		msg := fmt.Sprintf("Borrowed computer %s: pass computer %q to the computers tools.", d.Name, d.Name)
-		if login != "" {
-			msg += fmt.Sprintf(` Its browser starts with a copy of the %s profile: computers_browser_prepare with allow_launch true and profile {"mode":"isolated_named","name":%q}.`, login, login)
+		out := map[string]any{"computer": d.Name, "server": me}
+		msg := fmt.Sprintf("Borrowed computer %s: pass computer %q to the other tools.", d.Name, d.Name)
+		if p != nil {
+			out["profile"] = p.Name
+			msg += fmt.Sprintf(` Its browser starts with a copy of the %s profile: browser_prepare with allow_launch true and profile {"mode":"isolated_named","name":%q}.`, p.Name, p.Name)
 		}
-		msg += " Give it back with give_back when done; it's given back for you after 15 minutes without a call."
-		return map[string]any{"computer": d.Name, "server": me, "profile": login, "text": msg}, nil
+		out["text"] = msg + " Give it back with give_back when done; it's given back for you after 15 minutes without a call."
+		return out, nil
 	case "give_back":
 		if name == "" {
 			return nil, errors.New("which computer? pass the one you borrowed")
@@ -429,23 +433,20 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		}
 		return fmt.Sprintf("Gave back computer %s.", name), nil
 	case "sign_in":
-		if !here && !ds.makesHere(ctx) {
+		p, err := profileIn(in)
+		if err != nil || p == nil {
+			return nil, cmp.Or(err, errors.New("which browser profile? the app gives it"))
+		}
+		if !here && !ds.makesHere(ctx) && !ds.signingIn(p.Item) {
 			if r := ds.borrowElsewhere(ctx, op, in); r != nil {
 				return r, nil
 			}
-		}
-		login := cmpOr(text("profile"), "default")
-		if !validProfile.MatchString(login) {
-			return nil, errors.New("a profile's name is letters, digits and dashes, like Personal or PTC")
-		}
-		if r := ds.profileElsewhere(ctx, op, in, login, here); r != nil {
-			return r, nil
 		}
 		minutes := int(signInFor.Minutes())
 		if m, ok := in["minutes"].(float64); ok {
 			minutes = min(max(int(m), 1), 240)
 		}
-		d, until, err := ds.signIn(ctx, login, text("url"), minutes, cmpOr(text("by"), caller(ctx)))
+		d, until, err := ds.signIn(ctx, p, text("url"), minutes, cmpOr(text("by"), caller(ctx)))
 		if err != nil {
 			return nil, err
 		}
@@ -453,101 +454,65 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		if err != nil {
 			return nil, err
 		}
-		msg := fmt.Sprintf("Sign in to sites in the %s profile here:\n%s\nIt's saved in %d minutes, or as soon as computer %s is given back (give_back) or saved (save_profile).", login, url, minutes, d.Name)
+		msg := fmt.Sprintf("Sign in to sites in the %s profile here:\n%s\nIt's saved in %d minutes, or as soon as it's saved (save_profile).", p.Name, url, minutes)
 		me, _, _ := ds.servers(ctx)
-		return map[string]any{"computer": d.Name, "server": me, "profile": login, "url": url, "until": until, "text": msg}, nil
+		return map[string]any{"computer": d.Name, "server": me, "profile": p.Name, "url": url, "until": until, "text": msg}, nil
 	case "save_profile":
+		// The computer signing in to the profile, or the one named, with the profile the app gives (and its key).
+		p, err := profileIn(in)
+		if err != nil {
+			return nil, err
+		}
+		if name == "" && p != nil {
+			for n, l := range ds.loans() {
+				if l.SigningIn && l.Item == p.Item {
+					name = n
+				}
+			}
+			if name == "" && !here {
+				if s := ds.signingInElsewhere(ctx, p.Item); s != "" {
+					in["here"] = true
+					return ds.callNode(ctx, s, op, in)
+				}
+			}
+			if name == "" {
+				return nil, fmt.Errorf("nobody is signing in to the %s profile: there's nothing to save", p.Name)
+			}
+		}
 		d, err := ds.running(ctx, name)
 		if err != nil {
 			return nil, err
 		}
 		l, lent := ds.loans()[d.Name]
-		login := cmpOr(text("profile"), cmpOr(l.Profile, "default"))
-		if lent && l.SigningIn && login == l.Profile {
+		if p == nil {
+			p = ds.heldProfile(d.Name)
+		} else if held := ds.heldProfile(d.Name); held != nil && held.Item == p.Item {
+			p.Name = held.Name // the folder it was opened with, if it was renamed since
+		}
+		if p == nil {
+			return nil, errors.New("which browser profile? the app gives it")
+		}
+		if lent && l.SigningIn && l.Item == p.Item {
+			ds.hold(d.Name, p)
 			if err := ds.giveBack(ctx, d.Name, "signed in"); err != nil {
 				return nil, err
 			}
-			return fmt.Sprintf("Saved the %s profile and closed computer %s.", login, d.Name), nil
+			return fmt.Sprintf("Saved the %s profile and closed computer %s.", p.Name, d.Name), nil
 		}
-		if err := ds.saveLogin(ctx, d, login); err != nil {
+		if err := ds.saveProfile(ctx, d, p); err != nil {
 			return nil, err
 		}
-		return fmt.Sprintf("Saved computer %s's browser as the %s profile: computers borrowed with it start signed in to the same sites.", d.Name, login), nil
-	case "profiles":
-		me, _, err := ds.servers(ctx)
-		if err != nil {
-			return nil, err
-		}
-		mine := ds.logins(me)
-		if here {
-			return map[string]any{"profiles": mine}, nil
-		}
-		got, failed := ds.everywhere(ctx, "profiles", nil)
-		for _, r := range got {
-			var theirs struct{ Profiles []map[string]any }
-			json.Unmarshal(r, &theirs)
-			mine = append(mine, theirs.Profiles...)
-		}
-		out := map[string]any{"profiles": mine}
-		if len(failed) > 0 {
-			out["unreachable"] = failed
-		}
-		return out, nil
-	case "add_profile":
-		login := text("profile")
-		if !validProfile.MatchString(login) {
-			return nil, errors.New("a profile's name is letters, digits and dashes, like Personal or PTC")
-		}
-		if ds.keeps(login) || !here && ds.loginServer(ctx, login) != "" {
-			return nil, fmt.Errorf("there's already a %s profile", login)
-		}
-		// Kept where sign-ins are made, so signing in to it opens a computer on the same server.
-		if !here && !ds.makesHere(ctx) {
-			if r := ds.borrowElsewhere(ctx, op, in); r != nil {
-				return r, nil
-			}
-		}
-		if err := os.MkdirAll(ds.loginDir(login), 0o700); err != nil {
-			return nil, err
-		}
+		return fmt.Sprintf("Saved computer %s's browser as the %s profile: computers borrowed with it start signed in to the same sites.", d.Name, p.Name), nil
+	case "signing_in":
+		// Which profiles are being signed in to here: their items, with the computer and its server.
 		me, _, _ := ds.servers(ctx)
-		return map[string]any{"profile": login, "server": me, "text": fmt.Sprintf("Added the %s profile. It has no sign-ins yet: sign in to sites in it with sign_in.", login)}, nil
-	case "delete_profile":
-		login := text("profile")
-		if r := ds.profileElsewhere(ctx, op, in, login, here); r != nil {
-			return r, nil
-		}
-		if !validProfile.MatchString(login) || !ds.keeps(login) {
-			return nil, fmt.Errorf("no profile %q", login)
-		}
-		if err := os.RemoveAll(ds.loginDir(login)); err != nil {
-			return nil, err
-		}
-		return fmt.Sprintf("Deleted the %s profile.", login), nil
-	case "rename_profile":
-		login, to := text("profile"), text("to")
-		if r := ds.profileElsewhere(ctx, op, in, login, here); r != nil {
-			return r, nil
-		}
-		if !validProfile.MatchString(login) || !ds.keeps(login) {
-			return nil, fmt.Errorf("no profile %q", login)
-		}
-		if !validProfile.MatchString(to) {
-			return nil, errors.New("a profile's name is letters, digits and dashes, like Personal or PTC")
-		}
-		if ds.keeps(to) || !here && ds.loginServer(ctx, to) != "" {
-			return nil, fmt.Errorf("there's already a %s profile", to)
-		}
-		// A sign-in saves under the name it opened with, which would bring the old name back.
-		for _, l := range ds.loans() {
-			if l.SigningIn && l.Profile == login {
-				return nil, fmt.Errorf("the %s profile is being signed in to: save it first", login)
+		out := []map[string]any{}
+		for n, l := range ds.loans() {
+			if l.SigningIn {
+				out = append(out, map[string]any{"item": l.Item, "profile": l.Profile, "computer": n, "server": me, "until": l.Until})
 			}
 		}
-		if err := os.Rename(ds.loginDir(login), ds.loginDir(to)); err != nil {
-			return nil, err
-		}
-		return fmt.Sprintf("Renamed the %s profile to %s.", login, to), nil
+		return map[string]any{"signing_in": out}, nil
 	case "backup":
 		d, err := ds.running(ctx, name)
 		if err != nil {
@@ -741,7 +706,7 @@ func viewURL(ctx context.Context, d computer, minutes int) (string, error) {
 
 // local are the operations that act on this server even when given a
 // computer it doesn't have.
-var local = []string{"list", "create", "borrow", "sign_in", "profiles", "add_profile", "delete_profile", "rename_profile", "backups", "restore", "refresh_tools"}
+var local = []string{"list", "create", "borrow", "sign_in", "signing_in", "backups", "restore", "refresh_tools"}
 
 // reply is a result with entries for the node to write in the caller's log.
 type reply struct {

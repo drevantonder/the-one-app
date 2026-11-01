@@ -766,6 +766,52 @@ async fn an_app_wraps_the_sidecar_of_its_name_on_another_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn browser_profiles_are_vault_items_whose_key_only_the_agent_computers_sidecar_sees() {
+    let (a, _ra) = start("profiles").await;
+    a.create_with("Profiles", "Andre", &["agent-computers", "computer"]).await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    // The sidecar as the Go one answers: it gets the profile's key filled in, and reports a save to the app.
+    a.register_sidecar("agent-computers", json!({ "title": "Agent Computers", "ops": [{ "name": "borrow" }, { "name": "save_profile" }] })).await.unwrap();
+    let sidecar = a.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Ok(Some(c)) = sidecar.sidecars().next("agent-computers").await {
+                let p = c.input["profile"].clone();
+                let reply = match c.op.as_str() {
+                    "borrow" => json!({ "computer": "pool-a", "key_length": p["key"].as_str().map(str::len), "blob": p["blob"], "echo": p["key"] }),
+                    "save_profile" => {
+                        let (node, item) = (sidecar.clone(), p["item"].as_str().unwrap().to_string());
+                        let blob = node.put_blob(b"sealed profile").unwrap();
+                        let saved = node.call(call("agent-computers", "_saved", json!({ "item": item, "blob": blob, "salt": "5a17", "sites": "outlook.com 2026-11-02" }))).await;
+                        json!({ "saved": saved.is_ok() })
+                    }
+                    _ => json!(null),
+                };
+                sidecar.sidecars().reply("agent-computers", c.id, json!({ "ok": reply })).unwrap();
+            }
+        }
+    });
+    let added = a.call(call("agent-computers", "add_profile", json!({ "profile": "PTC" }))).await.unwrap();
+    assert!(a.call(call("agent-computers", "add_profile", json!({ "profile": "ptc" }))).await.is_err(), "one profile of a name");
+    let item = a.vault(&me, None).await.unwrap().into_iter().find(|i| i["id"] == added["item"]).unwrap();
+    assert_eq!((item["title"].as_str(), item["type"].as_str()), (Some("PTC"), Some("Browser profile")), "{item}");
+    assert!(!item.to_string().contains("\"value\"") || item["fields"].as_array().unwrap().iter().all(|f| f["secret"] == true), "its key is never shown: {item}");
+
+    // Agents borrow through Computer Use by the profile's name; the sidecar gets its key, nobody else.
+    let borrowed = a.call(call("computer", "borrow", json!({ "for": "Reading mail", "profile": "PTC" }))).await.unwrap();
+    assert_eq!((borrowed["key_length"].as_u64(), borrowed["echo"].as_str(), borrowed["blob"].as_str()), (Some(43), Some("••••"), Some("")), "{borrowed}");
+    assert!(a.call(call("computer", "borrow", json!({ "for": "x", "profile": "Nope" }))).await.unwrap_err().to_string().contains("No browser profile Nope"));
+
+    // A save is recorded on the item: its blob and salt for the next borrow, and the sites it was used on.
+    let saved = a.call(call("agent-computers", "save_profile", json!({ "profile": "PTC" }))).await.unwrap();
+    assert_eq!(saved["saved"], true, "{saved}");
+    let listed = a.call(call("agent-computers", "profiles", json!({}))).await.unwrap();
+    assert_eq!(listed[0]["sites"], "outlook.com 2026-11-02", "{listed}");
+    let again = a.call(call("computer", "borrow", json!({ "for": "Reading mail", "profile": "ptc" }))).await.unwrap();
+    assert_eq!(again["blob"].as_str().map(str::len), Some(64), "the next borrow starts from the save: {again}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn agents_use_a_device_its_owner_let_them_through_computer_use_and_each_session_is_logged() {
     let (a, _ra) = start("device-a").await;
     let (b, _rb) = start("device-b").await;
@@ -800,8 +846,8 @@ async fn agents_use_a_device_its_owner_let_them_through_computer_use_and_each_se
         let used = a.call(call("computer", "use", json!({ "computer": name, "tool": tool, "args": {} }))).await.unwrap();
         assert_eq!(used["content"][0]["text"], json!(tool), "use reaches the device's sidecar: {used}");
     }
-    // The Agent Computers page reads them through Computer Use.
-    let devices = a.call(call("agent-computers", "_devices", json!({}))).await.unwrap();
+    // Computer Use's page lists them.
+    let devices = a.call(call("computer", "_devices", json!({}))).await.unwrap();
     let sessions = devices["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 1, "a session is logged once, when it starts: {devices}");
     assert_eq!((sessions[0]["device"].clone(), sessions[0]["title"].clone()), (json!(name), json!("Andre's Mac")), "{devices}");

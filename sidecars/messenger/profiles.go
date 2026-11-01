@@ -129,7 +129,7 @@ func (m *messenger) keepGivingBack() {
 
 func (m *messenger) run(op string, raw json.RawMessage) (any, error) {
 	var in struct {
-		Account, Profile, Computer, Server, Name string
+		Account, Profile, Name string
 	}
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &in); err != nil {
@@ -163,11 +163,7 @@ func (m *messenger) run(op string, raw json.RawMessage) (any, error) {
 		return b.computers("profiles", map[string]any{})
 	case "_save": // the settings screen's Done: saves the profile signed in
 		b := &browser{node: m.node}
-		input := map[string]any{"computer": in.Computer, "profile": in.Profile}
-		if in.Server != "" {
-			input["server"] = in.Server
-		}
-		if _, err := b.computers("save_profile", input); err != nil {
+		if _, err := b.computers("save_profile", map[string]any{"profile": in.Profile}); err != nil {
 			return nil, err
 		}
 		m.found(in.Profile, nil)
@@ -197,6 +193,12 @@ func (m *messenger) signIn(profile string) (any, error) {
 	m.mu.Unlock()
 	b := &browser{node: m.node}
 	got, err := b.computers("sign_in", map[string]any{"profile": profile, "url": home})
+	if err != nil && strings.Contains(err.Error(), "No browser profile") {
+		// A new one: added to the Vault first.
+		if _, err = b.computers("add_profile", map[string]any{"profile": profile}); err == nil {
+			got, err = b.computers("sign_in", map[string]any{"profile": profile, "url": home})
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +213,7 @@ func (m *messenger) signIn(profile string) (any, error) {
 	m.mu.Unlock()
 	return map[string]any{
 		"profile": profile, "url": url, "computer": r["computer"], "server": r["server"],
-		"text": fmt.Sprintf("Give the person this link: %s\nThey sign in to Messenger there, in the %s browser profile (tick Keep me signed in), then press Save profile on the Agent Computers page or Done on Messenger's settings; it's saved by itself after 30 minutes otherwise.", url, profile),
+		"text": fmt.Sprintf("Give the person this link: %s\nThey sign in to Messenger there, in the %s browser profile (tick Keep me signed in), then press Done on Messenger's settings, or Done Signing In on the profile in the Vault; it's saved by itself after 30 minutes otherwise.", url, profile),
 	}, err
 }
 
