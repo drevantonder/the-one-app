@@ -66,12 +66,13 @@ func (b *browser) computers(op string, input map[string]any) (any, error) {
 	return reply.OK, nil
 }
 
-// borrow takes a computer with the profile, unless one is borrowed.
+// borrow takes a computer with the profile, unless one is borrowed: one with
+// no screen, since nobody watches it read.
 func (b *browser) borrow() error {
 	if b.computer != "" {
 		return nil
 	}
-	got, err := b.computers("borrow", map[string]any{"for": "Reading Messenger", "by": "messenger", "profile": b.login})
+	got, err := b.computers("borrow", map[string]any{"for": "Reading Messenger", "by": "messenger", "profile": b.login, "screen": false})
 	if err != nil {
 		return err
 	}
