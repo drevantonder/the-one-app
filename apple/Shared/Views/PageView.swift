@@ -6,44 +6,65 @@ private let iconSize: CGFloat = 60
 @MainActor private let iconSize: CGFloat = UIDevice.current.userInterfaceIdiom == .pad ? 76 : 62
 #endif
 
-/// A page: its title (on a Mac; a phone's bar names it instead), then one grid, as the Home Screen's: its widgets in
-/// their sizes, then its apps' icons, which flow around them, then the Connectors folder, there even with none.
+/// A page: its title (on a Mac; a phone's bar names it instead), then one grid, as the Home Screen's: the widgets its
+/// person put there in their sizes and its apps' icons, in their order, then the Connectors folder, there even with
+/// none. Touch and hold empty space (or choose Edit Home Page) to arrange it: everything jiggles, and apps and
+/// widgets drag anywhere, come off with their − badge, and widgets resize from their corner.
 struct PageView: View {
     @Environment(Store.self) private var store
     var page: Page
     var open: (Route) -> Void
     @State private var width: CGFloat = 0
+    @State private var viewport: CGFloat = 0
     @State private var deleting: AppInfo?
     @State private var error: String?
+    @State private var drag: Drag?
+    @State private var resize: Resize?
+    /// The widget whose options are showing, by its copy's id.
+    @State private var options: String?
+    @State private var removed = 0
+
+    /// An item being dragged: the page's order so far, where it started, how far it's gone, and what it's over.
+    struct Drag: Equatable {
+        var id: String
+        var order: [PageItem]
+        var start: CGPoint
+        var translation: CGSize
+        var over: String?
+    }
+
+    /// A widget being resized from its corner: the size it started at, and the size it is now.
+    struct Resize: Equatable {
+        var id: String
+        var start: String
+        var size: String
+    }
 
     var body: some View {
-        let apps = store.apps(on: page), widgets = store.widgets(on: page), connectors = store.connectors(on: page)
+        let editing = store.editing
+        let items = drag?.order ?? store.items(on: page)
         let grid = GridMetrics(width: width)
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 #if os(macOS)
                 PageHeader(title: page.title, subtitle: page.subtitle)
                 #endif
-                if apps.isEmpty && widgets.isEmpty {
+                if store.apps(on: page).isEmpty && store.widgets(on: page).isEmpty {
                     EmptyPage(page: page, open: open)
                 }
                 if width > 0 {
                     HomeGrid(grid: grid) {
-                        ForEach(widgets) { widget in
-                            let size = grid.fit(store.size(of: widget, on: page))
-                            PageWidget(widget: widget, page: page, size: size, grid: grid, open: open)
-                                .layoutValue(key: GridSpan.self, value: WidgetSize.cells(size))
+                        ForEach(items) { item in
+                            cell(item, grid: grid, editing: editing)
+                                .layoutValue(key: GridSpan.self, value: span(item, grid: grid))
                         }
-                        ForEach(apps) { app in
-                            IconButton(title: app.label, badge: store.appBadge(app.name, on: page) ?? 0) { open(store.open(app, from: page)) } icon: {
-                                AppTile(app: app, seed: app.name, size: grid.icon)
-                            }
-                            .contextMenu { AppActions(app: app, page: page, open: open, deleting: $deleting, error: $error) }
+                        IconButton(title: String(localized: "Connectors")) { if !editing { open(.connectors(page.scope)) } } icon: {
+                            FolderTile(apps: store.connectors(on: page), size: grid.icon)
                         }
-                        IconButton(title: String(localized: "Connectors")) { open(.connectors(page.scope)) } icon: {
-                            FolderTile(apps: connectors, size: grid.icon)
-                        }
+                        .modifier(Jiggle(on: editing))
                     }
+                    .coordinateSpace(.named(gridSpace))
+                    .overlay(alignment: .topLeading) { lifted(grid: grid) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -54,12 +75,162 @@ struct PageView: View {
             #endif
             .padding(.bottom, 96)
             .frame(maxWidth: 1100, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: viewport, alignment: .top)
+            .background { emptySpace }
         }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { viewport = $1 }
         .groupedBackground()
         .refreshable { try? await store.refreshState(); await store.refreshApps() }
         .deleteAppDialog($deleting, error: $error)
+        .overlay { optionsCard(grid: grid) }
+        .sensoryFeedback(.impact(weight: .light), trigger: drag?.id) { _, new in new != nil }
+        .sensoryFeedback(.selection, trigger: drag?.over) { _, new in new != nil }
+        .sensoryFeedback(.selection, trigger: resize?.size) { old, new in old != nil && new != nil }
+        .sensoryFeedback(.impact(flexibility: .soft), trigger: removed)
+        #if os(macOS)
+        .toolbar { EditToolbar(page: page, store: store) }
+        #endif
     }
+
+    /// The grid's empty space: touch and hold it to arrange the page, as on the Home Screen, or right-click it on a
+    /// Mac; while arranging, a tap there is Done.
+    private var emptySpace: some View {
+        Color.clear
+            .contentShape(.rect)
+            .onTapGesture { if store.editing { withAnimation { store.editing = false } } }
+            #if os(iOS)
+            .onLongPressGesture(minimumDuration: 0.45) { withAnimation { store.editing = true } }
+            #else
+            .contextMenu { Button("Edit Home Page", systemImage: "square.grid.3x3") { withAnimation { store.editing = true } } }
+            #endif
+    }
+
+    private func size(_ widget: WidgetInfo, grid: GridMetrics) -> String {
+        resize.flatMap { $0.id == widget.instance ? $0.size : nil } ?? grid.fit(widget.size ?? "medium")
+    }
+
+    private func span(_ item: PageItem, grid: GridMetrics) -> (w: Int, h: Int) {
+        if case .widget(let widget, _) = item { return WidgetSize.cells(size(widget, grid: grid)) }
+        return (1, 1)
+    }
+
+    /// One app's icon or widget on the grid, with its − badge, resize handle and jiggle while arranging.
+    private func cell(_ item: PageItem, grid: GridMetrics, editing: Bool) -> some View {
+        let lifted = drag?.id == item.id
+        // The drag goes on the item itself, under its badge and handle, so they keep their own taps and drags.
+        return content(item, grid: grid, editing: editing)
+            .highPriorityGesture(move(item, grid: grid), isEnabled: editing)
+            .overlay(alignment: .topLeading) {
+                if editing {
+                    RemoveBadge(label: removeLabel(item)) {
+                        removed += 1
+                        withAnimation(.snappy) { store.remove(item, from: page) }
+                    }
+                    .offset(x: item.isApp ? (grid.cell - grid.icon) / 2 - 9 : -9, y: -9)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if editing, case .widget(let widget, let kept) = item, grid.sizes(of: widget).count > 1 {
+                    ResizeHandle(grid: grid, sizes: grid.sizes(of: widget), current: size(widget, grid: grid)) { new in
+                        if resize == nil { resize = Resize(id: widget.instance ?? "", start: size(widget, grid: grid), size: new) }
+                        if resize?.size != new { withAnimation(.snappy) { resize?.size = new } }
+                    } ended: {
+                        if let resize, resize.size != resize.start { store.resize(kept, to: resize.size, on: page) }
+                        resize = nil
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .modifier(Jiggle(on: editing && !lifted))
+            .opacity(lifted ? 0 : 1)
+    }
+
+    @ViewBuilder
+    private func content(_ item: PageItem, grid: GridMetrics, editing: Bool) -> some View {
+        switch item {
+        case .app(let app):
+            IconButton(title: app.label, badge: store.appBadge(app.name, on: page) ?? 0) { if !editing { open(store.open(app, from: page)) } } icon: {
+                AppTile(app: app, seed: app.name, size: grid.icon)
+            }
+            .modifier(ContextMenu(enabled: !editing) {
+                Button("Edit Home Page", systemImage: "square.grid.3x3") { withAnimation { store.editing = true } }
+                AppActions(app: app, page: page, open: open, deleting: $deleting, error: $error)
+            })
+        case .widget(let widget, let kept):
+            PageWidget(widget: widget, kept: kept, page: page, size: size(widget, grid: grid), grid: grid, editing: editing, open: open,
+                       editOptions: { options = widget.instance }, remove: { removed += 1; withAnimation(.snappy) { store.remove(item, from: page) } })
+        }
+    }
+
+    private func removeLabel(_ item: PageItem) -> String {
+        switch item {
+        case .app(let app): String(localized: "Remove \(app.label) from this page")
+        case .widget(let widget, _): String(localized: "Remove \(widget.title ?? widget.widget)")
+        }
+    }
+
+    /// Drags an item while arranging: it follows the finger, and over another item takes that one's place, the rest
+    /// moving aside; past the last, it goes at the end.
+    private func move(_ item: PageItem, grid: GridMetrics) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .named(gridSpace))
+            .onChanged { value in
+                let order = drag?.order ?? store.items(on: page)
+                let frames = grid.frames(order.map { span($0, grid: grid) })
+                guard let from = order.firstIndex(where: { $0.id == item.id }) else { return }
+                var d = drag ?? Drag(id: item.id, order: order, start: frames[from].origin, translation: .zero)
+                d.translation = value.translation
+                let over = zip(order, frames).first { pair in pair.0.id != item.id && pair.1.contains(value.location) }?.0
+                var to: Int?
+                if let over, over.id != d.over {
+                    to = order.firstIndex(of: over)
+                } else if over == nil, value.location.y > (frames.map(\.maxY).max() ?? 0), from != order.count - 1 {
+                    to = order.count - 1
+                }
+                d.over = over?.id
+                if let to {
+                    d.order.move(fromOffsets: [from], toOffset: to > from ? to + 1 : to)
+                    withAnimation(.snappy) { drag = d }
+                } else {
+                    drag = d
+                }
+            }
+            .onEnded { _ in
+                if let drag, drag.order.map(\.id) != store.items(on: page).map(\.id) { store.arrange(drag.order, on: page) }
+                withAnimation(.snappy) { drag = nil }
+            }
+    }
+
+    /// The item being dragged, lifted above the grid under the finger.
+    @ViewBuilder
+    private func lifted(grid: GridMetrics) -> some View {
+        if let drag, let item = drag.order.first(where: { $0.id == drag.id }) {
+            let cells = span(item, grid: grid)
+            content(item, grid: grid, editing: true)
+                .frame(width: grid.span(cells.w), height: grid.span(cells.h))
+                .scaleEffect(1.07)
+                .shadow(color: .black.opacity(0.22), radius: 14, y: 8)
+                .offset(x: drag.start.x + drag.translation.width, y: drag.start.y + drag.translation.height)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// A widget's options, flipped round to face its person, the rest of the page dimmed.
+    @ViewBuilder
+    private func optionsCard(grid: GridMetrics) -> some View {
+        if let id = options, let (widget, kept) = store.items(on: page).lazy.compactMap({ item -> (WidgetInfo, Arrangement.Item)? in
+            if case .widget(let w, let k) = item, k.id == id { (w, k) } else { nil }
+        }).first {
+            WidgetOptionsCard(widget: widget, kept: kept, page: page, size: size(widget, grid: grid), grid: grid) { options = nil }
+        }
+    }
+}
+
+/// The named space a page's grid lays out in, which dragging measures in.
+private let gridSpace = "home-grid"
+
+extension PageItem {
+    var isApp: Bool { if case .app = self { true } else { false } }
 }
 
 /// A page's grid, as the Home Screen's: square cells, four across on a phone and more on wider screens, each holding
@@ -94,29 +265,19 @@ struct GridMetrics {
 
     /// `size`, or large where an xl doesn't fit.
     func fit(_ size: String) -> String { WidgetSize.cells(size).w <= columns ? size : "large" }
-}
 
-/// How many cells across and down a view in a `HomeGrid` takes: one, unless it says.
-struct GridSpan: LayoutValueKey {
-    static let defaultValue = (w: 1, h: 1)
-}
-
-/// Lays its views out in a grid's cells in order, each in the first place it fits, row by row, so icons fill the
-/// cells beside a small widget. Widgets start on an even column, as on the Home Screen.
-struct HomeGrid: Layout {
-    var grid: GridMetrics
-
-    private func places(_ subviews: Subviews) -> (cells: [(x: Int, y: Int)], rows: Int) {
+    /// Where views of these spans go, in order, each in the first place it fits, row by row, so icons fill the
+    /// cells beside a small widget; widgets start on an even column, as on the Home Screen. And how many rows that takes.
+    func places(_ spans: [(w: Int, h: Int)]) -> (cells: [(x: Int, y: Int)], rows: Int) {
         var taken: [[Bool]] = []
         var cells: [(x: Int, y: Int)] = []
-        for view in subviews {
-            let span = view[GridSpan.self]
-            let w = min(span.w, grid.columns), h = span.h
+        for span in spans {
+            let w = min(span.w, columns), h = span.h
             var y = 0
             search: while true {
-                for x in stride(from: 0, through: grid.columns - w, by: w > 1 ? 2 : 1) {
+                for x in stride(from: 0, through: columns - w, by: w > 1 ? 2 : 1) {
                     if (y..<y + h).allSatisfy({ row in row >= taken.count || (x..<x + w).allSatisfy { !taken[row][$0] } }) {
-                        while taken.count < y + h { taken.append(Array(repeating: false, count: grid.columns)) }
+                        while taken.count < y + h { taken.append(Array(repeating: false, count: columns)) }
                         for row in y..<y + h { for col in x..<x + w { taken[row][col] = true } }
                         cells.append((x, y))
                         break search
@@ -128,18 +289,32 @@ struct HomeGrid: Layout {
         return (cells, taken.count)
     }
 
+    /// The frames views of these spans take, in the grid's own space.
+    func frames(_ spans: [(w: Int, h: Int)]) -> [CGRect] {
+        zip(places(spans).cells, spans).map { cell, span in
+            CGRect(x: CGFloat(cell.x) * (self.cell + gap), y: CGFloat(cell.y) * (self.cell + gap), width: self.span(min(span.w, columns)), height: self.span(span.h))
+        }
+    }
+}
+
+/// How many cells across and down a view in a `HomeGrid` takes: one, unless it says.
+struct GridSpan: LayoutValueKey {
+    static let defaultValue = (w: 1, h: 1)
+}
+
+/// Lays its views out in a grid's cells in order, as `GridMetrics.places` says.
+struct HomeGrid: Layout {
+    var grid: GridMetrics
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = places(subviews).rows
+        let rows = grid.places(subviews.map { $0[GridSpan.self] }).rows
         return CGSize(width: grid.span(grid.columns), height: rows > 0 ? grid.span(rows) : 0)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let cells = places(subviews).cells
-        for (view, cell) in zip(subviews, cells) {
-            let span = view[GridSpan.self]
-            let size = ProposedViewSize(width: grid.span(min(span.w, grid.columns)), height: grid.span(span.h))
-            view.place(at: CGPoint(x: bounds.minX + CGFloat(cell.x) * (grid.cell + grid.gap), y: bounds.minY + CGFloat(cell.y) * (grid.cell + grid.gap)),
-                       anchor: .topLeading, proposal: size)
+        let frames = grid.frames(subviews.map { $0[GridSpan.self] })
+        for (view, frame) in zip(subviews, frames) {
+            view.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), anchor: .topLeading, proposal: ProposedViewSize(frame.size))
         }
     }
 }
@@ -168,34 +343,55 @@ struct PageHeader: View {
     }
 }
 
-/// A widget on a page: tapping it opens where it links, or its app; touch and hold to size or hide it.
+/// A widget on a page: tapping it opens where it links, or its app. Touch and hold it (right-click on a Mac) and it
+/// lifts, the rest blurred, over a menu as the Home Screen's: its sizes across the top, then Edit Widget, Edit Home
+/// Page and Remove Widget.
 private struct PageWidget: View {
     @Environment(Store.self) private var store
     @Environment(\.openURL) private var openURL
     var widget: WidgetInfo
+    var kept: Arrangement.Item
     var page: Page
     var size: String
     var grid: GridMetrics
+    var editing: Bool
     var open: (Route) -> Void
+    var editOptions: () -> Void
+    var remove: () -> Void
 
     var body: some View {
         let app = store.app(widget.app)
         WidgetCard(widget: widget, app: app, size: size)
             .environment(\.widgetHost, host)
-            .onTapGesture { follow(widget.tree(size).link) }
-            .contextMenu {
-                let sizes = grid.sizes(of: widget)
-                if sizes.count > 1 {
-                    Picker("Size", selection: Binding(get: { size }, set: { new in withAnimation { store.setSize(new, of: widget, on: page) } })) {
-                        ForEach(sizes, id: \.self) { Label(WidgetSize.title($0), systemImage: WidgetSize.symbol($0)).tag($0) }
-                    }
-                }
-                Button("Hide from \(page.title)", systemImage: "eye.slash") { withAnimation { store.setHidden(widget, on: page, true) } }
-                Button("Edit Widgets…", systemImage: "square.grid.2x2") { store.sheet = .widgets(page.scope) }
-                if let error = widget.error {
-                    Button("Copy What Went Wrong", systemImage: "doc.on.doc") { copy(error) }
-                }
+            .allowsHitTesting(!editing)
+            .contentShape(.rect(cornerRadius: 22, style: .continuous))
+            .onTapGesture { if !editing { follow(widget.tree(size).link) } }
+            .modifier(ContextMenu(enabled: !editing, menu: { menu }, preview: {
+                WidgetCard(widget: widget, app: app, size: size)
+                    .frame(width: grid.span(WidgetSize.cells(size).w), height: grid.span(WidgetSize.cells(size).h))
+            }))
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        let sizes = grid.sizes(of: widget)
+        if sizes.count > 1 {
+            // Unlabelled, as the Home Screen's row of sizes is.
+            Picker(selection: Binding(get: { size }, set: { new in withAnimation(.snappy) { store.resize(kept, to: new, on: page) } })) {
+                ForEach(sizes, id: \.self) { Label(WidgetSize.title($0), systemImage: WidgetSize.symbol($0)).tag($0) }
+            } label: {
+                EmptyView()
             }
+            .pickerStyle(.palette)
+        }
+        if !(widget.options ?? []).isEmpty {
+            Button("Edit Widget", systemImage: "info.circle", action: editOptions)
+        }
+        Button("Edit Home Page", systemImage: "square.grid.3x3") { withAnimation { store.editing = true } }
+        if let error = widget.error {
+            Button("Copy What Went Wrong", systemImage: "doc.on.doc") { copy(error) }
+        }
+        Button("Remove Widget", systemImage: "minus.circle", role: .destructive, action: remove)
     }
 
     private var host: WidgetHost {
@@ -210,6 +406,29 @@ private struct PageWidget: View {
             return
         }
         if case .url(let url) = link { openURL(url) } else if let route = store.route(for: link, app: widget.app, scope: page.scope) { open(route) }
+    }
+}
+
+/// A context menu that's there only while `enabled`, as an arranging page has none; with `preview`, what lifts.
+struct ContextMenu<Menu: View, Preview: View>: ViewModifier {
+    var enabled: Bool
+    @ViewBuilder var menu: Menu
+    @ViewBuilder var preview: Preview
+
+    func body(content: Content) -> some View {
+        if !enabled {
+            content
+        } else if Preview.self == EmptyView.self {
+            content.contextMenu { menu }
+        } else {
+            content.contextMenu { menu } preview: { preview }
+        }
+    }
+}
+
+extension ContextMenu where Preview == EmptyView {
+    init(enabled: Bool, @ViewBuilder menu: () -> Menu) {
+        self.init(enabled: enabled, menu: menu, preview: { EmptyView() })
     }
 }
 
@@ -276,99 +495,6 @@ struct WidgetCard: View {
     }
 }
 
-/// A widget card at `size`, as a phone's page draws it, for lists that show widgets outside a page's grid.
-struct WidgetPreview: View {
-    var widget: WidgetInfo
-    var app: AppInfo?
-    var size: String
-
-    var body: some View {
-        let grid = GridMetrics(width: 348)
-        let cells = WidgetSize.cells(grid.fit(size))
-        WidgetCard(widget: widget, app: app, size: grid.fit(size))
-            .frame(width: grid.span(cells.w), height: grid.span(cells.h))
-            .scaleEffect(0.85, anchor: .topLeading)
-            .frame(width: grid.span(cells.w) * 0.85, height: grid.span(cells.h) * 0.85, alignment: .topLeading)
-    }
-}
-
-/// Every widget there is: this page's, to show, hide and size, and the other pages', which come with their apps.
-struct WidgetsEditor: View {
-    @Environment(Store.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    var scope: String
-
-    var body: some View {
-        let page = store.page(scope)
-        NavigationStack {
-            List {
-                if let page {
-                    let here = store.widgets(on: page, hidden: true)
-                    Section {
-                        ForEach(here) { widget in
-                            VStack(alignment: .leading, spacing: 10) {
-                                Toggle(isOn: Binding(get: { !store.hiddenWidgets.contains("\(scope)/\(widget.id)") },
-                                                     set: { store.setHidden(widget, on: page, !$0) })) {
-                                    Text(widget.title ?? store.app(widget.app)?.label ?? widget.widget)
-                                }
-                                if widget.supported.count > 1 {
-                                    Picker("Size", selection: Binding(get: { store.size(of: widget, on: page) }, set: { store.setSize($0, of: widget, on: page) })) {
-                                        ForEach(widget.supported, id: \.self) { Text(WidgetSize.title($0)).tag($0) }
-                                    }
-                                    .pickerStyle(.segmented)
-                                    .labelsHidden()
-                                }
-                                WidgetPreview(widget: widget, app: store.app(widget.app), size: store.size(of: widget, on: page))
-                                    .allowsHitTesting(false)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        if here.isEmpty { Text("No app on \(page.title) has a widget.").foregroundStyle(.secondary) }
-                    } header: {
-                        Text("On \(page.title)")
-                    } footer: {
-                        Text("Switch one off to hide it from this page on this device.")
-                    }
-                    let elsewhere = elsewhere(than: page)
-                    if !elsewhere.isEmpty {
-                        Section {
-                            ForEach(elsewhere, id: \.0.id) { widget, other in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("On \(other.title)").font(.caption).foregroundStyle(.secondary)
-                                    WidgetPreview(widget: widget, app: store.app(widget.app), size: widget.size ?? "medium").allowsHitTesting(false)
-                                }
-                                .padding(.vertical, 4)
-                            }
-                        } header: {
-                            Text("More Widgets")
-                        } footer: {
-                            Text(store.canArrange(scope)
-                                 ? "A widget comes with its app: add the app to \(page.title) from the App Store to have it here."
-                                 : "A widget comes with its app, which \(page.title)’s admins add.")
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Widgets")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
-        }
-        #if os(macOS)
-        .frame(width: 440, height: 560)
-        #endif
-    }
-
-    /// The widgets of other pages whose apps aren't on this one, once each.
-    private func elsewhere(than page: Page) -> [(WidgetInfo, Page)] {
-        let here = Set(store.widgets(on: page, hidden: true).map(\.id))
-        var seen = here
-        return store.allPages.filter { $0 != page }.flatMap { other in
-            store.widgets(on: other, hidden: true).filter { seen.insert($0.id).inserted }.map { ($0, other) }
-        }
-    }
-}
-
 /// A large rounded icon with its name under it, as a home screen's, with a count in a red badge as its icons have.
 struct IconButton<Icon: View>: View {
     var title: String
@@ -414,7 +540,7 @@ private struct EmptyPage: View {
             Text("Nothing here yet")
                 .font(.headline)
             Text(store.canArrange(page.scope)
-                 ? "Apps you add to \(page.title) show up here, with their widgets above them."
+                 ? "Apps you add to \(page.title) show up here."
                  : "When its admins add apps to \(page.title), they show up here.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

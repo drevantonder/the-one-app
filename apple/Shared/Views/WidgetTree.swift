@@ -13,14 +13,46 @@ struct WidgetInfo: Codable, Sendable, Equatable, Identifiable {
     /// Why its render failed, if it did; `root` then says so for shells that don't know this.
     var error: String?
     var root: WidgetNode
+    /// One line on what it shows, for the widget gallery.
+    var description: String?
+    /// What a person may choose for each copy of it they put on a page.
+    var options: [WidgetOption]?
+    /// Each copy this user put on the page with options of their own, drawn with them, by its id.
+    var placed: [String: Placed]?
+    /// The copy of it on a page this is, once a page has placed it.
+    var instance: String?
 
-    var id: String { "\(app).\(widget)" }
+    struct Placed: Codable, Sendable, Equatable {
+        var sizes: [String: WidgetNode]?
+        var error: String?
+    }
+
+    var id: String { instance ?? "\(app).\(widget)" }
+    /// The widget itself, whichever copy this is.
+    var kind: String { "\(app).\(widget)" }
 
     /// The sizes it draws, smallest first: every size, from a server that renders each widget once.
     var supported: [String] { WidgetSize.all.filter { sizes?[$0] != nil || sizes == nil } }
 
     /// Its tree at `size`, or at its own size if it doesn't draw that one.
     func tree(_ size: String) -> WidgetNode { sizes?[size] ?? root }
+}
+
+/// One of a widget's options: a choice among values, or, with none and a true or false default, a switch.
+struct WidgetOption: Codable, Sendable, Equatable, Identifiable {
+    struct Choice: Codable, Sendable, Equatable, Hashable {
+        var value: JSONValue
+        var title: String
+    }
+    var name: String
+    var title: String
+    var defaultValue: JSONValue?
+    var choices: [Choice]?
+
+    var id: String { name }
+    var isSwitch: Bool { choices == nil && { if case .bool = defaultValue { true } else { false } }() }
+
+    enum CodingKeys: String, CodingKey { case name, title, defaultValue = "default", choices }
 }
 
 /// The sizes of an iPhone's Home Screen widgets, in its grid's cells: small 2×2, medium 4×2, large 4×4, and xl 8×4,

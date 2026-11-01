@@ -45,7 +45,7 @@ struct MenuPanel: View {
                     ScrollView {
                         VStack(spacing: 8) {
                             ForEach(store.allWidgets) { widget in
-                                PanelWidget(widget: widget, inMenuBar: !items.hidden.contains(widget.id), toggle: { items.toggle(widget.id) }, open: open)
+                                PanelWidget(widget: widget, inMenuBar: !items.hidden.contains(widget.kind), toggle: { items.toggle(widget.kind) }, open: open)
                             }
                         }
                         .padding(.horizontal, 10)
@@ -193,7 +193,7 @@ private struct PanelWidget: View {
     /// A web link in the browser; a screen, or the app's first, in the window.
     private func follow(_ link: WidgetLink?) {
         if case .url(let url) = link { NSWorkspace.shared.open(url); return }
-        let page = store.pages.first { store.widgets(on: $0, hidden: true).contains(widget) }
+        let page = store.pages.first { store.widgets(on: $0).contains { $0.kind == widget.kind } }
         if let link, let route = store.route(for: link, app: widget.app, scope: page?.scope) {
             store.selection = route
         } else if let app = store.app(widget.app), app.hasScreens {

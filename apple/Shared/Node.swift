@@ -25,12 +25,29 @@ struct NodeState: Decodable, Sendable, Equatable {
     /// How many requests for a Vault item wait for this user; and as nodes before the Vault said it.
     var vaultRequests: Int?
     var secretRequests: Int?
+    /// How this user arranged each page, by scope; nil from a server too old to keep arrangements.
+    var arrangements: [String: Arrangement]?
 
     var waitingRequests: Int { vaultRequests ?? secretRequests ?? 0 }
 
     enum CodingKeys: String, CodingKey {
-        case config, machine = "me", host = "server", user, install, opens, vaultRequests = "vault_requests", secretRequests = "secret_requests"
+        case config, machine = "me", host = "server", user, install, opens, vaultRequests = "vault_requests", secretRequests = "secret_requests", arrangements
     }
+}
+
+/// How one person arranged a page (SPEC.md `arrange`): its apps and the widgets they put there, in order, and the
+/// apps they took off it.
+struct Arrangement: Codable, Sendable, Equatable {
+    struct Item: Codable, Sendable, Equatable, Hashable {
+        var app: String
+        /// A widget's name, with the id of this copy of it, its size and the options chosen for it; nil for an icon.
+        var widget: String?
+        var id: String?
+        var size: String?
+        var options: [String: JSONValue]?
+    }
+    var items: [Item]
+    var hidden: [String]?
 }
 
 struct Machine: Codable, Sendable, Equatable {
@@ -453,6 +470,12 @@ struct NodeClient: Sendable {
 
     /// The Vault's items on a page this user manages, or on all of them.
     func vault(scope: String? = nil) async throws -> [VaultItem] { try await get("v1/vault", scope.map { ["scope": $0] } ?? [:]) }
+
+    /// Arranges one of this user's pages, for them alone.
+    func arrange(page: String, _ arrangement: Arrangement) async throws {
+        let items = try JSONSerialization.jsonObject(with: JSONEncoder().encode(arrangement.items))
+        try await post("v1/arrange", ["page": page, "items": items, "hidden": arrangement.hidden ?? []])
+    }
 
     /// Makes an item (no `id`) or changes one: fields as `{ name: { value, secret } }`, `apps`, `hosts`, `deleted`.
     @discardableResult

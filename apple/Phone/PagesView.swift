@@ -31,6 +31,12 @@ struct PagesView: View {
             .onChange(of: position) { if let position, position != settingsID, position != store.current { store.current = position } }
             .onChange(of: store.current, initial: true) { if position != store.current { withAnimation(.snappy) { position = store.current } } }
             .safeAreaBar(edge: .bottom) { BottomBar(position: $position).padding(.bottom, 2) }
+            // As on the Home Screen, Edit and Done take the status bar's place, either side of the Dynamic Island.
+            .overlay(alignment: .top) {
+                if store.editing && position != settingsID { EditBar(page: store.page(store.current)).padding(.top, 14).ignoresSafeArea(edges: .top) }
+            }
+            .statusBarHidden(store.editing)
+            .sensoryFeedback(.impact(weight: .medium), trigger: store.editing) { _, new in new }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Route.self) { route in
                 RouteView(route: route, open: open)
@@ -58,7 +64,7 @@ struct PagesView: View {
             switch sheet {
             case .pair: PairSheet()
             case .pages: PagesEditor()
-            case .widgets(let scope): WidgetsEditor(scope: scope)
+            case .addWidget(let scope): AddWidgetSheet(scope: scope)
             case .join, .connectors: EmptyView()
             case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
             }
@@ -69,6 +75,7 @@ struct PagesView: View {
         .onChange(of: store.widgets, initial: true) { Task { await store.saveForHomeScreen() } }
         .onChange(of: scenePhase) {
             if scenePhase == .active { Task { try? await store.refreshState(); await store.refreshApps() } }
+            if scenePhase == .background { store.editing = false }
         }
     }
 
@@ -114,7 +121,7 @@ private struct BottomBar: View {
                     Divider()
                     Button("Edit Pages…", systemImage: "list.bullet") { store.sheet = .pages }
                     if !onSettings {
-                        Button("Edit Widgets…", systemImage: "square.grid.2x2") { store.sheet = .widgets(positions[index]) }
+                        Button("Edit Home Page", systemImage: "square.grid.3x3") { withAnimation { store.editing = true } }
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -176,7 +183,7 @@ extension Store {
     /// those draw again.
     func saveForHomeScreen() async {
         let items = pages.flatMap { page in
-            widgets(on: page, hidden: true).map { w in
+            widgets(on: page).map { w in
                 WidgetCache.Item(app: w.app, widget: w.widget, scope: page.scope, page: page.title, title: w.title ?? app(w.app)?.label ?? w.widget,
                                  icon: symbol(app(w.app)?.icon), error: w.error, root: w.root, sizes: w.sizes)
             }

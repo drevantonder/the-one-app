@@ -26,7 +26,7 @@ final class WidgetItems {
     /// Opens an app's first screen, or the screen a link names, in the window.
     func open(_ app: String, link: WidgetLink? = nil) {
         guard let store, let info = store.app(app) else { return }
-        let page = store.pages.first { store.apps(on: $0).contains(info) || store.widgets(on: $0, hidden: true).contains { $0.app == app } }
+        let page = store.pages.first { store.apps(on: $0).contains(info) || store.widgets(on: $0).contains { $0.app == app } }
         store.selection = link.flatMap { store.route(for: $0, app: app, scope: page?.scope) } ?? store.open(info, from: page)
         openWindow?()
         NSApp.activate()
@@ -44,14 +44,14 @@ final class WidgetItems {
 
     private func update() {
         guard let store else { return }
-        let shown = store.allWidgets.filter { !hidden.contains($0.id) }
-        for (id, item) in items where !shown.contains(where: { $0.id == id }) {
+        let shown = store.allWidgets.filter { !hidden.contains($0.kind) }
+        for (id, item) in items where !shown.contains(where: { $0.kind == id }) {
             item.remove()
             items[id] = nil
         }
         for widget in shown {
-            let item = items[widget.id] ?? WidgetItem(id: widget.id, owner: self)
-            items[widget.id] = item
+            let item = items[widget.kind] ?? WidgetItem(id: widget.kind, owner: self)
+            items[widget.kind] = item
             item.show(widget, app: store.app(widget.app))
         }
     }

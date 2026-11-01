@@ -12,6 +12,27 @@ struct Page: Identifiable, Hashable {
     var group: String? { scope.hasPrefix("group:") ? String(scope.dropFirst(6)) : nil }
 }
 
+/// One thing on a page's grid: an app's icon, or a widget its person put there.
+enum PageItem: Identifiable, Equatable {
+    case app(AppInfo)
+    case widget(WidgetInfo, Arrangement.Item)
+
+    var id: String {
+        switch self {
+        case .app(let app): "app:\(app.name)"
+        case .widget(_, let item): "widget:\(item.id ?? "")"
+        }
+    }
+
+    /// How an arrangement keeps it.
+    var kept: Arrangement.Item {
+        switch self {
+        case .app(let app): Arrangement.Item(app: app.name)
+        case .widget(_, let item): item
+        }
+    }
+}
+
 /// Where a shell's navigation goes: a page, an app's screen, or one of the shell's own views.
 enum Route: Hashable, Codable {
     case page(String)
@@ -79,8 +100,8 @@ enum Sheet: Hashable, Identifiable {
     /// A request for a Vault item, from a `<cli>://vault?id=…&scope=…` link (or `<cli>://secret?…`, as before), or an
     /// app screen's `one.vault(need)`.
     case vault(scope: String, id: String)
-    /// A page's widgets, to show, hide and size, with every other widget there is.
-    case widgets(String)
+    /// The widget gallery, adding to a page: its scope.
+    case addWidget(String)
     /// A page's Connectors folder, on a Mac: its scope.
     case connectors(String)
 
@@ -120,6 +141,7 @@ final class Store {
         didSet {
             guard selection != oldValue else { return }
             path = []
+            editing = false
             UserDefaults.standard.set(selection.flatMap { try? JSONEncoder().encode($0) }, forKey: "selection")
         }
     }
@@ -162,10 +184,10 @@ final class Store {
         var pages = [Page(scope: "user", title: String(localized: "You"),
                           subtitle: devices == 1 ? String(localized: "Just you · 1 device") : String(localized: "Just you · \(devices) devices"))]
         pages += mine.map { group in
-            Page(scope: "group:\(group.id)", title: group.name, subtitle: "\(people(group.members.count)) · \(arrangedBy(group.admins))")
+            Page(scope: "group:\(group.id)", title: group.name, subtitle: "\(people(group.members.count)) · \(appsChosenBy(group.admins))")
         }
         pages.append(Page(scope: "global", title: String(localized: "Everyone"),
-                          subtitle: "\(people(install.users.count)) · \(arrangedBy(install.users.filter(\.admin).map(\.id)))"))
+                          subtitle: "\(people(install.users.count)) · \(appsChosenBy(install.users.filter(\.admin).map(\.id)))"))
         return pages
     }
 
@@ -176,14 +198,14 @@ final class Store {
 
     private func people(_ n: Int) -> String { n == 1 ? String(localized: "1 person") : String(localized: "\(n) people") }
 
-    private func arrangedBy(_ admins: [String]) -> String {
+    private func appsChosenBy(_ admins: [String]) -> String {
         let names = admins.sorted { ($0 == me?.id ? 1 : 0, userName($0)) < ($1 == me?.id ? 1 : 0, userName($1)) }
             .map { $0 == me?.id ? String(localized: "you") : userName($0) }
         switch names.count {
-        case 0: return String(localized: "arranged by admins")
-        case 1: return String(localized: "arranged by \(names[0])")
-        case 2: return String(localized: "arranged by \(names[0]) and \(names[1])")
-        default: return String(localized: "arranged by \(names.count) admins")
+        case 0: return String(localized: "apps chosen by admins")
+        case 1: return String(localized: "apps chosen by \(names[0])")
+        case 2: return String(localized: "apps chosen by \(names[0]) and \(names[1])")
+        default: return String(localized: "apps chosen by \(names.count) admins")
         }
     }
 
@@ -242,34 +264,161 @@ final class Store {
         badges[page.scope]?[app].flatMap { $0 > 0 ? $0 : nil }
     }
 
-    /// A page's widgets: those of the apps installed in its scope, screen or not, but for those hidden from it.
-    func widgets(on page: Page, hidden: Bool = false) -> [WidgetInfo] {
+    /// Every widget a page could show: those of the apps installed in its scope, screen or not, at their defaults.
+    /// The widget gallery offers them; a page shows those its person put there (`items(on:)`).
+    func widgets(on page: Page) -> [WidgetInfo] {
         let here = Set(apps.filter { $0.scopes.contains(page.scope) }.map(\.name))
-        return (widgets[page.scope] ?? []).filter { here.contains($0.app) && (hidden || !hiddenWidgets.contains("\(page.scope)/\($0.id)")) }
+        return (widgets[page.scope] ?? []).filter { here.contains($0.app) }
+    }
+
+    // MARK: Arranging
+
+    /// How this user arranged each page, as their server last said, with what changed here since that it hasn't yet.
+    private(set) var arrangements: [String: Arrangement] = [:]
+    private var unsaved: [String: Arrangement] = [:]
+    private var saving: Task<Void, Never>?
+    /// Whether the pages are being arranged: everything jiggles, on every page, as on the Home Screen.
+    var editing = false
+    /// Why the last change to a page didn't save, until someone sees it.
+    var arrangeError: String?
+
+    /// What a page shows, in its person's order: the widgets they put there and its apps' icons, those installed
+    /// since they last arranged it at the end, without those they took off it. A page they never arranged shows its
+    /// apps and no widgets.
+    func items(on page: Page) -> [PageItem] {
+        let apps = apps(on: page), widgets = widgets(on: page)
+        guard let arrangement = arrangements[page.scope] else { return apps.map(PageItem.app) }
+        var out: [PageItem] = [], seen = Set<String>()
+        for item in arrangement.items {
+            if let name = item.widget {
+                guard let id = item.id, let widget = widgets.first(where: { $0.app == item.app && $0.widget == name }), seen.insert("widget:\(id)").inserted else { continue }
+                out.append(.widget(placed(widget, item), item))
+            } else if let app = apps.first(where: { $0.name == item.app }), seen.insert("app:\(app.name)").inserted {
+                out.append(.app(app))
+            }
+        }
+        let hidden = Set(arrangement.hidden ?? [])
+        return out + apps.filter { !seen.contains("app:\($0.name)") && !hidden.contains($0.name) }.map(PageItem.app)
+    }
+
+    /// A widget as one copy of it on a page draws: at its size, with the options chosen for it.
+    private func placed(_ widget: WidgetInfo, _ item: Arrangement.Item) -> WidgetInfo {
+        var w = widget
+        w.instance = item.id
+        if let size = item.size, widget.supported.contains(size) { w.size = size }
+        if let mine = item.id.flatMap({ widget.placed?[$0] }) {
+            if let sizes = mine.sizes {
+                w.sizes = (w.sizes ?? [:]).merging(sizes) { $1 }
+                if let tree = sizes[w.size ?? ""] ?? sizes.values.first { w.root = tree }
+            }
+            if let error = mine.error { w.error = error }
+        }
+        return w
+    }
+
+    /// The apps this user took off a page, which stay installed there.
+    func hiddenApps(on page: Page) -> [AppInfo] {
+        (arrangements[page.scope]?.hidden ?? []).compactMap(app).filter { $0.hasScreens && $0.scopes.contains(page.scope) }
+    }
+
+    /// Keeps a page in this order.
+    func arrange(_ items: [PageItem], on page: Page) {
+        save(Arrangement(items: items.map(\.kept), hidden: arrangements[page.scope]?.hidden ?? []), on: page.scope)
+    }
+
+    /// Takes a widget off a page, or an app's icon: the app stays installed there.
+    func remove(_ item: PageItem, from page: Page) {
+        var hidden = arrangements[page.scope]?.hidden ?? []
+        if case .app(let app) = item, !hidden.contains(app.name) { hidden.append(app.name) }
+        save(Arrangement(items: items(on: page).filter { $0 != item }.map(\.kept), hidden: hidden), on: page.scope)
+    }
+
+    /// Puts an app taken off a page back, at its end.
+    func show(_ app: AppInfo, on page: Page) {
+        let hidden = (arrangements[page.scope]?.hidden ?? []).filter { $0 != app.name }
+        save(Arrangement(items: items(on: page).map(\.kept) + [Arrangement.Item(app: app.name)], hidden: hidden), on: page.scope)
+    }
+
+    /// Adds a copy of a widget to a page, at `size`, in the first place it fits.
+    func add(_ widget: WidgetInfo, size: String, to page: Page) {
+        let item = Arrangement.Item(app: widget.app, widget: widget.widget, id: Self.newID(), size: size)
+        save(Arrangement(items: items(on: page).map(\.kept) + [item], hidden: arrangements[page.scope]?.hidden ?? []), on: page.scope)
+    }
+
+    func resize(_ item: Arrangement.Item, to size: String, on page: Page) {
+        change(item, on: page) { $0.size = size }
+    }
+
+    /// Sets one of a widget's options on a page, or with nil puts back its default; the widget draws again with it.
+    func setOption(_ name: String, _ value: JSONValue?, of item: Arrangement.Item, on page: Page) {
+        change(item, on: page) { item in
+            var options = item.options ?? [:]
+            options[name] = value
+            item.options = options.isEmpty ? nil : options
+        }
+    }
+
+    private func change(_ item: Arrangement.Item, on page: Page, _ edit: (inout Arrangement.Item) -> Void) {
+        let items = items(on: page).map(\.kept).map { kept in
+            guard kept.id != nil, kept.id == item.id else { return kept }
+            var changed = kept
+            edit(&changed)
+            return changed
+        }
+        save(Arrangement(items: items, hidden: arrangements[page.scope]?.hidden ?? []), on: page.scope, redraw: items.contains { $0.id == item.id && $0.options != nil })
+    }
+
+    /// Keeps an arrangement here at once, then saves it, after any saving before it, so the latest is the one kept.
+    private func save(_ arrangement: Arrangement, on scope: String, redraw: Bool = false) {
+        arrangements[scope] = arrangement
+        unsaved[scope] = arrangement
+        let before = saving
+        saving = Task {
+            await before?.value
+            do {
+                try await node.arrange(page: scope, arrangement)
+            } catch {
+                arrangeError = error.localizedDescription
+            }
+            if unsaved[scope] == arrangement { unsaved[scope] = nil }
+            if redraw { await refreshWidgets() }
+        }
+    }
+
+    static func newID() -> String { String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10)).lowercased() }
+
+    /// Whether this device showed pages before each person arranged their own, when every page showed all its apps'
+    /// widgets but those hidden on the device: then the first time it finds a page not arranged yet, it keeps the
+    /// widgets it showed there, at the sizes it showed them, as if chosen.
+    private var showedPagesBefore = !UserDefaults.standard.bool(forKey: "pagesArranged")
+        && ["selection", "widgetSizes", "pageHiddenWidgets"].contains { UserDefaults.standard.object(forKey: $0) != nil }
+    /// The pages whose widgets came from their server, the last time they were asked for.
+    private var loadedWidgets = Set<String>()
+
+    private func keepWidgetsShownBefore() {
+        guard showedPagesBefore, state?.arrangements != nil else { return }
+        let defaults = UserDefaults.standard
+        let hidden = Set(defaults.stringArray(forKey: "pageHiddenWidgets") ?? [])
+        let sizes = defaults.dictionary(forKey: "widgetSizes") as? [String: String] ?? [:]
+        var done = Set(defaults.stringArray(forKey: "pagesKept") ?? [])
+        for page in allPages where !done.contains(page.scope) && loadedWidgets.contains(page.scope) {
+            done.insert(page.scope)
+            let shown = widgets(on: page).filter { !hidden.contains("\(page.scope)/\($0.kind)") }
+            guard arrangements[page.scope] == nil, !shown.isEmpty else { continue }
+            let items = shown.map { w in
+                Arrangement.Item(app: w.app, widget: w.widget, id: Self.newID(), size: sizes["\(page.scope)/\(w.kind)"].flatMap { w.supported.contains($0) ? $0 : nil } ?? w.size)
+            } + apps(on: page).map { Arrangement.Item(app: $0.name) }
+            save(Arrangement(items: items, hidden: []), on: page.scope)
+        }
+        defaults.set(Array(done), forKey: "pagesKept")
+        if allPages.allSatisfy({ done.contains($0.scope) }) {
+            showedPagesBefore = false
+            defaults.set(true, forKey: "pagesArranged")
+            for key in ["pageHiddenWidgets", "widgetSizes", "pagesKept"] { defaults.removeObject(forKey: key) }
+        }
     }
 
     // MARK: Widgets
-
-    /// The widgets someone hid from a page, and the sizes they gave others, on this machine, as `<scope>/<app>.<widget>`.
-    private(set) var hiddenWidgets = Set(UserDefaults.standard.stringArray(forKey: "pageHiddenWidgets") ?? [])
-    private(set) var widgetSizes = UserDefaults.standard.dictionary(forKey: "widgetSizes") as? [String: String] ?? [:]
-
-    /// The size someone gave a widget on a page, if it still draws that size; else its own.
-    func size(of widget: WidgetInfo, on page: Page) -> String {
-        let chosen = widgetSizes["\(page.scope)/\(widget.id)"]
-        return chosen.flatMap { widget.supported.contains($0) ? $0 : nil } ?? widget.size ?? "medium"
-    }
-
-    func setSize(_ size: String, of widget: WidgetInfo, on page: Page) {
-        widgetSizes["\(page.scope)/\(widget.id)"] = size
-        UserDefaults.standard.set(widgetSizes, forKey: "widgetSizes")
-    }
-
-    func setHidden(_ widget: WidgetInfo, on page: Page, _ hidden: Bool) {
-        let id = "\(page.scope)/\(widget.id)"
-        if hidden { hiddenWidgets.insert(id) } else { hiddenWidgets.remove(id) }
-        UserDefaults.standard.set(Array(hiddenWidgets), forKey: "pageHiddenWidgets")
-    }
 
     /// Runs an operation a widget's button or toggle names, as this user, then draws the widgets again. The error's
     /// text, if it failed.
@@ -301,10 +450,12 @@ final class Store {
         }
     }
 
-    /// Every page's widgets, once each: for the menu bar and the home-screen widget.
+    /// The widgets on every page, each widget once: for the menu bar.
     var allWidgets: [WidgetInfo] {
         var seen = Set<String>()
-        return pages.flatMap { widgets(on: $0) }.filter { seen.insert($0.id).inserted }
+        return pages.flatMap { items(on: $0) }.compactMap { item -> WidgetInfo? in
+            if case .widget(let widget, _) = item { widget } else { nil }
+        }.filter { seen.insert($0.kind).inserted }
     }
 
     /// Opens an app's first screen, telling it which page it came from.
@@ -409,6 +560,7 @@ final class Store {
         let arrived = self.state?.install?.joining != false && state.install?.joining == false
         let regrouped = state.user != self.state?.user || state.install?.groups != self.state?.install?.groups
         self.state = state
+        arrangements = (state.arrangements ?? [:]).merging(unsaved) { $1 }
         phase = .ready
         if first { await renameIfHostname() }
         if first || arrived || apps.isEmpty || regrouped { await refreshApps() }
@@ -474,9 +626,13 @@ final class Store {
         var fresh: [String: [WidgetInfo]] = [:]
         await withTaskGroup(of: (String, [WidgetInfo]?).self) { tasks in
             for page in allPages { tasks.addTask { (page.scope, try? await node.widgets(scope: page.scope)) } }
-            for await (scope, widgets) in tasks { fresh[scope] = widgets ?? self.widgets[scope] ?? [] }
+            for await (scope, widgets) in tasks {
+                fresh[scope] = widgets ?? self.widgets[scope] ?? []
+                if widgets != nil { loadedWidgets.insert(scope) }
+            }
         }
         if fresh != widgets { widgets = fresh }
+        keepWidgetsShownBefore()
         scheduleRedraw()
         var counts: [String: [String: Int]] = [:]
         for page in allPages { counts[page.scope] = (try? await node.badges(scope: page.scope)) ?? [:] }
