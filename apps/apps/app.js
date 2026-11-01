@@ -61,9 +61,9 @@ async function described(ctx, bundle) {
   return { title: field("title"), icon: field("icon"), color: field("color"), description: field("description") };
 }
 
-/// Whether an app only connects accounts (SPEC.md "Connected apps"): it has accounts, sign_in and sign_out, and a
-/// settings screen but no main one. What it says about itself where it's installed for the caller; elsewhere, its code.
-async function connects(ctx, a) {
+/// Whether an app is a connector (SPEC.md "Connectors"): it has accounts, sign_in and sign_out, and a settings screen
+/// but no main one. What it says about itself where it's installed for the caller; elsewhere, its code.
+async function isConnector(ctx, a) {
   const has = (list, name) => (list || []).some((x) => x.name === name);
   if (a.ops) return has(a.ops, "accounts") && has(a.ops, "sign_in") && has(a.ops, "sign_out") && !has(a.screens, "main");
   const bundle = a.bundle || a.built_in;
@@ -154,13 +154,15 @@ export default {
   ops: {
     list: {
       reads: true,
-      description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; owner, where it's installed (that you can see), forks, and the places you may add it to. Each says whether it's connected: it only connects an account (Gmail, say), and shells keep it in each page's Connected Apps folder. With connected, only those.",
-      input: { type: "object", properties: { connected: { type: "boolean", description: "only connected apps" } } },
-      async run(ctx, { connected } = {}) {
+      description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; owner, where it's installed (that you can see), forks, and the places you may add it to. Each says whether it's a connector: it only connects an account (Gmail, say), and shells keep it in each page's Connectors folder. With connector, only those.",
+      // `connected` is connector's old name, which shells built before still send.
+      input: { type: "object", properties: { connector: { type: "boolean", description: "only connectors" }, connected: { type: "boolean", description: "the same as connector" } } },
+      async run(ctx, { connector, connected } = {}) {
+        const only = connector ?? connected;
         const name = namer(ctx);
-        const all = (await ctx.catalog()).filter((a) => !a.deleted || !connected);
-        const linked = await Promise.all(all.map((a) => connects(ctx, a).catch(() => false)));
-        const apps = await Promise.all(all.filter((a, i) => linked[i] || !connected).map(async (a) => {
+        const all = (await ctx.catalog()).filter((a) => !a.deleted || !only);
+        const connectors = await Promise.all(all.map((a) => isConnector(ctx, a).catch(() => false)));
+        const apps = await Promise.all(all.filter((a, i) => connectors[i] || !only).map(async (a) => {
           const added = a.deploys > 0;
           const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
           return {
@@ -169,7 +171,8 @@ export default {
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], drivers: [] },
             built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
-            mine: mine(ctx, a.owner), deleted: a.deleted || null, connected: linked[all.indexOf(a)],
+            mine: mine(ctx, a.owner), deleted: a.deleted || null, connector: connectors[all.indexOf(a)],
+            connected: connectors[all.indexOf(a)], // connector's old name, for whatever read it before
           };
         }));
         apps.sort((a, b) => a.title.localeCompare(b.title));
@@ -287,17 +290,17 @@ export default {
   .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
   .tag { font-size: 12px; padding: 1px 7px; border-radius: 10px; background: var(--line); color: var(--muted); }
 </style>
-<div class="segmented" id="tabs"><button data-tab="apps">Apps</button><button data-tab="connected">Connected Apps</button><button data-tab="drivers">Drivers</button></div>
+<div class="segmented" id="tabs"><button data-tab="apps">Apps</button><button data-tab="connectors">Connectors</button><button data-tab="drivers">Drivers</button></div>
 <p id="about" class="muted small" style="margin:0 4px 10px" hidden></p>
 <input id="search" class="search" type="search" placeholder="Find an app" autocomplete="off">
 <div id="list"></div>
 <script>
 ${install}
-// Apps that only connect an account would bury the rest, so they get their own tab. A shell's Add a connected app
-// opens it with { connected: true }, on that tab.
-let tab = one.params.connected ? "connected" : one.params.drivers ? "drivers" : "apps";
+// Connectors would bury the rest, so they get their own tab. A shell's Add a Connector opens it with { connector: true }
+// ({ connected: true } from shells built before), on that tab.
+let tab = one.params.connector || one.params.connected ? "connectors" : one.params.drivers ? "drivers" : "apps";
 const ABOUT = {
-  connected: "Apps that connect an account, for you and your agents. Add one to a page, then sign in from that page’s Connected Apps.",
+  connectors: "Connectors link an account for you and your agents. Add one to a page, then sign in from that page’s Connectors.",
   drivers: "Drivers are the native code apps use: a shell, a local model, WhatsApp’s linked phone, a desktop’s browser. Each runs on the servers whose owners installed it.",
 };
 function pick(t) {
@@ -362,7 +365,7 @@ function drawDrivers(q) {
 function draw() {
   const q = document.getElementById("search").value.trim().toLowerCase();
   if (tab === "drivers") return drawDrivers(q);
-  const found = apps.filter((a) => !!a.connected === (tab === "connected") && (!q || [a.title, a.name, a.description || ""].some((t) => t.toLowerCase().includes(q))));
+  const found = apps.filter((a) => !!a.connector === (tab === "connectors") && (!q || [a.title, a.name, a.description || ""].some((t) => t.toLowerCase().includes(q))));
   document.getElementById("list").innerHTML = found.length
     ? section(BUILT_IN, found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted))
     : '<div class="empty">No apps match.<div class="small" style="margin-top:6px">Make your own: put an app.js in a folder and run <code>' + one.esc(CLI) + ' deploy</code> on it.</div></div>';

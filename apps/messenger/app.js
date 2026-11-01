@@ -1,6 +1,6 @@
 // Messenger: the person's Facebook Messenger, read through messenger.com in a desktop's browser. The messenger driver
 // drives the browser, on each server whose owner installed it; this app is what people and agents use, and a
-// connected app (SPEC.md "Connected apps"): each account is a browser profile signed in to Messenger.
+// connector (SPEC.md "Connectors"): each account is a browser profile signed in to Messenger.
 
 /// Runs one of the messenger driver's operations, wherever it runs for the caller. When none of their servers runs it,
 /// says what's needed instead of how the call failed.
@@ -35,7 +35,7 @@ export default {
       reads: true,
       description: "The browser profiles Messenger reads, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
       input: {"properties": {}, "type": "object"},
-      // A connected app lists no accounts, rather than failing, where no server runs its driver; its settings say why.
+      // A connector lists no accounts, rather than failing, where no server runs its driver; its settings say why.
       run: async (ctx, input) => ((await running(ctx)).length ? driver(ctx, "accounts", input) : []),
     },
     chats: {

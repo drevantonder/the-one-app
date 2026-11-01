@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// What touching and holding an app's icon offers, and its ⋯ menu in Connected Apps: its settings, its page in the App
+/// What touching and holding an app's icon offers, and its ⋯ menu in Connectors: its settings, its page in the App
 /// Store, taking it off this page, and deleting it, for its owners.
 struct AppActions: View {
     @Environment(Store.self) private var store
@@ -62,7 +62,7 @@ private struct DeleteAppDialog: ViewModifier {
     }
 }
 
-/// A page's Connected Apps folder, as an iOS folder's icon: its apps' icons, small, nine to a page, on frosted glass.
+/// A page's Connectors folder, as an iOS folder's icon: its apps' icons, small, nine to a page, on frosted glass.
 struct FolderTile: View {
     var apps: [AppInfo]
     var size: CGFloat
@@ -85,30 +85,30 @@ struct FolderTile: View {
     }
 }
 
-/// One account of a connected app, as its `accounts` gives it.
-private struct ConnectedAccount: Decodable, Hashable, Identifiable {
+/// One account of a connector, as its `accounts` gives it.
+private struct ConnectorAccount: Decodable, Hashable, Identifiable {
     var account: String
     var ok: Bool
     var why: String?
     var id: String { account }
 }
 
-/// A page's Connected Apps, opened: a section per app, with its icon, title and ⋯ menu, then its accounts, each with a
-/// dot saying whether it's signed in, then Add Account; and at the bottom, Add a Connected App. Swipe an account, or
-/// press Edit, to sign it out.
-struct ConnectedAppsView: View {
+/// A page's Connectors, opened: a section per app, with its icon, title and ⋯ menu, then its accounts, each with a dot
+/// saying whether it's signed in, then Add Account; and at the bottom, Add a Connector. Swipe an account, or press
+/// Edit, to sign it out.
+struct ConnectorsView: View {
     @Environment(Store.self) private var store
     var page: Page
     var open: (Route) -> Void
     /// Each app's accounts, or why they couldn't be listed; none yet while loading.
-    @State private var accounts: [String: Result<[ConnectedAccount], NodeError>] = [:]
+    @State private var accounts: [String: Result<[ConnectorAccount], NodeError>] = [:]
     @State private var editing = false
-    @State private var signingOut: (app: AppInfo, account: ConnectedAccount)?
+    @State private var signingOut: (app: AppInfo, account: ConnectorAccount)?
     @State private var deleting: AppInfo?
     @State private var error: String?
 
     var body: some View {
-        let apps = store.connectedApps(on: page)
+        let apps = store.connectors(on: page)
         List {
             ForEach(apps) { app in
                 Section {
@@ -125,12 +125,12 @@ struct ConnectedAppsView: View {
                 }
             }
             if apps.isEmpty {
-                Text("No app on \(page.title) connects an account yet.").foregroundStyle(.secondary)
+                Text("No connectors on \(page.title) yet.").foregroundStyle(.secondary)
             }
-            if store.canArrange(page.scope), let route = store.connectedStoreRoute {
+            if store.canArrange(page.scope), let route = store.connectorStoreRoute {
                 Section {
                     Button { open(route) } label: {
-                        Label("Add a Connected App", systemImage: "plus.app")
+                        Label("Add a Connector", systemImage: "plus.app")
                             .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.borderless)
@@ -140,7 +140,7 @@ struct ConnectedAppsView: View {
         #if os(iOS)
         .listStyle(.insetGrouped)
         #endif
-        .navigationTitle("Connected Apps")
+        .navigationTitle("Connectors")
         .navigationSubtitle(subtitle(apps.count))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -166,14 +166,14 @@ struct ConnectedAppsView: View {
         .deleteAppDialog($deleting, error: $error)
     }
 
-    /// "For you only · 4 apps": whose page it is, and how many apps it connects.
+    /// "For you only · 4 connectors": whose page it is, and how many connectors it has.
     private func subtitle(_ count: Int) -> String {
         let whose = switch page.scope {
         case "user": String(localized: "For you only")
         case "global": String(localized: "For everyone")
         default: String(localized: "For \(page.title)")
         }
-        return count == 1 ? String(localized: "\(whose) · 1 app") : String(localized: "\(whose) · \(count) apps")
+        return count == 1 ? String(localized: "\(whose) · 1 connector") : String(localized: "\(whose) · \(count) connectors")
     }
 
     private func header(_ app: AppInfo) -> some View {
@@ -220,7 +220,7 @@ struct ConnectedAppsView: View {
         }
     }
 
-    private func row(_ app: AppInfo, _ account: ConnectedAccount) -> some View {
+    private func row(_ app: AppInfo, _ account: ConnectorAccount) -> some View {
         HStack(spacing: 12) {
             if editing {
                 Button { signingOut = (app, account) } label: {
@@ -256,17 +256,17 @@ struct ConnectedAppsView: View {
     }
 
     private func load(_ apps: [AppInfo]) async {
-        await withTaskGroup(of: (String, Result<[ConnectedAccount], NodeError>).self) { tasks in
+        await withTaskGroup(of: (String, Result<[ConnectorAccount], NodeError>).self) { tasks in
             for app in apps {
                 let node = store.node
                 tasks.addTask {
                     do {
                         let data = try await node.call(app: app.name, op: "accounts", input: Data("{}".utf8))
-                        return (app.name, .success(try JSONDecoder().decode([ConnectedAccount].self, from: data)))
+                        return (app.name, .success(try JSONDecoder().decode([ConnectorAccount].self, from: data)))
                     } catch let failure as NodeError {
                         return (app.name, .failure(failure))
                     } catch is DecodingError {
-                        return (app.name, .failure(NodeError("\(app.label) doesn’t list its accounts as connected apps do yet.")))
+                        return (app.name, .failure(NodeError("\(app.label) doesn’t list its accounts as connectors do yet.")))
                     } catch {
                         return (app.name, .failure(NodeError(error.localizedDescription)))
                     }
@@ -276,7 +276,7 @@ struct ConnectedAppsView: View {
         }
     }
 
-    private func signOut(_ app: AppInfo, _ account: ConnectedAccount) async {
+    private func signOut(_ app: AppInfo, _ account: ConnectorAccount) async {
         do {
             _ = try await store.node.call(app: app.name, op: "sign_out", input: try JSONEncoder().encode(["account": account.account]))
         } catch {

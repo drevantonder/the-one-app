@@ -19,8 +19,8 @@ enum Route: Hashable, Codable {
     case settings
     case setting(Setting)
     case group(String)
-    /// A page's Connected Apps folder, opened: its scope.
-    case connected(String)
+    /// A page's Connectors folder, opened: its scope.
+    case connectors(String)
 }
 
 struct ScreenRoute: Hashable, Codable {
@@ -77,8 +77,8 @@ enum Sheet: Hashable, Identifiable {
     case secret(scope: String, id: String)
     /// A page's widgets, to show, hide and size, with every other widget there is.
     case widgets(String)
-    /// A page's Connected Apps folder, on a Mac: its scope.
-    case connected(String)
+    /// A page's Connectors folder, on a Mac: its scope.
+    case connectors(String)
 
     var id: Self { self }
 }
@@ -196,9 +196,9 @@ final class Store {
         apps.filter { $0.hasScreens && $0.scopes.contains(page.scope) }
     }
 
-    /// A page's connected apps, which its Connected Apps folder holds instead of each having an icon.
-    func connectedApps(on page: Page) -> [AppInfo] {
-        apps.filter { $0.isConnected && $0.scopes.contains(page.scope) }
+    /// A page's connectors, which its Connectors folder holds instead of each having an icon.
+    func connectors(on page: Page) -> [AppInfo] {
+        apps.filter { $0.isConnector && $0.scopes.contains(page.scope) }
             .sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
     }
 
@@ -217,10 +217,10 @@ final class Store {
         return .screen(ScreenRoute(app: name, screen: "app", params: Self.params(["app": app.name])))
     }
 
-    /// The App Store, showing only connected apps, if the install's store app is here.
-    var connectedStoreRoute: Route? {
+    /// The App Store's Connectors tab, if the install's store app is here.
+    var connectorStoreRoute: Route? {
         guard let name = config?.store, app(name)?.hasScreens == true else { return nil }
-        return .screen(ScreenRoute(app: name, params: Self.params(["connected": true])))
+        return .screen(ScreenRoute(app: name, params: Self.params(["connector": true])))
     }
 
     /// An app's settings screen, opened from a page; with `add`, starting to sign in another account.
@@ -482,10 +482,10 @@ final class Store {
     private func stillThere(_ route: Route) -> Route? {
         switch route {
         case .page(let scope): pages.contains { $0.scope == scope } ? route : nil
-        // A screen the app no longer has (Gmail's main, once it was a connected app) isn't; one not described yet may be.
+        // A screen the app no longer has (Gmail's main, once it was a connector) isn't; one not described yet may be.
         case .screen(let screen): app(screen.app).map { $0.screens == nil || $0.has(screen: screen.screen) } == true ? route : nil
         case .group(let id): install?.group(id) != nil ? route : nil
-        case .connected(let scope): page(scope) != nil ? route : nil
+        case .connectors(let scope): page(scope) != nil ? route : nil
         case .settings, .setting: route
         }
     }

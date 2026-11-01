@@ -161,9 +161,9 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     var label: String { title ?? name }
     /// Only apps with a `main` screen get an icon; the rest still give widgets and tools.
     var hasScreens: Bool { has(screen: "main") }
-    /// A connected app (SPEC.md "Connected apps"): it only connects accounts, so it goes in a page's Connected Apps
-    /// folder, with its accounts, rather than having an icon of its own.
-    var isConnected: Bool {
+    /// A connector (SPEC.md "Connectors"): it only connects accounts, so it goes in a page's Connectors folder, with
+    /// its accounts, rather than having an icon of its own.
+    var isConnector: Bool {
         !hasScreens && ["accounts", "sign_in", "sign_out"].allSatisfy { op in ops?.contains { $0.name == op } == true }
     }
     func has(screen: String) -> Bool { screens?.contains { $0.name == screen } == true }

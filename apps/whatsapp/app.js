@@ -1,6 +1,6 @@
 // WhatsApp: the person's WhatsApp accounts, each a phone linked to one of their servers as WhatsApp Desktop is linked.
 // The whatsapp driver links the phone and keeps its messages, on each server whose owner installed it; this app is
-// what people and agents use, and a connected app (SPEC.md "Connected apps").
+// what people and agents use, and a connector (SPEC.md "Connectors").
 
 /// Runs one of the whatsapp driver's operations, wherever it runs for the caller. When none of their servers runs it,
 /// says what's needed instead of how the call failed.
@@ -35,7 +35,7 @@ export default {
       reads: true,
       description: "The WhatsApp accounts linked on any of your servers, this one's first: each { account, ok, server }, with why when ok is false.",
       input: {"properties": {}, "type": "object"},
-      // A connected app lists no accounts, rather than failing, where no server runs its driver; its settings say why.
+      // A connector lists no accounts, rather than failing, where no server runs its driver; its settings say why.
       run: async (ctx, input) => ((await running(ctx)).length ? driver(ctx, "accounts", input) : []),
     },
     status: {

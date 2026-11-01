@@ -22,13 +22,13 @@ struct Sidebar: View {
                             .accessibilityLabel(app.label)
                             .tag(store.open(app, from: page))
                     }
-                    let connected = store.connectedApps(on: page)
-                    if !connected.isEmpty {
-                        FolderTile(apps: connected, size: 24)
+                    let connectors = store.connectors(on: page)
+                    if !connectors.isEmpty {
+                        FolderTile(apps: connectors, size: 24)
                             .frame(maxWidth: .infinity)
-                            .help("Connected Apps")
-                            .accessibilityLabel("Connected Apps")
-                            .tag(Route.connected(page.scope))
+                            .help("Connectors")
+                            .accessibilityLabel("Connectors")
+                            .tag(Route.connectors(page.scope))
                     }
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {
@@ -67,15 +67,15 @@ struct Sidebar: View {
                         .badge(store.appBadge(app.name, on: page) ?? 0)
                         .tag(store.open(app, from: page))
                     }
-                    // Its connected apps, in one row, as the page has them in one folder.
-                    let connected = store.connectedApps(on: page)
-                    if !connected.isEmpty {
+                    // Its connectors, in one row, as the page has them in one folder.
+                    let connectors = store.connectors(on: page)
+                    if !connectors.isEmpty {
                         Label {
-                            Text("Connected Apps")
+                            Text("Connectors")
                         } icon: {
-                            FolderTile(apps: connected, size: 20)
+                            FolderTile(apps: connectors, size: 20)
                         }
-                        .tag(Route.connected(page.scope))
+                        .tag(Route.connectors(page.scope))
                     }
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {

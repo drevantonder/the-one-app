@@ -217,7 +217,7 @@ export default {
   },
 };
 
-/// The settings screen a shell opens for a connected app (SPEC.md "Connected apps"): the accounts signed in, each with
+/// The settings screen a shell opens for a connector (SPEC.md "Connectors"): the accounts signed in, each with
 /// whether it still works and a way to sign it out, and signing in another, by link and pasted address. Opened with
 /// { add: true } (a shell's Add account), it starts signing in at once.
 function settingsScreen(title, blurb) {

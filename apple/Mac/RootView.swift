@@ -35,7 +35,7 @@ struct RootView: View {
             case .pages: PagesEditor()
             case .secret(let scope, let id): SecretRequestSheet(scope: scope, id: id)
             case .widgets(let scope): WidgetsEditor(scope: scope)
-            case .connected(let scope): ConnectedSheet(scope: scope)
+            case .connectors(let scope): ConnectorsSheet(scope: scope)
             }
         }
         .onChange(of: appearance, initial: true) {
@@ -76,19 +76,19 @@ private struct MainView: View {
         }
     }
 
-    /// An app opens in place of the page, selected in the sidebar; a page's Connected Apps, as a sheet over it; the
+    /// An app opens in place of the page, selected in the sidebar; a page's Connectors, as a sheet over it; the
     /// shell's own views push.
     private func open(_ route: Route) {
         switch route {
         case .screen: store.selection = route
-        case .connected(let scope): store.sheet = .connected(scope)
+        case .connectors(let scope): store.sheet = .connectors(scope)
         default: store.path.append(route)
         }
     }
 }
 
-/// A page's Connected Apps, over the page: what it opens (a settings screen, the App Store) opens in the window.
-private struct ConnectedSheet: View {
+/// A page's Connectors, over the page: what it opens (a settings screen, the App Store) opens in the window.
+private struct ConnectorsSheet: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     var scope: String
@@ -96,7 +96,7 @@ private struct ConnectedSheet: View {
     var body: some View {
         NavigationStack {
             if let page = store.page(scope) {
-                ConnectedAppsView(page: page) { route in
+                ConnectorsView(page: page) { route in
                     dismiss()
                     if case .screen = route { store.selection = route } else { store.path.append(route) }
                 }

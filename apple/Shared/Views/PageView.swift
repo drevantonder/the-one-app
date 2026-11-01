@@ -7,7 +7,7 @@ private let iconSize: CGFloat = 60
 #endif
 
 /// A page: its title (on a Mac; a phone's bar names it instead), then one grid, as the Home Screen's: its widgets in
-/// their sizes, then its apps' icons, which flow around them, then the Connected Apps folder.
+/// their sizes, then its apps' icons, which flow around them, then the Connectors folder.
 struct PageView: View {
     @Environment(Store.self) private var store
     var page: Page
@@ -17,14 +17,14 @@ struct PageView: View {
     @State private var error: String?
 
     var body: some View {
-        let apps = store.apps(on: page), widgets = store.widgets(on: page), connected = store.connectedApps(on: page)
+        let apps = store.apps(on: page), widgets = store.widgets(on: page), connectors = store.connectors(on: page)
         let grid = GridMetrics(width: width)
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 #if os(macOS)
                 PageHeader(title: page.title, subtitle: page.subtitle)
                 #endif
-                if apps.isEmpty && widgets.isEmpty && connected.isEmpty {
+                if apps.isEmpty && widgets.isEmpty && connectors.isEmpty {
                     EmptyPage(page: page, open: open)
                 } else if width > 0 {
                     HomeGrid(grid: grid) {
@@ -39,11 +39,11 @@ struct PageView: View {
                             }
                             .contextMenu { AppActions(app: app, page: page, open: open, deleting: $deleting, error: $error) }
                         }
-                        if !connected.isEmpty {
-                            IconButton(title: String(localized: "Connected Apps")) { open(.connected(page.scope)) } icon: {
-                                FolderTile(apps: connected, size: grid.icon)
+                        if !connectors.isEmpty {
+                            IconButton(title: String(localized: "Connectors")) { open(.connectors(page.scope)) } icon: {
+                                FolderTile(apps: connectors, size: grid.icon)
                             }
-                            .accessibilityLabel("Connected Apps, \(connected.count) apps")
+                            .accessibilityLabel("Connectors, \(connectors.count) apps")
                         }
                     }
                 }

@@ -396,8 +396,8 @@ struct RouteView: View {
             SettingsPage(open: open)
         case .group(let id):
             GroupView(id: id)
-        case .connected(let scope):
-            if let page = store.page(scope) { ConnectedAppsView(page: page, open: open) }
+        case .connectors(let scope):
+            if let page = store.page(scope) { ConnectorsView(page: page, open: open) }
         case .setting(let setting):
             switch setting {
             case .store:
