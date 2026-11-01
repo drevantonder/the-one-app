@@ -31,7 +31,7 @@ func TestProfileFolders(t *testing.T) {
 			t.Errorf("folder(%q) = %q, want %q", title, got, want)
 		}
 	}
-	if _, err := profileIn(map[string]any{"profile": map[string]any{"item": "0123456789abcdef", "name": "PTC", "key": "{{0123456789abcdef:profile_key}}"}}); err == nil {
+	if _, err := profileIn(map[string]any{"profile": map[string]any{"item": "0123456789abcdef", "name": "PTC", "key": "{{0123456789abcdef:_profile_key}}"}}); err == nil {
 		t.Error("a key the node didn't fill in is refused")
 	}
 }

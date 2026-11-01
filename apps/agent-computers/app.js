@@ -2,7 +2,7 @@
 // screen or without one, which the agent-computers sidecar runs (Incus, or a Mac's containers). Its page shows them;
 // Computer Use (apps/computer) is what agents use them with. A browser profile a computer starts with is a Vault item
 // of type Browser profile: the sidecar keeps it as an encrypted blob, and only it, never this app, holds its key,
-// which the node fills into the calls this app makes ({{<item id>:profile_key}}).
+// which the node fills into the calls this app makes ({{<item id>:_profile_key}}).
 
 /// Runs one of the agent-computers sidecar's operations, wherever it runs for the caller. When none of their servers
 /// runs it, says what's needed instead of how the call failed.
@@ -40,7 +40,7 @@ async function profile(ctx, name) {
 }
 
 /// A profile as the sidecar takes it: its key is a placeholder the node fills in, for the sidecar only.
-const given = (p) => ({ item: p.id, name: p.title, key: `{{${p.id}:profile_key}}`, blob: p.fields._blob?.value || "", salt: p.fields._salt?.value || "" });
+const given = (p) => ({ item: p.id, name: p.title, key: `{{${p.id}:_profile_key}}`, blob: p.fields._blob?.value || "", salt: p.fields._salt?.value || "" });
 
 const named = { type: "string", description: "a browser profile's name, like Personal or PTC: a Browser profile in the person's Vault" };
 
@@ -154,7 +154,7 @@ export default {
   // Browser profiles live in the Vault: the person adds one there (add_profile), signs in to sites in it (sign_in, then
   // save_profile), renames and deletes it there.
   vault: {
-    profile: { title: TYPE, type: TYPE, hosts: ["agent-computers"], fields: { profile_key: { label: "Key", secret: true } }, make: "add_profile", actions: { sign_in: "Sign In to a Site" } },
+    profile: { title: TYPE, type: TYPE, hosts: ["agent-computers"], fields: { _profile_key: { label: "Key", secret: true } }, make: "add_profile", actions: { sign_in: "Sign In to a Site" } },
   },
   schema: {
     user: `create table saves (item text primary key, blob text not null)`,
@@ -225,7 +225,7 @@ export default {
         const title = String(input.profile || input.title || "").trim();
         if (!title) throw new Error("Name it, like Personal or PTC.");
         if ((await profiles(ctx)).some((p) => p.title.toLowerCase() === title.toLowerCase())) throw new Error(`There's already a ${title} profile.`);
-        const item = await ctx.vault.create({ title, type: TYPE, hosts: ["agent-computers"], fields: { profile_key: { generate: true } } });
+        const item = await ctx.vault.create({ title, type: TYPE, hosts: ["agent-computers"], fields: { _profile_key: { generate: true } } });
         return { item, profile: title, text: `Added the ${title} profile. It has no sign-ins yet: sign in to sites in it with sign_in.` };
       },
     },
