@@ -1,0 +1,47 @@
+// Models: the local AI models on the person's servers. The models driver, built into every server's node, asks the
+// ones on its machine, and a call goes on to the next server when a model isn't there; this app is what people,
+// agents and other apps use.
+
+/// Runs one of the models driver's operations, wherever it runs for the caller. When none of their servers runs it,
+/// says what's needed instead of how the call failed.
+async function driver(ctx, op, input) {
+  try {
+    return await ctx.drivers.models[op](input);
+  } catch (err) {
+    if (String(err.message).includes("no server runs models for you")) throw new Error(NEEDS);
+    throw err;
+  }
+}
+
+const NEEDS = "Models runs on your servers, and none of them is online.";
+
+export default {
+  name: "models",
+  title: "Models",
+  icon: "cpu",
+  color: "#32ade6",
+  description: "AI models on your own devices",
+  instructions: "Local models run on the device that has them. models_here lists this server's models; give server \"all\" for every server's, and which are loaded. models_chat asks one and returns its answer, on whichever of your servers has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
+  uses: { drivers: ["models"] },
+
+  ops: {
+    here: {
+      reads: true,
+      description: "This server's local models, and whether each is loaded; give server \"all\" for every server's.",
+      input: {"properties": {}, "type": "object"},
+      run: (ctx, input) => driver(ctx, "here", input),
+    },
+    chat: {
+      reads: true,
+      description: "Ask a local model and get its answer, on whichever of your servers has it (or the server given). Give prompt, or messages as [{role, content}]; system sets its instructions; format \"json\" or a JSON schema makes it answer in JSON.",
+      input: {"properties": {"format": {"description": "\"json\", or a JSON schema the answer must match"}, "images": {"description": "images (JPEG, PNG or WebP) in base64, shown with the prompt", "items": {"type": "string"}, "type": "array"}, "messages": {"items": {"type": "object"}, "type": "array"}, "model": {"description": "a model's name as here lists it", "type": "string"}, "options": {"description": "Ollama's options, like { temperature: 0, num_predict: 1024 }", "type": "object"}, "prompt": {"type": "string"}, "system": {"type": "string"}, "think": {"description": "whether a thinking model reasons first", "type": "boolean"}}, "required": ["model"], "type": "object"},
+      run: (ctx, input) => driver(ctx, "chat", input),
+    },
+    decide: {
+      reads: true,
+      description: "Ask a decision model (a model with the decision capability, like clef-flash) questions about something and get typed answers with probabilities: choice (one of criteria, an object of option: description), noul (yes/no) or score (levels, lowest first). Answers { answers: { name: { choice, probabilities, confidence } }, usage }.",
+      input: {"properties": {"images": {"description": "images in base64 (or [{ content_type, base64 }]), named in state as image 1, 2...", "type": "array"}, "model": {"description": "a decision model, like clef-flash", "type": "string"}, "questions": {"description": "named questions, each { type, instructions, criteria | levels }", "type": "object"}, "state": {"description": "what to decide about: named fields", "type": "object"}}, "required": ["model", "questions"], "type": "object"},
+      run: (ctx, input) => driver(ctx, "decide", input),
+    },
+  },
+};

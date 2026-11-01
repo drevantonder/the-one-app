@@ -716,7 +716,7 @@ async fn an_app_wraps_the_driver_of_its_name_on_another_server() {
     a.create("Wraps", "Andre").await.unwrap();
     b.join(&a.pair(None).unwrap()).await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
-    b.provide("lamps", json!({ "title": "Lamps", "ops": [{ "name": "on" }] })).await.unwrap();
+    b.provide("lamps", json!({ "title": "Lamps", "image": "data:image/png;base64,AAAA", "image_kind": "icon", "ops": [{ "name": "on" }] })).await.unwrap();
     let driver = b.clone();
     tokio::spawn(async move {
         loop {
@@ -737,6 +737,8 @@ async fn an_app_wraps_the_driver_of_its_name_on_another_server() {
     assert_eq!(a.call(direct).await.unwrap(), "on from ");
     let listed = a.apps(&me).await.unwrap();
     assert_eq!(listed.iter().filter(|x| x["name"] == "lamps").count(), 1, "the app stands for its driver in the list");
+    let lamps = listed.iter().find(|x| x["name"] == "lamps").unwrap();
+    assert_eq!((lamps["image"].as_str(), lamps["image_kind"].as_str()), (Some("data:image/png;base64,AAAA"), Some("icon")), "it shows its driver's picture: {lamps}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

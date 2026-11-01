@@ -1900,9 +1900,23 @@ impl Node {
                 if let Some((image, kind)) = self.logo(domain, name) {
                     (info["image"], info["image_kind"]) = (json!(image), json!(kind));
                 }
+            } else if let Some((image, kind)) = info["name"].as_str().and_then(|n| self.driver_image(n)) {
+                // An app over a driver of its name shows the picture the driver gives (a Mac app's icon).
+                (info["image"], info["image_kind"]) = (image, kind);
             }
         }
         Ok(out)
+    }
+
+    /// The picture a driver called `name` gives, here or on a server this one is connected to, and its kind.
+    fn driver_image(&self, name: &str) -> Option<(Value, Value)> {
+        self.with(|i| {
+            let here = self.drivers_here(i).into_iter().map(|d| d.2);
+            let there = i.sessions.values().flat_map(|s| s.drivers.iter().map(|d| d.2.clone()));
+            Ok(here.chain(there).find(|d| d["name"] == name && d["image"].is_string()).map(|d| (d["image"].clone(), d["image_kind"].clone())))
+        })
+        .ok()
+        .flatten()
     }
 
     /// The logo of `domain`, the site `app` connects to, as a data URL, once this server has fetched it. Fetches it

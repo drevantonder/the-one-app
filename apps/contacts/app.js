@@ -1,0 +1,43 @@
+// Contacts: Contacts on the person's Mac. The contacts driver lives in the Mac app, which macOS lets reach Contacts;
+// this app is what people and agents use, wherever they are.
+
+/// Runs one of the contacts driver's operations, wherever it runs for the caller. When none of their servers runs it,
+/// says what's needed instead of how the call failed.
+async function driver(ctx, op, input) {
+  try {
+    return await ctx.drivers.contacts[op](input);
+  } catch (err) {
+    if (String(err.message).includes("no server runs contacts for you")) throw new Error(NEEDS);
+    throw err;
+  }
+}
+
+const NEEDS = "Contacts runs on a Mac with The One App open, and none of yours is online with it.";
+
+export default {
+  name: "contacts",
+  title: "Contacts",
+  icon: "person.crop.circle",
+  color: "#8e8e93",
+  description: "Contacts on your Mac, for your apps and agents",
+  instructions: "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; contacts_me is the person's own card.",
+  uses: { drivers: ["contacts"] },
+
+  ops: {
+    search: {
+      description: "Find contacts by name, email address or phone number.",
+      input: {"properties": {"limit": {"description": "at most this many; default 25", "type": "integer"}, "query": {"description": "a name or part of one, an email address, or a phone number", "type": "string"}}, "required": ["query"], "type": "object"},
+      run: (ctx, input) => driver(ctx, "search", input),
+    },
+    get: {
+      description: "One contact, by the id search gives.",
+      input: {"properties": {"id": {"description": "the contact's id", "type": "string"}}, "required": ["id"], "type": "object"},
+      run: (ctx, input) => driver(ctx, "get", input),
+    },
+    me: {
+      description: "The person's own contact card.",
+      input: {"properties": {}, "type": "object"},
+      run: (ctx, input) => driver(ctx, "me", input),
+    },
+  },
+};
