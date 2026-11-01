@@ -327,6 +327,26 @@ struct VaultItem: Decodable, Sendable, Equatable, Identifiable, Hashable {
         return fields.first { !$0.secret && !($0.value ?? "").isEmpty }?.value
     }
     var isAccount: Bool { account == true }
+
+    enum CodingKeys: String, CodingKey { case id, scope, scope_name, title, type, domain, image, hosts, fields, apps, wanted_by, app, account }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        scope = try c.decode(String.self, forKey: .scope)
+        title = try c.decode(String.self, forKey: .title)
+        hosts = (try? c.decode([String].self, forKey: .hosts)) ?? []
+        fields = (try? c.decode([Field].self, forKey: .fields)) ?? []
+        apps = (try? c.decode([String].self, forKey: .apps)) ?? []
+        scope_name = try? c.decode(String.self, forKey: .scope_name)
+        type = try? c.decode(String.self, forKey: .type)
+        domain = try? c.decode(String.self, forKey: .domain)
+        wanted_by = try? c.decode([String].self, forKey: .wanted_by)
+        app = try? c.decode(String.self, forKey: .app)
+        account = try? c.decode(Bool.self, forKey: .account)
+        // Its icon, as a data URL; a node may give it with its kind, as `[url, kind]`.
+        image = (try? c.decode(String.self, forKey: .image)) ?? (try? c.decode([String].self, forKey: .image))?.first
+    }
 }
 
 /// A request for an item an app may use (SPEC.md "The Vault"): the person picks one of theirs or makes one, so the
