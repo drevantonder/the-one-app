@@ -36,8 +36,14 @@ struct MacApp: App {
             store.selection = .page(scope)
             if value("folder") == "services" { store.sheet = .services(scope) }
         } else if url.host() == "settings" {
-            store.selection = .settings
-            store.path = url.pathComponents.dropFirst().first.flatMap(Setting.named).map { [.setting($0)] } ?? []
+            let path: [Route] = url.pathComponents.dropFirst().first.flatMap(Setting.named).map { [.setting($0)] } ?? []
+            if store.selection == .settings {
+                store.path = path
+            } else {
+                store.selection = .settings
+                // Settings' stack is new: it takes a path once it's shown.
+                Task { @MainActor in store.path = path }
+            }
         }
     }
 
