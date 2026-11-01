@@ -1,6 +1,6 @@
 //! What agents are told, as Agent Skills (agentskills.io): a root skill, short enough to load up front, and deeper ones
 //! loaded when needed: one for each app with a guide (its instructions and operations, from the same declarations its
-//! tools come from), the Vault's, and a few areas of their own (`skills/`). One source, every way out: the Agents
+//! tools come from), the Vault's, and a few areas of their own (`skills/`). One source, every way out: the agents
 //! sidecar writes them into each harness's skills folder, `<cli> mcp` serves them (Skills over MCP, SEP-2640), a
 //! server serves the root's body as `/llms.txt` and each skill's files at `/skills/<name>/<path>`, and `<cli> skills`
 //! prints them. MCP's instructions are the root's short version.
@@ -24,7 +24,7 @@ pub fn rules() -> String {
     [
         "Never send a message or an email unless the person asked you to send that one. Draft it instead, show them, and let them send it.".to_string(),
         format!("Anything that sends or can't be undone takes `confirm: true` (`--confirm` in the terminal), given only once the person agreed to that action. Without it, it refuses: ask them rather than guess."),
-        "Never ask for a password, key or token in the chat, and never paste one. `vault_request` gives the person a link to a sheet on their own device, where they pick or type it; `vault_fetch` makes a web request with an item they switched Agents on for, and you never see the secret. If someone pastes one anyway, keep it with `vault_set` and don't repeat it.".to_string(),
+        "Never ask for a password, key or token in the chat, and never paste one. `vault_request` gives the person a link to a sheet on their own device, where they pick or type it; `vault_fetch` makes a web request with an item they let agents use, and you never see the secret. If someone pastes one anyway, keep it with `vault_set` and don't repeat it.".to_string(),
         "If something says you aren't allowed, stop and tell the person. Nothing widens access by itself.".to_string(),
     ]
     .iter()

@@ -1353,7 +1353,7 @@ impl Node {
     }
 
     /// Makes an HTTP request for an agent of `caller`'s (`{ url, method?, headers?, body? }`), as the built-in agents
-    /// sidecar: the fields of the items a person switched Agents on for are filled in, a secret one only for its item's
+    /// sidecar: the fields of the items a person lets agents use are filled in, a secret one only for its item's
     /// hosts, as an app's requests are. → `{ status, headers, body }`, a secret field's value blotted out wherever the
     /// site echoes it back, so the agent never sees one.
     pub async fn vault_fetch(&self, caller: &Caller, req: &Value) -> Result<Value> {
@@ -1494,10 +1494,10 @@ impl Node {
         // Only the node says which app's call made an item.
         data.as_object_mut().context("an item is an object")?.remove("app");
         let content = self.with(|i| {
-            // Agents use an item (vault_fetch) only once its person switched Agents on for it, never by themselves.
+            // Agents use an item (vault_fetch) only once its person lets agents use it, never by themselves.
             let had = i.views.get(&scope.to_string()).and_then(|(_, s)| s.items.get(&id)).is_some_and(|it| it.apps.contains(crate::agents::NAME));
             let wants = data["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == crate::agents::NAME));
-            ensure!(caller.agent.is_none() || had || !wants, "only the person switches Agents on for an item: ask them with vault_request (app agents), and they pick or make it");
+            ensure!(caller.agent.is_none() || had || !wants, "only the person lets agents use an item: ask them with vault_request (app agents), and they pick or make it");
             item_entry(i, &caller.user, scope, data)
         })?;
         let by = (caller.key != self.0.id).then_some(caller.key);

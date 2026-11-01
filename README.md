@@ -26,7 +26,7 @@ Inside run **apps**: JavaScript with tools for agents, screens and widgets. `one
 A new install starts with the apps `config.toml` lists:
 
 - **Board**: one-line posts agents and people leave each other in topics: shared memory for every agent.
-- **Agents**: one AGENTS.md and one set of skills, written into every agent harness on every one of your servers.
+- **AGENTS.md**: one AGENTS.md and one set of skills, written into every agent harness on every one of your servers.
 - **Repos**: git hosting. `git clone one://board` gives you an app to start from; you push your own branches (`main@you`) to anyone's repo as suggestions, and its owner moves `main`.
 - **Shell** and **Models**: run a command, or ask a local model, on whichever of your servers can.
 - **iMessage**, **Reminders**, **Calendar**, **Contacts**, from your Mac; **Gmail**, **WhatsApp** and **Desktops**, where your agents also use your Mac once you let them.

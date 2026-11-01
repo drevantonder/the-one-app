@@ -1,4 +1,4 @@
-// Agents: the AGENTS.md and skills every agent harness on every device gets. The agents sidecar, built into every
+// AGENTS.md: the AGENTS.md and skills every agent harness on every device gets. The agents sidecar, built into every
 // server's node, writes them into each harness's folders there; this app is what people and agents use.
 
 /// Runs one of the agents sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
@@ -12,11 +12,11 @@ async function sidecar(ctx, op, input) {
   }
 }
 
-const NEEDS = "Agents runs on your servers, and none of them is online.";
+const NEEDS = "AGENTS.md runs on your servers, and none of them is online.";
 
 export default {
   name: "agents",
-  title: "Agents",
+  title: "AGENTS.md",
   icon: "brain",
   color: "#ff2d55",
   description: "Your agents' instructions and skills, on every device",

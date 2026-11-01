@@ -1019,14 +1019,14 @@ async fn agents_and_sidecars_use_the_items_switched_on_for_them_without_seeing_t
     let token = json!({ "title": "Example key", "fields": { "token": { "value": "s3cret", "secret": true } }, "hosts": ["127.0.0.1"] });
     let id = a.set_item(&agent, &mine, token).await.unwrap();
 
-    // An agent never switches Agents on for an item itself: its person does.
+    // An agent never lets agents use an item itself: its person does.
     assert!(a.set_item(&agent, &mine, json!({ "id": id, "apps": ["agents"] })).await.is_err());
     let fetch = |url: String| {
         let (a, agent) = (a.clone(), agent.clone());
         async move { a.vault_fetch(&agent, &json!({ "url": url, "headers": { "authorization": "Bearer {{token}}" }, "body": "t={{token}}" })).await }
     };
     let got = fetch(format!("http://127.0.0.1:{port}/x")).await.unwrap();
-    assert!(got["body"].as_str().unwrap().contains("Bearer {{token}}"), "not filled before the person switched Agents on: {got}");
+    assert!(got["body"].as_str().unwrap().contains("Bearer {{token}}"), "not filled before the person let agents use it: {got}");
     a.set_item(&person, &mine, json!({ "id": id, "apps": ["agents"] })).await.unwrap();
 
     // Filled for its host, and the site's echo of it blotted out.

@@ -55,10 +55,10 @@ Usage:
                                        set a field of an item (by title or id; a new one by that title), its value
                                        read from stdin (a line typed, or a whole file); for a person's value, vault
                                        request asks them instead
-  {CLI} vault use <item> <app> [--off] switch an app on (or off) for an item; only the person switches agents on
+  {CLI} vault use <item> <app> [--off] switch an app on (or off) for an item; only the person lets agents use one
   {CLI} vault fetch <url> [--method M] [--headers <json object>] [--body text]
-                                       make a request with {{{{field}}}} filled in from the items the person switched
-                                       Agents on for, a secret field only for its item's sites: you get the answer,
+                                       make a request with {{{{field}}}} filled in from the items the person lets
+                                       agents use, a secret field only for its item's sites: you get the answer,
                                        never the secret
   {CLI} vault remove <item> [<field>]  delete an item, or one of its fields
   {CLI} vault request <app> (--need <name> | --title <t> --fields a,b [--secret-fields b] --hosts a,b) [--why text]
@@ -792,7 +792,7 @@ fn mcp(mode: Mode) -> Result<()> {
                 uri if uri.starts_with("skill://") => skill_resource(uri),
                 uri => mcp_apps::read(uri),
             },
-            // Skills over MCP (SEP-2640): the same skills the Agents sidecar writes into harnesses' folders.
+            // Skills over MCP (SEP-2640): the same skills the agents sidecar writes into harnesses' folders.
             "skills/list" => Ok(json!({ "resultType": "complete", "skills": skills().iter().map(skill_entry).collect::<Vec<_>>(), "ttlMs": 60_000, "cacheScope": "session" })),
             "skills/get" => {
                 let uri = msg["params"]["uri"].as_str().unwrap_or("");

@@ -1,6 +1,6 @@
 //! Server sidecars: native code a server runs beside its node, for what apps can't reach from workerd (a shell, local
 //! models, WhatsApp's linked phone, a Mac's own apps). A sidecar serves its server's users, and the node advertises it in
-//! sync; an app over it calls it with `ctx.sidecars`. Some are built into the node (Shell, Agents, Models: `built_in`);
+//! sync; an app over it calls it with `ctx.sidecars`. Some are built into the node (Shell, AGENTS.md, Models: `built_in`);
 //! the rest are programs that register over the local API, in whatever language the platform needs (Go for WhatsApp,
 //! Swift in the Mac app), and long-poll for calls. The core never names one: only `built_in` does, for the binary.
 
