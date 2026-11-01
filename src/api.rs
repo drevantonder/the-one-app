@@ -24,6 +24,7 @@ pub fn addr() -> String {
 
 pub fn router(node: Node) -> Router {
     Router::new()
+        .route("/llms.txt", get(guide))
         .route("/v1/state", get(state))
         .route("/v1/apps", get(apps))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
@@ -80,6 +81,63 @@ pub fn router(node: Node) -> Router {
         .route("/v1/providers/{app}/calls/{id}", post(reply))
         .layer(axum::middleware::from_fn(only_this_machine))
         .with_state(node)
+}
+
+/// The guide for agents (src/guide.rs), as Markdown.
+async fn guide() -> Response {
+    ([(axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8")], crate::guide::full()).into_response()
+}
+
+/// Serves the guide, and nothing else, on this machine's Tailscale address and the local API's port, so an agent on
+/// any of the person's devices can read it. Looks again every minute: Tailscale may come up later, or move.
+pub async fn serve_guide() {
+    let port = addr().rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(crate::config::PORT);
+    let mut serving: Option<(std::net::Ipv4Addr, tokio::task::JoinHandle<()>)> = None;
+    loop {
+        let ip = tailnet_address();
+        if ip != serving.as_ref().map(|s| s.0) {
+            if let Some((_, task)) = serving.take() {
+                task.abort();
+            }
+            crate::guide::set_address(None);
+            if let Some(ip) = ip {
+                match tokio::net::TcpListener::bind((ip, port)).await {
+                    Ok(listener) => {
+                        crate::guide::set_address(Some(format!("http://{ip}:{port}/llms.txt")));
+                        let app = Router::new().route("/llms.txt", get(guide));
+                        serving = Some((ip, tokio::spawn(async move { axum::serve(listener, app).await.ok(); })));
+                    }
+                    Err(e) => tracing::debug!("can't serve the guide on {ip}:{port}: {e}"),
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    }
+}
+
+/// This machine's Tailscale address, in 100.64.0.0/10, if it has one.
+fn tailnet_address() -> Option<std::net::Ipv4Addr> {
+    let mut list: *mut libc::ifaddrs = std::ptr::null_mut();
+    if unsafe { libc::getifaddrs(&mut list) } != 0 {
+        return None;
+    }
+    let mut found = None;
+    let mut at = list;
+    while let Some(ifa) = unsafe { at.as_ref() } {
+        if let Some(sa) = unsafe { ifa.ifa_addr.as_ref() }
+            && sa.sa_family as i32 == libc::AF_INET
+        {
+            let sin = unsafe { &*(ifa.ifa_addr as *const libc::sockaddr_in) };
+            let ip = std::net::Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr));
+            if ip.octets()[0] == 100 && (64..128).contains(&ip.octets()[1]) {
+                found = Some(ip);
+                break;
+            }
+        }
+        at = ifa.ifa_next;
+    }
+    unsafe { libc::freeifaddrs(list) };
+    found
 }
 
 /// Browsers send an Origin, and a page that rebinds its DNS to 127.0.0.1 still sends its own Host:

@@ -3,9 +3,11 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use one::config::{CLI, NAME};
+use one::guide::Mode;
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
 
+mod code;
 mod mcp_apps;
 mod ops;
 mod update;
@@ -84,6 +86,8 @@ Usage:
   {CLI} file put <file>                keep a file in the install, for apps and agents; prints its hash
   {CLI} file get <hash> <file>         get a kept file from this server or another
   {CLI} version                        this build
+  {CLI} guide                          how agents connect to {NAME} and find their way, as /llms.txt says it
+  {CLI} search <words>                 the operations for a task in every app: how to call each, and its app's guide
   {CLI} mcp                            serve MCP over stdio, for agents
 
 {NAME} holds one install. For another context, run that context's own app."
@@ -124,6 +128,11 @@ fn run(args: Vec<String>) -> Result<()> {
             serve()?
         }
         ["mcp"] => mcp()?,
+        ["guide"] => print!("{}", one::guide::full()),
+        ["search", words @ ..] if !words.is_empty() => {
+            let limit = flags.get("limit").and_then(|l| l.as_str().and_then(|l| l.parse().ok()).or(l.as_u64().map(|l| l as usize))).unwrap_or(8);
+            println!("{}", code::search(&code::catalog()?, &words.join(" "), limit, code::For::Cli));
+        }
         ["status"] => status(&get("/v1/state")?),
         ["apps"] => {
             for app in get("/v1/apps")?.as_array().into_iter().flatten() {
@@ -701,6 +710,7 @@ async fn serve() -> Result<()> {
     let (node, router) = Node::start(&dir, one::sidecars::built_in()).await?;
     let listener = tokio::net::TcpListener::bind(addr()).await.with_context(|| format!("listen on {}", addr()))?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
+    tokio::spawn(api::serve_guide());
     let http = axum::serve(listener, api::router(node));
     tokio::select! {
         r = http => r?,
@@ -729,11 +739,12 @@ fn mcp() -> Result<()> {
                 "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
                 "capabilities": { "tools": {}, "resources": {} },
                 "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
-                "instructions": instructions(),
+                "instructions": instructions(Mode::All),
                 })
             }),
             "ping" => Ok(json!({})),
             "tools/list" => tools().map(|mut t| {
+                t.insert(0, code::search_tool(Mode::All));
                 t.extend(mcp_apps::tools());
                 json!({ "tools": t })
             }),
@@ -784,17 +795,10 @@ fn agent_name(raw: &str) -> String {
     known.iter().find(|(names, _)| names.contains(&lower.as_str())).map(|(_, n)| n.to_string()).unwrap_or_else(|| raw.trim().to_string())
 }
 
-fn instructions() -> String {
-    let mut text = format!("{NAME} is this user's apps and agents, shared across their machines. Every tool is also a CLI command ({CLI} <app> <op>).");
-    text.push_str("\n\n## Vault\n\nThe Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat, and never paste one yourself. To keep one, call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. To use one yourself, ask with app agents, then call vault_fetch with {{<field>}} where it goes: your server fills it in, only for the item's sites, and you get the answer. If someone pastes a secret anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.");
-    if let Ok(apps) = get("/v1/apps") {
-        for app in apps.as_array().into_iter().flatten() {
-            if let Some(i) = app["instructions"].as_str().filter(|i| !i.is_empty()) {
-                text.push_str(&format!("\n\n## {}\n\n{i}", app["title"].as_str().unwrap_or("")));
-            }
-        }
-    }
-    text
+/// The server's instructions (src/guide.rs): the rules first, short enough that every harness keeps all of them.
+fn instructions(mode: Mode) -> String {
+    let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    one::guide::instructions(mode, &apps)
 }
 
 /// An item, as one line: its title, what it is, its page, its fields (secret ones never shown), where they go and
@@ -969,6 +973,13 @@ fn call_tool(params: &Value, agent: Option<&str>) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let mut input = params["arguments"].as_object().cloned().unwrap_or_default();
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
+    if name == "search" {
+        let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
+        return match code::catalog() {
+            Ok(apps) => json!({ "content": [{ "type": "text", "text": code::search(&apps, input.get("query").and_then(Value::as_str).unwrap_or(""), limit, code::For::Mcp(Mode::All)) }] }),
+            Err(e) => failed(format!("{e:#}")),
+        };
+    }
     let Some((app, op)) = name.split_once('_') else { return failed(format!("no tool {name}")) };
     if app == "vault" || app == "secrets" {
         let answer = if app == "vault" { vault_tool(op, &input, agent) } else { secret_tool(op, &input, agent) };

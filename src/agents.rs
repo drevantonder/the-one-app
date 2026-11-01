@@ -292,7 +292,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     let hook = format!("curl -sf --max-time 3 --data-binary @- http://{addr}{HOOK_PATH} || true");
     // Another edition's node on this machine has a hook of its own, on its own port.
     let port = format!(":{}{HOOK_PATH}", addr.rsplit(':').next().unwrap_or_default());
-    let server = server_name();
+    let server = crate::guide::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
     // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
     let installed = home.join(".local/bin").join(crate::config::CLI);
@@ -328,12 +328,6 @@ fn harnesses(home: &Path, written: &mut Written) {
     if pi.is_dir() {
         written.write(&pi.join("extensions").join(format!("{}-board.ts", crate::config::CLI)), &plugin(PI_EXTENSION));
     }
-}
-
-/// What harnesses call this install's MCP server: the config's name in kebab case, like the-one-app.
-fn server_name() -> String {
-    let name: String = crate::config::NAME.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-    name.split('-').filter(|w| !w.is_empty()).collect::<Vec<_>>().join("-")
 }
 
 /// `<name>.jsonc` if the harness has one, else `<name>.json`.
@@ -628,7 +622,7 @@ mod tests {
 
     #[test]
     fn the_server_is_named_after_the_edition() {
-        let name = server_name();
+        let name = crate::guide::server_name();
         assert!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !name.starts_with('-') && !name.ends_with('-'), "{name}");
     }
 

@@ -61,6 +61,9 @@ fn main() {
         starters.push_str(&format!("{name:?},"));
     }
     let out = format!("{out}pub const BUILT_IN: &[(&str, &[(&str, &[u8])])] = &[{apps}];\npub const STARTERS: &[&str] = &[{starters}];\n");
+    // The apps every agent needs from the start: their guide is in MCP's instructions, and code mode keeps their tools.
+    let always_on: String = config.get("always_on").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()).map(|n| format!("{n:?},")).collect();
+    let out = format!("{out}pub const ALWAYS_ON: &[&str] = &[{always_on}];\n");
     // Which build this is, so a node can tell a release apart from itself.
     let commit = std::process::Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])
