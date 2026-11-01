@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// The desktop's browser describes a page as an outline, one node per line:
+// The computer's browser describes a page as an outline, one node per line:
 //
 //	- row "Kim Unread message: Lunch? 2 hours ago More options for Kim"
 //	  - link "Kim Unread message: Lunch? 2 hours ago" [focusable=true]

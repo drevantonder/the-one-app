@@ -37,8 +37,8 @@ type saved struct {
 	Out    map[string]string `json:"signed_out,omitempty"`
 }
 
-// load reads which profiles are linked. Before profiles, Messenger read the
-// agent computers' default saved login: that is its first account.
+// load reads which profiles are linked; with none saved yet, the browser
+// profile called default is the first account.
 func load(node, dir string) (*messenger, error) {
 	m := &messenger{node: node, path: filepath.Join(dir, "profiles.json"), linked: []string{"default"}, out: map[string]string{}, browsers: map[string]*browser{}}
 	raw, err := os.ReadFile(m.path)
@@ -89,7 +89,7 @@ func (m *messenger) browser(account string) (*browser, error) {
 	}
 	b := m.browsers[profile]
 	if b == nil {
-		b = &browser{node: m.node, login: profile}
+		b = &browser{node: m.node, profile: profile}
 		m.browsers[profile] = b
 	}
 	return b, nil
@@ -175,7 +175,7 @@ func (m *messenger) run(op string, raw json.RawMessage) (any, error) {
 	}
 	result, err := b.run(op, raw)
 	if op != "send" || err == nil {
-		m.found(b.login, err)
+		m.found(b.profile, err)
 	}
 	return result, err
 }

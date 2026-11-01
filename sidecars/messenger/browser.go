@@ -17,8 +17,8 @@ import (
 // through this device's node, starting with a copy of a browser profile
 // signed in to messenger.com.
 type browser struct {
-	node  string
-	login string // the browser profile
+	node    string
+	profile string // the browser profile
 
 	mu       sync.Mutex
 	computer string // the borrowed computer; given back when idle
@@ -31,7 +31,7 @@ type browser struct {
 
 const (
 	home = "https://www.messenger.com/"
-	// idle is how long a borrowed desktop is kept without a call.
+	// idle is how long a borrowed computer is kept without a call.
 	idle = 5 * time.Minute
 )
 
@@ -72,7 +72,7 @@ func (b *browser) borrow() error {
 	if b.computer != "" {
 		return nil
 	}
-	got, err := b.computers("borrow", map[string]any{"for": "Reading Messenger", "by": "messenger", "profile": b.login, "screen": false})
+	got, err := b.computers("borrow", map[string]any{"for": "Reading Messenger", "by": "messenger", "profile": b.profile, "screen": false})
 	if err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func (b *browser) giveBack() {
 func (b *browser) tool(name string, in map[string]any) (map[string]any, error) {
 	b.used = time.Now()
 	out, err := b.try(name, in)
-	// The desktop was given back, as after 15 minutes without a call.
+	// The computer was given back, as after 15 minutes without a call.
 	if gone := b.computer; err != nil && gone != "" && strings.Contains(err.Error(), gone) {
 		b.computer = ""
 		if name != "browser_prepare" {
@@ -159,7 +159,7 @@ func structured(got any) map[string]any {
 // open starts the computer's browser on the profile and attaches to its tab.
 func (b *browser) open() error {
 	b.target, b.tab = "", ""
-	prepared, err := b.tool("browser_prepare", map[string]any{"allow_launch": true, "profile": map[string]any{"mode": "isolated_named", "name": b.login}})
+	prepared, err := b.tool("browser_prepare", map[string]any{"allow_launch": true, "profile": map[string]any{"mode": "isolated_named", "name": b.profile}})
 	if err != nil {
 		return fmt.Errorf("starting the browser: %w", err)
 	}

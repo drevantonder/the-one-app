@@ -1,4 +1,4 @@
-// Messenger: the person's Facebook Messenger, read through messenger.com in a desktop's browser. The messenger sidecar
+// Messenger: the person's Facebook Messenger, read through messenger.com in an agent computer's browser. The messenger sidecar
 // drives the browser, on each server whose owner installed it; this app is what people and agents use, and a
 // connector: each account is a browser profile signed in to Messenger.
 
@@ -48,7 +48,7 @@ export default {
   description: "Your Messenger chats, for your agents: read, search and send",
   connector: true,
   needs: "Needs Computer Use on one of your servers",
-  instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in a desktop's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
+  instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in an agent computer's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
   uses: { sidecars: ["messenger"] },
   vault: VAULT,
 
@@ -166,7 +166,7 @@ async function pick(accounts) {
     const profile = select.value || name.value.trim();
     if (!profile) return name.focus();
     e.target.disabled = true;
-    e.target.textContent = "Opening a desktop…";
+    e.target.textContent = "Opening a computer…";
     try { signingIn(await one.call("sign_in", { profile })); }
     catch (err) { document.getElementById("err").textContent = err.message; e.target.disabled = false; e.target.textContent = "Sign in to Messenger"; }
   };
@@ -174,7 +174,7 @@ async function pick(accounts) {
 
 function signingIn(r) {
   const c = document.getElementById("connect");
-  c.innerHTML = \`<ol><li><a href="\${one.esc(r.url)}">Open the desktop</a>: its browser is on messenger.com, in the \${one.esc(r.profile)} profile.</li>
+  c.innerHTML = \`<ol><li><a href="\${one.esc(r.url)}">Open the computer</a>: its browser is on messenger.com, in the \${one.esc(r.profile)} profile.</li>
     <li>Sign in there, and tick Keep me signed in.</li><li>Come back and press Done.</li></ol>
     <button class="primary" id="done">Done</button><div id="err" class="error small"></div>\`;
   document.getElementById("done").onclick = async (e) => {
