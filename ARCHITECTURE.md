@@ -54,6 +54,6 @@ The map: what lives where, and the few rules the code only shows by keeping them
 
 ## Designed, not built
 
-- Backups' pruning, failure pushes, weekly restore check and recovery from nothing: a server restoring with no one left to pair with admits itself with the recovery key's countersignature.
+- Backups' weekly restore check and recovery from nothing: a server restoring with no one left to pair with admits itself with the recovery key's countersignature.
 - Sidecars a node starts from a `sidecar` entry's executable, rather than registering themselves.
 - View snapshots on disk, so a node needn't replay every scope when it starts.

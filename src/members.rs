@@ -146,7 +146,7 @@ pub struct Members {
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
-const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "vault-request", "item", "forget", "used", "failed", "cost", "backup-key", "backup"];
+const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "vault-request", "item", "forget", "used", "failed", "cost", "backup-key", "backup", "backup-alert"];
 
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
@@ -602,6 +602,10 @@ pub struct ScopeState {
     pub backup_key: Option<[u8; 32]>,
     /// In `global`: the latest backup runs, oldest first.
     pub backups: Vec<BackupRun>,
+    /// In `global`: by (place, scope), the newest entry's time a snapshot there holds, and when it was written.
+    pub covered: BTreeMap<(String, String), (u64, u64)>,
+    /// In `global`: when admins were last told of a place's trouble, by place.
+    pub alerted: BTreeMap<String, u64>,
 }
 
 /// How many backup runs `global`'s state keeps.
@@ -615,6 +619,8 @@ pub struct BackupRun {
     pub server: Key,
     pub time: u64,
     pub error: Option<String>,
+    /// What kind of trouble the error is, for its fix: `crate::backups::Trouble`'s name.
+    pub trouble: Option<String>,
     pub snapshots: Vec<BackedUp>,
 }
 
@@ -827,10 +833,21 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
                 bytes: s["bytes"].as_u64().unwrap_or(0),
             });
             let place = data["place"].as_str().filter(|p| is_id(p)).context("no place")?.to_string();
-            state.backups.push(BackupRun { place, server: e.author(), time: e.time(), error: data["error"].as_str().map(str::to_string), snapshots: snapshots.collect() });
+            let snapshots: Vec<BackedUp> = snapshots.collect();
+            for s in &snapshots {
+                let covered = state.covered.entry((place.clone(), s.scope.clone())).or_default();
+                *covered = (covered.0.max(s.upto), covered.1.max(e.time()));
+            }
+            let (error, trouble) = (data["error"].as_str().map(str::to_string), data["trouble"].as_str().map(str::to_string));
+            state.backups.push(BackupRun { place, server: e.author(), time: e.time(), error, trouble, snapshots });
             if state.backups.len() > BACKUP_RUNS_KEPT {
                 state.backups.remove(0);
             }
+        }
+        "backup-alert" => {
+            ensure!(scope == Scope::Global, "backup alerts are written in global");
+            let place = e.content.data["place"].as_str().filter(|p| is_id(p)).context("no place")?.to_string();
+            state.alerted.insert(place, e.time());
         }
         "forget" => {
             let blob = e.content.data["blob"].as_str().filter(|b| b.len() == 64 && b.bytes().all(|c| c.is_ascii_hexdigit())).context("no blob")?;

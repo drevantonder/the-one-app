@@ -10,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::entry::{Entry, Head, Key};
 
 /// Entries other than the node's backup runs and keys, which change nothing a backup needs to send at once.
-const NOT_BACKUPS: &str = "not (json_extract(cast(body as text), '$.app') = 'node' and json_extract(cast(body as text), '$.kind') in ('backup', 'backup-key'))";
+const NOT_BACKUPS: &str = "not (json_extract(cast(body as text), '$.app') = 'node' and json_extract(cast(body as text), '$.kind') in ('backup', 'backup-key', 'backup-alert'))";
 
 pub struct Store {
     db: Connection,

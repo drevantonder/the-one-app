@@ -272,6 +272,8 @@ pub struct Inner {
     backed: Mutex<HashMap<(String, String), (crate::backups::Snapshot, String)>>,
     /// When each place's last run here failed, so it's tried again an hour later, not every minute.
     backup_failed: Mutex<HashMap<String, u64>>,
+    /// When this server last pruned each place, by its id.
+    pruned: Mutex<HashMap<String, u64>>,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -364,6 +366,7 @@ impl Node {
             backup_forced: Mutex::new(false),
             backed: Mutex::new(HashMap::new()),
             backup_failed: Mutex::new(HashMap::new()),
+            pruned: Mutex::new(HashMap::new()),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -2309,6 +2312,7 @@ impl Node {
         let viewer_name = if viewer.key == self.0.id { self.server_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
         let user = install.as_ref().and_then(|i| i.r.members.user(&viewer.user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role }));
         let settings = settings(install.as_ref().map(|i| &i.r.members).unwrap_or(&Members::default()));
+        let backups = install.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
         let install = install.as_ref().map(|i| {
             let m = &i.r.members;
             let me = &viewer.user;
@@ -2383,6 +2387,8 @@ impl Node {
             "secret_requests": waiting,
             // How this user arranged each of their pages (see `arrange`).
             "arrangements": arrangements,
+            // What's wrong with backups, for an admin: a badge on Settings until a run works again.
+            "backups": backups,
         });
         if viewer.key != self.0.id {
             state["client"] = json!({ "key": hex(&viewer.key), "name": viewer_name });

@@ -8,6 +8,86 @@ use crate::backups::{self as b, Place, Snapshot};
 
 /// How often the node looks for backups that are due.
 const TICK: Duration = Duration::from_secs(60);
+/// How often a server prunes each place it backs up to: after its first run, then daily.
+const PRUNE_EVERY: u64 = 24 * 3_600_000;
+/// How long changes may wait for a place before admins hear of it, which catches a server that's gone.
+const LATE: u64 = 24 * 3_600_000;
+/// How long each server after the first in line waits before telling admins itself, in case those before it are down.
+const STAGGER: u64 = 10 * 60_000;
+
+/// What's wrong with a place, for admins: what, its fix, since when, and from when it's worth a push.
+#[derive(Clone, Debug)]
+pub struct Problem {
+    pub place: String,
+    pub text: String,
+    pub fix: String,
+    pub since: u64,
+    pub push: Option<u64>,
+}
+
+impl Problem {
+    pub fn json(&self) -> Value {
+        json!({ "place": self.place, "text": self.text, "fix": self.fix, "since": self.since })
+    }
+}
+
+/// Each place's problem, as this server sees it: its runs failing (worth a push from the second failure in a row),
+/// or a scope this server holds with changes that have waited a day for it, whoever should have backed them up.
+/// Both end by themselves once a run works.
+fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
+    let m = &i.r.members;
+    let Some((_, global)) = i.views.get("global") else { return Ok(Vec::new()) };
+    let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
+    let mut out = Vec::new();
+    for p in places(global) {
+        let runs: Vec<&members::BackupRun> = global.backups.iter().filter(|r| r.place == p.id).collect();
+        let failing: Vec<&&members::BackupRun> = runs.iter().rev().take_while(|r| r.error.is_some()).collect();
+        if let Some(last) = failing.first() {
+            let error = last.error.clone().unwrap_or_default();
+            let trouble = last.trouble.as_deref().and_then(b::Trouble::parse);
+            let text = match trouble {
+                Some(_) => format!("{} {error}.", p.title),
+                None => format!("{}: {error}.", p.title),
+            };
+            let server = name(&last.server);
+            let fix = match (trouble, &p.place) {
+                (_, Err(_)) => "Fix it in the Vault.".to_string(),
+                (Some(b::Trouble::Key), _) => "Change its key in the Vault.".to_string(),
+                (Some(b::Trouble::Bucket), _) => "Check the bucket's name in the Vault.".to_string(),
+                (Some(b::Trouble::Refused), _) => "Give the key permission to write there, or change it in the Vault.".to_string(),
+                (Some(b::Trouble::Unreachable), _) => format!("Check {server} is online. It tries again every hour."),
+                (Some(b::Trouble::Disk), _) => format!("Check the disk on {server} is plugged in and has room."),
+                (None, _) => "It tries again every hour.".to_string(),
+            };
+            let since = failing.last().map_or(last.time, |r| r.time);
+            out.push(Problem { place: p.id.clone(), text, fix, since, push: failing.iter().rev().nth(1).map(|r| r.time) });
+            continue;
+        }
+        let mut late: Option<(u64, String)> = None;
+        for log in i.r.store.logs()? {
+            let Ok(scope) = Scope::parse(&log) else { continue };
+            let backer = match &p.place {
+                Ok(Place::Folder(_)) => p.server.filter(|k| m.holds(k, &scope)),
+                _ => line(m, &scope, &p.id).first().copied(),
+            };
+            let Some(backer) = backer.filter(|_| i.r.holds(&scope)) else { continue };
+            let covered = global.covered.get(&(p.id.clone(), log.clone())).map_or(0, |c| c.0);
+            let Some(waiting) = i.r.store.first_change(&log, covered)? else { continue };
+            let since = waiting.max(p.made);
+            if now.saturating_sub(since) >= LATE && late.as_ref().is_none_or(|l| since < l.0) {
+                late = Some((since, name(&backer)));
+            }
+        }
+        if let Some((since, backer)) = late {
+            let fix = match &p.place {
+                Ok(Place::Folder(_)) => format!("Check {backer} is on, with the disk plugged in."),
+                _ => format!("{backer} backs it up: check it's on."),
+            };
+            out.push(Problem { place: p.id.clone(), text: format!("Nothing has gone to {} for a day.", p.title), fix, since, push: Some(since + LATE) });
+        }
+    }
+    Ok(out)
+}
 
 /// A place to back up to, as its Vault item says: one in Everyone that the node is switched on for.
 struct PlaceItem {
@@ -96,8 +176,54 @@ impl Node {
                 if let Err(err) = self.back_up(force).await {
                     tracing::warn!("backups: {err:#}");
                 }
+                if let Err(err) = self.tell_admins().await {
+                    tracing::warn!("telling admins about backups: {err:#}");
+                }
             }
         }
+    }
+
+    /// Pushes a place's problem to the install's admins once it's worth it, through the install's push. Every server
+    /// watches, so a server that's gone is noticed too; the first in line tells them, each after it only once the
+    /// ones before have had time to, and the `backup-alert` it writes keeps the rest quiet until the next problem.
+    async fn tell_admins(&self) -> Result<()> {
+        let now = now_ms();
+        let me = self.0.id;
+        let (due, admins, push) = self.with(|i| {
+            let m = &i.r.members;
+            let push = settings(m).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+            let Some((_, global)) = i.views.get("global") else { return Ok((Vec::new(), Vec::new(), push)) };
+            if push.is_empty() {
+                return Ok((Vec::new(), Vec::new(), push));
+            }
+            let at = line(m, &Scope::Global, "alerts").iter().position(|k| *k == me).unwrap_or(usize::MAX / 2) as u64;
+            let due: Vec<Problem> = problems(i, now)?
+                .into_iter()
+                .filter(|p| p.push.is_some_and(|t| now >= t + at * STAGGER) && global.alerted.get(&p.place).is_none_or(|t| *t < p.since))
+                .collect();
+            let admins: Vec<String> = m.users.values().filter(|u| !u.removed && m.is_admin(&u.id)).map(|u| u.id.clone()).collect();
+            Ok((due, admins, push))
+        })?;
+        for p in due {
+            self.append(&Scope::Global, members::node("backup-alert", json!({ "place": p.place, "since": p.since }))).await?;
+            for admin in &admins {
+                let input = json!({ "title": "Backups", "body": format!("{} {}", p.text, p.fix) });
+                let call = CallRequest { app: push.clone(), sidecar: Some(push.clone()), op: "send".into(), input, client: Some("app".into()), ..Default::default() };
+                match Box::pin(self.route(call, Caller { key: me, user: admin.clone(), agent: None })).await {
+                    Ok(sent) => tracing::info!("told {admin} about backups: {sent}"),
+                    Err(err) => tracing::warn!("couldn't tell {admin} about backups: {err:#}"),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The first of the backups' problems, for the badge on Settings: only an admin's to see.
+    pub(super) fn backup_problem(&self, i: &Install, user: &str) -> Option<Value> {
+        if !i.r.members.is_admin(user) {
+            return None;
+        }
+        problems(i, now_ms()).ok()?.into_iter().min_by_key(|p| p.since).map(|p| p.json())
     }
 
     /// Backs up now, everything this server backs up, whether or not an hour has passed.
@@ -119,6 +245,7 @@ impl Node {
             let frontier = i.r.store.frontier()?;
             let cache = self.0.backed.lock().unwrap();
             let failed = self.0.backup_failed.lock().unwrap();
+            let pruned = self.0.pruned.lock().unwrap();
             let mut plan = Vec::new();
             for p in places(global) {
                 if !force && failed.get(&p.id).is_some_and(|t| now - t < b::EVERY) {
@@ -128,6 +255,12 @@ impl Node {
                 if folder && p.server != Some(me) {
                     continue;
                 }
+                // Every server prunes each scope it holds the key of, so pruning needs no one server.
+                let prune = (force || pruned.get(&p.id).is_none_or(|t| now - t >= PRUNE_EVERY)).then(|| -> Result<_> {
+                    let scopes: BTreeMap<String, [u8; 32]> = i.views.iter().filter(|(l, _)| Scope::parse(l).is_ok_and(|s| i.r.holds(&s))).filter_map(|(l, (_, s))| Some((l.clone(), s.backup_key?))).collect();
+                    Ok((scopes, releases(&i.r.store.scope("global")?)))
+                });
+                let prune = prune.transpose()?;
                 let mut due = Vec::new();
                 let mut logs = i.r.store.logs()?;
                 if !logs.iter().any(|l| l == "global") {
@@ -166,17 +299,20 @@ impl Node {
                     let Some(writer) = writer(i, &me, &scope) else { continue };
                     due.push(Due { scope: log, key, writer });
                 }
-                if !due.is_empty() {
-                    plan.push((p, due));
+                if !due.is_empty() || prune.is_some() {
+                    plan.push((p, due, prune));
                 }
             }
             Ok((install, recovery, plan))
         })?;
-        for (p, due) in plan {
+        for (p, due, prune) in plan {
             let place = match p.place {
                 Ok(place) => place,
                 Err(err) => {
-                    self.backed_up(&p.id, now, Some(format!("{err:#}")), Vec::new()).await?;
+                    if !due.is_empty() {
+                        self.0.backup_failed.lock().unwrap().insert(p.id.clone(), now);
+                        self.backed_up(&p.id, now, Some(err), Vec::new()).await?;
+                    }
                     continue;
                 }
             };
@@ -191,7 +327,7 @@ impl Node {
                     Ok(None) => {}
                     Err(err) => {
                         tracing::warn!("backing up {} to {}: {err:#}", d.scope, p.title);
-                        error.get_or_insert(format!("{err:#}"));
+                        error.get_or_insert(err);
                     }
                 }
             }
@@ -199,8 +335,18 @@ impl Node {
                 Some(_) => self.0.backup_failed.lock().unwrap().insert(p.id.clone(), now),
                 None => self.0.backup_failed.lock().unwrap().remove(&p.id),
             };
+            let failed = error.is_some();
             if error.is_some() || !snapshots.is_empty() {
                 self.backed_up(&p.id, now, error, snapshots).await?;
+            }
+            if let (Some((scopes, fetchable)), false) = (prune, failed) {
+                self.0.pruned.lock().unwrap().insert(p.id.clone(), now);
+                let (place, install, title) = (place.clone(), install.clone(), p.title.clone());
+                match tokio::task::spawn_blocking(move || b::prune(&place, &install, &scopes, &fetchable, now_ms())).await? {
+                    Ok(pruned) if pruned != b::Pruned::default() => tracing::info!("pruned {title}: {} snapshots, {} objects, {} bytes", pruned.snapshots, pruned.objects, pruned.bytes),
+                    Ok(_) => {}
+                    Err(err) => tracing::warn!("pruning {title}: {err:#}"),
+                }
             }
         }
         Ok(())
@@ -221,7 +367,8 @@ impl Node {
         let cached = self.0.backed.lock().unwrap().get(&(place_id.to_string(), d.scope.clone())).filter(|s| s.1 == b::key_id(&key)).map(|s| s.0.clone());
         let (entries, blobs) = self.with(|i| {
             let entries = i.r.store.scope(&d.scope)?;
-            Ok((entries.clone(), backed_blobs(&entries)))
+            let forgotten = i.views.get(&d.scope).map(|(_, s)| s.forgotten.clone()).unwrap_or_default();
+            Ok((entries.clone(), backed_blobs(&entries, &forgotten)))
         })?;
         let dir = self.0.dir.clone();
         let (place, install, scope_name, server) = (place.clone(), install.to_string(), d.scope.clone(), self.0.id);
@@ -246,11 +393,14 @@ impl Node {
     }
 
     /// Writes how a run to a place went, in `global`.
-    async fn backed_up(&self, place: &str, now: u64, error: Option<String>, snapshots: Vec<Snapshot>) -> Result<()> {
+    async fn backed_up(&self, place: &str, now: u64, error: Option<anyhow::Error>, snapshots: Vec<Snapshot>) -> Result<()> {
         let snapshots: Vec<Value> = snapshots.iter().map(|s| json!({ "scope": s.scope, "upto": s.upto, "entries": s.entries, "blobs": s.blobs.len(), "bytes": s.bytes })).collect();
         let mut data = json!({ "place": place, "time": now, "snapshots": snapshots });
         if let Some(error) = error {
-            data["error"] = json!(error.chars().take(500).collect::<String>());
+            data["error"] = json!(format!("{error:#}").chars().take(500).collect::<String>());
+            if let Some(trouble) = b::Trouble::of(&error) {
+                data["trouble"] = json!(trouble.name());
+            }
         }
         self.append(&Scope::Global, members::node("backup", data)).await?;
         Ok(())
@@ -422,9 +572,15 @@ impl Node {
     }
 }
 
-/// The blobs a scope's backup keeps: every blob its entries name, but of the node's releases only the newest for each
-/// platform, so a white label with no published releases can still recover.
-fn backed_blobs(entries: &[Entry]) -> BTreeSet<String> {
+/// The node's releases' blobs: what a backup needn't keep but the newest of, since releases can be fetched again from
+/// where they're published.
+fn releases(entries: &[Entry]) -> BTreeSet<String> {
+    entries.iter().filter(|e| e.content.app == release::APP && e.content.kind == "node-release").flat_map(|e| e.content.blobs.iter().cloned()).collect()
+}
+
+/// The blobs a scope's backup keeps: every blob its entries name but those its apps forgot, and of the node's releases
+/// only the newest for each platform, so a white label with no published releases can still recover.
+fn backed_blobs(entries: &[Entry], forgotten: &BTreeSet<String>) -> BTreeSet<String> {
     let mut newest: BTreeMap<String, (u64, String)> = BTreeMap::new();
     let mut out = BTreeSet::new();
     for e in entries {
@@ -437,7 +593,7 @@ fn backed_blobs(entries: &[Entry]) -> BTreeSet<String> {
             }
             continue;
         }
-        out.extend(e.content.blobs.iter().cloned());
+        out.extend(e.content.blobs.iter().filter(|b| e.content.app == members::APP || !forgotten.contains(*b)).cloned());
     }
     out.extend(newest.into_values().map(|(_, b)| b));
     out

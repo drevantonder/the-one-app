@@ -178,6 +178,59 @@ fn unpack(bytes: &[u8]) -> Result<Vec<Entry>> {
 
 // Places.
 
+/// What went wrong at a place, so a person can be told how to fix it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trouble {
+    /// The place rejected the key.
+    Key,
+    /// It has no such bucket.
+    Bucket,
+    /// The key may not write there.
+    Refused,
+    /// The place couldn't be reached.
+    Unreachable,
+    /// A folder's disk couldn't be written or read.
+    Disk,
+}
+
+impl Trouble {
+    pub fn name(self) -> &'static str {
+        match self {
+            Trouble::Key => "key",
+            Trouble::Bucket => "bucket",
+            Trouble::Refused => "refused",
+            Trouble::Unreachable => "unreachable",
+            Trouble::Disk => "disk",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Trouble> {
+        [Trouble::Key, Trouble::Bucket, Trouble::Refused, Trouble::Unreachable, Trouble::Disk].into_iter().find(|t| t.name() == name)
+    }
+
+    /// The trouble behind an error, if a place said what it was.
+    pub fn of(err: &anyhow::Error) -> Option<Trouble> {
+        err.chain().find_map(|e| e.downcast_ref::<Failed>()).map(|f| f.0)
+    }
+}
+
+/// A place's failure, in words that follow the place's name ("rejected the key"), and what kind it is.
+#[derive(Debug)]
+pub struct Failed(pub Trouble, pub String);
+
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.1)
+    }
+}
+
+impl std::error::Error for Failed {}
+
+/// A folder's I/O error, as a disk's trouble.
+fn disk(dir: &std::path::Path, err: std::io::Error) -> anyhow::Error {
+    Failed(Trouble::Disk, format!("couldn't be used ({}: {err})", dir.display())).into()
+}
+
 /// Where backups go.
 #[derive(Clone, Debug)]
 pub enum Place {
@@ -224,15 +277,15 @@ impl Place {
         match self {
             Place::Folder(dir) => {
                 let file = dir.join(path);
-                std::fs::create_dir_all(file.parent().context("no folder")?)?;
+                std::fs::create_dir_all(file.parent().context("no folder")?).map_err(|e| disk(dir, e))?;
                 let tmp = file.with_extension("partial");
-                std::fs::write(&tmp, bytes)?;
-                std::fs::rename(&tmp, &file)?;
+                std::fs::write(&tmp, bytes).map_err(|e| disk(dir, e))?;
+                std::fs::rename(&tmp, &file).map_err(|e| disk(dir, e))?;
                 Ok(())
             }
             Place::S3(s3) => match s3.request("PUT", path, &[], bytes)? {
                 (200, _) => Ok(()),
-                (status, body) => bail!("{}", s3.failed(status, &body)),
+                (status, body) => Err(s3.failed(status, &body)),
             },
         }
     }
@@ -242,12 +295,12 @@ impl Place {
             Place::Folder(dir) => match std::fs::read(dir.join(path)) {
                 Ok(bytes) => Ok(Some(bytes)),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                Err(e) => Err(e.into()),
+                Err(e) => Err(disk(dir, e)),
             },
             Place::S3(s3) => match s3.request("GET", path, &[], &[])? {
                 (200, body) => Ok(Some(body)),
                 (404, _) => Ok(None),
-                (status, body) => bail!("{}", s3.failed(status, &body)),
+                (status, body) => Err(s3.failed(status, &body)),
             },
         }
     }
@@ -255,12 +308,12 @@ impl Place {
     pub fn delete(&self, path: &str) -> Result<()> {
         match self {
             Place::Folder(dir) => match std::fs::remove_file(dir.join(path)) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(disk(dir, e)),
                 _ => Ok(()),
             },
             Place::S3(s3) => match s3.request("DELETE", path, &[], &[])? {
                 (200 | 204 | 404, _) => Ok(()),
-                (status, body) => bail!("{}", s3.failed(status, &body)),
+                (status, body) => Err(s3.failed(status, &body)),
             },
         }
     }
@@ -271,12 +324,30 @@ impl Place {
             Place::Folder(dir) => match std::fs::read_dir(dir.join(folder)) {
                 Ok(entries) => entries.filter_map(|e| e.ok()?.file_name().into_string().ok()).filter(|n| !n.ends_with(".partial") && !n.starts_with('.')).collect(),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(disk(dir, e)),
             },
-            Place::S3(s3) => s3.list(&format!("{}/", folder.trim_end_matches('/')))?,
+            Place::S3(s3) => s3.list(&format!("{}/", folder.trim_end_matches('/')))?.into_iter().map(|(name, _)| name).collect(),
         };
         out.sort();
+        out.dedup();
         Ok(out)
+    }
+
+    /// The objects in an install's backup: each one's name, when it was last written (ms), and its size.
+    pub fn objects(&self, install: &str) -> Result<Vec<(String, u64, u64)>> {
+        let folder = format!("{install}/objects");
+        match self {
+            Place::Folder(dir) => {
+                let mut out = Vec::new();
+                for name in self.list(&folder)? {
+                    let meta = std::fs::metadata(dir.join(&folder).join(&name)).map_err(|e| disk(dir, e))?;
+                    let written = meta.modified().map_err(|e| disk(dir, e))?.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                    out.push((name, written, meta.len()));
+                }
+                Ok(out)
+            }
+            Place::S3(s3) => Ok(s3.list(&format!("{folder}/"))?.into_iter().filter_map(|(name, about)| Some((name, about?.0, about?.1))).collect()),
+        }
     }
 
     /// Writes a test file, reads it back and deletes it: each step, and what went wrong if it did.
@@ -309,19 +380,22 @@ impl S3 {
     }
 
     /// Says what a refused request means, in words, from S3's error code.
-    fn failed(&self, status: u16, body: &[u8]) -> String {
+    fn failed(&self, status: u16, body: &[u8]) -> anyhow::Error {
         let text = String::from_utf8_lossy(body);
         let code = between(&text, "<Code>", "</Code>").unwrap_or_default();
-        match (status, code.as_str()) {
-            (_, "InvalidAccessKeyId" | "SignatureDoesNotMatch") | (401, _) => format!("{} rejected the key", self.host()),
-            (_, "NoSuchBucket") => format!("{} has no bucket {}", self.host(), self.bucket),
-            (403, _) | (_, "AccessDenied") => format!("{} refused: the key may not write to {}", self.host(), self.bucket),
-            _ => format!("{} said {status}{}", self.host(), if code.is_empty() { String::new() } else { format!(" ({code})") }),
-        }
+        let (trouble, said) = match (status, code.as_str()) {
+            (_, "InvalidAccessKeyId" | "SignatureDoesNotMatch") | (401, _) => (Trouble::Key, "rejected the key".to_string()),
+            (_, "NoSuchBucket") => (Trouble::Bucket, format!("has no bucket {}", self.bucket)),
+            (403, _) | (_, "AccessDenied") => (Trouble::Refused, format!("won't let the key write to {}", self.bucket)),
+            (500.., _) => (Trouble::Unreachable, format!("said {status}{}", if code.is_empty() { String::new() } else { format!(" ({code})") })),
+            _ => return anyhow!("{} said {status}{}", self.host(), if code.is_empty() { String::new() } else { format!(" ({code})") }),
+        };
+        Failed(trouble, said).into()
     }
 
-    /// The names under `prefix`, one level down: objects' and folders'.
-    fn list(&self, prefix: &str) -> Result<Vec<String>> {
+    /// The names under `prefix`, one level down: objects', with when each was last written (ms) and its size, and
+    /// folders'.
+    fn list(&self, prefix: &str) -> Result<Vec<(String, Option<(u64, u64)>)>> {
         let mut out = Vec::new();
         let mut token: Option<String> = None;
         loop {
@@ -331,19 +405,25 @@ impl S3 {
             }
             let q: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
             let (status, body) = self.request("GET", "", &q, &[])?;
-            ensure!(status == 200, "{}", self.failed(status, &body));
+            if status != 200 {
+                return Err(self.failed(status, &body));
+            }
             let text = String::from_utf8_lossy(&body);
-            for tag in ["Key", "Prefix"] {
-                let (open, close) = (format!("<{tag}>"), format!("</{tag}>"));
+            // Each object is a <Contents> with its <Key> and <LastModified>; each folder a <CommonPrefixes><Prefix>.
+            for (tag, block) in [("Key", "Contents"), ("Prefix", "CommonPrefixes")] {
+                let (open, close) = (format!("<{block}>"), format!("</{block}>"));
                 let mut rest = text.as_ref();
                 while let Some(start) = rest.find(&open) {
                     rest = &rest[start + open.len()..];
                     let Some(end) = rest.find(&close) else { break };
-                    let name = unescape(&rest[..end]);
-                    if let Some(name) = name.strip_prefix(prefix).map(|n| n.trim_end_matches('/')).filter(|n| !n.is_empty()) {
-                        out.push(name.to_string());
-                    }
+                    let item = &rest[..end];
                     rest = &rest[end..];
+                    let Some(name) = between(item, &format!("<{tag}>"), &format!("</{tag}>")).map(|n| unescape(&n)) else { continue };
+                    let written = between(item, "<LastModified>", "</LastModified>").and_then(|t| t.parse::<jiff::Timestamp>().ok()).map(|t| t.as_millisecond() as u64);
+                    let size = between(item, "<Size>", "</Size>").and_then(|n| n.parse().ok());
+                    if let Some(name) = name.strip_prefix(prefix).map(|n| n.trim_end_matches('/')).filter(|n| !n.is_empty()) {
+                        out.push((name.to_string(), written.zip(size)));
+                    }
                 }
             }
             match between(&text, "<NextContinuationToken>", "</NextContinuationToken>") {
@@ -351,7 +431,6 @@ impl S3 {
                 _ => break,
             }
         }
-        out.dedup();
         Ok(out)
     }
 
@@ -387,7 +466,7 @@ impl S3 {
             "PUT" => agent.run(builder.body(body.to_vec())?),
             _ => agent.run(builder.body(())?),
         }
-        .with_context(|| format!("couldn't reach {host}"))?;
+        .map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({host}: {e})")))?;
         let bytes = resp.body_mut().with_config().limit(4 << 30).read_to_vec()?;
         Ok((resp.status().as_u16(), bytes))
     }
@@ -459,8 +538,11 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
     let Job { place, install, scope, key, recovery, server, now, previous, entries, blobs } = job;
     let mut snap = previous.clone().unwrap_or_else(|| Snapshot { scope: scope.to_string(), ..Default::default() });
     let new: Vec<&Entry> = entries.iter().filter(|e| e.seq() >= snap.frontier.get(&hex(&e.author())).copied().unwrap_or(0)).collect();
+    // Blobs the scope no longer keeps (a release that's been superseded, a blob its scope forgot) leave the snapshot,
+    // and leave the place once no snapshot kept still has them.
+    snap.blobs.retain(|hash, _| blobs.contains(hash));
     let new_blobs: Vec<&String> = blobs.iter().filter(|b| !snap.blobs.contains_key(*b)).collect();
-    if previous.is_some() && new.is_empty() && new_blobs.is_empty() {
+    if previous.as_ref().is_some_and(|p| p.blobs.len() == snap.blobs.len()) && new.is_empty() && new_blobs.is_empty() {
         return Ok(None);
     }
     let keys = format!("{install}/keys/{}/{}", folder(scope), key_id(&key));
@@ -526,6 +608,115 @@ pub fn latest(place: &Place, install: &str, scope: &str, keys: &[[u8; 32]]) -> R
 pub fn snapshots(place: &Place, install: &str, scope: &str) -> Result<Vec<(u64, String)>> {
     let names = place.list(&format!("{install}/snapshots/{}", folder(scope)))?;
     Ok(names.iter().rev().filter_map(|n| n.split_once('-').and_then(|(t, s)| Some((t.parse().ok()?, s.to_string())))).collect())
+}
+
+// Pruning.
+
+const HOUR: u64 = 3_600_000;
+const DAY: u64 = 24 * HOUR;
+/// How long an object no kept snapshot names may stay, in case a run that's sending it again hasn't written its
+/// snapshot yet.
+const SETTLE: u64 = HOUR;
+/// How long an object no snapshot names at all may stay, in case it's from a run still going.
+const STRAY: u64 = DAY;
+
+/// Which snapshots to keep, by time: every one for 2 days, the last of each day for 30 days, the last of each month
+/// for 12 months, and always the newest. Days and months are UTC's, so every server keeps the same ones.
+pub fn kept(times: &[u64], now: u64) -> BTreeSet<u64> {
+    let mut out: BTreeSet<u64> = times.iter().copied().filter(|t| *t + 2 * DAY > now).collect();
+    out.extend(times.iter().max());
+    let mut days: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut months: BTreeMap<(i16, i8), u64> = BTreeMap::new();
+    for &t in times {
+        if t + 30 * DAY > now {
+            let last = days.entry(t / DAY).or_insert(t);
+            *last = (*last).max(t);
+        }
+        if t + 365 * DAY > now {
+            let date = jiff::Timestamp::from_millisecond(t as i64).unwrap_or_default().to_zoned(jiff::tz::TimeZone::UTC);
+            let last = months.entry((date.year(), date.month())).or_insert(t);
+            *last = (*last).max(t);
+        }
+    }
+    out.extend(days.into_values());
+    out.extend(months.into_values());
+    out
+}
+
+/// What a prune did.
+#[derive(Debug, Default, PartialEq)]
+pub struct Pruned {
+    pub snapshots: usize,
+    pub objects: usize,
+    pub bytes: u64,
+}
+
+/// Prunes an install's backup in a place: drops the snapshots `kept` doesn't keep of each scope in `scopes` (by its
+/// key), takes the blobs in `fetchable` (releases, which can be fetched again from where they're published) out of
+/// every snapshot but each scope's newest, then deletes the objects no snapshot kept still names.
+///
+/// A run may be backing up at the same moment, so an object goes only once it has gone unwritten for `SETTLE` (a
+/// run that sends it again has rewritten it), and the newest snapshot, which a run builds on, is never touched. When
+/// `scopes` opens every snapshot in the place, objects no snapshot names at all (from a run that failed partway)
+/// go too, once they've waited `STRAY`.
+pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, fetchable: &BTreeSet<String>, now: u64) -> Result<Pruned> {
+    let mut out = Pruned::default();
+    let mut keep: BTreeSet<String> = BTreeSet::new();
+    let mut drop: BTreeSet<String> = BTreeSet::new();
+    let mut opened_all = true;
+    let names = |s: &Snapshot| s.packs.iter().chain(s.blobs.values()).cloned().collect::<Vec<_>>();
+    // A release leaves a snapshot only once its object has settled, so it leaves the place in the same prune.
+    let unsettled: BTreeSet<String> = place.objects(install)?.into_iter().filter(|o| o.1 + SETTLE > now).map(|o| o.0).collect();
+    let folders = place.list(&format!("{install}/snapshots"))?;
+    for dir in &folders {
+        let scope = scope_of(dir);
+        let Some(key) = scopes.get(&scope) else {
+            opened_all = false;
+            continue;
+        };
+        let mut snaps: Vec<(String, Snapshot)> = Vec::new();
+        for name in place.list(&format!("{install}/snapshots/{dir}"))? {
+            let path = format!("{install}/snapshots/{dir}/{name}");
+            let Some(bytes) = place.get(&path)? else { continue };
+            match open_snapshot(&[*key], &bytes)? {
+                Some((s, _)) => snaps.push((path, s)),
+                None => opened_all = false,
+            }
+        }
+        let Some(newest) = snaps.iter().map(|(_, s)| s.time).max() else { continue };
+        let latest: BTreeSet<String> = snaps.iter().filter(|(_, s)| s.time == newest).flat_map(|(_, s)| s.blobs.keys().cloned()).collect();
+        let times: Vec<u64> = snaps.iter().map(|(_, s)| s.time).collect();
+        let kept = kept(&times, now);
+        for (path, mut s) in snaps {
+            if !kept.contains(&s.time) {
+                place.delete(&path)?;
+                out.snapshots += 1;
+                drop.extend(names(&s));
+                continue;
+            }
+            if s.time != newest {
+                let gone: Vec<String> = s.blobs.iter().filter(|(h, o)| fetchable.contains(*h) && !latest.contains(*h) && !unsettled.contains(*o)).map(|(h, _)| h.clone()).collect();
+                if !gone.is_empty() {
+                    for h in gone {
+                        drop.extend(s.blobs.remove(&h));
+                    }
+                    place.put(&path, &lock_snapshot(key, &s))?;
+                }
+            }
+            keep.extend(names(&s));
+        }
+    }
+    // Listed again: an object a run sent since the first listing has just been written.
+    for (name, written, size) in place.objects(install)? {
+        let settled = |wait: u64| written + wait <= now;
+        if keep.contains(&name) || !(drop.contains(&name) && settled(SETTLE) || opened_all && settled(STRAY)) {
+            continue;
+        }
+        place.delete(&format!("{install}/objects/{name}"))?;
+        out.bytes += size;
+        out.objects += 1;
+    }
+    Ok(out)
 }
 
 /// Backups' tools, which are the node's, not an app's.
@@ -752,6 +943,97 @@ mod tests {
         assert!(takes_over(1, Some(hour), 10 * hour, 12 * hour));
         assert!(!takes_over(2, Some(hour), 10 * hour, 12 * hour), "the third waits for two");
         assert!(takes_over(2, Some(hour), 0, 5 * hour));
+    }
+
+    #[test]
+    fn snapshots_are_kept_hourly_for_two_days_daily_for_a_month_and_monthly_for_a_year() {
+        let (hour, day) = (HOUR, DAY);
+        // Noon UTC on 2026-11-15.
+        let now = 1_795_262_400_000 + 12 * hour;
+        let hourly: Vec<u64> = (0..72).map(|h| now - h * hour).collect();
+        let kept_hours = kept(&hourly, now);
+        assert!(hourly[..48].iter().all(|t| kept_hours.contains(t)), "every one in the last 2 days");
+        assert_eq!(kept_hours.len(), 48 + 1, "then the last of the day before");
+        let daily: Vec<u64> = (0..400).flat_map(|d| [now - d * day - 3 * hour, now - d * day - 5 * hour]).collect();
+        let k = kept(&daily, now);
+        assert!(k.contains(&(now - 10 * day - 3 * hour)) && !k.contains(&(now - 10 * day - 5 * hour)), "the last of each day for a month");
+        let months = k.iter().filter(|t| **t + 30 * day <= now).count();
+        assert!((11..=12).contains(&months), "the last of each month for a year: {months}");
+        assert!(k.iter().all(|t| *t + 365 * day > now), "nothing older than a year");
+        assert_eq!(kept(&[now - 900 * day], now), [now - 900 * day].into(), "the newest always stays");
+    }
+
+    #[test]
+    fn pruning_drops_old_snapshots_and_releases_and_what_only_they_named() {
+        let dir = std::env::temp_dir().join(format!("backups-prune-{}", hex(&rand::random())));
+        let place = Place::Folder(dir.clone());
+        let install = "0123456789abcdef";
+        let recovery = SigningKey::generate();
+        let server = SigningKey::generate();
+        let key: [u8; 32] = rand::random();
+        let blob = |b: &[u8]| (blake3::hash(b).to_hex().to_string(), b.to_vec());
+        let (release1, release2, repo) = (blob(b"release 1"), blob(b"release 2"), blob(b"a repo's pack"));
+        let all = entries(&server, "global", 8, None);
+        let real = jiff::Timestamp::now().as_millisecond() as u64;
+        let ten_days_ago = (real / DAY - 10) * DAY;
+        let mut previous = None;
+        // Two on one day ten days ago, with the old release; then an hour ago and now, with the new one.
+        let runs = [(ten_days_ago + HOUR, 2, &release1), (ten_days_ago + 2 * HOUR, 4, &release1), (real - HOUR, 6, &release2), (real, 8, &release2)];
+        let mut written = Vec::new();
+        for (now, n, release) in runs {
+            let job = Job {
+                place: &place,
+                install,
+                scope: "global",
+                key,
+                recovery: *recovery.verifying_key().as_bytes(),
+                server: *server.verifying_key().as_bytes(),
+                now,
+                previous: previous.clone(),
+                entries: all[..n].to_vec(),
+                blobs: [release.0.clone(), repo.0.clone()].into(),
+            };
+            let s = back_up(job, |h| [&release1, &release2, &repo].into_iter().find(|b| b.0 == h).map(|b| b.1.clone())).unwrap().unwrap();
+            written.push(s.clone());
+            previous = Some(s);
+        }
+        assert!(!written[2].blobs.contains_key(&release1.0), "a new snapshot leaves out the release it no longer keeps");
+        let objects = |place: &Place| place.objects(install).unwrap().into_iter().map(|o| o.0).collect::<BTreeSet<_>>();
+        let release1_object = written[0].blobs[&release1.0].clone();
+        let scopes: BTreeMap<String, [u8; 32]> = [("global".to_string(), key)].into();
+        let fetchable: BTreeSet<String> = [release1.0.clone(), release2.0.clone()].into();
+
+        // Just written, the old release waits: a run may be sending it again right now.
+        let first = prune(&place, install, &scopes, &fetchable, real).unwrap();
+        assert_eq!((first.snapshots, first.objects), (1, 0), "the day's earlier snapshot goes; no object yet");
+        assert!(objects(&place).contains(&release1_object));
+        let stray = format!("{install}/objects/{}", hex(&rand::random()));
+        place.put(&stray, b"from a run that failed partway").unwrap();
+
+        // Once it has waited, it goes, and the snapshot that named it no longer does.
+        let later = prune(&place, install, &scopes, &fetchable, real + 2 * HOUR).unwrap();
+        assert_eq!((later.snapshots, later.objects), (0, 1));
+        assert!(later.bytes > b"release 1".len() as u64);
+        assert!(!objects(&place).contains(&release1_object));
+        assert!(place.get(&stray).unwrap().is_some(), "a stray object waits a day, for a run still going");
+        let names = place.list(&format!("{install}/snapshots/global")).unwrap();
+        assert_eq!(names.len(), 3);
+        let day_old = open_snapshot(&[key], &place.get(&format!("{install}/snapshots/global/{}", names[0])).unwrap().unwrap()).unwrap().unwrap().0;
+        assert_eq!(day_old.blobs.keys().collect::<Vec<_>>(), vec![&repo.0], "the old snapshot keeps the repo, not the release");
+
+        // A day on, the stray goes too, since every snapshot here opened.
+        assert_eq!(prune(&place, install, &scopes, &fetchable, real + 2 * DAY).unwrap().objects, 1);
+        assert!(place.get(&stray).unwrap().is_none());
+        // Not when a scope's snapshots are another key's: they may name it.
+        place.put(&stray, b"again").unwrap();
+        place.put(&format!("{install}/snapshots/user-0123456789abcdef/{}", snapshot_name(real, &[0; 32])), &lock_snapshot(&rand::random(), &Snapshot::default())).unwrap();
+        assert_eq!(prune(&place, install, &scopes, &fetchable, real + 2 * DAY).unwrap().objects, 0);
+
+        // What's left restores, and every object it names is there.
+        let restored = restore(&place, install, "global", &[key]).unwrap();
+        assert_eq!(restored.entries.len(), 8);
+        assert_eq!(restored.blobs.iter().map(|b| &b.0).collect::<BTreeSet<_>>(), [&release2.0, &repo.0].into());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
