@@ -17,6 +17,10 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+# Backups encrypt what leaves for a place with AES-256-GCM, and seal each scope's key to the recovery key with X25519
+# (src/backups.rs). Both were already built, through iroh.
+aes-gcm = "0.10"
+curve25519-dalek = "4.1"
 blake3 = "1"
 axum = "0.8"
 ciborium = "0.2"

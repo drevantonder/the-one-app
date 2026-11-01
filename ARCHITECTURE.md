@@ -37,6 +37,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/apps.rs`, `src/runtime/`: workerd, which runs every app; `src/runtime/shim.js` is what an app's `ctx` is.
 - `src/sidecars.rs`: server sidecars: the ones built in (`src/shell.rs`, `src/agents.rs`, `src/models.rs`), and those that register over the local API (`sidecars/`, in Go, and the Mac app's, `apple/Mac/Sidecars`).
 - `src/vault.rs`, `src/outbound.rs`: the Vault's items, and filling them into apps' and sidecars' requests on the way out.
+- `src/backups.rs`, `src/node/backups.rs`: backups, each scope's entries and blobs encrypted with its own key (sealed to the recovery key) and sent to a place, a folder or S3-compatible storage, that's a Vault item; and which server backs up what, when.
 - `src/schedules.rs`: apps' schedules, and which server runs each.
 - `src/deploy.rs`, `src/bundle.rs`: `one deploy`, building an app with a pinned Bun into a bundle that keeps its source.
 - `src/screen/`: the design kit and the bridge every app screen is served in. `src/mcp_apps.rs`, `src/mcp_view.html`: widgets and screens drawn inline in chats.
@@ -53,6 +54,6 @@ The map: what lives where, and the few rules the code only shows by keeping them
 
 ## Designed, not built
 
-- Backups: each server streams the entries and blobs it holds, encrypted and content-named, to an S3 bucket; restore is import, and a server restoring with no one left to pair with admits itself with the recovery key's countersignature.
+- Backups' pruning, failure pushes, weekly restore check and recovery from nothing: a server restoring with no one left to pair with admits itself with the recovery key's countersignature.
 - Sidecars a node starts from a `sidecar` entry's executable, rather than registering themselves.
 - View snapshots on disk, so a node needn't replay every scope when it starts.

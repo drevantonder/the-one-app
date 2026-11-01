@@ -9,6 +9,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::entry::{Entry, Head, Key};
 
+/// Entries other than the node's backup runs and keys, which change nothing a backup needs to send at once.
+const NOT_BACKUPS: &str = "not (json_extract(cast(body as text), '$.app') = 'node' and json_extract(cast(body as text), '$.kind') in ('backup', 'backup-key'))";
+
 pub struct Store {
     db: Connection,
 }
@@ -189,6 +192,19 @@ impl Store {
         ensure!(log != "global", "every server holds global");
         self.db.execute("delete from entries where log = ?", [log])?;
         Ok(())
+    }
+
+    /// Whether a scope has entries past `frontier` (each author's next seq, by key) other than backups' own.
+    pub fn changed_since(&self, log: &str, frontier: &std::collections::BTreeMap<String, u32>) -> Result<bool> {
+        let mut stmt = self.db.prepare(&format!("select author, max(seq) from entries where log = ? and {NOT_BACKUPS} group by author"))?;
+        let rows: Vec<(Key, u32)> = stmt.query_map([log], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        Ok(rows.iter().any(|(a, max)| frontier.get(&crate::entry::hex(a)).is_none_or(|next| max >= next)))
+    }
+
+    /// When the first of a scope's entries after `time` was written, other than backups' own.
+    pub fn first_change(&self, log: &str, time: u64) -> Result<Option<u64>> {
+        let t: Option<i64> = self.db.query_row(&format!("select min(time) from entries where log = ? and time > ? and {NOT_BACKUPS}"), params![log, time as i64], |r| r.get(0))?;
+        Ok(t.map(|t| t as u64))
     }
 
     pub fn max_time(&self) -> Result<u64> {

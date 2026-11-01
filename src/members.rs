@@ -146,7 +146,7 @@ pub struct Members {
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
-const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "vault-request", "item", "forget", "used", "failed", "cost"];
+const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "vault-request", "item", "forget", "used", "failed", "cost", "backup-key", "backup"];
 
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
@@ -598,6 +598,34 @@ pub struct ScopeState {
     /// In a user's own scope: how they arranged each page, by page (`user`, `group:<id>` or `global`):
     /// `{ items, hidden }`, as their latest `arrange` of it said.
     pub arrangements: BTreeMap<String, Value>,
+    /// The key this scope's backups are encrypted with: the first `backup-key` written here.
+    pub backup_key: Option<[u8; 32]>,
+    /// In `global`: the latest backup runs, oldest first.
+    pub backups: Vec<BackupRun>,
+}
+
+/// How many backup runs `global`'s state keeps.
+pub const BACKUP_RUNS_KEPT: usize = 500;
+
+/// One server's backup run to one place: the snapshots it wrote, or what went wrong.
+#[derive(Clone, Debug)]
+pub struct BackupRun {
+    /// The place's Vault item.
+    pub place: String,
+    pub server: Key,
+    pub time: u64,
+    pub error: Option<String>,
+    pub snapshots: Vec<BackedUp>,
+}
+
+/// A scope's snapshot in a run: when its newest entry was, and what it added.
+#[derive(Clone, Debug)]
+pub struct BackedUp {
+    pub scope: String,
+    pub upto: u64,
+    pub entries: u64,
+    pub blobs: u64,
+    pub bytes: u64,
 }
 
 /// How many runs of each schedule a scope's state keeps.
@@ -783,6 +811,27 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
                 }
             }
         }
+        "backup-key" => {
+            ensure!(state.backup_key.is_none(), "the scope has its backup key");
+            let key = unhex(e.content.data["key"].as_str().context("no key")?)?;
+            state.backup_key = Some(key);
+        }
+        "backup" => {
+            ensure!(scope == Scope::Global, "backup runs are written in global");
+            let data = &e.content.data;
+            let snapshots = data["snapshots"].as_array().into_iter().flatten().map(|s| BackedUp {
+                scope: s["scope"].as_str().unwrap_or("").to_string(),
+                upto: s["upto"].as_u64().unwrap_or(0),
+                entries: s["entries"].as_u64().unwrap_or(0),
+                blobs: s["blobs"].as_u64().unwrap_or(0),
+                bytes: s["bytes"].as_u64().unwrap_or(0),
+            });
+            let place = data["place"].as_str().filter(|p| is_id(p)).context("no place")?.to_string();
+            state.backups.push(BackupRun { place, server: e.author(), time: e.time(), error: data["error"].as_str().map(str::to_string), snapshots: snapshots.collect() });
+            if state.backups.len() > BACKUP_RUNS_KEPT {
+                state.backups.remove(0);
+            }
+        }
         "forget" => {
             let blob = e.content.data["blob"].as_str().filter(|b| b.len() == 64 && b.bytes().all(|c| c.is_ascii_hexdigit())).context("no blob")?;
             state.forgotten.insert(blob.to_string());
@@ -799,7 +848,8 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             }
             ensure!(!state.requests.contains_key(&id), "that request is already made");
             let app = data["app"].as_str().context("no app")?.to_string();
-            ensure!(m.apps.contains_key(&app), "no such app");
+            // An item the node itself uses (a backup place's) is asked for as the node's.
+            ensure!(m.apps.contains_key(&app) || app == APP, "no such app");
             // An earlier server's asks for one secret field, `name`.
             let (title, fields) = match data["name"].as_str() {
                 Some(name) => (name.to_string(), vec![(name.to_string(), true)]),

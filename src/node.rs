@@ -23,6 +23,8 @@ use crate::store::{Frontier, Store};
 use crate::sync::{self, Sidecar, Handled, Msg, Replica};
 use crate::vault;
 
+mod backups;
+
 const JOIN_ALPN: &[u8] = b"one/join/1";
 const CALL_ALPN: &[u8] = b"one/call/1";
 pub const CLIENT_ALPN: &[u8] = b"one/client/1";
@@ -263,6 +265,13 @@ pub struct Inner {
     seen: Mutex<std::collections::HashSet<(String, String, String, u64)>>,
     /// How many failures of each app were recorded here each hour.
     failures: Mutex<HashMap<(String, u64), u32>>,
+    /// Wakes the backups to run now, and whether they run whether or not an hour passed.
+    backup_now: tokio::sync::Notify,
+    backup_forced: Mutex<bool>,
+    /// The newest snapshot this server knows of each (place, scope), with its key's id.
+    backed: Mutex<HashMap<(String, String), (crate::backups::Snapshot, String)>>,
+    /// When each place's last run here failed, so it's tried again an hour later, not every minute.
+    backup_failed: Mutex<HashMap<String, u64>>,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -351,6 +360,10 @@ impl Node {
             later: Mutex::new(HashMap::new()),
             seen: Mutex::new(Default::default()),
             failures: Mutex::new(HashMap::new()),
+            backup_now: tokio::sync::Notify::new(),
+            backup_forced: Mutex::new(false),
+            backed: Mutex::new(HashMap::new()),
+            backup_failed: Mutex::new(HashMap::new()),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -371,6 +384,7 @@ impl Node {
             .spawn();
         tokio::spawn(node.clone().dial_loop());
         tokio::spawn(node.clone().schedule_loop());
+        tokio::spawn(node.clone().backup_loop());
         let worker = node.clone();
         tokio::spawn(async move {
             loop {
@@ -1523,7 +1537,7 @@ impl Node {
         data["agent"] = json!(caller.agent);
         self.with(|i| {
             ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "you can't change the Vault in {scope}");
-            ensure!(i.r.members.apps.get(app).is_some_and(|a| !a.erased), "no app named {app}");
+            ensure!(i.r.members.apps.get(app).is_some_and(|a| !a.erased) || app == members::APP, "no app named {app}");
             Ok(())
         })?;
         let by = (caller.key != self.0.id).then_some(caller.key);
@@ -2556,6 +2570,7 @@ impl Node {
                 self.member_as(me, "remove", data).await?;
                 json!({})
             }
+            (m, p) if p.starts_with("/v1/backups") => self.backups_route(me, m, p, &body).await?.with_context(|| format!("no {m} {p}"))?,
             (m, p) if p.starts_with("/v1/vault") || p.starts_with("/v1/secrets") => self.vault_route(me, m, p, &body).await?.with_context(|| format!("no {m} {p}"))?,
             ("POST", "/v1/name") => {
                 let name = body["name"].as_str().unwrap_or("").trim();

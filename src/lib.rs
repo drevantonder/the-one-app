@@ -24,6 +24,7 @@ pub fn cache() -> PathBuf {
 fn user_home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| ".".into())
 }
+pub mod backups;
 pub mod entry;
 pub mod git;
 pub mod skills;

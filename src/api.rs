@@ -57,6 +57,8 @@ pub fn router(node: Node) -> Router {
         .route("/v1/driver", post(sidecar))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
+        .route("/v1/backups", get(backups_get))
+        .route("/v1/backups/{op}", post(backups_post))
         .route("/v1/vault", get(vault_get).post(vault_post))
         .route("/v1/vault/requests", get(vault_get))
         .route("/v1/vault/request", post(vault_post))
@@ -415,6 +417,15 @@ async fn fork(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     };
     node.fork(&local(&node)?, text(&body, "app")?, text(&body, "name")?, owner.as_deref()).await?;
     done()
+}
+
+/// Backups' routes, `/v1/backups…`.
+async fn backups_get(State(node): State<Node>, uri: axum::http::Uri) -> Reply {
+    Ok(Json(node.backups_route(&local(&node)?, "GET", uri.path(), &json!({})).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
+}
+
+async fn backups_post(State(node): State<Node>, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
+    Ok(Json(node.backups_route(&local(&node)?, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
 /// The Vault's routes, `/v1/vault…` and their earlier names `/v1/secrets…`: a GET's query goes to the node as a

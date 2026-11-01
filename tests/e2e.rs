@@ -1380,3 +1380,68 @@ fn try_makes_a_new_install_beside_this_ones() {
     assert!(!tried.join("install").exists());
     let _ = std::fs::remove_dir_all(&tried);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alone() {
+    let (a, _ra) = start("backup-a").await;
+    let (b, _rb) = start("backup-b").await;
+    let recovery = a.create("Home", "Andre").await.unwrap();
+    b.join(&a.pair(None).unwrap()).await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    eventually("the board to run", async || a.call(board("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
+    a.set_item(&me, &one::entry::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
+
+    // A place that can't be written isn't added.
+    let bad = a.add_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" })).await.unwrap();
+    assert!(bad["id"].is_null() && bad["tried"][0]["error"].is_string(), "{bad}");
+    assert!(a.backups().unwrap()["places"].as_array().unwrap().is_empty());
+
+    let dir = temp("backup-disk").join("One Backups");
+    let added = a.add_place(&me, &json!({ "path": dir, "title": "T7 Shield" })).await.unwrap();
+    assert!(added["id"].is_string() && added["tried"].as_array().unwrap().iter().all(|s| s["error"].is_null()), "{added}");
+    eventually("the first backup", async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
+    let shown = a.backups().unwrap();
+    assert_eq!(shown["places"][0]["title"], "T7 Shield");
+    assert_eq!(shown["places"][0]["last"]["server"], "backup-a", "the folder's own server backs it up: {shown}");
+    eventually("b to see it", async || !b.backups().unwrap()["places"][0]["last"].is_null()).await;
+
+    // From nothing but the disk and the recovery key.
+    let place = one::backups::Place::Folder(dir.clone());
+    let install = one::backups::installs(&place).unwrap().remove(0);
+    let keys = one::backups::open_keys(&place, &install, &one::entry::unhex(&recovery).unwrap()).unwrap();
+    assert!(keys.contains_key("global") && keys.contains_key(&format!("user:{}", me.user)), "{:?}", keys.keys());
+    let checked = one::backups::check(&place, &install, &keys, None).unwrap();
+    assert_eq!(checked["install"], "Home");
+    assert_eq!(checked["people"], json!(["Andre"]));
+    assert!(checked["apps"].as_array().unwrap().contains(&json!("board")), "{checked}");
+    assert!(checked["vault"].as_array().unwrap().contains(&json!("Example key")), "{checked}");
+    let restored = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
+    assert!(restored.entries.iter().any(|e| e.content.data["text"] == "before the backup"));
+    let entries_then = restored.entries.len();
+    let files: Vec<Vec<u8>> = walk(&dir).iter().map(|f| std::fs::read(f).unwrap()).collect();
+    assert!(!files.iter().any(|f| f.windows(12).any(|w| w == b"s3cret-value") || f.windows(17).any(|w| w == b"before the backup")), "nothing is readable on the disk");
+
+    // A change is backed up on the next run; only what's new is sent.
+    a.call(board("post", json!({ "text": "after the backup" }))).await.unwrap();
+    a.back_up_now();
+    eventually("the second backup", async || {
+        one::backups::restore(&place, &install, "global", &keys["global"]).is_ok_and(|r| r.entries.iter().any(|e| e.content.data["text"] == "after the backup"))
+    })
+    .await;
+    let again = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
+    assert!(again.snapshot.packs.len() >= 2 && again.entries.len() > entries_then);
+    let checked = a.check_backups().await.unwrap();
+    assert_eq!(checked[0]["place"], "T7 Shield", "{checked}");
+    assert!(checked[0]["error"].is_null(), "{checked}");
+}
+
+fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        match e.path().is_dir() {
+            true => out.extend(walk(&e.path())),
+            false => out.push(e.path()),
+        }
+    }
+    out
+}

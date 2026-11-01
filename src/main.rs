@@ -66,6 +66,19 @@ Usage:
                                        or make one, so you never see it; vault status <id> says how it went
   {CLI} vault requests                 the requests waiting for you; vault answer <id> [--item <id> | --decline]
                                        answers one, a new item's values on stdin (one line, or a JSON object)
+  {CLI} backups                        how backups are going: each place, its last backup, what's failing
+  {CLI} backups now                    back up now, without waiting for the hour
+  {CLI} backups place add <folder> [--title t]
+                                       back up to a folder on this server, like a USB disk's: tried before it's added
+  {CLI} backups place add --endpoint <url> [--title t]
+                                       back up to S3-compatible storage (R2, B2, MinIO): piped a JSON object of
+                                       bucket, key_id and secret (and region) it tries and adds it; otherwise it asks
+                                       the person for them, with a link to a sheet on their device
+  {CLI} backups place remove <place>   stop backing up to a place (what's there stays)
+  {CLI} backups check [--folder <path>]
+                                       restore each place's newest backup into a throwaway copy, check every entry and
+                                       blob, and say what came back; with --folder, any backup on a disk, opened with
+                                       the recovery key on stdin, with or without an install here
   {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
   {CLI} sidecars                       the server sidecars on each server: version, and who installed them
@@ -292,6 +305,45 @@ fn run(args: Vec<String>) -> Result<()> {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             post("/v1/install", json!({ "app": app, "scope": scope, "installed": !flags.contains_key("remove") }))?;
             println!("{app} is {} in {scope}.", if flags.contains_key("remove") { "no longer installed" } else { "installed" });
+        }
+        ["backups"] => print!("{}", backups_said(&get("/v1/backups")?)),
+        ["backups", "now"] => {
+            post("/v1/backups/now", json!({}))?;
+            println!("Backing up now. {CLI} backups says how it went.");
+        }
+        ["backups", "place", "add"] | ["backups", "place", "add", _] => {
+            let title = flags.get("title").cloned();
+            let r = match (positional.get(3), flags.get("endpoint").and_then(Value::as_str)) {
+                (Some(path), None) => post("/v1/backups/place", json!({ "path": std::path::absolute(path)?, "title": title }))?,
+                (None, Some(endpoint)) if !std::io::IsTerminal::is_terminal(&std::io::stdin()) => {
+                    let mut body: Value = serde_json::from_reader(std::io::stdin()).context("pipe a JSON object of bucket, key_id and secret")?;
+                    body["endpoint"] = json!(endpoint);
+                    body["title"] = title.unwrap_or(Value::Null);
+                    post("/v1/backups/place", body)?
+                }
+                (None, Some(endpoint)) => {
+                    let r = post("/v1/backups/request", json!({ "endpoint": endpoint, "title": title, "agent": agent_from_env() }))?;
+                    println!("Open this on your device to give the bucket and its key: {}\nIt's also waiting in Settings, under Requests.", r["link"].as_str().unwrap_or(""));
+                    return Ok(());
+                }
+                _ => anyhow::bail!("give a folder, or --endpoint for S3-compatible storage"),
+            };
+            print!("{}", tried_said(&r));
+        }
+        ["backups", "place", "remove", place] => {
+            let places = get("/v1/backups")?["places"].as_array().cloned().unwrap_or_default();
+            let p = places.iter().find(|p| p["id"] == *place || p["title"] == *place).with_context(|| format!("no place {place}; {CLI} backups lists them"))?;
+            post("/v1/backups/place", json!({ "id": p["id"], "deleted": true }))?;
+            println!("No longer backing up to {}. What's there stays.", p["title"].as_str().unwrap_or(""));
+        }
+        ["backups", "check"] => {
+            let r = match flags.get("folder").and_then(Value::as_str) {
+                Some(folder) => check_folder(folder)?,
+                None => post("/v1/backups/check", json!({}))?,
+            };
+            for place in r.as_array().into_iter().flatten() {
+                print!("{}", checked_said(place));
+            }
         }
         ["vault"] | ["vault", "list"] => {
             let scope = flags.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default();
@@ -1065,6 +1117,109 @@ fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> 
 }
 
 
+/// Backups' status, for people.
+fn backups_said(r: &Value) -> String {
+    let mut out = String::new();
+    let places = r["places"].as_array().cloned().unwrap_or_default();
+    if places.is_empty() {
+        return format!("Nothing is backed up yet: add a place with {CLI} backups place add.\n");
+    }
+    for p in &places {
+        let when = |t: &Value| t.as_u64().map(|t| say_time(t)).unwrap_or_default();
+        let last = match &p["last"] {
+            Value::Null => "not backed up yet".to_string(),
+            l => format!("backed up {} by {}", when(&l["time"]), l["server"].as_str().unwrap_or("")),
+        };
+        out.push_str(&format!("{} ({}): {last}\n", p["title"].as_str().unwrap_or(""), p["where"].as_str().unwrap_or("")));
+        if let Some(f) = p["failing"].as_object() {
+            out.push_str(&format!("  failing since {}: {}\n", when(&f["since"]), f["error"].as_str().unwrap_or("")));
+        }
+    }
+    out
+}
+
+/// Each step of trying a place, and whether it was added.
+fn tried_said(r: &Value) -> String {
+    let mut out = String::new();
+    for s in r["tried"].as_array().into_iter().flatten() {
+        match s["error"].as_str() {
+            None => out.push_str(&format!("✓ {}\n", s["step"].as_str().unwrap_or(""))),
+            Some(e) => out.push_str(&format!("✗ {}: {e}\n", s["step"].as_str().unwrap_or(""))),
+        }
+    }
+    out.push_str(match r["id"].is_string() {
+        true => "Added: the first backup starts now, then every hour that something changes.\n",
+        false => "Not added.\n",
+    });
+    out
+}
+
+/// What a check restored, by name.
+fn checked_said(r: &Value) -> String {
+    if let Some(e) = r["error"].as_str() {
+        return format!("✗ {}: {e}\n", r["place"].as_str().unwrap_or(""));
+    }
+    let list = |k: &str| r[k].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+    let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} entries, {} blobs, from {})", s["scope"].as_str().unwrap_or(""), s["entries"], s["blobs"], say_time(s["time"].as_u64().unwrap_or(0)))).collect();
+    format!(
+        "{}: {} came back, checked\n  ✓ every entry signed and in order, every blob as its hash says: {}\n  ✓ people: {}\n  ✓ apps: {}\n  ✓ Vault: {}\n",
+        r["place"].as_str().unwrap_or("A disk"),
+        r["install"].as_str().unwrap_or(""),
+        scopes.join("; "),
+        list("people"),
+        list("apps"),
+        list("vault"),
+    )
+}
+
+/// Checks a backup on a disk with the recovery key alone, here, without a server: every install it holds.
+fn check_folder(folder: &str) -> Result<Value> {
+    let mut key = String::new();
+    std::io::stdin().read_line(&mut key)?;
+    let secret = one::entry::unhex(key.trim()).context("give the recovery key on stdin: 64 hex characters")?;
+    let place = one::backups::Place::Folder(folder.into());
+    let mut out = Vec::new();
+    for install in one::backups::installs(&place)? {
+        let keys = one::backups::open_keys(&place, &install, &secret)?;
+        let mut r = one::backups::check(&place, &install, &keys, None)?;
+        r["place"] = json!(folder);
+        out.push(r);
+    }
+    anyhow::ensure!(!out.is_empty(), "no backup in {folder}");
+    Ok(json!(out))
+}
+
+/// A time, for people: today's as its hour, else its date.
+fn say_time(ms: u64) -> String {
+    let Ok(t) = jiff::Timestamp::from_millisecond(ms as i64) else { return String::new() };
+    let tz = jiff::tz::TimeZone::system();
+    let (t, today) = (t.to_zoned(tz.clone()), jiff::Timestamp::now().to_zoned(tz));
+    match t.date() == today.date() {
+        true => t.strftime("today at %H:%M").to_string(),
+        false => t.strftime("%-d %b at %H:%M").to_string(),
+    }
+}
+
+fn backups_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
+    match op {
+        "status" => get("/v1/backups"),
+        "now" => post("/v1/backups/now", json!({ "agent": agent })).map(|_| json!("Backing up now; backups_status says how it went.")),
+        "add_place" => {
+            let r = post("/v1/backups/request", json!({ "endpoint": input.get("endpoint"), "title": input.get("title"), "agent": agent }))?;
+            Ok(json!(format!("Asked. Give the person this link: {}\nThey type the bucket and its key into a sheet on their own device, and you never see it. Once they have, backups_status shows its first backup.", r["link"].as_str().unwrap_or(""))))
+        }
+        "remove_place" => {
+            let place = input.get("place").and_then(Value::as_str).context("give place")?;
+            let places = get("/v1/backups")?["places"].as_array().cloned().unwrap_or_default();
+            let p = places.iter().find(|p| p["id"] == *place || p["title"] == *place).with_context(|| format!("no place {place}"))?;
+            post("/v1/backups/place", json!({ "id": p["id"], "deleted": true, "agent": agent }))?;
+            Ok(json!("Removed. What's there stays."))
+        }
+        "check" => post("/v1/backups/check", json!({})),
+        other => anyhow::bail!("no tool backups_{other}"),
+    }
+}
+
 fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
     let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
     let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
@@ -1114,6 +1269,7 @@ fn secret_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Res
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
     let mut tools = one::vault::tools();
+    tools.extend(one::backups::tools());
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
         // Operations starting with `_` are for the node, such as a sidecar's `_screen`.
@@ -1161,6 +1317,9 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     }
     if app == "secrets" {
         return secret_tool(op, &input, agent);
+    }
+    if app == "backups" {
+        return backups_tool(op, &input, agent);
     }
     let server = input.remove("server").or(input.remove("device"));
     let confirmed = input.remove("confirm") == Some(json!(true));

@@ -138,6 +138,7 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
         })
         .collect();
     skills.push(app_skill(&vault_app()));
+    skills.push(app_skill(&backups_app()));
     skills.extend(apps.iter().filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["ops"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
     skills
 }
@@ -181,15 +182,28 @@ const VAULT_GUIDE: &str = "The Vault keeps the person's keys, sign-ins and accou
 
 /// The Vault's tools as an app's operations, as search, scripts and its skill see them.
 pub fn vault_app() -> Value {
+    node_app("vault", "Vault", "Keys, sign-ins and accounts, used without being seen", VAULT_GUIDE, crate::vault::tools())
+}
+
+/// How backups' tools are explained, as an app's guide is.
+const BACKUPS_GUIDE: &str = "Each server backs up the install's data it holds, every hour that something changed, to each place: a folder on a server's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only the install's servers and its recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. backups_status says how it's going; backups_check restores the newest backup into a throwaway copy and says what came back.";
+
+/// Backups' tools as an app's operations.
+pub fn backups_app() -> Value {
+    node_app("backups", "Backups", "Encrypted copies of everything, to a disk or S3-compatible storage", BACKUPS_GUIDE, crate::backups::tools())
+}
+
+/// The node's own tools, shown as an app's operations are, to search, scripts and skills.
+fn node_app(name: &str, title: &str, description: &str, guide: &str, tools: Vec<Value>) -> Value {
     json!({
-        "name": "vault", "title": "Vault", "description": "Keys, sign-ins and accounts, used without being seen", "instructions": VAULT_GUIDE,
-        "ops": crate::vault::tools().into_iter().map(|t| {
+        "name": name, "title": title, "description": description, "instructions": guide,
+        "ops": tools.into_iter().map(|t| {
             let confirm = t["annotations"]["destructiveHint"] == true;
             let mut input = t["inputSchema"].clone();
             if confirm {
                 input["properties"]["confirm"] = json!({ "type": "boolean", "description": "true once the person has agreed: this can't be undone" });
             }
-            json!({ "name": t["name"].as_str().unwrap_or("").trim_start_matches("vault_"), "description": t["description"], "input": input, "reads": t["annotations"]["readOnlyHint"] == true, "confirm": confirm })
+            json!({ "name": t["name"].as_str().unwrap_or("").trim_start_matches(&format!("{name}_")), "description": t["description"], "input": input, "reads": t["annotations"]["readOnlyHint"] == true, "confirm": confirm })
         }).collect::<Vec<_>>(),
     })
 }
@@ -339,7 +353,7 @@ mod tests {
     fn skills_keep_the_agent_skills_format() {
         let skills = all(&apps(3));
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(&names[..5], &[server_name().as_str(), &format!("{}-accounts", server_name()), &format!("{}-build", server_name()), &format!("{}-vault", server_name()), &format!("{}-board", server_name())]);
+        assert_eq!(&names[..6], &[server_name().as_str(), &format!("{}-accounts", server_name()), &format!("{}-build", server_name()), &format!("{}-vault", server_name()), &format!("{}-backups", server_name()), &format!("{}-board", server_name())]);
         for s in &skills {
             assert!(!s.name.is_empty() && s.name.len() <= 64 && s.name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'), "{}", s.name);
             assert!(!s.description.is_empty() && s.description.chars().count() <= 1024, "{}", s.name);
