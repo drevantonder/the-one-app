@@ -417,19 +417,18 @@ const sections = [
     return '<div class="needs">' + one.esc(where.line) + "</div>" + (rows.length ? '<div class="list" style="margin-top:12px">' + rows.join("") + "</div>" : "");
   },
   function schedules({ health }) {
-    const list = health?.schedules || [];
+    // One a deploy removed no longer runs: it isn't the app's any more.
+    const list = (health?.schedules || []).filter((s) => !s.removed);
     if (!list.length) return "";
     const places = new Set(list.map((s) => s.scope)).size > 1;
     const row = (s) => {
       let line;
       if (s.invalid) line = '<span class="error">' + one.esc(s.invalid) + "</span>";
-      else if (s.removed) line = "Removed by a deploy";
       else if (s.last && !s.last.ok) line = '<span class="error">Failed ' + ago(s.last.time) + ": " + one.esc(s.last.error || "") + "</span>";
       else if (s.on && s.runs_as) line = one.esc(cap(s.when)) + (places ? " · " + one.esc(s.scope_name) : "") + (s.next ? " · next " + soon(s.next) : "");
       else if (s.on) line = "Nobody can run it: switch it on to run it as you";
       else line = one.esc(cap(s.when)) + (s.switched ? " · off since " + ago(s.switched.time) : "");
-      const live = !s.invalid && !s.removed;
-      const toggle = live ? \`<input type="checkbox" class="switch"\${s.on && s.runs_as ? " checked" : ""}\${s.may_switch ? "" : " disabled"} onchange='switchIt(this, \${JSON.stringify({ schedule: s.name, scope: s.scope })})'>\` : "";
+      const toggle = !s.invalid ? \`<input type="checkbox" class="switch"\${s.on && s.runs_as ? " checked" : ""}\${s.may_switch ? "" : " disabled"} onchange='switchIt(this, \${JSON.stringify({ schedule: s.name, scope: s.scope })})'>\` : "";
       return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(s.description || s.name)}</span></div><div class="sub">\${line}</div></div>\${toggle}</div>\`;
     };
     return '<h2 class="section">Schedules</h2><div class="list">' + list.map(row).join("") + "</div>";
