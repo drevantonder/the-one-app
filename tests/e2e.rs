@@ -742,6 +742,47 @@ async fn an_app_wraps_the_driver_of_its_name_on_another_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn agents_use_a_device_its_owner_let_them_through_desktops_and_each_session_is_logged() {
+    let (a, _ra) = start("device-a").await;
+    let (b, _rb) = start("device-b").await;
+    a.create_with("Devices", "Andre", &["desktops"]).await.unwrap();
+    b.join(&a.pair(None).unwrap()).await.unwrap();
+    // b is a Mac whose owner let agents use it: its computer driver answers as the Mac app's does.
+    b.provide("computer", json!({ "title": "Computer Use", "ops": [{ "name": "_status" }, { "name": "_use" }] })).await.unwrap();
+    let driver = b.clone();
+    tokio::spawn(async move {
+        let mut started = false;
+        loop {
+            if let Ok(Some(c)) = driver.providers().next("computer").await {
+                let reply = match c.op.as_str() {
+                    "_status" => json!({ "on": true, "title": "Andre's Mac", "kind": "mac" }),
+                    "_use" => {
+                        let first = !std::mem::replace(&mut started, true);
+                        json!({ "result": { "content": [{ "type": "text", "text": c.input["tool"] }] }, "title": "Andre's Mac", "started": first.then_some("2026-11-01T09:00:00Z") })
+                    }
+                    _ => json!(null),
+                };
+                driver.providers().reply("computer", c.id, json!({ "ok": reply })).unwrap();
+            }
+        }
+    });
+    let listed = async || a.call(call("desktops", "list", json!({}))).await;
+    eventually("the device among the desktops", async || listed().await.is_ok_and(|l| l["desktops"].as_array().is_some_and(|d| d.iter().any(|d| d["device"] == true)))).await;
+    let device = listed().await.unwrap()["desktops"][0].clone();
+    assert_eq!((device["title"].clone(), device["state"].clone()), (json!("Andre's Mac"), json!("running")), "listed with no desktops driver anywhere: {device}");
+    let name = device["name"].as_str().unwrap().to_string();
+
+    for tool in ["list_windows", "click"] {
+        let used = a.call(call("desktops", "use", json!({ "desktop": name, "tool": tool, "args": {} }))).await.unwrap();
+        assert_eq!(used["content"][0]["text"], json!(tool), "use reaches the device's driver: {used}");
+    }
+    let devices = a.call(call("desktops", "_devices", json!({}))).await.unwrap();
+    let sessions = devices["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1, "a session is logged once, when it starts: {devices}");
+    assert_eq!((sessions[0]["device"].clone(), sessions[0]["title"].clone()), (json!(name), json!("Andre's Mac")), "{devices}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_servers_owner_removes_a_driver_there_and_allows_it_again() {
     let (a, _ra) = start("drivers-a").await;
     let (b, _rb) = start("drivers-b").await;

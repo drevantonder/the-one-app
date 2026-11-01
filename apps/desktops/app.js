@@ -1,6 +1,11 @@
 // Desktops: computers for agents and people, each a live picture with a browser in it, on the person's servers; and
 // the browser profiles they start with. The desktops driver runs them (Incus or a Mac's virtual machines), on each
 // server whose owner installed it; this app is its page and what agents use.
+//
+// The person's own devices are computers here too, once they let agents use them: a device whose computer driver
+// serves them (the Mac app has one) is listed beside the desktops under its server's name, and use, tools and screen
+// go to it instead. The driver keeps whether it's on, and asks the person at the device before turning it on; this
+// app keeps who used which device when, as `session` entries in the person's own scope.
 
 /// Runs one of the desktops driver's operations, wherever it runs for the caller. When none of their servers runs it,
 /// says what's needed instead of how the call failed.
@@ -20,20 +25,67 @@ async function running(ctx) {
   return (await ctx.servers()).filter((s) => s.online && (s.drivers || []).includes("desktops")).map((s) => s.name);
 }
 
+/// The caller's devices whose computer driver serves them, by server name: `{ server, on, title, kind, using,
+/// permissions, missing }`, or `{ server, why }` for one that didn't answer.
+async function devices(ctx) {
+  const mine = (s) => {
+    const d = (s.installed_drivers || []).find((d) => d.name === "computer");
+    return d ? !d.users || d.users.includes(ctx.me.user_name) : (s.drivers || []).includes("computer");
+  };
+  const servers = (await ctx.servers()).filter((s) => s.online && mine(s));
+  return Promise.all(servers.map(async (s) => {
+    try {
+      return { server: s.name, ...(await ctx.drivers.computer._status({}, { server: s.name })) };
+    } catch (err) {
+      return { server: s.name, on: false, why: err.message };
+    }
+  }));
+}
+
+/// The device a desktop's name means, if it's one: a server of the caller's running the computer driver for them.
+async function device(ctx, name) {
+  if (!name) return null;
+  const n = String(name).toLowerCase();
+  const s = (await ctx.servers()).find((s) => s.name.toLowerCase() === n && (s.drivers || []).includes("computer"));
+  return s ? s.name : null;
+}
+
+/// A device as the list shows it among the desktops.
+const asDesktop = (d) => ({ name: d.server, server: d.server, device: true, kind: d.kind, title: d.title, state: d.on ? "running" : "off", using: d.using || null });
+
 export default {
   name: "desktops",
   title: "Desktops",
   icon: "macwindow.on.rectangle",
   color: "#a2845e",
   description: "Desktops with a browser, for your agents and you",
-  instructions: "Desktops are Linux desktops on the user's servers, each with a browser. To browse, borrow a desktop of your own: desktops_borrow with for (what it's for, in a few words: the person sees it) gives you one whose browser starts with a copy of a browser profile, signed in to its sites (default unless you pass profile; desktops_profiles lists them, like Personal or PTC); pass its name as desktop to the other tools, and give it back with desktops_give_back when done: it's deleted, with anything it did to the profile. One left 15 minutes without a call is given back for you. Borrow rather than use a lasting desktop (desktops_create makes those, for the person), so agents never share a browser. In it: desktops_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":\"default\"} (the profile's name) launches the browser; desktops_use with tool list_windows gives its window_id; desktops_get_browser_state with that pid and window_id gives target_id and tab_id; then desktops_browser_navigate, desktops_browser_click and desktops_browser_type act, and desktops_get_browser_state reads the page. A browser left idle for 5 minutes closes; prepare it again. desktops_screen shows the desktop. When a site needs the person to sign in, call desktops_sign_in with the site's url and give them its link: they sign in there, in the profile itself (pass profile), and it's saved when they're done (or desktops_save_profile). For a challenge in your own desktop, give them desktops_view's link. Never sign in or submit forms for them unless they asked. Everything else on a desktop (apps, windows, keyboard, mouse): desktops_tools lists the tools and desktops_use runs one. desktops_list shows every server's desktops, who has borrowed which and what for; to act on one on another server, pass server too. A lasting desktop nobody calls or watches for 30 minutes is paused, and unpaused by the next call.",
-  uses: { drivers: ["desktops"] },
+  instructions: "Desktops are Linux desktops on the user's servers, each with a browser. To browse, borrow a desktop of your own: desktops_borrow with for (what it's for, in a few words: the person sees it) gives you one whose browser starts with a copy of a browser profile, signed in to its sites (default unless you pass profile; desktops_profiles lists them, like Personal or PTC); pass its name as desktop to the other tools, and give it back with desktops_give_back when done: it's deleted, with anything it did to the profile. One left 15 minutes without a call is given back for you. Borrow rather than use a lasting desktop (desktops_create makes those, for the person), so agents never share a browser. In it: desktops_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":\"default\"} (the profile's name) launches the browser; desktops_use with tool list_windows gives its window_id; desktops_get_browser_state with that pid and window_id gives target_id and tab_id; then desktops_browser_navigate, desktops_browser_click and desktops_browser_type act, and desktops_get_browser_state reads the page. A browser left idle for 5 minutes closes; prepare it again. desktops_screen shows the desktop. When a site needs the person to sign in, call desktops_sign_in with the site's url and give them its link: they sign in there, in the profile itself (pass profile), and it's saved when they're done (or desktops_save_profile). For a challenge in your own desktop, give them desktops_view's link. Never sign in or submit forms for them unless they asked. Everything else on a desktop (apps, windows, keyboard, mouse): desktops_tools lists the tools and desktops_use runs one. desktops_list shows every server's desktops, who has borrowed which and what for; to act on one on another server, pass server too. A lasting desktop nobody calls or watches for 30 minutes is paused, and unpaused by the next call. desktops_list also lists the person's own devices they let agents use (device: true, like their Mac), by their server's name: desktops_tools, desktops_use and desktops_screen work on one as on a desktop, acting in the background where they can, but there's nothing to borrow and no view link. The person sees in their menu bar while you use their device and can stop you. Use one only for what they asked of that device, and never their messages, mail, browser sessions or files unless they asked.",
+  uses: { drivers: ["desktops", "computer"] },
+
+  schema: {
+    user: `create table sessions (id text primary key, device text not null, title text, agent text not null, came_from text, time integer not null)`,
+  },
+
+  on: {
+    // An agent started using one of the person's devices.
+    session(db, e) {
+      db.exec("insert or replace into sessions values (?, ?, ?, ?, ?, ?)", [e.id, e.data.device, e.data.title || null, e.data.agent, e.name, e.time]);
+    },
+  },
 
   ops: {
     list: {
       description: "Every server's desktops: each one's server, whether it's running, paused or stopped, its size, the memory and CPU it uses now, and who has borrowed it and what for (or that it's the spare kept for borrowing).",
       input: {"properties": {"here": {"description": "only this server's", "type": "boolean"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "list", input),
+      run: async (ctx, input) => {
+        const [listed, devs] = await Promise.all([driver(ctx, "list", input).catch((err) => err), input.here ? [] : devices(ctx)]);
+        const on = devs.filter((d) => d.on).map(asDesktop);
+        if (listed instanceof Error) {
+          if (on.length && listed.message === NEEDS) return { desktops: on };
+          throw listed;
+        }
+        return on.length && Array.isArray(listed?.desktops) ? { ...listed, desktops: [...on, ...listed.desktops] } : listed;
+      },
     },
     borrow: {
       description: "Borrow a desktop of your own for as long as you need a browser, starting its browser with a copy of a browser profile. Quick: a spare is kept ready. Give it back with give_back when done; it's deleted then, or after 15 minutes without a call, with anything in it.",
@@ -93,17 +145,29 @@ export default {
     view: {
       description: "A link to watch and use a desktop in a browser, for the person: to solve a challenge, or to see what an agent is doing. Works on their own devices.",
       input: {"properties": {"desktop": {"description": "which desktop, by name; default the only one", "type": "string"}, "minutes": {"description": "how long the link works; default 60, at most 1440", "type": "integer"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "view", input),
+      run: async (ctx, input) => {
+        const d = await device(ctx, input.desktop);
+        if (d) throw new Error(`${d} is the person's own device: they watch it on the Desktops page and on the device itself, and stop agents there.`);
+        return driver(ctx, "view", input);
+      },
     },
     screen: {
       description: "A small picture of a desktop as it is now.",
       input: {"properties": {"desktop": {"description": "which desktop, by name; default the only one", "type": "string"}, "width": {"description": "the picture's width in pixels; default 640, at most 1920", "type": "integer"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "screen", input),
+      run: async (ctx, input) => {
+        const d = await device(ctx, input.desktop);
+        if (d) return ctx.drivers.computer._screen({ width: input.width }, { server: d });
+        return driver(ctx, "screen", input);
+      },
     },
     tools: {
       description: "The desktop's other tools, for desktops_use; with name, that tool's full description and input.",
       input: {"properties": {"desktop": {"description": "which desktop, by name; default the only one", "type": "string"}, "name": {"description": "a tool's name", "type": "string"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "tools", input),
+      run: async (ctx, input) => {
+        const d = await device(ctx, input.desktop);
+        if (d) return ctx.drivers.computer._tools(input.name ? { name: input.name } : {}, { server: d });
+        return driver(ctx, "tools", input);
+      },
     },
     refresh_tools: {
       description: "Read the desktops' tools again from a running desktop, as after its image was updated.",
@@ -111,9 +175,15 @@ export default {
       run: (ctx, input) => driver(ctx, "refresh_tools", input),
     },
     use: {
-      description: "Run one of the desktop's tools, as desktops_tools lists them, e.g. list_windows, launch_app, click, type_text, get_guide.",
+      description: "Run one of the desktop's tools, as desktops_tools lists them, e.g. list_windows, launch_app, click, type_text, get_guide. On a device of the person's (desktops_list says device: true), the same, on that device.",
       input: {"properties": {"args": {"description": "the tool's input", "type": "object"}, "desktop": {"description": "which desktop, by name; default the only one", "type": "string"}, "tool": {"description": "the tool's name", "type": "string"}}, "required": ["tool"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "use", input),
+      run: async (ctx, input) => {
+        const d = await device(ctx, input.desktop);
+        if (!d) return driver(ctx, "use", input);
+        const r = await ctx.drivers.computer._use({ tool: input.tool, args: input.args || {} }, { server: d });
+        if (r.started) ctx.user.append("session", { device: d, title: r.title, agent: ctx.me.agent || ctx.me.name });
+        return r.result;
+      },
     },
     backup: {
       description: "Back up a desktop's home folder (its files and sign-ins, without caches) as a blob any server can fetch, keeping the newest 5. Not off-site: backups to a bucket aren't built yet.",
@@ -175,6 +245,23 @@ export default {
       input: {"additionalProperties": true, "properties": {"action": {"description": "Pointer gesture. scroll needs delta_x or delta_y; drag needs destination_ref or to_x/to_y.", "enum": ["hover", "right_click", "double_click", "scroll", "drag"], "type": "string"}, "delivery_mode": {"default": "background", "description": "background (default) refuses trusted input where it would activate the browser window, including Linux Chromium and macOS Chromium configurations whose trusted route cannot stay in the background. foreground accepts that activation, for a browser whose window nobody else is using (for example inside a sandbox).", "enum": ["background", "foreground"], "type": "string"}, "delta_x": {"description": "Horizontal scroll delta in CSS pixels.", "type": "number"}, "delta_y": {"description": "Vertical scroll delta in CSS pixels.", "type": "number"}, "desktop": {"description": "which desktop, by name; default the only one", "type": "string"}, "destination_ref": {"description": "Drag destination page ref in the exact same frame.", "type": "string"}, "input_route": {"default": "trusted", "description": "trusted sends CDP Input events; dom_event synthesizes DOM events in the page and requires ref.", "enum": ["trusted", "dom_event"], "type": "string"}, "ref": {"description": "Origin page ref. Alternative to x/y.", "type": "string"}, "session": {"description": "For multi-call work, prefer a short public session label and repeat it on every call that accepts it. This tool requires the label that owns its browser target, tab, and refs.", "type": "string"}, "tab_id": {"description": "Opaque tab id minted by get_browser_state.", "type": "string"}, "target_id": {"description": "Opaque target id minted by get_browser_state.", "type": "string"}, "to_x": {"description": "Drag destination viewport x in CSS pixels.", "type": "number"}, "to_y": {"description": "Drag destination viewport y in CSS pixels.", "type": "number"}, "x": {"description": "Origin viewport x in CSS pixels.", "type": "number"}, "y": {"description": "Origin viewport y in CSS pixels.", "type": "number"}}, "required": ["target_id", "tab_id", "session", "action"], "type": "object"},
       run: (ctx, input) => driver(ctx, "browser_pointer", input),
     },
+    _devices: {
+      description: "The person's devices that agents may use once they let them, each with whether they do and who is using it now, and the recent sessions.",
+      input: { type: "object", properties: {} },
+      run: async (ctx) => ({
+        devices: await devices(ctx),
+        sessions: ctx.user ? await ctx.user.query("select * from sessions order by time desc limit 30") : [],
+      }),
+    },
+    _allow: {
+      description: "Lets agents use one of the person's devices, or stops them. Turning it on asks the person at the device first.",
+      input: { type: "object", properties: { device: { type: "string" }, on: { type: "boolean" } }, required: ["device", "on"] },
+      run: async (ctx, input) => {
+        const d = await device(ctx, input.device);
+        if (!d) throw new Error(`${input.device} can't be used by agents: no driver for it runs there.`);
+        return ctx.drivers.computer._allow({ on: !!input.on }, { server: d });
+      },
+    },
     _running: {
       reads: true,
       description: "Which of your servers run the driver, for the screens to say when none does.",
@@ -208,6 +295,9 @@ export default {
   .line .host { margin-left: auto; padding-left: 6px; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
   .dot.on { background: #34c759; }
+  .dot.busy { background: #ff9500; }
+  .tile.device .pic { color: var(--muted); text-align: center; padding: 0 12px; }
+  .line button.plain { font-size: 13px; flex: none; }
   .banner { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 0 0 18px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   .banner .text { flex: 1; min-width: 200px; }
   svg { flex: none; display: block; }
@@ -218,6 +308,11 @@ export default {
 </header>
 <div id="banner"></div>
 <div class="grid" id="grid"><div class="empty">Loading…</div></div>
+<div id="devices-section" hidden>
+<h2 class="section">Agents on Your Devices</h2>
+<div class="list" id="sessions"></div>
+<p class="muted small" style="margin: 6px 4px">Each time an agent starts using one of your devices. You see it in the device's menu bar while it does, and Stop there turns it off. iPhones and iPads can't be used by agents: iOS doesn't let one app control others.</p>
+</div>
 <h2 class="section">Browser Profiles</h2>
 <div class="list" id="profiles"></div>
 <p class="muted small" style="margin: 6px 4px">Each profile is a browser of its own, with its own sign-ins, like Personal and PTC. Agents' desktops start with a copy of one, and apps like Messenger link to one.</p>
@@ -228,6 +323,9 @@ export default {
   const cpus = {}; // by server/name: recent CPU percentages, oldest first
   const links = {}; // by server/name: { url, until }
   let desktops = [];
+  let devs = []; // the person's devices: { server, title, on, using, permissions, asking, why }
+  let sessions = []; // { agent, device, title, came_from, time }
+  const asking = new Set(); // devices this page is asking to let agents in
   let signing = null; // { desktop, server, login, url }, once a sign-in is open
   let profiles = []; // { profile, server, saved }
 
@@ -288,13 +386,60 @@ export default {
     return "";
   }
 
+  // A device of the person's: off, with a way to let agents use it; on; or in use, with its picture and Stop.
+  function deviceTile(d) {
+    const k = "device/" + d.server, name = d.title || d.server;
+    const allowed = d.permissions ? d.permissions.accessibility && d.permissions.screen_recording : true;
+    let pic, state;
+    if (d.why) {
+      pic = one.esc(d.why);
+      state = \`<span class="dot"></span><span class="who">Not answering</span>\`;
+    } else if (!d.on) {
+      pic = asking.has(d.server) || d.asking ? "Asking on the device…" : d.missing ? one.esc(d.missing) : \`<button class="primary" data-allow="\${one.esc(d.server)}">Let Agents Use It</button>\`;
+      state = \`<span class="dot"></span><span class="who">Agents can't use it</span>\`;
+    } else if (d.using) {
+      pic = pics[k] ? \`<img src="\${pics[k]}" alt="">\` : "";
+      state = \`<span class="dot busy"></span><span class="who">\${one.esc(d.using.agent)} is using it</span><button class="plain" data-stop="\${one.esc(d.server)}">Stop</button>\`;
+    } else {
+      pic = allowed ? "Agents may use it" : "Waiting for you to allow it in System Settings on the Mac: Privacy &amp; Security, Accessibility and Screen Recording";
+      state = \`<span class="dot on"></span><span class="who">Agents may use it</span><button class="plain" data-stop="\${one.esc(d.server)}">Turn Off</button>\`;
+    }
+    return \`<div class="tile device" title="\${one.esc(d.server)}"><div class="pic">\${pic}</div><div class="name">\${one.esc(name)}</div>\` +
+      \`<div class="line">\${state}<span class="host">\${one.esc(host(d.server))}</span></div></div>\`;
+  }
+
+  async function allow(server, on) {
+    if (on) asking.add(server);
+    draw();
+    try {
+      await one.call("_allow", { device: server, on });
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      asking.delete(server);
+      await refresh();
+    }
+  }
+
+  function drawSessions() {
+    document.getElementById("devices-section").hidden = !devs.length && !sessions.length;
+    document.getElementById("sessions").innerHTML = sessions.length
+      ? sessions.map((s) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(s.agent)}</span></div>\` +
+          \`<div class="sub small">\${one.esc(s.title || s.device)} · \${one.esc(one.ago(s.time, { long: true }))}\${s.came_from ? " · asked from " + one.esc(host(s.came_from)) : ""}</div></div></div>\`).join("")
+      : \`<div class="row plain"><div class="main"><div class="sub small">No agent has used your devices yet.</div></div></div>\`;
+  }
+
   function draw() {
-    if (!desktops.length) {
+    drawSessions();
+    const mine = devs.map(deviceTile).join("");
+    if (!desktops.length && mine) {
+      grid.innerHTML = mine;
+    } else if (!desktops.length) {
       grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">No desktops yet. An agent makes one when it needs a browser, or sign in to a site to start one.</div>\`;
     } else {
       const order = (d) => (d.borrowed?.signing_in ? 0 : d.borrowed ? 1 : d.spare ? 3 : 2);
       const shown = [...desktops].sort((a, b) => order(a) - order(b) || (Date.parse(a.borrowed?.since) || 0) - (Date.parse(b.borrowed?.since) || 0) || a.name.localeCompare(b.name));
-      grid.innerHTML = shown.map((d) => {
+      grid.innerHTML = mine + shown.map((d) => {
         const k = key(d), running = d.state === "running";
         const pic = free(d) ? "" : pics[k] ? \`<img src="\${pics[k]}" alt="">\` : running ? "" : one.esc(d.state || "stopped");
         const [used, limit] = memory(d);
@@ -309,6 +454,8 @@ export default {
           \`<div class="name">\${one.esc(title(d))}</div><div class="line">\${line}</div></\${tag.split(" ")[0]}>\`;
       }).join("");
     }
+    for (const b of grid.querySelectorAll("[data-allow]")) b.onclick = () => allow(b.dataset.allow, true);
+    for (const b of grid.querySelectorAll("[data-stop]")) b.onclick = () => allow(b.dataset.stop, false);
     // What they all use, together.
     const running = desktops.filter((d) => d.state === "running");
     let used = 0, limit = 0, cpu = 0;
@@ -391,6 +538,13 @@ export default {
 
   // A picture of each running desktop, and a link to open it, kept until shortly before the link stops working.
   async function pictures() {
+    await Promise.all(devs.filter((d) => d.on && d.using).map(async (d) => {
+      try {
+        const r = await one.call("screen", { desktop: d.server, width: 480 });
+        const img = (r.content || []).find((c) => c.type === "image");
+        if (img) pics["device/" + d.server] = \`data:\${img.mimeType};base64,\${img.data}\`;
+      } catch {}
+    }));
     await Promise.all(desktops.filter((d) => d.state === "running" && !free(d)).map(async (d) => {
       const k = key(d);
       try {
@@ -410,9 +564,17 @@ export default {
 
   async function refresh() {
     try {
-      desktops = parse(await one.call("list", {}));
+      ({ devices: devs, sessions } = await one.call("_devices", {}));
+    } catch {}
+    try {
+      desktops = parse(await one.call("list", {})).filter((d) => !d.device);
     } catch (e) {
-      grid.innerHTML = \`<div class="empty error" style="grid-column:1/-1">\${one.esc(e.message)}</div>\`;
+      if (devs.length) {
+        desktops = [];
+        draw();
+      } else {
+        grid.innerHTML = \`<div class="empty error" style="grid-column:1/-1">\${one.esc(e.message)}</div>\`;
+      }
       return;
     }
     let all = 0;

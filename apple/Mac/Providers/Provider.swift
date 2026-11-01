@@ -9,7 +9,7 @@ protocol Provider: Sendable {
 }
 
 enum Providers {
-    static let all: [any Provider] = [RemindersApp(), CalendarApp(), ContactsApp(), MessagesApp()]
+    static let all: [any Provider] = [RemindersApp(), CalendarApp(), ContactsApp(), MessagesApp(), ComputerApp()]
 
     static func start() {
         let port = Bundle.main.object(forInfoDictionaryKey: "NodePort") as! String
@@ -57,7 +57,7 @@ enum Providers {
         guard status == 200, let call = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = (call["id"] as? NSNumber)?.uint64Value, let op = call["op"] as? String
         else { throw URLError(.badServerResponse) }
-        return Call(id: id, op: op, input: Input(call["input"] as? [String: Any] ?? [:]))
+        return Call(id: id, op: op, input: Input(call["input"] as? [String: Any] ?? [:], caller: call["caller"] as? [String: Any] ?? [:]))
     }
 
     private static func post(_ url: URL, _ body: Any) async throws {
@@ -76,10 +76,16 @@ struct Refusal: Error, CustomStringConvertible {
     init(_ description: String) { self.description = description }
 }
 
-/// A call's input. Read leniently: the CLI sends a flag that looks like a number as one.
+/// A call's input, and who made the call (`{ key, user, name, agent }`: the device it came from and the agent that
+/// asked through it). Read leniently: the CLI sends a flag that looks like a number as one.
 struct Input: @unchecked Sendable {
     private let raw: [String: Any]
-    init(_ raw: [String: Any]) { self.raw = raw }
+    private let by: [String: Any]
+    init(_ raw: [String: Any], caller: [String: Any] = [:]) { (self.raw, by) = (raw, caller) }
+
+    func value(_ key: String) -> Any? { raw[key] }
+
+    func caller(_ key: String) -> String? { (by[key] as? String).flatMap { $0.isEmpty ? nil : $0 } }
 
     func has(_ key: String) -> Bool { raw[key] != nil && !(raw[key] is NSNull) }
 

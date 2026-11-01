@@ -7,6 +7,7 @@ struct MenuPanel: View {
     @Environment(\.openWindow) private var openWindow
     @State private var openAtLogin = SMAppService.mainApp.status == .enabled
     private var items: WidgetItems { .shared }
+    private var computer: ComputerUse { .shared }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -73,6 +74,16 @@ struct MenuPanel: View {
                     if openAtLogin { Image(systemName: "checkmark").font(.callout.weight(.semibold)) }
                 }
             }
+            MenuButton {
+                if computer.on { computer.turnOff() } else { computer.turnOn() }
+            } label: {
+                HStack {
+                    Text("Let Agents Use This Mac")
+                    Spacer()
+                    if computer.on { Image(systemName: "checkmark").font(.callout.weight(.semibold)) }
+                }
+            }
+            .help("Your own agents may use this Mac's apps, keyboard and pointer. The menu bar shows when one does, with Stop.")
             MenuButton { NSApp.terminate(nil) } label: {
                 Text("Quit")
             }
