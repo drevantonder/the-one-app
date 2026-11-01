@@ -292,6 +292,16 @@ export default function (pi: any) {
 }
 "#;
 
+/// The MCP entry each harness gets when it has none: `<cli> mcp`, every tool, for those that find tools themselves or
+/// script them (Claude Code and Codex search deferred tools, OpenCode wraps them in its own code mode); `<cli> mcp
+/// --code` for Amp, which loads every tool up front. As checked on 2026-11-01; check again after their big releases.
+fn mcp_args(harness: &str) -> &'static [&'static str] {
+    match harness {
+        "amp" => &["mcp", "--code"],
+        _ => &["mcp"],
+    }
+}
+
 /// Gives each harness installed here the board's prompt hook and this install's MCP server, leaving everything else
 /// in its settings as it was.
 fn harnesses(home: &Path, written: &mut Written) {
@@ -315,26 +325,27 @@ fn harnesses(home: &Path, written: &mut Written) {
     };
     let plugin = |text: &str| text.replace("{{name}}", crate::config::NAME).replace("{{cli}}", crate::config::CLI).replace("{{addr}}", &addr);
     let s = |v: &str| CstInputValue::String(v.to_string());
+    let args = |harness: &str| mcp_args(harness).iter().map(|a| s(a)).collect::<Vec<_>>();
     if claude.is_dir() {
         edit(&claude.join("settings.json"), true, |t| with_hook(t, &hook, &port));
         // Claude Code keeps user-scoped MCP servers beside its config folder, or in it if that's moved.
         let file = if std::env::var_os("CLAUDE_CONFIG_DIR").is_some() { claude.join(".claude.json") } else { home.join(".claude.json") };
-        let entry = CstInputValue::Object(vec![("type".into(), s("stdio")), ("command".into(), s(&cli)), ("args".into(), CstInputValue::Array(vec![s("mcp")])), ("env".into(), CstInputValue::Object(vec![]))]);
+        let entry = CstInputValue::Object(vec![("type".into(), s("stdio")), ("command".into(), s(&cli)), ("args".into(), CstInputValue::Array(args("claude"))), ("env".into(), CstInputValue::Object(vec![]))]);
         edit(&file, false, |t| with_mcp(t, "mcpServers", &server, entry));
     }
     if codex.is_dir() {
         edit(&codex.join("hooks.json"), true, |t| with_hook(t, &hook, &port));
-        edit(&codex.join("config.toml"), true, |t| with_codex_mcp(t, &server, &cli));
+        edit(&codex.join("config.toml"), true, |t| with_codex_mcp(t, &server, &cli, mcp_args("codex")));
     }
     let opencode = config.join("opencode");
     if opencode.is_dir() {
         written.write(&opencode.join("plugins").join(format!("{}-board.js", crate::config::CLI)), &plugin(OPENCODE_PLUGIN));
-        let entry = CstInputValue::Object(vec![("type".into(), s("local")), ("command".into(), CstInputValue::Array(vec![s(&cli), s("mcp")])), ("enabled".into(), true.into())]);
+        let entry = CstInputValue::Object(vec![("type".into(), s("local")), ("command".into(), CstInputValue::Array([vec![s(&cli)], args("opencode")].concat())), ("enabled".into(), true.into())]);
         edit(&json_or_jsonc(&opencode, "opencode"), true, |t| with_mcp(t, "mcp", &server, entry));
     }
     let amp = config.join("amp");
     if amp.is_dir() {
-        let entry = CstInputValue::Object(vec![("command".into(), s(&cli)), ("args".into(), CstInputValue::Array(vec![s("mcp")]))]);
+        let entry = CstInputValue::Object(vec![("command".into(), s(&cli)), ("args".into(), CstInputValue::Array(args("amp")))]);
         edit(&json_or_jsonc(&amp, "settings"), true, |t| with_mcp(t, "amp.mcpServers", &server, entry));
     }
     if pi.is_dir() {
@@ -448,7 +459,7 @@ fn with_mcp(text: &str, key: &str, name: &str, entry: CstInputValue) -> Result<O
 }
 
 /// Adds `[mcp_servers.<name>]` to Codex's config.toml, unless there's one by that name already.
-fn with_codex_mcp(text: &str, name: &str, cli: &str) -> Result<Option<String>> {
+fn with_codex_mcp(text: &str, name: &str, cli: &str, args: &[&str]) -> Result<Option<String>> {
     let mut doc: toml_edit::DocumentMut = text.parse().context("can't read it")?;
     if !doc.contains_key("mcp_servers") {
         let mut table = toml_edit::Table::new();
@@ -457,7 +468,7 @@ fn with_codex_mcp(text: &str, name: &str, cli: &str) -> Result<Option<String>> {
     }
     let mut server = toml_edit::Table::new();
     server["command"] = toml_edit::value(cli);
-    server["args"] = toml_edit::value(toml_edit::Array::from_iter(["mcp"]));
+    server["args"] = toml_edit::value(toml_edit::Array::from_iter(args.iter().copied()));
     match &mut doc["mcp_servers"] {
         toml_edit::Item::Table(servers) if !servers.contains_key(name) => {
             servers.insert(name, toml_edit::Item::Table(server));
@@ -593,8 +604,16 @@ mod tests {
             assert!(with_hook(text, HOOK, OURS).is_err(), "{text}");
         }
         assert!(with_mcp("{\"mcp\": 3}", "mcp", "the-one-app", "x".into()).is_err());
-        assert!(with_codex_mcp("model = ", "the-one-app", "one").is_err());
-        assert!(with_codex_mcp("mcp_servers = 3\n", "the-one-app", "one").is_err());
+        assert!(with_codex_mcp("model = ", "the-one-app", "one", &["mcp"]).is_err());
+        assert!(with_codex_mcp("mcp_servers = 3\n", "the-one-app", "one", &["mcp"]).is_err());
+    }
+
+    #[test]
+    fn harnesses_that_load_every_tool_get_code_mode() {
+        assert_eq!(mcp_args("amp"), &["mcp", "--code"]);
+        for h in ["claude", "codex", "opencode"] {
+            assert_eq!(mcp_args(h), &["mcp"]);
+        }
     }
 
     #[test]
@@ -618,17 +637,17 @@ mod tests {
     #[test]
     fn codex_config_keeps_its_comments_and_tables() {
         let text = "# my config\nmodel = \"gpt-5.5\" # best\n\n[mcp_servers.nuxt_ui]\nurl = \"https://ui.nuxt.com/mcp\"\n\n[features]\ngoals = true\n";
-        let out = with_codex_mcp(text, "the-one-app", "/home/a/.local/bin/one").unwrap().unwrap();
+        let out = with_codex_mcp(text, "the-one-app", "/home/a/.local/bin/one", &["mcp"]).unwrap().unwrap();
         assert!(out.starts_with(text.trim_end_matches("[features]\ngoals = true\n")) || out.starts_with(text), "{out}");
         assert!(out.contains("# my config\nmodel = \"gpt-5.5\" # best\n"), "{out}");
         assert!(out.contains("[features]\ngoals = true\n"), "{out}");
         assert!(out.contains("[mcp_servers.the-one-app]\ncommand = \"/home/a/.local/bin/one\"\nargs = [\"mcp\"]\n"), "{out}");
         assert!(!out.contains("[mcp_servers]\n"), "{out}");
-        assert_eq!(with_codex_mcp(&out, "the-one-app", "one").unwrap(), None);
-        let out = with_codex_mcp("", "the-one-app", "one").unwrap().unwrap();
+        assert_eq!(with_codex_mcp(&out, "the-one-app", "one", &["mcp"]).unwrap(), None);
+        let out = with_codex_mcp("", "the-one-app", "one", &["mcp"]).unwrap().unwrap();
         assert_eq!(out, "[mcp_servers.the-one-app]\ncommand = \"one\"\nargs = [\"mcp\"]\n");
         let inline = "mcp_servers = { paper = { command = \"paper\" } }\n";
-        let out = with_codex_mcp(inline, "the-one-app", "one").unwrap().unwrap();
+        let out = with_codex_mcp(inline, "the-one-app", "one", &["mcp"]).unwrap().unwrap();
         assert!(out.contains("paper = { command = \"paper\" }") && out.contains("the-one-app"), "{out}");
     }
 
