@@ -216,7 +216,7 @@ struct AddWidgetSheet: View {
             }
         }
         #if os(macOS)
-        .frame(width: 520, height: 680)
+        .frame(width: 520, height: 560)
         #endif
     }
 
