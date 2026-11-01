@@ -17,7 +17,8 @@ const PACKAGES: &[(&str, &str, &str)] = &[
 /// The files an app's build starts from, in this order.
 const ENTRIES: &[&str] = &["app.ts", "app.js", "index.ts", "index.js"];
 
-fn bun() -> Result<PathBuf> {
+/// The pinned Bun, downloaded and checked the first time.
+pub fn bun() -> Result<PathBuf> {
     let (_, package, integrity) =
         PACKAGES.iter().find(|(target, _, _)| *target == crate::config::TARGET).ok_or_else(|| anyhow!("deploying from {} isn't possible yet: Bun has no build for it", crate::config::TARGET))?;
     let url = format!("https://registry.npmjs.org/@oven/bun-{package}/-/bun-{package}-{BUN}.tgz");

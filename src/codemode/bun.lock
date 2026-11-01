@@ -1,0 +1,18 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "dependencies": {
+        "@opencode/codemode": "2.2.5",
+      },
+    },
+  },
+  "packages": {
+    "@opencode/codemode": ["@opencode/codemode@2.2.5", "", { "dependencies": { "acorn": "8.15.0", "effect": "4.0.6" } }, "sha512-oqZXynEO71nOpM9kOVacyRY6qOceYdk2p9Q0667kwSP4ZXgKSKtxV2HkI0iUBh3ci+TueO88BxIb2CgL1slpGw=="],
+
+    "acorn": ["acorn@8.15.0", "", { "bin": { "acorn": "bin/acorn" } }, "sha512-NZyJarBfL7nWwIq+FDL6Zp/yHEhePMNnnJ0y3qfieCrmNvYct8uvtiV41UvlSe6apAfk0fY1FbWx+NwfmpvtTg=="],
+
+    "effect": ["effect@4.0.6", "", {}, "sha512-Tc3mkzuLR6t6P9dhLt0D2GrxYtmU5td4XEJEiXCmILz53IRIfJyHsKZWjTA3xEjiwpNTtXBgI4iqYPxMztBDrw=="],
+  }
+}

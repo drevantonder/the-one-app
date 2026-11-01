@@ -1,7 +1,12 @@
 //! Finding operations across every app (`<cli> search`, MCP's `search`), with the exact way to call each and its
-//! app's guide, so the long guides come with a search instead of the MCP instructions.
+//! app's guide, so the long guides come with a search instead of the MCP instructions; and code mode: scripts that call
+//! them (`<cli> run`, MCP's `execute`), run by OpenCode's interpreter under the pinned Bun (`src/codemode/run.js`).
 
-use anyhow::Result;
+use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+
+use anyhow::{Context, Result, bail};
 use one::config::CLI;
 use one::guide::Mode;
 use serde_json::{Value, json};
@@ -24,8 +29,12 @@ pub fn catalog() -> Result<Vec<Value>> {
     let mut apps = vec![json!({
         "name": "vault", "title": "Vault", "description": "Keys, sign-ins and accounts, used without being seen", "instructions": VAULT_GUIDE,
         "ops": crate::vault_tools().into_iter().map(|t| json!({
-            "name": t["name"].as_str().unwrap_or("").trim_start_matches("vault_"), "description": t["description"], "input": t["inputSchema"],
+            "name": t["name"].as_str().unwrap_or("").trim_start_matches("vault_"), "description": t["description"],
             "reads": t["annotations"]["readOnlyHint"] == true, "confirm": t["annotations"]["destructiveHint"] == true,
+            "input": match t["annotations"]["destructiveHint"] == true {
+                true => { let mut i = t["inputSchema"].clone(); i["properties"]["confirm"] = json!({ "type": "boolean", "description": "true once the person has agreed: this can't be undone" }); i }
+                false => t["inputSchema"].clone(),
+            },
         })).collect::<Vec<_>>(),
     })];
     for mut app in get("/v1/apps")?.as_array().cloned().unwrap_or_default() {
@@ -196,6 +205,151 @@ pub fn search_tool(mode: Mode) -> Value {
         } },
         "annotations": { "readOnlyHint": true },
     })
+}
+
+/// The tools `<cli> mcp --code` serves, of every tool there is: search and execute, the Vault's request (and how it
+/// went), and the tools of the apps every agent needs from the start (the config's `always_on`).
+pub fn code_tools(all: Vec<Value>) -> Vec<Value> {
+    let direct = |t: &Value| {
+        let name = t["name"].as_str().unwrap_or("");
+        matches!(name, "vault_request" | "vault_status") || one::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|op| op.starts_with('_')))
+    };
+    [vec![search_tool(Mode::Code), execute_tool()], all.into_iter().filter(direct).collect()].concat()
+}
+
+/// A script's limits, as the old PTC App's were: ten minutes, a hundred calls and 60 KB back.
+const LIMITS: (u64, u64, u64) = (600_000, 100, 60_000);
+
+/// MCP's `execute` tool.
+pub fn execute_tool() -> Value {
+    json!({
+        "name": "execute",
+        "description": format!("Run a short script that calls operations, and get back what it returns. It's JavaScript without imports, timers or network: call operations as `await tools.<app>.<op>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what sends or can't be undone needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
+        "inputSchema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string", "description": "the script" } } },
+    })
+}
+
+/// The runner's files, and the npm packages it needs, pinned by their lockfile.
+const RUNNER: &[(&str, &str)] = &[("package.json", include_str!("codemode/package.json")), ("bun.lock", include_str!("codemode/bun.lock")), ("run.js", include_str!("codemode/run.js"))];
+
+/// The folder the runner runs in, its packages installed (once per version of its files) with the pinned Bun.
+fn runner() -> Result<(PathBuf, PathBuf)> {
+    use sha2::Digest;
+    let bun = one::deploy::bun()?;
+    let mut hash = sha2::Sha256::new();
+    for (path, text) in RUNNER {
+        hash.update(format!("{path}\0{}\0{text}", text.len()));
+    }
+    let hash = data_encoding::HEXLOWER.encode(&hash.finalize());
+    let dir = one::cache().join(format!("codemode-{}", &hash[..16]));
+    if dir.join("node_modules/@opencode/codemode").is_dir() {
+        return Ok((bun, dir));
+    }
+    // Made beside it, then moved into place, so two at once can't see half of one.
+    let making = dir.with_extension(format!("{}", std::process::id()));
+    std::fs::create_dir_all(&making)?;
+    for (path, text) in RUNNER {
+        std::fs::write(making.join(path), text)?;
+    }
+    let out = Command::new(&bun)
+        .args(["install", "--frozen-lockfile"])
+        .current_dir(&making)
+        .env("BUN_INSTALL_CACHE_DIR", bun.parent().unwrap().join("cache"))
+        .env("DO_NOT_TRACK", "1")
+        .output()?;
+    if !out.status.success() {
+        let _ = std::fs::remove_dir_all(&making);
+        bail!("installing code mode's packages failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    }
+    if std::fs::rename(&making, &dir).is_err() {
+        let _ = std::fs::remove_dir_all(&making);
+    }
+    Ok((bun, dir))
+}
+
+/// Runs a script: each call it makes is checked against its operation's inputs and run as the person, as an MCP call
+/// is, what sends or can't be undone only with confirm: true. Gives back code mode's result: `{ ok, value | error,
+/// logs, truncated, toolCalls }`.
+pub fn execute(script: &str, agent: Option<&str>, client: &str) -> Result<Value> {
+    anyhow::ensure!(!script.trim().is_empty(), "give the script as code");
+    let apps = catalog()?;
+    let mut tools = Vec::new();
+    let mut descriptions = serde_json::Map::new();
+    for app in &apps {
+        let name = app["name"].as_str().unwrap_or("");
+        descriptions.insert(name.into(), app["description"].clone());
+        for op in app["ops"].as_array().into_iter().flatten() {
+            tools.push(json!({ "app": name, "op": op["name"], "description": op["description"], "input": op["input"], "confirm": op["confirm"] == true }));
+        }
+    }
+    let (bun, dir) = runner()?;
+    let mut child = Command::new(bun).arg("run.js").current_dir(&dir).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let mut to = child.stdin.take().unwrap();
+    let from = BufReader::new(child.stdout.take().unwrap());
+    let limits = json!({ "timeoutMs": LIMITS.0, "maxToolCalls": LIMITS.1, "maxOutputBytes": LIMITS.2 });
+    writeln!(to, "{}", json!({ "code": script, "tools": tools, "limits": limits, "descriptions": descriptions }))?;
+    // Past its own time limit, with a minute for the last call to come back, it's stopped.
+    let pid = child.id() as i32;
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let watching = done.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(LIMITS.0 + 60_000));
+        if !watching.load(std::sync::atomic::Ordering::SeqCst) {
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    });
+    let mut result = None;
+    for line in from.lines() {
+        let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
+        if let Some(id) = msg.get("call") {
+            let (app, op) = (msg["app"].as_str().unwrap_or(""), msg["op"].as_str().unwrap_or(""));
+            let spec = apps.iter().find(|a| a["name"] == app).and_then(|a| a["ops"].as_array()?.iter().find(|o| o["name"] == op)).cloned();
+            let input = msg["input"].clone();
+            let answer = (|| {
+                let spec = spec.with_context(|| format!("no operation {app}_{op}"))?;
+                crate::ops::check(&spec["input"], &input, "input")?;
+                crate::dispatch(&format!("{app}_{op}"), input.as_object().cloned().unwrap_or_default(), agent, client, Some(spec))
+            })();
+            let reply = match answer {
+                Ok(ok) => json!({ "reply": id, "ok": ok }),
+                Err(e) => json!({ "reply": id, "error": format!("{e:#}") }),
+            };
+            // A script that has stopped listening has finished, or been stopped.
+            if writeln!(to, "{reply}").is_err() {
+                break;
+            }
+        } else if let Some(r) = msg.get("done") {
+            result = Some(r.clone());
+            break;
+        }
+    }
+    done.store(true, std::sync::atomic::Ordering::SeqCst);
+    drop(to);
+    let _ = child.kill();
+    let out = child.wait_with_output()?;
+    result.with_context(|| format!("the script stopped without an answer: {}", String::from_utf8_lossy(&out.stderr).trim()))
+}
+
+/// A script's result as text for an agent: what it returned, or what went wrong, with its logs.
+pub fn shown(result: &Value) -> String {
+    let mut text = match result["ok"] == true {
+        true => match &result["value"] {
+            Value::String(s) => s.clone(),
+            v => serde_json::to_string_pretty(v).unwrap_or_default(),
+        },
+        false => format!("{}: {}", result["error"]["kind"].as_str().unwrap_or("Error"), result["error"]["message"].as_str().unwrap_or("")),
+    };
+    let logs: Vec<String> = result["logs"].as_array().into_iter().flatten().map(|l| l.as_str().map(String::from).unwrap_or_else(|| l.to_string())).collect();
+    if !logs.is_empty() {
+        text.push_str(&format!("\n\nLogged:\n{}", logs.join("\n")));
+    }
+    for w in result["warnings"].as_array().into_iter().flatten() {
+        text.push_str(&format!("\n\nWarning: {}", w["message"].as_str().unwrap_or("")));
+    }
+    if result["truncated"] == true {
+        text.push_str(&format!("\n\n(cut at {} KB: return less)", LIMITS.2 / 1000));
+    }
+    text
 }
 
 #[cfg(test)]

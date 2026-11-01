@@ -88,7 +88,9 @@ Usage:
   {CLI} version                        this build
   {CLI} guide                          how agents connect to {NAME} and find their way, as /llms.txt says it
   {CLI} search <words>                 the operations for a task in every app: how to call each, and its app's guide
-  {CLI} mcp                            serve MCP over stdio, for agents
+  {CLI} run <file>                     run a short script that calls operations, as tools.<app>.<op>({{ ... }}) (- reads
+                                       it from stdin), and print what it returns; {CLI} search gives each call
+  {CLI} mcp [--code]                   serve MCP over stdio, for agents: every tool, or with --code, search and execute
 
 {NAME} holds one install. For another context, run that context's own app."
     )
@@ -127,7 +129,21 @@ fn run(args: Vec<String>) -> Result<()> {
             usual_path();
             serve()?
         }
-        ["mcp"] => mcp()?,
+        ["mcp"] => mcp(if flags.contains_key("code") { Mode::Code } else { Mode::All })?,
+        ["run", file] => {
+            let script = match *file {
+                "-" => std::io::read_to_string(std::io::stdin())?,
+                file => std::fs::read_to_string(file).with_context(|| format!("read {file}"))?,
+            };
+            let result = code::execute(&script, agent_from_env().as_deref(), "cli")?;
+            for line in result["logs"].as_array().into_iter().flatten() {
+                eprintln!("{}", line.as_str().map(String::from).unwrap_or_else(|| line.to_string()));
+            }
+            match result["ok"] == true {
+                true => println!("{}", match &result["value"] { Value::String(s) => s.clone(), v => serde_json::to_string_pretty(v)? }),
+                false => bail!("{}", code::shown(&result)),
+            }
+        }
         ["guide"] => print!("{}", one::guide::full()),
         ["search", words @ ..] if !words.is_empty() => {
             let limit = flags.get("limit").and_then(|l| l.as_str().and_then(|l| l.parse().ok()).or(l.as_u64().map(|l| l as usize))).unwrap_or(8);
@@ -720,8 +736,9 @@ async fn serve() -> Result<()> {
     Ok(())
 }
 
-/// MCP over stdio: every app operation is a tool, every app's instructions are the server's.
-fn mcp() -> Result<()> {
+/// MCP over stdio: every app operation is a tool, with `search` to find them; or in code mode (`--code`), `search` and
+/// `execute`, which runs scripts with them, and the few tools every agent needs from the start.
+fn mcp(mode: Mode) -> Result<()> {
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
     // The agent this serves, credited on its calls: the client's own name for itself, else what its environment says.
@@ -739,17 +756,20 @@ fn mcp() -> Result<()> {
                 "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
                 "capabilities": { "tools": {}, "resources": {} },
                 "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
-                "instructions": instructions(Mode::All),
+                "instructions": instructions(mode),
                 })
             }),
             "ping" => Ok(json!({})),
-            "tools/list" => tools().map(|mut t| {
-                t.insert(0, code::search_tool(Mode::All));
+            "tools/list" => tools().map(|t| {
+                let mut t = match mode {
+                    Mode::All => [vec![code::search_tool(mode)], t].concat(),
+                    Mode::Code => code::code_tools(t),
+                };
                 t.extend(mcp_apps::tools());
                 json!({ "tools": t })
             }),
             "tools/call" => Ok(mcp_apps::call(msg["params"]["name"].as_str().unwrap_or(""), &msg["params"]["arguments"])
-                .unwrap_or_else(|| call_tool(&msg["params"], agent.as_deref()))),
+                .unwrap_or_else(|| call_tool(&msg["params"], agent.as_deref(), mode))),
             // Apps' widgets and screens, as MCP Apps (src/mcp_apps.rs).
             "resources/list" => Ok(json!({ "resources": mcp_apps::resources() })),
             "resources/read" => mcp_apps::read(msg["params"]["uri"].as_str().unwrap_or("")),
@@ -969,37 +989,44 @@ fn tools() -> Result<Vec<Value>, Value> {
     Ok(tools)
 }
 
-fn call_tool(params: &Value, agent: Option<&str>) -> Value {
+fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     let name = params["name"].as_str().unwrap_or("");
-    let mut input = params["arguments"].as_object().cloned().unwrap_or_default();
+    let input = params["arguments"].as_object().cloned().unwrap_or_default();
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
-    if name == "search" {
-        let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
-        return match code::catalog() {
-            Ok(apps) => json!({ "content": [{ "type": "text", "text": code::search(&apps, input.get("query").and_then(Value::as_str).unwrap_or(""), limit, code::For::Mcp(Mode::All)) }] }),
+    match name {
+        "search" => {
+            let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
+            match code::catalog() {
+                Ok(apps) => json!({ "content": [{ "type": "text", "text": code::search(&apps, input.get("query").and_then(Value::as_str).unwrap_or(""), limit, code::For::Mcp(mode)) }] }),
+                Err(e) => failed(format!("{e:#}")),
+            }
+        }
+        "execute" => match code::execute(input.get("code").and_then(Value::as_str).unwrap_or(""), agent, "mcp") {
+            Ok(result) => json!({ "isError": result["ok"] != true, "content": [{ "type": "text", "text": code::shown(&result) }] }),
             Err(e) => failed(format!("{e:#}")),
-        };
-    }
-    let Some((app, op)) = name.split_once('_') else { return failed(format!("no tool {name}")) };
-    if app == "vault" || app == "secrets" {
-        let answer = if app == "vault" { vault_tool(op, &input, agent) } else { secret_tool(op, &input, agent) };
-        return match answer {
+        },
+        _ => match dispatch(name, input, agent, "mcp", None) {
             Ok(ok) => json!({ "content": ops::mcp_content(&ok) }),
             Err(e) => failed(format!("{e:#}")),
-        };
+        },
+    }
+}
+
+/// Runs one tool as the person, an app's operation or the Vault's, for MCP or a code mode script: what can't be undone
+/// only with confirm: true. `spec` is the operation, when the caller has it already.
+fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, client: &str, spec: Option<Value>) -> Result<Value> {
+    let (app, op) = name.split_once('_').with_context(|| format!("no tool {name}"))?;
+    if app == "vault" {
+        return vault_tool(op, &input, agent);
+    }
+    if app == "secrets" {
+        return secret_tool(op, &input, agent);
     }
     let server = input.remove("server").or(input.remove("device"));
     let confirmed = input.remove("confirm") == Some(json!(true));
-    if let Some((_, spec)) = ops::find(app, op) {
-        if spec["confirm"] == true && !confirmed {
-            return failed(format!("{name} can't be undone: ask the person first, then call it again with confirm: true"));
-        }
-        if let Err(e) = ops::mcp_files(&spec, &mut input) {
-            return failed(format!("{e:#}"));
-        }
+    if let Some(spec) = spec.or_else(|| ops::find(app, op).map(|(_, spec)| spec)) {
+        anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} can't be undone: ask the person first, then call it again with confirm: true");
+        ops::mcp_files(&spec, &mut input)?;
     }
-    match post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input, "agent": agent, "client": "mcp" })) {
-        Ok(r) => json!({ "content": ops::mcp_content(&r["ok"]) }),
-        Err(e) => failed(format!("{e:#}")),
-    }
+    Ok(post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input, "agent": agent, "client": client }))?["ok"].take())
 }

@@ -490,6 +490,55 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
     schema
 }
 
+/// Checks `v` against an input schema, as code mode's interpreter doesn't: types, choices, required inputs, and no
+/// inputs an operation doesn't take. `at` names it in what's wrong.
+pub fn check(schema: &Value, v: &Value, at: &str) -> Result<()> {
+    if let Some(choices) = schema["enum"].as_array() {
+        ensure!(choices.contains(v), "{at} is one of {}, not {v}", choices.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", "));
+    }
+    let types: Vec<&str> = match &schema["type"] {
+        Value::String(t) => vec![t.as_str()],
+        Value::Array(ts) => ts.iter().filter_map(Value::as_str).collect(),
+        _ => vec![],
+    };
+    let is = |t: &str| match t {
+        "string" => v.is_string(),
+        "integer" => v.is_i64() || v.is_u64(),
+        "number" => v.is_number(),
+        "boolean" => v.is_boolean(),
+        "array" => v.is_array(),
+        "object" => v.is_object(),
+        "null" => v.is_null(),
+        _ => true,
+    };
+    if !types.is_empty() && !types.iter().any(|t| is(t)) {
+        let want = types.iter().map(|t| match *t { "string" => "text", "integer" => "a whole number", "number" => "a number", "boolean" => "true or false", "array" => "a list", "object" => "an object", t => t }).collect::<Vec<_>>().join(" or ");
+        bail!("{at} takes {want}, not {v}");
+    }
+    if let (Some(items), Some(list)) = (schema.get("items"), v.as_array()) {
+        for (i, x) in list.iter().enumerate() {
+            check(items, x, &format!("{at}[{i}]"))?;
+        }
+    }
+    if let (Some(props), Some(o)) = (schema["properties"].as_object(), v.as_object()) {
+        for r in required(schema) {
+            ensure!(o.get(&r).is_some_and(|x| !x.is_null()), "{at} needs {r}");
+        }
+        for (k, x) in o {
+            match props.get(k) {
+                Some(_) if x.is_null() => {}
+                Some(p) => check(p, x, &format!("{at}.{k}"))?,
+                // An operation's own inputs are all listed; deeper objects may hold more, unless they say not.
+                None if (at == "input" && !props.is_empty()) || schema["additionalProperties"] == false => {
+                    bail!("{at} has no {k}: it takes {}", props.keys().cloned().collect::<Vec<_>>().join(", "))
+                }
+                None => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 /// An MCP tool's hints: whether it only reads, and whether it can't be undone.
 pub fn mcp_annotations(op: &Value) -> Value {
     let mut a = json!({});

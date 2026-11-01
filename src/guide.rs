@@ -32,7 +32,7 @@ pub fn rules() -> String {
 /// How to find what's possible, from the command line.
 pub fn finding() -> String {
     format!(
-        "- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} status` says who you are, and which devices are in the install."
+        "- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations, as `tools.<app>.<op>({{ ... }})`, and prints what it returns.\n- `{CLI} status` says who you are, and which devices are in the install."
     )
 }
 
@@ -46,7 +46,8 @@ pub fn server_name() -> String {
 pub fn mcp_entries() -> String {
     let server = server_name();
     format!(
-        "MCP runs as a command on the device you're on, so `{CLI}` needs to be there first. Add `{CLI} mcp`: every tool, two hundred or so, and `search`, which finds the ones for a task with their app's guide. In Claude Code: `claude mcp add --scope user {server} -- {CLI} mcp`. On their devices, {NAME} adds it to Claude Code, Codex, OpenCode and Amp by itself."
+        "MCP runs as a command on the device you're on, so `{CLI}` needs to be there first. Add one of two entries:\n\n- `{CLI} mcp`: every tool, two hundred or so, and `search`. For agents that already find tools themselves or run code with them: Claude Code, OpenCode, Codex, Cursor. In Claude Code: `claude mcp add --scope user {server} -- {CLI} mcp`\n- `{CLI} mcp --code`: a few tools. `search` finds what's possible, `execute` runs a short script with it, and {} stay tools of their own. For every other agent.\n\nPick the one that fits you, or tell the person in one line which you're adding and why. On their devices, {NAME} adds the right one to Claude Code, Codex, OpenCode and Amp by itself.",
+        crate::config::ALWAYS_ON.iter().map(|a| format!("{a}'s tools")).chain(["`vault_request`".to_string()]).collect::<Vec<_>>().join(" and ")
     )
 }
 
@@ -93,7 +94,7 @@ pub fn instructions(mode: Mode, apps: &[Value]) -> String {
         Mode::All => format!(
             "Every tool is also a command (`{CLI} <app> <op>`). `search` finds the tools for a task across every app, with each app's guide; call it before you guess, and to learn an app."
         ),
-        Mode::Code => "`search` finds the operations for a task across every app, with exact call signatures and each app's guide. `execute` runs a short script with them: `const r = await tools.<app>.<op>({ ... }); return r`. Scripts call several in one go; what they return comes back to you.".to_string(),
+        Mode::Code => "`search` finds the operations for a task across every app, with exact call signatures and each app's guide. `execute` runs a short script with them: `const r = await tools.<app>.<op>({ ... }); return r`. Scripts call several in one go; what they return comes back to you. Guides name operations <app>_<op>: in a script, that's tools.<app>.<op>.".to_string(),
     };
     let mut text = format!("{}\n\nRules, before anything else:\n{}\n\n{finding}", about(), rules());
     for app in apps.iter().filter(|a| crate::config::ALWAYS_ON.contains(&a["name"].as_str().unwrap_or(""))) {
@@ -175,6 +176,7 @@ mod tests {
     fn the_guide_says_what_the_instructions_say() {
         let guide = full();
         assert!(guide.contains(&rules()) && guide.contains(&connecting()) && guide.contains(&mcp_entries()));
-                assert!(instructions(Mode::Code, &[]).contains(&rules()));
+                assert!(guide.contains(&format!("`{CLI} mcp --code`")) && guide.contains(&format!("`{CLI} run <file>`")));
+        assert!(instructions(Mode::Code, &[]).contains(&rules()));
     }
 }
