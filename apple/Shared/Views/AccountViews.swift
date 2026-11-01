@@ -125,8 +125,11 @@ struct InstallSettingsView: View {
                 Toggle("Push Notifications", isOn: Binding(get: { !push.isEmpty }, set: { set("push", $0 ? nil : "") }))
                 if !push.isEmpty && store.isAdmin {
                     Button { askingKey = true } label: {
-                        LabeledContent("Apple Push Key", value: pushKey ?? "")
-                            .contentShape(.rect)
+                        HStack {
+                            LabeledContent("Apple Push Key", value: pushKey ?? "")
+                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                 }

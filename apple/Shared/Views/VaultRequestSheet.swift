@@ -115,7 +115,7 @@ struct VaultRequestSheet: View {
                 if request?.waiting == true {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Allow") { answer() }.disabled(!ready || busy)
+                        Button(ask == nil ? "Allow" : "Save") { answer() }.disabled(!ready || busy)
                     }
                 } else {
                     ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
@@ -135,7 +135,7 @@ struct VaultRequestSheet: View {
             }
         }
         #if os(macOS)
-        .frame(width: 460, height: 460)
+        .frame(width: 460, height: 560)
         #endif
     }
 
