@@ -6,7 +6,7 @@ func agentPrompt(name: String, cli: String, guide: String?) -> String {
     if let guide {
         "Connect yourself to \(name): read \(guide) and set it up for me."
     } else {
-        "Connect yourself to \(name): run `\(cli) guide` and set it up for me."
+        "Connect yourself to \(name): run \"\(cli) guide\" in a terminal and set it up for me."
     }
 }
 
@@ -61,7 +61,7 @@ struct AskYourAgentSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Ask Your Agent") {
+                Section {
                     AskYourAgent(prompt: prompt)
                 }
             }
