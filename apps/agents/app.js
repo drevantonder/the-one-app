@@ -17,7 +17,7 @@ const NEEDS = "Agents runs on your servers, and none of them is online.";
 export default {
   name: "agents",
   title: "Agents",
-  icon: "sparkles",
+  icon: "brain",
   color: "#ff2d55",
   description: "Your agents' instructions and skills, on every device",
   instructions: "agents_get and agents_set read and replace the AGENTS.md every agent harness on every device gets (Codex, Amp, OpenCode). Skills live in every harness's skills folder: agents_skills lists them, agents_skill reads one, agents_skill_set adds or replaces one (all its files), agents_skill_remove removes one. agents_history lists AGENTS.md's revisions (or a skill's), and agents_restore brings an old one back. Every device's harnesses also get the board's prompt hook and this install's MCP server.",

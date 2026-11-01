@@ -44,6 +44,30 @@
     new EventSource("/v1/events").onmessage = (m) => one.__event(JSON.parse(m.data));
   }
 
+  // Outside a shell, which draws apps' SF Symbols itself, the symbols the built-in apps use, drawn on a 24-point grid.
+  const glyphs = {
+    "square.grid.2x2": '<rect x="4" y="4" width="7" height="7" rx="1.8"/><rect x="13" y="4" width="7" height="7" rx="1.8"/><rect x="4" y="13" width="7" height="7" rx="1.8"/><rect x="13" y="13" width="7" height="7" rx="1.8"/>',
+    "text.bubble": '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 3.5V17A2.5 2.5 0 0 1 4 14.5z"/><path d="M8 8.5h8M8 12.5h5"/>',
+    calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+    "cursorarrow.rays": '<path d="M10.5 10.5l9 3.6-4 1.5-1.5 4z"/><path d="M7 3v3M3 7h3M4 4l1.8 1.8M10.5 4.5L9 6M4.5 10.5L6 9"/>',
+    "person.crop.circle": '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3.2"/><path d="M6.3 18.2a6.6 6.6 0 0 1 11.4 0"/>',
+    "macwindow.on.rectangle": '<rect x="7.5" y="8" width="13" height="11" rx="2"/><path d="M7.5 11.5h13M16.5 8V6a2 2 0 0 0-2-2h-9a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/>',
+    desktopcomputer: '<rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/>',
+    "doc.text": '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+    externaldrive: '<rect x="3" y="7" width="18" height="10" rx="2.5"/><path d="M16.5 12h.01M3.5 12h9"/>',
+    envelope: '<rect x="3" y="5.5" width="18" height="13" rx="2.2"/><path d="M3.8 7l8.2 6.3L20.2 7"/>',
+    "message.fill": '<path fill="currentColor" stroke="none" d="M12 3.8c-5 0-9 3.4-9 7.6 0 2.3 1.2 4.3 3 5.7l-.7 3.4 3.8-2c.9.3 1.9.4 2.9.4 5 0 9-3.4 9-7.5S17 3.8 12 3.8z"/>',
+    "phone.bubble.fill": '<path fill="currentColor" stroke="none" d="M12 3.8c-5 0-9 3.4-9 7.6 0 2.3 1.2 4.3 3 5.7l-.7 3.4 3.8-2c.9.3 1.9.4 2.9.4 5 0 9-3.4 9-7.5S17 3.8 12 3.8z"/>',
+    cpu: '<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9.5 3v3M14.5 3v3M9.5 18v3M14.5 18v3M3 9.5h3M3 14.5h3M18 9.5h3M18 14.5h3"/>',
+    checklist: '<path d="M4 6.5l1.5 1.5L8.5 5M4 12.5l1.5 1.5 3-3M4 18.5L5.5 20l3-3M12 6.5h8M12 12.5h8M12 18.5h8"/>',
+    "arrow.triangle.branch": '<path d="M7 20V9a4 4 0 0 1 4-4h6M14 2l3 3-3 3M7 13a4 4 0 0 0 4 4h6M14 14l3 3-3 3"/>',
+    tablecells: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M3.5 14.5h17M12 4.5v15"/>',
+    terminal: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15H17"/>',
+    sparkles: '<path d="M10 3.5l1.7 4.3 4.3 1.7-4.3 1.7L10 15.5l-1.7-4.3L4 9.5l4.3-1.7z"/><path d="M17.5 13.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/>',
+    brain: '<path d="M12 5.2a3 3 0 0 0-5.6-1A3 3 0 0 0 4 8.4a3.2 3.2 0 0 0 .3 4.8A3.4 3.4 0 0 0 8 18.6a3 3 0 0 0 4 1.4zM12 5.2a3 3 0 0 1 5.6-1A3 3 0 0 1 20 8.4a3.2 3.2 0 0 1-.3 4.8 3.4 3.4 0 0 1-3.7 5.4 3 3 0 0 1-4 1.4"/>',
+    "puzzlepiece.extension": '<path d="M5 8.5h3.2a2.3 2.3 0 1 1 4.6 0H16v3.2a2.3 2.3 0 1 1 0 4.6V20H5z"/>',
+  };
+
   const colors = ["#5e5ce6", "#ff9f0a", "#30b0c7", "#ff375f", "#34c759", "#af52de", "#0a84ff", "#a2845e"];
 
   window.one = {
@@ -118,9 +142,13 @@
     // by the shell; elsewhere its picture, or its first letter on its colour. `image_kind` "icon" is a finished app icon,
     // drawn edge to edge; otherwise the picture is a logo, inset on white.
     appIcon(app, size = 36) {
-      const letter = String(app.title || app.name || "?")[0].toUpperCase();
+      const glyph = glyphs[app.icon];
+      const face = glyph && !shell
+        ? `<svg viewBox="0 0 24 24" width="${Math.round(size * 0.56)}" height="${Math.round(size * 0.56)}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glyph}</svg>`
+        : one.esc(String(app.title || app.name || "?")[0].toUpperCase());
       const look = app.image && !shell ? `;background-image:url(${app.image})` : app.color ? `;--tile:${app.color}` : "";
-      return `<span class="app-icon${look.includes("url(") ? " drawn" : ""}" style="--size:${size}px${one.esc(look)}" data-symbol="${one.esc(app.icon || "")}" data-seed="${one.esc(app.name)}" data-color="${one.esc(app.color || "")}" data-image="${one.esc(app.image || "")}" data-kind="${one.esc(app.image_kind || "")}" data-size="${size}">${one.esc(letter)}</span>`;
+      const logo = app.image && !shell && app.image_kind !== "icon" ? " logo" : "";
+      return `<span class="app-icon${look.includes("url(") ? " drawn" : ""}${logo}" style="--size:${size}px${one.esc(look)}" data-symbol="${one.esc(app.icon || "")}" data-seed="${one.esc(app.name)}" data-color="${one.esc(app.color || "")}" data-image="${one.esc(app.image || "")}" data-kind="${one.esc(app.image_kind || "")}" data-size="${size}">${face}</span>`;
     },
     // A steady colour and initials for someone, from their id and name.
     avatar(id, name) {
