@@ -15,7 +15,7 @@ use crate::native::Reply;
 pub fn describe() -> Value {
     json!({
         "name": "shell", "title": "Shell", "icon": "terminal", "color": "#3a3a3c", "runs": "here",
-        "instructions": "Run a shell command on one of your own servers with shell_run; give server to choose which. Every command is logged in your own scope.",
+        "instructions": "Run a shell command on one of your own servers with shell_run; give server to choose which. Every command is logged where only you can read it.",
         "ops": [{
             "name": "run",
             "description": "Run a shell command on this server (or the server given) and return its exit code and output. Every command is logged.",

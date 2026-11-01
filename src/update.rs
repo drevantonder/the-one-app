@@ -292,7 +292,7 @@ config="$c/config/{CONFIG_FILE}""#
 cp target/release/{bin} "$a/{CLI}-$(rustc -vV | sed -n 's/^host: //p')"
 ditto -c -k --keepParent "$HOME/Applications/{NAME}.app" "$a/{zip}"
 for f in "$a"/*; do
-	n=0; until h=$(target/release/{bin} blob put "$f"); do n=$((n + 1)); [ $n -lt 30 ]; sleep 2; done
+	n=0; until h=$(target/release/{bin} file put "$f"); do n=$((n + 1)); [ $n -lt 30 ]; sleep 2; done
 	echo "$h $(basename "$f")" >> "$c/assets.txt"
 done"#,
             zip = app_zip(),

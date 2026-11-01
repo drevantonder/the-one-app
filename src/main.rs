@@ -15,7 +15,7 @@ fn help() -> String {
         "{NAME}: your machines, and your team's, as one place for apps and agents.
 
 Usage:
-  {CLI} serve                          run this machine's node
+  {CLI} serve                          run this machine's server
   {CLI} status                         this server, its install, its users, groups and servers
   {CLI} create <name> --as <your name> create an install, with you as its first admin
   {CLI} pair [--new-user <name> [--admin] | --user <name>]
@@ -37,9 +37,9 @@ Usage:
   {CLI} deploy <dir> [--name <app>] [--owner <owner>]
                                        build the app in <dir> (app.ts or app.js, and its npm packages) with Bun and
                                        deploy it, with its source; makes the app if it's new (owner: you, a group or admins)
-  {CLI} deploy <app> --bundle <hash>   deploy an earlier bundle again: a rollback
+  {CLI} deploy <app> --version <hash>  deploy an earlier version again (deploys lists them): a rollback
   {CLI} deploys <app>                  an app's deploys, newest last
-  {CLI} source <app> [path] [--bundle <hash>]
+  {CLI} source <app> [path] [--version <hash>]
                                        an app's code as deployed: its files, or one of them
   {CLI} install <app> [--scope user|global|<group>]
                                        install an app, and the apps it uses, for you, a group you admin or everyone
@@ -67,9 +67,9 @@ Usage:
                                        --out <path> saves what it gives back. --server <name> runs it there
   {CLI} update                         test and build main's tip on this machine and the Macs, and run it everywhere
   {CLI} release <vX.Y.Z>               the same, signed off and published on GitHub for the installer
-  {CLI} publish [binary]               sign and publish a build you made; every node on its platform updates
-  {CLI} blob put <file>                keep a file as a blob; prints its hash
-  {CLI} blob get <hash> <file>         get a blob from this server or another
+  {CLI} publish [binary]               sign and publish a build you made; every server on its platform updates
+  {CLI} file put <file>                keep a file in the install, for apps and agents; prints its hash
+  {CLI} file get <hash> <file>         get a kept file from this server or another
   {CLI} version                        this build
   {CLI} mcp                            serve MCP over stdio, for agents
 
@@ -190,10 +190,10 @@ fn run(args: Vec<String>) -> Result<()> {
             let r = post("/v1/open", json!({ "user": user, "server": server, "agent": agent_from_env() }))?;
             println!("{}", r["ok"].as_str().unwrap_or("Opened."));
         }
-        ["deploy", app] if flags.contains_key("bundle") => {
-            let bundle = flags["bundle"].as_str().context("give --bundle <hash>")?;
-            post("/v1/deploy", json!({ "app": app, "bundle": bundle }))?;
-            println!("Deployed {app} ({bundle}) again. Every server runs it now.");
+        ["deploy", app] if flags.contains_key("version") => {
+            let version = flags["version"].as_str().context("give --version <hash>")?;
+            post("/v1/deploy", json!({ "app": app, "bundle": version }))?;
+            println!("Deployed {app} ({version}) again. Every server runs it now.");
         }
         ["deploy", dir] => deploy(std::path::Path::new(dir), &flags)?,
         ["deploys", app] => {
@@ -206,7 +206,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["source", app, rest @ ..] => {
             let mut q = Vec::new();
-            if let Some(b) = flags.get("bundle").and_then(Value::as_str) {
+            if let Some(b) = flags.get("version").and_then(Value::as_str) {
                 q.push(format!("bundle={b}"));
             }
             if let [path] = rest {
@@ -328,12 +328,13 @@ fn run(args: Vec<String>) -> Result<()> {
             };
             publish(&path, &flags, &update::release_key()?)?;
         }
-        ["blob", "put", file] => {
+        // `blob`: what `update` scripts made by builds before `file` call.
+        ["file" | "blob", "put", file] => {
             let bytes = std::fs::read(file).with_context(|| format!("read {file}"))?;
             println!("{}", request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bytes[..]))?["blob"].as_str().unwrap_or(""));
         }
-        ["blob", "get", hash, file] => {
-            let mut resp = agent().get(format!("http://{}/v1/blobs/{hash}", addr())).call().with_context(|| format!("no node is running here: start one with {CLI} serve"))?;
+        ["file" | "blob", "get", hash, file] => {
+            let mut resp = agent().get(format!("http://{}/v1/blobs/{hash}", addr())).call().with_context(|| format!("{NAME} isn't running here: start it with {CLI} serve"))?;
             if !resp.status().is_success() {
                 bail!("{}", resp.body_mut().read_json::<Value>()?["error"].as_str().unwrap_or("failed"));
             }
@@ -384,7 +385,7 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
     }
     let signature = one::release::sign(key, &std::fs::read(path)?)?;
     let r = post("/v1/node-release", json!({ "path": path, "commit": commit, "target": target, "committed": committed, "signature": signature }))?;
-    println!("Published {} for {}. Every node on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
+    println!("Published {} for {}. Every server on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
     Ok(())
 }
 
@@ -436,9 +437,9 @@ fn parse(args: &[String]) -> (Vec<String>, Map<String, Value>) {
     (positional, flags)
 }
 
-/// Whether a node runs here, and which install it's in, for the bare command.
+/// Whether a server runs here, and which install it's in, for the bare command.
 fn connection() -> String {
-    let Ok(state) = get("/v1/state") else { return format!("No node is running here: start one with {CLI} serve.") };
+    let Ok(state) = get("/v1/state") else { return format!("{NAME} isn't running here: start it with {CLI} serve.") };
     let server = state["server"]["name"].as_str().unwrap_or("this server");
     let i = &state["install"];
     if i.is_null() {
@@ -455,7 +456,7 @@ fn agent() -> ureq::Agent {
 }
 
 fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
-    let mut resp = resp.with_context(|| format!("no node is running here: start one with {CLI} serve"))?;
+    let mut resp = resp.with_context(|| format!("{NAME} isn't running here: start it with {CLI} serve"))?;
     let body: Value = resp.body_mut().read_json()?;
     if let Some(err) = body.get("error") {
         bail!("{}", err.as_str().unwrap_or("failed"));
@@ -481,7 +482,7 @@ fn status(state: &Value) {
     }
     let users: std::collections::HashMap<&str, &str> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, u["name"].as_str()?))).collect();
     let name = |id: &str| users.get(id).copied().unwrap_or(id).to_string();
-    println!("\n{}  {} entries", i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("(joining)"), i["entries"]);
+    println!("\n{}  {} changes", i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("(joining)"), i["entries"]);
     println!("\nUsers");
     for u in i["users"].as_array().into_iter().flatten() {
         let me = if u["me"] == true { " (you)" } else { "" };
@@ -663,9 +664,9 @@ fn instructions() -> String {
 
 /// Secrets are the node's, not an app's: agents set, replace and delete them, and list their names, never values.
 fn secret_tools() -> Vec<Value> {
-    let scope = json!({ "type": "string", "description": "user (yours, the default), global, or a group's name or id" });
+    let scope = json!({ "type": "string", "description": "user (yours, the default), global (everyone's), or a group's name or id" });
     vec![
-        json!({ "name": "secrets_set", "description": "Set (or replace) a secret of an app: it puts {{name}} in a request's headers or body and the node fills it in, only for these hosts. Nobody can read it back.", "inputSchema": { "type": "object", "required": ["app", "name", "value", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "scope": scope } } }),
+        json!({ "name": "secrets_set", "description": "Set (or replace) a secret of an app: it puts {{name}} in a request's headers or body and your server fills it in, only for requests to these hosts. Nobody can read it back.", "inputSchema": { "type": "object", "required": ["app", "name", "value", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "scope": scope } } }),
         json!({ "name": "secrets_list", "description": "The secrets you may set: app, name and hosts, never values.", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": { "readOnlyHint": true } }),
         json!({ "name": "secrets_remove", "annotations": { "destructiveHint": true }, "description": "Delete a secret of an app.", "inputSchema": { "type": "object", "required": ["app", "name"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "scope": scope } } }),
         json!({ "name": "secrets_request", "description": "Ask the person to set a secret of an app, instead of handling its value yourself: returns a link to give them, which opens a sheet in the app where they type it (and their Settings lists it as a request). You never see the value; poll secrets_status with the id until it's set or declined.", "inputSchema": { "type": "object", "required": ["app", "name", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "why": { "type": "string", "description": "one line the person sees: what it's for and where to find it" }, "scope": scope } } }),

@@ -1505,7 +1505,7 @@ impl Node {
         };
         let me = self.me_for(&viewer)?;
         let made_here = self.with(|i| Ok(settings(&i.r.members).remove("made_here")))?;
-        let config = json!({ "name": crate::config::NAME, "made_here": made_here });
+        let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "made_here": made_here });
         let context = json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope, "config": config });
         // `</` can't appear inside the inline script, so it can't end it early.
         let context = context.to_string().replace("</", "<\\/");

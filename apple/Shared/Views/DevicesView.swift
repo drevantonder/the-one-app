@@ -29,7 +29,7 @@ struct DevicesView: View {
             } header: {
                 Text("Your Devices")
             } footer: {
-                Text("A computer you pair runs the node and keeps your data; a phone keeps none and asks your servers.")
+                Text("A computer you pair is a server: it keeps your data. A phone keeps none and asks your servers.")
             }
 
             if !others.isEmpty {

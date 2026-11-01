@@ -18,7 +18,7 @@ function row(r) {
 function list() {
   if (!repos.length) {
     document.getElementById("find").hidden = true;
-    return one.empty({ icon: "book", title: "No repos yet.", text: `Push one from any machine with a node:<br><code>git push one://&lt;name&gt; main</code>` });
+    return one.empty({ icon: "book", title: "No repos yet.", text: `Push one from any computer in this install:<br><code>git push ${one.config?.cli || "one"}://&lt;name&gt; main</code>` });
   }
   document.getElementById("find").hidden = false;
   const q = query.toLowerCase();

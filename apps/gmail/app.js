@@ -43,7 +43,7 @@ async function setting(ctx, key) {
 }
 
 async function accounts(ctx) {
-  if (!ctx.user) throw new Error("Gmail accounts are in your own scope, which this server doesn't hold");
+  if (!ctx.user) throw new Error("this server doesn't keep your data, so it can't reach your Gmail accounts: use one of your own servers");
   return ctx.user.query("select email from accounts order by added, email");
 }
 
@@ -365,7 +365,7 @@ const writing = {
   html: str("the email as HTML; sent with body (or, without it, the HTML made plain) as its text, so mail apps show the one they prefer"),
   reply_to: str("the id of a message to reply to, keeping the reply in its thread"),
   attachments: {
-    type: "array", description: `files to attach, up to ${MOST_FILES} and 25 MB in all: each { name, type, base64 }, or { name, type, blob } with a blob's hash`,
+    type: "array", description: `files to attach, up to ${MOST_FILES} and 25 MB in all: each { name, type, base64 }, or { name, type, blob } with a kept file's hash (as file put prints it)`,
     items: { type: "object", format: "file", required: ["name"], properties: { name: str("the file's name"), type: str("its MIME type; guessed from the name if left out"), base64: str("its bytes"), blob: str("or a blob's hash") } },
   },
 };
@@ -460,7 +460,7 @@ export default {
         client_id: str("an OAuth client id, only to set or replace the one kept for you"), client_secret: str("that client's secret"),
       } },
       async run(ctx, { code, client_id, client_secret }) {
-        if (!ctx.user) throw new Error("this server doesn't hold your scope");
+        if (!ctx.user) throw new Error("this server doesn't keep your data: use one of your own servers");
         if (code) return finishSignIn(ctx, code);
         if (client_id) {
           setClient(ctx, { client_id, client_secret, scope: "user" });

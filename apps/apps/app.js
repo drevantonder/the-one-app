@@ -240,7 +240,8 @@ document.getElementById("tabs").addEventListener("click", (e) => e.target.datase
 // The sections: the apps built into the release, and those made in this install (each install words that its own way,
 // in its settings).
 const BUILT_IN = "Built In";
-const MADE_HERE = one.config.made_here || "Made here";
+const MADE_HERE = one.config?.made_here || "Made here";
+const CLI = one.config?.cli || "one";
 
 /// A built-in app's state here; for an app made here, what it was forked from.
 function status(a) {
@@ -266,7 +267,7 @@ function draw() {
   const found = apps.filter((a) => !!a.connected === (tab === "connected") && (!q || [a.title, a.name, a.description || ""].some((t) => t.toLowerCase().includes(q))));
   document.getElementById("list").innerHTML = found.length
     ? section(BUILT_IN, found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted))
-    : '<div class="empty">No apps match.<div class="small" style="margin-top:6px">Make your own: put an app.js in a folder and run <code>one deploy</code> on it.</div></div>';
+    : '<div class="empty">No apps match.<div class="small" style="margin-top:6px">Make your own: put an app.js in a folder and run <code>' + one.esc(CLI) + ' deploy</code> on it.</div></div>';
 }
 async function show() {
   apps = (await one.call("list")).apps;
@@ -372,7 +373,7 @@ const sections = [
   function usage({ health }) {
     const list = health?.insights?.usage || [];
     if (!list.length) return "";
-    const what = { cli: "CLI", mcp: "Agent", phone: "iPhone", mac: "Mac", browser: "Browser", schedule: "Schedule", app: "Another app", node: "The node", api: "Local API" };
+    const what = { cli: "CLI", mcp: "Agent", phone: "iPhone", mac: "Mac", browser: "Browser", schedule: "Schedule", app: "Another app", node: "The server", api: "A program on the server" };
     const row = (u) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(u.user)}</span><span class="when">\${one.ago(u.last)}</span></div>
         <div class="sub small">\${one.esc(u.agent || what[u.client] || u.client)} · \${u.days} day\${u.days === 1 ? "" : "s"}</div></div></div>\`;
     return '<h2 class="section">Used by</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>";

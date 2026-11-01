@@ -97,7 +97,7 @@ private struct SecretSheet: View {
                     if let error {
                         Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
                     } else {
-                        Text("The app puts {{\(secret?.name ?? (name.isEmpty ? "name" : name))}} where it goes; the node fills it in only on requests to these hosts.")
+                        Text("The app puts {{\(secret?.name ?? (name.isEmpty ? "name" : name))}} where it goes; your server fills it in only on requests to these hosts.")
                     }
                 }
                 if let secret {

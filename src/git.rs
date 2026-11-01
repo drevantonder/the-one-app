@@ -175,7 +175,7 @@ impl Api {
     }
 
     fn reply(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
-        let mut resp = resp.with_context(|| format!("no node is running here: start one with {} serve", crate::config::CLI))?;
+        let mut resp = resp.with_context(|| format!("{} isn't running here: start it with {} serve", crate::config::NAME, crate::config::CLI))?;
         let body: Value = resp.body_mut().with_config().limit(64 << 20).read_json()?;
         if let Some(err) = body.get("error") {
             bail!("{}", err.as_str().unwrap_or("failed"));

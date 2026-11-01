@@ -77,7 +77,7 @@ export default {
       sizes: ["small", "medium", "large", "xl"],
       async render(ctx) {
         const list = await devices(ctx);
-        if (!list.length) return { t: "text", text: "No servers yet", tone: "muted" };
+        if (!list.length) return { t: "text", text: "No devices yet", tone: "muted" };
         return ctx.size === "small" ? compact(list) : table(list, ctx.size);
       },
     },

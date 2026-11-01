@@ -25,7 +25,7 @@ async function setting(ctx, key) {
 }
 
 async function accounts(ctx) {
-  if (!ctx.user) throw new Error("Drive accounts are in your own scope, which this server doesn't hold");
+  if (!ctx.user) throw new Error("this server doesn't keep your data, so it can't reach your Drive accounts: use one of your own servers");
   return ctx.user.query("select email, added from accounts order by added");
 }
 
@@ -119,7 +119,7 @@ export default {
       async run(ctx) {
         const client = await setting(ctx, "client_id");
         if (!client) throw new Error("Drive has no OAuth client yet: an admin sets one with drive_set_client");
-        if (!ctx.user) throw new Error("this server doesn't hold your scope");
+        if (!ctx.user) throw new Error("this server doesn't keep your data: use one of your own servers");
         const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
         const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
         // The verifier waits as a secret, filled in only when the code is exchanged at Google.
@@ -178,7 +178,7 @@ export default {
       run: (ctx, { body, fields, account: a }) => api(ctx, a, "POST", "/files", { json: body, query: { fields } }),
     },
     files_upload: {
-      description: "Upload a file: metadata (id, name, parents, appProperties), its type, and its bytes as data (base64) or blob (a blob's hash).",
+      description: "Upload a file: metadata (id, name, parents, appProperties), its type, and its bytes as data (base64) or blob (a kept file's hash, as file put prints it).",
       input: { type: "object", required: ["metadata", "type"], properties: { metadata: { type: "object" }, type: { type: "string" }, data: { type: "string" }, blob: { type: "string" }, fields: { type: "string" }, account: accountInput } },
       async run(ctx, { metadata, type, data, blob, fields, account: a }) {
         const bytes = blob ? await ctx.blob.get(blob) : fromB64(data || "");

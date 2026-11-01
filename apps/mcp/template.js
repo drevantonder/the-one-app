@@ -231,7 +231,7 @@ export default {
         },
       },
       async run(ctx, { code, account: name, client_id, client_secret }) {
-        if (!ctx.user) throw new Error("sign in from your own scope");
+        if (!ctx.user) throw new Error("this server doesn't keep your data: sign in on one of your own servers");
         if (code) return finish(ctx, code, name);
         let unauthorized;
         try {

@@ -47,7 +47,7 @@
 
   window.one = {
     app: ctx.app, screen: ctx.screen, params: ctx.params, me: ctx.me,
-    // The product: its `name`, and `made_here`, what an App Store calls the apps made in the install (its setting).
+    // The product: its `name` and `cli`, and `made_here`, what an App Store calls the apps made in the install (its setting).
     config: ctx.config,
     // The same, for apps written before it was `config`.
     brand: ctx.config,

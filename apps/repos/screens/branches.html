@@ -15,7 +15,7 @@ function row(b) {
 
 async function show() {
   const all = await one.call("branches", { repo: P.repo });
-  if (!all.length) return one.empty({ icon: "branch", title: "No branches yet.", text: `Push one with <code>git push one://${esc(P.repo)} main</code>` });
+  if (!all.length) return one.empty({ icon: "branch", title: "No branches yet.", text: `Push one with <code>git push ${one.config?.cli || "one"}://${esc(P.repo)} main</code>` });
   const bare = all.filter((b) => !b.branch.includes("@")).sort((a, b) => (b.branch === "main") - (a.branch === "main") || b.time - a.time);
   const sugg = all.filter((b) => b.branch.includes("@")).sort((a, b) => b.time - a.time);
   return `<h2 class="section">Branches</h2><div class="list">${bare.map(row).join("") || '<div class="empty small">None</div>'}</div>` +

@@ -272,7 +272,7 @@ async fn deploys_build_with_bun_keep_their_source_and_roll_back() {
     cli(&api, &dir, &["deploy", "."]).await.unwrap();
     eventually("the second deploy to run", async || a.call(call("hello", "hi", json!({}))).await.is_ok_and(|r| r == "hello &lt;two&gt;")).await;
     let first = files["bundle"].as_str().unwrap().to_string();
-    cli(&api, &dir, &["deploy", "hello", "--bundle", &first[..12]]).await.unwrap();
+    cli(&api, &dir, &["deploy", "hello", "--version", &first[..12]]).await.unwrap();
     eventually("the rollback to run", async || a.call(call("hello", "hi", json!({}))).await.is_ok_and(|r| r == "hello &lt;one&gt;")).await;
     let deploys = cli(&api, &dir, &["deploys", "hello"]).await.unwrap();
     assert_eq!(deploys.lines().count(), 3, "{deploys}");

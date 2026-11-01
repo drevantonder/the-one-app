@@ -77,7 +77,7 @@ export default {
   icon: "arrow.triangle.branch",
   color: "#5856d6",
   description: "Git hosting in the install: clone, push and suggest changes",
-  instructions: `Repos is git hosting in this install: \`git clone one://<repo>\`, \`git push\` and \`git fetch\` work on any machine with a node. Only a repo's owner moves main; push your own branch as main@<your name> to suggest changes.`,
+  instructions: `Repos is git hosting in this install: \`git clone one://<repo>\`, \`git push\` and \`git fetch\` work on any computer in this install. Only a repo's owner moves main; push your own branch as main@<your name> to suggest changes.`,
 
   schema: {
     global: `

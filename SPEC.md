@@ -297,7 +297,7 @@ An app's screens are HTML. A server serves each as a whole page: the app's HTML 
 - `one.on("changed", fn)`: called when this app's data changes.
 - `one.params`, `one.me`, and helpers `one.esc`, `one.ago`, `one.avatar`.
 - `one.appIcon(app, size)`: an app's icon (`{ name, title, icon, color, image }`, as `catalog()` gives it), which the shell draws as it draws apps on its pages; a browser shows its `image`, or its first letter on its `color`.
-- `one.config` (also `one.brand`, for apps written before): the product's `name`, and `made_here`, what an App Store calls the apps made in the install (its setting).
+- `one.config` (also `one.brand`, for apps written before): the product's `name` and `cli` (its CLI and git remotes' name, like `one`), and `made_here`, what an App Store calls the apps made in the install (its setting).
 - `one.save(file)` and `one.preview(file)`: saves or shares a file (`{ name, type, base64 }`, or `{ name, type, blob }`), or shows it. `one.scan()`, where `one.can.scan` says the shell has a document camera: resolves to the pages scanned, each a JPEG `{ name, type, size, base64 }` (none if cancelled).
 - Links, `window.open` and anything else that would take the page away open outside it (the browser, Mail); `<a download>` and blob or data URLs save the file. File inputs work in every shell.
 - `one.scope`: the page the shell opened the screen from (`user`, `group:<id>` or `global`), or null. Only a hint: the app decides what to show, and draws its own scope picker if it has one.
