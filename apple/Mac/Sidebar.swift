@@ -54,7 +54,9 @@ struct Sidebar: View {
         @Bindable var store = store
         return List(selection: $store.selection) {
             ForEach(store.pages) { page in
-                Section {
+                // Held open: macOS folds a sidebar's section when its header is pressed (through accessibility, as
+                // agents drive the app), and here the header opens the page.
+                Section(isExpanded: Binding(get: { true }, set: { _ in })) {
                     ForEach(store.apps(on: page)) { app in
                         Label {
                             Text(app.label)
@@ -88,7 +90,6 @@ struct Sidebar: View {
                         Button("Edit Pages…") { store.sheet = .pages }
                     }
                 }
-                // A sidebar's section folds when its header is clicked, and here the header opens the page.
                 .collapsible(false)
             }
         }
