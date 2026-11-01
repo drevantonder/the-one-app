@@ -74,10 +74,12 @@ func describe() map[string]any {
 		return object(props, required...)
 	}
 	return map[string]any{
-		"title":  "Messenger",
-		"icon":   "message.fill",
-		"color":  "#0866ff",
-		"domain": "messenger.com",
+		"title":       "Messenger",
+		"description": "Reads and sends Messenger in a desktop's browser",
+		"version":     version(),
+		"icon":        "message.fill",
+		"color":       "#0866ff",
+		"domain":      "messenger.com",
 		"instructions": "Messenger is the person's Facebook Messenger, read through messenger.com in a desktop's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. " +
 			"messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. " +
 			"If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. " +

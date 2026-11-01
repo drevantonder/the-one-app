@@ -173,10 +173,12 @@ func num(description string) map[string]any {
 var account = str("which account: its number, as whatsapp_accounts lists them; default the first linked here")
 
 var describe = map[string]any{
-	"title":  "WhatsApp",
-	"icon":   "phone.bubble.fill",
-	"color":  "#25d366",
-	"domain": "whatsapp.com",
+	"title":       "WhatsApp",
+	"description": "Links a phone's WhatsApp to this server, as WhatsApp Desktop is linked, and keeps its messages here",
+	"version":     version(),
+	"icon":        "phone.bubble.fill",
+	"color":       "#25d366",
+	"domain":      "whatsapp.com",
 	"instructions": "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their servers, as WhatsApp Desktop is linked; calls find the server. whatsapp_accounts lists them; the others take account, the first by default. " +
 		"whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: " +
 		"send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. " +

@@ -724,6 +724,47 @@ async fn an_app_wraps_the_driver_of_its_name_on_another_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_servers_owner_removes_a_driver_there_and_allows_it_again() {
+    let (a, _ra) = start("drivers-a").await;
+    let (b, _rb) = start("drivers-b").await;
+    a.create("Drivers", "Andre").await.unwrap();
+    b.join(&a.pair(None).unwrap()).await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    let describe = json!({ "title": "Lamps", "description": "The lights", "version": "abc123", "ops": [{ "name": "on" }] });
+    b.provide("lamps", describe.clone()).await.unwrap();
+    let driver = b.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Ok(Some(c)) = driver.providers().next("lamps").await {
+                driver.providers().reply("lamps", c.id, json!({ "ok": "on" })).unwrap();
+            }
+        }
+    });
+    let b_name = b.state()["server"]["name"].as_str().unwrap().to_string();
+    let on_b = |state: &Value, list: &str| state["install"]["servers"].as_array().unwrap().iter().find(|s| s["name"] == b_name.as_str()).unwrap()[list].clone();
+    let lamps = |state: &Value| on_b(state, "installed_drivers").as_array().unwrap().iter().find(|d| d["name"] == "lamps").cloned();
+    eventually("a to see b's driver", async || lamps(&a.state()).is_some()).await;
+    let listed = lamps(&a.state()).unwrap();
+    assert_eq!((listed["name"].clone(), listed["version"].clone(), listed["installed_by"].clone(), listed["users"].clone()), (json!("lamps"), json!("abc123"), json!("Andre"), json!(["Andre"])), "{listed}");
+    let shell = on_b(&a.state(), "installed_drivers").as_array().unwrap().iter().any(|d| d["name"] == "shell" && d["built_in"] == true);
+    assert!(shell, "the node's own drivers are listed as built in");
+
+    eventually("the App Store to run", async || a.call(call("apps", "drivers", json!({}))).await.is_ok()).await;
+    let store = a.call(call("apps", "drivers", json!({ "name": "lamps" }))).await.unwrap();
+    let on = &store["drivers"][0]["servers"][0];
+    assert_eq!((on["server"].as_str(), on["version"].as_str(), on["may_remove"].as_bool()), (Some(b_name.as_str()), Some("abc123"), Some(true)), "the App Store lists it: {store}");
+
+    // Its owner removes it from b: b stops serving it and refuses it until it's allowed again.
+    a.set_driver(&me, Some(&b_name), "lamps", false).await.unwrap();
+    eventually("b to stop serving lamps", async || a.call(call("lamps", "on", json!({}))).await.is_err()).await;
+    assert!(b.provide("lamps", describe.clone()).await.is_err_and(|e| format!("{e:#}").contains("removed")), "b refuses it");
+    eventually("a to see it removed", async || on_b(&a.state(), "removed_drivers").as_array().is_some_and(|l| l.len() == 1)).await;
+    a.set_driver(&me, Some(&b_name), "lamps", true).await.unwrap();
+    eventually("b to take lamps again", async || b.provide("lamps", describe.clone()).await.is_ok()).await;
+    eventually("a to reach lamps again", async || a.call(call("lamps", "on", json!({}))).await.is_ok()).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn schedules_run_once_per_slot_on_one_server_and_switch_off() {
     let (a, _ra) = start("sched-a").await;
     let (b, _rb) = start("sched-b").await;

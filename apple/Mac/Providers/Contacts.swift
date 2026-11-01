@@ -6,7 +6,7 @@ struct ContactsApp: Provider {
     private static let store = Unshared(CNContactStore())
 
     var description: [String: Any] {
-        describe(title: "Contacts", icon: "contact", instructions:
+        describe(title: "Contacts", icon: "contact", summary: "Contacts on this Mac", instructions:
             "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; " +
             "contacts_me is the person's own card.", ops: [
             op("search", "Find contacts by name, email address or phone number.", [

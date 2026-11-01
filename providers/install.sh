@@ -18,6 +18,8 @@ if [ -n "$config" ]; then
 	home=${home:-'$HOME'/.local/share/$cli}
 	env="ONE_ADDR=127.0.0.1:$(field port) ONE_CLI=$cli $(echo "$provider" | tr a-z A-Z)_DATA=$home/$provider"
 fi
+# Installed by the server's owner who runs this, and allowed there if an owner removed it before.
+allow() { on "~/.local/bin/$node drivers add $provider" || echo "$node drivers add $provider failed: the driver serves once an owner allows it there" >&2; }
 set -- $(on uname -sm)
 os=$(echo "$1" | tr A-Z a-z)
 case $2 in x86_64) arch=amd64 ;; *) arch=arm64 ;; esac
@@ -45,6 +47,7 @@ cat >$plist <<EOF
 EOF
 launchctl bootout gui/$(id -u)/app.one.$name 2>/dev/null || true
 launchctl bootstrap gui/$(id -u) $plist'
+allow
 exit
 fi
 on "name=$name"'
@@ -72,3 +75,4 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable $name
 sudo systemctl restart $name'
+allow

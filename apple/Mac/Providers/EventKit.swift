@@ -49,7 +49,7 @@ struct RemindersApp: Provider {
 
     var description: [String: Any] {
         let priority = str("high, medium, low or none")
-        return describe(title: "Reminders", icon: "list-checks", instructions:
+        return describe(title: "Reminders", icon: "list-checks", summary: "Apple Reminders on this Mac", instructions:
             "Reminders are the person's Apple Reminders, through their Mac, and sync to their other Apple devices. reminders_lists lists the lists; " +
             "reminders_list lists reminders, soonest due first, leaving out completed ones unless asked. reminders_update also completes one.", ops: [
             op("lists", "The reminder lists."),
@@ -183,7 +183,7 @@ struct CalendarApp: Provider {
         ]
         let id = str("the event's id, as events gives it; for a repeating event it names one occurrence")
         let future = flag("for a repeating event, this occurrence and every later one, not just this one")
-        return describe(title: "Calendar", icon: "calendar", instructions:
+        return describe(title: "Calendar", icon: "calendar", summary: "Apple Calendar on this Mac", instructions:
             "Calendar is the person's Apple Calendar through their Mac: every account it has, such as iCloud, Google or Exchange. " +
             "calendar_events lists events in a time range, by default the coming week. Times are ISO 8601; without an offset they're in the Mac's time zone.", ops: [
             op("calendars", "The calendars, with whether each can be changed."),

@@ -12,7 +12,7 @@ const OLLAMA: &str = "http://127.0.0.1:11434";
 
 pub fn describe() -> Value {
     json!({
-        "name": "models", "title": "Models", "icon": "cpu", "color": "#32ade6", "runs": "here",
+        "name": "models", "title": "Models", "icon": "cpu", "color": "#32ade6", "runs": "here", "description": "Asks the local models on this server",
         "instructions": "Local models run on the device that has them. models_here lists this server's models; give server \"all\" for every server's, and which are loaded. models_chat asks one and returns its answer, on whichever of your servers has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
         "ops": [
             { "name": "here", "reads": true, "description": "This server's local models, and whether each is loaded; give server \"all\" for every server's.", "input": { "type": "object", "properties": {} } },

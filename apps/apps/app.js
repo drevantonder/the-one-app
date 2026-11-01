@@ -72,6 +72,34 @@ async function connects(ctx, a) {
   return ["accounts", "sign_in", "sign_out", "settings"].every((k) => new RegExp(`\\b${k}:\\s*\\{`).test(code)) && !/\bmain:\s*\{/.test(code);
 }
 
+/// Every driver on the caller's servers, and each driver an app uses that none of them runs: what it is, where it runs
+/// (version, who installed it, whether the caller may remove it there), where it was removed, and the apps that use it.
+async function drivers(ctx) {
+  const [servers, catalog] = await Promise.all([ctx.servers(), ctx.catalog()]);
+  const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
+  const by = new Map();
+  const driver = (name) => {
+    if (!by.has(name)) by.set(name, { name, title: name, icon: null, color: null, description: null, install: null, servers: [], removed: [], apps: [] });
+    return by.get(name);
+  };
+  for (const s of servers) {
+    for (const d of s.installed_drivers || []) {
+      const it = driver(d.name);
+      for (const k of ["title", "icon", "color", "description", "install"]) it[k] = it[k] && it[k] !== it.name ? it[k] : d[k] ?? it[k];
+      it.servers.push({ server: s.name, online: s.online, here: s.here, version: d.version || null, built_in: !!d.built_in, installed_by: d.installed_by || null, users: d.users || [], may_remove: owns(s) });
+    }
+    for (const d of s.removed_drivers || []) driver(d.name).removed.push({ server: s.name, by: d.by || null, time: d.time, may_allow: owns(s) });
+  }
+  for (const a of catalog.filter((a) => !a.deleted)) for (const name of a.uses?.drivers || []) driver(name).apps.push({ name: a.name, title: a.title || a.name });
+  // An app of a driver's name shows its picture.
+  for (const d of by.values()) {
+    const app = catalog.find((a) => a.name === d.name);
+    d.image = app?.image || null;
+    if (d.title === d.name && app?.title) d.title = app.title;
+  }
+  return { drivers: [...by.values()].sort((a, b) => a.title.localeCompare(b.title)), servers: servers.filter(owns).map((s) => s.name) };
+}
+
 async function find(ctx, name) {
   const app = (await ctx.catalog()).find((a) => a.name === name);
   if (!app) throw new Error(`no app named ${name}`);
@@ -97,6 +125,17 @@ function folder(files, dir) {
       <div class="main"><div class="title"><span>${one.esc(n.replace(/\/$/, ""))}</span><span class="when">${f.dir ? "" : one.size(f.size)}</span></div></div><div class="chev">›</div></a>`;
   };
   return '<div class="list code-list">' + names.map(row).join("") + "</div>";
+}
+
+/// How to install a driver on a server you own, for the Drivers screens. Runs in the page: the screens include it.
+function install(servers, name) {
+  const driver = name || "<driver>";
+  const where = servers.length ? servers[0] : "<server>";
+  return `<h2 class="section">Install a driver</h2><div class="list"><div class="row plain"><div class="main">
+    <div class="sub">A server's owner installs a driver there. From ${one.esc(one.config.name)}'s code, on any machine that reaches the server over ssh:</div>
+    <pre class="small" style="margin:8px 0;white-space:pre-wrap"><code>providers/install.sh ${one.esc(driver)} ${one.esc(where)}</code></pre>
+    <div class="sub small">${servers.length ? "You own " + one.esc(servers.join(", ")) + "." : "You own none of the servers, so ask one of a server's owners."} Settings shows each server's owners.</div>
+  </div></div></div>`;
 }
 
 export default {
@@ -197,6 +236,32 @@ export default {
         return `${schedule} is ${on ? "on" : "off"}.`;
       },
     },
+    drivers: {
+      reads: true,
+      description: "Every driver on your servers, the native code apps use (a shell, WhatsApp's linked phone, a browser), and each one an app uses that none of them runs: what it is, which servers run it (its version there, who installed it, whom it serves), where an owner removed it, and the apps that use it. servers lists the servers you own, where you may install and remove drivers.",
+      input: { type: "object", properties: { name: { type: "string", description: "only this driver" } } },
+      async run(ctx, { name } = {}) {
+        const all = await drivers(ctx);
+        return name ? { ...all, drivers: all.drivers.filter((d) => d.name === name) } : all;
+      },
+    },
+    remove_driver: {
+      confirm: true,
+      description: "Remove a driver from a server you own: it stops serving there, and apps that use it go to another server that runs it, or say none does. Its own data stays on the server; allow_driver undoes it.",
+      input: { type: "object", required: ["driver", "server"], properties: { driver: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
+      async run(ctx, { driver, server }) {
+        ctx.driver(driver, server, false);
+        return `Removed ${driver} from ${server}.`;
+      },
+    },
+    allow_driver: {
+      description: "Allow a driver an owner removed from a server you own again: it serves there again while it runs.",
+      input: { type: "object", required: ["driver", "server"], properties: { driver: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
+      async run(ctx, { driver, server }) {
+        ctx.driver(driver, server, true);
+        return `${driver} is allowed on ${server} again.`;
+      },
+    },
     code: {
       reads: true,
       description: "An app's code as deployed: its files, or with path one of them. Everyone may read every app's code.",
@@ -222,18 +287,26 @@ export default {
   .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
   .tag { font-size: 12px; padding: 1px 7px; border-radius: 10px; background: var(--line); color: var(--muted); }
 </style>
-<div class="segmented" id="tabs"><button data-tab="apps">Apps</button><button data-tab="connected">Connected Apps</button></div>
-<p id="about" class="muted small" style="margin:0 4px 10px" hidden>Apps that connect an account, for you and your agents. Add one to a page, then sign in from that page’s Connected Apps.</p>
+<div class="segmented" id="tabs"><button data-tab="apps">Apps</button><button data-tab="connected">Connected Apps</button><button data-tab="drivers">Drivers</button></div>
+<p id="about" class="muted small" style="margin:0 4px 10px" hidden></p>
 <input id="search" class="search" type="search" placeholder="Find an app" autocomplete="off">
 <div id="list"></div>
 <script>
+${install}
 // Apps that only connect an account would bury the rest, so they get their own tab. A shell's Add a connected app
 // opens it with { connected: true }, on that tab.
-let tab = one.params.connected ? "connected" : "apps";
+let tab = one.params.connected ? "connected" : one.params.drivers ? "drivers" : "apps";
+const ABOUT = {
+  connected: "Apps that connect an account, for you and your agents. Add one to a page, then sign in from that page’s Connected Apps.",
+  drivers: "Drivers are the native code apps use: a shell, a local model, WhatsApp’s linked phone, a desktop’s browser. Each runs on the servers whose owners installed it.",
+};
 function pick(t) {
   tab = t;
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
-  document.getElementById("about").hidden = tab !== "connected";
+  const about = document.getElementById("about");
+  about.textContent = ABOUT[tab] || "";
+  about.hidden = !ABOUT[tab];
+  document.getElementById("search").placeholder = tab === "drivers" ? "Find a driver" : "Find an app";
   draw();
 }
 document.getElementById("tabs").addEventListener("click", (e) => e.target.dataset.tab && pick(e.target.dataset.tab));
@@ -262,15 +335,40 @@ const row = (a) => \`<a class="row" onclick='one.open("app", \${JSON.stringify({
   </a>\`;
 const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(title) + '</h2><div class="list">' + list.map(row).join("") + "</div>" : "";
 
+let drivers = null;
+const driverRow = (d) => {
+  const on = d.servers.map((s) => s.server);
+  const sub = on.length ? "On " + on.join(", ") : d.removed.length ? "Removed from " + d.removed.map((r) => r.server).join(", ") : "On none of your servers";
+  const used = d.apps.length ? " · " + d.apps.map((a) => a.title).join(", ") : "";
+  return \`<a class="row" onclick='one.open("driver", \${JSON.stringify({ driver: d.name })})'>
+    \${one.appIcon(d, 44)}
+    <div class="main">
+      <div class="title"><span>\${one.esc(d.title)}</span><span class="when">\${one.esc(d.servers[0]?.version?.slice(0, 7) || "")}</span></div>
+      <div class="sub">\${one.esc(d.description || sub)}</div>
+      <div class="sub small">\${one.esc((d.description ? sub : "") + used)}</div>
+    </div>
+    <div class="chev">›</div>
+  </a>\`;
+};
+function drawDrivers(q) {
+  if (!drivers) return (document.getElementById("list").innerHTML = '<div class="empty">Loading drivers…</div>');
+  const found = drivers.drivers.filter((d) => !q || [d.title, d.name, d.description || ""].some((t) => t.toLowerCase().includes(q)));
+  const running = found.filter((d) => d.servers.length), not = found.filter((d) => !d.servers.length);
+  document.getElementById("list").innerHTML = (found.length
+    ? (running.length ? '<h2 class="section">On your servers</h2><div class="list">' + running.map(driverRow).join("") + "</div>" : "")
+      + (not.length ? '<h2 class="section">Not running</h2><div class="list">' + not.map(driverRow).join("") + "</div>" : "")
+    : '<div class="empty">No drivers match.</div>') + install(drivers.servers);
+}
 function draw() {
   const q = document.getElementById("search").value.trim().toLowerCase();
+  if (tab === "drivers") return drawDrivers(q);
   const found = apps.filter((a) => !!a.connected === (tab === "connected") && (!q || [a.title, a.name, a.description || ""].some((t) => t.toLowerCase().includes(q))));
   document.getElementById("list").innerHTML = found.length
     ? section(BUILT_IN, found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted))
     : '<div class="empty">No apps match.<div class="small" style="margin-top:6px">Make your own: put an app.js in a folder and run <code>' + one.esc(CLI) + ' deploy</code> on it.</div></div>';
 }
 async function show() {
-  apps = (await one.call("list")).apps;
+  [apps, drivers] = await Promise.all([one.call("list").then((l) => l.apps), one.call("drivers").catch(() => ({ drivers: [], servers: [] }))]);
   draw();
 }
 document.getElementById("search").addEventListener("input", draw);
@@ -462,6 +560,66 @@ async function toggle(button, scope, on) {
   } catch (err) {
     document.getElementById("error").textContent = err.message;
   }
+  show();
+}
+one.on("changed", show);
+show();
+</script>`,
+    },
+    driver: {
+      title: "Driver",
+      html: `
+<style>
+  .head { display: flex; gap: 14px; align-items: center; margin: 12px 4px 4px; }
+  .head h1 { font-size: 22px; margin: 0; }
+  .about { margin: 12px 4px 0; }
+  .pill { font: inherit; font-size: 15px; font-weight: 600; padding: 5px 14px; border-radius: 15px; border: 0; background: var(--accent); color: white; }
+  .pill.danger { background: var(--danger); }
+  .pill:disabled { opacity: 0.4; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #34c759; flex: none; margin-right: 12px; }
+  .dot.off { background: var(--muted); }
+  #error { margin: 8px 4px; }
+</style>
+<div id="driver"></div>
+<div id="ask"></div>
+<div id="error" class="error small"></div>
+<script>
+${install}
+const name = one.params.driver;
+one.title(name);
+async function show() {
+  const { drivers, servers } = await one.call("drivers", { name });
+  const d = drivers[0];
+  if (!d) return (document.getElementById("driver").innerHTML = '<div class="empty">None of your servers runs ' + one.esc(name) + ", and no app uses it.</div>");
+  one.title(d.title);
+  const by = (s) => s.built_in ? "Built into every server" : s.installed_by ? "Installed by " + s.installed_by : "";
+  const server = (s) => \`<div class="row plain"><span class="dot\${s.online ? "" : " off"}"></span><div class="main">
+      <div class="title"><span>\${one.esc(s.server)}</span><span class="when">\${one.esc(s.version ? s.version.slice(0, 12) : "")}</span></div>
+      <div class="sub small">\${one.esc([s.online ? "Running" : "Offline", by(s), s.users.length ? "for " + s.users.join(", ") : ""].filter(Boolean).join(" · "))}</div></div>
+      \${s.may_remove ? \`<button class="pill danger" onclick='removeIt(\${JSON.stringify(s.server)})'>Remove</button>\` : ""}</div>\`;
+  const removed = (r) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(r.server)}</span></div>
+      <div class="sub small">Removed\${r.by ? " by " + one.esc(r.by) : ""} \${one.esc(one.ago(r.time))} ago</div></div>
+      \${r.may_allow ? \`<button class="pill" onclick='allow(this, \${JSON.stringify(r.server)})'>Allow</button>\` : ""}</div>\`;
+  const app = (a) => \`<a class="row plain" onclick='one.open("app", \${JSON.stringify({ app: a.name })})'><div class="main"><div class="title"><span>\${one.esc(a.title)}</span></div></div><div class="chev">›</div></a>\`;
+  document.getElementById("driver").innerHTML = \`<div class="head">\${one.appIcon(d, 60)}<div><h1>\${one.esc(d.title)}</h1><div class="muted small">\${one.esc(d.name)} · driver</div></div></div>
+    \${d.description ? '<div class="about">' + one.esc(d.description) + "</div>" : ""}
+    <h2 class="section">Runs on</h2><div class="list">\${d.servers.length ? d.servers.map(server).join("") : '<div class="row plain"><div class="main sub">None of your servers runs it.</div></div>'}</div>
+    \${d.removed.length ? '<h2 class="section">Removed</h2><div class="list">' + d.removed.map(removed).join("") + "</div>" : ""}
+    \${d.apps.length ? '<h2 class="section">Used by</h2><div class="list">' + d.apps.map(app).join("") + "</div>" : ""}
+    \${d.install ? '<h2 class="section">Install</h2><div class="list"><div class="row plain"><div class="main sub">' + one.esc(d.install) + "</div></div></div>" : install(servers, name)}\`;
+}
+async function removeIt(server) {
+  document.getElementById("ask").scrollIntoView({ behavior: "smooth", block: "center" });
+  await one.confirm("#ask", {
+    title: "Remove " + name + " from " + server + "?",
+    detail: "It stops serving there, and apps that use it go to another server that runs it, or say none does. What it keeps on the server stays, and you can allow it again.",
+    action: "Remove", danger: true, run: () => one.call("remove_driver", { driver: name, server, confirm: true }).then(show),
+  });
+}
+async function allow(button, server) {
+  button.disabled = true;
+  document.getElementById("error").textContent = "";
+  try { await one.call("allow_driver", { driver: name, server }); } catch (err) { document.getElementById("error").textContent = err.message; }
   show();
 }
 one.on("changed", show);

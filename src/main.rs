@@ -57,6 +57,10 @@ Usage:
   {CLI} secret requests                the requests waiting for you; secret answer <id> [--decline] sets one from stdin
   {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
+  {CLI} drivers                        the drivers on each server: version, and who installed them
+  {CLI} drivers remove|add <name> [--server <name>]
+                                       remove a driver from a server you own (here by default), or allow it there
+                                       again; drivers/install.sh <name> [server] installs one and allows it
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's operations
@@ -295,6 +299,38 @@ fn run(args: Vec<String>) -> Result<()> {
             let past = match *how { "delete" => "deleted", "restore" => "restored", _ => "erased" };
             post("/v1/retire", json!({ "app": app, "how": past }))?;
             println!("{app} is {past}{}.", if *how == "delete" { ": it's in the App Store's Recently Deleted until you restore or erase it" } else { "" });
+        }
+        ["drivers"] => {
+            let state = get("/v1/state")?;
+            for s in state["install"]["servers"].as_array().into_iter().flatten() {
+                let installed = s["installed_drivers"].as_array().cloned().unwrap_or_default();
+                let removed = s["removed_drivers"].as_array().cloned().unwrap_or_default();
+                if installed.is_empty() && removed.is_empty() {
+                    continue;
+                }
+                println!("{}{}", s["name"].as_str().unwrap_or(""), if s["online"] == true { "" } else { " (offline)" });
+                for d in &installed {
+                    let by = match (&d["installed_by"], d["built_in"] == true) {
+                        (_, true) => format!("built into {NAME}"),
+                        (Value::String(by), _) => format!("installed by {by}"),
+                        _ => String::new(),
+                    };
+                    let version = d["version"].as_str().map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
+                    println!("  {}{version}  {} ({by})", d["name"].as_str().unwrap_or(""), d["title"].as_str().unwrap_or(""));
+                }
+                for d in &removed {
+                    println!("  {}  removed by {} {}", d["name"].as_str().unwrap_or(""), d["by"].as_str().unwrap_or("an owner"), ago(d["time"].as_u64().unwrap_or(0)));
+                }
+            }
+        }
+        ["drivers", how @ ("remove" | "add"), name] => {
+            let server = flags.get("server").and_then(Value::as_str);
+            post("/v1/driver", json!({ "name": name, "server": server, "installed": *how == "add" }))?;
+            let on = server.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
+            match *how {
+                "remove" => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} drivers add {name})."),
+                _ => println!("{name} is allowed {on} again: it serves there while it runs."),
+            }
         }
         ["schedules"] => {
             for app in get("/v1/apps")?.as_array().into_iter().flatten() {

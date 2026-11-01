@@ -105,6 +105,24 @@ pub struct App {
     pub erased: bool,
 }
 
+/// The latest `driver` entry for a driver on a server: removed there, or let register there again.
+#[derive(Clone, Debug)]
+pub struct DriverInstall {
+    /// Its executable, for its server's node to start *(not built yet)*.
+    pub blob: Option<String>,
+    /// Installed by registering over the local API, as `drivers/install.sh` does.
+    pub local: bool,
+    pub by: String,
+    pub time: u64,
+}
+
+impl DriverInstall {
+    /// Removed from its server: it isn't served there until it's installed again.
+    pub fn removed(&self) -> bool {
+        self.blob.is_none() && !self.local
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Members {
     pub root: Option<Hash>,
@@ -120,6 +138,8 @@ pub struct Members {
     /// The install's settings its admins set: each name's latest value. The rest are the edition's defaults.
     pub settings: BTreeMap<String, String>,
     pub apps: BTreeMap<String, App>,
+    /// The latest `driver` entry of each driver on each server: (server, driver).
+    pub drivers: BTreeMap<(Key, String), DriverInstall>,
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
@@ -509,6 +529,16 @@ impl Members {
                 app.bundle = Some(bundle.clone());
                 app.deploys += 1;
                 app.history.push((bundle, e.time(), w.clone()));
+            }
+            "driver" => {
+                let server = key_of("server")?;
+                let name = text("name")?;
+                ensure!(valid_app_name(&name), "driver names are lowercase words joined by -");
+                ensure!(self.server(&server).is_some(), "no such server");
+                ensure!(self.owners(&server).iter().any(|o| self.acts_for(&w, o)), "only someone acting for one of a server's owners installs or removes its drivers");
+                let blob = data["blob"].as_str().map(str::to_string);
+                ensure!(blob.as_ref().is_none_or(|b| e.content.blobs.contains(b)), "a driver names its executable among its blobs");
+                self.drivers.insert((server, name), DriverInstall { blob, local: data["local"] == true, by: w, time: e.time() });
             }
             "secret" => ensure!(self.is_admin(&w), "admins only"),
             "install" | "uninstall" | "node-release" | "running" => {}

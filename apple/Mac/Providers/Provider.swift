@@ -174,8 +174,10 @@ func object(_ fields: [String: Any?]) -> [String: Any] {
     fields.compactMapValues { $0 }
 }
 
-func describe(title: String, icon: String, instructions: String, ops: [[String: Any]]) -> [String: Any] {
-    ["title": title, "icon": icon, "instructions": instructions, "ops": ops, "widgets": [Any]()]
+/// A driver's description: what it is, and, for the App Store's Drivers, the Mac app's build and how it's installed.
+func describe(title: String, icon: String, summary: String, instructions: String, ops: [[String: Any]]) -> [String: Any] {
+    ["title": title, "icon": icon, "description": summary, "instructions": instructions, "ops": ops, "widgets": [Any](),
+     "version": Bundle.main.object(forInfoDictionaryKey: "BuildCommit") as? String ?? "", "install": "Comes with the Mac app: it runs on each Mac with the app open."]
 }
 
 func op(_ name: String, _ description: String, _ properties: [String: [String: Any]] = [:], required: [String] = []) -> [String: Any] {

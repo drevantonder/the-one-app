@@ -58,7 +58,7 @@ func (ds *desktops) describe() map[string]any {
 			ops = append(ops, map[string]any{"name": t.Name, "description": t.Description, "input": withDesktop(t.InputSchema)})
 		}
 	}
-	return map[string]any{"title": "Desktops", "icon": "macwindow.on.rectangle", "color": "#a2845e", "instructions": instructions, "ops": ops, "widgets": []any{}, "screens": screens}
+	return map[string]any{"title": "Desktops", "description": "Runs desktops with a browser in them on this server", "version": version(), "icon": "macwindow.on.rectangle", "color": "#a2845e", "instructions": instructions, "ops": ops, "widgets": []any{}, "screens": screens}
 }
 
 // withDesktop adds the desktop argument to a tool's input.

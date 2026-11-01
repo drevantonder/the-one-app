@@ -201,6 +201,12 @@ function context(env, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ retire: name, how });
     },
+    /// Removes a driver from a server (by name), or with installed lets it register there again, for someone acting
+    /// for one of the server's owners.
+    driver: (name, server, installed = false) => {
+      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+      appends.push({ driver: name, server, installed });
+    },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     schedule: (name, schedule, scope, on = true) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");

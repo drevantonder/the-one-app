@@ -395,10 +395,23 @@ impl Node {
 
     /// Registers a provider; the node advertises it to the servers it syncs with.
     pub async fn provide(&self, app: &str, describe: Value) -> Result<()> {
+        if let Some(why) = self.removed_here(app) {
+            bail!("{why}");
+        }
         if let Some(domain) = describe["domain"].as_str() {
             self.logo(domain, app);
         }
         self.0.providers.register(app, describe);
+        self.say_hello();
+        Ok(())
+    }
+
+    /// Removes a driver from a server (this one if none is named), or with `installed` lets it register there again,
+    /// for someone acting for one of the server's owners.
+    pub async fn set_driver(&self, caller: &Caller, server: Option<&str>, name: &str, installed: bool) -> Result<()> {
+        let server = server.map(str::to_string).unwrap_or_else(|| self.server_name());
+        let content = self.with(|i| driver_entry(&i.r.members, &caller.user, &server, name, installed))?;
+        self.member_content(caller, content).await?;
         self.say_hello();
         Ok(())
     }
@@ -732,15 +745,41 @@ impl Node {
         self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some()))).unwrap_or(false)
     }
 
-    /// The drivers serving on this server, by name.
-    fn local_drivers(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.0.native.iter().map(|n| n.name.to_string()).collect();
-        names.extend(self.0.providers.describe().iter().filter_map(|d| d["name"].as_str().map(str::to_string)));
-        names
+    /// The drivers serving on this server, whom each serves, and what each says it is: those built into the node,
+    /// then those registered. A driver one of its owners removed from this server isn't served here.
+    fn drivers_here(&self, i: &Install) -> Vec<Driver> {
+        let m = &i.r.members;
+        let everyone: Vec<String> = m.users.keys().filter(|u| m.serves(&self.0.id, u)).cloned().collect();
+        let removed = |name: &str| m.drivers.get(&(self.0.id, name.to_string())).is_some_and(|d| d.removed());
+        let built_in = |n: &crate::native::Native| {
+            let mut d = (n.describe)();
+            d["name"] = json!(n.name);
+            d["built_in"] = json!(true);
+            d
+        };
+        let mut drivers: Vec<Driver> = self.0.native.iter().filter(|n| !removed(n.name)).map(|n| (n.name.to_string(), vec![i.user.clone()], built_in(n))).collect();
+        drivers.extend(self.0.providers.describe().into_iter().filter(|d| !removed(d["name"].as_str().unwrap_or(""))).map(|d| {
+            let users = if d["serves"] == "everyone" { everyone.clone() } else { vec![i.user.clone()] };
+            (d["name"].as_str().unwrap_or("").to_string(), users, d)
+        }));
+        drivers
+    }
+
+    /// Why a driver isn't served here, if one of this server's owners removed it.
+    fn removed_here(&self, name: &str) -> Option<String> {
+        self.with(|i| {
+            let m = &i.r.members;
+            Ok(m.drivers.get(&(self.0.id, name.to_string())).filter(|d| d.removed()).map(|d| {
+                let by = m.users.get(&d.by).map(|u| u.name.as_str()).unwrap_or("an owner");
+                format!("{name} was removed from {} by {by}; an owner of it installs it again", self.server_name())
+            }))
+        })
+        .ok()
+        .flatten()
     }
 
     fn runs_driver_here(&self, app: &str) -> bool {
-        self.0.native.iter().any(|n| n.name == app) || self.0.providers.has(app)
+        (self.0.native.iter().any(|n| n.name == app) || self.0.providers.has(app)) && self.removed_here(app).is_none()
     }
 
     /// Asks another server to run a call.
@@ -1524,8 +1563,7 @@ impl Node {
         let mut out = self.catalog(viewer, false).await?;
         let mut drivers = Vec::new();
         if viewer.user == self.user()? {
-            drivers.extend(self.0.native.iter().map(|n| (n.describe)()));
-            drivers.extend(self.0.providers.describe());
+            drivers.extend(self.with(|i| Ok(self.drivers_here(i)))?.into_iter().map(|d| d.2));
         }
         let remote = self.with(|i| {
             let mut d: Vec<Value> = i.sessions.values().flat_map(|s| s.drivers.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
@@ -1844,6 +1882,7 @@ impl Node {
             let m = &i.r.members;
             let me = &viewer.user;
             let list = |ps: Vec<Principal>| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+            let here_drivers = self.drivers_here(i);
             let servers: Vec<Value> = m
                 .servers()
                 .map(|s| {
@@ -1862,7 +1901,9 @@ impl Node {
                         "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(),
                         "serves_me": m.serves(&s.key, me),
                         "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
-                        "drivers": if s.key == self.0.id { self.local_drivers() } else { session.map(|s| s.drivers.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },
+                        "drivers": if s.key == self.0.id { here_drivers.iter().map(|d| d.0.clone()).collect() } else { session.map(|s| s.drivers.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },
+                        "installed_drivers": installed_drivers(m, s, if s.key == self.0.id { &here_drivers } else { session.map(|s| s.drivers.as_slice()).unwrap_or_default() }, i.builds.get(&s.key).map(|r| r.commit.as_str())),
+                        "removed_drivers": m.drivers.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
                         "load": load,
                     })
                 })
@@ -2347,13 +2388,7 @@ impl Node {
 
     /// What this server's hello says: its frontier, and the drivers serving its local user here.
     fn hello(&self, i: &Install) -> Result<Msg> {
-        let mut drivers: Vec<Driver> = self.0.native.iter().map(|n| (n.name.to_string(), vec![i.user.clone()], (n.describe)())).collect();
-        let m = &i.r.members;
-        let everyone: Vec<String> = m.users.keys().filter(|u| m.serves(&self.0.id, u)).cloned().collect();
-        drivers.extend(self.0.providers.describe().into_iter().map(|d| {
-            let users = if d["serves"] == "everyone" { everyone.clone() } else { vec![i.user.clone()] };
-            (d["name"].as_str().unwrap_or("").to_string(), users, d)
-        }));
+        let drivers = self.drivers_here(i);
         i.r.hello(drivers)
     }
 
@@ -2733,8 +2768,42 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
             }
             (Scope::Global, members::node("app", data))
         }
+        Append::Driver { server, name, installed } => (Scope::Global, driver_entry(&i.r.members, &me.user, &server, &name, installed)?),
         Append::Install { .. } | Append::Cost { .. } => bail!("installs and costs are written on their own"),
     })
+}
+
+/// What a server says of each driver serving there, as `GET /v1/state` lists it: what it is, its version (a
+/// driver's own, or for one built into the node, the node's build), whom it serves, and who installed it.
+fn installed_drivers(m: &Members, server: &members::Machine, drivers: &[Driver], build: Option<&str>) -> Vec<Value> {
+    let name_of = |u: &String| m.users.get(u).map(|u| u.name.clone());
+    drivers
+        .iter()
+        .map(|(name, users, d)| {
+            let built_in = d["built_in"] == true;
+            let installed = m.drivers.get(&(server.key, name.clone())).filter(|i| i.local);
+            // Registered over the local API, a driver counts as installed by the server's local user.
+            let by = match installed {
+                Some(i) => name_of(&i.by),
+                None if built_in => None,
+                None => name_of(&server.user),
+            };
+            json!({
+                "name": name, "title": d["title"].as_str().unwrap_or(name), "icon": d["icon"], "color": d["color"], "domain": d["domain"],
+                "description": d["description"], "version": d["version"].as_str().or(built_in.then_some(build).flatten()),
+                "built_in": built_in, "installed_by": by, "installed": installed.map(|i| i.time), "users": users.iter().filter_map(name_of).collect::<Vec<_>>(),
+            })
+        })
+        .collect()
+}
+
+/// The `driver` entry that removes a driver from a server, found by name or key prefix, or with `installed` lets it
+/// register there again; for someone acting for one of the server's owners.
+fn driver_entry(m: &Members, user: &str, server: &str, name: &str, installed: bool) -> Result<Content> {
+    let found: Vec<&members::Machine> = m.servers().filter(|s| s.name.eq_ignore_ascii_case(server) || (!server.is_empty() && hex(&s.key).starts_with(server))).collect();
+    let [s] = found.as_slice() else { bail!("no one server called {server}") };
+    ensure!(m.owners(&s.key).iter().any(|o| m.acts_for(user, o)), "only someone acting for one of {}'s owners installs or removes its drivers", s.name);
+    Ok(members::node("driver", json!({ "server": hex(&s.key), "name": name, "blob": null, "local": installed })))
 }
 
 /// Whom a schedule of `app` in a scope runs as: whoever switched it on last, or else installed the app there, while

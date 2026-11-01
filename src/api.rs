@@ -49,6 +49,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/install", post(install))
         .route("/v1/schedule", post(schedule))
         .route("/v1/retire", post(retire))
+        .route("/v1/driver", post(driver))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
         .route("/v1/secrets", get(secrets).post(set_secret))
@@ -116,6 +117,13 @@ async fn state(State(node): State<Node>) -> Json<Value> {
 
 async fn apps(State(node): State<Node>) -> Reply {
     Ok(Json(json!(node.apps(&local(&node)?).await?)))
+}
+
+/// `{ name, server?, installed? }`: removes a driver from a server (this one by default), or with `installed` lets it
+/// register there again.
+async fn driver(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    node.set_driver(&local(&node)?, body["server"].as_str(), text(&body, "name")?, body["installed"] == true).await?;
+    done()
 }
 
 /// `{ app, how }`: deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`).
