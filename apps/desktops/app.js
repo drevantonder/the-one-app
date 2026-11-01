@@ -86,10 +86,10 @@ export default {
       input: {"properties": {"profile": {"description": "its name: letters, digits and dashes, like Personal or PTC", "type": "string"}}, "required": ["profile"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "add_profile", input),
     },
-    forget_profile: {
+    delete_profile: {
       description: "Delete a browser profile, signing agents out of every site in it. Only when the person asked.",
       input: {"properties": {"profile": {"description": "the profile's name", "type": "string"}}, "required": ["profile"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "forget_profile", input),
+      run: (ctx, input) => sidecar(ctx, "delete_profile", input),
     },
     _list: {
       reads: true,
@@ -152,6 +152,7 @@ export default {
   button.primary { font: inherit; font-size: 15px; font-weight: 600; border: 0; border-radius: 980px; padding: 7px 16px; color: white; background: var(--accent); cursor: pointer; }
   button.primary:disabled { opacity: 0.5; cursor: default; }
   button.plain, a.plain { font: inherit; font-size: 15px; border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; text-decoration: none; }
+  button.plain.danger { color: var(--danger); }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 40vw), 1fr)); gap: 20px 14px; }
   .tile { display: block; color: inherit; min-width: 0; }
   .pic { aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: var(--card); border: 0.5px solid var(--line); display: grid; place-items: center; color: var(--muted); font-size: 13px; }
@@ -188,6 +189,7 @@ export default {
   <div class="row plain" id="add-row"><div class="main"><input id="new-profile" class="search" style="margin:0" placeholder="New profile, like Personal or PTC" autocapitalize="words" autocorrect="off"></div>
   <button class="plain" id="add-profile">Add</button></div>
 </div>
+<div id="profile-confirm"></div>
 <p class="footer">Each is a browser with its own sign-ins.</p>
 <script>
   one.title("Desktops");
@@ -412,7 +414,7 @@ export default {
       const sub = s ? \`Signing in\${s.server ? " on " + one.esc(host(s.server)) : ""} · \${p?.saved ? "saved " + one.esc(one.ago(Date.parse(p.saved))) : "not saved yet"}\` : saved;
       const actions = s
         ? (url ? \`<a class="plain" href="\${one.esc(url)}" target="_blank" rel="noopener">Open desktop</a>\` : "") + \`<button class="plain" data-save="\${one.esc(name)}">Save</button>\`
-        : \`<button class="plain" data-profile="\${one.esc(name)}">Sign in to a site</button>\`;
+        : \`<button class="plain" data-profile="\${one.esc(name)}">Sign in to a site</button><button class="plain danger" data-delete="\${one.esc(name)}">Delete</button>\`;
       return \`<div class="row plain" data-row><div class="main"><div class="title"><span>\${one.esc(name)}</span></div><div class="sub small">\${sub}</div></div>\${actions}</div>\`;
     }).join("");
     if (html === drawn) return;
@@ -422,6 +424,11 @@ export default {
     document.getElementById("add-row").insertAdjacentHTML("beforebegin", html);
     for (const b of list.querySelectorAll("[data-profile]")) b.onclick = () => signIn(b, b.dataset.profile);
     for (const b of list.querySelectorAll("[data-save]")) b.onclick = () => save(b, open[b.dataset.save]);
+    for (const b of list.querySelectorAll("[data-delete]")) b.onclick = async () => {
+      const profile = b.dataset.delete;
+      if (await one.confirm("#profile-confirm", { title: \`Delete the \${profile} profile?\`, detail: "Agents are signed out of every site in it, and can't borrow a desktop with it.",
+        action: "Delete Profile", danger: true, run: () => one.call("delete_profile", { profile }) })) await loadProfiles();
+    };
   }
 
   async function loadProfiles() {

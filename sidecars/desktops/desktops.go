@@ -280,8 +280,6 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		op = "profiles"
 	case "save_login":
 		op = "save_profile"
-	case "forget_login":
-		op = "forget_profile"
 	}
 	if p, ok := in["profile"]; ok {
 		in["login"] = p
@@ -528,7 +526,7 @@ func (ds *desktops) run(ctx context.Context, op string, raw json.RawMessage) (an
 		}
 		me, _, _ := ds.servers(ctx)
 		return map[string]any{"profile": login, "server": me, "text": fmt.Sprintf("Added the %s profile. It has no sign-ins yet: sign in to sites in it with sign_in.", login)}, nil
-	case "forget_profile":
+	case "delete_profile":
 		login := text("login")
 		if r := ds.profileElsewhere(ctx, op, in, login, here); r != nil {
 			return r, nil
@@ -733,7 +731,7 @@ func viewURL(ctx context.Context, d desktop, minutes int) (string, error) {
 
 // local are the operations that act on this server even when given a
 // desktop it doesn't have.
-var local = []string{"list", "create", "borrow", "sign_in", "profiles", "add_profile", "forget_profile", "backups", "restore", "refresh_tools"}
+var local = []string{"list", "create", "borrow", "sign_in", "profiles", "add_profile", "delete_profile", "backups", "restore", "refresh_tools"}
 
 // reply is a result with entries for the node to write in the caller's log.
 type reply struct {

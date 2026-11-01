@@ -189,7 +189,7 @@ func ownOps() []map[string]any {
 		{"name": "profiles", "description": "The browser profiles desktops can be borrowed with, like Personal and PTC, each with its own sign-ins: which server keeps it, and when it was last saved.", "input": object(map[string]any{})},
 		{"name": "add_profile", "description": "Add a browser profile with no sign-ins yet, for the person to sign in to sites in with sign_in.",
 			"input": object(map[string]any{"profile": str("its name: letters, digits and dashes, like Personal or PTC")}, "profile")},
-		{"name": "forget_profile", "description": "Delete a browser profile, signing agents out of every site in it. Only when the person asked.",
+		{"name": "delete_profile", "description": "Delete a browser profile, signing agents out of every site in it. Only when the person asked.",
 			"input": object(map[string]any{"profile": str("the profile's name")}, "profile")},
 		{"name": "create", "description": "Create a lasting desktop and start it, for the person: Linux, with a browser of its own. Takes a minute. Agents borrow instead.",
 			"input": object(map[string]any{"desktop": str("its name: lowercase letters, digits and dashes"), "size": sizeArg}, "desktop")},
