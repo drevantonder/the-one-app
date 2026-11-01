@@ -3,8 +3,9 @@
 // (what refresh_tools said the server has), and deploys it again when the tools change.
 //
 // Servers that want OAuth (MCP's authorization: protected resource metadata, dynamic client registration, PKCE) are
-// signed in with sign_in, as many accounts as the person likes. Every token is one of the caller's own secrets, sent
-// only to the host it's for; the store keeps only which accounts there are and how to refresh them.
+// signed in with sign_in, as many accounts as the person likes. Each account is an item in the caller's Vault: its
+// tokens (and its client's secret) as secret fields, sent only to the server and its token address, and how to
+// refresh them as plain ones. The store keeps only a sign-in that's waiting, with its verifier.
 
 import server from "./server.json";
 import listed from "./tools.json";
@@ -16,12 +17,10 @@ const REDIRECT = `http://127.0.0.1/oauth/${NAME}`;
 const MINE = new Set(["sign_in", "sign_out", "accounts", "refresh_tools"]);
 
 const host = (url) => new URL(url).hostname.toLowerCase();
-const slug = (name) => name.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 48);
-const access = (name) => `access.${slug(name)}`;
-const refresh = (name) => `refresh.${slug(name)}`;
-// A form body, with secrets' placeholders left as written for the node to fill (tokens and verifiers are URL-safe).
+const TYPE = `${server.title || NAME} account`;
+// A form body, with the Vault's placeholders left as written for the node to fill (tokens are URL-safe).
 const form = (o) => Object.entries(o).filter(([, v]) => v != null && v !== "")
-  .map(([k, v]) => `${encodeURIComponent(k)}=${/^\{\{[\w.-]+\}\}$/.test(v) ? v : encodeURIComponent(v)}`).join("&");
+  .map(([k, v]) => `${encodeURIComponent(k)}=${/^\{\{[\w:.-]+\}\}$/.test(v) ? v : encodeURIComponent(v)}`).join("&");
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
 
@@ -33,10 +32,14 @@ function opName(tool) {
   return MINE.has(name) ? `${name}_tool` : name;
 }
 
-/// The accounts signed in for the caller.
+/// The accounts signed in for the caller: their Vault items this app is switched on for, each as { id, name,
+/// client_id, token_endpoint, resource, has_secret }.
 async function accounts(ctx) {
   if (!ctx.user) return [];
-  return ctx.user.query("select * from accounts order by name");
+  const value = (i, f) => i.fields[f]?.value ?? null;
+  return (await ctx.vault.items()).filter((i) => i.type === TYPE && i.fields.access_token).sort((a, b) => a.title.localeCompare(b.title)).map((i) => ({
+    id: i.id, name: i.title, client_id: value(i, "client_id"), token_endpoint: value(i, "token_endpoint"), resource: value(i, "resource"), has_secret: !!i.fields.client_secret,
+  }));
 }
 
 /// The account a call acts as: the one named, or the only one.
@@ -77,7 +80,7 @@ async function rpc(session, method, params, id) {
 }
 
 /// Opens a session as the account (null: none), asks `method`, and gives its result. A rejected access token is
-/// refreshed once; the new tokens are kept as the caller's secrets.
+/// refreshed once; the new tokens are kept in its item.
 async function ask(ctx, acct, method, params) {
   const open = async (token) => {
     const session = { protocol: PROTOCOL, token };
@@ -89,7 +92,7 @@ async function ask(ctx, acct, method, params) {
   };
   if (!acct) return open(null);
   try {
-    return await open(`{{${access(acct.name)}}}`);
+    return await open(`{{${acct.id}:access_token}}`);
   } catch (e) {
     if (e.unauthorized == null) throw e;
     return { ...(await open(await renew(ctx, acct))), renewed: true };
@@ -101,12 +104,11 @@ async function renew(ctx, acct) {
   const r = await fetch(acct.token_endpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
-    body: form({ grant_type: "refresh_token", refresh_token: `{{${refresh(acct.name)}}}`, client_id: acct.client_id, client_secret: acct.has_secret ? `{{client_secret.${slug(acct.client_id)}}}` : null, resource: acct.resource }),
+    body: form({ grant_type: "refresh_token", refresh_token: `{{${acct.id}:refresh_token}}`, client_id: acct.client_id, client_secret: acct.has_secret ? `{{${acct.id}:client_secret}}` : null, resource: acct.resource }),
   });
   const tok = await r.json().catch(() => ({}));
   if (!r.ok || !tok.access_token) throw new Error(`${acct.name}'s sign-in no longer works (${tok.error_description || tok.error || r.status}): sign_in with account ${acct.name} signs it in again`);
-  ctx.user.secret(access(acct.name), tok.access_token, [host(server.url)]);
-  if (tok.refresh_token) ctx.user.secret(refresh(acct.name), tok.refresh_token, [host(acct.token_endpoint)]);
+  ctx.vault.update(acct.id, { fields: { access_token: { value: tok.access_token }, ...(tok.refresh_token ? { refresh_token: { value: tok.refresh_token } } : {}) } });
   return tok.access_token;
 }
 
@@ -194,25 +196,23 @@ export default {
     listed.instructions || "",
   ].filter(Boolean).join(" "),
 
+  vault: listed.oauth ? {
+    account: { title: TYPE, type: TYPE, domain: host(server.url), accounts: true, hosts: [host(server.url)], fields: { access_token: { label: "Access token", secret: true }, refresh_token: { label: "Refresh token", secret: true } } },
+  } : {},
+
   schema: {
     user: `
-      create table accounts (name text primary key, client_id text not null, token_endpoint text not null, resource text, has_secret integer not null);
       create table pending (one integer primary key check (one = 1), state text not null, account text, client_id text not null,
-                            token_endpoint text not null, resource text, has_secret integer not null);`,
+                            token_endpoint text not null, resource text, client_secret text, verifier text not null);`,
   },
 
   on: {
-    account(db, e) {
-      const d = e.data;
-      db.exec("insert or replace into accounts values (?, ?, ?, ?, ?)", [d.name, d.client_id, d.token_endpoint, d.resource || null, d.has_secret ? 1 : 0]);
-      db.exec("delete from pending");
-    },
-    sign_out(db, e) {
-      db.exec("delete from accounts where name = ?", [e.data.name]);
-    },
     pending(db, e) {
       const d = e.data;
-      db.exec("insert or replace into pending values (1, ?, ?, ?, ?, ?, ?)", [d.state, d.account || null, d.client_id, d.token_endpoint, d.resource || null, d.has_secret ? 1 : 0]);
+      db.exec("insert or replace into pending values (1, ?, ?, ?, ?, ?, ?, ?)", [d.state, d.account || null, d.client_id, d.token_endpoint, d.resource || null, d.client_secret || null, d.verifier]);
+    },
+    pending_done(db) {
+      db.exec("delete from pending");
     },
   },
 
@@ -257,12 +257,10 @@ export default {
           client_id = reg.client_id;
           client_secret = reg.client_secret;
         }
-        const tokenHost = host(as.token_endpoint);
-        if (client_secret) ctx.user.secret(`client_secret.${slug(client_id)}`, client_secret, [tokenHost]);
         const verifier = random(), state = random();
         const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-        ctx.user.secret("verifier", verifier, [tokenHost]);
-        ctx.user.append("pending", { state, account: name || null, client_id, token_endpoint: as.token_endpoint, resource: as.resource, has_secret: !!client_secret });
+        // A sign-in waiting for its code, in this app's own data: its verifier, and its client until the account has it.
+        ctx.user.append("pending", { state, verifier, account: name || null, client_id, client_secret: client_secret || null, token_endpoint: as.token_endpoint, resource: as.resource });
         const link = `${as.authorization_endpoint}?${form({
           response_type: "code", client_id, redirect_uri: REDIRECT, scope: as.scope, state, resource: as.resource,
           code_challenge: challenge, code_challenge_method: "S256",
@@ -287,9 +285,7 @@ export default {
       async run(ctx, { account: name }) {
         const acct = await account(ctx, name);
         if (!acct) throw new Error("no account is signed in");
-        ctx.user.append("sign_out", { name: acct.name });
-        ctx.user.secret(access(acct.name), null, []);
-        ctx.user.secret(refresh(acct.name), null, []);
+        ctx.vault.release(acct.id);
         return `Signed out ${acct.name}.`;
       },
     },
@@ -313,10 +309,10 @@ export default {
   },
 };
 
-/// A sign-in that's over without an account (a code is taken once): it answers why rather than failing, so the
-/// verifier's deletion is written, as a failed call writes nothing.
+/// A sign-in that's over without an account (a code is taken once): it answers why rather than failing, so its
+/// verifier is forgotten, as a failed call writes nothing.
 function failed(ctx, why) {
-  ctx.user.secret("verifier", null, []);
+  ctx.user.append("pending_done", {});
   return { signed_in: false, why };
 }
 
@@ -337,17 +333,20 @@ async function finish(ctx, code, name) {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body: form({
-      grant_type: "authorization_code", code, redirect_uri: REDIRECT, client_id: p.client_id, code_verifier: "{{verifier}}",
-      client_secret: p.has_secret ? `{{client_secret.${slug(p.client_id)}}}` : null, resource: p.resource,
+      grant_type: "authorization_code", code, redirect_uri: REDIRECT, client_id: p.client_id, code_verifier: p.verifier,
+      client_secret: p.client_secret, resource: p.resource,
     }),
   });
   const tok = await r.json().catch(() => ({}));
   if (!r.ok || !tok.access_token) return failed(ctx, `Sign-in failed: ${tok.error_description || tok.error || r.status}. Start again with sign_in.`);
   if (!tok.refresh_token) return failed(ctx, "The server gave no refresh token, so the sign-in wouldn't last. Start again with sign_in.");
   const acct = name || p.account || email(tok.id_token || "") || "default";
-  ctx.user.secret(access(acct), tok.access_token, [host(server.url)]);
-  ctx.user.secret(refresh(acct), tok.refresh_token, [host(p.token_endpoint)]);
-  ctx.user.secret("verifier", null, []);
-  ctx.user.append("account", { name: acct, client_id: p.client_id, token_endpoint: p.token_endpoint, resource: p.resource, has_secret: p.has_secret });
+  ctx.user.append("pending_done", {});
+  const fields = {
+    name: { value: acct }, access_token: { value: tok.access_token, secret: true }, refresh_token: { value: tok.refresh_token, secret: true },
+    client_id: { value: p.client_id }, token_endpoint: { value: p.token_endpoint }, ...(p.resource ? { resource: { value: p.resource } } : {}),
+    ...(p.client_secret ? { client_secret: { value: p.client_secret, secret: true } } : {}),
+  };
+  await ctx.vault.create({ title: acct, type: TYPE, domain: host(server.url), fields, hosts: [...new Set([host(server.url), host(p.token_endpoint)])], same: "name" });
   return `Signed in as ${acct}.${listed.oauth ? "" : ` Run apps/mcp/add ${NAME} to make the server's tools this app's operations.`}`;
 }

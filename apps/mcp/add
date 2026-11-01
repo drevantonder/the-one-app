@@ -5,7 +5,8 @@
 #   apps/mcp/add <name>        deploys the server's tools as they are now: after sign_in, or when they change
 #
 # A server that wants OAuth: `one <name> sign_in`, then run this again with just the name. A header's value may hold
-# a secret as {{key}}, set with `one secret set <name> key --hosts <the server's host>`.
+# a Vault field as {{key}}: `one vault request <name> --title <title> --fields key --secret-fields key --hosts <the
+# server's host>` asks the person for it.
 # Apps can't deploy, so this runs where the CLI does: it builds the app from template.js beside it.
 set -eu
 one=${ONE:-one}

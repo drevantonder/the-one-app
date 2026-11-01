@@ -1,74 +1,213 @@
-// Google Drive for apps: your own Drive accounts, signed in once. The app keeps each account's refresh token as one of
-// its own secrets, which the node fills in only for Google's token address, so no app or agent ever reads it. Other
-// apps use it as ctx.apps.drive.<op>, Drive's own API by another name (files_get, files_list, files_create,
+// Google Drive for apps: your own Drive accounts, signed in once. Each account's refresh token is a secret field of
+// its Google account item in the Vault, which the node fills in only for Google's token address, so no app or agent
+// ever reads it; signing in is the same in every Google app. Other apps use it as ctx.apps.drive.<op>, Drive's own API by another name (files_get, files_list, files_create,
 // files_upload, files_update, generate_ids).
 
 const OAUTH = "oauth2.googleapis.com";
 const SCOPES = "openid email https://www.googleapis.com/auth/drive";
 const API = "https://www.googleapis.com/drive/v3";
 // Where Google sends the browser after sign-in. Nothing answers there: the person copies the address it fails to load.
-const REDIRECT = "http://127.0.0.1:4747/hooks/drive/oauth";
+const APP = "drive";
+const TITLE = "Google Drive";
+const REDIRECT = `http://127.0.0.1:4747/hooks/${APP}/oauth`;
 
-const slug = (email) => email.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
 /// What Drive said, with its status: callers tell a missing file (404) from a refused one.
 export class DriveError extends Error {}
 const needsConnecting = () => new DriveError("Drive needs connecting: sign in to Google Drive again (drive_sign_in).");
 
-async function setting(ctx, key) {
-  for (const s of [ctx.user, ctx.global]) {
-    const [row] = s ? await s.query("select value from settings where key = ?", [key]) : [];
-    if (row) return JSON.parse(row.value);
-  }
-  return null;
+// The Vault keeps what signing in needs, the same for every Google app: one "Google sign-in" item, the OAuth client
+// (its id, and its secret), and a "Google account" item for each account (its address, its refresh token and the
+// scopes it allowed), sent only to Google's token address. Signing in to an account another Google app already uses
+// adds this app's scopes to it (incremental consent). The browser ends on a 127.0.0.1 address the person pastes
+// back; the verifier waits for it in this app's own data.
+
+const VAULT = {
+  client: {
+    title: "Google sign-in", type: "Google sign-in", domain: "google.com", hosts: [OAUTH],
+    fields: { client_id: { label: "Client ID" }, client_secret: { label: "Client secret", secret: true } },
+  },
+  account: {
+    title: "Google account", type: "Google account", domain: "google.com", hosts: [OAUTH], accounts: true,
+    fields: { email: { label: "Email" }, refresh_token: { label: "Refresh token", secret: true } },
+  },
+};
+
+/// The Google sign-in (OAuth client) this app is switched on for: yours first, else your group's or everyone's.
+async function googleClient(ctx, id) {
+  const all = (await ctx.vault.items()).filter((i) => i.fields.client_id?.value && i.fields.client_secret);
+  return all.find((i) => i.fields.client_id.value === id) || all.find((i) => i.scope.startsWith("user:")) || all[0] || null;
+}
+const noClient = () => new Error(`${TITLE} has no Google sign-in yet: choose one on its settings page, or ask the person for it with vault_request (app ${APP}, need client)`);
+
+/// The Google accounts this app is switched on for, the first signed in first.
+async function accountItems(ctx) {
+  return (await ctx.vault.items()).filter((i) => i.type === "Google account" && i.fields.email?.value && i.fields.refresh_token).sort((a, b) => a.time - b.time);
 }
 
 async function accounts(ctx) {
-  if (!ctx.user) throw new Error("this server doesn't keep your data, so it can't reach your Drive accounts: use one of your own servers");
-  return ctx.user.query("select email, added from accounts order by added");
+  if (!ctx.user) throw new Error("this server doesn't keep your data, so it can't reach your accounts: use one of your own servers");
+  return (await accountItems(ctx)).map((i) => i.fields.email.value);
 }
 
-/// The account to use: the one named, else the first.
-async function account(ctx, email) {
+/// The account named, by its address or a part of it only it has; the first signed in when none is named.
+async function account(ctx, name) {
   const all = await accounts(ctx);
-  if (!all.length) throw needsConnecting();
-  if (!email) return all[0];
-  const found = all.find((a) => a.email.toLowerCase() === String(email).toLowerCase());
-  if (!found) throw new Error(`no Drive account ${email}; they are: ${all.map((a) => a.email).join(", ")}`);
+  if (!all.length) throw new Error(`no Google account is signed in: ${APP}_sign_in signs one in`);
+  if (!name) return all[0];
+  const n = String(name).toLowerCase();
+  const found = all.find((e) => e.toLowerCase() === n) || (all.filter((e) => e.toLowerCase().includes(n)).length === 1 && all.find((e) => e.toLowerCase().includes(n)));
+  if (!found) throw new Error(`no single account matches "${name}"; they are: ${all.join(", ")}`);
   return found;
 }
 
-const tokens = new Map(); // email → { value, expires }, for this runtime only
+/// Whether an account allowed this app's scopes, or signed in before accounts kept them.
+const allowed = (item) => !item.fields.scopes || SCOPES.split(" ").every((s) => s === "openid" || s === "email" || item.fields.scopes.value.split(" ").includes(s));
+
+const tokens = new Map(); // `${user}/${email}` → { value, expires }, for this runtime only
 async function token(ctx, email) {
-  const t = tokens.get(email);
+  const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
+  if (!item) throw new Error(`${email} isn't signed in to ${TITLE}: ${APP}_sign_in signs it in`);
+  if (!allowed(item)) throw new Error(`${email} hasn't allowed ${TITLE} yet: sign in to it again (${APP}_sign_in with account)`);
+  const key = `${ctx.user.id}/${email}`;
+  const t = tokens.get(key);
   if (t && t.expires > Date.now() + 60_000) return t.value;
-  const client = await setting(ctx, "client_id");
-  if (!client) throw new Error("Drive has no OAuth client yet: an admin sets one with drive_set_client");
+  const client = await googleClient(ctx, item.fields.client_id?.value);
+  if (!client) throw noClient();
   const r = await fetch(`https://${OAUTH}/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: `grant_type=refresh_token&client_id=${encodeURIComponent(client)}&client_secret={{client_secret}}&refresh_token={{refresh_${slug(email)}}}`,
+    body: `grant_type=refresh_token&client_id=${encodeURIComponent(client.fields.client_id.value)}&client_secret={{${client.id}:client_secret}}&refresh_token={{${item.id}:refresh_token}}`,
   });
   const body = await r.json().catch(() => ({}));
-  if (!r.ok || !body.access_token) {
-    if (r.status === 400 || r.status === 401) throw needsConnecting();
-    throw new DriveError(`Drive ${r.status}: ${body.error_description || body.error || "Google didn't answer"}`);
-  }
-  tokens.set(email, { value: body.access_token, expires: Date.now() + (body.expires_in || 3600) * 1000 });
+  if (!r.ok || !body.access_token) throw new Error(`${email}'s sign-in no longer works (${body.error_description || body.error || r.status}): ${APP}_sign_in signs it in again`);
+  tokens.set(key, { value: body.access_token, expires: Date.now() + (body.expires_in || 3600) * 1000 });
   return body.access_token;
 }
 
+/// A link to sign in to Google with, `hint` the account to suggest; the verifier waits in this app's own data.
+async function startSignIn(ctx, hint) {
+  const client = await googleClient(ctx);
+  if (!client) throw noClient();
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+  ctx.user.append("pending", { verifier, client: client.id });
+  const q = new URLSearchParams({
+    client_id: client.fields.client_id.value, redirect_uri: REDIRECT, response_type: "code", scope: SCOPES, access_type: "offline",
+    prompt: "consent", include_granted_scopes: "true", code_challenge: challenge, code_challenge_method: "S256", ...(hint ? { login_hint: hint } : {}),
+  });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
+}
+
+/// A sign-in that's over without an account: it answers why rather than failing, so its verifier is forgotten, as a
+/// failed call writes nothing.
+function failed(ctx, why) {
+  ctx.user.append("pending_done", {});
+  return { signed_in: false, why };
+}
+
+/// The address an id_token says signed in, from its base64url payload.
+function emailOf(idToken) {
+  try {
+    const payload = String(idToken).split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload), (c) => c.charCodeAt(0)))).email || null;
+  } catch {
+    return null;
+  }
+}
+
+async function finishSignIn(ctx, given) {
+  const [p] = await ctx.user.query("select verifier, client from pending");
+  if (!p) throw new Error(`no sign-in is waiting for that address: ${APP}_sign_in starts one`);
+  const s = String(given || "").trim();
+  const refused = s.match(/[?&]error=([^&#]+)/)?.[1];
+  if (refused) return failed(ctx, `Google didn't sign you in (${decodeURIComponent(refused)}). Start again with ${APP}_sign_in.`);
+  const code = s.includes("code=") ? new URL(s.startsWith("http") ? s : `http://x/?${s.split("?").pop()}`).searchParams.get("code") : s;
+  if (!code) throw new Error("that address has no code: copy the whole address the browser ended up on");
+  const client = (await ctx.vault.items()).find((i) => i.id === p.client && i.fields.client_secret) || await googleClient(ctx);
+  if (!client) throw noClient();
+  const r = await fetch(`https://${OAUTH}/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: `grant_type=authorization_code&code=${encodeURIComponent(code)}&client_id=${encodeURIComponent(client.fields.client_id.value)}&client_secret={{${client.id}:client_secret}}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_verifier=${encodeURIComponent(p.verifier)}`,
+  });
+  const tok = await r.json().catch(() => ({}));
+  if (!r.ok) return failed(ctx, `Sign-in failed: ${tok.error_description || tok.error || r.status}. Start again with ${APP}_sign_in.`);
+  if (!tok.refresh_token) return failed(ctx, "Google didn't give a refresh token, so the sign-in wouldn't last; start again.");
+  const email = emailOf(tok.id_token);
+  if (!email) return failed(ctx, "Google didn't say which account signed in; start again.");
+  ctx.user.append("pending_done", {});
+  const id = await ctx.vault.create({
+    title: email, type: "Google account", domain: "google.com", hosts: [OAUTH], same: "email",
+    fields: { email: { value: email }, refresh_token: { value: tok.refresh_token, secret: true }, scopes: { value: tok.scope || SCOPES }, client_id: { value: client.fields.client_id.value } },
+  });
+  tokens.set(`${ctx.user.id}/${email}`, { value: tok.access_token, expires: Date.now() + (tok.expires_in || 3600) * 1000 });
+  return `Signed in as ${email}.`;
+}
+
+const signInSchema = { user: "create table pending (verifier text not null, client text);" };
+const signInOn = {
+  pending(db, e) {
+    db.exec("delete from pending");
+    db.exec("insert into pending values (?, ?)", [e.data.verifier, e.data.client ?? null]);
+  },
+  pending_done(db) { db.exec("delete from pending"); },
+};
+
+const signInOps = {
+  accounts: {
+    reads: true,
+    description: "The Google accounts signed in here, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
+    input: { type: "object", properties: {} },
+    async run(ctx) {
+      return Promise.all((await accounts(ctx)).map(async (account) => {
+        try { await token(ctx, account); return { account, ok: true }; } catch (e) { return { account, ok: false, why: e.message }; }
+      }));
+    },
+  },
+  sign_in: {
+    description: "Sign in to a Google account, or another one, or with account, allow this app on one: returns a link to open in a browser; then pass the address the browser ends up on as code (here or to finish_sign_in).",
+    input: { type: "object", properties: {
+      code: { type: "string", description: "the address the browser was sent to after signing in, to finish here instead" },
+      account: { type: "string", description: "the account's address, to suggest it to Google" },
+    } },
+    async run(ctx, { code, account }) {
+      if (!ctx.user) throw new Error("this server doesn't keep your data: use one of your own servers");
+      if (code) return finishSignIn(ctx, code);
+      return `Open this link in a browser on any device and sign in. The browser then fails to load a 127.0.0.1 page: copy that page's whole address and pass it to ${APP}_finish_sign_in.\n\n${await startSignIn(ctx, account)}`;
+    },
+  },
+  finish_sign_in: {
+    description: "Finish signing in: the address the browser ended up on after sign_in's link (or just its code). Answers { signed_in: false, why } when Google didn't sign in.",
+    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the address, or its code" } } },
+    run: (ctx, { code }) => finishSignIn(ctx, code),
+  },
+  sign_out: {
+    description: "Sign a Google account out of this app; it stays signed in to the other Google apps that use it.",
+    input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the account's address, or a part of it only it has" } } },
+    async run(ctx, { account: name }) {
+      const email = await account(ctx, name);
+      const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
+      ctx.vault.release(item.id);
+      tokens.delete(`${ctx.user.id}/${email}`);
+      return `Signed ${email} out of ${TITLE}.`;
+    },
+  },
+};
+
+
 async function api(ctx, email, method, path, { query, json, raw, type } = {}) {
-  const acc = await account(ctx, email);
+  const acc = { email: await account(ctx, email).catch(() => { throw needsConnecting(); }) };
+  const access = await token(ctx, acc.email).catch((e) => { throw new DriveError(e.message); });
   const q = query ? `?${new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)]))}` : "";
   const r = await fetch(`${path.startsWith("http") ? "" : API}${path}${q}`, {
     method,
-    headers: { authorization: `Bearer ${await token(ctx, acc.email)}`, ...(json ? { "content-type": "application/json" } : type ? { "content-type": type } : {}) },
+    headers: { authorization: `Bearer ${access}`, ...(json ? { "content-type": "application/json" } : type ? { "content-type": type } : {}) },
     body: json ? JSON.stringify(json) : raw,
   });
   const text = await r.text();
-  if (r.status === 401) { tokens.delete(acc.email); throw needsConnecting(); }
+  if (r.status === 401) { tokens.delete(`${ctx.user.id}/${acc.email}`); throw needsConnecting(); }
   if (!r.ok) {
     let message = text.slice(0, 200);
     try { message = JSON.parse(text).error?.message || message; } catch {}
@@ -80,97 +219,22 @@ async function api(ctx, email, method, path, { query, json, raw, type } = {}) {
 const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const accountInput = { type: "string", description: "which Drive account, by address; the first when left out" };
 
-/// A sign-in that's over without an account (Google takes each code once): it answers why rather than failing, so
-/// the verifier's deletion is written, as a failed call writes nothing.
-function failed(ctx, why) {
-  ctx.user.secret("verifier", null);
-  return { signed_in: false, why };
-}
-
 export default {
   name: "drive",
   title: "Google Drive",
   icon: "externaldrive",
   color: "#fbbc04",
   instructions: "Google Drive is your own Drive accounts. drive_accounts lists them; drive_sign_in connects one (a link to open, then drive_finish_sign_in with the address the browser ends up on). The files_* operations are Drive's own API (v3): files_get, files_list (q is Drive's search), files_create, files_upload, files_update (addParents and removeParents move a file), generate_ids.",
-  schema: {
-    user: "create table accounts (email text primary key, added integer not null); create table settings (key text primary key, value text);",
-    global: "create table settings (key text primary key, value text);",
-  },
+  vault: VAULT,
+  schema: signInSchema,
 
   ops: {
-    accounts: {
-      reads: true,
-      description: "Your Drive accounts, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
-      input: { type: "object", properties: {} },
-      async run(ctx) {
-        return Promise.all((await accounts(ctx)).map(async ({ email: account }) => {
-          try { await token(ctx, account); return { account, ok: true }; } catch (e) { return { account, ok: false, why: e.message }; }
-        }));
-      },
-    },
-    set_client: {
-      description: "Set the Google OAuth client Drive signs in with: its id here, and its secret (read from stdin with one secret set drive client_secret --hosts oauth2.googleapis.com). scope global (admins) or user.",
-      input: { type: "object", required: ["client_id"], properties: { client_id: { type: "string" }, scope: { type: "string" } } },
-      async run(ctx, { client_id, scope = "global" }) {
-        const s = scope === "global" ? ctx.global : ctx.user;
-        if (!s) throw new Error(`drive isn't installed for ${scope}`);
-        if (scope === "global" && s.role !== "admin") throw new Error("only admins set everyone's client");
-        s.append("setting", { key: "client_id", value: client_id });
-        return "Saved.";
-      },
-    },
-    sign_in: {
-      description: "Start connecting a Google Drive account: answers a link to open in a browser. After signing in, the browser goes to an address that doesn't load; pass that address to finish_sign_in.",
-      input: { type: "object", properties: {} },
-      async run(ctx) {
-        const client = await setting(ctx, "client_id");
-        if (!client) throw new Error("Drive has no OAuth client yet: an admin sets one with drive_set_client");
-        if (!ctx.user) throw new Error("this server doesn't keep your data: use one of your own servers");
-        const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
-        const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-        // The verifier waits as a secret, filled in only when the code is exchanged at Google.
-        ctx.user.secret("verifier", verifier, [OAUTH]);
-        const q = new URLSearchParams({ client_id: client, redirect_uri: REDIRECT, response_type: "code", scope: SCOPES, access_type: "offline", prompt: "consent", code_challenge: challenge, code_challenge_method: "S256" });
-        return { url: `https://accounts.google.com/o/oauth2/v2/auth?${q}` };
-      },
-    },
-    finish_sign_in: {
-      description: "Finish connecting Drive: the address the browser ended up on after sign_in's link (or just its code). Answers { signed_in: false, why } when Google didn't sign in.",
-      input: { type: "object", required: ["code"], properties: { code: { type: "string" } } },
-      async run(ctx, { code }) {
-        const client = await setting(ctx, "client_id");
-        const given = String(code).trim();
-        const value = given.includes("code=") ? new URL(given.startsWith("http") ? given : `http://x/?${given.split("?").pop()}`).searchParams.get("code") : given;
-        const refused = given.match(/[?&]error=([^&#]+)/)?.[1];
-        if (refused) return failed(ctx, `Google didn't sign you in (${decodeURIComponent(refused)}). Start again with sign_in.`);
-        if (!value) throw new Error("that address has no code: copy the whole address the browser ended up on");
-        const r = await fetch(`https://${OAUTH}/token`, {
-          method: "POST",
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-          body: `grant_type=authorization_code&code=${encodeURIComponent(value)}&client_id=${encodeURIComponent(client)}&client_secret={{client_secret}}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_verifier={{verifier}}`,
-        });
-        const body = await r.json().catch(() => ({}));
-        if (!r.ok || !body.refresh_token) return failed(ctx, `Google didn't sign you in: ${body.error_description || body.error || r.status}. Start again with sign_in.`);
-        const who = await (await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${body.access_token}` } })).json();
-        if (!who.email) return failed(ctx, "Google didn't say which account that is. Start again with sign_in.");
-        ctx.user.secret(`refresh_${slug(who.email)}`, body.refresh_token, [OAUTH]);
-        ctx.user.secret("verifier", null);
-        ctx.user.append("account", { email: who.email });
-        tokens.set(who.email, { value: body.access_token, expires: Date.now() + (body.expires_in || 3600) * 1000 });
-        return `Connected ${who.email}.`;
-      },
-    },
-    sign_out: {
-      description: "Forget a Drive account.",
-      input: { type: "object", required: ["account"], properties: { account: accountInput } },
-      async run(ctx, { account: email }) {
-        const acc = await account(ctx, email);
-        ctx.user.secret(`refresh_${slug(acc.email)}`, null);
-        ctx.user.append("forget", { email: acc.email });
-        return `Forgot ${acc.email}.`;
-      },
-    },
+    ...signInOps,
+    // Drive's sign-in answers { url }, as apps like Claims take it.
+    sign_in: { ...signInOps.sign_in, async run(ctx, input) {
+      if (!ctx.user) throw new Error("this server doesn't keep your data: use one of your own servers");
+      return input.code ? finishSignIn(ctx, input.code) : { url: await startSignIn(ctx, input.account) };
+    } },
     files_get: {
       description: "A file's or folder's metadata (fields like id,name,parents,mimeType,trashed). fileId root is My Drive.",
       input: { type: "object", required: ["fileId"], properties: { fileId: { type: "string" }, fields: { type: "string" }, account: accountInput } },
@@ -212,14 +276,7 @@ export default {
     },
   },
 
-  on: {
-    account(db, e) { db.exec("insert or ignore into accounts values (?, ?)", [e.data.email, e.time]); },
-    forget(db, e) { db.exec("delete from accounts where email = ?", [e.data.email]); },
-    setting(db, e) {
-      if (e.scope === "global" && e.role !== "admin") return;
-      db.exec("insert or replace into settings values (?, ?)", [e.data.key, JSON.stringify(e.data.value)]);
-    },
-  },
+  on: signInOn,
 
   screens: {
     settings: { title: "Google Drive", html: settingsScreen("Google Drive", "Sign in to Google Drive, and apps like Claims save a copy of what you add to your own Drive.") },
@@ -227,14 +284,14 @@ export default {
 };
 
 /// The settings screen a shell opens for a connector (SPEC.md "Connectors"): the accounts signed in, each with
-/// whether it still works and a way to sign it out, and signing in another, by link and pasted address. Opened with
-/// { add: true } (a shell's Add account), it starts signing in at once.
+/// whether it works, a way to allow it again and to sign it out, and signing in another, by link and pasted address.
+/// Opened with { add: true } (a shell's Add Account), it starts signing in at once.
 function settingsScreen(title, blurb) {
   return `
 <style>
   .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
   button.primary { font: inherit; font-weight: 600; color: white; background: var(--accent); border: 0; border-radius: 10px; padding: 11px 16px; }
-  button.plain { font: inherit; color: var(--accent); background: none; border: 0; padding: 4px 0; }
+  button.plain { font: inherit; color: var(--accent); background: none; border: 0; padding: 4px 0; margin-left: 12px; }
   input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
   ol { padding-left: 20px; margin: 8px 0; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: #34c759; flex: none; margin-right: 12px; }
@@ -246,22 +303,30 @@ function settingsScreen(title, blurb) {
 async function show() {
   const accounts = await one.call("accounts");
   document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Signed in" : "Signed in · used first") : a.why || "Needs signing in again")}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Signed in" : "Signed in · used first") : a.why || "Needs signing in again")}</div></div>\${a.ok ? "" : \`<button class="plain" data-in="\${one.esc(a.account)}">Sign in</button>\`}<button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
     : '<p class="muted">${blurb}</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => { await one.call("sign_out", { account: b.dataset.out }); show(); };
+  for (const b of document.querySelectorAll("[data-in]")) b.onclick = () => start(b.dataset.in);
   const c = document.getElementById("connect");
-  c.innerHTML = '<button class="primary" id="start">' + (accounts.length ? "Add account" : "Sign in to Google") + '</button><div id="err" class="error small"></div>';
-  document.getElementById("start").onclick = start;
+  c.innerHTML = '<button class="primary" id="start">' + (accounts.length ? "Add Account" : "Sign In to Google") + '</button><div id="err" class="error small"></div>';
+  document.getElementById("start").onclick = () => start();
 }
-async function start() {
+async function start(account) {
   const c = document.getElementById("connect");
   let link;
   try {
-    const r = await one.call("sign_in");
+    const r = await one.call("sign_in", account ? { account } : {});
     link = typeof r === "string" ? r.split("\\n").pop() : r.url;
-  } catch (e) { document.getElementById("err").textContent = e.message; return; }
+  } catch (e) {
+    // No Google sign-in yet: the person picks one from their Vault, or makes one, then it goes on.
+    if (/no Google sign-in/.test(e.message) && one.vault) {
+      try { if (await one.vault("client")) return start(account); } catch (err) { e = err; }
+    }
+    document.getElementById("err").textContent = e.message;
+    return;
+  }
   c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
-    <input id="code" placeholder="http://127.0.0.1:4747/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign in</button><div id="err" class="error small"></div>\`;
+    <input id="code" placeholder="http://127.0.0.1:4747/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign In</button><div id="err" class="error small"></div>\`;
   document.getElementById("finish").onclick = async () => {
     try { const r = await one.call("finish_sign_in", { code: document.getElementById("code").value }); if (r?.signed_in === false) throw new Error(r.why); show(); }
     catch (e) { document.getElementById("err").textContent = e.message; }

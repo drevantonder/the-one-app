@@ -1,6 +1,5 @@
-// Sheets: the person's own Google Sheets, through Google's API. Signing in is apps/gmail's (and apps/drive's) way: the
-// OAuth client's id is a setting, its secret and each account's refresh token are the app's secrets, sent only to
-// Google's token address, and the browser ends on a 127.0.0.1 address the person pastes back.
+// Sheets: the person's own Google Sheets, through Google's API. Signing in is the same in every
+// Google app: see "signing in" below.
 
 const APP = "sheets";
 const TITLE = "Google Sheets";
@@ -9,24 +8,42 @@ const SCOPES = "openid email https://www.googleapis.com/auth/spreadsheets";
 const API = "https://sheets.googleapis.com/v4/";
 const REDIRECT = `http://127.0.0.1:4747/hooks/${APP}/oauth`;
 
-// ---- signing in, as in apps/gmail ----
+// ---- signing in ----
 
-const slug = (email) => email.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 56);
-const utf8 = new TextEncoder();
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const fromB64 = (s) => Uint8Array.from(atob(String(s).replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 
-async function setting(ctx, key) {
-  for (const s of [ctx.user, ctx.global]) {
-    const [row] = s ? await s.query("select value from settings where key = ?", [key]) : [];
-    if (row) return JSON.parse(row.value);
-  }
-  return null;
+// The Vault keeps what signing in needs, the same for every Google app: one "Google sign-in" item, the OAuth client
+// (its id, and its secret), and a "Google account" item for each account (its address, its refresh token and the
+// scopes it allowed), sent only to Google's token address. Signing in to an account another Google app already uses
+// adds this app's scopes to it (incremental consent). The browser ends on a 127.0.0.1 address the person pastes
+// back; the verifier waits for it in this app's own data.
+
+const VAULT = {
+  client: {
+    title: "Google sign-in", type: "Google sign-in", domain: "google.com", hosts: [OAUTH],
+    fields: { client_id: { label: "Client ID" }, client_secret: { label: "Client secret", secret: true } },
+  },
+  account: {
+    title: "Google account", type: "Google account", domain: "google.com", hosts: [OAUTH], accounts: true,
+    fields: { email: { label: "Email" }, refresh_token: { label: "Refresh token", secret: true } },
+  },
+};
+
+/// The Google sign-in (OAuth client) this app is switched on for: yours first, else your group's or everyone's.
+async function googleClient(ctx, id) {
+  const all = (await ctx.vault.items()).filter((i) => i.fields.client_id?.value && i.fields.client_secret);
+  return all.find((i) => i.fields.client_id.value === id) || all.find((i) => i.scope.startsWith("user:")) || all[0] || null;
+}
+const noClient = () => new Error(`${TITLE} has no Google sign-in yet: choose one on its settings page, or ask the person for it with vault_request (app ${APP}, need client)`);
+
+/// The Google accounts this app is switched on for, the first signed in first.
+async function accountItems(ctx) {
+  return (await ctx.vault.items()).filter((i) => i.type === "Google account" && i.fields.email?.value && i.fields.refresh_token).sort((a, b) => a.time - b.time);
 }
 
 async function accounts(ctx) {
   if (!ctx.user) throw new Error("this server doesn't keep your data, so it can't reach your accounts: use one of your own servers");
-  return (await ctx.user.query("select email from accounts order by added, email")).map((a) => a.email);
+  return (await accountItems(ctx)).map((i) => i.fields.email.value);
 }
 
 /// The account named, by its address or a part of it only it has; the first signed in when none is named.
@@ -40,17 +57,23 @@ async function account(ctx, name) {
   return found;
 }
 
+/// Whether an account allowed this app's scopes, or signed in before accounts kept them.
+const allowed = (item) => !item.fields.scopes || SCOPES.split(" ").every((s) => s === "openid" || s === "email" || item.fields.scopes.value.split(" ").includes(s));
+
 const tokens = new Map(); // `${user}/${email}` → { value, expires }, for this runtime only
 async function token(ctx, email) {
+  const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
+  if (!item) throw new Error(`${email} isn't signed in to ${TITLE}: ${APP}_sign_in signs it in`);
+  if (!allowed(item)) throw new Error(`${email} hasn't allowed ${TITLE} yet: sign in to it again (${APP}_sign_in with account)`);
   const key = `${ctx.user.id}/${email}`;
   const t = tokens.get(key);
   if (t && t.expires > Date.now() + 60_000) return t.value;
-  const client = await setting(ctx, "client_id");
-  if (!client) throw new Error(`no OAuth client yet: ${APP}_set_client sets one`);
+  const client = await googleClient(ctx, item.fields.client_id?.value);
+  if (!client) throw noClient();
   const r = await fetch(`https://${OAUTH}/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: `grant_type=refresh_token&client_id=${encodeURIComponent(client)}&client_secret={{client_secret}}&refresh_token={{refresh_${slug(email)}}}`,
+    body: `grant_type=refresh_token&client_id=${encodeURIComponent(client.fields.client_id.value)}&client_secret={{${client.id}:client_secret}}&refresh_token={{${item.id}:refresh_token}}`,
   });
   const body = await r.json().catch(() => ({}));
   if (!r.ok || !body.access_token) throw new Error(`${email}'s sign-in no longer works (${body.error_description || body.error || r.status}): ${APP}_sign_in signs it in again`);
@@ -58,51 +81,74 @@ async function token(ctx, email) {
   return body.access_token;
 }
 
-async function startSignIn(ctx) {
-  const client = await setting(ctx, "client_id");
-  if (!client) throw new Error(`no OAuth client yet: ${APP}_set_client sets one`);
+/// A link to sign in to Google with, `hint` the account to suggest; the verifier waits in this app's own data.
+async function startSignIn(ctx, hint) {
+  const client = await googleClient(ctx);
+  if (!client) throw noClient();
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
-  const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(verifier))));
-  ctx.user.secret("verifier", verifier, [OAUTH]); // filled in only when the code is exchanged at Google
-  const q = new URLSearchParams({ client_id: client, redirect_uri: REDIRECT, response_type: "code", scope: SCOPES, access_type: "offline", prompt: "consent", code_challenge: challenge, code_challenge_method: "S256" });
+  const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+  ctx.user.append("pending", { verifier, client: client.id });
+  const q = new URLSearchParams({
+    client_id: client.fields.client_id.value, redirect_uri: REDIRECT, response_type: "code", scope: SCOPES, access_type: "offline",
+    prompt: "consent", include_granted_scopes: "true", code_challenge: challenge, code_challenge_method: "S256", ...(hint ? { login_hint: hint } : {}),
+  });
   return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
 }
 
-/// A sign-in that's over without an account (Google takes each code once): it answers why rather than failing, so
-/// the verifier's deletion is written, as a failed call writes nothing.
+/// A sign-in that's over without an account: it answers why rather than failing, so its verifier is forgotten, as a
+/// failed call writes nothing.
 function failed(ctx, why) {
-  ctx.user.secret("verifier", null);
+  ctx.user.append("pending_done", {});
   return { signed_in: false, why };
 }
 
+/// The address an id_token says signed in, from its base64url payload.
+function emailOf(idToken) {
+  try {
+    const payload = String(idToken).split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload), (c) => c.charCodeAt(0)))).email || null;
+  } catch {
+    return null;
+  }
+}
+
 async function finishSignIn(ctx, given) {
-  const client = await setting(ctx, "client_id");
+  const [p] = await ctx.user.query("select verifier, client from pending");
+  if (!p) throw new Error(`no sign-in is waiting for that address: ${APP}_sign_in starts one`);
   const s = String(given || "").trim();
-  const code = s.includes("code=") ? new URL(s.startsWith("http") ? s : `http://x/?${s.split("?").pop()}`).searchParams.get("code") : s;
-  const refused = String(given).match(/[?&]error=([^&#]+)/)?.[1];
+  const refused = s.match(/[?&]error=([^&#]+)/)?.[1];
   if (refused) return failed(ctx, `Google didn't sign you in (${decodeURIComponent(refused)}). Start again with ${APP}_sign_in.`);
+  const code = s.includes("code=") ? new URL(s.startsWith("http") ? s : `http://x/?${s.split("?").pop()}`).searchParams.get("code") : s;
   if (!code) throw new Error("that address has no code: copy the whole address the browser ended up on");
+  const client = (await ctx.vault.items()).find((i) => i.id === p.client && i.fields.client_secret) || await googleClient(ctx);
+  if (!client) throw noClient();
   const r = await fetch(`https://${OAUTH}/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: `grant_type=authorization_code&code=${encodeURIComponent(code)}&client_id=${encodeURIComponent(client)}&client_secret={{client_secret}}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_verifier={{verifier}}`,
+    body: `grant_type=authorization_code&code=${encodeURIComponent(code)}&client_id=${encodeURIComponent(client.fields.client_id.value)}&client_secret={{${client.id}:client_secret}}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_verifier=${encodeURIComponent(p.verifier)}`,
   });
   const tok = await r.json().catch(() => ({}));
   if (!r.ok) return failed(ctx, `Sign-in failed: ${tok.error_description || tok.error || r.status}. Start again with ${APP}_sign_in.`);
   if (!tok.refresh_token) return failed(ctx, "Google didn't give a refresh token, so the sign-in wouldn't last; start again.");
-  let email;
-  try { email = JSON.parse(new TextDecoder().decode(fromB64(tok.id_token.split(".")[1]))).email; } catch {}
+  const email = emailOf(tok.id_token);
   if (!email) return failed(ctx, "Google didn't say which account signed in; start again.");
-  ctx.user.secret(`refresh_${slug(email)}`, tok.refresh_token, [OAUTH]);
-  ctx.user.secret("verifier", null);
-  ctx.user.append("account", { email });
+  ctx.user.append("pending_done", {});
+  const id = await ctx.vault.create({
+    title: email, type: "Google account", domain: "google.com", hosts: [OAUTH], same: "email",
+    fields: { email: { value: email }, refresh_token: { value: tok.refresh_token, secret: true }, scopes: { value: tok.scope || SCOPES }, client_id: { value: client.fields.client_id.value } },
+  });
   tokens.set(`${ctx.user.id}/${email}`, { value: tok.access_token, expires: Date.now() + (tok.expires_in || 3600) * 1000 });
   return `Signed in as ${email}.`;
 }
 
-const str = (description) => ({ type: "string", description });
-const accountInput = str(`which account: its address or a part of it only it has; default the first, as ${APP}_accounts lists them`);
-const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
+const signInSchema = { user: "create table pending (verifier text not null, client text);" };
+const signInOn = {
+  pending(db, e) {
+    db.exec("delete from pending");
+    db.exec("insert into pending values (?, ?)", [e.data.verifier, e.data.client ?? null]);
+  },
+  pending_done(db) { db.exec("delete from pending"); },
+};
 
 const signInOps = {
   accounts: {
@@ -116,56 +162,39 @@ const signInOps = {
     },
   },
   sign_in: {
-    description: "Sign in to a Google account, or another one: returns a link to open in a browser; then pass the address the browser ends up on to finish_sign_in.",
-    input: { type: "object", properties: { code: str("the address the browser was sent to after signing in, to finish here instead") } },
-    async run(ctx, { code }) {
+    description: "Sign in to a Google account, or another one, or with account, allow this app on one: returns a link to open in a browser; then pass the address the browser ends up on as code (here or to finish_sign_in).",
+    input: { type: "object", properties: {
+      code: { type: "string", description: "the address the browser was sent to after signing in, to finish here instead" },
+      account: { type: "string", description: "the account's address, to suggest it to Google" },
+    } },
+    async run(ctx, { code, account }) {
       if (!ctx.user) throw new Error("this server doesn't keep your data: use one of your own servers");
       if (code) return finishSignIn(ctx, code);
-      return `Open this link in a browser on any device and sign in. The browser then fails to load a 127.0.0.1 page: copy that page's whole address and pass it to ${APP}_finish_sign_in.\n\n${await startSignIn(ctx)}`;
+      return `Open this link in a browser on any device and sign in. The browser then fails to load a 127.0.0.1 page: copy that page's whole address and pass it to ${APP}_finish_sign_in.\n\n${await startSignIn(ctx, account)}`;
     },
   },
   finish_sign_in: {
     description: "Finish signing in: the address the browser ended up on after sign_in's link (or just its code). Answers { signed_in: false, why } when Google didn't sign in.",
-    input: { type: "object", required: ["code"], properties: { code: str("the address, or its code") } },
+    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the address, or its code" } } },
     run: (ctx, { code }) => finishSignIn(ctx, code),
   },
-  set_client: {
-    description: "Set the Google OAuth client to sign in with (a Desktop app client): its id here, its secret with one secret set; for you, or with scope global (admins) for everyone.",
-    input: { type: "object", required: ["client_id"], properties: { client_id: str("the client's id"), client_secret: str("its secret, kept as a secret"), scope: str("user (the default) or global") } },
-    run(ctx, { client_id, client_secret, scope }) {
-      const s = scope === "global" ? ctx.global : ctx.user;
-      if (!s) throw new Error(`${APP} isn't installed for ${scope || "you"} here`);
-      if (scope === "global" && s.role !== "admin") throw new Error("only admins set everyone's client");
-      s.append("setting", { key: "client_id", value: String(client_id) });
-      if (client_secret) s.secret("client_secret", client_secret, [OAUTH]);
-      return "Saved.";
-    },
-  },
   sign_out: {
-    description: "Forget a Google account here.",
-    input: { type: "object", required: ["account"], properties: { account: str("the account's address, or a part of it only it has") } },
+    description: "Sign a Google account out of this app; it stays signed in to the other Google apps that use it.",
+    input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the account's address, or a part of it only it has" } } },
     async run(ctx, { account: name }) {
       const email = await account(ctx, name);
-      ctx.user.secret(`refresh_${slug(email)}`, null);
-      ctx.user.append("forget", { email });
+      const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
+      ctx.vault.release(item.id);
       tokens.delete(`${ctx.user.id}/${email}`);
-      return `Signed out ${email}. To revoke access too, remove it at myaccount.google.com/permissions.`;
+      return `Signed ${email} out of ${TITLE}.`;
     },
   },
 };
 
-const signInSchema = {
-  user: "create table accounts (email text primary key, added integer not null); create table settings (key text primary key, value text);",
-  global: "create table settings (key text primary key, value text);",
-};
-const signInOn = {
-  account(db, e) { db.exec("insert or ignore into accounts values (?, ?)", [e.data.email, e.time]); },
-  forget(db, e) { db.exec("delete from accounts where email = ?", [e.data.email]); },
-  setting(db, e) {
-    if (e.scope === "global" && e.role !== "admin") return;
-    db.exec("insert or replace into settings values (?, ?)", [e.data.key, JSON.stringify(e.data.value)]);
-  },
-};
+
+const str = (description) => ({ type: "string", description });
+const accountInput = str(`which account: its address or a part of it only it has; default the first, as ${APP}_accounts lists them`);
+const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
 
 /// Calls Google's API as `email`.
 async function api(ctx, email, method, path, { query, json } = {}) {
@@ -213,6 +242,7 @@ export default {
   color: "#34a853",
   description: "Your Google Sheets: read ranges, add rows, change cells and make spreadsheets.",
   instructions: `Sheets is the person's Google Sheets. ${APP}_spreadsheet lists a spreadsheet's tabs; ${APP}_read reads a range (A1 notation, like Budget!A1:F20; the first tab when left out). ${APP}_append adds rows after a table, ${APP}_update writes over a range and ${APP}_create makes a spreadsheet: change only what the person asked. Spreadsheets are given by id or address. With several accounts, each operation takes account.`,
+  vault: VAULT,
   schema: signInSchema,
 
   ops: {
@@ -292,14 +322,14 @@ export default {
 };
 
 /// The settings screen a shell opens for a connector (SPEC.md "Connectors"): the accounts signed in, each with
-/// whether it still works and a way to sign it out, and signing in another, by link and pasted address. Opened with
-/// { add: true } (a shell's Add account), it starts signing in at once.
+/// whether it works, a way to allow it again and to sign it out, and signing in another, by link and pasted address.
+/// Opened with { add: true } (a shell's Add Account), it starts signing in at once.
 function settingsScreen(title, blurb) {
   return `
 <style>
   .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
   button.primary { font: inherit; font-weight: 600; color: white; background: var(--accent); border: 0; border-radius: 10px; padding: 11px 16px; }
-  button.plain { font: inherit; color: var(--accent); background: none; border: 0; padding: 4px 0; }
+  button.plain { font: inherit; color: var(--accent); background: none; border: 0; padding: 4px 0; margin-left: 12px; }
   input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
   ol { padding-left: 20px; margin: 8px 0; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: #34c759; flex: none; margin-right: 12px; }
@@ -311,22 +341,30 @@ function settingsScreen(title, blurb) {
 async function show() {
   const accounts = await one.call("accounts");
   document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Signed in" : "Signed in · used first") : a.why || "Needs signing in again")}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Signed in" : "Signed in · used first") : a.why || "Needs signing in again")}</div></div>\${a.ok ? "" : \`<button class="plain" data-in="\${one.esc(a.account)}">Sign in</button>\`}<button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
     : '<p class="muted">${blurb}</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => { await one.call("sign_out", { account: b.dataset.out }); show(); };
+  for (const b of document.querySelectorAll("[data-in]")) b.onclick = () => start(b.dataset.in);
   const c = document.getElementById("connect");
-  c.innerHTML = '<button class="primary" id="start">' + (accounts.length ? "Add account" : "Sign in to Google") + '</button><div id="err" class="error small"></div>';
-  document.getElementById("start").onclick = start;
+  c.innerHTML = '<button class="primary" id="start">' + (accounts.length ? "Add Account" : "Sign In to Google") + '</button><div id="err" class="error small"></div>';
+  document.getElementById("start").onclick = () => start();
 }
-async function start() {
+async function start(account) {
   const c = document.getElementById("connect");
   let link;
   try {
-    const r = await one.call("sign_in");
+    const r = await one.call("sign_in", account ? { account } : {});
     link = typeof r === "string" ? r.split("\\n").pop() : r.url;
-  } catch (e) { document.getElementById("err").textContent = e.message; return; }
+  } catch (e) {
+    // No Google sign-in yet: the person picks one from their Vault, or makes one, then it goes on.
+    if (/no Google sign-in/.test(e.message) && one.vault) {
+      try { if (await one.vault("client")) return start(account); } catch (err) { e = err; }
+    }
+    document.getElementById("err").textContent = e.message;
+    return;
+  }
   c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
-    <input id="code" placeholder="http://127.0.0.1:4747/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign in</button><div id="err" class="error small"></div>\`;
+    <input id="code" placeholder="http://127.0.0.1:4747/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign In</button><div id="err" class="error small"></div>\`;
   document.getElementById("finish").onclick = async () => {
     try { const r = await one.call("finish_sign_in", { code: document.getElementById("code").value }); if (r?.signed_in === false) throw new Error(r.why); show(); }
     catch (e) { document.getElementById("err").textContent = e.message; }

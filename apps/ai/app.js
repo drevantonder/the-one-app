@@ -1,6 +1,6 @@
 // AI for apps: read a photo or PDF with a prompt, and ask a decision model typed questions. It reads with the user's
-// local models (the models driver, on the server that has them) or with Gemini once its key is set as this app's
-// `gemini_key` secret. Apps use it as ctx.apps.ai.read and ctx.apps.ai.decide, so none of them holds a key.
+// local models (the models driver, on the server that has them) or with Gemini once the person's Vault has a Gemini
+// key item for it (its secret field `gemini_key`). Apps use it as ctx.apps.ai.read and ctx.apps.ai.decide, so none of them holds a key.
 
 const DEFAULTS = { provider: "local", local_server: null, read_model: "gemma4:12b", decide_model: "clef-flash", gemini_model: "gemini-3.5-flash-lite" };
 const GEMINI = "generativelanguage.googleapis.com";
@@ -45,8 +45,11 @@ export default {
   title: "AI",
   icon: "sparkles",
   color: "#af52de",
-  instructions: "AI for apps: ai_read reads photos and PDFs with a prompt, ai_decide asks a decision model typed questions. ai_settings shows which models answer (local models on one of your servers, or Gemini once its gemini_key secret is set); ai_set changes them.",
+  instructions: "AI for apps: ai_read reads photos and PDFs with a prompt, ai_decide asks a decision model typed questions. ai_settings shows which models answer (local models on one of your servers, or Gemini once the person's Vault has a Gemini key for it: ask with vault_request, app ai, need gemini); ai_set changes them.",
   uses: { drivers: ["models"] },
+  vault: {
+    gemini: { title: "Gemini key", type: "API key", domain: "aistudio.google.com", hosts: ["generativelanguage.googleapis.com"], fields: { gemini_key: { label: "API key", secret: true } } },
+  },
   schema: Object.fromEntries(kinds.map((k) => [k, schema])),
 
   ops: {
@@ -56,7 +59,7 @@ export default {
       run: (ctx) => settings(ctx),
     },
     set: {
-      description: "Change which AI answers, for you (or, with scope global, for everyone: admins). provider is local or gemini (Gemini needs this app's gemini_key secret, for generativelanguage.googleapis.com).",
+      description: "Change which AI answers, for you (or, with scope global, for everyone: admins). provider is local or gemini (Gemini needs a Gemini key in the Vault: vault_request with app ai and need gemini).",
       input: {
         type: "object",
         properties: {
