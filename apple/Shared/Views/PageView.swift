@@ -74,9 +74,17 @@ struct GridMetrics {
     var icon: CGFloat
 
     @MainActor init(width: CGFloat) {
-        gap = width < 500 ? 12 : 18
-        columns = max(4, Int((width + gap) / (96 + gap)))
-        cell = max(1, (width - gap * CGFloat(columns - 1)) / CGFloat(columns))
+        if width < 500 {
+            // A phone: four columns across the screen.
+            gap = 12
+            columns = 4
+            cell = max(1, (width - gap * 3) / 4)
+        } else {
+            // Wider: cells stay an icon's size, so widgets keep the Home Screen's, and more of them fit across.
+            gap = 14
+            cell = iconSize + 22
+            columns = max(4, Int((width + gap) / (cell + gap)))
+        }
         icon = max(40, min(iconSize, cell - 19))
     }
 
