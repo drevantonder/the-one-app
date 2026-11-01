@@ -1056,6 +1056,13 @@ async fn agents_and_sidecars_use_the_items_switched_on_for_them_without_seeing_t
     assert!(got["elsewhere"]["Err"].as_str().unwrap().contains("sent only to api.example.com"), "{got}");
     assert_eq!(got["theirs"]["Ok"], "{{token}}", "not another app's item");
     assert!(a.sidecar_fill("keeper", 9999, "{{key}}", "api.example.com").is_err(), "only while a call waits");
+
+    // An app on a person's own page sees Everyone's items switched on for it too, as its placeholders are filled.
+    deploy_module(&a, "reader", r#"export default { name: "reader", ops: { items: { run: (ctx) => ctx.vault.items() } } };"#).await;
+    a.install(&person, "reader", &mine, true).await.unwrap();
+    a.set_item(&person, &one::entry::Scope::Global, json!({ "title": "Everyone's sign-in", "fields": { "client_id": { "value": "c1" } }, "apps": ["reader"] })).await.unwrap();
+    let seen = a.call(call("reader", "items", json!({}))).await.unwrap();
+    assert_eq!((seen[0]["scope"].as_str(), seen[0]["fields"]["client_id"]["value"].as_str()), (Some("global"), Some("c1")), "{seen}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

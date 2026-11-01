@@ -1404,16 +1404,22 @@ impl Node {
         Ok(out)
     }
 
-    /// The items `app` is switched on for in `scopes`, as its calls see them (`ctx.vault.items()`).
-    fn vault_of(&self, app: &str, scopes: &[Scope]) -> Result<Vec<Value>> {
+    /// The items `app` is switched on for in the scopes `user` may use, as its calls see them (`ctx.vault.items()`):
+    /// the same ones its placeholders are filled from, the user's own first, then their groups', then `global`'s.
+    fn vault_of(&self, app: &str, user: &str) -> Result<Vec<Value>> {
         self.with(|i| {
+            let m = &i.r.members;
+            let mut scopes: Vec<(Scope, &ScopeState)> = i.views.iter().filter_map(|(log, (_, s))| Scope::parse(log).ok().filter(|sc| m.may_use(user, sc)).map(|sc| (sc, s))).collect();
+            scopes.sort_by_key(|(sc, _)| match sc {
+                Scope::User(_) => 0,
+                Scope::Group(_) => 1,
+                Scope::Global => 2,
+            });
             let mut out = Vec::new();
-            for scope in scopes {
-                let log = scope.to_string();
-                let Some((_, state)) = i.views.get(&log) else { continue };
+            for (scope, state) in scopes {
                 let mut mine: Vec<(&String, &vault::Item)> = state.items.iter().filter(|(_, it)| it.apps.contains(app)).collect();
                 mine.sort_by_key(|(_, it)| it.made);
-                out.extend(mine.into_iter().map(|(id, it)| vault::for_app(id, &log, it)));
+                out.extend(mine.into_iter().map(|(id, it)| vault::for_app(id, &scope.to_string(), it)));
             }
             Ok(out)
         })
@@ -2172,7 +2178,7 @@ impl Node {
                 let call = CallRequest { app: app.into(), sidecar: sidecar.then(|| app.into()), op: op.into(), input: req["input"].clone(), server, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
-            ("GET", "/vault") => ok(json!(self.vault_of(&grant.app, &grant.scopes)?)),
+            ("GET", "/vault") => ok(json!(self.vault_of(&grant.app, &grant.caller.user)?)),
             ("POST", "/vault/match") => {
                 // The item a sign-in would change rather than make: one of that type whose plain field has that value.
                 let req: Value = serde_json::from_slice(&body)?;
