@@ -43,6 +43,14 @@ enum Providers {
         }
     }
 
+    /// The drivers' own connections to the node: each holds one open waiting for calls, and URLSession.shared allows
+    /// six to a host, so sharing it would leave the window's requests queued behind them until they time out.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpMaximumConnectionsPerHost = 64
+        return URLSession(configuration: config)
+    }()
+
     private struct Call: Sendable {
         var id: UInt64
         var op: String
@@ -51,7 +59,7 @@ enum Providers {
 
     /// The node's next call; nil if there was none for 25 seconds.
     private static func next(_ url: URL) async throws -> Call? {
-        let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url.appending(path: "calls"), timeoutInterval: 40))
+        let (data, response) = try await session.data(for: URLRequest(url: url.appending(path: "calls"), timeoutInterval: 40))
         let status = (response as? HTTPURLResponse)?.statusCode
         if status == 204 { return nil }
         guard status == 200, let call = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -65,7 +73,7 @@ enum Providers {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (_, response) = try await session.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
     }
 }

@@ -60,7 +60,12 @@ struct VaultView: View {
         }
         .task(id: scope) { await load() }
         .refreshable { await load() }
-        .onReceive(NotificationCenter.default.publisher(for: .nodeEvent)) { _ in Task { await load() } }
+        .onReceive(NotificationCenter.default.publisher(for: .nodeEvent)) { note in
+            // The node's own entries (an item changed) change no app.
+            guard let json = note.object as? String, let event = try? JSONDecoder().decode(NodeEvent.self, from: Data(json.utf8)),
+                  event.type == "changed", event.apps?.isEmpty ?? true else { return }
+            Task { await load() }
+        }
         .sheet(isPresented: $adding) { NewItemSheet(scope: scope) { await load() } }
         .confirmationDialog(deleting.map { $0.isAccount ? "Sign out of \($0.title)?" : "Delete \($0.title)?" } ?? "",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible,
