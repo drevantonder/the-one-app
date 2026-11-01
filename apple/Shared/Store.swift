@@ -511,8 +511,10 @@ final class Store {
     /// What waits for this user: invites, servers to trust and items asked for.
     var requests: Int { invites.count + trustOffers.count + (state?.waitingRequests ?? 0) }
 
-    /// The count on Settings' icon: the requests waiting.
-    var badge: Int { requests }
+    /// The count on Settings' icon: the requests waiting, and backups' problem.
+    var badge: Int { requests + (backupProblem == nil ? 0 : 1) }
+    /// What's wrong with backups, for an admin, until a run works again.
+    var backupProblem: Backups.Problem? { state?.backups }
 
     /// The count on the app's own icon, as iOS adds up a folder's: every app's badge on every page, and the requests.
     var iconBadge: Int { requests + badges.values.flatMap(\.values).reduce(0) { $0 + max($1, 0) } }
@@ -533,7 +535,8 @@ final class Store {
         }
     }
 
-    var hasRequests: Bool { badge > 0 }
+    /// Whether Settings has something to see: requests waiting, or backups' problem.
+    var needsAttention: Bool { badge > 0 }
 
     // MARK: Connection
 

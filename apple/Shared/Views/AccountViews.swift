@@ -204,17 +204,23 @@ struct BackupsView: View {
                 if let error { Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red) }
             }
             Section {
-                ForEach(places) { PlaceRow(place: $0, remove: remove) }
+                ForEach(places) { place in
+                    NavigationLink {
+                        PlaceView(place: place) { await load() }
+                    } label: {
+                        PlaceRow(place: place)
+                    }
+                }
                 Button("Add Place…") { adding = true }
             } header: {
                 Text("Places")
             } footer: {
-                Text("Everything is encrypted before it leaves, so a place can’t read it. The install’s recovery key opens every backup, everyone’s: keep it where only admins can reach it.")
+                Text("Encrypted before it leaves. The install’s recovery key opens every backup, everyone’s.")
             }
             if let snapshots = backups?.snapshots, !snapshots.isEmpty {
                 Section("Snapshots") {
                     ForEach(snapshots.prefix(8), id: \.self) { s in
-                        LabeledContent(when(s.time, style: .day), value: "\(s.place) · \(displayName(s.server))")
+                        NavigationLink(when(s.time, style: .day)) { SnapshotView(snapshot: s) }
                     }
                 }
             }
@@ -235,42 +241,36 @@ struct BackupsView: View {
         }
     }
 
-    /// Status first, in words: backed up when, by whom, to where; or what broke and since when.
+    /// Status first, in words: backed up when; or what's wrong, since when, and its fix.
     @ViewBuilder private func status(_ places: [Backups.Place]) -> some View {
-        let failing = places.filter { $0.failing != nil }
-        let lasts = places.compactMap(\.last)
-        let newest = lasts.max { $0.time < $1.time }
+        let problem = places.compactMap(\.problem).min { $0.since < $1.since }
+        let newest = places.compactMap(\.last).max { $0.time < $1.time }
+        let color: Color = problem != nil ? .red : newest == nil ? .secondary : .green
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: failing.isEmpty ? (newest == nil ? "externaldrive" : "checkmark") : "exclamationmark")
+                Image(systemName: problem != nil ? "exclamationmark" : newest == nil ? "externaldrive" : "checkmark")
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(failing.isEmpty ? (newest == nil ? Color.secondary : .green) : .red)
+                    .foregroundStyle(color)
                     .frame(width: 40, height: 40)
-                    .background(Circle().fill((failing.isEmpty ? (newest == nil ? Color.secondary : .green) : .red).opacity(0.15)))
+                    .background(Circle().fill(color.opacity(0.15)))
                 VStack(alignment: .leading, spacing: 3) {
-                    if let place = failing.first, let failure = place.failing {
+                    if let problem {
                         Text(newest.map { "Not backed up since \(when($0.time, style: .relative))" } ?? "Not backed up yet").font(.title3.weight(.semibold))
-                        Text("\(place.title): \(failure.error ?? String(localized: "it failed")), since \(when(failure.since, style: .time)).")
-                            .foregroundStyle(.secondary)
-                        let safe = places.filter { $0.failing == nil && $0.last != nil }.map(\.title)
-                        if !safe.isEmpty {
-                            Text("\(safe.formatted()) still \(safe.count == 1 ? "has" : "have") a copy.").foregroundStyle(.secondary)
-                        }
+                        Text(problem.text).foregroundStyle(.secondary)
+                        Text(problem.fix).foregroundStyle(.secondary)
                     } else if let newest {
                         Text("Backed up \(when(newest.time, style: .relative))").font(.title3.weight(.semibold))
-                        Text("\(displayName(newest.server)), to \(places.filter { $0.last != nil }.map(\.title).formatted())").foregroundStyle(.secondary)
                     } else if places.isEmpty {
                         Text("Not backed up").font(.title3.weight(.semibold))
                         Text("Add a disk, or S3-compatible storage like Cloudflare R2, and your servers back up to it every hour that something changes.")
                             .foregroundStyle(.secondary)
                     } else {
                         Text("Backing up…").font(.title3.weight(.semibold))
-                        Text("The first backup is on its way.").foregroundStyle(.secondary)
                     }
                 }
             }
             if !places.isEmpty {
-                Button(failing.isEmpty ? "Back Up Now" : "Try Again") { backUp() }
+                Button(problem == nil ? "Back Up Now" : "Try Again") { backUp() }
                     .buttonStyle(.bordered)
                     .disabled(asked.map { Date.now.timeIntervalSince($0) < 10 } ?? false)
             }
@@ -286,15 +286,6 @@ struct BackupsView: View {
         asked = .now
         Task {
             do { try await store.node.backUpNow() } catch { self.error = error.localizedDescription }
-        }
-    }
-
-    private func remove(_ place: Backups.Place) {
-        Task {
-            do {
-                try await store.node.removePlace(place.id)
-                await load()
-            } catch { self.error = error.localizedDescription }
         }
     }
 }
@@ -317,47 +308,119 @@ private func when(_ ms: Double, style: WhenStyle) -> String {
     }
 }
 
-/// A place backups go to: what it is, and when it last backed up, or that it's failing.
+/// A place backups go to: what it is, and when it last backed up, or what's wrong.
 private struct PlaceRow: View {
     var place: Backups.Place
-    var remove: (Backups.Place) -> Void
-    @State private var removing = false
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: place.kind == "folder" ? "externaldrive.fill" : "cloud.fill")
-                .font(.system(size: 15))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(RoundedRectangle(cornerRadius: 7).fill(place.kind == "folder" ? Color.gray : Color.orange))
+            PlaceIcon(kind: place.kind)
             VStack(alignment: .leading, spacing: 2) {
                 Text(place.title)
-                Text(detail).font(.callout).foregroundStyle(place.failing == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red)).lineLimit(2)
+                if let problem = place.problem {
+                    Text(problem.text).font(.callout).foregroundStyle(.red).lineLimit(2)
+                } else {
+                    Text(place.kind == "folder" ? String(localized: "Disk on \(displayName(place.server ?? ""))") : String(localized: "Off-site · \(place.where)"))
+                        .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer()
-            if let last = place.last, place.failing == nil {
+            if let last = place.last, place.problem == nil {
                 Text(when(last.time, style: .time)).foregroundStyle(.secondary).monospacedDigit()
             }
         }
-        .contextMenu {
-            Button("Stop Backing Up Here", role: .destructive) { removing = true }
+    }
+}
+
+private struct PlaceIcon: View {
+    var kind: String
+
+    var body: some View {
+        Image(systemName: kind == "folder" ? "externaldrive.fill" : "cloud.fill")
+            .font(.system(size: 15))
+            .foregroundStyle(.white)
+            .frame(width: 30, height: 30)
+            .background(RoundedRectangle(cornerRadius: 7).fill(kind == "folder" ? Color.gray : Color.orange))
+    }
+}
+
+/// A place's own page: what's wrong and its fix, where it is, its last backup, its item in the Vault, and stopping.
+private struct PlaceView: View {
+    @Environment(Store.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    var place: Backups.Place
+    var changed: () async -> Void
+    @State private var item: VaultItem?
+    @State private var removing = false
+    @State private var error: String?
+
+    var body: some View {
+        Form {
+            if let problem = place.problem {
+                Section {
+                    Label(problem.text, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                    Text(problem.fix)
+                }
+            }
+            Section {
+                if place.kind == "folder" {
+                    LabeledContent("Folder") { Text(place.where).textSelection(.enabled) }
+                    LabeledContent("Disk on", value: displayName(place.server ?? ""))
+                } else {
+                    LabeledContent("Bucket", value: place.where)
+                    if let endpoint = place.endpoint {
+                        LabeledContent("Endpoint") { Text(endpoint).textSelection(.enabled).lineLimit(2) }
+                    }
+                }
+                if let last = place.last {
+                    LabeledContent("Last backup", value: "\(when(last.time, style: .day)), \(displayName(last.server))")
+                }
+            }
+            if let item {
+                Section {
+                    NavigationLink("Edit in Vault") { VaultItemView(item: item) { await changed() } }
+                }
+            }
+            Section {
+                Button("Stop Backing Up Here", role: .destructive) { removing = true }
+            } footer: {
+                if let error { Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red) }
+            }
         }
-        #if os(iOS)
-        .swipeActions { Button("Remove", role: .destructive) { removing = true } }
-        #endif
+        .formStyle(.grouped)
+        .navigationTitle(place.title)
+        .task { item = try? await store.node.vault(scope: "global").first { $0.id == place.id } }
         .confirmationDialog("Stop backing up to \(place.title)?", isPresented: $removing) {
-            Button("Stop Backing Up", role: .destructive) { remove(place) }
+            Button("Stop Backing Up", role: .destructive) { remove() }
         } message: {
             Text("What’s there now stays there.")
         }
     }
 
-    private var detail: String {
-        if let failing = place.failing {
-            return [failing.error, place.last.map { String(localized: "last \(when($0.time, style: .time))") }].compactMap { $0 }.joined(separator: " · ")
+    private func remove() {
+        Task {
+            do {
+                try await store.node.removePlace(place.id)
+                await changed()
+                dismiss()
+            } catch { self.error = error.localizedDescription }
         }
-        if place.kind == "folder" { return String(localized: "Disk on \(displayName(place.server ?? ""))") }
-        return String(localized: "Off-site · \(place.where)")
+    }
+}
+
+/// A snapshot of the install: when, where it went, whose data it holds, and which servers wrote it.
+private struct SnapshotView: View {
+    var snapshot: Backups.Snapshot
+
+    var body: some View {
+        Form {
+            LabeledContent("Taken", value: Date(timeIntervalSince1970: snapshot.time / 1000).formatted(date: .complete, time: .shortened))
+            LabeledContent("Kept in", value: snapshot.places.formatted())
+            LabeledContent("Holds", value: snapshot.scopes.formatted())
+            LabeledContent("Written by", value: snapshot.servers.map(displayName).formatted())
+        }
+        .formStyle(.grouped)
+        .navigationTitle(when(snapshot.time, style: .day))
     }
 }
 

@@ -1508,6 +1508,28 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let checked = a.check_backups().await.unwrap();
     assert_eq!(checked[0]["place"], "T7 Shield", "{checked}");
     assert!(checked[0]["error"].is_null(), "{checked}");
+    let shown = a.backups().unwrap();
+    let moment = &shown["snapshots"][0];
+    assert!(moment["scopes"].as_array().unwrap().contains(&json!("Everyone")) && moment["places"] == json!(["T7 Shield"]), "one snapshot of the install: {shown}");
+    assert!(a.state()["backups"].is_null(), "no badge while backups work");
+
+    // A disk that breaks: admins see what's wrong and its fix, on Settings, until a run works again.
+    let objects = dir.join(&install).join("objects");
+    std::fs::rename(&objects, dir.join("objects-aside")).unwrap();
+    std::fs::write(&objects, b"not a folder").unwrap();
+    for text in ["broken once", "broken twice"] {
+        a.call(board("post", json!({ "text": text }))).await.unwrap();
+        a.back_up_now();
+        eventually("a failed run", async || a.backups().unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used"))).await;
+    }
+    let problem = a.state()["backups"].clone();
+    assert_eq!(problem["fix"], "Check the disk on backup-a is plugged in and has room.", "{problem}");
+    assert!(problem["text"].as_str().unwrap().starts_with("T7 Shield couldn't be used"), "{problem}");
+    std::fs::remove_file(&objects).unwrap();
+    std::fs::rename(dir.join("objects-aside"), &objects).unwrap();
+    a.call(board("post", json!({ "text": "fixed" }))).await.unwrap();
+    a.back_up_now();
+    eventually("the badge to clear", async || a.state()["backups"].is_null()).await;
 }
 
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {

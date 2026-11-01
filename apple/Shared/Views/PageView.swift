@@ -591,7 +591,8 @@ struct SettingsPage: View {
                     SettingsSection {
                         row(.users, value: "")
                         row(.install, value: "")
-                        row(.backups, value: "")
+                        let problem = store.backupProblem
+                        SettingsRow(item: .backups, value: problem == nil ? "" : "1", badge: problem != nil, detail: problem.map { "\($0.text) \($0.fix)" }) { open(.setting(.backups)) }
                     }
                 }
                 Text(version)
@@ -688,6 +689,8 @@ private struct SettingsRow: View {
     var item: Setting
     var value: String
     var badge = false
+    /// What needs doing, in red under the title.
+    var detail: String?
     var action: () -> Void
 
     var body: some View {
@@ -699,8 +702,17 @@ private struct SettingsRow: View {
                 } else {
                     SymbolTile(symbol: item.symbol, color: item.color, size: 30)
                 }
-                Text(item.title)
-                    .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .foregroundStyle(.primary)
+                    if let detail {
+                        Text(detail)
+                            .font(.callout)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                .padding(.vertical, detail == nil ? 0 : 8)
                 Spacer(minLength: 8)
                 if badge {
                     Text(value)

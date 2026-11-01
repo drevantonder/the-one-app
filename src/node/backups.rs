@@ -414,16 +414,17 @@ impl Node {
             let global = i.views.get("global").map(|(_, s)| s).unwrap_or(&empty);
             let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
             let runs = &global.backups;
+            let problems = problems(i, now_ms())?;
             let mut out = Vec::new();
             for p in places(global) {
                 let mine: Vec<&members::BackupRun> = runs.iter().filter(|r| r.place == p.id).collect();
                 let last_ok = mine.iter().rev().find(|r| r.error.is_none());
                 // A place fails while its latest run since its last good one failed.
                 let failing = mine.iter().rev().take_while(|r| r.error.is_some()).last().map(|first| (first.time, mine.last().and_then(|r| r.error.clone())));
-                let (kind, place_where) = match &p.place {
-                    Ok(Place::Folder(path)) => ("folder", path.display().to_string()),
-                    Ok(Place::S3(s3)) => ("s3", format!("{} · {}", s3.bucket, s3.endpoint.split("://").nth(1).unwrap_or(""))),
-                    Err(_) => ("s3", String::new()),
+                let (kind, place_where, endpoint) = match &p.place {
+                    Ok(Place::Folder(path)) => ("folder", path.display().to_string(), None),
+                    Ok(Place::S3(s3)) => ("s3", s3.bucket.clone(), Some(s3.endpoint.clone())),
+                    Err(_) => ("s3", String::new(), None),
                 };
                 let bytes: u64 = {
                     let mut latest: BTreeMap<&str, u64> = BTreeMap::new();
@@ -439,15 +440,38 @@ impl Node {
                     "title": p.title,
                     "kind": kind,
                     "where": place_where,
+                    "endpoint": endpoint,
                     "server": p.server.map(|k| name(&k)),
+                    "problem": problems.iter().find(|q| q.place == p.id).map(Problem::json),
                     "last": last_ok.map(|r| json!({ "time": r.time, "server": name(&r.server) })),
                     "failing": failing.map(|(since, error)| json!({ "since": since, "error": error.or(p.place.as_ref().err().map(|e| format!("{e:#}"))) })),
                     "bytes": bytes,
                 }));
             }
             let titles: BTreeMap<String, String> = places(global).into_iter().map(|p| (p.id, p.title)).collect();
-            // Each run that wrote snapshots, newest first: when, by which server, to which place.
-            let snapshots: Vec<Value> = runs.iter().rev().filter(|r| r.error.is_none() && titles.contains_key(&r.place)).take(20).map(|r| json!({ "time": r.time, "server": name(&r.server), "place": titles[&r.place], "scopes": r.snapshots.iter().map(|s| s.scope.clone()).collect::<Vec<_>>() })).collect();
+            // The install's snapshots, newest first: the runs of each minute, whichever servers and places, as one.
+            let mut moments: Vec<(u64, BTreeSet<String>, BTreeSet<String>, BTreeSet<String>)> = Vec::new();
+            for r in runs.iter().rev().filter(|r| !r.snapshots.is_empty() && titles.contains_key(&r.place)) {
+                let minute = r.time / 60_000;
+                if moments.last().is_none_or(|m| m.0 / 60_000 != minute) {
+                    if moments.len() == 20 {
+                        break;
+                    }
+                    moments.push((r.time, BTreeSet::new(), BTreeSet::new(), BTreeSet::new()));
+                }
+                let m = moments.last_mut().expect("just pushed");
+                m.1.insert(name(&r.server));
+                m.2.insert(titles[&r.place].clone());
+                m.3.extend(r.snapshots.iter().map(|s| scope_name(i, &s.scope)));
+            }
+            let snapshots: Vec<Value> = moments
+                .into_iter()
+                .map(|(time, servers, places, scopes)| {
+                    let (servers, places): (Vec<String>, Vec<String>) = (servers.into_iter().collect(), places.into_iter().collect());
+                    // `server` and `place`, one each, for apps built before a snapshot was the install's.
+                    json!({ "time": time, "server": servers.join(", "), "place": places.join(", "), "servers": servers, "places": places, "scopes": scopes })
+                })
+                .collect();
             Ok(json!({ "places": out, "snapshots": snapshots, "here": self.server_name(), "disks": disks() }))
         })
     }
@@ -597,6 +621,17 @@ fn backed_blobs(entries: &[Entry], forgotten: &BTreeSet<String>) -> BTreeSet<Str
     }
     out.extend(newest.into_values().map(|(_, b)| b));
     out
+}
+
+/// A scope as people call it: Everyone, a person's name, or a group's.
+fn scope_name(i: &Install, scope: &str) -> String {
+    let m = &i.r.members;
+    match Scope::parse(scope) {
+        Ok(Scope::Global) => "Everyone".to_string(),
+        Ok(Scope::User(u)) => m.user(&u).map(|u| u.name.clone()).unwrap_or(u),
+        Ok(Scope::Group(g)) => m.groups.get(&g).map(|g| g.name.clone()).unwrap_or(g),
+        Err(_) => scope.to_string(),
+    }
 }
 
 /// The disks plugged into this machine, where a folder place could go: each one's name, folder and free space.

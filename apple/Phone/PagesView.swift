@@ -149,7 +149,7 @@ private struct BottomBar: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(onSettings ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                         .overlay(alignment: .topTrailing) {
-                            if store.hasRequests { Circle().fill(.red).frame(width: 7, height: 7).offset(x: 3, y: -3) }
+                            if store.needsAttention { Circle().fill(.red).frame(width: 7, height: 7).offset(x: 3, y: -3) }
                         }
                         .padding(.trailing, 18)
                         .frame(height: height)
@@ -157,7 +157,7 @@ private struct BottomBar: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Settings")
-                .accessibilityValue(store.hasRequests ? Text("Requests waiting") : Text(""))
+                .accessibilityValue(store.backupProblem.map { Text($0.text) } ?? (store.requests > 0 ? Text("Requests waiting") : Text("")))
             }
             .glassEffect(.regular.interactive(), in: .capsule)
         }

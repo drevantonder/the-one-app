@@ -97,7 +97,7 @@ struct Sidebar: View {
     }
 }
 
-/// The cog, kept at the sidebar's foot as a row of its own, counting waiting requests.
+/// The cog, kept at the sidebar's foot as a row of its own, counting waiting requests and backups' problem.
 private struct SettingsRow: View {
     @Environment(Store.self) private var store
     var folded = false

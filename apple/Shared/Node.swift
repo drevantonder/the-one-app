@@ -27,11 +27,13 @@ struct NodeState: Decodable, Sendable, Equatable {
     var secretRequests: Int?
     /// How this user arranged each page, by scope; nil from a server too old to keep arrangements.
     var arrangements: [String: Arrangement]?
+    /// What's wrong with backups, for an admin; nil while they work.
+    var backups: Backups.Problem?
 
     var waitingRequests: Int { vaultRequests ?? secretRequests ?? 0 }
 
     enum CodingKeys: String, CodingKey {
-        case config, machine = "me", host = "server", user, install, opens, vaultRequests = "vault_requests", secretRequests = "secret_requests", arrangements
+        case config, machine = "me", host = "server", user, install, opens, vaultRequests = "vault_requests", secretRequests = "secret_requests", arrangements, backups
     }
 }
 
@@ -408,20 +410,27 @@ struct VaultRequest: Decodable, Sendable, Hashable, Identifiable {
 
 /// Backups, as the node says how they're going.
 struct Backups: Decodable, Equatable {
-    struct Place: Decodable, Equatable, Identifiable {
-        struct Last: Decodable, Equatable { var time: Double; var server: String }
-        struct Failing: Decodable, Equatable { var since: Double; var error: String? }
+    /// What's wrong with a place, and its fix, in words; since when.
+    struct Problem: Decodable, Sendable, Equatable, Hashable { var place: String; var text: String; var fix: String; var since: Double }
+    struct Place: Decodable, Equatable, Hashable, Identifiable {
+        struct Last: Decodable, Equatable, Hashable { var time: Double; var server: String }
+        struct Failing: Decodable, Equatable, Hashable { var since: Double; var error: String? }
         var id: String
         var title: String
         /// `folder` or `s3`.
         var kind: String
+        /// A folder's path, or a bucket.
         var `where`: String
+        /// S3's endpoint.
+        var endpoint: String?
         var server: String?
         var last: Last?
         var failing: Failing?
+        var problem: Problem?
         var bytes: Double?
     }
-    struct Snapshot: Decodable, Equatable, Hashable { var time: Double; var server: String; var place: String }
+    /// A snapshot of the install: whichever servers wrote it, to which places, of whose data.
+    struct Snapshot: Decodable, Equatable, Hashable { var time: Double; var servers: [String]; var places: [String]; var scopes: [String] }
     struct Disk: Decodable, Equatable, Identifiable { var name: String; var path: String; var free: Double; var id: String { path } }
     struct Step: Decodable, Equatable, Identifiable { var step: String; var error: String?; var id: String { step } }
     var places: [Place]
