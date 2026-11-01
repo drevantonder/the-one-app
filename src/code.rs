@@ -334,7 +334,7 @@ mod tests {
         let text = search(&apps(), "post to the board", 1, For::Mcp(Mode::All));
         assert!(text.starts_with("board_post { text: string, topic?: string }"), "{text}");
         let text = search(&apps(), "board post", 1, For::Cli);
-        assert!(text.starts_with("one board post <text> [--topic string]"), "{text}");
+        assert!(text.starts_with(&format!("{CLI} board post <text> [--topic string]")), "{text}");
         let text = search(&apps(), "calendar events", 1, For::Mcp(Mode::Code));
         assert!(text.starts_with("tools[\"google-calendar\"].events({ kind?: \"a\" | \"b\" })"), "{text}");
         assert!(search(&apps(), "send", 1, For::Mcp(Mode::Code)).contains("confirm: true"));
