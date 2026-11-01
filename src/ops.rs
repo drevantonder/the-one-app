@@ -17,7 +17,7 @@ pub const FILE_LIMIT: usize = 10 << 20;
 /// What MCP takes inline from an agent, which sends base64 in its own output.
 pub const MCP_FILE_LIMIT: usize = 1 << 20;
 
-/// An operation as `GET /v1/apps` describes it, with its app; None when no app or driver here lists it.
+/// An operation as `GET /v1/apps` describes it, with its app; None when no app or sidecar here lists it.
 pub fn find(app: &str, op: &str) -> Option<(Value, Value)> {
     let apps = get("/v1/apps").ok()?;
     let a = apps.as_array()?.iter().find(|a| a["name"] == app)?.clone();

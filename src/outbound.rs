@@ -1,7 +1,7 @@
 //! Workerd's global outbound: every request an app makes comes here, on a port of the node's own, with the token of
 //! the call it was made in (`x-one-call`). The node makes the request itself, filling in that call's secrets for
 //! their hosts (`src/vault.rs`). Requests to `one.internal` are the shim's asks of the node for the call: other
-//! apps' and drivers' operations, blobs, and the install's apps.
+//! apps' and sidecars' operations, blobs, and the install's apps.
 
 use std::time::Duration;
 

@@ -1,12 +1,12 @@
-// Messenger: the person's Facebook Messenger, read through messenger.com in a desktop's browser. The messenger driver
+// Messenger: the person's Facebook Messenger, read through messenger.com in a desktop's browser. The messenger sidecar
 // drives the browser, on each server whose owner installed it; this app is what people and agents use, and a
 // connector (SPEC.md "Connectors"): each account is a browser profile signed in to Messenger.
 
-/// Runs one of the messenger driver's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the messenger sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
 /// says what's needed instead of how the call failed.
-async function driver(ctx, op, input) {
+async function sidecar(ctx, op, input) {
   try {
-    return await ctx.drivers.messenger[op](input);
+    return await ctx.sidecars.messenger[op](input);
   } catch (err) {
     if (String(err.message).includes("no server runs messenger for you")) throw new Error(NEEDS);
     throw err;
@@ -15,9 +15,9 @@ async function driver(ctx, op, input) {
 
 const NEEDS = "Messenger needs Computer Use on one of your servers, and none of them runs it. Ask an owner of one to install it.";
 
-/// The caller's online servers that run the driver, by name.
+/// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
-  return (await ctx.servers()).filter((s) => s.online && (s.drivers || []).includes("messenger")).map((s) => s.name);
+  return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("messenger")).map((s) => s.name);
 }
 
 export default {
@@ -30,59 +30,59 @@ export default {
   connector: true,
   needs: "Needs Computer Use on one of your servers",
   instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in a desktop's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
-  uses: { drivers: ["messenger"] },
+  uses: { sidecars: ["messenger"] },
 
   ops: {
     accounts: {
       reads: true,
       description: "The browser profiles Messenger reads, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
       input: {"properties": {}, "type": "object"},
-      // A connector lists no accounts, rather than failing, where no server runs its driver; its settings say why.
-      run: async (ctx, input) => ((await running(ctx)).length ? driver(ctx, "accounts", input) : []),
+      // A connector lists no accounts, rather than failing, where no server runs its sidecar; its settings say why.
+      run: async (ctx, input) => ((await running(ctx)).length ? sidecar(ctx, "accounts", input) : []),
     },
     chats: {
       reads: true,
       description: "Recent Messenger chats, newest first: who, when, their last message, and whether unread.",
       input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}, "unread": {"description": "only unread chats", "type": "boolean"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "chats", input),
+      run: (ctx, input) => sidecar(ctx, "chats", input),
     },
     read: {
       description: "A recent chat's latest messages. Opening a chat marks it read on Messenger, so one that was unread is marked unread again afterwards; the sender may still see it as seen.",
       input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}, "chat": {"description": "the chat's name, or a part of it only one recent chat has", "type": "string"}}, "required": ["chat"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "read", input),
+      run: (ctx, input) => sidecar(ctx, "read", input),
     },
     search: {
       reads: true,
       description: "Messages containing some words, across every chat: which chats have them, and the message when a chat has one.",
       input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}, "query": {"description": "words to find", "type": "string"}}, "required": ["query"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "search", input),
+      run: (ctx, input) => sidecar(ctx, "search", input),
     },
     send: {
       confirm: true,
       description: "Send a real message, as the person, to a recent chat or to someone by their exact name. It can't be taken back: only when the person asked, with the text they approved.",
       input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}, "chat": {"description": "the chat's name, or a part of it only one recent chat has; anyone else by their exact name", "type": "string"}, "text": {"description": "the message", "type": "string"}}, "required": ["chat", "text"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "send", input),
+      run: (ctx, input) => sidecar(ctx, "send", input),
     },
     sign_in: {
       description: "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, to sign in there themselves. The default profile's again when none is given.",
       input: {"properties": {"profile": {"description": "the browser profile, like Personal or PTC; computer_profiles lists them", "type": "string"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "sign_in", input),
+      run: (ctx, input) => sidecar(ctx, "sign_in", input),
     },
     sign_out: {
       description: "Stop reading a browser profile's Messenger. The profile, and its sign-ins to other sites, stay.",
       input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}}, "required": ["account"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "sign_out", input),
+      run: (ctx, input) => sidecar(ctx, "sign_out", input),
     },
     _profiles: {
       reads: true,
       description: "The desktops' browser profiles, for the settings screen to pick one.",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => driver(ctx, "_profiles", input),
+      run: (ctx, input) => sidecar(ctx, "_profiles", input),
     },
     _save: {
       description: "The settings screen's Done: saves the browser profile signed in.",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => driver(ctx, "_save", input),
+      run: (ctx, input) => sidecar(ctx, "_save", input),
     },
     _running: {
       reads: true,

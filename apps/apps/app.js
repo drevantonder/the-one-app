@@ -59,8 +59,8 @@ async function described(ctx, bundle) {
   const all = file ? new TextDecoder().decode(file.bytes) : "";
   const code = all.slice(Math.max(0, all.indexOf("export default")));
   const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
-  const parts = code.match(/\buses:\s*\{[^}]*\bdrivers:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
-  return { title: field("title"), icon: field("icon"), color: field("color"), description: field("description"), needs: field("needs"), uses: { apps: [], drivers: parts } };
+  const parts = code.match(/\buses:\s*\{[^}]*\bsidecars:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
+  return { title: field("title"), icon: field("icon"), color: field("color"), description: field("description"), needs: field("needs"), uses: { apps: [], sidecars: parts } };
 }
 
 /// Whether an app is a connector (SPEC.md "Connectors"): it says so (`connector: true`), or it has accounts, sign_in
@@ -83,11 +83,11 @@ async function isConnector(ctx, a) {
 /// sidecars it uses, by their names.
 async function where(ctx, a) {
   const servers = await ctx.servers();
-  const parts = a.uses?.drivers || [];
+  const parts = a.uses?.sidecars || [];
   if (!parts.length) return null;
   const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
-  const runs = servers.filter((s) => (s.drivers || []).some((d) => parts.includes(d)));
-  const removed = servers.filter((s) => !runs.includes(s) && (s.removed_drivers || []).some((d) => parts.includes(d.name)));
+  const runs = servers.filter((s) => (s.sidecars || []).some((d) => parts.includes(d)));
+  const removed = servers.filter((s) => !runs.includes(s) && (s.removed_sidecars || []).some((d) => parts.includes(d.name)));
   const line = runs.length ? "Runs on " + runs.map((s) => s.name).join(", ") : a.needs || "Runs on none of your servers";
   return {
     line, runs: runs.map((s) => s.name), needs: a.needs || null,
@@ -154,7 +154,7 @@ export default {
             name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, image: a.image || null, image_kind: a.image_kind || null, description: d.description || a.description || null,
             owner: a.owner, owner_name: name(a.owner),
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
-            installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], drivers: [] },
+            installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], sidecars: [] },
             built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
             mine: mine(ctx, a.owner), deleted: a.deleted || null, connector: connectors[all.indexOf(a)],
             connected: connectors[all.indexOf(a)], // connector's old name, for whatever read it before
@@ -238,7 +238,7 @@ export default {
       input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
       async run(ctx, { app, server }) {
         const a = await find(ctx, app);
-        for (const part of a.uses?.drivers || []) ctx.driver(part, server, true);
+        for (const part of a.uses?.sidecars || []) ctx.sidecar(part, server, true);
         return `${a.title || app} is installed on ${server}.`;
       },
     },
@@ -249,7 +249,7 @@ export default {
       async run(ctx, { app, server }) {
         const a = await find(ctx, app);
         const there = (await ctx.servers()).find((s) => s.name === server);
-        for (const part of a.uses?.drivers || []) if ((there?.drivers || []).includes(part)) ctx.driver(part, server, false);
+        for (const part of a.uses?.sidecars || []) if ((there?.sidecars || []).includes(part)) ctx.sidecar(part, server, false);
         return `${a.title || app} is removed from ${server}.`;
       },
     },

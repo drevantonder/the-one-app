@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::apps::{AppEntry, Me};
 use crate::entry::Content;
-use crate::native::Reply;
+use crate::sidecars::Reply;
 
 /// Marks a skill folder as this edition's to replace, so the nodes of two editions on one machine leave each other's alone.
 fn marker() -> String {

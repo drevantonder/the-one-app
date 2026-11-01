@@ -3,11 +3,11 @@
 // sidecar runs the desktops (Incus, or a Mac's containers); Computer Use (apps/computer) is what agents use them with,
 // and this page reads the computers through it.
 
-/// Runs one of the desktops driver's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the desktops sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
 /// says what's needed instead of how the call failed.
-async function driver(ctx, op, input) {
+async function sidecar(ctx, op, input) {
   try {
-    return await ctx.drivers.desktops[op](input);
+    return await ctx.sidecars.desktops[op](input);
   } catch (err) {
     if (String(err.message).includes("no server runs desktops for you")) throw new Error(NEEDS);
     throw err;
@@ -16,9 +16,9 @@ async function driver(ctx, op, input) {
 
 const NEEDS = "Desktops needs a Linux server with Incus, or a Mac, and none of yours runs it.";
 
-/// The caller's online servers that run the driver, by name.
+/// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
-  return (await ctx.servers()).filter((s) => s.online && (s.drivers || []).includes("desktops")).map((s) => s.name);
+  return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("desktops")).map((s) => s.name);
 }
 
 export default {
@@ -28,63 +28,63 @@ export default {
   color: "#a2845e",
   description: "See, watch and lend your computers, and keep your browser profiles",
   instructions: "Desktops is the person's page for their computers: making and sizing lasting desktops, starting, stopping and deleting them, backing them up and moving them, and keeping browser profiles. To use a computer, agents use Computer Use (computer_*), not these.",
-  uses: { apps: ["computer"], drivers: ["desktops"] },
+  uses: { apps: ["computer"], sidecars: ["desktops"] },
 
   ops: {
     create: {
       description: "Create a lasting desktop and start it, for the person: Linux, with a browser of its own. Takes a minute. Agents borrow instead.",
       input: {"properties": {"desktop": {"description": "its name: lowercase letters, digits and dashes", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "required": ["desktop"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "create", input),
+      run: (ctx, input) => sidecar(ctx, "create", input),
     },
     resize: {
       description: "Change how much CPU and memory a desktop may use, at once, without restarting it.",
       input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "required": ["desktop", "size"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "resize", input),
+      run: (ctx, input) => sidecar(ctx, "resize", input),
     },
     start: {
       description: "Start a stopped (or paused) desktop. It starts again after the server restarts.",
       input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}}, "required": ["desktop"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "start", input),
+      run: (ctx, input) => sidecar(ctx, "start", input),
     },
     stop: {
       description: "Stop a desktop. Its files and sign-ins stay; it stays stopped until started.",
       input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}}, "required": ["desktop"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "stop", input),
+      run: (ctx, input) => sidecar(ctx, "stop", input),
     },
     delete: {
       description: "Delete a desktop and everything in it, its sign-ins too. Only when the person asked.",
       input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}}, "required": ["desktop"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "delete", input),
+      run: (ctx, input) => sidecar(ctx, "delete", input),
     },
     backup: {
       description: "Back up a desktop's home folder (its files and sign-ins, without caches) as a blob any server can fetch, keeping the newest 5. Not off-site: backups to a bucket aren't built yet.",
       input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}}, "required": ["desktop"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "backup", input),
+      run: (ctx, input) => sidecar(ctx, "backup", input),
     },
     backups: {
       description: "Every server's backups of desktops, newest first.",
       input: {"properties": {"desktop": {"description": "only this desktop's", "type": "string"}, "here": {"description": "only this server's", "type": "boolean"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "backups", input),
+      run: (ctx, input) => sidecar(ctx, "backups", input),
     },
     restore: {
       description: "Make a desktop on this server from a backup: the newest of the desktop named, from any server, or the one with blob.",
       input: {"properties": {"as": {"description": "the new desktop's name; default the same", "type": "string"}, "blob": {"description": "a particular backup's blob", "type": "string"}, "desktop": {"description": "the backed-up desktop's name", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "restore", input),
+      run: (ctx, input) => sidecar(ctx, "restore", input),
     },
     move: {
       description: "Move a desktop to another server: backs it up, restores it there and stops it here, kept until you delete it. Takes a few minutes.",
       input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}, "to": {"description": "the server to move it to", "type": "string"}}, "required": ["desktop", "to"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "move", input),
+      run: (ctx, input) => sidecar(ctx, "move", input),
     },
     save_profile: {
       description: "Save a desktop's browser profile, closing its browsers first; a sign_in desktop is also given back. Only when the person asked: borrowed desktops start from saved profiles.",
       input: {"properties": {"desktop": {"description": "the desktop's name", "type": "string"}, "profile": {"description": "the profile; default the desktop's, or default", "type": "string"}}, "required": ["desktop"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "save_profile", input),
+      run: (ctx, input) => sidecar(ctx, "save_profile", input),
     },
     forget_profile: {
       description: "Delete a browser profile, signing agents out of every site in it. Only when the person asked.",
       input: {"properties": {"profile": {"description": "the profile's name", "type": "string"}}, "required": ["profile"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "forget_profile", input),
+      run: (ctx, input) => sidecar(ctx, "forget_profile", input),
     },
     _list: {
       reads: true,
@@ -202,7 +202,7 @@ export default {
     if (!(bytes > 0)) return "0 MB";
     return bytes >= 1 << 30 ? \`\${(bytes / (1 << 30)).toFixed(1)} GB\` : \`\${Math.round(bytes / (1 << 20))} MB\`;
   }
-  // Memory in use and the most it may use, in bytes, however the driver says it.
+  // Memory in use and the most it may use, in bytes, however the sidecar says it.
   function memory(d) {
     const m = d.memory;
     if (m && typeof m === "object") return [m.used ?? m.usage ?? 0, m.limit ?? m.total ?? 0];
@@ -224,7 +224,7 @@ export default {
     return \`<span class="meter">\${ring(share)}\${size(used)}</span><span class="meter">\${spark(history)}\${Math.round(cpu || 0)}%</span>\`;
   }
 
-  // The driver's list: { desktops: [...] }, or, from a driver before that, lines of "name: state, ...".
+  // The sidecar's list: { desktops: [...] }, or, from a sidecar before that, lines of "name: state, ...".
   function parse(listed) {
     if (listed && Array.isArray(listed.desktops)) return listed.desktops;
     if (typeof listed !== "string" || listed.startsWith("No desktops")) return [];

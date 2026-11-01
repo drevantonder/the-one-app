@@ -21,16 +21,18 @@ pub const FUTURE: u64 = 3_600_000;
 
 pub type Wire = (Vec<u8>, Vec<u8>);
 
-/// A driver serving on the sender: its name, the users it serves, and what it does (its operations), which callers
-/// list until apps wrap drivers.
-pub type Driver = (String, Vec<String>, Value);
+/// A sidecar serving on the sender: its name, the users it serves, and what it does (its operations), which callers
+/// list until apps wrap sidecars.
+pub type Sidecar = (String, Vec<String>, Value);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Msg {
     /// `load` is how loaded the sender is; older servers send none, and skip it.
     Hello {
         frontier: Frontier,
-        drivers: Vec<Driver>,
+        /// `drivers` on the wire: sidecars' name before, which servers still read.
+        #[serde(rename = "drivers")]
+        sidecars: Vec<Sidecar>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         load: Option<crate::load::Load>,
     },
@@ -99,8 +101,8 @@ impl Replica {
         self.members.server(peer).is_some() || (self.members.server(&self.id).is_none() && self.paired_by == Some(*peer))
     }
 
-    pub fn hello(&self, drivers: Vec<Driver>) -> Result<Msg> {
-        Ok(Msg::Hello { frontier: self.store.frontier()?, drivers, load: None })
+    pub fn hello(&self, sidecars: Vec<Sidecar>) -> Result<Msg> {
+        Ok(Msg::Hello { frontier: self.store.frontier()?, sidecars, load: None })
     }
 
     /// The message that passes `entries` on to `peer`: those in scopes it holds.
@@ -288,7 +290,11 @@ mod tests {
     /// `Msg` as servers before `load` had it.
     #[derive(Serialize, Deserialize)]
     enum OldMsg {
-        Hello { frontier: Frontier, drivers: Vec<Driver> },
+        Hello {
+            frontier: Frontier,
+            #[serde(rename = "drivers")]
+            sidecars: Vec<Sidecar>,
+        },
         Entries { entries: Vec<Wire> },
     }
 
@@ -301,10 +307,10 @@ mod tests {
     #[test]
     fn hello_load_is_optional_both_ways() {
         let load = crate::load::Load { cpu: vec![3, 4], memory: Some(crate::load::Space { used: 1, total: 2 }), ..Default::default() };
-        let new = Msg::Hello { frontier: vec![([7; 32], "global".into(), 3)], drivers: vec![], load: Some(load.clone()) };
+        let new = Msg::Hello { frontier: vec![([7; 32], "global".into(), 3)], sidecars: vec![], load: Some(load.clone()) };
         let Ok(OldMsg::Hello { frontier, .. }) = ciborium::from_reader(cbor(&new).as_slice()) else { panic!("an older server can't read it") };
         assert_eq!(frontier.len(), 1);
-        let old = OldMsg::Hello { frontier, drivers: vec![] };
+        let old = OldMsg::Hello { frontier, sidecars: vec![] };
         let Ok(Msg::Hello { load: None, .. }) = ciborium::from_reader(cbor(&old).as_slice()) else { panic!("can't read an older server's") };
         let Ok(Msg::Hello { load: Some(l), .. }) = ciborium::from_reader::<Msg, _>(cbor(&new).as_slice()) else { panic!() };
         assert_eq!(l, load);

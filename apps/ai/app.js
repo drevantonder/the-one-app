@@ -1,5 +1,5 @@
 // AI for apps: read a photo or PDF with a prompt, and ask a decision model typed questions. It reads with the user's
-// local models (the models driver, on the server that has them) or with Gemini once the person's Vault has a Gemini
+// local models (the models sidecar, on the server that has them) or with Gemini once the person's Vault has a Gemini
 // key item for it (its secret field `gemini_key`). Apps use it as ctx.apps.ai.read and ctx.apps.ai.decide, so none of them holds a key.
 
 const DEFAULTS = { provider: "local", local_server: null, read_model: "gemma4:12b", decide_model: "clef-flash", gemini_model: "gemini-3.5-flash-lite" };
@@ -46,7 +46,7 @@ export default {
   icon: "sparkles",
   color: "#af52de",
   instructions: "AI for apps: ai_read reads photos and PDFs with a prompt, ai_decide asks a decision model typed questions. ai_settings shows which models answer (local models on one of your servers, or Gemini once the person's Vault has a Gemini key for it: ask with vault_request, app ai, need gemini); ai_set changes them.",
-  uses: { drivers: ["models"] },
+  uses: { sidecars: ["models"] },
   vault: {
     gemini: { title: "Gemini key", type: "API key", domain: "aistudio.google.com", hosts: ["generativelanguage.googleapis.com"], fields: { gemini_key: { label: "API key", secret: true } } },
   },
@@ -108,7 +108,7 @@ export default {
           return { text, provider: "gemini", cut: reply.candidates?.some((x) => x.finishReason === "MAX_TOKENS") || false };
         }
         if (files.some((f) => !f.type.startsWith("image/"))) throw new Error("Local models read photos, not PDFs: set Gemini up with ai_set to read PDFs.");
-        const reply = await ctx.drivers.models.chat({
+        const reply = await ctx.sidecars.models.chat({
           model: s.read_model, system, think: false,
           options: { temperature: 0, num_predict: max_tokens },
           messages: [{ role: "user", content: prompt, images: files.map((f) => f.data) }],
@@ -126,7 +126,7 @@ export default {
       },
       async run(ctx, { state = {}, questions, images }) {
         const s = await settings(ctx);
-        return ctx.drivers.models.decide({ model: s.decide_model, state, questions, ...(images?.length ? { images: images.map((i) => i.base64 ?? i) } : {}) }, { server: s.local_server || undefined });
+        return ctx.sidecars.models.decide({ model: s.decide_model, state, questions, ...(images?.length ? { images: images.map((i) => i.base64 ?? i) } : {}) }, { server: s.local_server || undefined });
       },
     },
   },

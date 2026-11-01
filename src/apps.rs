@@ -95,8 +95,8 @@ pub enum Append {
     Forget { scope: String, blob: String },
     /// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), with the caller's own rights.
     Retire { app: String, how: String },
-    /// Removes a driver from a server (or lets it register there again), for someone acting for one of its owners.
-    Driver { server: String, name: String, installed: bool },
+    /// Removes a sidecar from a server (or lets it register there again), for someone acting for one of its owners.
+    Sidecar { server: String, name: String, installed: bool },
     /// What the call spent on AI: `{ model, usd, input, output }`, for the insights of the app that called it.
     Cost { data: Value },
     /// Sets (or with no value, deletes) one of the calling app's secrets in a scope, as earlier apps did.
@@ -135,8 +135,8 @@ pub fn appends(app: &str, list: &Value) -> Result<Vec<Append>> {
             appends.push(Append::Switch { app: a["app"].as_str().unwrap_or("").into(), schedule: schedule.into(), scope, on: a["on"] != false });
             continue;
         }
-        if let Some(name) = a["driver"].as_str() {
-            appends.push(Append::Driver { server: a["server"].as_str().unwrap_or("").into(), name: name.into(), installed: a["installed"] == true });
+        if let Some(name) = a["sidecar"].as_str().or(a["driver"].as_str()) {
+            appends.push(Append::Sidecar { server: a["server"].as_str().unwrap_or("").into(), name: name.into(), installed: a["installed"] == true });
             continue;
         }
         if let Some(name) = a["retire"].as_str() {
@@ -322,7 +322,7 @@ impl Apps {
         }
     }
 
-    /// Runs an operation, for at most `limit`: longer for an app that waits on drivers.
+    /// Runs an operation, for at most `limit`: longer for an app that waits on sidecars.
     pub async fn call(&self, app: &str, op: &str, input: Value, ctx: &Context, limit: Duration) -> Result<Outcome> {
         let reply = self.ask_for(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from }), limit).await?;
         Ok(Outcome { result: reply["ok"].clone(), appends: appends(app, &reply["appends"])?, later: reply["later"] == true })

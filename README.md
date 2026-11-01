@@ -19,7 +19,7 @@ Your machines run a small node and become **servers**. Each server has owners an
 
 Everything lives in one of three scopes: yours, a group's (a team, a family), or everyone's. Anyone can start a group and invite people; being in one shares the group's data, never your own. Everything anyone does is a signed entry, which goes only to the servers that hold its scope; every view is rebuilt by replaying entries in one shared order, so every server shows the same once it has caught up. Nobody, admins included, sees your data unless you trust their server, and an admin opening it is something you see.
 
-Inside run **apps**: JavaScript with tools for agents, screens and widgets. `one deploy <dir>` puts an app's code into the install; every app runs its latest deploy everywhere, and everyone can read its code as written. You install apps for yourself, group admins for their group, and admins for everyone. Apps reach what only some machines can do (iMessage on a Mac, a local model, a shell, WhatsApp's linked session) through **drivers**, native code a server's owners install on it. Keys, sign-ins and accounts live in the **Vault**, as items apps are switched on for: they use secret fields but never see them. Nothing is built in.
+Inside run **apps**: JavaScript with tools for agents, screens and widgets. `one deploy <dir>` puts an app's code into the install; every app runs its latest deploy everywhere, and everyone can read its code as written. You install apps for yourself, group admins for their group, and admins for everyone. Apps reach what only some machines can do (iMessage on a Mac, a local model, a shell, WhatsApp's linked session) through **server sidecars**, native code a server's owners install on it. Keys, sign-ins and accounts live in the **Vault**, as items apps are switched on for: they use secret fields but never see them. Nothing is built in.
 
 ## What's in it
 
@@ -49,7 +49,7 @@ one group create Family                  # share data with others: one group inv
 
 For agents: `claude mcp add --scope user one -- one mcp`.
 
-On a Mac, `apple/build.sh` builds the app with the node and the Apple drivers inside it.
+On a Mac, `apple/build.sh` builds the app with the node and the Apple sidecars inside it.
 
 ## Make it yours
 

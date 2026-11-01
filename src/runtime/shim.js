@@ -31,7 +31,8 @@ function describe() {
     }),
     badge: typeof app.badge === "function",
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
-    uses: { apps: app.uses?.apps || [], drivers: app.uses?.drivers || [] },
+    // `drivers` is what `sidecars` was called first; apps that say it still use theirs.
+    uses: { apps: app.uses?.apps || [], sidecars: [...(app.uses?.sidecars || []), ...(app.uses?.drivers || [])] },
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
   };
 }
@@ -97,7 +98,7 @@ export class Store extends DurableObject {
   }
 }
 
-/// Asks the node something for the call with `token`: other apps' and drivers' operations, blobs, the install's apps.
+/// Asks the node something for the call with `token`: other apps' and sidecars' operations, blobs, the install's apps.
 async function askNode(token, path, init = {}) {
   const r = await fetchOut(new Request(`http://one.internal/${path}`, { ...init, headers: { "x-one-call": token } }));
   if (!r.ok) throw new Error(await r.text());
@@ -162,18 +163,19 @@ function context(env, body, appends, later) {
     },
   });
   const scopes = body.scopes.map(handle);
-  // What the node does for a call: other apps' and drivers' operations, blobs, the install's apps.
+  // What the node does for a call: other apps' and sidecars' operations, blobs, the install's apps.
   const ask = (path, init) => askNode(body.token, path, init);
-  // `ctx.apps.<name>.<op>(input, { server })`, for exactly the apps (or drivers) the app says it uses; `server` (a
-  // name) runs it there, like a driver on the machine that has what it needs.
+  // `ctx.apps.<name>.<op>(input, { server })`, for exactly the apps (or sidecars) the app says it uses; `server` (a
+  // name) runs it there, like a sidecar on the machine that has what it needs.
+  const uses = { apps: app.uses?.apps || [], sidecars: [...(app.uses?.sidecars || []), ...(app.uses?.drivers || [])] };
   const used = (kind) => new Proxy({}, {
     get(_, name) {
       if (typeof name !== "string" || name === "then") return undefined;
-      if (!(app.uses?.[kind] || []).includes(name)) throw new Error(`${app.name} doesn't use ${name}: add it to uses.${kind}`);
+      if (!uses[kind].includes(name)) throw new Error(`${app.name} doesn't use ${name}: add it to uses.${kind}`);
       return new Proxy({}, {
         get(_, op) {
           if (typeof op !== "string" || op === "then") return undefined;
-          return async (input = {}, { server } = {}) => (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, driver: kind === "drivers", op, input, server }) })).json()).ok;
+          return async (input = {}, { server } = {}) => (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, sidecar: kind === "sidecars", op, input, server }) })).json()).ok;
         },
       });
     },
@@ -201,7 +203,9 @@ function context(env, body, appends, later) {
     groups: scopes.filter((s) => s.id.startsWith("group:")),
     group: (id) => find(id.startsWith("group:") ? id : `group:${id}`),
     apps: used("apps"),
-    drivers: used("drivers"),
+    sidecars: used("sidecars"),
+    // What `sidecars` was called first.
+    drivers: used("sidecars"),
     blob: {
       put: async (bytes) => (await (await ask("blob", { method: "POST", body: bytes })).json()).blob,
       get: async (hash) => new Uint8Array(await (await ask(`blob/${hash}`)).arrayBuffer()),
@@ -256,11 +260,16 @@ function context(env, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ retire: name, how });
     },
-    /// Removes a driver from a server (by name), or with installed lets it register there again, for someone acting
-    /// for one of the server's owners.
+    /// Removes a sidecar from a server (by name), or with installed lets it run there again, for someone acting for one
+    /// of the server's owners.
+    sidecar: (name, server, installed = false) => {
+      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+      appends.push({ sidecar: name, server, installed });
+    },
+    /// What `sidecar` was called first.
     driver: (name, server, installed = false) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ driver: name, server, installed });
+      appends.push({ sidecar: name, server, installed });
     },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     schedule: (name, schedule, scope, on = true) => {

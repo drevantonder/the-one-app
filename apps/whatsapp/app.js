@@ -1,12 +1,12 @@
 // WhatsApp: the person's WhatsApp accounts, each a phone linked to one of their servers as WhatsApp Desktop is linked.
-// The whatsapp driver links the phone and keeps its messages, on each server whose owner installed it; this app is
+// The whatsapp sidecar links the phone and keeps its messages, on each server whose owner installed it; this app is
 // what people and agents use, and a connector (SPEC.md "Connectors").
 
-/// Runs one of the whatsapp driver's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the whatsapp sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
 /// says what's needed instead of how the call failed.
-async function driver(ctx, op, input) {
+async function sidecar(ctx, op, input) {
   try {
-    return await ctx.drivers.whatsapp[op](input);
+    return await ctx.sidecars.whatsapp[op](input);
   } catch (err) {
     if (String(err.message).includes("no server runs whatsapp for you")) throw new Error(NEEDS);
     throw err;
@@ -15,9 +15,9 @@ async function driver(ctx, op, input) {
 
 const NEEDS = "WhatsApp needs one of your servers to link your phone to, and none of them runs it. Ask an owner of one to install it.";
 
-/// The caller's online servers that run the driver, by name.
+/// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
-  return (await ctx.servers()).filter((s) => s.online && (s.drivers || []).includes("whatsapp")).map((s) => s.name);
+  return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("whatsapp")).map((s) => s.name);
 }
 
 export default {
@@ -30,66 +30,66 @@ export default {
   connector: true,
   needs: "Needs a server of yours to link your phone to",
   instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their servers, as WhatsApp Desktop is linked; calls find the server. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another server; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
-  uses: { drivers: ["whatsapp"] },
+  uses: { sidecars: ["whatsapp"] },
 
   ops: {
     accounts: {
       reads: true,
       description: "The WhatsApp accounts linked on any of your servers, this one's first: each { account, ok, server }, with why when ok is false.",
       input: {"properties": {}, "type": "object"},
-      // A connector lists no accounts, rather than failing, where no server runs its driver; its settings say why.
-      run: async (ctx, input) => ((await running(ctx)).length ? driver(ctx, "accounts", input) : []),
+      // A connector lists no accounts, rather than failing, where no server runs its sidecar; its settings say why.
+      run: async (ctx, input) => ((await running(ctx)).length ? sidecar(ctx, "accounts", input) : []),
     },
     status: {
       reads: true,
       description: "Which accounts are linked and connected here, and how many messages each keeps; or on which of your servers WhatsApp is linked.",
       input: {"properties": {}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "status", input),
+      run: (ctx, input) => sidecar(ctx, "status", input),
     },
     sign_in: {
       description: "Link a WhatsApp account here, or another one, as WhatsApp Desktop is linked: returns a QR code to scan on the phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code is on the phone itself.",
       input: {"properties": {"phone": {"description": "the account's number with its country code, e.g. +61 400 000 000, for a code to type on the phone", "type": "string"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "sign_in", input),
+      run: (ctx, input) => sidecar(ctx, "sign_in", input),
     },
     chats: {
       reads: true,
       description: "Recent WhatsApp chats, most recent first: who, when, the last message, and how many are unread.",
       input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "limit": {"description": "at most this many; default 30", "type": "integer"}, "skip": {"description": "skip this many of the most recent, to page back", "type": "integer"}, "unread": {"description": "only unread chats", "type": "boolean"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "chats", input),
+      run: (ctx, input) => sidecar(ctx, "chats", input),
     },
     read: {
       reads: true,
       description: "A WhatsApp chat's messages, newest last. Page back with skip. WhatsApp isn't told they were read: the sender sees no blue ticks, and the chat stays unread on the phone.",
       input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "chat": {"description": "the chat's name, a part of it only one chat has, a phone number, or a JID", "type": "string"}, "limit": {"description": "this many; default 30", "type": "integer"}, "skip": {"description": "skip this many of the newest, to read further back", "type": "integer"}}, "required": ["chat"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "read", input),
+      run: (ctx, input) => sidecar(ctx, "read", input),
     },
     search: {
       reads: true,
       description: "WhatsApp messages containing some text, across chats or in one, newest last.",
       input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "chat": {"description": "only in this chat", "type": "string"}, "limit": {"description": "at most this many; default 30", "type": "integer"}, "query": {"description": "text to look for, case-insensitive", "type": "string"}, "skip": {"description": "skip this many of the newest matches, to page back", "type": "integer"}}, "required": ["query"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "search", input),
+      run: (ctx, input) => sidecar(ctx, "search", input),
     },
     send: {
       description: "Send a WhatsApp message, as the linked account, to a chat, a contact or a phone number. This sends a real message to a real person.",
       input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "chat": {"description": "the chat's name, a part of it only one chat has, a contact's exact name, a phone number with its country code, or a JID", "type": "string"}, "text": {"description": "the message", "type": "string"}}, "required": ["chat", "text"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "send", input),
+      run: (ctx, input) => sidecar(ctx, "send", input),
     },
     move: {
       description: "Move a WhatsApp link, with its kept messages, from the server it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted here once the other server has it.",
       input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "to": {"description": "the server to move it to, by name", "type": "string"}}, "required": ["to"], "type": "object"},
-      run: (ctx, input) => driver(ctx, "move", input),
+      run: (ctx, input) => sidecar(ctx, "move", input),
     },
     sign_out: {
       confirm: true,
       description: "Unlink a WhatsApp account: removes this server from its linked devices and deletes the messages kept here. Destructive: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
       input: {"properties": {"account": {"description": "the account's number; needed when several are linked here", "type": "string"}}, "type": "object"},
-      run: (ctx, input) => driver(ctx, "sign_out", input),
+      run: (ctx, input) => sidecar(ctx, "sign_out", input),
     },
     _pairing: {
       reads: true,
       description: "The QR code and phone code while a phone is linking, for the settings screen.",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => driver(ctx, "_pairing", input),
+      run: (ctx, input) => sidecar(ctx, "_pairing", input),
     },
     _running: {
       reads: true,

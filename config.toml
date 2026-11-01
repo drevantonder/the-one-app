@@ -21,9 +21,9 @@ logo = "icons/Logo.png"
 
 # An install's settings until its admins change them in Settings (SPEC.md, "setting"). Every install has:
 # store, the app the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.install);
-# push, the driver phones register their push tokens with and apps push through (providers/push), empty for off;
+# push, the sidecar phones register their push tokens with and apps push through (sidecars/push), empty for off;
 # made_here, what the App Store calls the apps made in the install, beside the ones built in; and join_domain, the
-# email domain people may join with by signing in, where the work-email join driver runs (providers/workjoin).
+# email domain people may join with by signing in, where the work-email join sidecar runs (sidecars/workjoin).
 [settings]
 store = "apps"
 push = "push"

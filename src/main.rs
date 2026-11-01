@@ -61,10 +61,10 @@ Usage:
                                        answers one, a new item's values on stdin (one line, or a JSON object)
   {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
-  {CLI} drivers                        the drivers on each server: version, and who installed them
-  {CLI} drivers remove|add <name> [--server <name>]
-                                       remove a driver from a server you own (here by default), or allow it there
-                                       again; drivers/install.sh <name> [server] installs one and allows it
+  {CLI} sidecars                       the server sidecars on each server: version, and who installed them
+  {CLI} sidecars remove|add <name> [--server <name>]
+                                       remove a sidecar from a server you own (here by default), or allow it there
+                                       again; sidecars/install.sh <name> [server] installs one and allows it
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's operations
@@ -373,11 +373,12 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/retire", json!({ "app": app, "how": past }))?;
             println!("{app} is {past}{}.", if *how == "delete" { ": it's in the App Store's Recently Deleted until you restore or erase it" } else { "" });
         }
-        ["drivers"] => {
+        // `drivers`: what sidecars were called first.
+        ["sidecars" | "drivers"] => {
             let state = get("/v1/state")?;
             for s in state["install"]["servers"].as_array().into_iter().flatten() {
-                let installed = s["installed_drivers"].as_array().cloned().unwrap_or_default();
-                let removed = s["removed_drivers"].as_array().cloned().unwrap_or_default();
+                let installed = s["installed_sidecars"].as_array().cloned().unwrap_or_default();
+                let removed = s["removed_sidecars"].as_array().cloned().unwrap_or_default();
                 if installed.is_empty() && removed.is_empty() {
                     continue;
                 }
@@ -396,12 +397,12 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
-        ["drivers", how @ ("remove" | "add"), name] => {
+        ["sidecars" | "drivers", how @ ("remove" | "add"), name] => {
             let server = flags.get("server").and_then(Value::as_str);
-            post("/v1/driver", json!({ "name": name, "server": server, "installed": *how == "add" }))?;
+            post("/v1/sidecar", json!({ "name": name, "server": server, "installed": *how == "add" }))?;
             let on = server.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
             match *how {
-                "remove" => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} drivers add {name})."),
+                "remove" => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} sidecars add {name})."),
                 _ => println!("{name} is installed {on}: it serves there while it runs."),
             }
         }
@@ -508,7 +509,7 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     let bundle = one::deploy::build(dir)?;
     let blob = request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
     let apps = get("/v1/apps")?;
-    // A driver of the same name is listed too, without an owner: the app is still to be made.
+    // A sidecar of the same name is listed too, without an owner: the app is still to be made.
     if !apps.as_array().into_iter().flatten().any(|a| a["name"] == name.as_str() && !a["owner"].is_null()) {
         let owner = match flags.get("owner").and_then(Value::as_str) {
             Some(owner) => owner.to_string(),
@@ -641,7 +642,7 @@ fn ago(ms: u64) -> String {
 }
 
 /// Puts the usual tool folders on PATH: launchd starts the Mac's node with almost none, and the shell, agents and
-/// drivers it starts need Homebrew's and the user's own tools.
+/// sidecars it starts need Homebrew's and the user's own tools.
 fn usual_path() {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let mut path: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
@@ -673,7 +674,7 @@ async fn serve() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn,iroh=error,noq_proto=error".into()))
         .init();
     let dir = one::home();
-    let (node, router) = Node::start(&dir, one::builtin::all()).await?;
+    let (node, router) = Node::start(&dir, one::sidecars::built_in()).await?;
     let listener = tokio::net::TcpListener::bind(addr()).await.with_context(|| format!("listen on {}", addr()))?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
     let http = axum::serve(listener, api::router(node));
@@ -926,7 +927,7 @@ fn tools() -> Result<Vec<Value>, Value> {
     let mut tools = vault_tools();
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
-        // Operations starting with `_` are for the node, such as a driver's `_screen`.
+        // Operations starting with `_` are for the node, such as a sidecar's `_screen`.
         for op in app["ops"].as_array().into_iter().flatten().filter(|op| !op["name"].as_str().unwrap_or("").starts_with('_')) {
             let mut tool = json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": ops::mcp_schema(app, op) });
             let hints = ops::mcp_annotations(op);

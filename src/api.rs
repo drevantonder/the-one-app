@@ -50,7 +50,9 @@ pub fn router(node: Node) -> Router {
         .route("/v1/schedule", post(schedule))
         .route("/v1/arrange", post(arrange))
         .route("/v1/retire", post(retire))
-        .route("/v1/driver", post(driver))
+        .route("/v1/sidecar", post(sidecar))
+        // What /v1/sidecar was called first.
+        .route("/v1/driver", post(sidecar))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
         .route("/v1/vault", get(vault_get).post(vault_post))
@@ -67,6 +69,10 @@ pub fn router(node: Node) -> Router {
         .route("/v1/events", get(events))
         .route("/v1/screens/{app}/{screen}", get(screen))
         .route("/hooks/{app}/{name}", post(hook))
+        .route("/v1/sidecars/{app}", post(register))
+        .route("/v1/sidecars/{app}/calls", get(next_call))
+        .route("/v1/sidecars/{app}/calls/{id}", post(reply))
+        // Where sidecars registered before they were called that, as the ones installed then still do.
         .route("/v1/providers/{app}", post(register))
         .route("/v1/providers/{app}/calls", get(next_call))
         .route("/v1/providers/{app}/calls/{id}", post(reply))
@@ -124,10 +130,10 @@ async fn apps(State(node): State<Node>) -> Reply {
     Ok(Json(json!(node.apps(&local(&node)?).await?)))
 }
 
-/// `{ name, server?, installed? }`: removes a driver from a server (this one by default), or with `installed` lets it
+/// `{ name, server?, installed? }`: removes a sidecar from a server (this one by default), or with `installed` lets it
 /// register there again.
-async fn driver(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.set_driver(&local(&node)?, body["server"].as_str(), text(&body, "name")?, body["installed"] == true).await?;
+async fn sidecar(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    node.set_sidecar(&local(&node)?, body["server"].as_str(), text(&body, "name")?, body["installed"] == true).await?;
     done()
 }
 
@@ -372,19 +378,19 @@ async fn blob(State(node): State<Node>, Path(hash): Path<String>) -> Result<Resp
 }
 
 async fn register(State(node): State<Node>, Path(app): Path<String>, Json(describe): Json<Value>) -> Reply {
-    node.provide(&app, describe).await?;
+    node.register_sidecar(&app, describe).await?;
     done()
 }
 
 async fn next_call(State(node): State<Node>, Path(app): Path<String>) -> Result<Response, Error> {
-    Ok(match node.providers().next(&app).await? {
+    Ok(match node.sidecars().next(&app).await? {
         Some(call) => Json(json!(call)).into_response(),
         None => StatusCode::NO_CONTENT.into_response(),
     })
 }
 
 async fn reply(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
-    node.providers().reply(&app, id, body)?;
+    node.sidecars().reply(&app, id, body)?;
     done()
 }
 

@@ -20,7 +20,7 @@ use crate::members::{self, Members, Principal, Role, ScopeState};
 use crate::release::{self, Release};
 use crate::schedules::{self, Schedule};
 use crate::store::{Frontier, Store};
-use crate::sync::{self, Driver, Handled, Msg, Replica};
+use crate::sync::{self, Sidecar, Handled, Msg, Replica};
 use crate::vault;
 
 const JOIN_ALPN: &[u8] = b"one/join/1";
@@ -29,8 +29,8 @@ pub const CLIENT_ALPN: &[u8] = b"one/client/1";
 const BLOB_ALPN: &[u8] = b"one/blob/1";
 /// How long a call may run before it's stopped.
 const CALL_LIMIT: Duration = Duration::from_secs(30);
-/// A driver's call may take longer, as a browser or a desktop starts: as long as a provider is waited for.
-const DRIVER_LIMIT: Duration = Duration::from_secs(600);
+/// A sidecar's call may take longer, as a browser or a desktop starts: as long as a sidecar is waited for.
+const SIDECAR_LIMIT: Duration = Duration::from_secs(600);
 /// The most a call or a client's request (or its answer) may carry: an email of a claim's receipts, base64, fits.
 const MESSAGE_LIMIT: usize = 64 << 20;
 /// How long a waking server waits for its first round of dialing before it may call itself ready.
@@ -77,7 +77,7 @@ struct Session {
     tx: mpsc::UnboundedSender<Msg>,
     /// The frontier the peer last said it had.
     frontier: Option<Frontier>,
-    drivers: Vec<Driver>,
+    sidecars: Vec<Sidecar>,
     /// How loaded the peer said it is.
     load: Option<crate::load::Load>,
     /// Whether this server has received everything the peer's first hello offered it.
@@ -158,13 +158,16 @@ pub struct Caller {
     pub agent: Option<String>,
 }
 
-/// An operation to run: of an app, or of a driver.
+/// An operation to run: of an app, or of a sidecar.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct CallRequest {
-    /// The app, or for a driver's call, the driver (older machines name a driver here).
+    /// The app, or for a sidecar's call, the sidecar (older machines name a sidecar here).
     #[serde(default)]
     pub app: String,
-    /// The driver whose operation this is, when it is one: an app and the driver it wraps may share a name.
+    /// The sidecar whose operation this is, when it is one: an app and the sidecar it wraps may share a name.
+    #[serde(default)]
+    pub sidecar: Option<String>,
+    /// What `sidecar` was called first, which machines built before send; a call takes it as `sidecar`.
     #[serde(default)]
     pub driver: Option<String>,
     pub op: String,
@@ -228,8 +231,8 @@ pub struct Inner {
     name: Mutex<String>,
     endpoint: Endpoint,
     apps: Apps,
-    native: Vec<crate::native::Native>,
-    pub providers: crate::providers::Providers,
+    built_in_sidecars: Vec<crate::sidecars::BuiltIn>,
+    pub sidecars: crate::sidecars::Sidecars,
     install: Mutex<Option<Install>>,
     pairings: Mutex<HashMap<[u8; 16], Pairing>>,
     events: broadcast::Sender<Event>,
@@ -243,7 +246,7 @@ pub struct Inner {
     built_in: BTreeMap<String, String>,
     /// Each bundle's `icon.png` as a data URL, once read, or none.
     images: Mutex<HashMap<String, Option<String>>>,
-    /// The logos of the sites apps and drivers connect to.
+    /// The logos of the sites apps and sidecars connect to.
     logos: crate::logos::Logos,
     /// The calls, widgets and hooks running now, by the token their requests carry.
     grants: Mutex<HashMap<String, Grant>>,
@@ -307,8 +310,8 @@ impl std::fmt::Debug for Node {
 }
 
 impl Node {
-    /// Starts this server's node, with the native apps this build has.
-    pub async fn start(dir: &Path, native: Vec<crate::native::Native>) -> Result<(Node, Router)> {
+    /// Starts this server's node, with the built-in sidecars this build has.
+    pub async fn start(dir: &Path, built_in_sidecars: Vec<crate::sidecars::BuiltIn>) -> Result<(Node, Router)> {
         std::fs::create_dir_all(dir)?;
         let server = load_server(dir)?;
         let secret = unhex(&server.secret)?;
@@ -329,8 +332,8 @@ impl Node {
             name: Mutex::new(server.name),
             endpoint: endpoint.clone(),
             apps,
-            native,
-            providers: Default::default(),
+            built_in_sidecars,
+            sidecars: Default::default(),
             install: Mutex::new(None),
             pairings: Mutex::new(load_pairings(dir)),
             events,
@@ -379,8 +382,8 @@ impl Node {
         });
         if node.has_install() {
             node.consider_update();
-            for native in node.0.native.iter().filter(|n| n.sync.is_some()) {
-                node.sync_native(native.name);
+            for sidecar in node.0.built_in_sidecars.iter().filter(|n| n.sync.is_some()) {
+                node.sync_built_in(sidecar.name);
             }
         }
         Ok((node, router))
@@ -390,28 +393,28 @@ impl Node {
         self.0.id
     }
 
-    pub fn providers(&self) -> &crate::providers::Providers {
-        &self.0.providers
+    pub fn sidecars(&self) -> &crate::sidecars::Sidecars {
+        &self.0.sidecars
     }
 
-    /// Registers a provider; the node advertises it to the servers it syncs with.
-    pub async fn provide(&self, app: &str, describe: Value) -> Result<()> {
+    /// Registers a sidecar; the node advertises it to the servers it syncs with.
+    pub async fn register_sidecar(&self, app: &str, describe: Value) -> Result<()> {
         if let Some(why) = self.removed_here(app) {
             bail!("{why}");
         }
         if let Some(domain) = describe["domain"].as_str() {
             self.logo(domain, app);
         }
-        self.0.providers.register(app, describe);
+        self.0.sidecars.register(app, describe);
         self.say_hello();
         Ok(())
     }
 
-    /// Removes a driver from a server (this one if none is named), or with `installed` lets it register there again,
+    /// Removes a sidecar from a server (this one if none is named), or with `installed` lets it register there again,
     /// for someone acting for one of the server's owners.
-    pub async fn set_driver(&self, caller: &Caller, server: Option<&str>, name: &str, installed: bool) -> Result<()> {
+    pub async fn set_sidecar(&self, caller: &Caller, server: Option<&str>, name: &str, installed: bool) -> Result<()> {
         let server = server.map(str::to_string).unwrap_or_else(|| self.server_name());
-        let content = self.with(|i| driver_entry(&i.r.members, &caller.user, &server, name, installed))?;
+        let content = self.with(|i| sidecar_entry(&i.r.members, &caller.user, &server, name, installed))?;
         self.member_content(caller, content).await?;
         self.say_hello();
         Ok(())
@@ -560,9 +563,9 @@ impl Node {
             self.0.changed.notify_one();
             self.emit(Event::Servers);
         }
-        for native in &self.0.native {
-            if native.sync.is_some() && handled.new.iter().any(|e| e.content.app == native.name) {
-                self.sync_native(native.name);
+        for sidecar in &self.0.built_in_sidecars {
+            if sidecar.sync.is_some() && handled.new.iter().any(|e| e.content.app == sidecar.name) {
+                self.sync_built_in(sidecar.name);
             }
         }
         let forgotten: Vec<String> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| e.content.data["blob"].as_str().map(str::to_string)).collect();
@@ -686,10 +689,10 @@ impl Node {
         bail!("no server could run it ({})", why.join("; "))
     }
 
-    /// Runs a driver's call on every server that runs it for the caller, one at a time: `{ <server>: answer }`, or
-    /// `{ error }` for one that failed. Only for drivers: an app's call runs once.
+    /// Runs a sidecar's call on every server that runs it for the caller, one at a time: `{ <server>: answer }`, or
+    /// `{ error }` for one that failed. Only for sidecars: an app's call runs once.
     async fn everywhere(&self, req: CallRequest, me: Caller) -> Result<Value> {
-        ensure!(req.driver.is_some(), "{} is an app: its calls run once, on one server", req.app);
+        ensure!(req.sidecar.is_some(), "{} is an app: its calls run once, on one server", req.app);
         let req = CallRequest { server: None, ..req };
         let mut out = serde_json::Map::new();
         for server in self.candidates(&req, &me)? {
@@ -713,14 +716,14 @@ impl Node {
         if let Some(server) = &req.server {
             return Ok(vec![self.find_server(server)?]);
         }
-        let here = self.runs_driver_here(&req.app);
+        let here = self.runs_sidecar_here(&req.app);
         self.with(|i| {
             let m = &i.r.members;
-            let mut servers: Vec<Key> = if req.driver.is_none() {
+            let mut servers: Vec<Key> = if req.sidecar.is_none() {
                 m.servers().map(|s| s.key).filter(|s| m.serves(s, &me.user)).collect()
             } else {
-                let mut s: Vec<Key> = i.sessions.iter().filter(|(_, s)| s.drivers.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
-                if here && (me.user == i.user || (self.0.providers.serves_everyone(&req.app) && i.r.members.serves(&self.0.id, &me.user))) {
+                let mut s: Vec<Key> = i.sessions.iter().filter(|(_, s)| s.sidecars.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
+                if here && (me.user == i.user || (self.0.sidecars.serves_everyone(&req.app) && i.r.members.serves(&self.0.id, &me.user))) {
                     s.push(self.0.id);
                 }
                 s
@@ -731,13 +734,16 @@ impl Node {
         })
     }
 
-    /// A call as the node runs it: one that names a driver is that driver's, whatever app shares its name. As older
-    /// machines ask for a driver, so is one that names an app with no deploy, or that runs on every server.
+    /// A call as the node runs it: one that names a sidecar is that sidecar's, whatever app shares its name. As older
+    /// machines ask for a sidecar, so is one that names an app with no deploy, or that runs on every server.
     fn resolve(&self, mut req: CallRequest) -> CallRequest {
-        if let Some(driver) = &req.driver {
-            req.app = driver.clone();
+        if req.sidecar.is_none() {
+            req.sidecar = req.driver.take();
+        }
+        if let Some(sidecar) = &req.sidecar {
+            req.app = sidecar.clone();
         } else if req.app != members::APP && (!self.deployed(&req.app) || req.server.as_deref() == Some("all")) {
-            req.driver = Some(req.app.clone());
+            req.sidecar = Some(req.app.clone());
         }
         req
     }
@@ -746,31 +752,31 @@ impl Node {
         self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some()))).unwrap_or(false)
     }
 
-    /// The drivers serving on this server, whom each serves, and what each says it is: those built into the node,
-    /// then those registered. A driver one of its owners removed from this server isn't served here.
-    fn drivers_here(&self, i: &Install) -> Vec<Driver> {
+    /// The sidecars serving on this server, whom each serves, and what each says it is: those built into the node,
+    /// then those registered. A sidecar one of its owners removed from this server isn't served here.
+    fn sidecars_here(&self, i: &Install) -> Vec<Sidecar> {
         let m = &i.r.members;
         let everyone: Vec<String> = m.users.keys().filter(|u| m.serves(&self.0.id, u)).cloned().collect();
-        let removed = |name: &str| m.drivers.get(&(self.0.id, name.to_string())).is_some_and(|d| d.removed());
-        let built_in = |n: &crate::native::Native| {
+        let removed = |name: &str| m.sidecars.get(&(self.0.id, name.to_string())).is_some_and(|d| d.removed());
+        let built_in = |n: &crate::sidecars::BuiltIn| {
             let mut d = (n.describe)();
             d["name"] = json!(n.name);
             d["built_in"] = json!(true);
             d
         };
-        let mut drivers: Vec<Driver> = self.0.native.iter().filter(|n| !removed(n.name)).map(|n| (n.name.to_string(), vec![i.user.clone()], built_in(n))).collect();
-        drivers.extend(self.0.providers.describe().into_iter().filter(|d| !removed(d["name"].as_str().unwrap_or(""))).map(|d| {
+        let mut sidecars: Vec<Sidecar> = self.0.built_in_sidecars.iter().filter(|n| !removed(n.name)).map(|n| (n.name.to_string(), vec![i.user.clone()], built_in(n))).collect();
+        sidecars.extend(self.0.sidecars.describe().into_iter().filter(|d| !removed(d["name"].as_str().unwrap_or(""))).map(|d| {
             let users = if d["serves"] == "everyone" { everyone.clone() } else { vec![i.user.clone()] };
             (d["name"].as_str().unwrap_or("").to_string(), users, d)
         }));
-        drivers
+        sidecars
     }
 
-    /// Why a driver isn't served here, if one of this server's owners removed it.
+    /// Why a sidecar isn't served here, if one of this server's owners removed it.
     fn removed_here(&self, name: &str) -> Option<String> {
         self.with(|i| {
             let m = &i.r.members;
-            Ok(m.drivers.get(&(self.0.id, name.to_string())).filter(|d| d.removed()).map(|d| {
+            Ok(m.sidecars.get(&(self.0.id, name.to_string())).filter(|d| d.removed()).map(|d| {
                 let by = m.users.get(&d.by).map(|u| u.name.as_str()).unwrap_or("an owner");
                 format!("{name} was removed from {} by {by}; an owner of it installs it again", self.server_name())
             }))
@@ -779,15 +785,15 @@ impl Node {
         .flatten()
     }
 
-    fn runs_driver_here(&self, app: &str) -> bool {
-        (self.0.native.iter().any(|n| n.name == app) || self.0.providers.has(app)) && self.removed_here(app).is_none()
+    fn runs_sidecar_here(&self, app: &str) -> bool {
+        (self.0.built_in_sidecars.iter().any(|n| n.name == app) || self.0.sidecars.has(app)) && self.removed_here(app).is_none()
     }
 
     /// Asks another server to run a call.
     async fn ask_server(&self, server: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
         let conn = tokio::time::timeout(Duration::from_secs(10), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, CALL_ALPN)).await.context("timed out")??;
         let (mut send, mut recv) = conn.open_bi().await?;
-        let request = json!({ "app": req.app, "driver": req.driver, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
+        let request = json!({ "app": req.app, "sidecar": req.sidecar, "driver": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
         send.write_all(&serde_json::to_vec(&request)?).await?;
         send.finish()?;
         let reply = tokio::time::timeout(self.limit(req).await + Duration::from_secs(5), recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
@@ -806,13 +812,13 @@ impl Node {
         }
     }
 
-    /// How long a call may run: an app's, CALL_LIMIT; a driver's, and that of an app that uses drivers (which waits
-    /// on theirs), DRIVER_LIMIT.
+    /// How long a call may run: an app's, CALL_LIMIT; a sidecar's, and that of an app that uses sidecars (which waits
+    /// on theirs), SIDECAR_LIMIT.
     async fn limit(&self, req: &CallRequest) -> Duration {
         if req.app == members::APP {
             return CALL_LIMIT;
         }
-        if req.driver.is_some() || !self.uses_here(&req.app).await.1.is_empty() { DRIVER_LIMIT } else { CALL_LIMIT }
+        if req.sidecar.is_some() || !self.uses_here(&req.app).await.1.is_empty() { SIDECAR_LIMIT } else { CALL_LIMIT }
     }
 
     async fn run_here(&self, req: &CallRequest, me: &Caller, limit: Duration) -> Result<Reply> {
@@ -820,12 +826,12 @@ impl Node {
         if req.app == members::APP {
             return self.node_op(&req.op, &input, me).await.map(Reply::Ok);
         }
-        if req.driver.is_some() {
-            if !self.runs_driver_here(&req.app) {
+        if req.sidecar.is_some() {
+            if !self.runs_sidecar_here(&req.app) {
                 return Ok(Reply::Elsewhere(format!("{} doesn't run here", req.app)));
             }
-            return match self.run_driver(&req.app, &req.op, input, me, req.from.clone()).await {
-                Err(err) if err.is::<crate::native::Elsewhere>() => Ok(Reply::Elsewhere(err.to_string())),
+            return match self.run_sidecar(&req.app, &req.op, input, me, req.from.clone()).await {
+                Err(err) if err.is::<crate::sidecars::Elsewhere>() => Ok(Reply::Elsewhere(err.to_string())),
                 other => other.map(Reply::Ok),
             };
         }
@@ -1022,16 +1028,16 @@ impl Node {
         });
     }
 
-    /// Runs a native app or provider here, for this server's local user.
-    async fn run_driver(&self, app: &str, op: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
-        let everyone = self.0.providers.serves_everyone(app) && self.with(|i| Ok(i.r.members.serves(&self.0.id, &me.user)))?;
+    /// Runs a built-in sidecar or sidecar here, for this server's local user.
+    async fn run_sidecar(&self, app: &str, op: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
+        let everyone = self.0.sidecars.serves_everyone(app) && self.with(|i| Ok(i.r.members.serves(&self.0.id, &me.user)))?;
         let user = if everyone { me.user.clone() } else { self.user()? };
         ensure!(me.user == user, "{app} runs only for {}'s own user", self.server_name());
         let caller = self.me_for(me)?;
-        let native = self.0.native.iter().find(|n| n.name == app);
-        let (result, appends) = match native {
+        let built_in = self.0.built_in_sidecars.iter().find(|n| n.name == app);
+        let (result, appends) = match built_in {
             Some(n) => (n.call)(op.to_string(), input, caller, if n.entries { self.app_entries(app)? } else { vec![] }).await?,
-            None => self.0.providers.call(app, op, input, caller, from).await?,
+            None => self.0.sidecars.call(app, op, input, caller, from).await?,
         };
         let by = (me.key != self.0.id).then_some(me.key);
         for content in appends {
@@ -1780,10 +1786,10 @@ impl Node {
         let body = match deployed {
             // A screen the app doesn't have (an old or mistyped link) is a page that says so.
             true => self.0.apps.screen(app, name).await?.unwrap_or_else(|| "<div id=\"missing\"></div><script>missing.innerHTML = one.notFound()</script>".into()),
-            // A driver's screen, for now: its `_screen` operation gives the body, wherever the driver runs.
+            // A sidecar's screen, for now: its `_screen` operation gives the body, wherever the sidecar runs.
             false => {
                 let input = json!({ "name": name, "params": params });
-                let req = CallRequest { app: app.into(), driver: Some(app.into()), op: "_screen".into(), input, ..Default::default() };
+                let req = CallRequest { app: app.into(), sidecar: Some(app.into()), op: "_screen".into(), input, ..Default::default() };
                 let body = self.route(req, viewer.clone()).await?;
                 body.as_str().context("the screen isn't text")?.to_string()
             }
@@ -1803,24 +1809,24 @@ impl Node {
         ))
     }
 
-    /// Every app in the install, with what each does for `viewer` where it's installed for them; and the drivers
+    /// Every app in the install, with what each does for `viewer` where it's installed for them; and the sidecars
     /// that serve them.
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let mut out = self.catalog(viewer, false).await?;
-        let mut drivers = Vec::new();
+        let mut sidecars = Vec::new();
         if viewer.user == self.user()? {
-            drivers.extend(self.with(|i| Ok(self.drivers_here(i)))?.into_iter().map(|d| d.2));
+            sidecars.extend(self.with(|i| Ok(self.sidecars_here(i)))?.into_iter().map(|d| d.2));
         }
         let remote = self.with(|i| {
-            let mut d: Vec<Value> = i.sessions.values().flat_map(|s| s.drivers.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
+            let mut d: Vec<Value> = i.sessions.values().flat_map(|s| s.sidecars.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
             d.sort_by_key(|v| v["name"].as_str().unwrap_or("").to_string());
             Ok(d)
         })?;
-        for mut describe in drivers.into_iter().chain(remote) {
+        for mut describe in sidecars.into_iter().chain(remote) {
             if out.iter().any(|a| a["name"] == describe["name"]) {
                 continue;
             }
-            // A driver serves its user, so its screens are on their own page.
+            // A sidecar serves its user, so its screens are on their own page.
             if describe["screens"].as_array().is_some_and(|s| !s.is_empty()) && describe["installed"].is_null() {
                 describe["installed"] = json!([Scope::User(viewer.user.clone()).to_string()]);
             }
@@ -1904,19 +1910,19 @@ impl Node {
                 if let Some((image, kind)) = self.logo(domain, name) {
                     (info["image"], info["image_kind"]) = (json!(image), json!(kind));
                 }
-            } else if let Some((image, kind)) = info["name"].as_str().and_then(|n| self.driver_image(n)) {
-                // An app over a driver of its name shows the picture the driver gives (a Mac app's icon).
+            } else if let Some((image, kind)) = info["name"].as_str().and_then(|n| self.sidecar_image(n)) {
+                // An app over a sidecar of its name shows the picture the sidecar gives (a Mac app's icon).
                 (info["image"], info["image_kind"]) = (image, kind);
             }
         }
         Ok(out)
     }
 
-    /// The picture a driver called `name` gives, here or on a server this one is connected to, and its kind.
-    fn driver_image(&self, name: &str) -> Option<(Value, Value)> {
+    /// The picture a sidecar called `name` gives, here or on a server this one is connected to, and its kind.
+    fn sidecar_image(&self, name: &str) -> Option<(Value, Value)> {
         self.with(|i| {
-            let here = self.drivers_here(i).into_iter().map(|d| d.2);
-            let there = i.sessions.values().flat_map(|s| s.drivers.iter().map(|d| d.2.clone()));
+            let here = self.sidecars_here(i).into_iter().map(|d| d.2);
+            let there = i.sessions.values().flat_map(|s| s.sidecars.iter().map(|d| d.2.clone()));
             Ok(here.chain(there).find(|d| d["name"] == name && d["image"].is_string()).map(|d| (d["image"].clone(), d["image_kind"].clone())))
         })
         .ok()
@@ -1977,7 +1983,7 @@ impl Node {
         self.member_content(caller, deploy(app, bundle)).await
     }
 
-    /// What an app's latest deploy says it uses: (apps, drivers). Waits a while for this server to run that deploy.
+    /// What an app's latest deploy says it uses: (apps, sidecars). Waits a while for this server to run that deploy.
     async fn uses(&self, app: &str) -> (Vec<String>, Vec<String>) {
         let started = Instant::now();
         while started.elapsed() < CALL_LIMIT {
@@ -1990,11 +1996,11 @@ impl Node {
         self.uses_here(app).await
     }
 
-    /// What the deploy of `app` this server runs says it uses: (apps, drivers).
+    /// What the deploy of `app` this server runs says it uses: (apps, sidecars).
     async fn uses_here(&self, app: &str) -> (Vec<String>, Vec<String>) {
         let d = if self.0.apps.has(app) { self.0.apps.describe(app).await.unwrap_or_default() } else { Value::Null };
         let list = |k: &str| d["uses"][k].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
-        (list("apps"), list("drivers"))
+        (list("apps"), list("sidecars"))
     }
 
     /// The entries that install (or uninstall) `app` in `scope` for `caller`, with their own rights there. Installing
@@ -2077,7 +2083,7 @@ impl Node {
     }
 
     /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs an
-    /// operation of an app or driver the calling app uses, as its caller; `POST /blob` keeps a blob, `GET
+    /// operation of an app or sidecar the calling app uses, as its caller; `POST /blob` keeps a blob, `GET
     /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the install's apps, `GET /servers` its servers.
     pub async fn internal(&self, token: &str, method: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
         use axum::response::IntoResponse;
@@ -2088,16 +2094,16 @@ impl Node {
                 ensure!(!grant.read_only, "this call only reads: it can't run other apps' operations");
                 let req: Value = serde_json::from_slice(&body)?;
                 let (app, op) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
-                // `ctx.drivers` says it's a driver's; `ctx.apps`, an app's (or, from older shims, either).
-                let driver = req["driver"] == true;
-                let (apps, drivers) = self.uses(&grant.app).await;
-                let used = if driver { drivers.iter().any(|u| u == app) } else { apps.iter().chain(&drivers).any(|u| u == app) };
+                // `ctx.sidecars` says it's a sidecar's; `ctx.apps`, an app's (or, from older shims, either).
+                let sidecar = req["sidecar"] == true || req["driver"] == true;
+                let (apps, sidecars) = self.uses(&grant.app).await;
+                let used = if sidecar { sidecars.iter().any(|u| u == app) } else { apps.iter().chain(&sidecars).any(|u| u == app) };
                 ensure!(used, "{} doesn't use {app}", grant.app);
                 ensure!(grant.depth < MAX_DEPTH, "{} called {app} {} calls deep, and apps call each other at most {MAX_DEPTH} deep: is it looping?", grant.app, grant.depth + 1);
                 self.count(&grant.app, "call").await?;
                 // An app may say which server runs it, like the one with a local model.
                 let server = req["server"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
-                let call = CallRequest { app: app.into(), driver: driver.then(|| app.into()), op: op.into(), input: req["input"].clone(), server, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
+                let call = CallRequest { app: app.into(), sidecar: sidecar.then(|| app.into()), op: op.into(), input: req["input"].clone(), server, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
             ("GET", "/vault") => ok(json!(self.vault_of(&grant.app, &grant.scopes)?)),
@@ -2159,7 +2165,7 @@ impl Node {
                     return Ok(ok(json!({ "ok": { "sent": false, "why": "push is off in this install" } })));
                 }
                 let input: Value = serde_json::from_slice(&body)?;
-                let call = CallRequest { app: push.clone(), driver: Some(push), op: "send".into(), input, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
+                let call = CallRequest { app: push.clone(), sidecar: Some(push), op: "send".into(), input, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
             ("GET", "/servers") => ok(self.state_for(&grant.caller)["install"]["servers"].take()),
@@ -2191,7 +2197,7 @@ impl Node {
             let m = &i.r.members;
             let me = &viewer.user;
             let list = |ps: Vec<Principal>| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
-            let here_drivers = self.drivers_here(i);
+            let here_sidecars = self.sidecars_here(i);
             let servers: Vec<Value> = m
                 .servers()
                 .map(|s| {
@@ -2210,9 +2216,11 @@ impl Node {
                         "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(),
                         "serves_me": m.serves(&s.key, me),
                         "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
-                        "drivers": if s.key == self.0.id { here_drivers.iter().map(|d| d.0.clone()).collect() } else { session.map(|s| s.drivers.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },
-                        "installed_drivers": installed_drivers(m, s, if s.key == self.0.id { &here_drivers } else { session.map(|s| s.drivers.as_slice()).unwrap_or_default() }, i.builds.get(&s.key).map(|r| r.commit.as_str())),
-                        "removed_drivers": m.drivers.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
+                        // `drivers` too: sidecars' name before, which shells and sidecars built before still read.
+                        "drivers": if s.key == self.0.id { here_sidecars.iter().map(|d| d.0.clone()).collect() } else { session.map(|s| s.sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },
+                        "sidecars": if s.key == self.0.id { here_sidecars.iter().map(|d| d.0.clone()).collect() } else { session.map(|s| s.sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },
+                        "installed_sidecars": installed_sidecars(m, s, if s.key == self.0.id { &here_sidecars } else { session.map(|s| s.sidecars.as_slice()).unwrap_or_default() }, i.builds.get(&s.key).map(|r| r.commit.as_str())),
+                        "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
                         "load": load,
                     })
                 })
@@ -2404,8 +2412,8 @@ impl Node {
                 let mut req = self.resolve(serde_json::from_value(body)?);
                 (req.from, req.depth, req.client) = (None, 0, Some("phone".into()));
                 let me = &Caller { agent: req.agent.clone(), ..me.clone() };
-                // An app's call runs here or the client tries another server; a driver's goes where the driver is.
-                match req.driver.is_none() {
+                // An app's call runs here or the client tries another server; a sidecar's goes where the sidecar is.
+                match req.sidecar.is_none() {
                     true => self.run(&req, me).await.json(),
                     false => match self.route(req, me.clone()).await {
                         Ok(ok) => json!({ "ok": ok }),
@@ -2679,13 +2687,13 @@ impl Node {
         self.session(remote, send, recv).await
     }
 
-    /// What this server's hello says: its frontier, and the drivers serving its local user here.
+    /// What this server's hello says: its frontier, and the sidecars serving its local user here.
     fn hello(&self, i: &Install) -> Result<Msg> {
-        let drivers = self.drivers_here(i);
-        i.r.hello(drivers)
+        let sidecars = self.sidecars_here(i);
+        i.r.hello(sidecars)
     }
 
-    /// Says hello to every peer again, as when this server's drivers change.
+    /// Says hello to every peer again, as when this server's sidecars change.
     fn say_hello(&self) {
         let _ = self.with(|i| {
             let hello = self.hello(i)?;
@@ -2701,18 +2709,18 @@ impl Node {
         let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
         self.with(|i| {
             tx.send(self.hello(i)?).ok();
-            i.sessions.insert(peer, Session { tx: tx.clone(), frontier: None, drivers: Vec::new(), load: None, caught_up: false });
+            i.sessions.insert(peer, Session { tx: tx.clone(), frontier: None, sidecars: Vec::new(), load: None, caught_up: false });
             Ok(())
         })?;
         self.emit(Event::Servers);
         tracing::info!("syncing with {}", self.name_of(&peer));
         let writer = async {
             while let Some(mut msg) = rx.recv().await {
-                // Hellos made inside sync carry no drivers or load; every hello this server sends does.
-                if let Msg::Hello { drivers, load, .. } = &mut msg {
-                    if drivers.is_empty() {
-                        if let Ok(Msg::Hello { drivers: d, .. }) = self.with(|i| self.hello(i)) {
-                            *drivers = d;
+                // Hellos made inside sync carry no sidecars or load; every hello this server sends does.
+                if let Msg::Hello { sidecars, load, .. } = &mut msg {
+                    if sidecars.is_empty() {
+                        if let Ok(Msg::Hello { sidecars: d, .. }) = self.with(|i| self.hello(i)) {
+                            *sidecars = d;
                         }
                     }
                     *load = Some(crate::load::current());
@@ -2749,13 +2757,13 @@ impl Node {
 
     async fn handle(&self, peer: Key, msg: Msg) -> Result<Vec<Msg>> {
         let _write = self.0.writes.lock().await;
-        let drivers_changed = self.with(|i| {
-            let Msg::Hello { frontier, drivers, load } = &msg else { return Ok(false) };
+        let sidecars_changed = self.with(|i| {
+            let Msg::Hello { frontier, sidecars, load } = &msg else { return Ok(false) };
             let Some(s) = i.sessions.get_mut(&peer) else { return Ok(false) };
             s.frontier = Some(frontier.clone());
             s.load = load.clone();
-            let changed = s.drivers != *drivers;
-            s.drivers = drivers.clone();
+            let changed = s.sidecars != *sidecars;
+            s.sidecars = sidecars.clone();
             Ok(changed)
         })?;
         let mut handled = self.with(|i| i.r.handle(&peer, msg, now_ms()))?;
@@ -2773,7 +2781,7 @@ impl Node {
             Ok(!lacking)
         })?;
         self.after(handled, Some(peer)).await?;
-        if drivers_changed || caught_up {
+        if sidecars_changed || caught_up {
             self.emit(Event::Servers);
         }
         Ok(replies)
@@ -3067,22 +3075,22 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
             }
             (Scope::Global, members::node("app", data))
         }
-        Append::Driver { server, name, installed } => (Scope::Global, driver_entry(&i.r.members, &me.user, &server, &name, installed)?),
+        Append::Sidecar { server, name, installed } => (Scope::Global, sidecar_entry(&i.r.members, &me.user, &server, &name, installed)?),
         Append::Vault { id, scope, data, same, release } => vault_entry(i, app, me, scopes, &id, scope, data, same, release)?,
         Append::Install { .. } | Append::Cost { .. } => bail!("installs and costs are written on their own"),
     })
 }
 
-/// What a server says of each driver serving there, as `GET /v1/state` lists it: what it is, its version (a
-/// driver's own, or for one built into the node, the node's build), whom it serves, and who installed it.
-fn installed_drivers(m: &Members, server: &members::Machine, drivers: &[Driver], build: Option<&str>) -> Vec<Value> {
+/// What a server says of each sidecar serving there, as `GET /v1/state` lists it: what it is, its version (a
+/// sidecar's own, or for one built into the node, the node's build), whom it serves, and who installed it.
+fn installed_sidecars(m: &Members, server: &members::Machine, sidecars: &[Sidecar], build: Option<&str>) -> Vec<Value> {
     let name_of = |u: &String| m.users.get(u).map(|u| u.name.clone());
-    drivers
+    sidecars
         .iter()
         .map(|(name, users, d)| {
             let built_in = d["built_in"] == true;
-            let installed = m.drivers.get(&(server.key, name.clone())).filter(|i| i.local);
-            // Registered over the local API, a driver counts as installed by the server's local user.
+            let installed = m.sidecars.get(&(server.key, name.clone())).filter(|i| i.local);
+            // Registered over the local API, a sidecar counts as installed by the server's local user.
             let by = match installed {
                 Some(i) => name_of(&i.by),
                 None if built_in => None,
@@ -3097,13 +3105,13 @@ fn installed_drivers(m: &Members, server: &members::Machine, drivers: &[Driver],
         .collect()
 }
 
-/// The `driver` entry that removes a driver from a server, found by name or key prefix, or with `installed` lets it
+/// The `sidecar` entry that removes a sidecar from a server, found by name or key prefix, or with `installed` lets it
 /// register there again; for someone acting for one of the server's owners.
-fn driver_entry(m: &Members, user: &str, server: &str, name: &str, installed: bool) -> Result<Content> {
+fn sidecar_entry(m: &Members, user: &str, server: &str, name: &str, installed: bool) -> Result<Content> {
     let found: Vec<&members::Machine> = m.servers().filter(|s| s.name.eq_ignore_ascii_case(server) || (!server.is_empty() && hex(&s.key).starts_with(server))).collect();
     let [s] = found.as_slice() else { bail!("no one server called {server}") };
-    ensure!(m.owners(&s.key).iter().any(|o| m.acts_for(user, o)), "only someone acting for one of {}'s owners installs or removes its drivers", s.name);
-    Ok(members::node("driver", json!({ "server": hex(&s.key), "name": name, "blob": null, "local": installed })))
+    ensure!(m.owners(&s.key).iter().any(|o| m.acts_for(user, o)), "only someone acting for one of {}'s owners installs or removes its sidecars", s.name);
+    Ok(members::node("sidecar", json!({ "server": hex(&s.key), "name": name, "blob": null, "local": installed })))
 }
 
 /// Whom a schedule of `app` in a scope runs as: whoever switched it on last, or else installed the app there, while
@@ -3298,7 +3306,7 @@ impl Node {
         Err(last)
     }
 
-    /// Every entry a native app has in the local user's scope, oldest first.
+    /// Every entry a built-in sidecar has in the local user's scope, oldest first.
     fn app_entries(&self, app: &str) -> Result<Vec<AppEntry>> {
         self.with(|i| {
             let mut out = Vec::new();
@@ -3312,8 +3320,8 @@ impl Node {
         })
     }
 
-    fn sync_native(&self, app: &'static str) {
-        let Some(sync) = self.0.native.iter().find(|n| n.name == app).and_then(|n| n.sync) else { return };
+    fn sync_built_in(&self, app: &'static str) {
+        let Some(sync) = self.0.built_in_sidecars.iter().find(|n| n.name == app).and_then(|n| n.sync) else { return };
         let Ok(entries) = self.app_entries(app) else { return };
         tokio::task::spawn_blocking(move || sync(&entries));
     }

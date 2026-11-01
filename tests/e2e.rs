@@ -14,7 +14,7 @@ fn temp(name: &str) -> std::path::PathBuf {
 async fn start(name: &str) -> (Node, iroh::protocol::Router) {
     let dir = temp(name);
     std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
-    Node::start(&dir, one::builtin::all()).await.unwrap()
+    Node::start(&dir, one::sidecars::built_in()).await.unwrap()
 }
 
 async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
@@ -396,11 +396,11 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
     deploy_module(&a, "notes", notes).await;
     deploy_module(&a, "journal", r#"export default {
   name: "journal",
-  uses: { apps: ["notes"], drivers: ["shell"] },
+  uses: { apps: ["notes"], sidecars: ["shell"] },
   ops: {
     jot: { run: async (ctx, { text }) => { await ctx.apps.notes.add({ text }); return ctx.apps.notes.list({}); } },
     sneak: { run: (ctx) => ctx.apps.board.read({}) },
-    echo: { run: (ctx) => ctx.drivers.shell.run({ command: "echo from a driver" }) },
+    echo: { run: (ctx) => ctx.sidecars.shell.run({ command: "echo from a sidecar" }) },
     keep: { run: async (ctx, { text }) => { const hash = await ctx.blob.put(new TextEncoder().encode(text)); return new TextDecoder().decode(await ctx.blob.get(hash)); } },
     open: { run: async (ctx, { hash }) => new TextDecoder().decode(await ctx.blob.get(hash)) },
     catalog: { run: async (ctx) => (await ctx.catalog()).map((a) => a.name) },
@@ -422,7 +422,7 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
     let refused = a.call(call("journal", "sneak", json!({}))).await.unwrap_err();
     assert!(format!("{refused:#}").contains("doesn't use board"), "{refused:#}");
     let echoed = a.call(call("journal", "echo", json!({}))).await.unwrap();
-    assert!(echoed.to_string().contains("from a driver"), "{echoed}");
+    assert!(echoed.to_string().contains("from a sidecar"), "{echoed}");
     assert_eq!(a.call(call("journal", "keep", json!({ "text": "in a blob" }))).await.unwrap(), "in a blob");
     // A call asked on the server's own machine reads a blob put there through the local API, to attach it.
     let put = a.put_blob(b"put locally").unwrap();
@@ -645,7 +645,7 @@ async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
         let names: Vec<_> = listed["apps"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap().to_string()).collect();
         assert!(names.contains(&"whatsapp".into()) && !names.contains(&"desktops".into()), "{only} lists only connectors: {names:?}");
     }
-    assert_eq!(whatsapp["uses"], json!({ "apps": [], "drivers": [] }), "nothing runs it yet: {whatsapp}");
+    assert_eq!(whatsapp["uses"], json!({ "apps": [], "sidecars": [] }), "nothing runs it yet: {whatsapp}");
     let drive = app(&listed, "drive");
     assert!(drive["image"].as_str().is_some_and(|i| i.starts_with("data:image/png;base64,")), "icon.png in an app's folder is its picture");
     let everyone = listed["places"].as_array().unwrap().iter().find(|p| p["name"] == "Everyone").unwrap().clone();
@@ -683,63 +683,63 @@ fn board_in_user(op: &str, mut input: Value) -> CallRequest {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_drivers_screen_is_served_wherever_it_runs() {
+async fn a_sidecars_screen_is_served_wherever_it_runs() {
     let (a, _ra) = start("screens-a").await;
     let (b, _rb) = start("screens-b").await;
     a.create("Screens", "Andre").await.unwrap();
     b.join(&a.pair(None).unwrap()).await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
-    b.provide("lamps", json!({ "title": "Lamps", "ops": [], "screens": [{ "name": "main", "title": "Lamps" }] })).await.unwrap();
-    // b's provider answers the node's `_screen` calls.
-    let provider = b.clone();
+    b.register_sidecar("lamps", json!({ "title": "Lamps", "ops": [], "screens": [{ "name": "main", "title": "Lamps" }] })).await.unwrap();
+    // b's sidecar answers the node's `_screen` calls.
+    let sidecar = b.clone();
     tokio::spawn(async move {
         loop {
-            if let Ok(Some(c)) = provider.providers().next("lamps").await {
+            if let Ok(Some(c)) = sidecar.sidecars().next("lamps").await {
                 let body = format!("<p>{} {}</p>", c.input["name"].as_str().unwrap(), c.input["params"]["room"].as_str().unwrap_or(""));
                 let reply = if c.op == "_screen" { json!({ "ok": body }) } else { json!({ "error": "no" }) };
-                provider.providers().reply("lamps", c.id, reply).unwrap();
+                sidecar.sidecars().reply("lamps", c.id, reply).unwrap();
             }
         }
     });
-    eventually("a to list b's driver on its user's page", async || {
+    eventually("a to list b's sidecar on its user's page", async || {
         let apps = a.apps(&me).await.unwrap();
         apps.iter().any(|x| x["name"] == "lamps" && x["installed"] == json!([format!("user:{}", me.user)]))
     })
     .await;
     let html = a.screen(me, "lamps", "main", json!({ "room": "kitchen" }), None).await.unwrap();
-    assert!(html.contains("<p>main kitchen</p>") && html.contains("window.one"), "a serves b's driver's screen in the kit and bridge: {html}");
+    assert!(html.contains("<p>main kitchen</p>") && html.contains("window.one"), "a serves b's sidecar's screen in the kit and bridge: {html}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_app_wraps_the_driver_of_its_name_on_another_server() {
+async fn an_app_wraps_the_sidecar_of_its_name_on_another_server() {
     let (a, _ra) = start("wraps-a").await;
     let (b, _rb) = start("wraps-b").await;
     a.create("Wraps", "Andre").await.unwrap();
     b.join(&a.pair(None).unwrap()).await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
-    b.provide("lamps", json!({ "title": "Lamps", "image": "data:image/png;base64,AAAA", "image_kind": "icon", "ops": [{ "name": "on" }] })).await.unwrap();
-    let driver = b.clone();
+    b.register_sidecar("lamps", json!({ "title": "Lamps", "image": "data:image/png;base64,AAAA", "image_kind": "icon", "ops": [{ "name": "on" }] })).await.unwrap();
+    let sidecar = b.clone();
     tokio::spawn(async move {
         loop {
-            if let Ok(Some(c)) = driver.providers().next("lamps").await {
-                driver.providers().reply("lamps", c.id, json!({ "ok": format!("{} from {}", c.op, c.from.unwrap_or_default()) })).unwrap();
+            if let Ok(Some(c)) = sidecar.sidecars().next("lamps").await {
+                sidecar.sidecars().reply("lamps", c.id, json!({ "ok": format!("{} from {}", c.op, c.from.unwrap_or_default()) })).unwrap();
             }
         }
     });
-    eventually("a to reach b's driver", async || a.call(call("lamps", "on", json!({}))).await.is_ok_and(|v| v == "on from ")).await;
+    eventually("a to reach b's sidecar", async || a.call(call("lamps", "on", json!({}))).await.is_ok_and(|v| v == "on from ")).await;
 
-    // Deployed, an app of the driver's name takes its calls, and reaches the driver with ctx.drivers.
-    deploy_module(&a, "lamps", r#"export default { name: "lamps", uses: { drivers: ["lamps"] }, ops: { on: { run: async (ctx) => "app: " + await ctx.drivers.lamps.on({}) } } };"#).await;
+    // Deployed, an app of the sidecar's name takes its calls, and reaches the sidecar with ctx.sidecars.
+    deploy_module(&a, "lamps", r#"export default { name: "lamps", uses: { sidecars: ["lamps"] }, ops: { on: { run: async (ctx) => "app: " + await ctx.sidecars.lamps.on({}) } } };"#).await;
     a.install(&me, "lamps", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
     eventually("the app to take lamps' calls", async || a.call(call("lamps", "on", json!({}))).await.is_ok_and(|v| v == "app: on from lamps")).await;
     eventually("b to run the app too", async || b.call(call("lamps", "on", json!({}))).await.is_ok_and(|v| v == "app: on from lamps")).await;
-    // A call that names the driver still reaches it, as drivers reach each other.
-    let direct = CallRequest { driver: Some("lamps".into()), ..call("", "on", json!({})) };
+    // A call that names the sidecar still reaches it, as sidecars reach each other.
+    let direct = CallRequest { sidecar: Some("lamps".into()), ..call("", "on", json!({})) };
     assert_eq!(a.call(direct).await.unwrap(), "on from ");
     let listed = a.apps(&me).await.unwrap();
-    assert_eq!(listed.iter().filter(|x| x["name"] == "lamps").count(), 1, "the app stands for its driver in the list");
+    assert_eq!(listed.iter().filter(|x| x["name"] == "lamps").count(), 1, "the app stands for its sidecar in the list");
     let lamps = listed.iter().find(|x| x["name"] == "lamps").unwrap();
-    assert_eq!((lamps["image"].as_str(), lamps["image_kind"].as_str()), (Some("data:image/png;base64,AAAA"), Some("icon")), "it shows its driver's picture: {lamps}");
+    assert_eq!((lamps["image"].as_str(), lamps["image_kind"].as_str()), (Some("data:image/png;base64,AAAA"), Some("icon")), "it shows its sidecar's picture: {lamps}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -748,13 +748,13 @@ async fn agents_use_a_device_its_owner_let_them_through_computer_use_and_each_se
     let (b, _rb) = start("device-b").await;
     a.create_with("Devices", "Andre", &["computer", "desktops"]).await.unwrap();
     b.join(&a.pair(None).unwrap()).await.unwrap();
-    // b is a Mac whose owner let agents use it: its computer driver answers as the Mac app's does.
-    b.provide("computer", json!({ "title": "Computer Use", "ops": [{ "name": "_status" }, { "name": "_use" }] })).await.unwrap();
-    let driver = b.clone();
+    // b is a Mac whose owner let agents use it: its computer sidecar answers as the Mac app's does.
+    b.register_sidecar("computer", json!({ "title": "Computer Use", "ops": [{ "name": "_status" }, { "name": "_use" }] })).await.unwrap();
+    let sidecar = b.clone();
     tokio::spawn(async move {
         let mut started = false;
         loop {
-            if let Ok(Some(c)) = driver.providers().next("computer").await {
+            if let Ok(Some(c)) = sidecar.sidecars().next("computer").await {
                 let reply = match c.op.as_str() {
                     "_status" => json!({ "on": true, "title": "Andre's Mac", "kind": "mac" }),
                     "_use" => {
@@ -763,19 +763,19 @@ async fn agents_use_a_device_its_owner_let_them_through_computer_use_and_each_se
                     }
                     _ => json!(null),
                 };
-                driver.providers().reply("computer", c.id, json!({ "ok": reply })).unwrap();
+                sidecar.sidecars().reply("computer", c.id, json!({ "ok": reply })).unwrap();
             }
         }
     });
     let listed = async || a.call(call("computer", "list", json!({}))).await;
     eventually("the device among the desktops", async || listed().await.is_ok_and(|l| l["desktops"].as_array().is_some_and(|d| d.iter().any(|d| d["device"] == true)))).await;
     let device = listed().await.unwrap()["desktops"][0].clone();
-    assert_eq!((device["title"].clone(), device["state"].clone()), (json!("Andre's Mac"), json!("running")), "listed with no desktops driver anywhere: {device}");
+    assert_eq!((device["title"].clone(), device["state"].clone()), (json!("Andre's Mac"), json!("running")), "listed with no desktops sidecar anywhere: {device}");
     let name = device["name"].as_str().unwrap().to_string();
 
     for tool in ["list_windows", "click"] {
         let used = a.call(call("computer", "use", json!({ "desktop": name, "tool": tool, "args": {} }))).await.unwrap();
-        assert_eq!(used["content"][0]["text"], json!(tool), "use reaches the device's driver: {used}");
+        assert_eq!(used["content"][0]["text"], json!(tool), "use reaches the device's sidecar: {used}");
     }
     // The Desktops page reads them through Computer Use.
     let devices = a.call(call("desktops", "_devices", json!({}))).await.unwrap();
@@ -785,33 +785,33 @@ async fn agents_use_a_device_its_owner_let_them_through_computer_use_and_each_se
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_servers_owner_removes_a_driver_there_and_allows_it_again() {
-    let (a, _ra) = start("drivers-a").await;
-    let (b, _rb) = start("drivers-b").await;
-    a.create("Drivers", "Andre").await.unwrap();
+async fn a_servers_owner_removes_a_sidecar_there_and_allows_it_again() {
+    let (a, _ra) = start("sidecars-a").await;
+    let (b, _rb) = start("sidecars-b").await;
+    a.create("Sidecars", "Andre").await.unwrap();
     b.join(&a.pair(None).unwrap()).await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
     let describe = json!({ "title": "Lamps", "description": "The lights", "version": "abc123", "ops": [{ "name": "on" }] });
-    b.provide("lamps", describe.clone()).await.unwrap();
-    let driver = b.clone();
+    b.register_sidecar("lamps", describe.clone()).await.unwrap();
+    let sidecar = b.clone();
     tokio::spawn(async move {
         loop {
-            if let Ok(Some(c)) = driver.providers().next("lamps").await {
-                driver.providers().reply("lamps", c.id, json!({ "ok": "on" })).unwrap();
+            if let Ok(Some(c)) = sidecar.sidecars().next("lamps").await {
+                sidecar.sidecars().reply("lamps", c.id, json!({ "ok": "on" })).unwrap();
             }
         }
     });
     let b_name = b.state()["server"]["name"].as_str().unwrap().to_string();
     let on_b = |state: &Value, list: &str| state["install"]["servers"].as_array().unwrap().iter().find(|s| s["name"] == b_name.as_str()).unwrap()[list].clone();
-    let lamps = |state: &Value| on_b(state, "installed_drivers").as_array().unwrap().iter().find(|d| d["name"] == "lamps").cloned();
-    eventually("a to see b's driver", async || lamps(&a.state()).is_some()).await;
+    let lamps = |state: &Value| on_b(state, "installed_sidecars").as_array().unwrap().iter().find(|d| d["name"] == "lamps").cloned();
+    eventually("a to see b's sidecar", async || lamps(&a.state()).is_some()).await;
     let listed = lamps(&a.state()).unwrap();
     assert_eq!((listed["name"].clone(), listed["version"].clone(), listed["installed_by"].clone(), listed["users"].clone()), (json!("lamps"), json!("abc123"), json!("Andre"), json!(["Andre"])), "{listed}");
-    let shell = on_b(&a.state(), "installed_drivers").as_array().unwrap().iter().any(|d| d["name"] == "shell" && d["built_in"] == true);
-    assert!(shell, "the node's own drivers are listed as built in");
+    let shell = on_b(&a.state(), "installed_sidecars").as_array().unwrap().iter().any(|d| d["name"] == "shell" && d["built_in"] == true);
+    assert!(shell, "the node's own sidecars are listed as built in");
 
     // An app over it is a connector whose page says where it runs, and offers its owner to remove it there.
-    deploy_module(&a, "lamps", r#"export default { name: "lamps", connector: true, needs: "Needs a lamp", uses: { drivers: ["lamps"] }, ops: {} };"#).await;
+    deploy_module(&a, "lamps", r#"export default { name: "lamps", connector: true, needs: "Needs a lamp", uses: { sidecars: ["lamps"] }, ops: {} };"#).await;
     a.install(&me, "lamps", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
     let servers = async || a.call(call("apps", "servers", json!({ "app": "lamps" }))).await;
     eventually("the App Store to say where lamps runs", async || servers().await.is_ok_and(|w| w["runs"] == json!([b_name.as_str()]))).await;
@@ -820,13 +820,13 @@ async fn a_servers_owner_removes_a_driver_there_and_allows_it_again() {
 
     // Its owner removes it from b: b stops serving it and refuses it until it's allowed again.
     a.call(call("apps", "remove_from", json!({ "app": "lamps", "server": b_name }))).await.unwrap();
-    eventually("b to stop serving lamps", async || a.call(CallRequest { driver: Some("lamps".into()), ..call("", "on", json!({})) }).await.is_err()).await;
+    eventually("b to stop serving lamps", async || a.call(CallRequest { sidecar: Some("lamps".into()), ..call("", "on", json!({})) }).await.is_err()).await;
     eventually("the App Store to offer it back", async || servers().await.is_ok_and(|w| w["install"] == json!([b_name.as_str()]) && w["line"] == "Needs a lamp")).await;
-    assert!(b.provide("lamps", describe.clone()).await.is_err_and(|e| format!("{e:#}").contains("removed")), "b refuses it");
-    eventually("a to see it removed", async || on_b(&a.state(), "removed_drivers").as_array().is_some_and(|l| l.len() == 1)).await;
+    assert!(b.register_sidecar("lamps", describe.clone()).await.is_err_and(|e| format!("{e:#}").contains("removed")), "b refuses it");
+    eventually("a to see it removed", async || on_b(&a.state(), "removed_sidecars").as_array().is_some_and(|l| l.len() == 1)).await;
     a.call(call("apps", "install_on", json!({ "app": "lamps", "server": b_name }))).await.unwrap();
-    eventually("b to take lamps again", async || b.provide("lamps", describe.clone()).await.is_ok()).await;
-    eventually("a to reach lamps again", async || a.call(CallRequest { driver: Some("lamps".into()), ..call("", "on", json!({})) }).await.is_ok()).await;
+    eventually("b to take lamps again", async || b.register_sidecar("lamps", describe.clone()).await.is_ok()).await;
+    eventually("a to reach lamps again", async || a.call(CallRequest { sidecar: Some("lamps".into()), ..call("", "on", json!({})) }).await.is_ok()).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -927,18 +927,18 @@ async fn apps_badge_their_icons_and_the_install_pushes_through_the_sidecar_its_s
         ops: { nudge: { async run(ctx) { ctx.user.append("due", {}); return ctx.notify({ title: "Pay the rent", screen: "bills" }); } } } };"#).await;
     a.install(&me, "reminders", &mine, true).await.unwrap();
 
-    // With no push driver anywhere, the app's call fails there, and its badge still counts.
-    eventually("reminders to run without a push driver", async || a.call(call("reminders", "nudge", json!({}))).await.is_err_and(|e| format!("{e:#}").contains("push"))).await;
+    // With no push sidecar anywhere, the app's call fails there, and its badge still counts.
+    eventually("reminders to run without a push sidecar", async || a.call(call("reminders", "nudge", json!({}))).await.is_err_and(|e| format!("{e:#}").contains("push"))).await;
     assert_eq!(a.badges(me.clone(), Some("user")).await.unwrap(), json!({}), "a failed call writes nothing");
 
-    // A push driver on this server, serving everyone, hears who pushed and from which app.
-    a.provide("push", json!({ "title": "Push", "serves": "everyone", "ops": [{ "name": "send" }] })).await.unwrap();
-    let driver = a.clone();
+    // A push sidecar on this server, serving everyone, hears who pushed and from which app.
+    a.register_sidecar("push", json!({ "title": "Push", "serves": "everyone", "ops": [{ "name": "send" }] })).await.unwrap();
+    let sidecar = a.clone();
     let (heard, mut hear) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
         loop {
-            if let Ok(Some(c)) = driver.providers().next("push").await {
-                driver.providers().reply("push", c.id, json!({ "ok": { "accepted": 1, "devices": 1, "gone": [] } })).unwrap();
+            if let Ok(Some(c)) = sidecar.sidecars().next("push").await {
+                sidecar.sidecars().reply("push", c.id, json!({ "ok": { "accepted": 1, "devices": 1, "gone": [] } })).unwrap();
                 heard.send(c).unwrap();
             }
         }

@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use crate::apps::{AppEntry, Me};
 use crate::entry::Content;
-use crate::native::Reply;
+use crate::sidecars::Reply;
 
 pub fn describe() -> Value {
     json!({
