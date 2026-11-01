@@ -183,6 +183,8 @@ final class Store {
     var askYourAgent: String { agentPrompt(name: config?.name ?? appName, cli: config?.cli ?? Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "", guide: state?.host?.guide) }
 
     func app(_ name: String) -> AppInfo? { apps.first { $0.name == name } }
+    /// What a person calls an app that uses an item: its label, or Backups for the node's own (a place to back up to).
+    func label(_ name: String) -> String { name == "node" ? String(localized: "Backups") : app(name)?.label ?? name }
     func userName(_ id: String) -> String {
         id == me?.id ? String(localized: "You") : install?.user(id)?.name ?? String(id.prefix(6))
     }

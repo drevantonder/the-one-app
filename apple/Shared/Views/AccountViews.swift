@@ -61,6 +61,8 @@ struct UsersView: View {
             } footer: {
                 if let error {
                     Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                } else {
+                    Text("Admins keep the install’s recovery key. It opens every backup, everyone’s.")
                 }
             }
             Section {
@@ -185,50 +187,321 @@ struct InstallSettingsView: View {
     }
 }
 
-/// This server's encrypted backups to a bucket, for admins. The credentials stay on this server.
+/// Backups, for admins: how they're going first, in words; then each place they go to, and the snapshots.
 struct BackupsView: View {
     @Environment(Store.self) private var store
-    @State private var url = ""
-    @State private var accessKey = ""
-    @State private var secretKey = ""
-    @State private var key = ""
-    @State private var status: String?
+    @State private var backups: Backups?
+    @State private var adding = false
     @State private var error: String?
+    @State private var asked: Date?
 
     var body: some View {
+        let places = backups?.places ?? []
         Form {
             Section {
-                TextField("Bucket", text: $url, prompt: Text("https://…r2.cloudflarestorage.com/backups"))
-                TextField("Access Key", text: $accessKey)
-                SecureField("Secret Key", text: $secretKey)
-                SecureField("Backup Key", text: $key, prompt: Text("64 hex characters, from 1Password"))
-            } header: {
-                Text("Back Up \(displayName(store.state?.host?.name ?? store.state?.machine.name ?? ""))")
+                status(places)
             } footer: {
-                if let error {
-                    Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
-                } else {
-                    Text(status ?? "Encrypted with the backup key before it leaves.")
-                }
+                if let error { Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red) }
             }
             Section {
-                Button("Start Backing Up") { run(url) }
-                    .disabled(url.isEmpty || accessKey.isEmpty || secretKey.isEmpty || key.isEmpty)
-                Button("Stop Backing Up", role: .destructive) { run(nil) }
+                ForEach(places) { PlaceRow(place: $0, remove: remove) }
+                Button("Add Place…") { adding = true }
+            } header: {
+                Text("Places")
+            } footer: {
+                Text("Everything is encrypted before it leaves, so a place can’t read it. The install’s recovery key opens every backup, everyone’s: keep it where only admins can reach it.")
+            }
+            if let snapshots = backups?.snapshots, !snapshots.isEmpty {
+                Section("Snapshots") {
+                    ForEach(snapshots.prefix(8), id: \.self) { s in
+                        LabeledContent(when(s.time, style: .day), value: s.place)
+                    }
+                }
             }
         }
         .formStyle(.grouped)
         .navigationTitle("Backups")
+        .task { await load() }
+        .task {
+            // Times like "12 min ago" stay true.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                await load()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .nodeEvent)) { _ in Task { await load() } }
+        .sheet(isPresented: $adding, onDismiss: { Task { await load() } }) {
+            AddPlaceSheet(disks: backups?.disks ?? [], here: backups?.here ?? "")
+        }
     }
 
-    private func run(_ url: String?) {
-        error = nil
+    /// Status first, in words: backed up when, by whom, to where; or what broke and since when.
+    @ViewBuilder private func status(_ places: [Backups.Place]) -> some View {
+        let failing = places.filter { $0.failing != nil }
+        let lasts = places.compactMap(\.last)
+        let newest = lasts.max { $0.time < $1.time }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: failing.isEmpty ? (newest == nil ? "externaldrive" : "checkmark") : "exclamationmark")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(failing.isEmpty ? (newest == nil ? Color.secondary : .green) : .red)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill((failing.isEmpty ? (newest == nil ? Color.secondary : .green) : .red).opacity(0.15)))
+                VStack(alignment: .leading, spacing: 3) {
+                    if let place = failing.first, let failure = place.failing {
+                        Text(newest.map { "Not backed up since \(when($0.time, style: .relative))" } ?? "Not backed up yet").font(.title3.weight(.semibold))
+                        Text("\(place.title): \(failure.error ?? String(localized: "it failed")), since \(when(failure.since, style: .time)).")
+                            .foregroundStyle(.secondary)
+                        let safe = places.filter { $0.failing == nil && $0.last != nil }.map(\.title)
+                        if !safe.isEmpty {
+                            Text("\(safe.formatted()) still \(safe.count == 1 ? "has" : "have") a copy.").foregroundStyle(.secondary)
+                        }
+                    } else if let newest {
+                        Text("Backed up \(when(newest.time, style: .relative))").font(.title3.weight(.semibold))
+                        Text("\(displayName(newest.server)), to \(places.filter { $0.last != nil }.map(\.title).formatted())").foregroundStyle(.secondary)
+                    } else if places.isEmpty {
+                        Text("Not backed up").font(.title3.weight(.semibold))
+                        Text("Add a disk, or S3-compatible storage like Cloudflare R2, and your servers back up to it every hour that something changes.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Backing up…").font(.title3.weight(.semibold))
+                        Text("The first backup is on its way.").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if !places.isEmpty {
+                Button(failing.isEmpty ? "Back Up Now" : "Try Again") { backUp() }
+                    .buttonStyle(.bordered)
+                    .disabled(asked.map { Date.now.timeIntervalSince($0) < 10 } ?? false)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func load() async {
+        do { backups = try await store.node.backups() } catch { self.error = error.localizedDescription }
+    }
+
+    private func backUp() {
+        asked = .now
+        Task {
+            do { try await store.node.backUpNow() } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func remove(_ place: Backups.Place) {
         Task {
             do {
-                try await store.node.backup(url: url, accessKey: accessKey, secretKey: secretKey, key: key)
-                status = url == nil ? String(localized: "Backups stopped.") : String(localized: "Backing up.")
-                secretKey = ""; key = ""
+                try await store.node.removePlace(place.id)
+                await load()
             } catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
+private enum WhenStyle { case relative, time, day }
+
+/// A time for people: "12 min ago", "14:00", or "Today, 14:00".
+private func when(_ ms: Double, style: WhenStyle) -> String {
+    let date = Date(timeIntervalSince1970: ms / 1000)
+    switch style {
+    case .relative:
+        return Date.now.timeIntervalSince(date) < 60 ? String(localized: "just now") : date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
+    case .time:
+        return Calendar.current.isDateInToday(date) ? date.formatted(date: .omitted, time: .shortened) : date.formatted(date: .abbreviated, time: .shortened)
+    case .day:
+        let time = date.formatted(date: .omitted, time: .shortened)
+        if Calendar.current.isDateInToday(date) { return String(localized: "Today, \(time)") }
+        if Calendar.current.isDateInYesterday(date) { return String(localized: "Yesterday, \(time)") }
+        return date.formatted(.dateTime.weekday(.wide).day().month().hour().minute())
+    }
+}
+
+/// A place backups go to: what it is, and when it last backed up, or that it's failing.
+private struct PlaceRow: View {
+    var place: Backups.Place
+    var remove: (Backups.Place) -> Void
+    @State private var removing = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: place.kind == "folder" ? "externaldrive.fill" : "cloud.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(RoundedRectangle(cornerRadius: 7).fill(place.kind == "folder" ? Color.gray : Color.orange))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(place.title)
+                Text(detail).font(.callout).foregroundStyle(place.failing == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red)).lineLimit(2)
+            }
+            Spacer()
+            if let last = place.last, place.failing == nil {
+                Text(when(last.time, style: .time)).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+        .contextMenu {
+            Button("Stop Backing Up Here", role: .destructive) { removing = true }
+        }
+        #if os(iOS)
+        .swipeActions { Button("Remove", role: .destructive) { removing = true } }
+        #endif
+        .confirmationDialog("Stop backing up to \(place.title)?", isPresented: $removing) {
+            Button("Stop Backing Up", role: .destructive) { remove(place) }
+        } message: {
+            Text("What’s there now stays there.")
+        }
+    }
+
+    private var detail: String {
+        if let failing = place.failing {
+            return [failing.error, place.last.map { String(localized: "last \(when($0.time, style: .time))") }].compactMap { $0 }.joined(separator: " · ")
+        }
+        if place.kind == "folder" { return String(localized: "Disk on \(displayName(place.server ?? ""))") }
+        return String(localized: "Off-site · \(place.where)")
+    }
+}
+
+/// Adds a place: S3-compatible storage by its endpoint, bucket and key, or a disk plugged into the server. Each is
+/// tried (a test file written, read back and deleted) before it's added, so a typo shows here, not in a failed backup.
+struct AddPlaceSheet: View {
+    @Environment(Store.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    var disks: [Backups.Disk]
+    var here: String
+    @State private var cloud = true
+    @State private var endpoint = ""
+    @State private var bucket = ""
+    @State private var keyID = ""
+    @State private var secret = ""
+    @State private var title = ""
+    @State private var folder = ""
+    @State private var tried: [Backups.Step] = []
+    @State private var added = false
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Where", selection: $cloud) {
+                        Text("Cloud Storage").tag(true)
+                        Text("Disk").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .disabled(added)
+                }
+                if cloud {
+                    Section {
+                        TextField("Endpoint", text: $endpoint, prompt: Text("https://….r2.cloudflarestorage.com"))
+                            #if os(iOS)
+                            .keyboardType(.URL).textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                        TextField("Bucket", text: $bucket, prompt: Text("one-backups"))
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                        TextField("Access Key ID", text: $keyID)
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                        SecureField("Secret Key", text: $secret)
+                        TextField("Name", text: $title, prompt: Text("Cloudflare R2"))
+                    } header: {
+                        Text("S3-Compatible Storage")
+                    } footer: {
+                        Text("Cloudflare R2, Backblaze B2, MinIO or any other S3 storage. Use a key that can reach only this bucket. It goes into the Vault and never leaves your servers.")
+                    }
+                } else {
+                    Section {
+                        ForEach(disks) { disk in
+                            Button { folder = disk.path; title = disk.name } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "externaldrive.fill").foregroundStyle(.secondary).frame(width: 30)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(disk.name).foregroundStyle(.primary)
+                                        Text("Plugged into \(displayName(here)) · \(Int64(disk.free).formatted(.byteCount(style: .file))) free").font(.callout).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if folder == disk.path { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                                }
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        TextField("Folder", text: $folder, prompt: Text("/Volumes/…"))
+                            .autocorrectionDisabled()
+                    } header: {
+                        Text("A Disk on \(displayName(here))")
+                    } footer: {
+                        Text("A disk keeps a copy at home too. It’s backed up while it’s plugged in.")
+                    }
+                }
+                if !tried.isEmpty {
+                    Section {
+                        ForEach(tried) { step in
+                            HStack {
+                                Text(step.step)
+                                Spacer()
+                                Image(systemName: step.error == nil ? "checkmark" : "xmark").foregroundStyle(step.error == nil ? .green : .red)
+                            }
+                            if let error = step.error {
+                                Text(error).font(.callout).foregroundStyle(.red)
+                            }
+                        }
+                    } header: {
+                        Text("Tried It")
+                    } footer: {
+                        if added { Text("The first backup has started. After that, every hour that something changes.") }
+                    }
+                }
+                if let error {
+                    Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Add Place")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                if added {
+                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                } else {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Add") { add() }.disabled(!ready || busy)
+                    }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 460, minHeight: 480)
+        #endif
+    }
+
+    private var ready: Bool {
+        let filled = { (s: String) in !s.trimmingCharacters(in: .whitespaces).isEmpty }
+        return cloud ? [endpoint, bucket, keyID, secret].allSatisfy(filled) : filled(folder)
+    }
+
+    private func add() {
+        busy = true
+        error = nil
+        var fields = cloud ? ["endpoint": endpoint, "bucket": bucket, "key_id": keyID, "secret": secret] : ["path": folder]
+        if !title.trimmingCharacters(in: .whitespaces).isEmpty { fields["title"] = title }
+        Task {
+            do {
+                let reply = try await store.node.addPlace(fields)
+                tried = reply.tried
+                added = reply.added
+                if added { secret = "" }
+            } catch { self.error = error.localizedDescription }
+            busy = false
         }
     }
 }
@@ -247,7 +520,7 @@ struct RequestsView: View {
                         HStack(spacing: 12) {
                             AppTile(app: store.app(request.app), seed: request.app, size: 32)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("\(store.app(request.app)?.label ?? request.app) wants \(request.label)").font(.body.weight(.medium))
+                                Text("\(store.label(request.app)) wants \(request.label)").font(.body.weight(.medium))
                                 Text([request.asker, request.why].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                                     .font(.callout)
                                     .foregroundStyle(.secondary)

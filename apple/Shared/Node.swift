@@ -399,6 +399,31 @@ struct VaultRequest: Decodable, Sendable, Hashable, Identifiable {
     var wanted: [Field] { fields ?? name.map { [Field(name: $0, secret: true)] } ?? [] }
 }
 
+/// Backups, as the node says how they're going.
+struct Backups: Decodable, Equatable {
+    struct Place: Decodable, Equatable, Identifiable {
+        struct Last: Decodable, Equatable { var time: Double; var server: String }
+        struct Failing: Decodable, Equatable { var since: Double; var error: String? }
+        var id: String
+        var title: String
+        /// `folder` or `s3`.
+        var kind: String
+        var `where`: String
+        var server: String?
+        var last: Last?
+        var failing: Failing?
+        var bytes: Double?
+    }
+    struct Snapshot: Decodable, Equatable, Hashable { var time: Double; var server: String; var place: String }
+    struct Disk: Decodable, Equatable, Identifiable { var name: String; var path: String; var free: Double; var id: String { path } }
+    struct Step: Decodable, Equatable, Identifiable { var step: String; var error: String?; var id: String { step } }
+    var places: [Place]
+    var snapshots: [Snapshot]
+    /// The server that answered, whose disks these are.
+    var here: String
+    var disks: [Disk]
+}
+
 /// The local API, typed, over whichever transport reaches a node.
 struct NodeClient: Sendable {
     var transport: any NodeTransport
@@ -539,13 +564,19 @@ struct NodeClient: Sendable {
         try await post("v1/vault/answer", body)
     }
 
-    func backup(url: String?, accessKey: String = "", secretKey: String = "", key: String = "") async throws {
-        if let url {
-            try await post("v1/backup", ["url": url, "access_key": accessKey, "secret_key": secretKey, "key": key])
-        } else {
-            try await post("v1/backup", ["url": nil])
-        }
+    /// Each place backups go to, how its last run went, the recent snapshots, and the disks of the server answering.
+    func backups() async throws -> Backups { try await get("v1/backups") }
+    /// Backs up now, without waiting for the hour.
+    func backUpNow() async throws { try await post("v1/backups/now", [:]) }
+    /// Tries a place (writes, reads and deletes a test file) and, if that works, adds it: a folder's `path`, or S3's
+    /// `endpoint`, `bucket`, `key_id` and `secret`. → each step tried, and whether it was added.
+    func addPlace(_ fields: [String: String]) async throws -> (tried: [Backups.Step], added: Bool) {
+        let data = try await transport.send("POST", "v1/backups/place", body: try json(fields), timeout: 60)
+        struct Reply: Decodable { var tried: [Backups.Step]; var id: String? }
+        let reply = try JSONDecoder().decode(Reply.self, from: data)
+        return (reply.tried, reply.id != nil)
     }
+    func removePlace(_ id: String) async throws { try await post("v1/backups/place", ["id": id, "deleted": true]) }
 }
 
 /// A failed join, said as what went wrong and what to do next, with the node's own words for whoever needs them.

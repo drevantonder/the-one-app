@@ -79,7 +79,7 @@ struct VaultView: View {
     private func matches(_ item: VaultItem) -> Bool {
         let q = search.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return true }
-        let words = [item.title, item.type ?? "", item.domain ?? ""] + item.hosts + item.apps.map { store.app($0)?.label ?? $0 }
+        let words = [item.title, item.type ?? "", item.domain ?? ""] + item.hosts + item.apps.map { store.label($0) }
             + item.fields.compactMap { $0.secret ? nil : $0.value }
         return words.contains { $0.localizedCaseInsensitiveContains(q) }
     }
@@ -120,7 +120,7 @@ private struct VaultRow: View {
             Spacer(minLength: 8)
             HStack(spacing: 4) {
                 ForEach(item.apps.prefix(6), id: \.self) { app in
-                    AppTile(app: store.app(app), seed: app, size: 20).help(store.app(app)?.label ?? app)
+                    AppTile(app: store.app(app), seed: app, size: 20).help(store.label(app))
                 }
             }
             .accessibilityLabel(appNames(item.apps, store: store))
@@ -162,7 +162,7 @@ struct ItemIcon: View {
 /// "Gmail and Drive": the apps' names, as a person reads them.
 @MainActor
 func appNames(_ apps: [String], store: Store) -> String {
-    apps.map { store.app($0)?.label ?? $0 }.formatted(.list(type: .and))
+    apps.map { store.label($0) }.formatted(.list(type: .and))
 }
 
 /// A field's name as a person reads it: `client_id` is "Client ID".
@@ -263,7 +263,7 @@ struct VaultItemView: View {
                         Toggle(isOn: Binding(get: { item.apps.contains(app) }, set: { on in Task { await switchApp(app, on) } })) {
                             HStack(spacing: 10) {
                                 AppTile(app: store.app(app), seed: app, size: 28)
-                                Text(store.app(app)?.label ?? app)
+                                Text(store.label(app))
                             }
                         }
                     }
