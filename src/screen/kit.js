@@ -168,6 +168,51 @@
     return input;
   };
 
+  // A large title at the top of a screen, as iOS draws one: the shell's own title stays empty until it scrolls away,
+  // so the name shows once. Call it once per screen, and put what it returns first.
+  one.largeTitle = (text) => {
+    one.title("");
+    requestAnimationFrame(() => {
+      const el = document.querySelector(".large-title");
+      if (!el || !window.IntersectionObserver) return void one.title(text);
+      new IntersectionObserver(([e]) => one.title(e.isIntersecting ? "" : text)).observe(el);
+    });
+    return `<h1 class="large-title">${esc(text)}</h1>`;
+  };
+
+  // Information, as at the bottom of an App Store page: `[label, value]` pairs, plain text, each value on one line.
+  one.info = (pairs) =>
+    '<div class="list info">' + pairs.filter(([, v]) => v != null && v !== "").map(([label, value]) =>
+      `<div class="row plain"><span class="label">${esc(label)}</span><span class="value">${esc(value)}</span></div>`).join("") + "</div>";
+
+  // A sheet that slides up over the screen, with `title` and Done: `html` is what's in it. Returns its body, to draw
+  // into again, and `close`; `onClose` runs once it's gone (Done, a tap outside it, Escape).
+  one.sheet = ({ title = "", html = "", done = "Done", onClose } = {}) => {
+    const back = document.createElement("div");
+    back.className = "sheet-backdrop";
+    back.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="sheet-bar"><span></span>` +
+      `<div class="sheet-title">${esc(title)}</div><button class="button plain" data-done>${esc(done)}</button></div><div class="sheet-body">${html}</div></div>`;
+    document.body.append(back);
+    const was = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    requestAnimationFrame(() => requestAnimationFrame(() => back.classList.add("open")));
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener("keydown", key);
+      back.classList.remove("open");
+      document.body.style.overflow = was;
+      setTimeout(() => back.remove(), 300);
+      onClose?.();
+    };
+    const key = (e) => e.key === "Escape" && close();
+    document.addEventListener("keydown", key);
+    back.addEventListener("click", (e) => e.target === back && close());
+    back.querySelector("[data-done]").onclick = close;
+    return { body: back.querySelector(".sheet-body"), close };
+  };
+
   // A light haptic on every press of a row, button or tab (phones only), for screens that want them.
   one.haptics = () =>
     document.addEventListener("click", (e) => e.target.closest?.("a, button, .row, .segmented button, [data-tap]") && one.tap(), true);

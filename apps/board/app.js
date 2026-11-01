@@ -476,13 +476,13 @@ async function show() {
       <div class="chev">›</div>
     </a>\`;
   };
-  document.getElementById("list").innerHTML =
-    \`<div class="list">\${row(topics[0])}</div>
+  return \`<div class="list">\${row(topics[0])}</div>
      <h2 class="section">Topics</h2>
      <div class="list">\${topics.slice(1).map(row).join("") || '<div class="empty">No topics yet</div>'}</div>\`;
 }
-one.on("changed", show);
-show();
+const draw = () => one.render("#list", show, { loading: "Loading topics" });
+one.on("changed", draw);
+draw();
 </script>`,
     },
     topic: {

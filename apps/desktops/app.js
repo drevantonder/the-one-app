@@ -176,11 +176,11 @@ export default {
 <div id="devices-section" hidden>
 <h2 class="section">Agents on Your Devices</h2>
 <div class="list" id="sessions"></div>
-<p class="muted small" style="margin: 6px 4px">Each time an agent starts using one of your devices. You see it in the device's menu bar while it does, and Stop there turns it off. iPhones and iPads can't be used by agents: iOS doesn't let one app control others.</p>
+<p class="footer">Stop an agent from the device's menu bar.</p>
 </div>
 <h2 class="section">Browser Profiles</h2>
 <div class="list" id="profiles"></div>
-<p class="muted small" style="margin: 6px 4px">Each profile is a browser of its own, with its own sign-ins, like Personal and PTC. Agents' desktops start with a copy of one, and apps like Messenger link to one.</p>
+<p class="footer">Each is a browser with its own sign-ins.</p>
 <script>
   one.title("Desktops");
   const grid = document.getElementById("grid");
