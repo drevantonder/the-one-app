@@ -263,36 +263,34 @@ export default {
       async render(ctx) {
         if (!ctx.global) return { t: "col", c: [] };
         const many = { small: 1, medium: 3, large: 6, xl: 6 }[ctx.size] || 3;
-        // The branches pushed to last, each with its head commit's subject.
-        const pushed = await ctx.global.query("select repo, branch, head, name, time from branches order by time desc limit ?", [many]);
-        if (!pushed.length) return { t: "text", text: "No repos yet", size: "sm", tone: "muted" };
-        for (const b of pushed) b.subject = await subject(ctx, b.repo, b.head);
-        const link = (b) => ({ screen: "commit", params: { repo: b.repo, sha: b.head } });
+        const commits = await recent(ctx, many);
+        if (!commits.length) return { t: "text", text: "No repos yet", size: "sm", tone: "muted" };
+        const link = (c) => ({ screen: "commit", params: { repo: c.repo, sha: c.sha } });
         if (ctx.size === "small") {
-          const b = pushed[0];
+          const c = commits[0];
           return {
-            t: "col", gap: 3, link: link(b),
+            t: "col", gap: 3, link: link(c),
             c: [
-              { t: "row", gap: 4, c: [{ t: "text", text: b.repo, size: "xs", weight: "medium", tone: "accent", lines: 1 }, { t: "time", at: b.time, size: "xs", tone: "muted" }] },
-              { t: "text", text: b.subject || `Pushed ${b.branch}`, size: "sm", lines: 4 },
+              { t: "row", gap: 4, c: [{ t: "text", text: c.repo, size: "xs", weight: "medium", tone: "accent", lines: 1 }, { t: "time", at: c.time, size: "xs", tone: "muted" }] },
+              { t: "text", text: c.subject, size: "sm", lines: 4 },
               { t: "col", grow: true, c: [] },
-              { t: "text", text: `${b.name} · ${b.branch}`, size: "xs", tone: "muted", lines: 1 },
+              { t: "text", text: `${c.author} · ${c.branch}`, size: "xs", tone: "muted", lines: 1 },
             ],
           };
         }
         return {
           // Spread out to fill the widget.
           t: "col", gap: 4,
-          c: pushed.flatMap((b, i) => [...(i ? [{ t: "col", grow: true, c: [] }] : []), {
-            t: "col", gap: 2, link: link(b),
+          c: commits.flatMap((c, i) => [...(i ? [{ t: "col", grow: true, c: [] }] : []), {
+            t: "col", gap: 2, link: link(c),
             c: [
               { t: "row", gap: 5, c: [
-                { t: "text", text: b.repo, size: "xs", weight: "medium", lines: 1 },
-                { t: "text", text: b.branch, size: "xs", tone: "accent", lines: 1 },
+                { t: "text", text: c.repo, size: "xs", weight: "medium", lines: 1 },
+                { t: "text", text: c.author, size: "xs", tone: "accent", lines: 1 },
                 { t: "col", grow: true, c: [] },
-                { t: "time", at: b.time, size: "xs", tone: "muted" },
+                { t: "time", at: c.time, size: "xs", tone: "muted" },
               ] },
-              { t: "text", text: b.subject ? (ctx.size === "medium" ? b.subject : `${b.subject} · ${b.name}`) : `${b.name} pushed`, size: "sm", lines: 1 },
+              { t: "text", text: c.subject, size: "sm", lines: 1 },
             ],
           }]),
         };
@@ -301,12 +299,19 @@ export default {
   },
 };
 
-/// A commit's subject, read from its repo's packs; none if they can't be read.
-async function subject(ctx, repo, sha) {
-  try {
-    const { o } = await browse.open(ctx, ctx.global, repo, sha);
-    return browse.summary(o.commit(sha)).subject;
-  } catch {
-    return null;
+/// The newest `many` commits across repos' main branches, each with its repo and branch: the branches pushed to last,
+/// and their history, newest first. A repo whose packs can't be read is left out.
+async function recent(ctx, many) {
+  const heads = await ctx.global.query("select repo, branch from branches where branch not like '%@%' order by time desc limit ?", [many]);
+  const all = [];
+  for (const { repo, branch } of heads) {
+    try {
+      const { commits } = await browse.log(ctx, ctx.global, { repo, ref: branch });
+      all.push(...commits.slice(0, many).map((c) => ({ ...c, repo, branch })));
+    } catch {}
   }
+  // Repos that share history (a fork, or one split out of another) list a commit once.
+  const seen = new Set();
+  const key = (c) => `${c.time} ${c.subject}`;
+  return all.sort((a, b) => b.time - a.time).filter((c) => !seen.has(key(c)) && seen.add(key(c))).slice(0, many);
 }
