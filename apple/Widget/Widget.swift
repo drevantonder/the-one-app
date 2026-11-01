@@ -109,6 +109,10 @@ struct EntryView: View {
     var entry: Entry
     @Environment(\.widgetFamily) private var family
 
+    private var accent: Color {
+        Color(accentHex: Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? "")
+    }
+
     /// The page size drawn at this family: the same tree the app's pages show at that size.
     private var size: String {
         switch family {
@@ -139,6 +143,7 @@ struct EntryView: View {
                         WidgetTree(node: tree, now: entry.date)
                             .font(.footnote)
                             .environment(\.widgetHost, host)
+                            .tint(accent)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
