@@ -239,7 +239,10 @@ function table(list, size) {
 }
 
 /// Nodes with the room left between them, so they fill the widget from top to bottom.
-const spread = (nodes) => nodes.flatMap((n, i) => (i ? [{ t: "col", grow: true, gap: 0, c: [] }, n] : [n]));
+// Rows spread over the widget's height once there are enough of them; a few stay together at the top.
+const spread = (nodes) => nodes.length < 4
+  ? [{ t: "col", gap: 8, c: nodes }, { t: "col", grow: true, gap: 0, c: [] }]
+  : nodes.flatMap((n, i) => (i ? [{ t: "col", grow: true, gap: 0, c: [] }, n] : [n]));
 
 /// What needs looking at: a disk or memory nearly full, or a server offline; or that nothing does.
 function warning(list) {
