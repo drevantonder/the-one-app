@@ -9,6 +9,7 @@ struct VaultView: View {
     @State private var search = ""
     @State private var error: String?
     @State private var adding = false
+    @State private var making: ItemMaker?
     @State private var deleting: VaultItem?
 
     var body: some View {
@@ -56,7 +57,17 @@ struct VaultView: View {
         .searchable(text: $search)
         .navigationTitle("Vault")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) { Button("New Item", systemImage: "plus") { adding = true } }
+            ToolbarItem(placement: .primaryAction) {
+                let makers = store.itemMakers
+                if makers.isEmpty {
+                    Button("New Item", systemImage: "plus") { adding = true }
+                } else {
+                    Menu("New Item", systemImage: "plus") {
+                        Button("New Item") { adding = true }
+                        ForEach(makers) { maker in Button("New \(maker.type)") { making = maker } }
+                    }
+                }
+            }
         }
         .task(id: scope) { await load() }
         .refreshable { await load() }
@@ -67,6 +78,7 @@ struct VaultView: View {
             Task { await load() }
         }
         .sheet(isPresented: $adding) { NewItemSheet(scope: scope) { await load() } }
+        .sheet(item: $making) { maker in MakeItemSheet(maker: maker) { await load() } }
         .confirmationDialog(deleting.map { $0.isAccount ? "Sign out of \($0.title)?" : "Delete \($0.title)?" } ?? "",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible,
                             presenting: deleting) { item in
@@ -165,7 +177,45 @@ func appNames(_ apps: [String], store: Store) -> String {
     apps.map { store.label($0) }.formatted(.list(type: .and))
 }
 
-/// A field's name as a person reads it: `client_id` is "Client ID".
+/// An app's way to make an item of a type it uses, given its title.
+struct ItemMaker: Identifiable, Hashable {
+    var app: String
+    var op: String
+    var type: String
+    var id: String { "\(app)/\(op)" }
+}
+
+/// Something an app does with an item of a type it uses: an op it runs given the item's id.
+struct ItemAction: Identifiable, Hashable {
+    var app: String
+    var op: String
+    var title: String
+    var id: String { "\(app)/\(op)" }
+}
+
+extension Store {
+    /// The items the apps installed for this person make, as their `vault` says.
+    var itemMakers: [ItemMaker] {
+        apps.filter { !($0.installed ?? []).isEmpty }.flatMap { app in
+            (app.vault ?? [:]).values.compactMap { need in
+                guard let op = need.make, let type = need.type else { return nil }
+                return ItemMaker(app: app.name, op: op, type: type)
+            }
+        }
+        .sorted { $0.type < $1.type }
+    }
+
+    /// What the apps switched on for an item do with items of its type.
+    func itemActions(_ item: VaultItem) -> [ItemAction] {
+        apps.filter { item.apps.contains($0.name) }.flatMap { app in
+            (app.vault ?? [:]).values.filter { $0.type != nil && $0.type == item.type }.flatMap { need in
+                (need.actions ?? [:]).map { ItemAction(app: app.name, op: $0.key, title: $0.value) }
+            }
+        }
+        .sorted { $0.title < $1.title }
+    }
+}
+
 extension Store {
     /// Deletes an item, signing an account out first, as Services does: each app using it, or
     /// whose sign-in made it, that lists it among its `accounts` (by its title or a plain field) signs that account out,
@@ -187,6 +237,7 @@ extension Store {
     }
 }
 
+/// A field's name as a person reads it: `client_id` is "Client ID".
 func fieldLabel(_ name: String) -> String {
     let words = name.split(whereSeparator: { "_-.".contains($0) }).map { word -> String in
         let w = word.lowercased()
@@ -207,7 +258,20 @@ struct VaultItemView: View {
     @State private var editing: VaultItem.Field?
     @State private var addingField = false
     @State private var deleting = false
+    @State private var renaming = false
+    @State private var newTitle = ""
+    @State private var running: ItemAction?
+    @State private var following: Following?
     @State private var error: String?
+    @Environment(\.openURL) private var openURL
+
+    /// What an action left open: a link to it, and the op that finishes it.
+    struct Following {
+        var app: String
+        var url: URL?
+        var op: String
+        var title: String
+    }
 
     init(item: VaultItem, changed: @escaping () async -> Void) {
         _item = State(initialValue: item)
@@ -223,12 +287,26 @@ struct VaultItemView: View {
                     if let page = item.scope_name {
                         Text(page).foregroundStyle(.secondary)
                     }
+                    Button("Rename") { newTitle = item.title; renaming = true }.buttonStyle(.borderless)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
             }
+            let actions = store.itemActions(item)
+            if !actions.isEmpty {
+                Section {
+                    if let following {
+                        if let url = following.url { Button("Open Again") { openURL(url) } }
+                        Button(following.title) { Task { await finish(following) } }.disabled(running != nil)
+                    } else {
+                        ForEach(actions) { action in
+                            Button(running == action ? "\(action.title)…" : action.title) { Task { await run(action) } }.disabled(running != nil)
+                        }
+                    }
+                }
+            }
             Section {
-                ForEach(item.fields) { field in
+                ForEach(item.shown) { field in
                     LabeledContent(fieldLabel(field.name)) {
                         HStack(spacing: 12) {
                             if field.secret {
@@ -247,6 +325,8 @@ struct VaultItemView: View {
                 }
                 Button("Add Field", systemImage: "plus") { addingField = true }.buttonStyle(.borderless)
             }
+            // Hosts that are apps' names let it into calls to them, not to sites: Used by says those.
+            if item.hosts.isEmpty || !item.hosts.allSatisfy({ store.app($0) != nil }) {
             Section("Sent only to") {
                 TextField("Sites", text: $hosts, prompt: Text("api.example.com"))
                     .autocorrectionDisabled()
@@ -255,6 +335,7 @@ struct VaultItemView: View {
                     .keyboardType(.URL)
                     #endif
                     .onSubmit { Task { await saveHosts() } }
+            }
             }
             let wanting = usedBy
             if !wanting.isEmpty {
@@ -282,6 +363,14 @@ struct VaultItemView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .onAppear { hosts = item.hosts.joined(separator: ", ") }
+        .alert("Rename", isPresented: $renaming) {
+            TextField("Title", text: $newTitle)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") {
+                let title = newTitle.trimmingCharacters(in: .whitespaces)
+                if !title.isEmpty && title != item.title { Task { await save(["title": title]) } }
+            }
+        }
         .sheet(item: $editing) { field in
             FieldSheet(name: field.name, secret: field.secret, editingName: false) { _, value, _ in
                 await save(["fields": [field.name: ["value": value]]])
@@ -307,6 +396,43 @@ struct VaultItemView: View {
         } message: {
             Text(item.apps.isEmpty ? "It can’t be undone." : "\(appNames(item.apps, store: store)) stop using it.")
         }
+    }
+
+    /// Runs an app's action on the item, opening the link it gives; one that leaves something open says how to finish it.
+    private func run(_ action: ItemAction) async {
+        running = action
+        defer { running = nil }
+        error = nil
+        do {
+            let data = try await store.node.call(app: action.app, op: action.op, input: try JSONSerialization.data(withJSONObject: ["item": item.id]), timeout: 300)
+            let reply = try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) as? [String: Any] ?? [:]
+            let url = (reply["url"] as? String).flatMap(URL.init(string:))
+            if let url { openURL(url) }
+            if let then = reply["then"] as? [String: Any], let op = then["op"] as? String {
+                following = Following(app: action.app, url: url, op: op, title: then["title"] as? String ?? String(localized: "Done"))
+            }
+            await refresh()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func finish(_ f: Following) async {
+        running = ItemAction(app: f.app, op: f.op, title: f.title)
+        defer { running = nil }
+        error = nil
+        do {
+            _ = try await store.node.call(app: f.app, op: f.op, input: try JSONSerialization.data(withJSONObject: ["item": item.id]), timeout: 300)
+            following = nil
+            await refresh()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func refresh() async {
+        if let fresh = try? await store.node.vault(scope: item.scope).first(where: { $0.id == item.id }) { item = fresh }
+        await changed()
     }
 
     /// The apps that want it or use it, those using it first.
@@ -495,6 +621,54 @@ private struct NewItemSheet: View {
         do {
             try await store.node.setItem(scope: scope, id: nil, ["title": title.trimmingCharacters(in: .whitespaces), "fields": given, "hosts": sites, "apps": [String]()])
             await saved()
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+/// A new item an app makes, of a type it uses: the person names it.
+private struct MakeItemSheet: View {
+    @Environment(Store.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    var maker: ItemMaker
+    var made: () async -> Void
+    @State private var title = ""
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Name", text: $title)
+                if let error {
+                    Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("New \(maker.type)")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") { Task { await make() } }.disabled(busy || title.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(width: 380, height: 160)
+        #endif
+    }
+
+    private func make() async {
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await store.node.call(app: maker.app, op: maker.op, input: try JSONSerialization.data(withJSONObject: ["title": title.trimmingCharacters(in: .whitespaces)]), timeout: 60)
+            await made()
             dismiss()
         } catch {
             self.error = error.localizedDescription

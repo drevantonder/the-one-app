@@ -303,6 +303,11 @@ struct HTTPNode: NodeTransport {
 struct VaultNeed: Decodable, Sendable, Equatable {
     var title: String?
     var accounts: Bool?
+    /// The type of the items it's for; the op that makes a new one (given its title); and the ops a person runs on
+    /// one (given its id as `item`), by name, with each button's title.
+    var type: String?
+    var make: String?
+    var actions: [String: String]?
 }
 
 /// An item of the Vault as `GET /v1/vault` lists it: a secret field never with its value.
@@ -332,8 +337,10 @@ struct VaultItem: Decodable, Sendable, Equatable, Identifiable, Hashable {
     /// Its one short line: what it is, else its first plain field; none when what it is is its title.
     var line: String? {
         if let type, !type.isEmpty { return type == title ? nil : type }
-        return fields.first { !$0.secret && !($0.value ?? "").isEmpty }?.value
+        return shown.first { !$0.secret && !($0.value ?? "").isEmpty }?.value
     }
+    /// The fields a person sees: those whose names start with `_` are the app's own, like where it keeps a file.
+    var shown: [Field] { fields.filter { !$0.name.hasPrefix("_") } }
     var isAccount: Bool { account == true }
 
     enum CodingKeys: String, CodingKey { case id, scope, scope_name, title, type, domain, image, hosts, fields, apps, wanted_by, app, account }
@@ -466,9 +473,9 @@ struct NodeClient: Sendable {
     }
 
     /// Runs an app's operation for an app screen: its input and result are JSON, whatever their shape.
-    func call(app: String, op: String, input: Data) async throws -> Data {
+    func call(app: String, op: String, input: Data, timeout: TimeInterval = 15) async throws -> Data {
         let input = try JSONSerialization.jsonObject(with: input, options: .fragmentsAllowed)
-        let data = try await transport.send("POST", "v1/call", body: try json(["app": app, "op": op, "input": input, "client": client]), timeout: 15)
+        let data = try await transport.send("POST", "v1/call", body: try json(["app": app, "op": op, "input": input, "client": client]), timeout: timeout)
         let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         if let error = reply["error"] as? String { throw NodeError(error) }
         return try JSONSerialization.data(withJSONObject: reply["ok"] ?? NSNull(), options: .fragmentsAllowed)
