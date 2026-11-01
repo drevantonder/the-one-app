@@ -99,6 +99,7 @@ export default {
       run: (ctx, input) => sidecar(ctx, "search", input),
     },
     send: {
+      confirm: true,
       description: "Send a WhatsApp message, as the linked account, to a chat, a contact or a phone number. This sends a real message to a real person.",
       input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "chat": {"description": "the chat's name, a part of it only one chat has, a contact's exact name, a phone number with its country code, or a JID", "type": "string"}, "text": {"description": "the message", "type": "string"}}, "required": ["chat", "text"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "send", input),

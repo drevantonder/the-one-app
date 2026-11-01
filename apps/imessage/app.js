@@ -57,6 +57,7 @@ export default {
       run: (ctx, input) => sidecar(ctx, "search", input),
     },
     send: {
+      confirm: true,
       description: "Send an iMessage from the person's account, to a phone number, an email address or a chat. This sends a real message to a real person.",
       input: {"properties": {"text": {"description": "the message", "type": "string"}, "to": {"description": "a phone number with its country code, an email address, or a chat as chats names it", "type": "string"}}, "required": ["to", "text"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "send", input),
