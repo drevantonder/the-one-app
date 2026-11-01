@@ -45,12 +45,15 @@ function head(d) {
     </div>`;
 }
 
+// A few names say more than a count; more than a few, the Branches screen lists them.
+const few = (names) => (names.length <= 3 ? esc(names.join(", ")) : "");
+
 function more(d) {
   if (at || d.empty) return "";
-  const bare = d.branches.filter((b) => !b.includes("@")).length, sugg = d.branches.length - bare;
+  const bare = d.branches.filter((b) => !b.includes("@")), sugg = d.branches.filter((b) => b.includes("@"));
   return `<div class="list repo-links">
-      <a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("branch", "row-icon")}<div class="main"><div class="title"><span>Branches</span><span class="when">${bare}</span></div></div><div class="chev">›</div></a>
-      ${sugg ? `<a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("diff", "row-icon")}<div class="main"><div class="title"><span>Suggestions</span><span class="when">${sugg}</span></div></div><div class="chev">›</div></a>` : ""}
+      <a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("branch", "row-icon")}<div class="main"><div class="title"><span>Branches</span><span class="when">${few(bare)}</span></div></div><div class="chev">›</div></a>
+      ${sugg.length ? `<a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("diff", "row-icon")}<div class="main"><div class="title"><span>Suggestions</span><span class="when">${few(sugg)}</span></div></div><div class="chev">›</div></a>` : ""}
       <a class="row plain" onclick="${go("history", { repo: d.repo, ref: refOf(d) })}">${one.icon("history", "row-icon")}<div class="main"><div class="title"><span>Commits</span></div></div><div class="chev">›</div></a>
     </div>`;
 }
