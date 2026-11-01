@@ -791,7 +791,8 @@ pub fn import(store: &crate::store::Store, entries: &[Entry]) -> Result<usize> {
 }
 
 /// Restores every scope `keys` opens from a place into a throwaway store, checking every signature, chain and blob,
-/// then says what came back: each scope's entries and blobs, and by name the people, apps and Vault items.
+/// then says what came back: each scope's entries and blobs, and by name the people, apps and Vault items; and how
+/// much the install's backup takes there.
 pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>>, root: Option<p2panda_core::Hash>) -> Result<serde_json::Value> {
     let store = crate::store::Store::memory()?;
     let mut scopes = Vec::new();
@@ -816,8 +817,10 @@ pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>
         let (_, state) = crate::members::replay(root, &member_entries, &entries, |_, _, _| {});
         vault.extend(state.items.values().map(|it| it.title.clone()));
     }
+    let bytes: u64 = place.objects(install)?.iter().map(|o| o.2).sum();
     Ok(serde_json::json!({
         "install": m.name,
+        "bytes": bytes,
         "scopes": scopes,
         "people": m.users.values().filter(|u| !u.removed).map(|u| u.name.clone()).collect::<Vec<_>>(),
         "apps": m.apps.values().filter(|a| !a.erased && a.bundle.is_some()).map(|a| a.name.clone()).collect::<Vec<_>>(),

@@ -414,7 +414,6 @@ struct Backups: Decodable, Equatable {
     struct Problem: Decodable, Sendable, Equatable, Hashable { var place: String; var text: String; var fix: String; var since: Double }
     struct Place: Decodable, Equatable, Hashable, Identifiable {
         struct Last: Decodable, Equatable, Hashable { var time: Double; var server: String }
-        struct Failing: Decodable, Equatable, Hashable { var since: Double; var error: String? }
         var id: String
         var title: String
         /// `folder` or `s3`.
@@ -425,9 +424,7 @@ struct Backups: Decodable, Equatable {
         var endpoint: String?
         var server: String?
         var last: Last?
-        var failing: Failing?
         var problem: Problem?
-        var bytes: Double?
     }
     /// A snapshot of the install: whichever servers wrote it, to which places, of whose data.
     struct Snapshot: Decodable, Equatable, Hashable { var time: Double; var servers: [String]; var places: [String]; var scopes: [String] }

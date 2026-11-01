@@ -419,21 +419,10 @@ impl Node {
             for p in places(global) {
                 let mine: Vec<&members::BackupRun> = runs.iter().filter(|r| r.place == p.id).collect();
                 let last_ok = mine.iter().rev().find(|r| r.error.is_none());
-                // A place fails while its latest run since its last good one failed.
-                let failing = mine.iter().rev().take_while(|r| r.error.is_some()).last().map(|first| (first.time, mine.last().and_then(|r| r.error.clone())));
                 let (kind, place_where, endpoint) = match &p.place {
                     Ok(Place::Folder(path)) => ("folder", path.display().to_string(), None),
                     Ok(Place::S3(s3)) => ("s3", s3.bucket.clone(), Some(s3.endpoint.clone())),
                     Err(_) => ("s3", String::new(), None),
-                };
-                let bytes: u64 = {
-                    let mut latest: BTreeMap<&str, u64> = BTreeMap::new();
-                    for r in &mine {
-                        for s in &r.snapshots {
-                            latest.insert(&s.scope, s.bytes);
-                        }
-                    }
-                    latest.values().sum()
                 };
                 out.push(json!({
                     "id": p.id,
@@ -444,8 +433,6 @@ impl Node {
                     "server": p.server.map(|k| name(&k)),
                     "problem": problems.iter().find(|q| q.place == p.id).map(Problem::json),
                     "last": last_ok.map(|r| json!({ "time": r.time, "server": name(&r.server) })),
-                    "failing": failing.map(|(since, error)| json!({ "since": since, "error": error.or(p.place.as_ref().err().map(|e| format!("{e:#}"))) })),
-                    "bytes": bytes,
                 }));
             }
             let titles: BTreeMap<String, String> = places(global).into_iter().map(|p| (p.id, p.title)).collect();

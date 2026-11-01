@@ -1131,8 +1131,8 @@ fn backups_said(r: &Value) -> String {
             l => format!("backed up {} by {}", when(&l["time"]), l["server"].as_str().unwrap_or("")),
         };
         out.push_str(&format!("{} ({}): {last}\n", p["title"].as_str().unwrap_or(""), p["where"].as_str().unwrap_or("")));
-        if let Some(f) = p["failing"].as_object() {
-            out.push_str(&format!("  failing since {}: {}\n", when(&f["since"]), f["error"].as_str().unwrap_or("")));
+        if let Some(problem) = p["problem"].as_object() {
+            out.push_str(&format!("  {} {} (since {})\n", problem["text"].as_str().unwrap_or(""), problem["fix"].as_str().unwrap_or(""), when(&problem["since"])));
         }
     }
     out
@@ -1162,9 +1162,10 @@ fn checked_said(r: &Value) -> String {
     let list = |k: &str| r[k].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
     let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} entries, {} blobs, from {})", s["scope"].as_str().unwrap_or(""), s["entries"], s["blobs"], say_time(s["time"].as_u64().unwrap_or(0)))).collect();
     format!(
-        "{}: {} came back, checked\n  ✓ every entry signed and in order, every blob as its hash says: {}\n  ✓ people: {}\n  ✓ apps: {}\n  ✓ Vault: {}\n",
+        "{}: {} came back, checked, from {:.1} MB there\n  ✓ every entry signed and in order, every blob as its hash says: {}\n  ✓ people: {}\n  ✓ apps: {}\n  ✓ Vault: {}\n",
         r["place"].as_str().unwrap_or("A disk"),
         r["install"].as_str().unwrap_or(""),
+        r["bytes"].as_f64().unwrap_or(0.0) / 1e6,
         scopes.join("; "),
         list("people"),
         list("apps"),
