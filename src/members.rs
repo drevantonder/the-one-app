@@ -143,7 +143,7 @@ pub struct Members {
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
-const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "forget", "used", "failed", "cost"];
+const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "vault-request", "item", "forget", "used", "failed", "cost"];
 
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
@@ -552,7 +552,7 @@ pub fn valid_app_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && name != APP
 }
 
-/// What a scope's own node entries add up to: the apps installed in it, every `open` of it, its secrets, and its
+/// What a scope's own node entries add up to: the apps installed in it, every `open` of it, its Vault items, and its
 /// schedules' switches and runs.
 #[derive(Clone, Debug, Default)]
 pub struct ScopeState {
@@ -565,8 +565,8 @@ pub struct ScopeState {
     pub runs: BTreeMap<(String, String), Vec<Run>>,
     /// When a schedule's runs first followed a different definition, by (app, schedule): (was, is, when).
     pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
-    /// Agents' requests for a person to set a secret here, by id.
-    pub requests: BTreeMap<String, SecretRequest>,
+    /// Apps' and agents' requests for a person's item here, by id.
+    pub requests: BTreeMap<String, VaultRequest>,
     /// The blobs this scope's apps said they no longer need, though their entries name them.
     pub forgotten: BTreeSet<String>,
     /// What each app's owners see of it here: who used it, its errors, its AI cost.
@@ -574,8 +574,8 @@ pub struct ScopeState {
     /// (opener, server, time)
     /// Who opened this user's data, on which server, when, and through which agent.
     pub opens: Vec<(String, Key, u64, Option<String>)>,
-    /// Each app's secrets here, by (app, name).
-    pub secrets: BTreeMap<(String, String), Secret>,
+    /// The Vault's items here, by id.
+    pub items: BTreeMap<String, crate::vault::Item>,
     /// In a user's own scope: how they arranged each page, by page (`user`, `group:<id>` or `global`):
     /// `{ items, hidden }`, as their latest `arrange` of it said.
     pub arrangements: BTreeMap<String, Value>,
@@ -598,14 +598,16 @@ pub struct Run {
     pub spec: Value,
 }
 
-/// An agent's request for a person to set one of an app's secrets: what for, who asked, and how it was answered:
-/// (`set` or `declined`, by whom, when).
+/// An app's or agent's request for a person's item that an app may use: the fields it wants (name, and whether
+/// secret), what for, who asked, and how it was answered: (`set` or `declined`, by whom, when).
 #[derive(Clone, Debug)]
-pub struct SecretRequest {
+pub struct VaultRequest {
     pub app: String,
-    pub name: String,
+    pub title: String,
+    pub fields: Vec<(String, bool)>,
     pub hosts: Vec<String>,
     pub why: String,
+    pub need: Option<String>,
     pub user: String,
     pub agent: Option<String>,
     pub time: u64,
@@ -646,24 +648,7 @@ pub struct Cost {
     pub calls: u64,
 }
 
-/// A secret: set, never read. Only the node's outbound requests use its value (see SPEC.md, "Secrets").
-#[derive(Clone)]
-pub struct Secret {
-    pub hosts: Vec<String>,
-    pub value: String,
-    pub user: String,
-    pub time: u64,
-    /// Whether a person or agent gave it (the CLI, MCP, the API, a request's sheet), not an app's own code.
-    pub given: bool,
-}
-
-impl std::fmt::Debug for Secret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Secret {{ hosts: {:?}, set by {} at {} }}", self.hosts, self.user, self.time)
-    }
-}
-
-/// Whether `user` installs apps and sets secrets in `scope`: their own, a group's they're an admin of, and `global`
+/// Whether `user` installs apps and manages the Vault's items in `scope`: their own, a group's they're an admin of, and `global`
 /// if they're an admin.
 pub fn manages_scope(m: &Members, user: &str, scope: &Scope) -> bool {
     match scope {
@@ -678,12 +663,12 @@ pub fn valid_page(page: &str) -> bool {
     page == "user" || page == "global" || page.strip_prefix("group:").is_some_and(is_id)
 }
 
-/// A secret's name: letters, digits, `_`, `-` and `.`.
+/// A Vault field's name (once a secret's): letters, digits, `_`, `-` and `.`.
 pub fn valid_secret_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
 }
 
-/// A host a secret is sent to: a lowercase host name or IP address, without scheme or port.
+/// A host an item's secret fields are sent to: a lowercase host name or IP address, without scheme or port.
 pub fn valid_host(host: &str) -> bool {
     !host.is_empty() && host.len() <= 253 && host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-'))
 }
@@ -737,28 +722,18 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             }
         }
         "secret" => {
-            ensure!(manages_scope(m, w, &scope), "not allowed to set secrets there");
+            // An earlier server's: the item of its own it is.
+            ensure!(manages_scope(m, w, &scope), "not allowed to change the Vault there");
             let data = &e.content.data;
-            let app = data["app"].as_str().context("no app")?.to_string();
-            let name = data["name"].as_str().context("no name")?.to_string();
-            ensure!(m.apps.get(&app).is_some_and(|a| !a.erased), "no such app");
-            ensure!(valid_secret_name(&name), "not a secret's name");
-            match data["value"].as_str() {
-                None => {
-                    state.secrets.remove(&(app, name));
-                }
-                Some(value) => {
-                    let hosts: Vec<String> = data["hosts"].as_array().context("no hosts")?.iter().filter_map(|h| h.as_str().map(str::to_string)).collect();
-                    ensure!(!hosts.is_empty() && hosts.iter().all(|h| valid_host(h)), "a secret goes to one host or more");
-                    if let Some(r) = data["request"].as_str().and_then(|id| state.requests.get_mut(id)) {
-                        if r.answer.is_none() && r.app == app && r.name == name {
-                            r.answer = Some(("set".into(), w.to_string(), e.time()));
-                        }
-                    }
-                    let given = data["given"] == true;
-                    state.secrets.insert((app, name), Secret { hosts, value: value.to_string(), user: w.to_string(), time: e.time(), given });
-                }
-            }
+            ensure!(data["app"].as_str().is_some_and(|a| m.apps.get(a).is_some_and(|a| !a.erased)), "no such app");
+            let id = crate::vault::apply_legacy(&mut state.items, data, w, e.time())?;
+            answered(state, data, &id, w, e.time());
+        }
+        "item" => {
+            ensure!(manages_scope(m, w, &scope), "not allowed to change the Vault there");
+            let data = &e.content.data;
+            let id = crate::vault::apply(&mut state.items, data, w, e.time(), |a| !m.apps.get(a).is_some_and(|a| a.erased))?;
+            answered(state, data, &id, w, e.time());
         }
         "used" | "failed" | "cost" => {
             let data = &e.content.data;
@@ -793,8 +768,8 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let blob = e.content.data["blob"].as_str().filter(|b| b.len() == 64 && b.bytes().all(|c| c.is_ascii_hexdigit())).context("no blob")?;
             state.forgotten.insert(blob.to_string());
         }
-        "secret-request" => {
-            ensure!(manages_scope(m, w, &scope), "not allowed to set secrets there");
+        "secret-request" | "vault-request" => {
+            ensure!(manages_scope(m, w, &scope), "not allowed to change the Vault there");
             let data = &e.content.data;
             let id = data["id"].as_str().filter(|id| is_id(id)).context("no id")?.to_string();
             if data["declined"] == true {
@@ -805,13 +780,23 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             }
             ensure!(!state.requests.contains_key(&id), "that request is already made");
             let app = data["app"].as_str().context("no app")?.to_string();
-            let name = data["name"].as_str().context("no name")?.to_string();
-            ensure!(m.apps.contains_key(&app) && valid_secret_name(&name), "not an app's secret");
-            let hosts: Vec<String> = data["hosts"].as_array().context("no hosts")?.iter().filter_map(|h| h.as_str().map(str::to_string)).collect();
-            ensure!(!hosts.is_empty() && hosts.iter().all(|h| valid_host(h)), "a secret goes to one host or more");
+            ensure!(m.apps.contains_key(&app), "no such app");
+            // An earlier server's asks for one secret field, `name`.
+            let (title, fields) = match data["name"].as_str() {
+                Some(name) => (name.to_string(), vec![(name.to_string(), true)]),
+                None => {
+                    let fields: Vec<(String, bool)> = data["fields"].as_object().context("no fields")?.iter().map(|(n, f)| (n.clone(), f["secret"] == true)).collect();
+                    (data["title"].as_str().unwrap_or("").trim().to_string(), fields)
+                }
+            };
+            ensure!(!title.is_empty() && !fields.is_empty() && fields.iter().all(|(n, _)| valid_secret_name(n)), "a request asks for named fields, with a title");
+            let hosts: Vec<String> = data["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
+            ensure!(hosts.iter().all(|h| valid_host(h)), "a host is a host name, like api.example.com");
+            ensure!(!hosts.is_empty() || !fields.iter().any(|(_, secret)| *secret), "a secret field goes to one host or more");
             let why = data["why"].as_str().unwrap_or("").to_string();
             let agent = data["agent"].as_str().map(str::to_string);
-            state.requests.insert(id, SecretRequest { app, name, hosts, why, user: w.to_string(), agent, time: e.time(), answer: None });
+            let need = data["need"].as_str().map(str::to_string);
+            state.requests.insert(id, VaultRequest { app, title, fields, hosts, why, need, user: w.to_string(), agent, time: e.time(), answer: None });
         }
         "arrange" => {
             ensure!(scope == Scope::User(w.to_string()), "each person arranges pages in their own scope");
@@ -885,12 +870,21 @@ pub fn replay_from(root: Option<Hash>, member_entries: &[Entry], scope_entries: 
     (m, state)
 }
 
-/// After `e`, an `app` that erased an app: its secrets go from the scope, as no app of its name runs again.
+/// After `e`, an `app` that erased an app: it's off every item in the scope, and the items it made or only it used
+/// go, as no app of its name runs again.
 pub fn forget_erased(m: &Members, state: &mut ScopeState, e: &Entry) {
     if e.content.app == APP && e.content.kind == "app" && e.content.data["erased"] == true {
         if let Some(name) = e.content.data["name"].as_str().filter(|n| m.apps.get(*n).is_some_and(|a| a.erased)) {
-            state.secrets.retain(|(app, _), _| app != name);
+            crate::vault::forget_app(&mut state.items, name);
         }
+    }
+}
+
+/// An `item` (or earlier `secret`) that answers a request here, by an app it switches on for: the request is set.
+fn answered(state: &mut ScopeState, data: &Value, id: &str, w: &str, time: u64) {
+    let Some(r) = data["request"].as_str().and_then(|rid| state.requests.get_mut(rid)) else { return };
+    if r.answer.is_none() && state.items.get(id).is_some_and(|i| i.apps.contains(&r.app)) {
+        r.answer = Some(("set".into(), w.to_string(), time));
     }
 }
 

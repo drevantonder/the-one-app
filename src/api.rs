@@ -53,10 +53,14 @@ pub fn router(node: Node) -> Router {
         .route("/v1/driver", post(driver))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
-        .route("/v1/secrets", get(secrets).post(set_secret))
-        .route("/v1/secrets/requests", get(secret_requests))
-        .route("/v1/secrets/request", post(request_secret))
-        .route("/v1/secrets/answer", post(answer_secret_request))
+        .route("/v1/vault", get(vault_get).post(vault_post))
+        .route("/v1/vault/requests", get(vault_get))
+        .route("/v1/vault/request", post(vault_post))
+        .route("/v1/vault/answer", post(vault_post))
+        .route("/v1/secrets", get(vault_get).post(vault_post))
+        .route("/v1/secrets/requests", get(vault_get))
+        .route("/v1/secrets/request", post(vault_post))
+        .route("/v1/secrets/answer", post(vault_post))
         .route("/v1/node-release", post(release))
         .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
         .route("/v1/blobs/{hash}", get(blob))
@@ -322,54 +326,15 @@ async fn fork(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-#[derive(Deserialize)]
-struct SecretsQuery {
-    scope: Option<String>,
+/// The Vault's routes, `/v1/vault…` and their earlier names `/v1/secrets…`: a GET's query goes to the node as a
+/// POST's body does.
+async fn vault_get(State(node): State<Node>, uri: axum::http::Uri, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
+    let input: serde_json::Map<String, Value> = q.into_iter().map(|(k, v)| (k, json!(v))).collect();
+    Ok(Json(node.vault_route(&local(&node)?, "GET", uri.path(), &json!(input)).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
-/// The secrets this user may set (there): app, name and hosts, never values.
-async fn secrets(State(node): State<Node>, Query(q): Query<SecretsQuery>) -> Reply {
-    let me = local(&node)?;
-    let scope = q.scope.map(|s| node.scope_for(&me, &s)).transpose()?;
-    Ok(Json(json!(node.secrets(&me, scope.as_ref())?)))
-}
-
-/// `{ scope, app, name, hosts, value }`, with `value: null` to delete it. `scope` is `user` by default.
-async fn set_secret(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let me = local(&node)?;
-    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
-    let hosts = body["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
-    node.set_secret(&me, &scope, text(&body, "app")?, text(&body, "name")?, hosts, body["value"].as_str().map(str::to_string)).await?;
-    done()
-}
-
-#[derive(Deserialize)]
-struct RequestsQuery {
-    scope: Option<String>,
-    id: Option<String>,
-}
-
-/// The secret requests this user may answer, with their state; `?id=` for one (an agent polling it).
-async fn secret_requests(State(node): State<Node>, Query(q): Query<RequestsQuery>) -> Reply {
-    let me = local(&node)?;
-    let scope = q.scope.map(|s| node.scope_for(&me, &s)).transpose()?;
-    Ok(Json(json!(node.secret_requests(&me, scope.as_ref(), q.id.as_deref())?)))
-}
-
-/// `{ scope, app, name, hosts, why, agent? }`: asks a person to set a secret → `{ id, link, scope }`.
-async fn request_secret(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let me = Caller { agent: body["agent"].as_str().map(str::to_string), ..local(&node)? };
-    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
-    let hosts = body["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
-    Ok(Json(node.request_secret(&me, &scope, text(&body, "app")?, text(&body, "name")?, hosts, body["why"].as_str().unwrap_or("")).await?))
-}
-
-/// `{ scope, id, value }` sets what a request asks for; `value: null` declines it.
-async fn answer_secret_request(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let me = local(&node)?;
-    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
-    node.answer_secret_request(&me, &scope, text(&body, "id")?, body["value"].as_str().map(str::to_string)).await?;
-    done()
+async fn vault_post(State(node): State<Node>, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
+    Ok(Json(node.vault_route(&local(&node)?, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
 /// For agent harnesses' hooks: the body is the hook's JSON, the reply is plain text to show the agent.

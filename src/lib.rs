@@ -44,5 +44,5 @@ pub mod outbound;
 pub mod providers;
 pub mod release;
 pub mod schedules;
-pub mod secrets;
+pub mod vault;
 pub mod shell;

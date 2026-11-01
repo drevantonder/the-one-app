@@ -204,6 +204,35 @@ function context(env, body, appends, later) {
       put: async (bytes) => (await (await ask("blob", { method: "POST", body: bytes })).json()).blob,
       get: async (hash) => new Uint8Array(await (await ask(`blob/${hash}`)).arrayBuffer()),
     },
+    /// The Vault, as this app may use it: the items it's switched on for (a secret field as { secret: true }, never its
+    /// value), and making, changing and letting go of items. A field goes into a request as {{<item id>:<field>}}.
+    vault: {
+      items: async () => (await ask("vault")).json(),
+      /// Makes an item switched on for this app ({ scope?, title, type?, domain?, fields: { name: { value, secret? } },
+      /// hosts }), in the caller's scope by default; with `same`, a plain field's name, changes the item of that type
+      /// whose field has that value instead (every secret field given anew). Gives its id.
+      async create({ scope = "user", same, ...item }) {
+        if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+        const at = scope === "user" ? scopes.find((s) => s.id.startsWith("user:"))?.id : scope;
+        if (!at) throw new Error("this server doesn't keep your data: use one of your own servers");
+        let id = null;
+        if (same) id = (await (await ask("vault/match", { method: "POST", body: JSON.stringify({ scope: at, type: item.type ?? "", field: same, value: item.fields?.[same]?.value }) })).json()).id;
+        id ||= [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
+        appends.push({ vault: id, scope: at, item, same: same ?? null });
+        return id;
+      },
+      /// Changes an item it's switched on for: { title?, type?, domain?, fields?, hosts? }, its hosts only with every
+      /// secret field given anew.
+      update: (id, changes) => {
+        if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+        appends.push({ vault: String(id), item: changes ?? {} });
+      },
+      /// Switches this app off for an item (signing out an account); the item goes once no app uses it.
+      release: (id) => {
+        if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+        appends.push({ vault: String(id), release: true });
+      },
+    },
     /// Every app in the install, as `GET /v1/apps` gives them to the caller.
     catalog: async () => (await ask("catalog")).json(),
     /// The install's servers, as `GET /v1/state` gives them to the caller: online or not, and each one's load.

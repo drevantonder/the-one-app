@@ -46,16 +46,19 @@ Usage:
   {CLI} uninstall <app> [--scope s]
   {CLI} fork <app> <name> [--owner <owner>]
                                        a new app from <app>'s code, with data of its own
-  {CLI} secret set <app> <name> --hosts a,b [--scope user|global|<group>]
-                                       set an app's secret, read from stdin: it's sent only to those hosts, and
-                                       never read back; for a person's value, secret request asks them instead
-  {CLI} secret list [--scope s]        the secrets you may set: names and hosts, never values, and which the
-                                       app's own code keeps (an account's sign-in)
-  {CLI} secret remove <app> <name> [--scope s]
-  {CLI} secret request <app> <name> --hosts a,b [--why text] [--scope s]
-                                       ask the person to set a secret: a link to a sheet where they type it, so
-                                       you never see it; secret status <id> says how it went
-  {CLI} secret requests                the requests waiting for you; secret answer <id> [--decline] sets one from stdin
+  {CLI} vault [--scope user|global|<group>]
+                                       the Vault's items you may change: fields (secret ones never shown), the sites
+                                       they're sent to and the apps switched on for each
+  {CLI} vault set <item> <field> [--secret] [--hosts a,b] [--app <app>] [--scope s]
+                                       set a field of an item (by title or id; a new one by that title), its value
+                                       read from stdin; for a person's value, vault request asks them instead
+  {CLI} vault use <item> <app> [--off] switch an app on (or off) for an item
+  {CLI} vault remove <item> [<field>]  delete an item, or one of its fields
+  {CLI} vault request <app> (--need <name> | --title <t> --fields a,b [--secret-fields b] --hosts a,b) [--why text]
+                                       ask the person for an item an app may use: a link to a sheet where they pick
+                                       or make one, so you never see it; vault status <id> says how it went
+  {CLI} vault requests                 the requests waiting for you; vault answer <id> [--item <id> | --decline]
+                                       answers one, a new item's values on stdin (one line, or a JSON object)
   {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
   {CLI} drivers                        the drivers on each server: version, and who installed them
@@ -237,6 +240,74 @@ fn run(args: Vec<String>) -> Result<()> {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             post("/v1/install", json!({ "app": app, "scope": scope, "installed": !flags.contains_key("remove") }))?;
             println!("{app} is {} in {scope}.", if flags.contains_key("remove") { "no longer installed" } else { "installed" });
+        }
+        ["vault"] | ["vault", "list"] => {
+            let scope = flags.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default();
+            for it in get(&format!("/v1/vault{scope}"))?.as_array().into_iter().flatten() {
+                println!("{}", item_line(it));
+            }
+        }
+        ["vault", "set", item, field] => {
+            let value = match flags.get("value").and_then(Value::as_str) {
+                Some(v) => v.to_string(),
+                None => {
+                    let mut v = String::new();
+                    std::io::stdin().read_line(&mut v)?;
+                    v.trim_end_matches(['\n', '\r']).to_string()
+                }
+            };
+            anyhow::ensure!(!value.is_empty(), "give the value on stdin");
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            let hosts = flags.get("hosts").and_then(Value::as_str).map(|h| h.split(',').map(|h| h.trim().to_string()).collect());
+            println!("{}", vault_set(scope, item, field, &value, flags.get("secret").map(|_| true), hosts, flags.get("app").and_then(Value::as_str))?);
+        }
+        ["vault", "use", item, app] => {
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            println!("{}", vault_use(scope, item, app, !flags.contains_key("off"))?);
+        }
+        ["vault", "remove", item] | ["vault", "remove", item, _] => {
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            println!("{}", vault_remove(scope, item, positional.get(3).map(String::as_str))?);
+        }
+        ["vault", "request", app] => {
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            let list = |k: &str| flags.get(k).and_then(Value::as_str).map(|v| v.split(',').map(str::trim).filter(|v| !v.is_empty()).map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
+            let secret = list("secret-fields");
+            let fields: Map<String, Value> = list("fields").into_iter().map(|f| (f.clone(), json!({ "secret": secret.contains(&f) }))).collect();
+            let body = json!({ "scope": scope, "app": app, "need": flags.get("need"), "title": flags.get("title"), "fields": fields, "hosts": list("hosts"), "why": flags.get("why"), "agent": agent_from_env() });
+            let r = post("/v1/vault/request", body)?;
+            println!("Open this to answer it: {}\n{CLI} vault status {} says how it went.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""));
+        }
+        ["vault", "status", id] => {
+            let r = get(&format!("/v1/vault/requests?id={id}"))?;
+            let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
+            println!("{} for {} in {}: {}", r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""));
+        }
+        ["vault", "requests"] => {
+            for r in get("/v1/vault/requests")?.as_array().into_iter().flatten() {
+                println!("{}  {} for {} in {}  {}  {}", r["id"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""), r["why"].as_str().unwrap_or(""));
+            }
+        }
+        ["vault", "answer", id] => {
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            let mut body = json!({ "scope": scope, "id": id });
+            if flags.contains_key("decline") {
+                body["declined"] = json!(true);
+            } else if let Some(item) = flags.get("item").and_then(Value::as_str) {
+                body["item"] = json!(item);
+            } else {
+                let r = get(&format!("/v1/vault/requests?id={id}"))?;
+                let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
+                let mut text = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)?;
+                let text = text.trim_end_matches(['\n', '\r']);
+                body["fields"] = match serde_json::from_str::<Value>(text) {
+                    Ok(v) if v.is_object() => v,
+                    _ => json!({ r["fields"][0]["name"].as_str().unwrap_or(""): text }),
+                };
+            }
+            post("/v1/vault/answer", body)?;
+            println!("Answered.");
         }
         ["secret", "request", app, name] => {
             let hosts: Vec<&str> = flags.get("hosts").and_then(Value::as_str).context("give the hosts it's sent to: --hosts api.example.com")?.split(',').map(str::trim).collect();
@@ -690,7 +761,7 @@ fn agent_name(raw: &str) -> String {
 
 fn instructions() -> String {
     let mut text = format!("{NAME} is this user's apps and agents, shared across their machines. Every tool is also a CLI command ({CLI} <app> <op>).");
-    text.push_str("\n\n## Secrets\n\nNever ask the person to paste a secret (an API key, a password, a token) into the chat. Call secrets_request and give them its link: they type it into a sheet on their own device, and you never see it. If someone pastes one anyway, keep it with secrets_set and don't repeat it.");
+    text.push_str("\n\n## Vault\n\nThe Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat. Call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. If someone pastes one anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.");
     if let Ok(apps) = get("/v1/apps") {
         for app in apps.as_array().into_iter().flatten() {
             if let Some(i) = app["instructions"].as_str().filter(|i| !i.is_empty()) {
@@ -701,18 +772,136 @@ fn instructions() -> String {
     text
 }
 
-/// Secrets are the node's, not an app's: agents set, replace and delete them, and list their names, never values.
-fn secret_tools() -> Vec<Value> {
+/// An item, as one line: its title, what it is, its page, its fields (secret ones never shown), where they go and
+/// the apps switched on for it.
+fn item_line(it: &Value) -> String {
+    let fields: Vec<String> = it["fields"].as_array().into_iter().flatten().map(|f| match f["secret"] == true {
+        true => format!("{} ••••", f["name"].as_str().unwrap_or("")),
+        false => format!("{} = {}", f["name"].as_str().unwrap_or(""), f["value"].as_str().unwrap_or("")),
+    }).collect();
+    let list = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+    format!(
+        "{}  {}{}  [{}]  {}  → {}  used by: {}{}",
+        it["id"].as_str().unwrap_or(""),
+        it["title"].as_str().unwrap_or(""),
+        it["type"].as_str().filter(|t| !t.is_empty()).map(|t| format!(" ({t})")).unwrap_or_default(),
+        it["scope_name"].as_str().unwrap_or(""),
+        fields.join(", "),
+        list(&it["hosts"]),
+        list(&it["apps"]),
+        it["app"].as_str().map(|a| format!("  (kept by {a})")).unwrap_or_default(),
+    )
+}
+
+/// The item `name` (its id or title) names in `scope`, if there's one.
+fn find_item(scope: &str, name: &str) -> Result<Option<Value>> {
+    let items = get(&format!("/v1/vault?scope={scope}"))?;
+    let found: Vec<Value> = items.as_array().into_iter().flatten().filter(|i| i["id"] == name || i["title"].as_str().is_some_and(|t| t.eq_ignore_ascii_case(name))).cloned().collect();
+    anyhow::ensure!(found.len() < 2, "several items are called {name}: give its id");
+    Ok(found.into_iter().next())
+}
+
+/// Sets `field` of `item` in `scope` (a new item by that title if there's none), secret if asked or if it was.
+fn vault_set(scope: &str, item: &str, field: &str, value: &str, secret: Option<bool>, hosts: Option<Vec<String>>, app: Option<&str>) -> Result<String> {
+    let found = find_item(scope, item)?;
+    let was = found.as_ref().and_then(|it| it["fields"].as_array()?.iter().find(|f| f["name"] == field).map(|f| f["secret"] == true));
+    let mut data = json!({ "scope": scope, "fields": { field: { "value": value, "secret": secret.or(was).unwrap_or(false) } } });
+    if let Some(hosts) = hosts {
+        data["hosts"] = json!(hosts);
+    }
+    let made = match &found {
+        Some(it) => {
+            data["id"] = it["id"].clone();
+            if let Some(app) = app {
+                let mut apps: Vec<Value> = it["apps"].as_array().cloned().unwrap_or_default();
+                if !apps.contains(&json!(app)) {
+                    apps.push(json!(app));
+                }
+                data["apps"] = json!(apps);
+            }
+            false
+        }
+        None => {
+            data["title"] = json!(item);
+            data["apps"] = json!(app.into_iter().collect::<Vec<_>>());
+            true
+        }
+    };
+    let id = post("/v1/vault", data)?["id"].as_str().unwrap_or("").to_string();
+    Ok(match made {
+        true => format!("Made {item} ({id}) in {scope}, with {field}."),
+        false => format!("Set {item}'s {field}."),
+    })
+}
+
+/// Switches `app` on or off for `item` in `scope`.
+fn vault_use(scope: &str, item: &str, app: &str, on: bool) -> Result<String> {
+    let it = find_item(scope, item)?.with_context(|| format!("no item {item} in {scope}"))?;
+    let mut apps: Vec<Value> = it["apps"].as_array().cloned().unwrap_or_default().into_iter().filter(|a| a != app).collect();
+    if on {
+        apps.push(json!(app));
+    }
+    post("/v1/vault", json!({ "scope": scope, "id": it["id"], "apps": apps }))?;
+    Ok(format!("{app} is switched {} for {}.", if on { "on" } else { "off" }, it["title"].as_str().unwrap_or(item)))
+}
+
+/// Deletes `item` in `scope`, or with `field`, one of its fields.
+fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> {
+    let it = find_item(scope, item)?.with_context(|| format!("no item {item} in {scope}"))?;
+    let title = it["title"].as_str().unwrap_or(item);
+    match field {
+        Some(field) => {
+            post("/v1/vault", json!({ "scope": scope, "id": it["id"], "fields": { field: null } }))?;
+            Ok(format!("Removed {title}'s {field}."))
+        }
+        None => {
+            post("/v1/vault", json!({ "scope": scope, "id": it["id"], "deleted": true }))?;
+            Ok(format!("Deleted {title}."))
+        }
+    }
+}
+
+/// The Vault is the node's, not an app's: agents list its items (never a secret field's value), set and remove
+/// fields, switch apps on for items, and ask the person for one.
+fn vault_tools() -> Vec<Value> {
     let scope = json!({ "type": "string", "description": "user (yours, the default), global (everyone's), or a group's name or id" });
+    let item = json!({ "type": "string", "description": "the item's title or id" });
     vec![
-        json!({ "name": "secrets_set", "description": "Set (or replace) a secret of an app: it puts {{name}} in a request's headers or body and your server fills it in, only for requests to these hosts. Nobody can read it back. When the person has the value, use secrets_request instead: never ask them to paste it into the chat.", "inputSchema": { "type": "object", "required": ["app", "name", "value", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "scope": scope } } }),
-        json!({ "name": "secrets_list", "description": "The secrets you may set: app, name and hosts, never values; given is true for one a person or agent set, false for one the app's own code keeps (an account's sign-in).", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": { "readOnlyHint": true } }),
-        json!({ "name": "secrets_remove", "annotations": { "destructiveHint": true }, "description": "Delete a secret of an app.", "inputSchema": { "type": "object", "required": ["app", "name"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "scope": scope } } }),
-        json!({ "name": "secrets_request", "description": "Ask the person to set a secret of an app, instead of handling its value yourself: returns a link to give them, which opens a sheet in the app where they type it (and their Settings lists it as a request). You never see the value; poll secrets_status with the id until it's set or declined.", "inputSchema": { "type": "object", "required": ["app", "name", "hosts"], "properties": { "app": { "type": "string" }, "name": { "type": "string" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names it's sent to, like api.example.com" }, "why": { "type": "string", "description": "one line the person sees: what it's for and where to find it" }, "scope": scope } } }),
-        json!({ "name": "secrets_status", "description": "How a secret request went: waiting, set, declined or expired, and who answered. Never the value.", "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }, "annotations": { "readOnlyHint": true } }),
+        json!({ "name": "vault_list", "description": "The Vault's items you may change: title, type, fields (a secret one never with its value), the sites they're sent to (hosts), the apps switched on for each (apps) and those that want it (wanted_by), and app when an app's sign-in keeps it.", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": { "readOnlyHint": true } }),
+        json!({ "name": "vault_set", "description": "Set a field of an item, making the item if no item has that title. An app puts {{<item id>:<field>}} in a request and your server fills it in, a secret field only for the item's hosts; nobody reads a secret back. When the person has the value, use vault_request instead: never ask them to paste it into the chat.", "inputSchema": { "type": "object", "required": ["item", "field", "value"], "properties": { "item": item, "field": { "type": "string" }, "value": { "type": "string" }, "secret": { "type": "boolean", "description": "never shown again; true for keys, passwords and tokens" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "app": { "type": "string", "description": "an app to switch on for it" }, "scope": scope } } }),
+        json!({ "name": "vault_use", "description": "Switch an app on (or off) for an item, so its calls may use the item's fields.", "inputSchema": { "type": "object", "required": ["item", "app"], "properties": { "item": item, "app": { "type": "string" }, "on": { "type": "boolean", "description": "false switches it off" }, "scope": scope } } }),
+        json!({ "name": "vault_remove", "annotations": { "destructiveHint": true }, "description": "Delete an item, or with field, one of its fields.", "inputSchema": { "type": "object", "required": ["item"], "properties": { "item": item, "field": { "type": "string" }, "scope": scope } } }),
+        json!({ "name": "vault_request", "description": "Ask the person for an item an app may use, instead of handling its values yourself: need names what the app declares (its vault), or give title, fields and hosts. Returns a link to give them; it opens a sheet where they pick one of their items or make one (and their Settings lists it). You never see a secret; poll vault_status with the id until it's set or declined.", "inputSchema": { "type": "object", "required": ["app"], "properties": { "app": { "type": "string" }, "need": { "type": "string" }, "title": { "type": "string" }, "fields": { "type": "object", "description": "field name → { secret: true|false }", "additionalProperties": { "type": "object", "properties": { "secret": { "type": "boolean" } } } }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "why": { "type": "string", "description": "one line the person sees: what it's for and where to find it" }, "scope": scope } } }),
+        json!({ "name": "vault_status", "description": "How a request for an item went: waiting, set, declined or expired, and who answered. Never a value.", "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } }, "annotations": { "readOnlyHint": true } }),
     ]
 }
 
+fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
+    let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
+    let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
+    match op {
+        "list" => get(&format!("/v1/vault?scope={scope}")),
+        "set" => {
+            let hosts = input.get("hosts").and_then(Value::as_array).map(|h| h.iter().filter_map(Value::as_str).map(str::to_string).collect());
+            Ok(json!(vault_set(scope, text("item")?, text("field")?, text("value")?, input.get("secret").and_then(Value::as_bool), hosts, input.get("app").and_then(Value::as_str))?))
+        }
+        "use" => Ok(json!(vault_use(scope, text("item")?, text("app")?, input.get("on") != Some(&json!(false)))?)),
+        "remove" => Ok(json!(vault_remove(scope, text("item")?, input.get("field").and_then(Value::as_str))?)),
+        "request" => {
+            let r = post("/v1/vault/request", json!({ "scope": scope, "app": input.get("app"), "need": input.get("need"), "title": input.get("title"), "fields": input.get("fields"), "hosts": input.get("hosts"), "why": input.get("why"), "agent": agent }))?;
+            Ok(json!(format!("Asked. Give the person this link: {}\nIt's also waiting in their Settings, under Requests. Poll vault_status with id {} until it's set.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""))))
+        }
+        "status" => {
+            let id = text("id")?;
+            let r = get(&format!("/v1/vault/requests?id={id}"))?;
+            let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
+            Ok(json!({ "state": r["state"], "app": r["app"], "title": r["title"], "answered": r["answered"] }))
+        }
+        other => anyhow::bail!("no tool vault_{other}"),
+    }
+}
+
+/// The tools' earlier names, `secrets_*`, still answered (not listed) for agents that learned them.
 fn secret_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
     let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
     match op {
@@ -734,7 +923,7 @@ fn secret_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Res
 
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
-    let mut tools = secret_tools();
+    let mut tools = vault_tools();
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
         // Operations starting with `_` are for the node, such as a driver's `_screen`.
@@ -755,8 +944,9 @@ fn call_tool(params: &Value, agent: Option<&str>) -> Value {
     let mut input = params["arguments"].as_object().cloned().unwrap_or_default();
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
     let Some((app, op)) = name.split_once('_') else { return failed(format!("no tool {name}")) };
-    if app == "secrets" {
-        return match secret_tool(op, &input, agent) {
+    if app == "vault" || app == "secrets" {
+        let answer = if app == "vault" { vault_tool(op, &input, agent) } else { secret_tool(op, &input, agent) };
+        return match answer {
             Ok(ok) => json!({ "content": ops::mcp_content(&ok) }),
             Err(e) => failed(format!("{e:#}")),
         };

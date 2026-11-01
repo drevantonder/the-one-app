@@ -328,7 +328,13 @@ async fn secrets_are_set_never_read_and_go_only_to_their_hosts() {
 };"#)
     .await;
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
-    a.set_secret(&me, &one::entry::Scope::User(me.user.clone()), "keeper", "token", vec!["127.0.0.1".into()], Some("s3cret".into())).await.unwrap();
+    // Its earlier name: the secret `token`, which is an item of its own.
+    let secret = |who: &one::node::Caller, scope: &str, name: &str, hosts: Value, value: Value| {
+        let (a, who) = (a.clone(), who.clone());
+        let body = json!({ "scope": scope, "app": "keeper", "name": name, "hosts": hosts, "value": value });
+        async move { a.vault_route(&who, "POST", "/v1/secrets", &body).await }
+    };
+    secret(&me, "user", "token", json!(["127.0.0.1"]), json!("s3cret")).await.unwrap();
     a.append(&one::entry::Scope::User(me.user.clone()), one::members::node("install", json!({ "app": "keeper" }))).await.unwrap();
     let send = |url: String, auth: &str, body: &str| call("keeper", "send", json!({ "url": url, "auth": auth, "body": body }));
 
@@ -361,11 +367,11 @@ async fn secrets_are_set_never_read_and_go_only_to_their_hosts() {
     assert_eq!(given("kept"), Some(json!(false)));
 
     // Deleted, it's no longer filled in; and only someone who manages a scope sets secrets there.
-    a.set_secret(&me, &one::entry::Scope::User(me.user.clone()), "keeper", "token", vec![], None).await.unwrap();
+    secret(&me, "user", "token", json!([]), Value::Null).await.unwrap();
     let got = a.call(send(format!("http://127.0.0.1:{port}/"), "Bearer {{token}}", "")).await.unwrap();
     assert_eq!(got["authorization"], "Bearer {{token}}");
     let other = one::node::Caller { key: a.id(), user: "0123456789abcdef".into(), agent: None };
-    assert!(a.set_secret(&other, &one::entry::Scope::Global, "keeper", "x", vec!["a.com".into()], Some("v".into())).await.is_err());
+    assert!(secret(&other, "global", "x", json!(["a.com"]), json!("v")).await.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -900,33 +906,114 @@ async fn apps_badge_their_icons_and_push_through_a_driver_that_knows_who_sent_it
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn agents_ask_for_secrets_and_never_see_them() {
+async fn agents_ask_for_items_and_never_see_them() {
     let (a, _ra) = start("asks").await;
     a.create("Asks", "Andre").await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: Some("Claude Code".into()) };
     let mine = one::entry::Scope::User(me.user.clone());
-    let asked = a.request_secret(&me, &mine, "board", "token", vec!["api.example.com".into()], "Your example.com API key, from its settings page").await.unwrap();
+    let ask = json!({ "title": "Example key", "fields": { "user": {}, "key": { "secret": true } }, "hosts": ["api.example.com"] });
+    let asked = a.request_item(&me, &mine, "board", None, &ask, "Your example.com API key, from its settings page").await.unwrap();
     let id = asked["id"].as_str().unwrap().to_string();
-    assert!(asked["link"].as_str().unwrap().contains(&format!("secret?id={id}")), "{asked}");
-    assert_eq!(a.state()["secret_requests"], 1, "the shell shows a request waiting");
-    let waiting = a.secret_requests(&me, None, Some(&id)).unwrap();
+    assert!(asked["link"].as_str().unwrap().contains(&format!("vault?id={id}")), "{asked}");
+    assert_eq!(a.state()["vault_requests"], 1, "the shell shows a request waiting");
+    let waiting = a.item_requests(&me, None, Some(&id)).unwrap();
     assert_eq!(waiting[0]["state"], "waiting");
     assert_eq!(waiting[0]["agent"], "Claude Code");
     assert_eq!(waiting[0]["why"], "Your example.com API key, from its settings page");
+    assert_eq!(waiting[0]["matches"], json!([]), "no item has those fields yet");
 
-    a.answer_secret_request(&me, &mine, &id, Some("s3cret".into())).await.unwrap();
-    let done = a.secret_requests(&me, None, Some(&id)).unwrap();
+    let answer = json!({ "fields": { "user": "andre", "key": "s3cret" } });
+    a.answer_request(&me, &mine, &id, &answer).await.unwrap();
+    let done = a.item_requests(&me, None, Some(&id)).unwrap();
     assert_eq!(done[0]["state"], "set", "{done:?}");
-    assert!(!format!("{done:?}").contains("s3cret"), "a request never says the value");
-    let set = a.secrets(&me, Some(&mine)).unwrap();
-    assert!(set.iter().any(|s| s["name"] == "token" && s["hosts"] == json!(["api.example.com"])), "{set:?}");
-    assert!(a.answer_secret_request(&me, &mine, &id, Some("again".into())).await.is_err(), "answered once");
-    assert_eq!(a.state()["secret_requests"], 0);
+    assert!(!format!("{done:?}").contains("s3cret"), "a request never says a secret");
+    let items = a.vault(&me, Some(&mine)).await.unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["title"], "Example key");
+    assert_eq!(items[0]["apps"], json!(["board"]), "the app that asked is switched on for it");
+    assert_eq!(items[0]["fields"], json!([{ "name": "key", "secret": true }, { "name": "user", "secret": false, "value": "andre" }]));
+    assert!(!items[0].to_string().contains("s3cret"), "a secret field is never shown");
+    assert!(a.answer_request(&me, &mine, &id, &answer).await.is_err(), "answered once");
+    assert_eq!(a.state()["vault_requests"], 0);
 
-    let other = a.request_secret(&me, &mine, "board", "other", vec!["example.org".into()], "").await.unwrap();
-    let other = other["id"].as_str().unwrap();
-    a.answer_secret_request(&me, &mine, other, None).await.unwrap();
-    assert_eq!(a.secret_requests(&me, None, Some(other)).unwrap()[0]["state"], "declined");
+    // Another app's request is answered with the item that's there: it's switched on for it.
+    deploy_module(&a, "other", r#"export default { name: "other", ops: {} };"#).await;
+    let again = a.request_item(&me, &mine, "other", None, &ask, "").await.unwrap();
+    let again = again["id"].as_str().unwrap();
+    let matches = &a.item_requests(&me, None, Some(again)).unwrap()[0]["matches"];
+    let item = matches[0]["id"].as_str().unwrap().to_string();
+    a.answer_request(&me, &mine, again, &json!({ "item": item })).await.unwrap();
+    assert_eq!(a.vault(&me, Some(&mine)).await.unwrap()[0]["apps"], json!(["board", "other"]));
+
+    // Its earlier name asks for one secret field, and is declined.
+    let old = a.vault_route(&me, "POST", "/v1/secrets/request", &json!({ "app": "board", "name": "other", "hosts": ["example.org"] })).await.unwrap().unwrap();
+    assert!(old["link"].as_str().unwrap().contains("secret?id="), "{old}");
+    let old = old["id"].as_str().unwrap();
+    assert_eq!(a.item_requests(&me, None, Some(old)).unwrap()[0]["name"], "other", "shells built before ask for it by name");
+    a.vault_route(&me, "POST", "/v1/secrets/answer", &json!({ "id": old, "value": null })).await.unwrap();
+    assert_eq!(a.item_requests(&me, None, Some(old)).unwrap()[0]["state"], "declined");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn apps_use_only_the_items_they_are_switched_on_for() {
+    let (a, _ra) = start("vault").await;
+    a.create("Vault", "Andre").await.unwrap();
+    let port = echo().await;
+    let module = |name: &str| format!(r#"export default {{
+  name: "{name}",
+  ops: {{
+    send: {{ run: async (ctx, {{ url, auth }}) => {{
+      const r = await fetch(url, {{ method: "POST", headers: {{ authorization: auth }}, body: "" }});
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    }} }},
+    items: {{ run: (ctx) => ctx.vault.items() }},
+    sign_in: {{ run: (ctx, {{ email, token }}) => ctx.vault.create({{ title: email, type: "Example account", fields: {{ email: {{ value: email }}, token: {{ value: token, secret: true }} }}, hosts: ["127.0.0.1"], same: "email" }}) }},
+    rehost: {{ run: (ctx, {{ id }}) => {{ ctx.vault.update(id, {{ hosts: ["evil.example.com"] }}); return null; }} }},
+    sign_out: {{ run: (ctx, {{ id }}) => {{ ctx.vault.release(id); return null; }} }},
+  }},
+}};"#);
+    deploy_module(&a, "one", &module("one")).await;
+    deploy_module(&a, "two", &module("two")).await;
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    let mine = one::entry::Scope::User(me.user.clone());
+    for app in ["one", "two"] {
+        a.install(&me, app, &mine, true).await.unwrap();
+    }
+    let send = |app: &str, auth: &str| call(app, "send", json!({ "url": format!("http://127.0.0.1:{port}/"), "auth": auth }));
+
+    // A sign-in makes an item switched on for its app alone, which fills in only its own fields.
+    let id = a.call(call("one", "sign_in", json!({ "email": "a@example.com", "token": "t1" }))).await.unwrap();
+    let id = id.as_str().unwrap().to_string();
+    assert_eq!(a.call(send("one", &format!("Bearer {{{{{id}:token}}}}"))).await.unwrap()["authorization"], "Bearer t1");
+    assert_eq!(a.call(send("one", "{{token}}")).await.unwrap()["authorization"], "t1", "by field name, the oldest item that has it");
+    assert_eq!(a.call(send("two", &format!("{{{{{id}:token}}}}"))).await.unwrap()["authorization"], format!("{{{{{id}:token}}}}"), "an app not switched on gets nothing");
+    let seen = a.call(call("one", "items", json!({}))).await.unwrap();
+    assert_eq!(seen[0]["fields"], json!({ "email": { "value": "a@example.com" }, "token": { "secret": true } }), "an app sees plain fields, never a secret");
+    assert_eq!(a.call(call("two", "items", json!({}))).await.unwrap(), json!([]));
+    assert!(a.call(call("one", "rehost", json!({ "id": id }))).await.is_err(), "an app can't send a secret somewhere else");
+    let listed = a.vault(&me, None).await.unwrap();
+    assert_eq!(listed[0]["app"], "one", "kept by the app whose sign-in made it");
+    assert_eq!(listed[0]["wanted_by"], json!(["one"]));
+
+    // The same account signed in from another app is the same item, now switched on for both.
+    let again = a.call(call("two", "sign_in", json!({ "email": "a@example.com", "token": "t2" }))).await.unwrap();
+    assert_eq!(again, json!(id));
+    assert_eq!(a.vault(&me, None).await.unwrap()[0]["apps"], json!(["one", "two"]));
+    assert_eq!(a.call(send("one", "{{token}}")).await.unwrap()["authorization"], "t2");
+
+    // Signing out switches the app off; the item goes once no app uses it.
+    a.call(call("one", "sign_out", json!({ "id": id }))).await.unwrap();
+    assert_eq!(a.vault(&me, None).await.unwrap()[0]["apps"], json!(["two"]));
+    a.call(call("two", "sign_out", json!({ "id": id }))).await.unwrap();
+    assert!(a.vault(&me, None).await.unwrap().is_empty());
+
+    // A person's item, switched on for an app by them.
+    let made = a.set_item(&me, &mine, json!({ "title": "Key", "fields": { "token": { "value": "k", "secret": true } }, "hosts": ["127.0.0.1"], "apps": ["two"] })).await.unwrap();
+    assert_eq!(a.call(send("two", "{{token}}")).await.unwrap()["authorization"], "k");
+    let refused = a.call(call("two", "send", json!({ "url": format!("http://localhost:{port}/"), "auth": "{{token}}" }))).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("sent only to 127.0.0.1"), "{refused:#}");
+    assert!(a.call(call("one", "sign_out", json!({ "id": made }))).await.is_err(), "an app lets go only of what it uses");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1028,7 +1115,7 @@ async fn deleted_apps_wait_in_recently_deleted_until_restored_or_erased() {
 
     a.retire(&me, "scratch", "restored").await.unwrap();
     assert_eq!(a.call(call("scratch", "hi", json!({}))).await.unwrap(), "hi", "restored, it runs on the pages it was on");
-    let secret = async |scope: one::entry::Scope| a.set_secret(&me, &scope, "scratch", "key", vec!["example.com".into()], Some("v".into())).await;
+    let secret = async |scope: one::entry::Scope| a.set_item(&me, &scope, json!({ "title": "Key", "fields": { "key": { "value": "v", "secret": true } }, "hosts": ["example.com"], "apps": ["scratch"] })).await;
     secret(one::entry::Scope::User(me.user.clone())).await.unwrap();
     secret(one::entry::Scope::Global).await.unwrap();
     let kept = || a.secrets(&me, None).unwrap().into_iter().filter(|s| s["app"] == "scratch").count();
@@ -1039,7 +1126,8 @@ async fn deleted_apps_wait_in_recently_deleted_until_restored_or_erased() {
     a.retire(&me, "scratch", "erased").await.unwrap();
     assert!(listed(&a).await.is_none(), "erased, it's gone from every list");
     assert_eq!(kept(), 0, "erased, its secrets go from every scope");
-    assert!(secret(one::entry::Scope::Global).await.is_err(), "and none is set again");
+    secret(one::entry::Scope::Global).await.unwrap();
+    assert_eq!(kept(), 0, "and it's switched on for no item again");
     assert!(a.member("app", json!({ "name": "scratch", "owner": format!("user:{}", me.user) })).await.is_err(), "and its name isn't used again");
 }
 

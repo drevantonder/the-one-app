@@ -99,8 +99,11 @@ pub enum Append {
     Driver { server: String, name: String, installed: bool },
     /// What the call spent on AI: `{ model, usd, input, output }`, for the insights of the app that called it.
     Cost { data: Value },
-    /// Sets (or with no value, deletes) one of the calling app's secrets in a scope.
+    /// Sets (or with no value, deletes) one of the calling app's secrets in a scope, as earlier apps did.
     Secret { scope: String, name: String, value: Option<String>, hosts: Vec<String> },
+    /// Makes, changes or lets go of (`release`) a Vault item: `scope` for one it makes, `same` a plain field by
+    /// which it changes an item of that type instead.
+    Vault { id: String, scope: Option<String>, data: Value, same: Option<String>, release: bool },
 }
 
 pub struct Outcome {
@@ -120,6 +123,12 @@ pub fn appends(app: &str, list: &Value) -> Result<Vec<Append>> {
             let value = a["value"].as_str().map(str::to_string);
             ensure!(value.is_some() || a["value"].is_null(), "a secret's value is text");
             appends.push(Append::Secret { scope, name: name.into(), value, hosts });
+            continue;
+        }
+        if let Some(id) = a["vault"].as_str() {
+            let scope = a["scope"].as_str().map(str::to_string);
+            let data = if a["item"].is_object() { a["item"].clone() } else { serde_json::json!({}) };
+            appends.push(Append::Vault { id: id.into(), scope, data, same: a["same"].as_str().map(str::to_string), release: a["release"] == true });
             continue;
         }
         if let Some(schedule) = a["switch"].as_str() {
