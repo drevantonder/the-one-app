@@ -266,8 +266,14 @@ func ready(ctx context.Context, d computer) error {
 	}
 }
 
+// tailscale runs a tailscale command. Changing what it serves is refused to
+// an operator once anything on the machine serves a Unix socket, so then it
+// runs as root, where sudo needs no password.
 func tailscale(ctx context.Context, args ...string) (string, error) {
 	out, err := exec.CommandContext(ctx, "tailscale", args...).CombinedOutput()
+	if err != nil && strings.Contains(string(out), "must be root") {
+		out, err = exec.CommandContext(ctx, "sudo", append([]string{"-n", "tailscale"}, args...)...).CombinedOutput()
+	}
 	if err != nil {
 		return "", fmt.Errorf("tailscale %s: %v: %s", args[0], err, strings.TrimSpace(string(out)))
 	}

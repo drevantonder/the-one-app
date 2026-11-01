@@ -44,7 +44,7 @@ type loan struct {
 	Item      string    `json:"item,omitempty"`    // its Vault item
 	Since     time.Time `json:"since"`
 	SigningIn bool      `json:"signing_in,omitempty"`
-	Until     time.Time `json:"until,omitzero"`     // a sign-in's end
+	Until     time.Time `json:"until,omitzero"`      // a sign-in's end
 	NoScreen  bool      `json:"no_screen,omitempty"` // made without a screen: nobody watches it
 }
 
