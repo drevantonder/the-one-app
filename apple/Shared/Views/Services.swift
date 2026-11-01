@@ -141,6 +141,8 @@ struct ServicesView: View {
                         let route = store.storeRoute(for: app) ?? store.settingsRoute(for: app, on: page)
                         Button { if let route { open(route) } } label: { row(app, opens: route != nil) }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(app.label)
+                            .accessibilityHint(app.description ?? "")
                             .contextMenu { AppActions(app: app, page: page, open: open, deleting: $deleting, error: $error) }
                     }
                 }

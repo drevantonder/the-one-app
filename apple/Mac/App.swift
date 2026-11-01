@@ -26,6 +26,8 @@ struct MacApp: App {
     private func open(_ url: URL) {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let value = { (name: String) in query.first { $0.name == name }?.value?.trimmingCharacters(in: .whitespaces) }
+        // What a link opens shows in the window, not under a sheet left open.
+        if ["open", "page", "settings"].contains(url.host() ?? "") { store.sheet = nil }
         if url.host() == "open", let app = value("app") {
             store.path = []
             store.selection = .screen(ScreenRoute(app: app, screen: value("screen") ?? "main", params: value("params") ?? "{}", scope: value("scope")))
