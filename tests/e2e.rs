@@ -1037,6 +1037,11 @@ async fn agents_and_sidecars_use_the_items_switched_on_for_them_without_seeing_t
     assert!(!got.to_string().contains("s3cret"));
     let refused = fetch(format!("http://localhost:{port}/x")).await.unwrap_err();
     assert!(format!("{refused:#}").contains("sent only to 127.0.0.1"), "{refused:#}");
+    // The CLI's, through the local API.
+    let api = serve_api(&a).await;
+    let headers = r#"{"authorization":"Bearer {{token}}"}"#;
+    let out = cli(&api, &temp("fetch-cli"), &["vault", "fetch", &format!("http://127.0.0.1:{port}/x"), "--headers", headers]).await.unwrap();
+    assert!(out.contains("Bearer ••••") && !out.contains("s3cret"), "{out}");
 
     // A sidecar's text is filled for a call of its that waits, from the items of the app of its name, for their hosts.
     a.set_item(&person, &mine, json!({ "title": "Example push", "fields": { "key": { "value": "k3y", "secret": true }, "team": { "value": "T1" } }, "hosts": ["api.example.com"], "apps": ["keeper"] })).await.unwrap();

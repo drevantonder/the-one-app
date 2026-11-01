@@ -59,6 +59,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/vault/requests", get(vault_get))
         .route("/v1/vault/request", post(vault_post))
         .route("/v1/vault/answer", post(vault_post))
+        .route("/v1/vault/fetch", post(vault_post))
         .route("/v1/secrets", get(vault_get).post(vault_post))
         .route("/v1/secrets/requests", get(vault_get))
         .route("/v1/secrets/request", post(vault_post))
