@@ -9,9 +9,9 @@ function row(r) {
     <div class="icon${r.from ? " grey" : ""}">${one.icon("book")}</div>
     <div class="main">
       <div class="title"><span>${esc(r.name)}</span></div>
-      <div class="sub">${[r.branch, one.ago(r.updated || r.created, { long: true }), r.from && "fork of " + r.from].filter(Boolean).map(esc).join(" · ")}</div>
+      <div class="sub">${r.deleted ? "Deleted " + esc(one.ago(r.deleted.time, { long: true })) : [r.branch, one.ago(r.updated || r.created, { long: true }), r.from && "fork of " + r.from].filter(Boolean).map(esc).join(" · ")}</div>
     </div>
-    <div class="chev">›</div>
+    ${r.deleted ? (r.yours ? `<button class="button capsule" data-restore="${esc(r.name)}">Restore</button>` : "") : '<div class="chev">›</div>'}
   </a>`;
 }
 
@@ -23,9 +23,19 @@ function list() {
   document.getElementById("find").hidden = false;
   const q = query.toLowerCase();
   const shown = repos.filter((r) => !q || r.name.includes(q) || (r.from || "").includes(q));
-  return shown.length ? `<div class="list">${shown.map(row).join("")}</div>` : one.empty({ icon: "search", title: "No repos match." });
+  if (!shown.length) return one.empty({ icon: "search", title: "No repos match." });
+  const here = shown.filter((r) => !r.deleted), gone = shown.filter((r) => r.deleted);
+  return (here.length ? `<div class="list">${here.map(row).join("")}</div>` : "")
+    + (gone.length ? `<h2 class="section">Recently Deleted</h2><div class="list">${gone.map(row).join("")}</div>` : "");
 }
 
+document.getElementById("page").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-restore]");
+  if (!b) return;
+  e.stopPropagation();
+  b.disabled = true;
+  one.call("restore", { repo: b.dataset.restore }).catch(() => (b.disabled = false));
+}, true);
 one.search("#find", { placeholder: "Find a repo", onSearch: (q) => ((query = q), (document.getElementById("page").innerHTML = list())) });
 const draw = () => one.render("#page", async () => ((repos = await one.call("list")), list()), { loading: "Loading repos" });
 one.on("changed", draw);

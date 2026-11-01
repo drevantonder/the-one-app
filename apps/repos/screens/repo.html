@@ -36,11 +36,12 @@ function readme(d) {
 function head(d) {
   if (at) return "";
   const clone = `git clone ${one.config?.cli || "one"}://${d.repo}`;
+  const box = d.deleted ? "" : `<div class="clone"><code>${esc(clone)}</code>${one.copyButton(clone)}</div>`;
   return `<div class="repo-head">
       <div class="repo-title"><span class="repo-icon">${one.icon("book")}</span><div>
         <div class="repo-owner">${esc(d.owner_name)}</div><h1>${esc(d.repo)}</h1>
         ${d.from ? `<div class="muted small">Forked from <a onclick="${go("repo", { repo: d.from })}">${esc(d.from)}</a></div>` : ""}</div></div>
-      <div class="clone"><code>${esc(clone)}</code>${one.copyButton(clone)}</div>
+      ${box}
     </div>`;
 }
 
@@ -54,16 +55,44 @@ function more(d) {
     </div>`;
 }
 
+// At the bottom of a repo's front page, for its owners: Delete Repository, or once it's deleted, Erase Repository.
+function danger(d) {
+  if (at || !d.yours) return "";
+  return `<div class="list danger-list"><a class="row plain danger-row" onclick="retire('${d.deleted ? "erase" : "delete"}')">${d.deleted ? "Erase Repository" : "Delete Repository"}</a></div><div id="ask"></div>`;
+}
+
+async function retire(op) {
+  const erase = op === "erase";
+  document.getElementById("ask").scrollIntoView({ behavior: "smooth", block: "center" });
+  await one.confirm("#ask", {
+    title: erase ? `Erase ${P.repo} for good?` : `Delete ${P.repo}?`,
+    detail: erase ? "Its branches and history are gone, and its name is free again." : "No one can clone or push to it. You can restore it from Recently Deleted.",
+    action: erase ? "Erase" : "Delete", danger: true,
+    run: async () => {
+      await one.call(op, { repo: P.repo, confirm: true });
+      if (erase) history.back();
+    },
+  });
+}
+
+async function restore(button) {
+  button.disabled = true;
+  await one.call("restore", { repo: P.repo }).catch(() => (button.disabled = false));
+}
+
 async function show() {
   const d = await one.call("tree", { repo: P.repo, ref: P.ref, path: at });
+  if (d.deleted)
+    return head(d) + `<div class="deleted-note muted">Deleted ${esc(one.ago(d.deleted.time, { long: true }))}</div>`
+      + (d.yours ? '<button class="button capsule" onclick="restore(this)">Restore</button>' : "") + danger(d);
   if (d.file) return one.open("file", { repo: d.repo, ref: refOf(d), path: at });
   if (d.empty)
-    return head(d) + one.empty({ icon: "code", title: "No code yet.", text: `Push some with <code>git push ${one.config?.cli || "one"}://${esc(d.repo)} main</code>` });
+    return head(d) + danger(d) + one.empty({ icon: "code", title: "No code yet.", text: `Push some with <code>git push ${one.config?.cli || "one"}://${esc(d.repo)} main</code>` });
   const list = d.entries.length
     ? `<div class="list files">${at ? `<a class="row plain entry up" onclick="${go("repo", { repo: d.repo, ref: refOf(d), path: at.split("/").slice(0, -1).join("/") })}">${one.icon("folder", "entry-icon")}<span class="entry-name">..</span></a>` : ""}${d.entries.map((e) => entry(d, e)).join("")}</div>`
     : one.empty({ icon: "folder", title: "This folder is empty." });
   setTimeout(() => wide() && fill(d), 0);
-  return `${head(d)}${pathBar(d)}<div class="code-box">${commitCard(d.latest, d)}${list}</div>${readme(d)}${more(d)}`;
+  return `${head(d)}${pathBar(d)}<div class="code-box">${commitCard(d.latest, d)}${list}</div>${readme(d)}${more(d)}${danger(d)}`;
 }
 
 // Each row's last commit, on windows wide enough to show it.

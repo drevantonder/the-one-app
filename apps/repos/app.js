@@ -3,7 +3,8 @@
 // the branch's head. No git runs here: pages read the packs themselves (browse.js, git.js).
 //
 // A repo has an owner (user:<id>, group:<id> or admins). Only someone acting for it moves bare branches (`main`);
-// anyone pushes `<branch>@<their name>`, a suggestion, which then belongs to them.
+// anyone pushes `<branch>@<their name>`, a suggestion, which then belongs to them. Its owners delete it, as apps are:
+// it waits in Recently Deleted, read by no one, until they restore it or erase it, and its packs, for good.
 
 import * as browse from "./browse.js";
 import css from "./screens/repos.css" with { type: "text" };
@@ -59,6 +60,24 @@ function ownerName(ctx, owner) {
 
 const repoOf = async (g, name) => (await g.query("select * from repos where name = ?", [name]))[0] || null;
 
+/// A repo that's there to read and push to: not deleted.
+async function live(g, name) {
+  const r = await repoOf(g, name);
+  if (r?.deleted) throw new Error(`${name} was deleted: its owners restore it from Recently Deleted`);
+  return r;
+}
+
+/// A repo the caller acts for the owner of, to delete, restore or erase.
+async function owned(ctx, name) {
+  const r = await repoOf(global(ctx), name);
+  if (!r) throw new Error(`no repo ${name}`);
+  if (!actsFor(asWriter(ctx), r.owner)) throw new Error(`only ${ownerName(ctx, r.owner)} deletes, restores or erases ${name}`);
+  return r;
+}
+
+/// When a deleted repo was deleted, and by whom.
+const deletedOf = (r) => (r.deleted ? { time: r.deleted, by: r.deleted_by } : null);
+
 function global(ctx) {
   if (!ctx.global) throw new Error("repos lives in global: install it there");
   return ctx.global;
@@ -81,7 +100,8 @@ export default {
 
   schema: {
     global: `
-      create table repos (name text primary key, owner text not null, "from" text, created integer not null, user text not null);
+      create table repos (name text primary key, owner text not null, "from" text, created integer not null, user text not null,
+                          deleted integer, deleted_by text);
       create table branches (repo text not null, branch text not null, head text not null, user text not null, name text not null,
                              time integer not null, primary key (repo, branch));
       create table packs (repo text not null, hash text not null, time integer not null, primary key (repo, hash));
@@ -93,11 +113,11 @@ export default {
   ops: {
     list: {
       reads: true,
-      description: "Every repo: its owner, where it was forked from, its default branch (main, or else its first), how many branches and suggestions it has, and when it last moved.",
+      description: "Every repo: its owner, where it was forked from, its default branch (main, or else its first), how many branches and suggestions it has, and when it last moved. Deleted ones say when, and wait in Recently Deleted.",
       input: { type: "object", properties: {} },
       async run(ctx) {
         const repos = await global(ctx).query(
-          `select r.name, r.owner, r."from", r.created,
+          `select r.name, r.owner, r."from", r.created, r.deleted, r.deleted_by,
                   coalesce((select branch from branches b where b.repo = r.name and b.branch = 'main'),
                            (select min(branch) from branches b where b.repo = r.name and b.branch not like '%@%')) as branch,
                   (select count(*) from branches b where b.repo = r.name and b.branch not like '%@%') as branches,
@@ -105,7 +125,7 @@ export default {
                   (select max(time) from branches b where b.repo = r.name) as updated
              from repos r order by coalesce(updated, r.created) desc`,
         );
-        return repos.map((r) => ({ ...r, owner_name: ownerName(ctx, r.owner) }));
+        return repos.map((r) => ({ ...r, deleted: deletedOf(r), deleted_by: undefined, owner_name: ownerName(ctx, r.owner), yours: actsFor(asWriter(ctx), r.owner) }));
       },
     },
     get: {
@@ -114,7 +134,7 @@ export default {
       input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
       async run(ctx, { repo }) {
         const g = global(ctx);
-        const r = await repoOf(g, repo);
+        const r = await live(g, repo);
         if (!r) throw new Error(`no repo ${repo}`);
         const branches = await g.query("select branch, head, user, name, time from branches where repo = ? order by branch", [repo]);
         const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [repo])).map((p) => p.hash);
@@ -128,8 +148,12 @@ export default {
       description: "A folder of a repo at a branch or commit (main if none): its files and folders, its README, and the latest commit.",
       input: { type: "object", required: ["repo"], properties: { repo: { type: "string" }, ref: { type: "string" }, path: { type: "string" } } },
       async run(ctx, input) {
+        const r = await repoOf(global(ctx), input.repo);
+        const yours = !!r && actsFor(asWriter(ctx), r.owner);
+        // A deleted one shows only that it was, for its owners to restore or erase.
+        if (r?.deleted) return { repo: r.name, owner: r.owner, owner_name: ownerName(ctx, r.owner), yours, deleted: deletedOf(r), branches: [], entries: [] };
         const t = await browse.tree(ctx, global(ctx), input);
-        return { ...t, owner_name: ownerName(ctx, t.owner) };
+        return { ...t, owner_name: ownerName(ctx, t.owner), yours };
       },
     },
     file: {
@@ -187,12 +211,47 @@ export default {
       async run(ctx, { repo, name, owner }) {
         const g = global(ctx);
         owner ||= `user:${ctx.me.user}`;
-        if (!(await repoOf(g, repo))) throw new Error(`no repo ${repo}`);
+        if (!(await live(g, repo))) throw new Error(`no repo ${repo}`);
         if (!NAME.test(name || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
         if (await repoOf(g, name)) throw new Error(`${name} already exists`);
         if (!actsFor(asWriter(ctx), owner)) throw new Error(`you don't act for ${owner}`);
         g.append("repo", { name, owner, from: repo });
         return `Forked ${repo} as ${name}.`;
+      },
+    },
+    delete: {
+      confirm: true,
+      description: "Delete a repo you own: no one can read, clone or push to it, and it waits in Recently Deleted, where its owners restore it or erase it for good.",
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
+      async run(ctx, { repo }) {
+        const r = await owned(ctx, repo);
+        if (r.deleted) throw new Error(`${repo} is already in Recently Deleted`);
+        global(ctx).append("delete", { repo });
+        return `Deleted ${repo}: it's in Recently Deleted.`;
+      },
+    },
+    restore: {
+      description: "Restore a repo you own from Recently Deleted, as it was.",
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
+      async run(ctx, { repo }) {
+        const r = await owned(ctx, repo);
+        if (!r.deleted) throw new Error(`${repo} isn't deleted`);
+        global(ctx).append("restore", { repo });
+        return `Restored ${repo}.`;
+      },
+    },
+    erase: {
+      confirm: true,
+      description: "Erase a deleted repo you own for good: its branches, history and the packs no other repo shares are gone, and its name is free again.",
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
+      async run(ctx, { repo }) {
+        const g = global(ctx);
+        const r = await owned(ctx, repo);
+        if (!r.deleted) throw new Error(`delete ${repo} before erasing it`);
+        const packs = await g.query("select hash from packs where repo = ? and hash not in (select hash from packs where repo != ?)", [repo, repo]);
+        g.append("erase", { repo });
+        for (const p of packs) g.forget(p.hash);
+        return `Erased ${repo}.`;
       },
     },
     push: {
@@ -204,7 +263,7 @@ export default {
       },
       async run(ctx, { repo, branch, base = null, head = null, pack = null }) {
         const g = global(ctx);
-        let r = await repoOf(g, repo);
+        let r = await live(g, repo);
         if (!r) {
           if (!NAME.test(repo || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
           r = { name: repo, owner: `user:${ctx.me.user}` };
@@ -224,12 +283,28 @@ export default {
   },
 
   on: {
+    delete(db, e) {
+      const r = db.query("select * from repos where name = ?", [e.data.repo])[0];
+      if (r && !r.deleted && actsFor(e, r.owner)) db.exec("update repos set deleted = ?, deleted_by = ? where name = ?", [e.time, e.name, r.name]);
+    },
+    restore(db, e) {
+      const r = db.query("select * from repos where name = ?", [e.data.repo])[0];
+      if (r?.deleted && actsFor(e, r.owner)) db.exec("update repos set deleted = null, deleted_by = null where name = ?", [r.name]);
+    },
+    // Erased, it's gone, and its name is free again; its forks keep their code, no longer forked from it.
+    erase(db, e) {
+      const r = db.query("select * from repos where name = ?", [e.data.repo])[0];
+      if (!r?.deleted || !actsFor(e, r.owner)) return;
+      for (const table of ["branches", "packs", "pushes"]) db.exec(`delete from ${table} where repo = ?`, [r.name]);
+      db.exec("delete from repos where name = ?", [r.name]);
+      db.exec(`update repos set "from" = null where "from" = ?`, [r.name]);
+    },
     repo(db, e) {
       const { name, owner, from } = e.data;
       if (!NAME.test(name || "") || db.query("select 1 from repos where name = ?", [name]).length) return;
       if (!actsFor(e, owner || "")) return;
       if (from && !db.query("select 1 from repos where name = ?", [from]).length) return;
-      db.exec(`insert into repos values (?, ?, ?, ?, ?)`, [name, owner, from || null, e.time, e.user]);
+      db.exec(`insert into repos (name, owner, "from", created, user) values (?, ?, ?, ?, ?)`, [name, owner, from || null, e.time, e.user]);
       if (from) {
         db.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ? and branch not like '%@%'`, [name, e.user, e.name, e.time, from]);
         db.exec(`insert or ignore into packs select ?, hash, time from packs where repo = ?`, [name, from]);
@@ -238,7 +313,7 @@ export default {
     push(db, e) {
       const { repo, branch, base = null, head = null } = e.data;
       const r = db.query("select * from repos where name = ?", [repo])[0];
-      if (!r) return;
+      if (!r || r.deleted) return;
       const row = db.query("select * from branches where repo = ? and branch = ?", [repo, branch])[0];
       if (refusal(r, row, e, branch) || (row?.head ?? null) !== base) return;
       if (head) db.exec("insert or replace into branches values (?, ?, ?, ?, ?, ?)", [repo, branch, head, row?.user ?? e.user, e.name, e.time]);
@@ -267,7 +342,7 @@ export default {
         repo: {
           title: "Repo",
           default: "",
-          choices: async (ctx) => [{ value: "", title: "All Repos" }, ...(ctx.global ? await ctx.global.query("select name from repos order by name") : []).map((r) => r.name)],
+          choices: async (ctx) => [{ value: "", title: "All Repos" }, ...(ctx.global ? await ctx.global.query("select name from repos where deleted is null order by name") : []).map((r) => r.name)],
         },
       },
       async render(ctx) {
@@ -312,7 +387,10 @@ export default {
 /// The newest `many` commits across repos' main branches, each with its repo and branch: the branches pushed to last,
 /// and their history, newest first. A repo whose packs can't be read is left out.
 async function recent(ctx, many, repo = "") {
-  const heads = await ctx.global.query("select repo, branch from branches where branch not like '%@%' and (? = '' or repo = ?) order by time desc limit ?", [repo || "", repo || "", many]);
+  const heads = await ctx.global.query(
+    "select repo, branch from branches where branch not like '%@%' and (? = '' or repo = ?) and repo not in (select name from repos where deleted is not null) order by time desc limit ?",
+    [repo || "", repo || "", many],
+  );
   const all = [];
   for (const { repo, branch } of heads) {
     try {

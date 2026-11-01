@@ -26,6 +26,9 @@ code { font: 0.88em var(--mono); }
 .clone { display: flex; align-items: center; gap: 6px; margin-top: 12px; padding: 4px 4px 4px 12px; background: var(--card); border-radius: 10px; border: 0.5px solid var(--line); }
 .clone code { flex: 1; overflow-x: auto; white-space: nowrap; font-size: 13px; }
 .repo-links { margin-top: 16px; }
+.danger-list { margin-top: 28px; }
+.danger-row { color: var(--danger); justify-content: center; }
+.deleted-note { margin: 4px 0 12px; }
 
 /* The branch chip and the path. */
 .pathbar { display: flex; align-items: center; gap: 8px; margin: 10px 0; flex-wrap: wrap; }

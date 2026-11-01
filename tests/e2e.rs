@@ -581,6 +581,27 @@ async fn repos_clone_push_and_take_suggestions_with_real_git() {
     assert!(html.contains("one.call(\"tree\""), "repos has screens");
     let html = a.screen(one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None }, "repos", "nope", json!({}), None).await.unwrap();
     assert!(html.contains("one.notFound()"), "a screen that isn't there says so");
+
+    // Its owners delete it to Recently Deleted, then restore it or erase it; a fork keeps the packs it shares.
+    let refused = bob.call(call("repos", "delete", json!({ "repo": "hello", "confirm": true }))).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("deletes, restores or erases"), "{refused:#}");
+    a.call(call("repos", "delete", json!({ "repo": "hello", "confirm": true }))).await.unwrap();
+    let listed = a.call(call("repos", "list", json!({}))).await.unwrap();
+    assert!(listed.as_array().unwrap().iter().any(|r| r["name"] == "hello" && r["deleted"]["time"].is_u64() && r["yours"] == true), "{listed}");
+    let gone = git(&api_a, &work, &["clone", "-q", &format!("{cli}://hello"), "deleted"]).await.unwrap_err();
+    assert!(gone.contains("was deleted"), "{gone}");
+    assert!(a.call(call("repos", "tree", json!({ "repo": "hello" }))).await.unwrap()["deleted"].is_object(), "its page says so");
+    a.call(call("repos", "restore", json!({ "repo": "hello" }))).await.unwrap();
+    git(&api_a, &work, &["clone", "-q", &format!("{cli}://hello"), "restored"]).await.unwrap();
+    assert!(a.call(call("repos", "erase", json!({ "repo": "hello", "confirm": true }))).await.is_err(), "deleted before erased");
+    a.call(call("repos", "delete", json!({ "repo": "hello", "confirm": true }))).await.unwrap();
+    a.call(call("repos", "erase", json!({ "repo": "hello", "confirm": true }))).await.unwrap();
+    let listed = a.call(call("repos", "list", json!({}))).await.unwrap();
+    assert!(!listed.as_array().unwrap().iter().any(|r| r["name"] == "hello"), "erased, it's gone: {listed}");
+    assert!(listed.as_array().unwrap().iter().any(|r| r["name"] == "hello-too" && r["from"].is_null()), "its fork stays, forked from nothing now: {listed}");
+    git(&api_a, &work, &["clone", "-q", &format!("{cli}://hello-too"), "fork-after"]).await.unwrap();
+    assert_eq!(std::fs::read_to_string(work.join("fork-after/app.js")).unwrap(), "// mine\n", "the fork's packs stay");
+    a.call(call("repos", "create", json!({ "name": "hello" }))).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

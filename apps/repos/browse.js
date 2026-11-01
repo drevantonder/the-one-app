@@ -17,6 +17,7 @@ const utf8 = new TextDecoder();
 export async function open(ctx, g, repo, ref) {
   const r = (await g.query("select * from repos where name = ?", [repo]))[0];
   if (!r) throw new Error(`There's no repo called ${repo}`);
+  if (r.deleted) throw new Error(`${repo} was deleted: its owners restore it from Recently Deleted`);
   const branches = await g.query("select branch, head, name, time from branches where repo = ? order by branch", [repo]);
   const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [repo])).map((p) => p.hash);
   const o = await objects(ctx, packs);
