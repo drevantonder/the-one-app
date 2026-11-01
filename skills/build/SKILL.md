@@ -13,7 +13,7 @@ An app is a folder with one JavaScript module, `app.js` (or `app.ts`): its opera
 4. Deploy: `{{cli}} deploy <folder>` builds it, npm packages and all, and makes the app if it's new, owned by you.
 5. Put it on a page: `{{cli}} install <app>` for your own, `--scope <group>` for a group's, `--scope global` (admins) for everyone's.
 6. Check it: `{{cli}} <app> <op> --help`, then run each operation, and open its screens and widgets in the app on the person's Mac or phone. If something's wrong, `{{cli}} deploys <app>` lists its versions and `{{cli}} deploy <app> --version <hash>` puts one back.
-7. Keep its code in Repos: `{{cli}} repos create`, then `git push {{cli}}://<repo> main`. On someone else's repo, push `main@<your name>`, a suggestion its owner takes.
+7. Keep its code wherever you like (Repos, `git push {{cli}}://<repo> main`, or GitHub or any git host), and link the app to it: `{{cli}} apps source <app> <link>`. Its page shows it as Source.
 
 ## The details
 
