@@ -1395,8 +1395,8 @@ impl Node {
         let mut out = listed;
         for item in &mut out {
             if let (Some(domain), Some(app)) = (item["domain"].as_str().map(str::to_string), item["app"].as_str().or(item["apps"][0].as_str()).map(str::to_string)) {
-                if let Some(image) = self.logo(&domain, &app) {
-                    item["image"] = json!(image);
+                if let Some((image, kind)) = self.logo(&domain, &app) {
+                    (item["image"], item["image_kind"]) = (json!(image), json!(kind));
                 }
             }
         }
