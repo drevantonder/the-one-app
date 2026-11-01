@@ -172,7 +172,7 @@
   // so the name shows once. Call it once per screen, and put what it returns first.
   one.largeTitle = (text) => {
     one.title("");
-    requestAnimationFrame(() => {
+    setTimeout(() => {
       const el = document.querySelector(".large-title");
       if (!el || !window.IntersectionObserver) return void one.title(text);
       new IntersectionObserver(([e]) => one.title(e.isIntersecting ? "" : text)).observe(el);
@@ -195,7 +195,9 @@
     document.body.append(back);
     const was = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    requestAnimationFrame(() => requestAnimationFrame(() => back.classList.add("open")));
+    // Laid out first, so it slides; not with animation frames, which a window that's covered doesn't get.
+    void back.offsetHeight;
+    back.classList.add("open");
     let closed = false;
     const close = () => {
       if (closed) return;
