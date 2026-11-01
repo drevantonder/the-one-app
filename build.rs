@@ -31,6 +31,19 @@ fn main() {
             _ => (String::new(), file.clone()),
         },
     };
+    // A config in its own repo is part of what this build is: its commit, when it was made, and whether it's dirty.
+    let config_commit = if repo.is_empty() {
+        None
+    } else {
+        if let Some(dir) = git(&["rev-parse", "--absolute-git-dir"]) {
+            for what in ["HEAD", "index"] {
+                println!("cargo:rerun-if-changed={dir}/{what}");
+            }
+        }
+        let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
+        let at: u64 = git(&["log", "-1", "--format=%ct"]).and_then(|t| t.parse().ok()).unwrap_or(0);
+        git(&["rev-parse", "--short=8", "HEAD"]).map(|c| (c, at, dirty))
+    };
     let out = format!("{out}pub const CONFIG_FILE: &str = {:?};\npub const CONFIG_REPO: &str = {repo:?};\n", file.to_string_lossy());
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\n", optional("release_key"), optional("release_signer"));
     // The install settings an install has until its admins set them (`setting` entries).
@@ -74,6 +87,12 @@ fn main() {
         .unwrap_or_else(|| "dev".into());
     // A build with uncommitted changes isn't that commit; say so, so it can't be released as it.
     let dirty = std::process::Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).output().is_ok_and(|o| !o.stdout.is_empty());
+    let dirty = dirty || config_commit.as_ref().is_some_and(|c| c.2);
+    // An edition's build is main's commit and its config's, so a change to either is a new build that nodes take.
+    let commit = match &config_commit {
+        Some((config, ..)) => format!("{commit}-{config}"),
+        None => commit,
+    };
     let commit = if dirty { format!("{commit}+dirty") } else { commit };
     // Rebuild when HEAD moves; in a worktree .git is a file, so ask git where HEAD lives.
     for what in ["HEAD", "refs/heads", "index"] {
@@ -81,13 +100,14 @@ fn main() {
             println!("cargo:rerun-if-changed={}", String::from_utf8_lossy(&o.stdout).trim());
         }
     }
-    // When that commit was made, so releases only ever move devices forward.
+    // When that commit (or the config's, if later) was made, so releases only ever move devices forward.
     let committed: u64 = std::process::Command::new("git")
         .args(["log", "-1", "--format=%ct"])
         .output()
         .ok()
         .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .max(config_commit.map_or(0, |c| c.1));
     let out = format!("{out}pub const COMMITTED: u64 = {committed};\npub const BUILD: &str = {commit:?};\npub const TARGET: &str = {:?};\n", std::env::var("TARGET").unwrap());
     let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("config.rs");
     std::fs::write(dest, out).unwrap();

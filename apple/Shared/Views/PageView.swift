@@ -623,7 +623,7 @@ struct SettingsPage: View {
         let host = store.state?.host ?? store.state?.machine
         let server = store.install?.servers.first { $0.key == host?.key }
         guard let build = server?.build else { return app }
-        return "\(app)\n\(displayName(server?.name ?? "")) runs \(String(build.prefix(12)))"
+        return "\(app)\n\(displayName(server?.name ?? "")) runs \(build)"
     }
 }
 

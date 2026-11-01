@@ -58,6 +58,10 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     println!("Building {short}");
     step(Command::new(cargo()).current_dir(&src).env("CONFIG", &config).args(["build", "--release"]))?;
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
+    // The build devices say they run: main's commit, and an edition's config's.
+    let version: Value = serde_json::from_slice(&Command::new(&binary).args(["version", "--json"]).output()?.stdout).context("ask the new build what it is")?;
+    let short = version["commit"].as_str().context("the new build doesn't say what it is")?.to_string();
+    let short = short.as_str();
     // Which devices to wait for, asked before this device's own node restarts on the new build.
     let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
     crate::publish(&binary, &Default::default(), &key)?;
