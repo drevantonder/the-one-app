@@ -95,7 +95,7 @@ struct VaultView: View {
 
     private func delete(_ item: VaultItem) async {
         do {
-            try await store.node.setItem(scope: item.scope, id: item.id, ["deleted": true])
+            try await store.delete(item)
         } catch {
             self.error = error.localizedDescription
         }
@@ -166,6 +166,27 @@ func appNames(_ apps: [String], store: Store) -> String {
 }
 
 /// A field's name as a person reads it: `client_id` is "Client ID".
+extension Store {
+    /// Deletes an item, signing an account out first as connectors do (SPEC.md "Connectors"): each app using it, or
+    /// whose sign-in made it, that lists it among its `accounts` (by its title or a plain field) signs that account out,
+    /// so what the app keeps elsewhere goes too (a sidecar's link) and listing accounts doesn't make the item again.
+    func delete(_ item: VaultItem) async throws {
+        struct Listed: Decodable { var account: String }
+        if item.isAccount {
+            let known = Set([item.title] + item.fields.compactMap { $0.secret ? nil : $0.value })
+            for name in Set(item.apps + [item.app].compactMap { $0 }).sorted() {
+                guard let app = self.app(name), app.has(op: "accounts"), app.has(op: "sign_out") else { continue }
+                let listed = try JSONDecoder().decode([Listed].self, from: try await node.call(app: name, op: "accounts", input: Data("{}".utf8)))
+                guard let account = listed.first(where: { known.contains($0.account) }) else { continue }
+                _ = try await node.call(app: name, op: "sign_out", input: try JSONEncoder().encode(["account": account.account]))
+            }
+            // Signing out may have let go of it already.
+            guard try await node.vault(scope: item.scope).contains(where: { $0.id == item.id }) else { return }
+        }
+        try await node.setItem(scope: item.scope, id: item.id, ["deleted": true])
+    }
+}
+
 func fieldLabel(_ name: String) -> String {
     let words = name.split(whereSeparator: { "_-.".contains($0) }).map { word -> String in
         let w = word.lowercased()
@@ -274,7 +295,13 @@ struct VaultItemView: View {
         .confirmationDialog(item.isAccount ? "Sign out of \(item.title)?" : "Delete \(item.title)?", isPresented: $deleting, titleVisibility: .visible) {
             Button(item.isAccount ? "Sign Out" : "Delete", role: .destructive) {
                 Task {
-                    if await save(["deleted": true]) { dismiss() }
+                    do {
+                        try await store.delete(item)
+                        await changed()
+                        dismiss()
+                    } catch {
+                        self.error = error.localizedDescription
+                    }
                 }
             }
         } message: {

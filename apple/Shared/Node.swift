@@ -200,6 +200,7 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
         !hasScreens && (connector == true || ["accounts", "sign_in", "sign_out"].allSatisfy { op in ops?.contains { $0.name == op } == true })
     }
     func has(screen: String) -> Bool { screens?.contains { $0.name == screen } == true }
+    func has(op: String) -> Bool { ops?.contains { $0.name == op } == true }
     /// Whether its accounts are Vault items its sign-in makes, so Add Account may offer ones that are there.
     var keepsAccounts: Bool { vault?.values.contains { $0.accounts == true } == true }
     /// Its pages: the asker's own scope is the page `user`.
