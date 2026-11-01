@@ -7,7 +7,7 @@ private let iconSize: CGFloat = 60
 #endif
 
 /// A page: its title (on a Mac; a phone's bar names it instead), then one grid, as the Home Screen's: the widgets its
-/// person put there in their sizes and its apps' icons, in their order, then the Connectors folder, there even with
+/// person put there in their sizes and its apps' icons, in their order, then the Services folder, there even with
 /// none. Touch and hold empty space (or choose Edit Home Page) to arrange it: everything jiggles, and apps and
 /// widgets drag anywhere, come off with their − badge, and widgets resize from their corner.
 struct PageView: View {
@@ -58,8 +58,8 @@ struct PageView: View {
                             cell(item, grid: grid, editing: editing)
                                 .layoutValue(key: GridSpan.self, value: span(item, grid: grid))
                         }
-                        IconButton(title: String(localized: "Connectors")) { if !editing { open(.connectors(page.scope)) } } icon: {
-                            FolderTile(apps: store.connectors(on: page), size: grid.icon)
+                        IconButton(title: String(localized: "Services")) { if !editing { open(.services(page.scope)) } } icon: {
+                            FolderTile(apps: store.services(on: page), size: grid.icon)
                         }
                         .modifier(Jiggle(on: editing))
                     }

@@ -64,21 +64,17 @@ async function described(ctx, bundle) {
   return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), uses: { apps: [], sidecars: parts } };
 }
 
-/// Whether an app is a connector: it says so (`connector: true`), or it has accounts, sign_in
-/// and sign_out, and a settings screen but no main one. What it says about itself where it's installed for the caller,
-/// or the install's list says; elsewhere, its code.
-async function isConnector(ctx, a) {
-  const has = (list, name) => (list || []).some((x) => x.name === name);
-  if (a.connector) return true;
-  if (a.ops) return has(a.ops, "accounts") && has(a.ops, "sign_in") && has(a.ops, "sign_out") && !has(a.screens, "main");
+/// Whether an app is a service: it has no main screen and no widget, so shells keep it in each page's Services folder
+/// rather than giving it an icon. What it says about itself where it's installed for the caller; elsewhere, its code.
+async function isService(ctx, a) {
+  if (a.ops) return !(a.screens || []).some((x) => x.name === "main") && !(a.widgets || []).length;
   const bundle = a.bundle || a.built_in;
   const file = bundle && untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
   const code = file ? new TextDecoder().decode(file.bytes) : "";
-  if (/\bconnector:\s*true\b/.test(code)) return true;
-  return ["accounts", "sign_in", "sign_out", "settings"].every((k) => new RegExp(`\\b${k}:\\s*\\{`).test(code)) && !/\bmain:\s*\{/.test(code);
+  return !/\bmain:\s*\{/.test(code) && !/\bwidgets:\s*\{\s*[\w"]/.test(code);
 }
 
-/// Where a connector runs, in a few words, and what each of the caller's servers offers for it: "Runs on linux, mac",
+/// Where a service runs, in a few words, and what each of the caller's servers offers for it: "Runs on linux, mac",
 /// or what it needs (its `needs`) when none of their servers runs it; the servers they own it may be installed on (where
 /// an owner removed it) or removed from; and whether they own none, so they ask an owner instead. Its server parts are the
 /// sidecars it uses, by their names.
@@ -180,15 +176,15 @@ export default {
   ops: {
     list: {
       reads: true,
-      description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; its tagline, if it has one, and description; owner, where it's installed (that you can see), forks, and the places you may add it to. Each says whether it's a connector: it only connects an account (Gmail, say), and shells keep it in each page's Connectors folder. With connector, only those.",
-      // `connected` is connector's old name, which shells built before still send.
-      input: { type: "object", properties: { connector: { type: "boolean", description: "only connectors" }, connected: { type: "boolean", description: "the same as connector" } } },
-      async run(ctx, { connector, connected } = {}) {
-        const only = connector ?? connected;
+      description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; its tagline, if it has one, and description; owner, where it's installed (that you can see), forks, and the places you may add it to. Each says whether it's a service: it has no screen or widget of its own (Gmail, AI), and shells keep it in each page's Services folder. With service, only those.",
+      // `connector`, and before it `connected`, are service's old names, which shells built before still send.
+      input: { type: "object", properties: { service: { type: "boolean", description: "only services" }, connector: { type: "boolean", description: "the same as service" }, connected: { type: "boolean", description: "the same as service" } } },
+      async run(ctx, { service, connector, connected } = {}) {
+        const only = service ?? connector ?? connected;
         const name = namer(ctx);
         const all = (await ctx.catalog()).filter((a) => !a.deleted || !only);
-        const connectors = await Promise.all(all.map((a) => isConnector(ctx, a).catch(() => false)));
-        const apps = await Promise.all(all.filter((a, i) => connectors[i] || !only).map(async (a) => {
+        const services = await Promise.all(all.map((a) => isService(ctx, a).catch(() => false)));
+        const apps = await Promise.all(all.filter((a, i) => services[i] || !only).map(async (a) => {
           const added = a.deploys > 0;
           const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
           return {
@@ -198,8 +194,9 @@ export default {
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], sidecars: [] },
             built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
-            mine: mine(ctx, a.owner), deleted: a.deleted || null, connector: connectors[all.indexOf(a)],
-            connected: connectors[all.indexOf(a)], // connector's old name, for whatever read it before
+            mine: mine(ctx, a.owner), deleted: a.deleted || null, service: services[all.indexOf(a)],
+            // service's old names, for whatever read them before
+            connector: services[all.indexOf(a)], connected: services[all.indexOf(a)],
           };
         }));
         apps.sort((a, b) => a.title.localeCompare(b.title));
@@ -268,7 +265,7 @@ export default {
     },
     servers: {
       reads: true,
-      description: "Where a connector runs (\"Runs on linux, mac\"), or what it needs when none of your servers runs it; the servers you own it may be installed on or removed from; and ask: true when you own none of those, so you ask a server's owner to install it.",
+      description: "Where a service runs (\"Runs on linux, mac\"), or what it needs when none of your servers runs it; the servers you own it may be installed on or removed from; and ask: true when you own none of those, so you ask a server's owner to install it.",
       input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
       async run(ctx, { app }) {
         const a = await find(ctx, app);
@@ -276,7 +273,7 @@ export default {
       },
     },
     install_on: {
-      description: "Install a connector on a server you own, where an owner removed it: it runs there again.",
+      description: "Install a service on a server you own, where an owner removed it: it runs there again.",
       input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
       async run(ctx, { app, server }) {
         const a = await find(ctx, app);
@@ -286,7 +283,7 @@ export default {
     },
     remove_from: {
       confirm: true,
-      description: "Remove a connector from a server you own: it stops running there, and goes on running on your other servers that have it. What it keeps on that server stays, and install_on puts it back.",
+      description: "Remove a service from a server you own: it stops running there, and goes on running on your other servers that have it. What it keeps on that server stays, and install_on puts it back.",
       input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
       async run(ctx, { app, server }) {
         const a = await find(ctx, app);
@@ -324,15 +321,15 @@ export default {
 </style>
 <div id="top"></div>
 <div id="search"></div>
-<div class="segmented" id="tabs"><button data-tab="apps">Apps</button><button data-tab="connectors">Connectors</button></div>
+<div class="segmented" id="tabs"><button data-tab="apps">Apps</button><button data-tab="services">Services</button></div>
 <div id="list" class="store"></div>
 <script>
 ${addTo}
 ${onAPage}
 document.getElementById("top").innerHTML = one.largeTitle("App Store");
-// Connectors would bury the rest, so they get their own tab. A shell's Add a Connector opens it with { connector: true }
-// ({ connected: true } from shells built before), on that tab.
-let tab = one.params.connector || one.params.connected ? "connectors" : "apps";
+// Services would bury the rest, so they get their own tab. A shell's Add a Service opens it with { service: true }
+// ({ connector: true } or { connected: true } from shells built before), on that tab.
+let tab = one.params.service || one.params.connector || one.params.connected ? "services" : "apps";
 let query = "";
 let data = null;
 function pick(t) {
@@ -355,7 +352,7 @@ const row = (a) => \`<div class="row" data-app="\${one.esc(a.name)}">
 const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(title) + '</h2><div class="list">' + list.map(row).join("") + "</div>" : "";
 
 function html() {
-  const found = data.apps.filter((a) => !!a.connector === (tab === "connectors") && (!query || [a.title, a.name, a.tagline || "", a.description || ""].some((t) => t.toLowerCase().includes(query))));
+  const found = data.apps.filter((a) => !!a.service === (tab === "services") && (!query || [a.title, a.name, a.tagline || "", a.description || ""].some((t) => t.toLowerCase().includes(query))));
   if (!found.length) return one.empty({ icon: "search", title: "No Results", text: query ? one.esc("Nothing matches “" + query + "”.") : "" });
   return section("Built In", found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted));
 }
@@ -415,7 +412,7 @@ const sections = [
       \${tag ? '<div class="tag">' + one.esc(tag) + "</div>" : ""}<div class="act">\${act}</div></div></div>
       \${a.description ? '<div class="about">' + one.esc(a.description) + "</div>" : ""}\`;
   },
-  // A connector's servers, under what it needs: those it runs on, with Remove for their owners, then those of theirs an
+  // A service's servers, under what it needs: those it runs on, with Remove for their owners, then those of theirs an
   // owner removed it from, to install it again.
   function needs({ where }) {
     if (!where) return "";
@@ -515,7 +512,7 @@ async function switchIt(box, { schedule, scope }) {
   }
   show();
 }
-/// Installs a connector on a server, or removes it from one, then shows where it runs now.
+/// Installs a service on a server, or removes it from one, then shows where it runs now.
 async function place(button, op, server) {
   button.disabled = true;
   document.getElementById("error").textContent = "";

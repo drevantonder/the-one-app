@@ -36,7 +36,7 @@ struct RootView: View {
             case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
             case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
             case .addWidget(let scope): AddWidgetSheet(scope: scope)
-            case .connectors(let scope): ConnectorsSheet(scope: scope)
+            case .services(let scope): ServicesSheet(scope: scope)
             }
         }
         .onChange(of: appearance, initial: true) {
@@ -77,19 +77,19 @@ private struct MainView: View {
         }
     }
 
-    /// An app opens in place of the page, selected in the sidebar; a page's Connectors, as a sheet over it; the
+    /// An app opens in place of the page, selected in the sidebar; a page's Services, as a sheet over it; the
     /// shell's own views push.
     private func open(_ route: Route) {
         switch route {
         case .screen: store.selection = route
-        case .connectors(let scope): store.sheet = .connectors(scope)
+        case .services(let scope): store.sheet = .services(scope)
         default: store.path.append(route)
         }
     }
 }
 
-/// A page's Connectors, over the page: what it opens (a settings screen, the App Store) opens in the window.
-private struct ConnectorsSheet: View {
+/// A page's Services, over the page: what it opens (a settings screen, the App Store) opens in the window.
+private struct ServicesSheet: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     var scope: String
@@ -97,7 +97,7 @@ private struct ConnectorsSheet: View {
     var body: some View {
         NavigationStack {
             if let page = store.page(scope) {
-                ConnectorsView(page: page) { route in
+                ServicesView(page: page) { route in
                     dismiss()
                     if case .screen = route { store.selection = route } else { store.path.append(route) }
                 }

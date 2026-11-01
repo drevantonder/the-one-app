@@ -65,7 +65,7 @@ struct PagesView: View {
             case .pair: PairSheet()
             case .pages: PagesEditor()
             case .addWidget(let scope): AddWidgetSheet(scope: scope)
-            case .join, .connectors: EmptyView()
+            case .join, .services: EmptyView()
             case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
             case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
             }

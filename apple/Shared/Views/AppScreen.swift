@@ -420,8 +420,8 @@ struct RouteView: View {
             SettingsPage(open: open)
         case .group(let id):
             GroupView(id: id)
-        case .connectors(let scope):
-            if let page = store.page(scope) { ConnectorsView(page: page, open: open) }
+        case .services(let scope):
+            if let page = store.page(scope) { ServicesView(page: page, open: open) }
         case .setting(let setting):
             switch setting {
             case .store:

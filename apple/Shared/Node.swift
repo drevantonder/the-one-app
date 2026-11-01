@@ -167,8 +167,13 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     struct Op: Decodable, Sendable, Equatable {
         var name: String
     }
+    struct Widget: Decodable, Sendable, Equatable {
+        var name: String
+    }
     var name: String
     var title: String?
+    /// One line on what it's for.
+    var description: String?
     var icon: String?
     /// Its tile's colour, as hex, if it declares one; and its own picture, as a data URL, if it ships one.
     var color: String?
@@ -179,28 +184,25 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     var instructions: String?
     var screens: [Screen]?
     var ops: [Op]?
+    var widgets: [Widget]?
     /// The scopes it is installed in that the asker may use: `user:<id>`, `group:<id>`, `global`.
     var installed: [String]?
     var deploys: Int?
     /// What it asks the Vault for, by name.
     var vault: [String: VaultNeed]?
-    /// It says it's a connector: it brings something in from outside (an account, a Mac's own app, a device's ability).
-    var connector: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case name, title, icon, color, image, imageKind = "image_kind", owner, instructions, screens, ops, installed, deploys, vault, connector
+        case name, title, description, icon, color, image, imageKind = "image_kind", owner, instructions, screens, ops, widgets, installed, deploys, vault
     }
 
     var id: String { name }
     var label: String { title ?? name }
     /// Only apps with a `main` screen get an icon; the rest still give widgets and tools.
     var hasScreens: Bool { has(screen: "main") }
-    /// A connector with nothing to open: it says it's a connector, or only connects accounts,
-    /// so it goes in a page's Connectors folder, with its accounts, rather than having an icon of its own. A connector
-    /// with a page of its own gets an icon.
-    var isConnector: Bool {
-        !hasScreens && (connector == true || ["accounts", "sign_in", "sign_out"].allSatisfy { op in ops?.contains { $0.name == op } == true })
-    }
+    /// A service: nothing to open and no widget, so it goes in a page's Services folder rather than having an icon.
+    var isService: Bool { !hasScreens && (widgets ?? []).isEmpty }
+    /// Whether it keeps accounts (a connector: `accounts`, `sign_in`, `sign_out`), which its Services folder lists.
+    var hasAccounts: Bool { has(op: "accounts") }
     func has(screen: String) -> Bool { screens?.contains { $0.name == screen } == true }
     func has(op: String) -> Bool { ops?.contains { $0.name == op } == true }
     /// Whether its accounts are Vault items its sign-in makes, so Add Account may offer ones that are there.

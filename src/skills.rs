@@ -127,7 +127,7 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
         true => "ask whoever runs the install where it is".to_string(),
     };
     let fill = |t: &str| t.replace("{{name}}", NAME).replace("{{cli}}", CLI).replace("{{server}}", &server_name()).replace("{{code}}", &code);
-    let written = [include_str!("../skills/connectors/SKILL.md"), include_str!("../skills/build/SKILL.md")];
+    let written = [include_str!("../skills/accounts/SKILL.md"), include_str!("../skills/build/SKILL.md")];
     let mut skills: Vec<Skill> = written
         .into_iter()
         .map(|md| {
@@ -339,7 +339,7 @@ mod tests {
     fn skills_keep_the_agent_skills_format() {
         let skills = all(&apps(3));
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(&names[..5], &[server_name().as_str(), &format!("{}-connectors", server_name()), &format!("{}-build", server_name()), &format!("{}-vault", server_name()), &format!("{}-board", server_name())]);
+        assert_eq!(&names[..5], &[server_name().as_str(), &format!("{}-accounts", server_name()), &format!("{}-build", server_name()), &format!("{}-vault", server_name()), &format!("{}-board", server_name())]);
         for s in &skills {
             assert!(!s.name.is_empty() && s.name.len() <= 64 && s.name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'), "{}", s.name);
             assert!(!s.description.is_empty() && s.description.chars().count() <= 1024, "{}", s.name);

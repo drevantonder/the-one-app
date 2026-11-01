@@ -167,7 +167,7 @@ func appNames(_ apps: [String], store: Store) -> String {
 
 /// A field's name as a person reads it: `client_id` is "Client ID".
 extension Store {
-    /// Deletes an item, signing an account out first as connectors do: each app using it, or
+    /// Deletes an item, signing an account out first, as Services does: each app using it, or
     /// whose sign-in made it, that lists it among its `accounts` (by its title or a plain field) signs that account out,
     /// so what the app keeps elsewhere goes too (a sidecar's link) and listing accounts doesn't make the item again.
     func delete(_ item: VaultItem) async throws {

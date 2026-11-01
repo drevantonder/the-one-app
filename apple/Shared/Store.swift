@@ -10,6 +10,14 @@ struct Page: Identifiable, Hashable {
 
     var id: String { scope }
     var group: String? { scope.hasPrefix("group:") ? String(scope.dropFirst(6)) : nil }
+    /// Whose it is, as a folder's subtitle starts: "For you only".
+    var whose: String {
+        switch scope {
+        case "user": String(localized: "For you only")
+        case "global": String(localized: "For everyone")
+        default: String(localized: "For \(title)")
+        }
+    }
 }
 
 /// One thing on a page's grid: an app's icon, or a widget its person put there.
@@ -40,8 +48,8 @@ enum Route: Hashable, Codable {
     case settings
     case setting(Setting)
     case group(String)
-    /// A page's Connectors folder, opened: its scope.
-    case connectors(String)
+    /// A page's Services folder, opened: its scope.
+    case services(String)
 }
 
 struct ScreenRoute: Hashable, Codable {
@@ -106,8 +114,8 @@ enum Sheet: Hashable, Identifiable {
     case ask(VaultRequest)
     /// The widget gallery, adding to a page: its scope.
     case addWidget(String)
-    /// A page's Connectors folder, on a Mac: its scope.
-    case connectors(String)
+    /// A page's Services folder, on a Mac: its scope.
+    case services(String)
 
     var id: Self { self }
 }
@@ -228,9 +236,9 @@ final class Store {
         apps.filter { $0.hasScreens && $0.scopes.contains(page.scope) }
     }
 
-    /// A page's connectors, which its Connectors folder holds instead of each having an icon.
-    func connectors(on page: Page) -> [AppInfo] {
-        apps.filter { $0.isConnector && $0.scopes.contains(page.scope) }
+    /// A page's services, which its Services folder holds instead of each having an icon.
+    func services(on page: Page) -> [AppInfo] {
+        apps.filter { $0.isService && $0.scopes.contains(page.scope) }
             .sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
     }
 
@@ -255,10 +263,10 @@ final class Store {
         return app
     }
 
-    /// The App Store's Connectors tab, if the install's store app is here.
-    var connectorStoreRoute: Route? {
+    /// The App Store's Services tab, if the install's store app is here.
+    var serviceStoreRoute: Route? {
         guard let name = config?.store, app(name)?.hasScreens == true else { return nil }
-        return .screen(ScreenRoute(app: name, params: Self.params(["connector": true])))
+        return .screen(ScreenRoute(app: name, params: Self.params(["service": true])))
     }
 
     /// An app's settings screen, opened from a page; with `add`, starting to sign in another account.
@@ -655,10 +663,10 @@ final class Store {
     private func stillThere(_ route: Route) -> Route? {
         switch route {
         case .page(let scope): pages.contains { $0.scope == scope } ? route : nil
-        // A screen the app no longer has (Gmail's main, once it was a connector) isn't; one not described yet may be.
+        // A screen the app no longer has (Gmail's main, once it was a service) isn't; one not described yet may be.
         case .screen(let screen): app(screen.app).map { $0.screens == nil || $0.has(screen: screen.screen) } == true ? route : nil
         case .group(let id): install?.group(id) != nil ? route : nil
-        case .connectors(let scope): page(scope) != nil ? route : nil
+        case .services(let scope): page(scope) != nil ? route : nil
         case .settings, .setting: route
         }
     }

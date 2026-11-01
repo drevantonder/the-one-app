@@ -22,11 +22,11 @@ struct Sidebar: View {
                             .accessibilityLabel(app.label)
                             .tag(store.open(app, from: page))
                     }
-                    FolderTile(apps: store.connectors(on: page), size: 24)
+                    FolderTile(apps: store.services(on: page), size: 24)
                         .frame(maxWidth: .infinity)
-                        .help("Connectors")
-                        .accessibilityLabel("Connectors")
-                        .tag(Route.connectors(page.scope))
+                        .help("Services")
+                        .accessibilityLabel("Services")
+                        .tag(Route.services(page.scope))
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {
                         Text(initials(page.title))
@@ -66,13 +66,13 @@ struct Sidebar: View {
                         .badge(store.appBadge(app.name, on: page) ?? 0)
                         .tag(store.open(app, from: page))
                     }
-                    // Its connectors, in one row, as the page has them in one folder, there even with none.
+                    // Its services, in one row, as the page has them in one folder, there even with none.
                     Label {
-                        Text("Connectors")
+                        Text("Services")
                     } icon: {
-                        FolderTile(apps: store.connectors(on: page), size: 20)
+                        FolderTile(apps: store.services(on: page), size: 20)
                     }
-                    .tag(Route.connectors(page.scope))
+                    .tag(Route.services(page.scope))
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {
                         Text(page.title)

@@ -637,13 +637,15 @@ async fn built_in_apps_are_listed_added_and_kept_up_to_date() {
     assert!(board["description"].as_str().is_some_and(|d| d.contains("posts")), "a built-in app's code describes it before it's added: {board}");
     assert_eq!((board["color"].clone(), board["image"].clone()), (json!("#ff9500"), json!(null)), "{board}");
     let (whatsapp, desktops) = (app(&listed, "whatsapp"), app(&listed, "desktops"));
-    let computer = app(&listed, "computer");
-    assert_eq!((whatsapp["connector"].clone(), computer["connector"].clone(), desktops["connector"].clone()), (json!(true), json!(true), json!(false)), "a connector says so, or keeps the accounts contract; an app with a page isn't one: {whatsapp} {computer} {desktops}");
-    assert_eq!(whatsapp["connected"], json!(true), "connector's old name is still sent: {whatsapp}");
-    for only in [json!({ "connector": true }), json!({ "connected": true })] {
+    let (computer, agents) = (app(&listed, "computer"), app(&listed, "agents"));
+    let service = |a: &Value| (a["service"].clone(), a["connector"].clone(), a["connected"].clone());
+    let yes = (json!(true), json!(true), json!(true));
+    assert_eq!((service(&whatsapp), service(&computer), service(&agents)), (yes.clone(), yes.clone(), yes), "an app with no screen and no widget is a service, under its old names too: {whatsapp} {computer} {agents}");
+    assert_eq!((desktops["service"].clone(), board["service"].clone()), (json!(false), json!(false)), "an app with a page isn't one: {desktops} {board}");
+    for only in [json!({ "service": true }), json!({ "connector": true }), json!({ "connected": true })] {
         let listed = a.call(call("apps", "list", only.clone())).await.unwrap();
         let names: Vec<_> = listed["apps"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap().to_string()).collect();
-        assert!(names.contains(&"whatsapp".into()) && !names.contains(&"desktops".into()), "{only} lists only connectors: {names:?}");
+        assert!(names.contains(&"whatsapp".into()) && names.contains(&"agents".into()) && !names.contains(&"desktops".into()), "{only} lists only services: {names:?}");
     }
     assert_eq!(whatsapp["uses"], json!({ "apps": [], "sidecars": [] }), "nothing runs it yet: {whatsapp}");
     let drive = app(&listed, "drive");

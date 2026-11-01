@@ -27,7 +27,7 @@ struct AppStoreView: View {
                     .padding(.vertical, 2)
                 }
             } footer: {
-                Text("Apps without a screen give their pages widgets and tools for agents, but no icon.")
+                Text("Apps without a screen or widget are in each page’s Services folder.")
             }
         }
         .navigationTitle("App Store")
