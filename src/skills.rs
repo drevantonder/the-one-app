@@ -122,24 +122,19 @@ pub fn root(others: &[Skill], link: impl Fn(&Skill) -> String) -> Skill {
 /// The skills under the root, for `apps` (as `GET /v1/apps` gives them, those installed for the person having their
 /// operations): the areas of their own, the Vault's, then one for each app with a guide.
 pub fn deeper(apps: &[Value]) -> Vec<Skill> {
-    let fill = |t: &str| t.replace("{{name}}", NAME).replace("{{cli}}", CLI).replace("{{server}}", &server_name());
-    let spec = |section: &str| {
-        let text = include_str!("../SPEC.md");
-        let start = text.find(&format!("\n## {section}")).map(|i| i + 1).unwrap_or(0);
-        let end = text[start + 3..].find("\n## ").map(|i| start + 3 + i).unwrap_or(text.len());
-        format!("<!-- From {NAME}'s SPEC.md: <cli> is {CLI}. -->\n\n{}\n", text[start..end].trim())
+    let code = match REPO.is_empty() {
+        false => format!("https://github.com/{REPO}"),
+        true => "ask whoever runs the install where it is".to_string(),
     };
-    let written = [
-        (include_str!("../skills/connectors/SKILL.md"), vec![]),
-        (include_str!("../skills/build/SKILL.md"), vec![("references/apps.md", spec("Apps")), ("references/schedules.md", spec("Schedules")), ("references/screens.md", spec("Screens")), ("references/widgets.md", spec("Widgets"))]),
-    ];
+    let fill = |t: &str| t.replace("{{name}}", NAME).replace("{{cli}}", CLI).replace("{{server}}", &server_name()).replace("{{code}}", &code);
+    let written = [include_str!("../skills/connectors/SKILL.md"), include_str!("../skills/build/SKILL.md")];
     let mut skills: Vec<Skill> = written
         .into_iter()
-        .map(|(md, files)| {
+        .map(|md| {
             let md = fill(md);
             let (front, body) = md.trim_start_matches("---\n").split_once("\n---\n").unwrap_or(("", &md));
             let field = |k: &str| front.lines().find_map(|l| l.strip_prefix(&format!("{k}: "))).unwrap_or("").to_string();
-            Skill { name: field("name"), description: field("description"), body: body.trim().to_string(), files: files.into_iter().map(|(p, t)| (p.to_string(), t)).collect() }
+            Skill { name: field("name"), description: field("description"), body: body.trim().to_string(), files: vec![] }
         })
         .collect();
     skills.push(app_skill(&vault_app()));
@@ -336,7 +331,7 @@ mod tests {
         let skills = all(&apps(3));
         let guide = skills[0].skill_md();
         assert!(guide.contains(&rules()) && guide.contains(&connecting()) && guide.contains(&mcp_entries()));
-                assert!(guide.contains(&format!("`{CLI} mcp --code`")) && guide.contains(&format!("`{CLI} run <file>`")));
+        assert!(guide.contains(&format!("`{CLI} mcp --code`")) && guide.contains(&format!("`{CLI} run <file>`")));
         assert!(instructions(Mode::Code, &[]).contains(&rules()));
     }
 
@@ -358,7 +353,6 @@ mod tests {
         let board = skills.iter().find(|s| s.name.ends_with("-board")).unwrap();
         assert!(board.body.contains("xxxx") && board.body.contains("`board_read({})`"), "{}", board.body);
         let build = skills.iter().find(|s| s.name.ends_with("-build")).unwrap();
-        assert!(build.file("references/apps.md").unwrap().contains("**Connectors.**"));
-        assert!(build.file("references/widgets.md").unwrap().starts_with("<!--"));
+        assert!(build.body.contains(&format!("`{CLI} deploy <folder>`")) && !build.body.contains("{{code}}"), "{}", build.body);
     }
 }
