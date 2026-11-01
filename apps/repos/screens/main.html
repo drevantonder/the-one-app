@@ -8,8 +8,8 @@ function row(r) {
   return `<a class="row repo-row" onclick="${go("repo", { repo: r.name })}">
     <div class="icon${r.from ? " grey" : ""}">${one.icon("book")}</div>
     <div class="main">
-      <div class="title"><span>${esc(r.name)}</span><span class="when">${one.ago(r.updated || r.created)}</span></div>
-      <div class="sub">${esc(r.owner_name)}${r.from ? " · fork of " + esc(r.from) : ""} · ${plural(r.branches, "branch", "branches")}${r.suggestions ? " · " + plural(r.suggestions, "suggestion", "suggestions") : ""}</div>
+      <div class="title"><span>${esc(r.name)}</span></div>
+      <div class="sub">${[r.branch, one.ago(r.updated || r.created, { long: true }), r.from && "fork of " + r.from].filter(Boolean).map(esc).join(" · ")}</div>
     </div>
     <div class="chev">›</div>
   </a>`;

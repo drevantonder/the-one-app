@@ -93,11 +93,13 @@ export default {
   ops: {
     list: {
       reads: true,
-      description: "Every repo: its owner, where it was forked from, its branches and suggestions, and when it last moved.",
+      description: "Every repo: its owner, where it was forked from, its default branch (main, or else its first), how many branches and suggestions it has, and when it last moved.",
       input: { type: "object", properties: {} },
       async run(ctx) {
         const repos = await global(ctx).query(
           `select r.name, r.owner, r."from", r.created,
+                  coalesce((select branch from branches b where b.repo = r.name and b.branch = 'main'),
+                           (select min(branch) from branches b where b.repo = r.name and b.branch not like '%@%')) as branch,
                   (select count(*) from branches b where b.repo = r.name and b.branch not like '%@%') as branches,
                   (select count(*) from branches b where b.repo = r.name and b.branch like '%@%') as suggestions,
                   (select max(time) from branches b where b.repo = r.name) as updated
