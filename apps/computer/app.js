@@ -50,6 +50,99 @@ async function device(ctx, name) {
 /// A device as the list shows it among the computers.
 const asComputer = (d) => ({ name: d.server, server: d.server, device: true, kind: d.kind, title: d.title, state: d.on ? "running" : "off", using: d.using || null });
 
+// The page: the person's own devices agents may use, each with a switch, a live picture while an agent uses it, and the
+// recent sessions when there are any.
+const PAGE = `
+<style>
+  body { max-width: 1120px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 40vw), 1fr)); gap: 22px 14px; margin-top: 6px; }
+  .pic { aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: var(--card); border: 0.5px solid var(--line); display: grid; place-items: center; color: var(--faint); }
+  .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .head { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
+  .name { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .switch { transform: scale(0.78); transform-origin: right center; }
+  .sub { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.3em; }
+</style>
+<div class="grid" id="grid"><div class="empty" style="grid-column:1/-1">Loading…</div></div>
+<div id="sessions-section" hidden>
+<h2 class="section">Recent Sessions</h2>
+<div class="list" id="sessions"></div>
+</div>
+<script>
+  one.title("Computer Use");
+  const grid = document.getElementById("grid");
+  const pics = {}; // by server: a data URL
+  const asking = new Set(); // devices this page is asking to let agents in
+  let devs = [], sessions = [];
+  const host = (s) => String(s || "").split(".")[0];
+  const laptop = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>';
+
+  // A device: its picture while an agent uses it, its name with a switch, and one short line when there's something to say.
+  function tile(d) {
+    const allowed = d.permissions ? d.permissions.accessibility && d.permissions.screen_recording : true;
+    const line = d.why ? "Not answering"
+      : asking.has(d.server) || d.asking ? "Asking on the device…"
+      : !d.on ? (d.missing || "")
+      : d.using ? \`\${d.using.agent} is using it\`
+      : allowed ? "" : "Allow it in System Settings on the device";
+    const pic = d.on && d.using && pics[d.server] ? \`<img src="\${pics[d.server]}" alt="">\` : laptop;
+    const off = d.why || d.missing || asking.has(d.server);
+    return \`<div><div class="pic">\${pic}</div><div class="head"><div class="name">\${one.esc(d.title || d.server)}</div>\` +
+      \`<input type="checkbox" class="switch" data-device="\${one.esc(d.server)}" aria-label="Let agents use it"\${d.on ? " checked" : ""}\${off ? " disabled" : ""}></div>\` +
+      \`<div class="sub">\${one.esc(line)}</div></div>\`;
+  }
+
+  function draw() {
+    grid.innerHTML = devs.length ? devs.map(tile).join("")
+      : \`<div class="empty" style="grid-column:1/-1">Agents use your Mac here once you let them. Install The One App on it first.</div>\`;
+    for (const s of grid.querySelectorAll("[data-device]")) s.onchange = () => allow(s.dataset.device, s.checked);
+    document.getElementById("sessions-section").hidden = !sessions.length;
+    document.getElementById("sessions").innerHTML = sessions.slice(0, 10).map((s) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(s.agent)}</span></div>\` +
+      \`<div class="sub small">\${one.esc(s.title || s.device)} · \${one.esc(one.ago(s.time, { long: true }))}\${s.came_from ? " · asked from " + one.esc(host(s.came_from)) : ""}</div></div></div>\`).join("");
+  }
+
+  async function allow(server, on) {
+    if (on) asking.add(server);
+    draw();
+    try {
+      await one.call("_allow", { device: server, on });
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      asking.delete(server);
+      await refresh();
+    }
+  }
+
+  async function refresh() {
+    try {
+      ({ devices: devs, sessions } = await one.call("_devices", {}));
+    } catch (e) {
+      grid.innerHTML = \`<div class="empty error" style="grid-column:1/-1">\${one.esc(e.message)}</div>\`;
+      return;
+    }
+    draw();
+    await Promise.all(devs.filter((d) => d.on && d.using).map(async (d) => {
+      try {
+        const r = await one.call("screen", { computer: d.server, width: 480 });
+        const img = (r.content || []).find((c) => c.type === "image");
+        if (img) pics[d.server] = \`data:\${img.mimeType};base64,\${img.data}\`;
+      } catch {}
+    }));
+    draw();
+  }
+
+  let busy = false;
+  async function tick() {
+    if (busy || document.visibilityState === "hidden") return;
+    busy = true;
+    try { await refresh(); } finally { busy = false; }
+  }
+  tick();
+  setInterval(tick, 5000);
+  document.addEventListener("visibilitychange", tick);
+</script>`;
+
 export default {
   name: "computer",
   title: "Computer Use",
@@ -210,6 +303,13 @@ export default {
         if (!d) throw new Error(`${input.device} can't be used by agents: no sidecar for it runs there.`);
         return ctx.sidecars.computer._allow({ on: !!input.on }, { server: d });
       },
+    },
+  },
+
+  screens: {
+    main: {
+      title: "Computer Use",
+      html: PAGE,
     },
   },
 };

@@ -62,7 +62,7 @@ struct ComputerApp: Sidecar {
 }
 
 /// Whether agents may use this Mac, and who is using it now. Off until the person turns it on, in the menu bar's
-/// panel or from the Agent Computers page; turning it off stops Cua Driver, so no call gets through after.
+/// panel or from the Computer Use page; turning it off stops Cua Driver, so no call gets through after.
 @MainActor @Observable
 final class ComputerUse {
     static let shared = ComputerUse()
@@ -98,7 +98,7 @@ final class ComputerUse {
 
     /// Fails unless agents may use this Mac now.
     func ready() throws {
-        guard on else { throw Refusal("Agents can't use \(title): its owner hasn't let them. They can, in \(appName)'s menu on that Mac, or on the Agent Computers page.") }
+        guard on else { throw Refusal("Agents can't use \(title): its owner hasn't let them. They can, in \(appName)'s menu on that Mac, or on the Computer Use page.") }
         guard CuaDriver.path != nil else { throw Refusal("Cua Driver isn't installed on \(title): get it from github.com/trycua/cua.") }
         guard AXIsProcessTrusted() else { throw Refusal("macOS hasn't let \(appName) use Accessibility on \(title) yet: System Settings → Privacy & Security → Accessibility → \(appName) on.") }
     }
