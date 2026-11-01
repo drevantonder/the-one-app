@@ -246,7 +246,8 @@ private struct ScreenWebView: Representable {
                     return (nil, error.localizedDescription)
                 }
             case "vault":
-                // Asks for what the app declares, in the Vault's sheet, and answers once the sheet is gone.
+                // Asks for what the app declares, in the Vault's sheet, and answers once the sheet is gone, or once the
+                // request is answered somewhere else (another device, an agent's CLI), which closes the sheet.
                 let store = view.store, scope = route.scope ?? "user"
                 do {
                     guard let id = try await store.node.requestItem(scope: scope, app: route.app, need: body["need"] as? String ?? "") else {
@@ -254,7 +255,14 @@ private struct ScreenWebView: Representable {
                     }
                     let sheet = Sheet.vault(scope: scope, id: id)
                     store.sheet = sheet
-                    while store.sheet == sheet { try? await Task.sleep(for: .milliseconds(300)) }
+                    var waited = 0
+                    while store.sheet == sheet {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        waited += 1
+                        if waited % 7 == 0, let state = try? await store.node.vaultRequests(scope: scope, id: id).first?.state, state != "waiting", store.sheet == sheet {
+                            store.sheet = nil
+                        }
+                    }
                     let state = try await store.node.vaultRequests(scope: scope, id: id).first?.state
                     return (state == "set", nil)
                 } catch {
