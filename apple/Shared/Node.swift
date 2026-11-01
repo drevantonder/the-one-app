@@ -149,6 +149,8 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     /// Its tile's colour, as hex, if it declares one; and its own picture, as a data URL, if it ships one.
     var color: String?
     var image: String?
+    /// `icon` when `image` is a finished app icon, drawn edge to edge; else it's a logo, inset on white.
+    var imageKind: String?
     var owner: String?
     var instructions: String?
     var screens: [Screen]?
@@ -156,6 +158,10 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     /// The scopes it is installed in that the asker may use: `user:<id>`, `group:<id>`, `global`.
     var installed: [String]?
     var deploys: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case name, title, icon, color, image, imageKind = "image_kind", owner, instructions, screens, ops, installed, deploys
+    }
 
     var id: String { name }
     var label: String { title ?? name }

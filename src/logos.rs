@@ -30,6 +30,10 @@ struct Known {
     /// The logo's blob and its type, or none when the site gave none a shell can draw.
     blob: Option<String>,
     mime: Option<String>,
+    /// `icon` for a finished app icon (an apple-touch-icon), which a shell draws edge to edge; `logo` for the rest,
+    /// which it insets on white. Logos kept before it was known are fetched again.
+    #[serde(default)]
+    kind: Option<String>,
     /// When it was fetched, milliseconds since 1970.
     at: u64,
 }
@@ -41,21 +45,23 @@ impl Logos {
         Logos { path, known: Mutex::new(known), fetching: Mutex::default(), urls: Mutex::default() }
     }
 
-    /// `domain`'s logo as a data URL, if this server has it, and whether it's time to fetch it (again).
-    pub fn get(&self, dir: &Path, domain: &str, now: u64) -> (Option<String>, bool) {
+    /// `domain`'s logo as a data URL and its kind (`icon` or `logo`), if this server has it, and whether it's time to
+    /// fetch it (again).
+    pub fn get(&self, dir: &Path, domain: &str, now: u64) -> (Option<(String, String)>, bool) {
         if !valid(domain) {
             return (None, false);
         }
         let Some(k) = self.known.lock().unwrap().get(domain).cloned() else { return (None, true) };
-        let due = now.saturating_sub(k.at) > if k.blob.is_some() { FRESH } else { RETRY };
+        let due = now.saturating_sub(k.at) > if k.blob.is_some() { FRESH } else { RETRY } || (k.blob.is_some() && k.kind.is_none());
+        let kind = k.kind.clone().unwrap_or_else(|| "logo".into());
         let (Some(blob), Some(mime)) = (k.blob, k.mime) else { return (None, due) };
         if let Some(url) = self.urls.lock().unwrap().get(domain) {
-            return (Some(url.clone()), due);
+            return (Some((url.clone(), kind)), due);
         }
         let Ok(bytes) = release::blob_path(dir, &blob).and_then(|p| Ok(std::fs::read(p)?)) else { return (None, true) };
         let url = format!("data:{mime};base64,{}", data_encoding::BASE64.encode(&bytes));
         self.urls.lock().unwrap().insert(domain.to_string(), url.clone());
-        (Some(url), due)
+        (Some((url, kind)), due)
     }
 
     /// Whether this caller should fetch `domain` now: no one else is.
@@ -64,18 +70,18 @@ impl Logos {
     }
 
     /// Keeps what fetching `domain` got, a logo or none; a logo it had stays when a fetch fails. Whether the logo changed.
-    pub fn finish(&self, dir: &Path, domain: &str, logo: Option<(Vec<u8>, &str)>, now: u64) -> bool {
+    pub fn finish(&self, dir: &Path, domain: &str, logo: Option<Logo>, now: u64) -> bool {
         self.fetching.lock().unwrap().remove(domain);
         let mut known = self.known.lock().unwrap();
         let old = known.get(domain).cloned();
-        let new = match logo.and_then(|(bytes, mime)| Some((release::put_blob(dir, &bytes).ok()?, mime))) {
-            Some((blob, mime)) => Known { blob: Some(blob), mime: Some(mime.to_string()), at: now },
+        let new = match logo.and_then(|l| Some((release::put_blob(dir, &l.bytes).ok()?, l.mime, l.kind))) {
+            Some((blob, mime, kind)) => Known { blob: Some(blob), mime: Some(mime.to_string()), kind: Some(kind.to_string()), at: now },
             None => match &old {
                 Some(k) if k.blob.is_some() => Known { at: now.saturating_sub(FRESH) + RETRY, ..k.clone() },
-                _ => Known { blob: None, mime: None, at: now },
+                _ => Known { blob: None, mime: None, kind: None, at: now },
             },
         };
-        let changed = old.as_ref().and_then(|k| k.blob.as_ref()) != new.blob.as_ref();
+        let changed = old.as_ref().map(|k| (&k.blob, &k.kind)) != Some((&new.blob, &new.kind));
         known.insert(domain.to_string(), new);
         if changed {
             self.urls.lock().unwrap().remove(domain);
@@ -98,10 +104,18 @@ pub fn valid(domain: &str) -> bool {
         && !matches!(*labels.last().unwrap(), "local" | "internal" | "localhost" | "lan" | "home" | "arpa")
 }
 
+/// A site's picture: its bytes, type, and `icon` if it's a finished app icon (an apple-touch-icon, made for a Home
+/// Screen), else `logo`.
+pub struct Logo {
+    pub bytes: Vec<u8>,
+    pub mime: &'static str,
+    pub kind: &'static str,
+}
+
 /// Fetches `domain`'s logo, as a site gives browsers one: its page's apple-touch-icon, then `/apple-touch-icon.png`,
 /// then the largest icon its page links to, then `/favicon.ico`. The first a shell can draw (PNG, JPEG, GIF or WebP;
 /// an ICO's largest picture, as PNG), with its type.
-pub fn fetch(domain: &str) -> Result<(Vec<u8>, &'static str)> {
+pub fn fetch(domain: &str) -> Result<Logo> {
     ensure!(valid(domain), "{domain:?} isn't a site's name");
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(20)))
@@ -119,16 +133,16 @@ pub fn fetch(domain: &str) -> Result<(Vec<u8>, &'static str)> {
     };
     let mut links = links(&page);
     links.sort_by_key(|l| std::cmp::Reverse(l.size));
-    let mut tries: Vec<String> = links.iter().filter(|l| l.touch).map(|l| resolve(&base, &l.href)).collect();
-    tries.push(format!("https://{domain}/apple-touch-icon.png"));
-    tries.extend(links.iter().filter(|l| !l.touch && !l.svg).map(|l| resolve(&base, &l.href)));
-    tries.push(format!("https://{domain}/favicon.ico"));
+    let mut tries: Vec<(String, &str)> = links.iter().filter(|l| l.touch).map(|l| (resolve(&base, &l.href), "icon")).collect();
+    tries.push((format!("https://{domain}/apple-touch-icon.png"), "icon"));
+    tries.extend(links.iter().filter(|l| !l.touch && !l.svg).map(|l| (resolve(&base, &l.href), "logo")));
+    tries.push((format!("https://{domain}/favicon.ico"), "logo"));
     let mut tried = HashSet::new();
-    for url in tries.into_iter().filter(|u| tried.insert(u.clone())) {
+    for (url, kind) in tries.into_iter().filter(|(u, _)| tried.insert(u.clone())) {
         let Ok(mut r) = agent.get(&url).header("accept", "image/png,image/*;q=0.8").call() else { continue };
         let Ok(bytes) = r.body_mut().with_config().limit(LARGEST).read_to_vec() else { continue };
-        if let Some(logo) = picture(&bytes) {
-            return Ok(logo);
+        if let Some((bytes, mime)) = picture(&bytes) {
+            return Ok(Logo { bytes, mime, kind: if kind == "icon" { "icon" } else { "logo" } });
         }
     }
     bail!("{domain} has no logo a shell can draw")

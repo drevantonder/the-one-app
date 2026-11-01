@@ -1610,8 +1610,8 @@ impl Node {
                 describe["installed"] = json!([Scope::User(viewer.user.clone()).to_string()]);
             }
             if let (Value::Null, Some(domain), Some(name)) = (&describe["image"], describe["domain"].as_str(), describe["name"].as_str()) {
-                if let Some(image) = self.logo(domain, name) {
-                    describe["image"] = json!(image);
+                if let Some((image, kind)) = self.logo(domain, name) {
+                    (describe["image"], describe["image_kind"]) = (json!(image), json!(kind));
                 }
             }
             out.push(describe);
@@ -1686,8 +1686,8 @@ impl Node {
             if let Some(image) = info["bundle"].as_str().or(info["built_in"].as_str()).and_then(|b| self.image(b)) {
                 info["image"] = json!(image);
             } else if let (Some(domain), Some(name)) = (info["domain"].as_str(), info["name"].as_str()) {
-                if let Some(image) = self.logo(domain, name) {
-                    info["image"] = json!(image);
+                if let Some((image, kind)) = self.logo(domain, name) {
+                    (info["image"], info["image_kind"]) = (json!(image), json!(kind));
                 }
             }
         }
@@ -1696,7 +1696,7 @@ impl Node {
 
     /// The logo of `domain`, the site `app` connects to, as a data URL, once this server has fetched it. Fetches it
     /// in the background when it hasn't, or did a week ago, then tells shells `app` changed.
-    fn logo(&self, domain: &str, app: &str) -> Option<String> {
+    fn logo(&self, domain: &str, app: &str) -> Option<(String, String)> {
         let (url, due) = self.0.logos.get(&self.0.dir, domain, now_ms());
         if due && self.0.logos.begin(domain) {
             let (node, domain, app) = (self.clone(), domain.to_string(), app.to_string());
@@ -2852,7 +2852,7 @@ fn installed_drivers(m: &Members, server: &members::Machine, drivers: &[Driver],
                 None => name_of(&server.user),
             };
             json!({
-                "name": name, "title": d["title"].as_str().unwrap_or(name), "icon": d["icon"], "color": d["color"], "domain": d["domain"], "image": d["image"], "local_app": d["local_app"],
+                "name": name, "title": d["title"].as_str().unwrap_or(name), "icon": d["icon"], "color": d["color"], "domain": d["domain"], "image": d["image"], "image_kind": d["image_kind"], "local_app": d["local_app"],
                 "description": d["description"], "version": d["version"].as_str().or(built_in.then_some(build).flatten()),
                 "built_in": built_in, "installed_by": by, "installed": installed.map(|i| i.time), "users": users.iter().filter_map(name_of).collect::<Vec<_>>(),
             })

@@ -179,21 +179,24 @@ func object(_ fields: [String: Any?]) -> [String: Any] {
 func describe(title: String, icon: String, localApp: String, summary: String, instructions: String, ops: [[String: Any]]) -> [String: Any] {
     var d: [String: Any] = ["title": title, "icon": icon, "local_app": localApp, "description": summary, "instructions": instructions, "ops": ops, "widgets": [Any](),
                             "version": Bundle.main.object(forInfoDictionaryKey: "BuildCommit") as? String ?? "", "install": "Comes with the Mac app, on each Mac it's open on."]
-    if let image = appIcon(localApp) { d["image"] = image }
+    if let image = appIcon(localApp) { (d["image"], d["image_kind"]) = (image, "icon") }
     return d
 }
 
-/// A Mac app's icon, as a PNG data URL small enough to travel in every Hello: 88 pixels, a 44-point tile at 2x.
+/// A Mac app's icon, as a PNG data URL small enough to travel in every Hello: 88 pixels, a 44-point tile at 2x. Only
+/// the icon's own shape: macOS draws app icons on a grid that leaves a clear margin (100 of 1024 points on each side),
+/// which is cut away, so a shell draws it edge to edge as the Dock does.
 func appIcon(_ bundle: String) -> String? {
     guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) else { return nil }
     let icon = NSWorkspace.shared.icon(forFile: url.path)
     let size = 88
+    let full = CGFloat(size) * 1024 / 824, margin = (full - CGFloat(size)) / 2
     guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
                                      isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
           let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = context
-    icon.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
+    icon.draw(in: NSRect(x: -margin, y: -margin, width: full, height: full))
     NSGraphicsContext.restoreGraphicsState()
     guard let png = rep.representation(using: .png, properties: [:]) else { return nil }
     return "data:image/png;base64," + png.base64EncodedString()

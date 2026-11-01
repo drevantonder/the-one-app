@@ -69,13 +69,16 @@ func steadyHash(_ text: String) -> Int {
     text.unicodeScalars.reduce(5381) { ($0 &* 33 &+ Int($1.value)) & 0x7FFF_FFFF }
 }
 
-/// An app's icon tile, as a phone's Home Screen draws one: its own picture (`icon.png` in its folder) on white, or its
-/// symbol in white on its colour, the one it declares or else one picked by its name, so apps side by side differ.
+/// An app's icon tile, as a phone's Home Screen draws one: a finished app icon edge to edge in its own shape, a logo
+/// (`icon.png` in its folder, a site's favicon) on white, or its symbol in white on its colour, the one it declares or
+/// else one picked by its name, so apps side by side differ.
 struct AppTile: View {
     var icon: String?
     var seed: String
     var color: String? = nil
     var image: String? = nil
+    /// `icon` when `image` is a finished app icon (a Mac app's, a site's apple-touch-icon); else it's a logo.
+    var imageKind: String? = nil
     var size: CGFloat
 
     /// The system's colours, for apps that don't declare one.
@@ -85,7 +88,11 @@ struct AppTile: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
         Group {
-            if let picture = image.flatMap(Self.picture) {
+            if let picture = image.flatMap(Self.picture), imageKind == "icon" {
+                // A finished app icon is already its own tile: no plate, no border, just the shape it was made for.
+                picture.image.resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+                    .clipShape(shape)
+            } else if let picture = image.flatMap(Self.picture) {
                 // A logo with clear corners (a site's icon) sits inset on white, as one drawn on white would.
                 shape.fill(.white)
                     .overlay {

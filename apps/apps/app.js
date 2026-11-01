@@ -80,13 +80,13 @@ async function drivers(ctx) {
   const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
   const by = new Map();
   const driver = (name) => {
-    if (!by.has(name)) by.set(name, { name, title: name, icon: null, color: null, image: null, description: null, install: null, servers: [], removed: [], apps: [] });
+    if (!by.has(name)) by.set(name, { name, title: name, icon: null, color: null, image: null, image_kind: null, description: null, install: null, servers: [], removed: [], apps: [] });
     return by.get(name);
   };
   for (const s of servers) {
     for (const d of s.installed_drivers || []) {
       const it = driver(d.name);
-      for (const k of ["title", "icon", "color", "image", "description", "install"]) it[k] = it[k] && it[k] !== it.name ? it[k] : d[k] ?? it[k];
+      for (const k of ["title", "icon", "color", "image", "image_kind", "description", "install"]) it[k] = it[k] && it[k] !== it.name ? it[k] : d[k] ?? it[k];
       it.servers.push({ server: s.name, online: s.online, here: s.here, version: d.version || null, built_in: !!d.built_in, installed_by: d.installed_by || null, users: d.users || [], may_remove: owns(s) });
     }
     for (const d of s.removed_drivers || []) driver(d.name).removed.push({ server: s.name, by: d.by || null, time: d.time, may_allow: owns(s) });
@@ -95,7 +95,7 @@ async function drivers(ctx) {
   // A driver without a picture of its own (its Mac app's icon) shows its app's.
   for (const d of by.values()) {
     const app = catalog.find((a) => a.name === d.name);
-    d.image = d.image || app?.image || null;
+    if (!d.image && app?.image) [d.image, d.image_kind] = [app.image, app.image_kind || null];
     if (d.title === d.name && app?.title) d.title = app.title;
   }
   return { drivers: [...by.values()].sort((a, b) => a.title.localeCompare(b.title)), servers: servers.filter(owns).map((s) => s.name) };
@@ -167,7 +167,7 @@ export default {
           const added = a.deploys > 0;
           const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
           return {
-            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, image: a.image || null, description: d.description || a.description || null,
+            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, image: a.image || null, image_kind: a.image_kind || null, description: d.description || a.description || null,
             owner: a.owner, owner_name: name(a.owner),
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], drivers: [] },

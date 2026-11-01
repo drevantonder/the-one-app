@@ -702,6 +702,6 @@ extension Setting {
 extension AppTile {
     /// `app`'s tile; `seed` names it when it's not known here.
     init(app: AppInfo?, seed: String, size: CGFloat) {
-        self.init(icon: app?.icon, seed: app?.name ?? seed, color: app?.color, image: app?.image, size: size)
+        self.init(icon: app?.icon, seed: app?.name ?? seed, color: app?.color, image: app?.image, imageKind: app?.imageKind, size: size)
     }
 }
