@@ -62,7 +62,8 @@ private struct DeleteAppDialog: ViewModifier {
     }
 }
 
-/// A page's Connectors folder, as an iOS folder's icon: its apps' icons, small, nine to a page, on frosted glass.
+/// A page's Connectors folder, as an iOS folder's icon: its apps' icons, small, nine to a page, on frosted glass;
+/// with none, nine faint empty places, so it reads as an empty folder.
 struct FolderTile: View {
     var apps: [AppInfo]
     var size: CGFloat
@@ -72,8 +73,16 @@ struct FolderTile: View {
         let mini = (size - inset * 2 - gap * 2) / 3
         let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
         LazyVGrid(columns: Array(repeating: GridItem(.fixed(mini), spacing: gap), count: 3), alignment: .leading, spacing: gap) {
-            ForEach(apps.prefix(9)) { app in
-                AppTile(app: app, seed: app.name, size: mini)
+            if apps.isEmpty {
+                ForEach(0..<9, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: mini * 0.25, style: .continuous)
+                        .fill(.primary.opacity(0.07))
+                        .frame(width: mini, height: mini)
+                }
+            } else {
+                ForEach(apps.prefix(9)) { app in
+                    AppTile(app: app, seed: app.name, size: mini)
+                }
             }
         }
         .padding(inset)
