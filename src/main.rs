@@ -51,7 +51,8 @@ Usage:
                                        they're sent to and the apps switched on for each
   {CLI} vault set <item> <field> [--secret] [--hosts a,b] [--app <app>] [--scope s]
                                        set a field of an item (by title or id; a new one by that title), its value
-                                       read from stdin; for a person's value, vault request asks them instead
+                                       read from stdin (a line typed, or a whole file); for a person's value, vault
+                                       request asks them instead
   {CLI} vault use <item> <app> [--off] switch an app on (or off) for an item; only the person switches agents on
   {CLI} vault fetch <url> [--method M] [--headers <json object>] [--body text]
                                        make a request with {{{{field}}}} filled in from the items the person switched
@@ -255,8 +256,12 @@ fn run(args: Vec<String>) -> Result<()> {
             let value = match flags.get("value").and_then(Value::as_str) {
                 Some(v) => v.to_string(),
                 None => {
+                    // Typed, one line; from a file (a key's PEM), all of it.
                     let mut v = String::new();
-                    std::io::stdin().read_line(&mut v)?;
+                    match std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                        true => std::io::stdin().read_line(&mut v)?,
+                        false => std::io::Read::read_to_string(&mut std::io::stdin(), &mut v)?,
+                    };
                     v.trim_end_matches(['\n', '\r']).to_string()
                 }
             };
@@ -360,8 +365,12 @@ fn run(args: Vec<String>) -> Result<()> {
             let value = match flags.get("value").and_then(Value::as_str) {
                 Some(v) => v.to_string(),
                 None => {
+                    // Typed, one line; from a file (a key's PEM), all of it.
                     let mut v = String::new();
-                    std::io::stdin().read_line(&mut v)?;
+                    match std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                        true => std::io::stdin().read_line(&mut v)?,
+                        false => std::io::Read::read_to_string(&mut std::io::stdin(), &mut v)?,
+                    };
                     v.trim_end_matches(['\n', '\r']).to_string()
                 }
             };
