@@ -160,7 +160,12 @@ pub struct Caller {
 /// An operation to run: of an app, or of a driver.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct CallRequest {
+    /// The app, or for a driver's call, the driver (older machines name a driver here).
+    #[serde(default)]
     pub app: String,
+    /// The driver whose operation this is, when it is one: an app and the driver it wraps may share a name.
+    #[serde(default)]
+    pub driver: Option<String>,
     pub op: String,
     #[serde(default)]
     pub input: Value,
@@ -636,6 +641,7 @@ impl Node {
     /// Tries the servers that might run a call, nearest first, one at a time, the next only if one can't be reached
     /// or says to go elsewhere.
     async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
+        let req = self.resolve(req);
         if req.server.as_deref() == Some("all") {
             return self.everywhere(req, me).await;
         }
@@ -669,8 +675,7 @@ impl Node {
     /// Runs a driver's call on every server that runs it for the caller, one at a time: `{ <server>: answer }`, or
     /// `{ error }` for one that failed. Only for drivers: an app's call runs once.
     async fn everywhere(&self, req: CallRequest, me: Caller) -> Result<Value> {
-        let deployed = self.with(|i| Ok(i.r.members.apps.get(&req.app).is_some_and(|a| a.bundle.is_some())))?;
-        ensure!(!deployed, "{} is an app: its calls run once, on one server", req.app);
+        ensure!(req.driver.is_some(), "{} is an app: its calls run once, on one server", req.app);
         let req = CallRequest { server: None, ..req };
         let mut out = serde_json::Map::new();
         for server in self.candidates(&req, &me)? {
@@ -697,7 +702,7 @@ impl Node {
         let here = self.runs_driver_here(&req.app);
         self.with(|i| {
             let m = &i.r.members;
-            let mut servers: Vec<Key> = if m.apps.get(&req.app).is_some_and(|a| a.bundle.is_some()) {
+            let mut servers: Vec<Key> = if req.driver.is_none() {
                 m.servers().map(|s| s.key).filter(|s| m.serves(s, &me.user)).collect()
             } else {
                 let mut s: Vec<Key> = i.sessions.iter().filter(|(_, s)| s.drivers.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
@@ -712,6 +717,21 @@ impl Node {
         })
     }
 
+    /// A call as the node runs it: one that names an app with no deploy is its driver's, as older machines ask for
+    /// a driver; one that names a driver is that driver's, whatever app shares its name.
+    fn resolve(&self, mut req: CallRequest) -> CallRequest {
+        if let Some(driver) = &req.driver {
+            req.app = driver.clone();
+        } else if req.app != members::APP && !self.deployed(&req.app) {
+            req.driver = Some(req.app.clone());
+        }
+        req
+    }
+
+    fn deployed(&self, app: &str) -> bool {
+        self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some()))).unwrap_or(false)
+    }
+
     fn runs_driver_here(&self, app: &str) -> bool {
         self.0.native.iter().any(|n| n.name == app) || self.0.providers.has(app)
     }
@@ -720,17 +740,18 @@ impl Node {
     async fn ask_server(&self, server: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
         let conn = tokio::time::timeout(Duration::from_secs(10), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, CALL_ALPN)).await.context("timed out")??;
         let (mut send, mut recv) = conn.open_bi().await?;
-        let request = json!({ "app": req.app, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
+        let request = json!({ "app": req.app, "driver": req.driver, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
         send.write_all(&serde_json::to_vec(&request)?).await?;
         send.finish()?;
-        let reply = tokio::time::timeout(self.limit(&req.app) + Duration::from_secs(5), recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
+        let reply = tokio::time::timeout(self.limit(req).await + Duration::from_secs(5), recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
         Ok(Reply::from_json(serde_json::from_slice(&reply)?))
     }
 
     /// Runs a call here, for `me`, or says why it can't.
     async fn run(&self, req: &CallRequest, me: &Caller) -> Reply {
-        let limit = self.limit(&req.app);
-        let result = tokio::time::timeout(limit, self.run_here(req, me)).await;
+        let req = &self.resolve(req.clone());
+        let limit = self.limit(req).await;
+        let result = tokio::time::timeout(limit, self.run_here(req, me, limit)).await;
         match result {
             Ok(Ok(reply)) => reply,
             Ok(Err(err)) => Reply::Error(format!("{err:#}")),
@@ -738,19 +759,21 @@ impl Node {
         }
     }
 
-    /// How long a call to `app` may run: an app's, CALL_LIMIT; a driver's, DRIVER_LIMIT.
-    fn limit(&self, app: &str) -> Duration {
-        let deployed = self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some()))).unwrap_or(true);
-        if deployed || app == members::APP { CALL_LIMIT } else { DRIVER_LIMIT }
+    /// How long a call may run: an app's, CALL_LIMIT; a driver's, and that of an app that uses drivers (which waits
+    /// on theirs), DRIVER_LIMIT.
+    async fn limit(&self, req: &CallRequest) -> Duration {
+        if req.app == members::APP {
+            return CALL_LIMIT;
+        }
+        if req.driver.is_some() || !self.uses_here(&req.app).await.1.is_empty() { DRIVER_LIMIT } else { CALL_LIMIT }
     }
 
-    async fn run_here(&self, req: &CallRequest, me: &Caller) -> Result<Reply> {
+    async fn run_here(&self, req: &CallRequest, me: &Caller, limit: Duration) -> Result<Reply> {
         let input = if req.input.is_null() { json!({}) } else { req.input.clone() };
         if req.app == members::APP {
             return self.node_op(&req.op, &input, me).await.map(Reply::Ok);
         }
-        let deployed = self.with(|i| Ok(i.r.members.apps.get(&req.app).is_some_and(|a| a.bundle.is_some())))?;
-        if !deployed {
+        if req.driver.is_some() {
             if !self.runs_driver_here(&req.app) {
                 return Ok(Reply::Elsewhere(format!("{} doesn't run here", req.app)));
             }
@@ -783,13 +806,13 @@ impl Node {
         ctx.from = req.from.clone();
         let granted = self.grant(&req.app, me, &mut ctx, req.depth);
         // Just under the call's own limit, so a call that's stopped is recorded first.
-        let ran = tokio::time::timeout(CALL_LIMIT - Duration::from_secs(1), async {
-            let mut outcome = self.0.apps.call(&req.app, &req.op, input, &ctx).await?;
+        let ran = tokio::time::timeout(limit - Duration::from_secs(1), async {
+            let mut outcome = self.0.apps.call(&req.app, &req.op, input, &ctx, limit).await?;
             self.write_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
             anyhow::Ok(outcome)
         })
         .await
-        .unwrap_or_else(|_| Err(anyhow!("it took longer than {}s and was stopped", CALL_LIMIT.as_secs())));
+        .unwrap_or_else(|_| Err(anyhow!("it took longer than {}s and was stopped", limit.as_secs())));
         let outcome = match ran {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -1468,7 +1491,7 @@ impl Node {
             // A driver's screen, for now: its `_screen` operation gives the body, wherever the driver runs.
             false => {
                 let input = json!({ "name": name, "params": params });
-                let req = CallRequest { app: app.into(), op: "_screen".into(), input, ..Default::default() };
+                let req = CallRequest { app: app.into(), driver: Some(app.into()), op: "_screen".into(), input, ..Default::default() };
                 let body = self.route(req, viewer.clone()).await?;
                 body.as_str().context("the screen isn't text")?.to_string()
             }
@@ -1659,6 +1682,11 @@ impl Node {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+        self.uses_here(app).await
+    }
+
+    /// What the deploy of `app` this server runs says it uses: (apps, drivers).
+    async fn uses_here(&self, app: &str) -> (Vec<String>, Vec<String>) {
         let d = if self.0.apps.has(app) { self.0.apps.describe(app).await.unwrap_or_default() } else { Value::Null };
         let list = |k: &str| d["uses"][k].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
         (list("apps"), list("drivers"))
@@ -1736,13 +1764,16 @@ impl Node {
                 ensure!(!grant.read_only, "this call only reads: it can't run other apps' operations");
                 let req: Value = serde_json::from_slice(&body)?;
                 let (app, op) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
+                // `ctx.drivers` says it's a driver's; `ctx.apps`, an app's (or, from older shims, either).
+                let driver = req["driver"] == true;
                 let (apps, drivers) = self.uses(&grant.app).await;
-                ensure!(apps.iter().chain(&drivers).any(|u| u == app), "{} doesn't use {app}", grant.app);
+                let used = if driver { drivers.iter().any(|u| u == app) } else { apps.iter().chain(&drivers).any(|u| u == app) };
+                ensure!(used, "{} doesn't use {app}", grant.app);
                 ensure!(grant.depth < MAX_DEPTH, "{} called {app} {} calls deep, and apps call each other at most {MAX_DEPTH} deep: is it looping?", grant.app, grant.depth + 1);
                 self.count(&grant.app, "call").await?;
                 // An app may say which server runs it, like the one with a local model.
                 let server = req["server"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
-                let call = CallRequest { app: app.into(), op: op.into(), input: req["input"].clone(), server, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
+                let call = CallRequest { app: app.into(), driver: driver.then(|| app.into()), op: op.into(), input: req["input"].clone(), server, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
             ("POST", "/blob") => {
@@ -2007,12 +2038,11 @@ impl Node {
                 json!({ "html": self.screen(me.clone(), app, name, body["params"].clone(), body["scope"].as_str()).await? })
             }
             ("POST", "/v1/call") => {
-                let mut req: CallRequest = serde_json::from_value(body)?;
+                let mut req = self.resolve(serde_json::from_value(body)?);
                 (req.from, req.depth, req.client) = (None, 0, Some("phone".into()));
                 let me = &Caller { agent: req.agent.clone(), ..me.clone() };
-                let deployed = self.with(|i| Ok(i.r.members.apps.get(&req.app).is_some_and(|a| a.bundle.is_some())))?;
                 // An app's call runs here or the client tries another server; a driver's goes where the driver is.
-                match deployed || req.app == members::APP {
+                match req.driver.is_none() {
                     true => self.run(&req, me).await.json(),
                     false => match self.route(req, me.clone()).await {
                         Ok(ok) => json!({ "ok": ok }),

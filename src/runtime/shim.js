@@ -153,7 +153,7 @@ function context(env, body, appends, later) {
       return new Proxy({}, {
         get(_, op) {
           if (typeof op !== "string" || op === "then") return undefined;
-          return async (input = {}, { server } = {}) => (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, op, input, server }) })).json()).ok;
+          return async (input = {}, { server } = {}) => (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, driver: kind === "drivers", op, input, server }) })).json()).ok;
         },
       });
     },

@@ -38,7 +38,7 @@ var errNotSignedIn = errors.New("Messenger isn't signed in on that browser profi
 
 // desktops runs one of the desktops driver's operations, wherever it runs.
 func (b *browser) desktops(op string, input map[string]any) (any, error) {
-	body, _ := json.Marshal(map[string]any{"app": "desktops", "op": op, "input": input})
+	body, _ := json.Marshal(map[string]any{"app": "desktops", "driver": "desktops", "op": op, "input": input})
 	client := &http.Client{Timeout: 3 * time.Minute}
 	resp, err := client.Post(b.node+"/v1/call", "application/json", bytes.NewReader(body))
 	if err != nil {

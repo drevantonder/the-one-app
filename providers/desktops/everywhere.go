@@ -23,7 +23,7 @@ import (
 // callNode runs op on server (by name; "" for wherever the node picks) and
 // returns its result.
 func (ds *desktops) callNode(ctx context.Context, server, op string, input map[string]any) (json.RawMessage, error) {
-	req := map[string]any{"app": app, "op": op, "input": input}
+	req := map[string]any{"app": app, "driver": app, "op": op, "input": input}
 	if server != "" {
 		req["server"] = server
 	}

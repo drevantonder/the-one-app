@@ -685,6 +685,36 @@ async fn a_drivers_screen_is_served_wherever_it_runs() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_app_wraps_the_driver_of_its_name_on_another_server() {
+    let (a, _ra) = start("wraps-a").await;
+    let (b, _rb) = start("wraps-b").await;
+    a.create("Wraps", "Andre").await.unwrap();
+    b.join(&a.pair(None).unwrap()).await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    b.provide("lamps", json!({ "title": "Lamps", "ops": [{ "name": "on" }] })).await.unwrap();
+    let driver = b.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Ok(Some(c)) = driver.providers().next("lamps").await {
+                driver.providers().reply("lamps", c.id, json!({ "ok": format!("{} from {}", c.op, c.from.unwrap_or_default()) })).unwrap();
+            }
+        }
+    });
+    eventually("a to reach b's driver", async || a.call(call("lamps", "on", json!({}))).await.is_ok_and(|v| v == "on from ")).await;
+
+    // Deployed, an app of the driver's name takes its calls, and reaches the driver with ctx.drivers.
+    deploy_module(&a, "lamps", r#"export default { name: "lamps", uses: { drivers: ["lamps"] }, ops: { on: { run: async (ctx) => "app: " + await ctx.drivers.lamps.on({}) } } };"#).await;
+    a.install(&me, "lamps", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
+    eventually("the app to take lamps' calls", async || a.call(call("lamps", "on", json!({}))).await.is_ok_and(|v| v == "app: on from lamps")).await;
+    eventually("b to run the app too", async || b.call(call("lamps", "on", json!({}))).await.is_ok_and(|v| v == "app: on from lamps")).await;
+    // A call that names the driver still reaches it, as drivers reach each other.
+    let direct = CallRequest { driver: Some("lamps".into()), ..call("", "on", json!({})) };
+    assert_eq!(a.call(direct).await.unwrap(), "on from ");
+    let listed = a.apps(&me).await.unwrap();
+    assert_eq!(listed.iter().filter(|x| x["name"] == "lamps").count(), 1, "the app stands for its driver in the list");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn schedules_run_once_per_slot_on_one_server_and_switch_off() {
     let (a, _ra) = start("sched-a").await;
     let (b, _rb) = start("sched-b").await;

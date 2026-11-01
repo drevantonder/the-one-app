@@ -249,13 +249,18 @@ impl Apps {
     }
 
     async fn ask(&self, app: &str, what: &str, body: Value) -> Result<Value> {
+        self.ask_for(app, what, body, TIME_LIMIT).await
+    }
+
+    /// Asks the runtime, stopping it if it takes longer than `limit`.
+    async fn ask_for(&self, app: &str, what: &str, body: Value, limit: Duration) -> Result<Value> {
         if !self.has(app) {
             bail!("no app named {app} runs here");
         }
         let url = format!("{}/{app}/{what}", self.0.base);
         let runtime = self.0.clone();
         let reply: Value = tokio::task::spawn_blocking(move || -> Result<Value> {
-            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(TIME_LIMIT)).build().into();
+            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(limit)).build().into();
             // While the runtime restarts (for a deploy, or after a crash), wait for it rather than fail.
             let started = Instant::now();
             let sent = loop {
@@ -270,7 +275,7 @@ impl Apps {
                 Ok(mut resp) => Ok(resp.body_mut().with_config().limit(64 << 20).read_json()?),
                 Err(ureq::Error::Timeout(_)) => {
                     runtime.restart();
-                    bail!("the app took longer than {}s; it was stopped", TIME_LIMIT.as_secs())
+                    bail!("the app took longer than {}s; it was stopped", limit.as_secs())
                 }
                 Err(err) => Err(err.into()),
             }
@@ -302,8 +307,9 @@ impl Apps {
         }
     }
 
-    pub async fn call(&self, app: &str, op: &str, input: Value, ctx: &Context) -> Result<Outcome> {
-        let reply = self.ask(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from })).await?;
+    /// Runs an operation, for at most `limit`: longer for an app that waits on drivers.
+    pub async fn call(&self, app: &str, op: &str, input: Value, ctx: &Context, limit: Duration) -> Result<Outcome> {
+        let reply = self.ask_for(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from }), limit).await?;
         Ok(Outcome { result: reply["ok"].clone(), appends: appends(app, &reply["appends"])?, later: reply["later"] == true })
     }
 

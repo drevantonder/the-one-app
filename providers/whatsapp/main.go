@@ -143,7 +143,7 @@ func request(client *http.Client, url string, body any) ([]byte, error) {
 // servers, through this server's node, and decodes its result into out.
 func callOn(node, server, op string, input, out any) error {
 	body, err := request(&http.Client{Timeout: 28 * time.Second}, node+"/v1/call",
-		map[string]any{"app": app, "op": op, "input": input, "server": server})
+		map[string]any{"app": app, "driver": app, "op": op, "input": input, "server": server})
 	if err != nil {
 		return err
 	}
