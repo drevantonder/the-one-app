@@ -91,4 +91,5 @@ ln -sf "$HOME/.local/bin/$cli" "$HOME/.local/bin/git-remote-$cli"
 case :$PATH: in *:"$HOME/.local/bin":*) ;; *) echo "Add ~/.local/bin to your PATH." ;; esac
 echo "
 Next, on your first device:  $cli create <name>
-Or, to join a space:         $cli join <pairing code>   ($cli pair on a device in it gives one)"
+Or, to join a space:         $cli join <pairing code>   ($cli pair on a device in it gives one)
+Or, to look around first:    $cli try                   (a new install to try things in; $cli try stop deletes it)"

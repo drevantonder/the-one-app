@@ -14,6 +14,7 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 
 ## Work
 
+- `one try` (`target/release/one try` for your build) starts a new install beside the real one, with only what every new install starts with: what a new person sees. Review defaults and test changes there with `one try <command>` or `one try mcp`; `one try stop` deletes it.
 - `cargo test` before every commit, and `gh signoff` once it's pushed: tests run on our own machines, never in CI. `tests/sim.rs` runs the simulator; a failing seed is a bug, never a flake.
 - A change machines see must be one an older device can safely ignore (phones and Macs can run behind the servers). If it can't be, make it so first.
 - Push to `main` as you go (pull with `--rebase` first: several threads on several machines work on it at once). After each push to main, run `one update` on a Linux server of yours: it tests and builds main's tip, every Linux node updates itself, and each Mac rebuilds its app over SSH. `one release vX.Y.Z` does the same and publishes it on GitHub, where the installer gets it.

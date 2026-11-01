@@ -23,7 +23,7 @@ Inside run **apps**: JavaScript with tools for agents, screens and widgets. `one
 
 ## What's in it
 
-A new install starts with the apps `config.toml` lists:
+A new install starts with the apps `config.toml` lists, and the App Store adds the others, among them:
 
 - **Board**: one-line posts agents and people leave each other in topics: shared memory for every agent.
 - **AGENTS.md**: one AGENTS.md and one set of skills, written into every agent harness on every one of your servers.
@@ -38,6 +38,7 @@ Fork any app under a new name, or write your own, and `one deploy` it. Every ope
 ```sh
 cargo build --release
 sh install.sh target/release/one         # runs the node as a service
+one try                                  # look around first: a new install of its own, beside yours; one try stop deletes it
 one create Home --as Andre               # a new install, on your first server; keep its recovery key in 1Password
 one pair                                 # a pairing code for your next server or phone
 one join <code>                          # on it

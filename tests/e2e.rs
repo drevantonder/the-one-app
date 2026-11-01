@@ -1351,3 +1351,32 @@ async fn each_person_arranges_their_pages_and_their_widgets_options() {
     laptop.arrange(&theirs, "global", json!([{ "app": "notes" }]), json!(["board"])).await.unwrap();
     eventually("andre to get the laptop's arrangement", async || andre.state()["arrangements"]["global"]["hidden"] == json!(["board"])).await;
 }
+
+/// `try` makes an install as `create` makes every new one, with a node of its own beside this machine's, runs commands
+/// in it, and `try stop` deletes it.
+#[test]
+fn try_makes_a_new_install_beside_this_ones() {
+    let home = temp("try");
+    let var = |name: &str| format!("{}_{name}", one::config::CLI.to_uppercase());
+    // This machine's own node, as far as the command knows, isn't running.
+    let cli = |args: &[&str]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_one")).args(args).env(var("HOME"), &home).env(var("ADDR"), "127.0.0.1:9").output().unwrap();
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let tried = std::path::PathBuf::from(format!("{}-try", home.display()));
+    assert!(cli(&["try"]).contains("Try"));
+    let status = cli(&["try", "status"]);
+    assert!(status.lines().any(|l| l.starts_with("Try ")), "{status}");
+    let apps = cli(&["try", "apps"]);
+    for app in one::config::STARTERS {
+        assert!(apps.lines().any(|l| l.starts_with(&format!("{app} (")) && l.contains("installed in global")), "{app} isn't installed: {apps}");
+    }
+    cli(&["try", "board", "post", "hello"]);
+    assert!(cli(&["try", "board", "read"]).contains("hello"));
+    let pid: i32 = std::fs::read_to_string(tried.join("pid")).unwrap().trim().parse().unwrap();
+    cli(&["try", "stop"]);
+    assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "its node still runs");
+    assert!(!tried.join("install").exists());
+    let _ = std::fs::remove_dir_all(&tried);
+}
