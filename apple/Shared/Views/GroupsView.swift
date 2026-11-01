@@ -108,7 +108,7 @@ struct GroupView: View {
                     if lastAdmin && group.members.count > 1 {
                         Text("You’re its only admin: make someone else an admin before you leave.")
                     } else if admin {
-                        Text("As an admin you arrange its page, add apps to it and set its secrets.")
+                        Text("As an admin you arrange its page, add apps to it and keep its Vault.")
                     }
                 }
             }

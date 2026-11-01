@@ -106,6 +106,7 @@ struct ConnectorsView: View {
     @State private var signingOut: (app: AppInfo, account: ConnectorAccount)?
     @State private var deleting: AppInfo?
     @State private var error: String?
+    @State private var choosing: AccountChoice?
 
     var body: some View {
         let apps = store.connectors(on: page)
@@ -114,7 +115,7 @@ struct ConnectorsView: View {
                 Section {
                     accountRows(app)
                     if let add = store.settingsRoute(for: app, on: page, add: true) {
-                        Button { open(add) } label: {
+                        Button { Task { await addAccount(app, add) } } label: {
                             Label("Add Account", systemImage: "plus")
                                 .foregroundStyle(Color.accentColor)
                         }
@@ -166,6 +167,26 @@ struct ConnectorsView: View {
             Text("\(item.app.label) stops using it, here and for your agents. Signing in again takes you through \(item.app.label)’s sign-in.")
         }
         .deleteAppDialog($deleting, error: $error)
+        .sheet(item: $choosing) { choice in
+            AccountChoiceSheet(choice: choice) { item in
+                do {
+                    try await store.node.setItem(scope: item.scope, id: item.id, ["apps": item.apps + [choice.app.name]])
+                } catch {
+                    self.error = error.localizedDescription
+                }
+                await load([choice.app])
+            } signIn: {
+                open(choice.add)
+            }
+        }
+    }
+
+    /// Add Account: the person's accounts in the Vault that this app wants and doesn't use yet, to switch it on for
+    /// one; or, with none, its sign-in.
+    private func addAccount(_ app: AppInfo, _ add: Route) async {
+        guard app.keepsAccounts, let items = try? await store.node.vault() else { return open(add) }
+        let there = items.filter { $0.wanted_by?.contains(app.name) == true && !$0.apps.contains(app.name) }
+        if there.isEmpty { open(add) } else { choosing = AccountChoice(app: app, items: there, add: add) }
     }
 
     /// "For you only · 4 connectors": whose page it is, and how many connectors it has, if any.
@@ -290,5 +311,72 @@ struct ConnectorsView: View {
         }
         await load([app])
         await store.refreshWidgets()
+    }
+}
+
+/// Accounts in the Vault an app could use, offered when adding one to it.
+private struct AccountChoice: Identifiable {
+    var app: AppInfo
+    var items: [VaultItem]
+    var add: Route
+    var id: String { app.name }
+}
+
+/// Add Account, with accounts already in the Vault: each switches the app on for it; or sign in to another.
+private struct AccountChoiceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var choice: AccountChoice
+    var pick: (VaultItem) async -> Void
+    var signIn: () -> Void
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(choice.items) { item in
+                        Button {
+                            busy = true
+                            Task {
+                                await pick(item)
+                                dismiss()
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                ItemIcon(item: item, size: 32)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(item.title).foregroundStyle(.primary)
+                                    if let line = item.line { Text(line).font(.callout).foregroundStyle(.secondary) }
+                                }
+                                Spacer()
+                            }
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(busy)
+                    }
+                }
+                Section {
+                    Button {
+                        dismiss()
+                        signIn()
+                    } label: {
+                        Label("Sign In to Another Account", systemImage: "plus").foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            #if os(iOS)
+            .listStyle(.insetGrouped)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .navigationTitle("Add Account")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
+        #if os(macOS)
+        .frame(width: 400, height: 320)
+        #endif
     }
 }

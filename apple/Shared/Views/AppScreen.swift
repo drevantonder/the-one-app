@@ -208,7 +208,7 @@ private struct ScreenWebView: Representable {
         private var host: NSView? { web }
         #endif
 
-        /// The bridge: `{ type: "call" | "open" | "title" | "icon" | "copy" | "haptic" | "save" | "preview" | "scan", … }`.
+        /// The bridge: `{ type: "call" | "open" | "title" | "icon" | "copy" | "haptic" | "save" | "preview" | "scan" | "vault", … }`.
         /// A page only ever calls its own app, but may open another's screens.
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
             guard let body = message.body as? [String: Any] else { return (nil, "Not a message") }
@@ -242,6 +242,21 @@ private struct ScreenWebView: Representable {
             case "scan":
                 do {
                     return (try await ShellFiles.scan(from: host).map(\.json), nil)
+                } catch {
+                    return (nil, error.localizedDescription)
+                }
+            case "vault":
+                // Asks for what the app declares, in the Vault's sheet, and answers once the sheet is gone.
+                let store = view.store, scope = route.scope ?? "user"
+                do {
+                    guard let id = try await store.node.requestItem(scope: scope, app: route.app, need: body["need"] as? String ?? "") else {
+                        return (nil, "The Vault didn’t take the request")
+                    }
+                    let sheet = Sheet.vault(scope: scope, id: id)
+                    store.sheet = sheet
+                    while store.sheet == sheet { try? await Task.sleep(for: .milliseconds(300)) }
+                    let state = try await store.node.vaultRequests(scope: scope, id: id).first?.state
+                    return (state == "set", nil)
                 } catch {
                     return (nil, error.localizedDescription)
                 }
@@ -410,7 +425,7 @@ struct RouteView: View {
                 }
             case .groups: GroupsView(open: open)
             case .devices: DevicesView()
-            case .secrets: SecretsView()
+            case .vault: VaultView()
             case .access: AccessLogView()
             case .users: UsersView()
             case .install: InstallSettingsView()

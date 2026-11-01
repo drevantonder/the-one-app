@@ -437,7 +437,6 @@ struct SettingsPage: View {
     @Environment(Store.self) private var store
     var open: (Route) -> Void
     @AppStorage("appearance") private var appearance = Appearance.automatic.rawValue
-    @State private var secrets: Int?
 
     var body: some View {
         ScrollView {
@@ -457,7 +456,7 @@ struct SettingsPage: View {
                     row(.devices, value: count(myDevices))
                 }
                 SettingsSection {
-                    row(.secrets, value: secrets.map { $0 == 0 ? String(localized: "None") : count($0) } ?? "")
+                    row(.vault, value: "")
                     row(.access, value: (store.state?.opens.isEmpty ?? true) ? String(localized: "None") : count(store.state?.opens.count ?? 0))
                     row(.appearance, value: (Appearance(rawValue: appearance) ?? .automatic).title)
                 }
@@ -484,7 +483,6 @@ struct SettingsPage: View {
             .frame(maxWidth: .infinity)
         }
         .groupedBackground()
-        .task { secrets = try? await store.node.secrets(scope: "user").count }
     }
 
     private func row(_ item: Setting, value: String, badge: Bool = false) -> some View {
@@ -688,7 +686,7 @@ extension Setting {
         case .store: .blue
         case .groups: .green
         case .devices: .gray
-        case .secrets: .indigo
+        case .vault: .indigo
         case .access: .purple
         case .users: .teal
         case .install: .gray

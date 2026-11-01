@@ -119,7 +119,7 @@ final class Phone {
     }
 
     /// `<cli>://join?code=…&name=…`: joins without the camera, from a link another device gives. Or a link the
-    /// store opens itself, like an agent's request for a secret.
+    /// store opens itself, like an agent's request for a Vault item.
     /// `<cli>://open?app=…&screen=…&params=…&scope=…`: opens an app's screen, from a widget, on the page it came from.
     func open(_ url: URL) {
         if store.open(url) { return }
@@ -133,7 +133,7 @@ final class Phone {
         }
         if url.host() == "settings" {
             store.current = "settings"
-            store.path = url.pathComponents.dropFirst().first.flatMap(Setting.init(rawValue:)).map { [.setting($0)] } ?? []
+            store.path = url.pathComponents.dropFirst().first.flatMap(Setting.named).map { [.setting($0)] } ?? []
             return
         }
         if url.host() == "open", let app = value("app") {

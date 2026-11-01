@@ -60,7 +60,7 @@ struct PagesView: View {
             case .pages: PagesEditor()
             case .widgets(let scope): WidgetsEditor(scope: scope)
             case .join, .connectors: EmptyView()
-            case .secret(let scope, let id): SecretRequestSheet(scope: scope, id: id)
+            case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
             }
         }
         .onChange(of: store.pages) {

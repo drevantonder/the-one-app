@@ -22,10 +22,15 @@ struct NodeState: Decodable, Sendable, Equatable {
     var install: Install?
     /// Who opened this user's data, and when.
     var opens: [Open]
-    /// How many requests for a secret wait for this user.
+    /// How many requests for a Vault item wait for this user; and as nodes before the Vault said it.
+    var vaultRequests: Int?
     var secretRequests: Int?
 
-    enum CodingKeys: String, CodingKey { case config, machine = "me", host = "server", user, install, opens, secretRequests = "secret_requests" }
+    var waitingRequests: Int { vaultRequests ?? secretRequests ?? 0 }
+
+    enum CodingKeys: String, CodingKey {
+        case config, machine = "me", host = "server", user, install, opens, vaultRequests = "vault_requests", secretRequests = "secret_requests"
+    }
 }
 
 struct Machine: Codable, Sendable, Equatable {
@@ -158,9 +163,11 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     /// The scopes it is installed in that the asker may use: `user:<id>`, `group:<id>`, `global`.
     var installed: [String]?
     var deploys: Int?
+    /// What it asks the Vault for, by name (SPEC.md "Apps").
+    var vault: [String: VaultNeed]?
 
     enum CodingKeys: String, CodingKey {
-        case name, title, icon, color, image, imageKind = "image_kind", owner, instructions, screens, ops, installed, deploys
+        case name, title, icon, color, image, imageKind = "image_kind", owner, instructions, screens, ops, installed, deploys, vault
     }
 
     var id: String { name }
@@ -173,6 +180,8 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
         !hasScreens && ["accounts", "sign_in", "sign_out"].allSatisfy { op in ops?.contains { $0.name == op } == true }
     }
     func has(screen: String) -> Bool { screens?.contains { $0.name == screen } == true }
+    /// Whether its accounts are Vault items its sign-in makes, so Add Account may offer ones that are there.
+    var keepsAccounts: Bool { vault?.values.contains { $0.accounts == true } == true }
     /// Its pages: the asker's own scope is the page `user`.
     var scopes: [String] { (installed ?? []).map { $0.hasPrefix("user:") ? "user" : $0 } }
 }
@@ -265,23 +274,68 @@ struct HTTPNode: NodeTransport {
     }
 }
 
-/// A secret as `GET /v1/secrets` lists it: never its value.
-struct SecretInfo: Decodable, Sendable, Equatable, Identifiable {
-    var app: String
-    var name: String
-    var hosts: [String]
-
-    var id: String { "\(app)/\(name)" }
+/// What an app asks the Vault for: a title, the fields it wants, where they're sent, and whether its sign-in makes them.
+struct VaultNeed: Decodable, Sendable, Equatable {
+    var title: String?
+    var accounts: Bool?
 }
 
-/// An agent's or person's request that this user set a secret (SPEC.md "Secrets"), so the agent never sees its value.
-struct SecretRequest: Decodable, Sendable, Equatable, Identifiable {
+/// An item of the Vault as `GET /v1/vault` lists it: a secret field never with its value.
+struct VaultItem: Decodable, Sendable, Equatable, Identifiable, Hashable {
+    struct Field: Decodable, Sendable, Equatable, Hashable, Identifiable {
+        var name: String
+        var secret: Bool
+        var value: String?
+        var id: String { name }
+    }
+    var id: String
+    var scope: String
+    var scope_name: String?
+    var title: String
+    var type: String?
+    var domain: String?
+    var image: String?
+    var hosts: [String]
+    var fields: [Field]
+    /// The apps switched on for it, and those that want it (with the fields they ask for), switched on or not.
+    var apps: [String]
+    var wanted_by: [String]?
+    /// The app whose call made it, and whether it's an account a sign-in made, which signing out deletes.
+    var app: String?
+    var account: Bool?
+
+    /// Its one short line: what it is, else its first plain field.
+    var line: String? {
+        if let type, !type.isEmpty { return type }
+        return fields.first { !$0.secret && !($0.value ?? "").isEmpty }?.value
+    }
+    var isAccount: Bool { account == true }
+}
+
+/// A request for an item an app may use (SPEC.md "The Vault"): the person picks one of theirs or makes one, so the
+/// asker never sees its secrets.
+struct VaultRequest: Decodable, Sendable, Equatable, Identifiable {
+    struct Field: Decodable, Sendable, Equatable, Hashable, Identifiable {
+        var name: String
+        var secret: Bool
+        var id: String { name }
+    }
+    struct Match: Decodable, Sendable, Equatable, Hashable, Identifiable {
+        var id: String
+        var title: String
+        var type: String?
+        var domain: String?
+        var apps: [String]?
+    }
     var id: String
     var scope: String
     /// The scope's owner: a user's name, a group's, or the install's.
     var scope_name: String
     var app: String
-    var name: String
+    var title: String?
+    var fields: [Field]?
+    /// The one secret it asks for, as nodes before the Vault asked.
+    var name: String?
     var hosts: [String]
     var why: String?
     /// The user who asked, and the agent they asked through, if one did.
@@ -290,9 +344,12 @@ struct SecretRequest: Decodable, Sendable, Equatable, Identifiable {
     var time: Double
     /// `waiting`, `set`, `declined` or `expired`.
     var state: String
+    var matches: [Match]?
 
     var waiting: Bool { state == "waiting" }
     var asker: String { agent.flatMap { $0.isEmpty ? nil : $0 } ?? by }
+    var label: String { title ?? name ?? "" }
+    var wanted: [Field] { fields ?? name.map { [Field(name: $0, secret: true)] } ?? [] }
 }
 
 /// The local API, typed, over whichever transport reaches a node.
@@ -383,7 +440,7 @@ struct NodeClient: Sendable {
     /// Changes a member's role, or with no role removes them.
     func setMember(group: String, user: String, role: String?) async throws { try await post("v1/member", ["group": group, "user": user, "role": role]) }
 
-    // MARK: Apps, secrets, backups
+    // MARK: Apps, the Vault, backups
 
     func install(app: String, scope: String, _ installed: Bool) async throws {
         try await post("v1/install", ["app": app, "scope": scope, "installed": installed])
@@ -394,24 +451,39 @@ struct NodeClient: Sendable {
         try await post("v1/retire", ["app": app, "how": how])
     }
 
-    func secrets(scope: String) async throws -> [SecretInfo] { try await get("v1/secrets", ["scope": scope]) }
+    /// The Vault's items on a page this user manages, or on all of them.
+    func vault(scope: String? = nil) async throws -> [VaultItem] { try await get("v1/vault", scope.map { ["scope": $0] } ?? [:]) }
 
-    /// Sets a secret, or with no value deletes it.
-    func setSecret(scope: String, app: String, name: String, hosts: [String], value: String?) async throws {
-        try await post("v1/secrets", ["scope": scope, "app": app, "name": name, "hosts": hosts, "value": value])
+    /// Makes an item (no `id`) or changes one: fields as `{ name: { value, secret } }`, `apps`, `hosts`, `deleted`.
+    @discardableResult
+    func setItem(scope: String, id: String?, _ fields: [String: Any?]) async throws -> String? {
+        var body = fields
+        body["scope"] = scope
+        if let id { body["id"] = id }
+        return try await post("v1/vault", body)["id"] as? String
     }
 
-    /// Requests for a secret this user may answer, newest first: all, or one scope's, or one.
-    func secretRequests(scope: String? = nil, id: String? = nil) async throws -> [SecretRequest] {
+    /// Asks this user for an item an app's need names, for an app screen's `one.vault(need)` → the request's id.
+    func requestItem(scope: String, app: String, need: String) async throws -> String? {
+        try await post("v1/vault/request", ["scope": scope, "app": app, "need": need])["id"] as? String
+    }
+
+    /// Requests for an item this user may answer, newest first: all, or one scope's, or one.
+    func vaultRequests(scope: String? = nil, id: String? = nil) async throws -> [VaultRequest] {
         var query: [String: String] = [:]
         query["scope"] = scope
         query["id"] = id
-        return try await get("v1/secrets/requests", query)
+        return try await get("v1/vault/requests", query)
     }
 
-    /// Sets the secret a request asks for, or with no value declines it.
-    func answer(secretRequest id: String, scope: String, value: String?) async throws {
-        try await post("v1/secrets/answer", ["scope": scope, "id": id, "value": value])
+    /// Answers a request: with `item`, switching its app on for that one; else making one of `fields`.
+    func answer(request id: String, scope: String, item: String? = nil, title: String? = nil, fields: [String: String]? = nil, declined: Bool = false) async throws {
+        var body: [String: Any?] = ["scope": scope, "id": id]
+        if declined { body["declined"] = true }
+        if let item { body["item"] = item }
+        if let title { body["title"] = title }
+        if let fields { body["fields"] = fields }
+        try await post("v1/vault/answer", body)
     }
 
     func backup(url: String?, accessKey: String = "", secretKey: String = "", key: String = "") async throws {

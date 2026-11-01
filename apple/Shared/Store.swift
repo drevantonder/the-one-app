@@ -34,16 +34,19 @@ struct ScreenRoute: Hashable, Codable {
 
 /// The settings page's icons.
 enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
-    case store, groups, devices, secrets, access, users, install, backups, requests, appearance
+    case store, groups, devices, vault, access, users, install, backups, requests, appearance
 
     var id: Self { self }
+
+    /// A setting by the name a link gives it, `secrets` being the Vault's before it was.
+    static func named(_ name: String) -> Setting? { name == "secrets" ? .vault : Setting(rawValue: name) }
 
     var title: String {
         switch self {
         case .store: String(localized: "App Store")
         case .groups: String(localized: "Groups")
         case .devices: String(localized: "Devices")
-        case .secrets: String(localized: "Secrets")
+        case .vault: String(localized: "Vault")
         case .access: String(localized: "Access Log")
         case .users: String(localized: "Users")
         case .install: String(localized: "Install")
@@ -58,7 +61,7 @@ enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
         case .store: "bag.fill"
         case .groups: "person.3.fill"
         case .devices: "laptopcomputer.and.iphone"
-        case .secrets: "key.fill"
+        case .vault: "lock.fill"
         case .access: "eye.fill"
         case .users: "person.2.badge.gearshape.fill"
         case .install: "slider.horizontal.3"
@@ -73,8 +76,9 @@ enum Sheet: Hashable, Identifiable {
     case pair
     case join
     case pages
-    /// A request that this user set a secret, from a `<cli>://secret?id=…&scope=…` link.
-    case secret(scope: String, id: String)
+    /// A request for a Vault item, from a `<cli>://vault?id=…&scope=…` link (or `<cli>://secret?…`, as before), or an
+    /// app screen's `one.vault(need)`.
+    case vault(scope: String, id: String)
     /// A page's widgets, to show, hide and size, with every other widget there is.
     case widgets(String)
     /// A page's Connectors folder, on a Mac: its scope.
@@ -325,14 +329,14 @@ final class Store {
 
     /// Icons by role: Users, Install and Backups only for admins, Requests first, only while something waits.
     var settings: [Setting] {
-        var items: [Setting] = [.store, .groups, .devices, .secrets, .access]
+        var items: [Setting] = [.store, .groups, .devices, .vault, .access]
         if isAdmin { items += [.users, .install, .backups] }
         if requests > 0 { items.insert(.requests, at: 0) }
         return items
     }
 
-    /// What waits for this user: invites, servers to trust and secrets asked for.
-    var requests: Int { invites.count + trustOffers.count + (state?.secretRequests ?? 0) }
+    /// What waits for this user: invites, servers to trust and items asked for.
+    var requests: Int { invites.count + trustOffers.count + (state?.waitingRequests ?? 0) }
 
     /// The count on Settings' icon: the requests waiting.
     var badge: Int { requests }
@@ -415,7 +419,7 @@ final class Store {
             NotificationCenter.default.post(name: .nodeEvent, object: String(decoding: json, as: UTF8.self))
         }
         if ["servers", "install"].contains(event.type) { try? await refreshState() }
-        // Installs, deploys and data all arrive as changes; the node's own entries (a secret request) change no app.
+        // Installs, deploys and data all arrive as changes; the node's own entries (a request for an item) change no app.
         if event.type == "changed" {
             let apps = event.apps ?? []
             if apps.isEmpty { try? await refreshState() }
@@ -423,13 +427,14 @@ final class Store {
         }
     }
 
-    /// `<cli>://secret?id=…&scope=…`, which an agent gives a person to set a secret it asked for. Whether it was one.
+    /// `<cli>://vault?id=…&scope=…` (or `<cli>://secret?…`, as agents gave it before), which an agent gives a person
+    /// to answer a request for an item. Whether it was one.
     @discardableResult
     func open(_ url: URL) -> Bool {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let value = { (name: String) in query.first { $0.name == name }?.value ?? "" }
-        guard url.host() == "secret", !value("id").isEmpty, !value("scope").isEmpty else { return false }
-        sheet = .secret(scope: value("scope"), id: value("id"))
+        guard ["vault", "secret"].contains(url.host() ?? ""), !value("id").isEmpty, !value("scope").isEmpty else { return false }
+        sheet = .vault(scope: value("scope"), id: value("id"))
         return true
     }
 

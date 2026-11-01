@@ -33,7 +33,7 @@ struct RootView: View {
             case .pair: PairSheet()
             case .join: JoinSheet()
             case .pages: PagesEditor()
-            case .secret(let scope, let id): SecretRequestSheet(scope: scope, id: id)
+            case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
             case .widgets(let scope): WidgetsEditor(scope: scope)
             case .connectors(let scope): ConnectorsSheet(scope: scope)
             }

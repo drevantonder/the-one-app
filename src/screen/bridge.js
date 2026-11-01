@@ -35,6 +35,7 @@
       a.remove();
     }
     if (message.type === "scan") throw new Error("Scanning documents needs the iPhone or iPad app. Choose the files instead.");
+    if (message.type === "vault") throw new Error("Open this in the app to choose it.");
     if (message.type === "copy") return navigator.clipboard.writeText(message.text);
   }
 
@@ -64,6 +65,9 @@
     // The document camera, where the shell has one (one.can.scan): each page found, straightened and cropped, as a
     // JPEG `{ name, type, size, base64 }`; none if the person cancels.
     scan: () => host({ type: "scan" }),
+    // Asks the person for what this app's `vault` declares as `need`: they pick one of their items or make one, in a
+    // sheet of the shell's. True once it's allowed; false if they declined or closed it.
+    vault: (need) => host({ type: "vault", need }),
     // What this place can do beyond the basics.
     can: { scan: !!window.__oneShell?.scan },
     // Copies text: through the shell (which a page's clipboard can't always reach), else the browser's clipboard.
