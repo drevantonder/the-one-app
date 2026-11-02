@@ -370,9 +370,10 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
         let latest: BTreeSet<String> = snaps.iter().filter(|(_, s)| s.time == newest).flat_map(|(_, s)| s.blobs.keys().cloned()).collect();
         let times: Vec<u64> = snaps.iter().map(|(_, s)| s.time).collect();
         let kept = kept(&times, now);
-        // Each database's oldest copy a kept snapshot starts from.
+        // Each database's oldest copy a kept snapshot starts from, or one made in the last `SETTLE`: a run going now
+        // may be building on it, whether it's kept or not.
         let mut floors: BTreeMap<String, u64> = BTreeMap::new();
-        for (_, s) in snaps.iter().filter(|(_, s)| kept.contains(&s.time)) {
+        for (_, s) in snaps.iter().filter(|(_, s)| kept.contains(&s.time) || s.time + SETTLE > now) {
             for (database, (_, copied)) in &s.databases {
                 let floor = floors.entry(database.clone()).or_insert(*copied);
                 *floor = (*floor).min(*copied);
@@ -396,8 +397,8 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
             }
             keep.extend(names(&s));
         }
-        // The bucket's copy of each database goes up to there: no kept snapshot starts from an older copy or step. A
-        // run builds on the newest, from that copy or a newer one.
+        // The bucket's copy of each database goes up to there: no kept or recent snapshot starts from an older copy or
+        // step. A run builds on one of those, from its copy or a newer one.
         if !opened {
             continue;
         }
@@ -672,8 +673,12 @@ mod tests {
         assert!((1..=5).all(|n| copied(&crate::db::step_name(prefix, n))));
 
         let scopes: BTreeMap<String, [u8; 32]> = [("global".to_string(), key)].into();
+        // While another device's run may still be building on the hour's first snapshot, the steps it starts from stay.
+        let pruned = prune(&place, install, &scopes, &BTreeSet::new(), hour + 3 * 60_000).unwrap();
+        assert_eq!((pruned.snapshots, pruned.objects), (1, 0), "the hour's first snapshot, not yet the steps it started from");
+        assert!((1..=5).all(|n| copied(&crate::db::step_name(prefix, n))));
         let pruned = prune(&place, install, &scopes, &BTreeSet::new(), real).unwrap();
-        assert_eq!((pruned.snapshots, pruned.objects), (1, 5), "the hour's first snapshot, and the steps only it started from");
+        assert_eq!((pruned.snapshots, pruned.objects), (0, 5), "then the steps only it started from");
         assert!((1..=5).all(|n| !copied(&crate::db::step_name(prefix, n))));
         assert!(copied(&crate::db::copy_name(prefix, 8)) && (9..=10).all(|n| copied(&crate::db::step_name(prefix, n))), "the kept snapshot's copy and steps stay");
         assert_eq!(restore(&place, install, "global", &[key]).unwrap().snapshot.databases["board/main"], (10, 8));
