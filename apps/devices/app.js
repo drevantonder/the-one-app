@@ -1,5 +1,5 @@
 // Devices: every server in the install and how loaded it is (memory, CPU, GPU, disk), with the containers each one
-// hosts listed under it; and where things run first (ctx.order, src/rank.rs), which admins change. Each server measures itself and says so when it syncs; this app only draws what
+// hosts listed under it; and where things run first (ctx.order, src/rank.rs), which admins change in Settings > Devices, and agents with devices_use. Each server measures itself and says so when it syncs; this app only draws what
 // ctx.servers() gives it.
 
 const GB = 1e9;
@@ -138,12 +138,8 @@ export default {
 .guest .m { color: var(--muted); font-size: 13px; white-space: nowrap; }
 .guest .bar { flex: 0 3 64px; min-width: 16px; }
 .wrong { color: #ff3b30; font-size: 13px; margin-top: 6px; }
-#order h2.head { font-size: 20px; font-weight: 700; margin: 32px 0 0; }
-#order .about { color: var(--muted); font-size: 13px; margin: 6px 16px 0; }
-#order .row .sub { color: var(--muted); font-size: 13px; }
 </style>
 <div id="list"></div>
-<div id="order"></div>
 <script>
 const GB = 1e9, GiB = 2 ** 30;
 const size = (b, g = GB) => b >= 10 * g ? Math.round(b / g) + " GB" : b >= g ? (b / g).toFixed(1) + " GB" : Math.round(b / (g / 1000)) + " MB";
@@ -188,50 +184,8 @@ async function show() {
     document.getElementById("list").innerHTML = \`<div class="empty error">\${one.esc(err.message)}</div>\`;
   }
 }
-const PLACES = { first: "Use First", needed: "When Needed", last: "Last Resort" };
-const TYPES = { always_on: "Always on", laptop: "Laptop, sleeps", cloud: "Cloud server, paid by the hour", cloudflare: "On the web, costs a little each time it wakes" };
-let moving = false;
-/// Where things run first: each place's devices, in the order they're used, each with a menu to move it, for an admin.
-async function order() {
-  if (moving) return;
-  let got;
-  try {
-    got = await one.call("order", {});
-  } catch {
-    return;
-  }
-  const row = (d) => {
-    const sub = [TYPES[d.kind] || "", d.here ? "This device" : "", d.online ? "" : "Offline"].filter(Boolean).join(" · ");
-    const pick = got.admin
-      ? \`<label class="pick">\${PLACES[d.use]}<select aria-label="Where \${one.esc(d.name)} comes" onchange="move('\${one.esc(d.key)}', this.value, this)">\${Object.entries(PLACES).map(([v, t]) => \`<option value="\${v}"\${v === d.use ? " selected" : ""}>\${t}</option>\`).join("")}</select></label>\`
-      : "";
-    return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(d.name)}</span></div><div class="sub">\${sub}</div></div>\${pick}</div>\`;
-  };
-  let html = '<h2 class="head">Where Things Run</h2>';
-  for (const [place, title] of Object.entries(PLACES)) {
-    const here = got.order.filter((d) => d.use === place);
-    if (here.length) html += \`<h2 class="section">\${title}</h2><div class="list">\${here.map(row).join("")}</div>\`;
-  }
-  html += '<p class="about">Things run on the first device here that\\'s on and has room. One far away from you is used only when it\\'s nearer.</p>';
-  document.getElementById("order").innerHTML = html;
-}
-async function move(key, place, select) {
-  moving = true;
-  select.disabled = true;
-  let failed = null;
-  try {
-    await one.call("use", { name: key, place });
-  } catch (err) {
-    failed = err.message;
-  }
-  moving = false;
-  await order();
-  if (failed) document.getElementById("order").insertAdjacentHTML("beforeend", '<p class="wrong">' + one.esc(failed) + "</p>");
-}
 show();
-order();
 setInterval(show, 5000);
-setInterval(order, 15000);
 </script>`,
     },
   },

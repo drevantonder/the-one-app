@@ -50,6 +50,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/settings", post(settings))
         .route("/v1/acl", post(acl))
         .route("/v1/trust", post(trust))
+        .route("/v1/use", post(use_))
         .route("/v1/open", post(open))
         .route("/v1/group", post(group))
         .route("/v1/invite", post(invite))
@@ -137,6 +138,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/role",
     "/v1/settings",
     "/v1/trust",
+    "/v1/use",
     "/v1/group",
     "/v1/invite",
     "/v1/accept",
@@ -521,6 +523,12 @@ async fn acl(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 async fn trust(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let server = node.find_server(text(&body, "server")?)?;
     node.member_as(&me.caller, if body["trust"] == false { "untrust" } else { "trust" }, json!({ "server": hex(&server) })).await?;
+    done()
+}
+
+/// `{ server, use }`: puts a server (its name or key, or `cloudflare`) first, needed or last, for an admin.
+async fn use_(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    node.set_use(&me.caller, text(&body, "server")?, text(&body, "use")?).await?;
     done()
 }
 

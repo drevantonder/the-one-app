@@ -71,6 +71,30 @@
       : status(online);
     return row({ key: s.key, name: s.name, online, lines: [s.me ? "This device" : runBy(s), online && load(s.load)], trailing, removable: s.user === me() && !s.me });
   };
+  // Where things run first: every server, and Cloudflare, Use First, When Needed or Last Resort, cheaper kinds first
+  // within each (src/rank.rs); an admin moves one with its menu.
+  const PLACES = { first: "Use First", needed: "When Needed", last: "Last Resort" };
+  const KINDS = { always_on: "Always on", laptop: "Laptop, sleeps", cloud: "Cloud server, paid by the hour", cloudflare: "On the web, costs a little each time it wakes" };
+  const COST = { laptop: 1, cloudflare: 2, cloud: 3 };
+  const places = () => {
+    const all = (state.install?.servers || []).filter((s) => s.use).map((s) => ({ name: shown(s.name), key: s.key, kind: s.kind, use: s.use, online: !!s.online, here: s.me }));
+    if (state.install?.serverless?.use) all.push({ name: "Cloudflare", key: "cloudflare", kind: "cloudflare", use: state.install.serverless.use, online: true });
+    return all;
+  };
+  const orderRow = (d, admin) => {
+    const trailing = admin
+      ? `<label class="pick">${PLACES[d.use]}<select aria-label="Where ${one.esc(d.name)} comes" onchange="place('${one.esc(d.key)}', this.value, this)">${Object.entries(PLACES).map(([v, t]) => `<option value="${v}"${v === d.use ? " selected" : ""}>${t}</option>`).join("")}</select></label>`
+      : `<span class="note">${PLACES[d.use]}</span>`;
+    return `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(d.name)}</span></div>${subs([KINDS[d.kind], d.here && "This device", !d.online && "Offline"].filter(Boolean).join(" · "))}</div>${trailing}</div>`;
+  };
+  const orderSection = () => {
+    const all = places(), admin = state.user?.role === "admin";
+    if (!all.length) return "";
+    const rank = (d) => Object.keys(PLACES).indexOf(d.use) * 10 + (COST[d.kind] || 0);
+    const html = `<h2 class="section">Where Things Run</h2><div class="list">${all.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).map((d) => orderRow(d, admin)).join("")}</div>`;
+    return html + `<p class="footer">Things run on the first device here that’s on and has room. One far away from you is used only when it’s nearer.</p>`;
+  };
+
   const clientRow = (c) =>
     row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : c.asked ? `Phone · asked ${one.ago(c.asked, { long: true })}` : "Phone"], trailing: "", removable: !c.me });
 
@@ -86,6 +110,7 @@
     html += '<h2 class="section">Your Devices</h2><div class="list">' + mine.map(serverRow).join("") + clients.filter((c) => c.user === me()).map(clientRow).join("") +
       `<a class="row plain action-row" onclick="pair()">${one.icon("qr-code")}<span>Pair a Phone or Computer</span></a></div><div id="ask"></div>`;
     if (others.length) html += '<h2 class="section">Servers</h2><div class="list">' + others.map(serverRow).join("") + "</div>";
+    html += orderSection();
     const holding = servers.filter(holds).map((s) => shown(s.name));
     html += `<h2 class="section">Where Your Data Lives</h2><div class="list"><div class="row plain"><div class="main">${one.esc(list(holding))}</div></div></div>`;
     html += error ? `<p class="footer error">${one.esc(error)}</p>` : '<p class="footer">Only these keep your own data.</p>';
@@ -123,6 +148,12 @@
   function trust(server, input) {
     one.tap();
     act(() => one.api("POST", "/v1/trust", { server, trust: input.checked }));
+  }
+
+  function place(server, use, select) {
+    one.tap();
+    select.disabled = true;
+    act(() => one.api("POST", "/v1/use", { server, use }));
   }
 
   function remove(key) {

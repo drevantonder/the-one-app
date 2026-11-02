@@ -3280,6 +3280,10 @@ impl Node {
                 self.member_as(me, kind, json!({ "server": hex(&server) })).await?;
                 json!({})
             }
+            ("POST", "/v1/use") => {
+                self.set_use(me, body["server"].as_str().unwrap_or(""), body["use"].as_str().unwrap_or("")).await?;
+                json!({})
+            }
             ("GET", p) if p.starts_with("/v1/settings-screens/") => json!({ "html": self.settings_screen(me.clone(), &p["/v1/settings-screens/".len()..], body["params"].clone())? }),
             ("GET", p) if p.starts_with("/v1/blobs/") => {
                 let hash = &p["/v1/blobs/".len()..];
