@@ -157,15 +157,14 @@ private fun Welcome(store: Store) {
         Image(painterResource(R.drawable.logo), null, Modifier.size(116.dp).clip(RoundedCornerShape(26.dp)))
         Spacer(Modifier.height(28.dp))
         Text("Welcome to $name", fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, color = p.label, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(12.dp))
-        Text(
-            if (invited) "Made your passkey? Sign in with it." else "Your devices, and your team’s, as one place for apps and agents.",
-            style = Type.body, color = p.secondary, textAlign = TextAlign.Center,
-        )
+        if (invited) {
+            Spacer(Modifier.height(12.dp))
+            Text("Made your passkey? Sign in with it.", style = Type.body, color = p.secondary, textAlign = TextAlign.Center)
+        }
         if (!fixed) {
             Spacer(Modifier.height(32.dp))
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Your install’s address, or an invite link", style = Type.footnote, color = p.secondary, modifier = Modifier.padding(horizontal = 16.dp))
+                Text("Your One App’s address, or an invite link", style = Type.footnote, color = p.secondary, modifier = Modifier.padding(horizontal = 16.dp))
                 TextField(
                     address, { address = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("one.example.com", color = p.tertiary) },
                     shape = RoundedCornerShape(16.dp),

@@ -127,9 +127,8 @@ button.row.still { cursor: default; }
 
 /* Before the window: signing in, starting, and a server that doesn't answer. */
 .welcome, .unavailable, .starting { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px; text-align: center; }
-.welcome h1 { font-size: 28px; font-weight: 600; margin: 10px 0 0; }
-.welcome p { font-size: 15px; color: var(--muted); margin: 0 0 16px; max-width: 520px; }
-.welcome-mark { width: 112px; height: 112px; border-radius: 25px; background: linear-gradient(color-mix(in srgb, var(--accent) 75%, white), var(--accent)); }
+.welcome h1 { font-size: 28px; font-weight: 600; margin: 10px 0 16px; }
+.welcome-mark { width: 120px; height: 120px; }
 .button.big { font-size: 15px; padding: 9px 22px; }
 .welcome-error { max-width: 440px; font-size: 13px; }
 .unavailable-title { font-size: 17px; font-weight: 600; }

@@ -22,9 +22,11 @@ struct WelcomeView: View {
                         .accessibilityHidden(true)
                     Text("Welcome to \(appName)")
                         .font(.largeTitle.bold())
-                    Text(invited ? "Made your passkey? Sign in with it." : "Your devices, and your team’s, as one place for apps and agents.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
+                    if invited {
+                        Text("Made your passkey? Sign in with it.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .multilineTextAlignment(.center)
                 .padding(.top, 48)

@@ -1170,7 +1170,7 @@ window.__one = {};
   function showSignedOut(error) {
     const name = store.state?.config?.name || "The One App";
     document.title = name;
-    root.innerHTML = `<div class="welcome"><div class="welcome-mark"></div><h1>Welcome to ${esc(name)}</h1><p>Your devices, and your team’s, as one place for apps and agents.</p>` +
+    root.innerHTML = `<div class="welcome"><img class="welcome-mark" src="/logo.png" alt=""><h1>Welcome to ${esc(name)}</h1>` +
       `<button class="button primary big" data-signin>Sign In</button>${error ? `<div class="error welcome-error">${esc(error)}</div>` : ""}</div>`;
     $("[data-signin]", root).onclick = async (e) => {
       e.target.disabled = true;

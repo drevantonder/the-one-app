@@ -141,8 +141,7 @@ public sealed class MainWindow : Window
         var panel = new StackPanel { Spacing = 14, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var logo = new Image { Source = new BitmapImage(new Uri(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Logo.png"))), Width = 112, Height = 112, HorizontalAlignment = HorizontalAlignment.Center };
         panel.Children.Add(logo);
-        panel.Children.Add(new TextBlock { Text = $"Welcome to {Brand.Name}", FontSize = 32, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords });
-        panel.Children.Add(new TextBlock { Text = "Your devices, and your team’s, as one place for apps and agents.", FontSize = 16, Foreground = Look.Secondary, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords, Margin = new Thickness(0, 0, 0, 14) });
+        panel.Children.Add(new TextBlock { Text = $"Welcome to {Brand.Name}", FontSize = 32, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords, Margin = new Thickness(0, 0, 0, 14) });
         var problem = new TextBlock { Text = error ?? "", Foreground = Look.Toned("bad"), HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords, Visibility = error == null ? Visibility.Collapsed : Visibility.Visible };
 
         if (Auth.Shared.Address == null)

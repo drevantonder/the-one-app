@@ -87,6 +87,10 @@ fn main() {
     let mut kit = Vec::new();
     collect(&screen, &screen, &mut kit);
     files.extend(kit.into_iter().map(|(rel, abs)| (format!("web/screen/{rel}"), abs)));
+    // The white label's logo, which the web client shows where the apps show it.
+    let logo = std::path::Path::new(&path).parent().unwrap().join(get("logo").as_str().unwrap());
+    println!("cargo:rerun-if-changed={}", logo.display());
+    files.push(("web/logo.png".into(), std::fs::canonicalize(&logo).unwrap_or_else(|e| panic!("{}: {e}", logo.display())).to_string_lossy().into()));
     files.sort();
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
     let out = format!("{out}pub const KERNEL: &[(&str, &[u8])] = &[{}];\n", files.join(", "));

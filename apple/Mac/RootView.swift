@@ -131,17 +131,13 @@ private struct WelcomeView: View {
                     .frame(width: 112, height: 112)
                 Text("Welcome to \(store.config?.name ?? appName)")
                     .font(.largeTitle.weight(.semibold))
-                Group {
-                    if SignIn.configured == nil {
-                        Text("Your devices, and your team’s, as one place for apps and agents.\nStart it here, or join from another device.")
-                    } else {
-                        Text("Your devices, and your team’s, as one place for apps and agents.")
-                    }
+                if SignIn.configured == nil {
+                    Text("Start it here, or join from another device.")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 520)
                 }
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 520)
             }
             if let signIn = SignIn.configured { signInForm(signIn) } else { createForm }
         }
