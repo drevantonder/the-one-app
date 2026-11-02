@@ -7,13 +7,15 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 // Every request goes out through the node (the Worker's global outbound), carrying the token of the call it's made
-// in, so the node knows whose it is: it fills in that call's secrets, and refuses them to other hosts.
+// in, so the node knows whose it is: it fills in that call's secrets, and refuses them to other hosts. On the
+// serverless node, which has no outbound to give, the call hands each request to the node instead (`out`).
 const calls = new AsyncLocalStorage();
 const fetchOut = globalThis.fetch;
 globalThis.fetch = (input, init) => {
   const req = new Request(input, init);
-  const token = calls.getStore();
-  if (token) req.headers.set("x-one-call", token);
+  const call = calls.getStore();
+  if (call?.out) return call.out(req);
+  if (call) req.headers.set("x-one-call", call.token);
   return fetchOut(req);
 };
 
@@ -236,8 +238,9 @@ function context(ask, body, appends, later) {
 }
 
 /// Answers one of the node's requests: `describe`, `screen` (with `name`), or a call, widget, its options, a badge or
-/// a hook, for `body`; `ask` is how it asks the node, `waitUntil` how work outlives the reply. → what the reply says.
-async function handle(what, name, body, ask, waitUntil) {
+/// a hook, for `body`; `ask` is how it asks the node, `waitUntil` how work outlives the reply, and `out`, if given,
+/// sends the app's requests out. → what the reply says.
+async function handle(what, name, body, ask, waitUntil, out) {
   if (what === "describe") return { ok: describe() };
   if (what === "screen") return { ok: app.screens?.[name]?.html ?? null };
   try {
@@ -265,10 +268,11 @@ async function handle(what, name, body, ask, waitUntil) {
     } else {
       throw new Error(`no such request ${what}`);
     }
-    const result = await calls.run(body.token, run);
+    const call = { token: body.token, out };
+    const result = await calls.run(call, run);
     const keep = what === "call" && later.length > 0;
     const reply = { ok: result, appends: what === "call" ? appends.splice(0) : [], later: keep };
-    if (keep) waitUntil(calls.run(body.token, () => finish(ask, later, appends)));
+    if (keep) waitUntil(calls.run(call, () => finish(ask, later, appends)));
     return reply;
   } catch (err) {
     return { error: String(err?.message ?? err) };
@@ -294,6 +298,25 @@ export class Call extends WorkerEntrypoint {
       if (!r.ok) throw new Error(await r.text());
       return r;
     };
-    return handle(what, name, body, ask, (p) => this.ctx.waitUntil(p));
+    return handle(what, name, body, ask, (p) => this.ctx.waitUntil(p), (req) => sent(ask, req));
   }
+}
+
+const b64u = {
+  encode: (bytes) => {
+    let text = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(text).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  },
+  decode: (text) => Uint8Array.from(atob(text.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)),
+};
+
+/// An app's request, made by the serverless node through the vault, which fills in the Vault's items.
+async function sent(ask, req) {
+  const body = ["GET", "HEAD"].includes(req.method) ? undefined : b64u.encode(new Uint8Array(await req.arrayBuffer()));
+  const r = await ask("fetch", { method: "POST", body: JSON.stringify({ url: req.url, method: req.method, headers: Object.fromEntries(req.headers), body64: body }) });
+  const got = await r.json();
+  const headers = new Headers(got.headers);
+  for (const h of ["content-encoding", "content-length", "transfer-encoding"]) headers.delete(h);
+  return new Response([101, 204, 205, 304].includes(got.status) ? null : b64u.decode(got.body64), { status: got.status, headers });
 }

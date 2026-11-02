@@ -1,7 +1,7 @@
 //! The serverless node (`serverless/`) on Cloudflare: a node of the install as a Worker in its kernel's account, with
 //! no address of its own, which the gateway sends `/v1/` and `/mcp` to by service binding. A release carries its built
-//! WebAssembly (`update` builds it, where Rust builds for WebAssembly); its apps are the built-in ones this release
-//! ships, built here with the pinned Bun.
+//! WebAssembly (`update` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the install's
+//! bucket, each at its latest deploy.
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -11,26 +11,22 @@ use crate::kernel::{Cloudflare, Settings, worker_name};
 /// The serverless node's Worker is `<cli>-node`.
 pub const SERVICE: &str = "node";
 
-/// The serverless node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim and each
-/// built-in app's module.
+/// The serverless node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
+/// in (the apps themselves it reads from the bucket, each at its latest deploy); `icons.json` the icons every device
+/// draws.
 pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
     let built = |name: &str| {
         let found = crate::config::SERVERLESS.iter().find(|(n, _)| *n == name).map(|(_, b)| b.to_vec());
         found.with_context(|| format!("this build of {} has no serverless node: {} update builds one, on a Linux device with Rust", crate::config::NAME, crate::config::CLI))
     };
-    let mut apps = serde_json::Map::new();
-    for (name, files) in crate::config::BUILT_IN {
-        let bundle = crate::deploy::build_files(files)?;
-        let hash = data_encoding::HEXLOWER.encode(&blake3::hash(&bundle).as_bytes()[..8]);
-        apps.insert(name.to_string(), json!({ "module": crate::bundle::module(&bundle)?, "hash": hash }));
-    }
     let shim = include_str!("runtime/shim.js");
-    let built_js = format!("export const shim = {};\nexport const apps = {};\nexport const compatibilityDate = {};\n", json!(shim), Value::Object(apps), json!(crate::apps::COMPATIBILITY_DATE));
+    let built_js = format!("export const shim = {};\nexport const compatibilityDate = {};\n", json!(shim), json!(crate::apps::COMPATIBILITY_DATE));
     Ok(vec![
         ("worker.js".into(), "application/javascript+module", include_bytes!("../serverless/worker.js").to_vec()),
         ("one_serverless.js".into(), "application/javascript+module", built("one_serverless.js")?),
         ("one_serverless_bg.wasm".into(), "application/wasm", built("one_serverless_bg.wasm")?),
         ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
+        ("icons.json".into(), "text/plain", include_bytes!("../vendor/phosphor/icons.json").to_vec()),
     ])
 }
 

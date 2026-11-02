@@ -10,8 +10,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1"
+blake3 = "1"
 data-encoding = "2"
 one = { path = ".." }
+p2panda-core = "0.7"
 serde_json = "1"
 # The SQLite rusqlite builds into WebAssembly (src/db.rs on Workers) gets its clock and randomness from JavaScript.
 sqlite-wasm-rs = { version = "0.6", features = ["wasm-bindgen"] }

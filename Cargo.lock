@@ -2590,9 +2590,11 @@ name = "one-serverless"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "data-encoding",
  "js-sys",
  "one",
+ "p2panda-core",
  "serde_json",
  "sqlite-wasm-rs",
  "wasm-bindgen",
