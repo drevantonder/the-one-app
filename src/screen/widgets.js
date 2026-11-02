@@ -1,7 +1,8 @@
 // Widgets drawn from their trees (`GET /v1/widgets`), in a web page: the pages screen (pages.html) and `one mcp`'s view
 // in chats. The Apple shells draw the same trees natively (apple/Shared/Views/WidgetTree.swift). Nodes it doesn't know
 // draw nothing. Its styles come with it. `host` is what buttons, toggles and links act through: `run(app, op, input)` → the error's text if it
-// failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`.
+// failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`. A tree is the app's, so nothing in
+// it is ever markup: what's drawn is text, a number (`num`), or one of the names here.
 window.oneWidgets = (() => {
   const css = `
   .w-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 22px; background: var(--w-card, rgba(128, 128, 128, 0.12)); overflow: hidden; min-width: 0; font-size: 12px; line-height: 1.3; }
@@ -28,7 +29,10 @@ window.oneWidgets = (() => {
   .w-linked { cursor: pointer; }
   .w-broken { color: #ff9f0a; font-weight: 500; font-size: 13px; } .w-why { color: var(--w-muted, #8e8e93); font-size: 11px; overflow-wrap: anywhere; user-select: text; }`;
 
+  const classes = ["col", "row", "text", "xl", "lg", "sm", "xs", "medium", "bold"];
   const tones = { muted: "var(--w-muted, #8e8e93)", accent: "var(--accent)", good: "#34c759", warn: "#ff9f0a", bad: "#ff3b30", blue: "#0a9edc", purple: "#a550d9" };
+  // A number from a tree, or `or` where it isn't one.
+  const num = (v, or) => (v === null || v === "" || !Number.isFinite(Number(v)) ? or : Number(v));
   const fmt = (v) => typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? "–");
 
   function node(tag, cls, text) {
@@ -74,14 +78,15 @@ window.oneWidgets = (() => {
   // A node of a widget's tree.
   function draw(n, w, host) {
     if (!n || typeof n !== "object") return document.createTextNode("");
-    const tone = (el) => { if (n.tone) el.classList.add("w-" + n.tone); if (tones[n.tone]) el.style.setProperty("--tone", tones[n.tone]); return el; };
-    const kids = (el) => { el.append(...(n.c || []).map((c) => draw(c, w, host))); if (n.gap != null) el.style.setProperty("--gap", n.gap + "px"); return el; };
-    const cls = (...names) => names.filter(Boolean).map((c) => "w-" + c).join(" ");
+    const tone = (el) => { if (Object.hasOwn(tones, n.tone)) el.classList.add("w-" + n.tone), el.style.setProperty("--tone", tones[n.tone]); return el; };
+    const kids = (el) => { el.append(...(n.c || []).map((c) => draw(c, w, host))); if (num(n.gap) != null) el.style.setProperty("--gap", num(n.gap) + "px"); return el; };
+    const color = Object.hasOwn(tones, n.tone) ? tones[n.tone] : null;
+    const cls = (...names) => names.filter((c) => classes.includes(c)).map((c) => "w-" + c).join(" ");
     let el;
     switch (n.t) {
       case "col": case "row": {
         el = kids(node("div", cls(n.t)));
-        if (n.w) el.style.cssText += `width:${n.w}px;flex:none;`;
+        if (num(n.w)) el.style.cssText += `width:${num(n.w)}px;flex:none;`;
         if (n.grow) el.style.flex = "1";
         if (n.align === "center") el.style.alignItems = "center";
         if (n.dim) el.style.opacity = ".5";
@@ -89,7 +94,7 @@ window.oneWidgets = (() => {
       }
       case "text":
         el = tone(node("span", cls("text", n.size, n.weight), n.text ?? ""));
-        if (n.lines) el.style.cssText += `display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${n.lines};overflow:hidden;`;
+        if (num(n.lines)) el.style.cssText += `display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${Math.round(num(n.lines))};overflow:hidden;`;
         break;
       case "time": el = tone(node("span", cls("text", n.size), time(n))); break;
       case "stat": {
@@ -99,10 +104,10 @@ window.oneWidgets = (() => {
         break;
       }
       case "gauge": {
-        const f = Math.max(0, Math.min(1, (Number(n.value) || 0) / (n.max || 1))), r = 18, c = 2 * Math.PI * r;
-        el = svg({ viewBox: "0 0 46 46", width: n.w || 46, height: n.w || 46 });
+        const f = Math.max(0, Math.min(1, num(n.value, 0) / (num(n.max) || 1))), r = 18, c = 2 * Math.PI * r;
+        el = svg({ viewBox: "0 0 46 46", width: num(n.w) || 46, height: num(n.w) || 46 });
         el.innerHTML = `<circle cx="23" cy="23" r="${r}" fill="none" stroke="rgba(128,128,128,.22)" stroke-width="5"/>
-          <circle cx="23" cy="23" r="${r}" fill="none" stroke="${tones[n.tone] || "var(--accent)"}" stroke-width="5" stroke-linecap="round"
+          <circle cx="23" cy="23" r="${r}" fill="none" stroke="${color || "var(--accent)"}" stroke-width="5" stroke-linecap="round"
             stroke-dasharray="${c * f} ${c}" transform="rotate(-90 23 23)"/>
           <text x="23" y="27" text-anchor="middle" font-size="10" font-weight="600" fill="currentColor"></text>`;
         el.querySelector("text").textContent = n.label ?? Math.round(f * 100) + "%";
@@ -111,34 +116,36 @@ window.oneWidgets = (() => {
       case "progress": {
         el = node("div", "w-col");
         if (n.label) el.append(node("span", "w-sm w-muted", n.label));
-        if (n.w) el.style.width = n.w + "px";
+        if (num(n.w)) el.style.width = num(n.w) + "px";
         const bar = tone(node("div", "w-bar")), fill = node("i");
-        fill.style.width = Math.max(0, Math.min(1, (Number(n.value) || 0) / (n.max || 1))) * 100 + "%";
+        fill.style.width = Math.max(0, Math.min(1, num(n.value, 0) / (num(n.max) || 1))) * 100 + "%";
         bar.append(fill);
         el.append(bar);
         break;
       }
       case "spark": case "chart": {
-        const v = (n.values || []).map(Number), max = n.max || Math.max(...v, 1), h = n.h || (n.t === "spark" ? 28 : 70), wd = n.t === "spark" && n.w ? n.w : 240;
-        el = svg({ viewBox: `0 0 ${wd} ${h + (n.labels ? 14 : 0)}`, width: n.t === "spark" && n.w ? n.w : "100%" });
+        const labels = Array.isArray(n.labels) ? n.labels : [];
+        const v = (Array.isArray(n.values) ? n.values : []).map((y) => num(y, 0)), max = num(n.max) || Math.max(...v, 1);
+        const h = num(n.h) || (n.t === "spark" ? 28 : 70), wd = (n.t === "spark" && num(n.w)) || 240;
+        el = svg({ viewBox: `0 0 ${wd} ${h + (Array.isArray(n.labels) ? 14 : 0)}`, width: n.t === "spark" && num(n.w) ? wd : "100%" });
         if (n.t === "spark") el.setAttribute("preserveAspectRatio", "none");
-        const color = tones[n.tone] || "var(--accent)", step = wd / Math.max(v.length, 1);
+        const fill = color || "var(--accent)", step = wd / Math.max(v.length, 1);
         if (n.t === "spark" && !v.length) {
           el.innerHTML = `<line x1="2" y1="${h / 2}" x2="${wd - 2}" y2="${h / 2}" stroke="rgba(128,128,128,.4)" stroke-width="1.5" stroke-dasharray="2 3"/>`;
         } else if (n.t === "spark") {
           const pts = v.map((y, i) => [v.length > 1 ? (i / (v.length - 1)) * wd : wd / 2, h - 1 - (Math.min(y, max) / max) * (h - 2)]);
           const line = pts.map((p) => p.join(",")).join(" ");
-          el.innerHTML = `<polygon points="${line} ${wd},${h} 0,${h}" fill="${color}" opacity=".2"/><polyline points="${line}" fill="none" stroke="${color}" stroke-width="1.4" stroke-linejoin="round"/>`;
+          el.innerHTML = `<polygon points="${line} ${wd},${h} 0,${h}" fill="${fill}" opacity=".2"/><polyline points="${line}" fill="none" stroke="${fill}" stroke-width="1.4" stroke-linejoin="round"/>`;
         } else if (n.kind === "line") {
           const pts = v.map((y, i) => `${(i + 0.5) * step},${h - (y / max) * (h - 4) - 2}`).join(" ");
-          el.innerHTML = `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+          el.innerHTML = `<polyline points="${pts}" fill="none" stroke="${fill}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
         } else {
-          el.innerHTML = v.map((y, i) => `<rect x="${i * step + step * 0.15}" y="${h - (y / max) * h}" width="${step * 0.7}" height="${(y / max) * h}" rx="3" fill="${color}"/>`).join("");
+          el.innerHTML = v.map((y, i) => `<rect x="${i * step + step * 0.15}" y="${h - (y / max) * h}" width="${step * 0.7}" height="${(y / max) * h}" rx="3" fill="${fill}"/>`).join("");
         }
-        (n.labels || []).forEach((l, i) => {
+        labels.forEach((l, i) => {
           const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
           for (const [k, val] of Object.entries({ x: (i + 0.5) * step, y: h + 12, "text-anchor": "middle", "font-size": "10", fill: "var(--w-muted, #8e8e93)" })) t.setAttribute(k, val);
-          t.textContent = l;
+          t.textContent = String(l ?? "");
           el.append(t);
         });
         break;
@@ -162,25 +169,25 @@ window.oneWidgets = (() => {
         el = node("img");
         el.src = /^(https:|data:image\/)/.test(n.url || "") ? n.url : "";
         el.alt = "";
-        el.style.cssText = `width:${n.w ? n.w + "px" : "100%"};height:${n.h ? n.h + "px" : "auto"};object-fit:cover;border-radius:${n.round ? "50%" : "8px"};flex:none`;
+        el.style.cssText = `width:${num(n.w) ? num(n.w) + "px" : "100%"};height:${num(n.h) ? num(n.h) + "px" : "auto"};object-fit:cover;border-radius:${n.round ? "50%" : "8px"};flex:none`;
         break;
       case "dot": el = tone(node("span", "w-dot")); break;
       case "icon": {
-        const size = n.w || 16;
+        const size = num(n.w) || 16;
         // A named icon is Phosphor's, drawn where the bridge is (the web client); a chat draws only paths and badges.
         if (n.name && window.one?.icon) {
           el = node("span");
-          el.innerHTML = one.icon(n.name);
-          el.style.cssText = `display:flex;flex:none;width:${size}px;height:${size}px;color:${tones[n.tone] || "currentColor"}`;
+          el.innerHTML = one.icon(String(n.name));
+          el.style.cssText = `display:flex;flex:none;width:${size}px;height:${size}px;color:${color || "currentColor"}`;
           el.firstChild.style.cssText = "width:100%;height:100%";
           break;
         }
         el = svg({ viewBox: "0 0 24 24", width: size, height: size });
         el.style.flex = "none";
-        el.style.color = tones[n.tone] || "currentColor";
+        el.style.color = color || "currentColor";
         const path = (d, attrs) => { const p = document.createElementNS("http://www.w3.org/2000/svg", "path"); p.setAttribute("d", d); for (const [k, v] of Object.entries(attrs)) p.setAttribute(k, v); el.append(p); };
-        if (n.path) path(n.path, { fill: "none", stroke: "currentColor", "stroke-width": "1.5", "stroke-linejoin": "round" });
-        if (n.badge) { path(n.badge, { fill: "currentColor", transform: n.path || n.name ? "translate(15.5 15.5) scale(.458)" : "" }); el.style.overflow = "visible"; }
+        if (n.path) path(String(n.path), { fill: "none", stroke: "currentColor", "stroke-width": "1.5", "stroke-linejoin": "round" });
+        if (n.badge) { path(String(n.badge), { fill: "currentColor", transform: n.path || n.name ? "translate(15.5 15.5) scale(.458)" : "" }); el.style.overflow = "visible"; }
         break;
       }
       case "link": el = node("a", "w-link", n.text || ""); break;

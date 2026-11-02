@@ -394,7 +394,7 @@ fn web(dir: &Path, settings: &one::kernel::Settings) -> Result<()> {
     let port = match port.filter(|p| answers(*p)) {
         Some(port) => port,
         None => {
-            let chrome = chrome().context("the web client needs Chrome or Chromium on this machine: none was found (CHROME=<path> names one)")?;
+            let chrome = one::deploy::chrome().context("the web client needs Chrome or Chromium on this machine: none was found (CHROME=<path> names one)")?;
             let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
             spawn(
                 dir,
@@ -433,24 +433,6 @@ fn web(dir: &Path, settings: &one::kernel::Settings) -> Result<()> {
         settings.address
     );
     Ok(())
-}
-
-/// Chrome or Chromium on this machine: CHROME's, the usual ones, or Playwright's.
-fn chrome() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("CHROME") {
-        return Some(path.into());
-    }
-    let named = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"].iter().find_map(|name| {
-        std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file())
-    });
-    let mac = PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-    let playwright = || -> Option<PathBuf> {
-        let dir = PathBuf::from(std::env::var_os("HOME")?).join(".cache/ms-playwright");
-        let mut found: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("chromium-"))).collect();
-        found.sort();
-        found.into_iter().rev().flat_map(|p| [p.join("chrome-linux64/chrome"), p.join("chrome-linux/chrome")]).find(|p| p.is_file())
-    };
-    named.or_else(|| mac.is_file().then_some(mac)).or_else(playwright)
 }
 
 /// An Android or Windows client: on a throwaway copy of the person's lasting device, borrowed for the try install,

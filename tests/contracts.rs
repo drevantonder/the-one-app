@@ -586,3 +586,56 @@ fn the_gateway_names_the_windows_app_as_windows_does() {
         assert_eq!(one::kernel::windows_package(), "TheOneApp_ah4xyz62b3km4");
     }
 }
+
+/// A widget's tree is its app's, drawn on the clients' own screens, which act as the person looking: markup in every
+/// field of every node it can have draws as text, and makes no element, attribute or style (src/screen/widgets.js), in
+/// a browser.
+#[test]
+fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
+    let chrome = one::deploy::chrome().expect("this test draws screens in Chrome or Chromium: none was found (CHROME=<path> names one)");
+    let dir = std::env::temp_dir().join(format!("one-screens-{}", rand::random::<u64>()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // What each page says once it's drawn, as its title.
+    let title = |name: &str, body: &str| -> String {
+        let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body);
+        let path = dir.join(format!("{name}.html"));
+        std::fs::write(&path, page).unwrap();
+        let out = std::process::Command::new(&chrome)
+            .args(["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--virtual-time-budget=5000", "--dump-dom"])
+            .arg(format!("--user-data-dir={}", dir.join("profile").display()))
+            .arg(format!("file://{}", path.display()))
+            .output()
+            .unwrap();
+        let dom = String::from_utf8_lossy(&out.stdout);
+        let title = dom.split("<title>").nth(1).and_then(|t| t.split("</title>").next());
+        title.unwrap_or_else(|| panic!("{name} wasn't drawn: {}", String::from_utf8_lossy(&out.stderr))).to_string()
+    };
+
+    let widgets = concat!("<script>", include_str!("../src/screen/widgets.js"), "</script>", r#"<script>
+      const markup = `1"/><img src=x onerror="document.documentElement.dataset.ran = 1"><svg onload="document.documentElement.dataset.ran = 1">`;
+      const fields = ["text", "value", "unit", "label", "max", "w", "h", "gap", "lines", "tone", "size", "weight", "style", "at", "title", "subtitle", "trailing",
+        "empty", "url", "name", "path", "badge", "kind", "align", "dim", "grow", "round", "on", "icon", "op", "header"];
+      const node = (t, more = {}) => ({ ...Object.fromEntries(fields.map((f) => [f, markup])), t, values: [markup, 1, 2], labels: [markup, markup], c: [{ t: "text", text: markup }], link: "javascript:document.documentElement.dataset.ran = 1", ...more });
+      const types = ["col", "row", "text", "time", "stat", "gauge", "progress", "spark", "chart", "list", "item", "image", "dot", "icon", "link", "divider", "button", "toggle"];
+      const trees = [...types.map((t) => node(t)), node("chart", { kind: "line" }), node("spark", { values: [] }), node("icon", { name: undefined }), node("col", { c: types.map((t) => node(t)) })];
+      const host = { run: async () => {}, follow: () => {} };
+      let failed = 0;
+      for (const w of [...trees.map((root) => ({ root })), { error: markup }]) {
+        try {
+          document.body.append(oneWidgets.card({ app: markup, widget: markup, title: markup, ...w }, host));
+        } catch {
+          failed++;
+        }
+      }
+      document.querySelectorAll(".w-card, .w-card *").forEach((el) => el.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      addEventListener("load", () => setTimeout(() => {
+        const made = document.querySelectorAll("[onerror], [onload], img[src='x'], svg image, svg svg").length;
+        const styled = [...document.querySelectorAll("[style], [class]")].filter((el) => /onerror|<|"/.test(el.getAttribute("style") + el.getAttribute("class"))).length;
+        const drawn = document.querySelectorAll(".w-card").length, marks = document.querySelectorAll(".w-card polyline, .w-card rect, .w-card circle").length;
+        document.title = `${document.documentElement.dataset.ran ? "ran" : "inert"} failed ${failed} made ${made} styled ${styled} drawn ${drawn} marks ${marks > 4 ? "yes" : "no"}`;
+      }, 500));
+    </script>"#);
+    assert_eq!(title("widgets", widgets), "inert failed 0 made 0 styled 0 drawn 23 marks yes", "a widget's markup is only ever text");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
