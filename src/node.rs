@@ -815,6 +815,20 @@ impl Node {
         })
     }
 
+    /// A link that lets someone new, called `name`, join: it works once, for a few days. Made at the install's vault as
+    /// `caller`, an admin signed in, since the kernel checks who's asking, not this server: → (the link, until when).
+    pub async fn invite_link(&self, caller: &Caller, name: &str) -> Result<(String, u64)> {
+        ensure!(crate::config::SIGN_IN != "google", "people join by signing in with Google, so they need no invite link");
+        ensure!(!name.trim().is_empty(), "give their name");
+        let manages = self.with(|i| Ok(members::manages_scope(&i.r.members, &caller.user, &Scope::Global)))?;
+        ensure!(manages, "only admins invite someone");
+        let token = caller.token.clone().context("sign in first: an invite link is made by someone signed in")?;
+        let (address, url) = self.kernel()?;
+        let name = name.trim().to_string();
+        let (secret, until) = tokio::task::spawn_blocking(move || crate::kernel::Vault { url }.invite(&token, &name)).await??;
+        Ok((format!("{}/invite#{secret}", address.trim_end_matches('/')), until))
+    }
+
     /// The key of each scope this server holds, with the people who may open it and its admins (Everyone's and groups'),
     /// for an admin handing them to the install's kernel (`kernel keys`), so a serverless node opens what this one does
     /// and the vault knows who may say who no longer does.

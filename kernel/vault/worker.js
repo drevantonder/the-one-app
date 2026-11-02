@@ -117,6 +117,7 @@ export class Vault extends DurableObject {
       case "POST /keys": return json(await this.keys(token, claims, body));
       case "POST /urls": return json(await this.urls(token, claims, body));
       case "POST /erase": return json(await this.erase(token, claims, body));
+      case "POST /invite": return json(await this.invite(token, claims, body));
       case "POST /role": return json(this.role(token, claims, body));
       case "GET /items": return json(this.items.list((await this.sessionOf(token)).held, url.searchParams.get("scope")));
       case "POST /items": return json(await this.items.set((await this.sessionOf(token)).held, body).catch((err) => refuse(err.status || 400, err.message)));
@@ -481,6 +482,23 @@ export class Vault extends DurableObject {
     }
     if (!resp.ok) refuse(502, `the bucket said ${resp.status} to reading ${app}'s key`);
     return openAppKey(scopeKey, app, new Uint8Array(await resp.arrayBuffer()));
+  }
+
+  /// An invite link's secret for someone new, called `name`, and until when it works, made by the auth service as
+  /// for `kernel invite`: asked by an admin of the install (as the vault last heard who is), signed in.
+  async invite(token, claims, { name }) {
+    if (this.env.SIGN_IN === "google") refuse(403, "people here join by signing in with Google");
+    if (token.startsWith("run.")) refuse(403, "work left running invites nobody");
+    await this.sessionOf(token);
+    if (!this.sql.exec("select 1 from admins where scope = 'global' and user = ?", claims.sub).toArray().length) refuse(403, "only an admin invites someone");
+    const resp = await this.env.AUTH.fetch(new Request("https://auth/internal/invite", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-kernel-secret": this.env.KERNEL_SECRET },
+      body: JSON.stringify({ name }),
+    }));
+    const out = await resp.json().catch(() => ({}));
+    if (!resp.ok) refuse(resp.status, out.error || "the auth service made no invite");
+    return { token: out.token, until: out.until };
   }
 
   /// Erases an app's data in a scope by destroying its key: `{ scope, app }`, by a session that opens the scope and

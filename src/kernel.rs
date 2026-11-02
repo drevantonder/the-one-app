@@ -303,6 +303,13 @@ impl Vault {
         Ok(())
     }
 
+    /// An invite link's secret for someone new called `name`, and until when (milliseconds) it works, asked by an
+    /// admin of the install.
+    pub fn invite(&self, token: &str, name: &str) -> Result<(String, u64)> {
+        let out = self.post(token, "/invite", json!({ "name": name }))?;
+        Ok((out["token"].as_str().context("the vault gave no invite")?.to_string(), out["until"].as_u64().unwrap_or(0)))
+    }
+
     /// URLs to read and create objects named `<scope's folder>/<app>/…` (or `log/…`, the install's log), and to
     /// replace a database's `…/newest` while it's the version an ETag names: (name, etag) each.
     pub fn urls(&self, token: &str, read: &[&str], create: &[&str], replace: &[(&str, &str)]) -> Result<Urls> {

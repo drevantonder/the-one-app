@@ -660,6 +660,49 @@ fn someone_who_lost_every_passkey_joins_again_with_a_link_that_carries_their_key
     assert_eq!(opens(&k, &andre, &sam.prf()), 403);
 }
 
+/// Signs in to a new client of theirs with their passkey, in a browser signed in at the address, as joining leaves it:
+/// → the client's access token, whose session at the vault opens their keys.
+fn signs_in(browser: &mut Browser, passkey: &Passkey) -> String {
+    use sha2::Digest;
+    let back = "http://localhost:9/signed-in";
+    let (status, client) = browser.post("/api/auth/oauth2/register", json!({ "client_name": "Tester", "redirect_uris": [back], "token_endpoint_auth_method": "none" }));
+    assert_eq!(status, 201, "{client}");
+    let client = client["client_id"].as_str().unwrap().to_string();
+    let verifier = B64U.encode(&rand::random::<[u8; 32]>());
+    let challenge = B64U.encode(&sha2::Sha256::digest(verifier.as_bytes()));
+    let (_, _, sign_in) = browser.get(&format!("/api/auth/oauth2/authorize?response_type=code&client_id={client}&redirect_uri={}&scope=openid&state=s&code_challenge={challenge}&code_challenge_method=S256", enc(back)));
+    let query = sign_in.expect("authorizing goes to the sign-in page").split_once('?').unwrap().1.to_string();
+    let (status, accepted) = browser.post("/sign-in/accept", json!({ "oauth_query": query, "prf": passkey.prf(), "credential": B64U.encode(&passkey.id) }));
+    assert_eq!(status, 200, "{accepted}");
+    let code = url_query(accepted["url"].as_str().unwrap())["code"].clone();
+    let form = [("grant_type", "authorization_code"), ("code", code.as_str()), ("redirect_uri", back), ("client_id", client.as_str()), ("code_verifier", verifier.as_str())];
+    let (status, tokens, _) = browser.send("POST", "/api/auth/oauth2/token", None, Some(&form));
+    assert_eq!(status, 200, "{tokens}");
+    tokens["access_token"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn an_admin_signed_in_makes_an_invite_link_that_works_once() {
+    let k = Kernel::start(None);
+    let (mut andres, mut sams) = (k.browser(), k.browser());
+    let ((andre_key, andre), (sam_key, sam)) = (joins(&k, &mut andres, "Andre", None), joins(&k, &mut sams, "Sam", None));
+    // The install's log says Andre is its admin and Sam a member, as an admin's kernel keys tells the vault.
+    let everyone = json!({ "scope": "global", "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [andre, sam], "admins": [andre] });
+    let (status, out) = post(&format!("{}/internal/scope-key", k.vault), &[("x-kernel-secret", &k.secret)], everyone);
+    assert_eq!(status, 200, "{out}");
+    let vault = kernel::Vault { url: k.vault.clone() };
+    let (andres, sams) = (signs_in(&mut andres, &andre_key), signs_in(&mut sams, &sam_key));
+
+    let err = vault.invite(&sams, "Kim").err().expect("a member makes no invite link").to_string();
+    assert!(err.contains("only an admin"), "{err}");
+    let (secret, until) = vault.invite(&andres, "Kim").unwrap();
+    assert!(until > now() + 2 * 86_400_000, "it works for days");
+    let (_, kim) = joins_with(&k, &mut k.browser(), &secret);
+    assert!(kim != andre && kim != sam, "it's for someone new");
+    let (status, used) = k.browser().post("/invite/about", json!({ "token": secret }));
+    assert_eq!(status, 404, "a used link lets nobody else in: {used}");
+}
+
 /// Whether a passkey's PRF output opens `user`'s keys at the vault, as signing in to a client asks: → its status.
 fn opens(k: &Kernel, user: &str, prf: &str) -> u16 {
     post(&format!("{}/internal/grant", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": user, "from": prf, "to": "a code that no client is given" })).0

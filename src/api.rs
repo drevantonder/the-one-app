@@ -53,6 +53,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/use", post(use_))
         .route("/v1/group", post(group))
         .route("/v1/invite", post(invite))
+        .route("/v1/invite-link", post(invite_link))
         .route("/v1/accept", post(accept))
         .route("/v1/member", post(member))
         .route("/v1/app", post(app))
@@ -132,6 +133,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/use",
     "/v1/group",
     "/v1/invite",
+    "/v1/invite-link",
     "/v1/accept",
     "/v1/member",
     "/v1/backups",
@@ -561,6 +563,12 @@ async fn invite(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
     let (group, user) = (node.find_group(text(&body, "group")?)?, node.find_user(text(&body, "user")?)?);
     node.member_as(&me.caller, "invite", json!({ "group": group, "user": user, "role": role })).await?;
     done()
+}
+
+/// `{ name }`: a link that lets someone new join, for an admin signed in: → `{ link, until }`.
+async fn invite_link(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    let (link, until) = node.invite_link(&me.caller, text(&body, "name")?).await?;
+    Ok(Json(json!({ "link": link, "until": until })))
 }
 
 async fn accept(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
