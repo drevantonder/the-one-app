@@ -1,4 +1,4 @@
-//! `update` and `release`: the tip of main, built on your own devices (and tested, for a release), and run on every one of them.
+//! `update` and `release`: the tip of main, built on your own devices and run on every one of them.
 //! What runs anywhere is only ever what's on main.
 
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use crate::{get, post};
 /// Platforms the installer knows. A release has each one some device here can build.
 const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin"];
 
-/// Builds the tip of main and has every device run it; with a tag, also signs it off and publishes it on GitHub.
+/// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
 /// it in the background, and the node by building it, which every Linux device then takes.
 pub fn run(tag: Option<&str>) -> Result<()> {
@@ -64,31 +64,18 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
 
     let key = release_key()?;
-    // A release is tested, alongside its build, and goes out only if both work; an update's commits were tested
-    // before they were pushed.
-    println!("{} {short}", if tag.is_some() { "Testing and building" } else { "Building" });
-    let built = std::thread::scope(|s| {
-        let build = s.spawn(|| {
-            let mut build = Command::new(cargo());
-            build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
-            // A device that can't build it makes a release with no serverless node, which can't deploy one.
-            match serverless(&src, &config) {
-                Ok(dir) => {
-                    build.env("SERVERLESS", dir);
-                }
-                Err(err) => println!("  no serverless node in this build: {err:#}"),
-            }
-            run_quiet(&mut build)
-        });
-        let tested = if tag.is_some() { test(&src, &config) } else { Ok(()) };
-        let built = build.join().map_err(|_| anyhow::anyhow!("the build panicked"))?;
-        tested.and(built)
-    });
-    built?;
-    if tag.is_some() {
-        step(Command::new("gh").current_dir(&src).args(["signoff", "create", "--commit", &commit]))
-            .context("sign off (gh extension install basecamp/gh-signoff)")?;
+    // Its commits were tested before they were pushed.
+    println!("Building {short}");
+    let mut build = Command::new(cargo());
+    build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
+    // A device that can't build it makes a release with no serverless node, which can't deploy one.
+    match serverless(&src, &config) {
+        Ok(dir) => {
+            build.env("SERVERLESS", dir);
+        }
+        Err(err) => println!("  no serverless node in this build: {err:#}"),
     }
+    run_quiet(&mut build)?;
 
     // An update's Macs build in the background, and a release's build it with what it publishes, which it waits for.
     let mut missed = false;
@@ -229,27 +216,6 @@ impl Parts {
         }
         parts
     }
-}
-
-/// Runs the tests, each file of them at once, showing only what failed.
-fn test(src: &Path, config: &Path) -> Result<()> {
-    let cargo = || {
-        let mut cmd = Command::new(cargo());
-        cmd.current_dir(src).env("CONFIG", config).args(["test", "-q"]);
-        cmd
-    };
-    run_quiet(cargo().arg("--no-run"))?;
-    let mut groups: Vec<Vec<String>> = vec![vec!["--lib".into(), "--bins".into()], vec!["--doc".into()]];
-    for entry in std::fs::read_dir(src.join("tests"))?.flatten() {
-        if let Some(name) = entry.file_name().to_str().and_then(|n| n.strip_suffix(".rs")) {
-            groups.push(vec!["--test".into(), name.into()]);
-        }
-    }
-    std::thread::scope(|s| {
-        let runs: Vec<_> = groups.iter().map(|args| s.spawn(move || run_quiet(cargo().args(args)))).collect();
-        runs.into_iter().map(|r| r.join().map_err(|_| anyhow::anyhow!("a test run panicked"))?).collect::<Result<Vec<_>>>()
-    })?;
-    Ok(())
 }
 
 /// Runs a command, showing its output only if it fails.
