@@ -371,6 +371,19 @@ fn who_opens_a_scope_changes_at_once_and_only_as_its_admins_say() {
         // A group the vault has no key for yet changes nothing here.
         vault.role(&andre, SAM, Some(Member), true, &one(&Scope::parse("group:00000000000000e5").unwrap())).unwrap();
         assert!(opens(&andre, &everyone).is_some() && opens(&sam, &everyone).is_some());
+
+        // A group made since is the vault's from the start: its maker opens it at once, and nobody else until they're
+        // let in; nobody makes one the vault has a key for already; and its key is the one its nodes give.
+        let kitchen = Scope::parse("group:00000000000000f7").unwrap();
+        let made = vault.group(&sam, "00000000000000f7").unwrap();
+        assert!(opens(&sam, &kitchen).is_some() && opens(&andre, &kitchen).is_none());
+        assert!(vault.group(&andre, "00000000000000f7").is_err() && vault.group(&andre, "00000000000000c3").is_err());
+        vault.role(&sam, ANDRE, Some(Member), true, &one(&kitchen)).unwrap();
+        vault.role(&andre, ANDRE, Some(Member), false, &one(&kitchen)).unwrap();
+        assert_eq!(opens(&andre, &kitchen), opens(&sam, &kitchen));
+        let given = |key: &[u8; 32]| v.internal("scope-key", json!({ "scope": kitchen.to_string(), "key": B64U.encode(key), "people": [SAM, ANDRE], "admins": [SAM] })).0;
+        assert_eq!(given(&rand::random()), 409);
+        assert_eq!(given(&made), 200);
     }
 }
 
@@ -960,6 +973,10 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert!(state(&andres)["settings_items"].as_array().unwrap().iter().any(|i| i["name"] == "requests" && i["badge"] == 1), "his invite waits in Requests");
     assert_eq!(ask(&andres, "POST", "/v1/accept", json!({ "group": group })).0, 200);
     assert_eq!(members().as_array().unwrap().len(), 2);
+    // Its key is the vault's, made with it: Sam opened it at once, and Andre once he accepted, with no kernel keys.
+    let vault = kernel::Vault { url: v.url.clone() };
+    let opens = |token: &str, scope: &str| vault.keys_until(token, &[(scope, "board", None)]).is_ok();
+    assert!(opens(&sams, &format!("group:{group}")) && opens(&andres, &format!("group:{group}")));
 
     // What only this machine's own programs do, no sign-in from elsewhere (through the gateway) does: renaming the
     // device, say.
@@ -991,10 +1008,7 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     // Removing someone takes their keys at the vault as soon as the node writes it, with no kernel keys after.
     let key = || B64U.encode(&rand::random::<[u8; 32]>());
     v.internal("scope-key", json!({ "scope": "global", "key": key(), "people": [andre, sam], "admins": [andre] }));
-    v.internal("scope-key", json!({ "scope": format!("group:{group}"), "key": key(), "people": [andre, sam], "admins": [sam] }));
-    let vault = kernel::Vault { url: v.url.clone() };
-    let opens = |token: &str, scope: &str| vault.keys_until(token, &[(scope, "board", None)]).is_ok();
-    assert!(opens(&andres, &format!("group:{group}")) && opens(&sams, "global"));
+    assert!(opens(&sams, "global"));
     assert_eq!(ask(&sams, "POST", "/v1/member", json!({ "group": group, "user": andre, "role": null })).0, 200);
     assert!(!opens(&andres, &format!("group:{group}")) && opens(&andres, "global"));
     // Letting someone in does too. Andre, the install's admin but no longer in it, can't: the invite is made, and

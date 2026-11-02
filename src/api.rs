@@ -597,8 +597,7 @@ async fn use_(State(node): State<Node>, me: Me, Json(mut body): Json<Value>) -> 
 }
 
 async fn group(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let group = crate::entry::new_id();
-    node.member_as(&me.caller, "group", json!({ "group": group, "name": text(&body, "name")? })).await?;
+    let group = node.make_group(&me.caller, text(&body, "name")?).await?;
     Ok(Json(json!({ "group": group })))
 }
 

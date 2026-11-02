@@ -303,6 +303,12 @@ impl Vault {
         Ok(())
     }
 
+    /// A new group's key, which the vault makes and seals to the token's person, its first admin.
+    pub fn group(&self, token: &str, group: &str) -> Result<[u8; 32]> {
+        let out = self.post(token, "/group", json!({ "group": group }))?;
+        decode_key(out["key"].as_str().context("the vault gave no key")?)
+    }
+
     /// An invite link's secret for someone new called `name`, and until when (milliseconds) it works, asked by an
     /// admin of the install.
     pub fn invite(&self, token: &str, name: &str) -> Result<(String, u64)> {

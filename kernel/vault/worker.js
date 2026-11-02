@@ -125,6 +125,7 @@ export class Vault extends DurableObject {
       case "POST /erase": return json(await this.erase(token, claims, body));
       case "POST /invite": return json(await this.invite(token, claims, body));
       case "POST /role": return json(await this.role(token, claims, body));
+      case "POST /group": return json(await this.group(token, claims, body));
       case "GET /items": return json(this.items.list((await this.sessionOf(token)).held, url.searchParams.get("scope")));
       case "POST /items": return json(await this.items.set((await this.sessionOf(token)).held, body).catch((err) => refuse(err.status || 400, err.message)));
       case "POST /fetch": return json(await this.fetchFor(token, claims, body));
@@ -365,6 +366,25 @@ export class Vault extends DurableObject {
       }
     }
     return {};
+  }
+
+  /// A group's key, made as the group is (`{ group }`, a new id), sealed to whoever makes it, its first admin, and
+  /// settled at once: → `{ key }`, for the server that makes it to keep its own work under. Refused for a scope the
+  /// vault or the bucket has a key for already.
+  async group(token, claims, { group }) {
+    if (token.startsWith("run.")) refuse(403, "work left running makes no group");
+    const scope = `group:${group}`;
+    if (!USER.test(group || "")) refuse(400, "not a group id");
+    const { held } = await this.sessionOf(token);
+    if (held.user !== claims.sub) refuse(403, "that token's session is someone else's");
+    if (this.sql.exec("select 1 from scopes where scope = ?", scope).toArray().length) refuse(409, "that group has a key already");
+    const name = `${folderOf(scope)}/_key`;
+    const resp = await fetch((await bucketUrls(this.bucket(), { read: [name] }, 60)).read[name]);
+    if (resp.status !== 404) refuse(resp.ok ? 409 : 502, resp.ok ? "that group has a key already" : `the bucket said ${resp.status} to reading ${scope}'s key`);
+    const key = await this.makeScope(scope, held.user, b64u.decode(held.public));
+    this.sql.exec("update scopes set given = ? where scope = ?", Date.now(), scope);
+    this.sql.exec("insert or ignore into admins (scope, user) values (?, ?)", scope, held.user);
+    return { key: b64u.encode(key) };
   }
 
   async makeScope(scope, user, publicKey) {

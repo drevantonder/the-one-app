@@ -193,6 +193,29 @@ impl Node {
         self.tell_vault(caller, members::roles_changed(&before, &after)).await
     }
 
+    /// Makes a group called `name`, with `caller` its first admin: → its id. Signed in, its key is the vault's, made
+    /// with it and sealed to them there, so their sign-ins open it at once and nobody's waits for `kernel keys`; this
+    /// device keeps it for its own work, and gives it to the devices that hold the group. If the vault can't make it,
+    /// no group is made.
+    pub async fn make_group(&self, caller: &Caller, name: &str) -> Result<String> {
+        ensure!(!name.trim().is_empty(), "give the group a name");
+        let group = new_id();
+        let scope = Scope::Group(group.clone());
+        if let (Some(token), Ok((_, url))) = (caller.token.clone(), self.kernel()) {
+            let id = group.clone();
+            let made = match tokio::task::spawn_blocking(move || crate::kernel::Vault { url }.group(&token, &id)).await {
+                Ok(Ok(key)) => Ok(key),
+                Ok(Err(err)) => Err(format!("{err:#}").strip_prefix("the vault said: ").map(str::to_string)),
+                Err(_) => Err(None),
+            };
+            let ours = format!("your {}", crate::config::NAME.trim_start_matches("The "));
+            let key = made.map_err(|why| anyhow!("{} wasn't made: {}. Try again.", name.trim(), why.unwrap_or(format!("{ours} couldn't be reached"))))?;
+            self.adopt_key(&scope, key).await?;
+        }
+        self.member_as(caller, "group", json!({ "group": group, "name": name })).await?;
+        Ok(group)
+    }
+
     /// Tells the install's vault how people's roles changed, as `caller`, who changed them, so whoever was let in opens
     /// what's there at once, and whoever was taken out no longer does, rather than once an admin next runs `kernel
     /// keys`; the vault decides what `caller` may say. What it couldn't be told, it says, in words for whoever made the

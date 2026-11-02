@@ -67,6 +67,16 @@ impl Node {
         Ok(key)
     }
 
+    /// Keeps `key`, which the vault made, as a new scope's: the bucket says it's the scope's, as it does for one a
+    /// device makes, and this device gives it to each that holds the scope once the members say who does.
+    pub(super) async fn adopt_key(&self, scope: &Scope, key: [u8; 32]) -> Result<()> {
+        let _making = self.0.making_keys.lock().await;
+        let name = format!("{}/{KEY_OBJECT}", crate::bucket::folder(&scope.to_string()));
+        ensure!(crate::db::created(&self.bucket()?, &name, crate::backups::key_id(&key).as_bytes()).await?, "{scope} has a key already");
+        self.0.scope_keys.lock().unwrap().insert(scope.clone(), key);
+        Ok(())
+    }
+
     /// Seals a scope's key, in the bucket, to each device that holds the scope and to the recovery key, where it isn't
     /// yet.
     pub(super) async fn give_key(&self, scope: &Scope, key: &[u8; 32]) -> Result<()> {
