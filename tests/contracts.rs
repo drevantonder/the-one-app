@@ -466,20 +466,23 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
     let node = format!("http://{}", listener.local_addr().unwrap());
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            let mut headers = Vec::new();
-            loop {
-                let mut h = String::new();
-                if reader.read_line(&mut h).unwrap() == 0 || h.trim().is_empty() {
-                    break;
+            // Each connection on its own, and one that closes or resets before it's answered is let go: workerd may
+            // drop one it opened.
+            std::thread::spawn(move || -> std::io::Result<()> {
+                let mut reader = BufReader::new(stream.try_clone()?);
+                let mut line = String::new();
+                reader.read_line(&mut line)?;
+                let mut headers = Vec::new();
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h)? == 0 || h.trim().is_empty() {
+                        break;
+                    }
+                    headers.push(h.split(':').next().unwrap().trim().to_lowercase());
                 }
-                headers.push(h.split(':').next().unwrap().trim().to_lowercase());
-            }
-            let body = json!({ "line": line.trim(), "headers": headers }).to_string();
-            let mut stream = stream;
-            let _ = write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nwww-authenticate: Bearer\r\nmcp-session-id: s\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+                let body = json!({ "line": line.trim(), "headers": headers }).to_string();
+                write!(&stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nwww-authenticate: Bearer\r\nmcp-session-id: s\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len())
+            });
         }
     });
 

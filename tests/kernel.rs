@@ -653,26 +653,29 @@ fn hostile_node() -> String {
     let addr = format!("http://{}", listener.local_addr().unwrap());
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            let mut headers = serde_json::Map::new();
-            loop {
-                let mut h = String::new();
-                if reader.read_line(&mut h).unwrap() == 0 || h.trim().is_empty() {
-                    break;
+            // Each connection on its own, and one that closes or resets before it's answered is let go: workerd may
+            // drop one it opened.
+            std::thread::spawn(move || -> std::io::Result<()> {
+                let mut reader = BufReader::new(stream.try_clone()?);
+                let mut line = String::new();
+                reader.read_line(&mut line)?;
+                let mut headers = serde_json::Map::new();
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h)? == 0 || h.trim().is_empty() {
+                        break;
+                    }
+                    if let Some((k, v)) = h.trim().split_once(':') {
+                        headers.insert(k.trim().to_lowercase(), json!(v.trim()));
+                    }
                 }
-                if let Some((k, v)) = h.trim().split_once(':') {
-                    headers.insert(k.trim().to_lowercase(), json!(v.trim()));
-                }
-            }
-            let body = json!({ "request": line.trim(), "headers": headers }).to_string();
-            let mut stream = stream;
-            let _ = write!(
-                stream,
-                "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\nset-cookie: better-auth.session_token=planted; Path=/\r\naccess-control-allow-origin: *\r\nservice-worker-allowed: /\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                body.len()
-            );
+                let body = json!({ "request": line.trim(), "headers": headers }).to_string();
+                write!(
+                    &stream,
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\nset-cookie: better-auth.session_token=planted; Path=/\r\naccess-control-allow-origin: *\r\nservice-worker-allowed: /\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+            });
         }
     });
     addr
