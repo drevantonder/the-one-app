@@ -11,21 +11,38 @@ struct AppScreen: View {
     @State private var loaded = false
     @State private var slow = false
     @State private var failure: String?
-    /// When the node couldn't be reached, so the screen shows its last copy, kept from then.
-    @State private var offline: Date?
+    /// When the node couldn't be reached, so the screen shows its last copy, until it answers again.
+    @State private var offline: Offline?
+    /// Bumped by Try Now, for the web view to try the node again at once.
+    @State private var tries = 0
 
     var body: some View {
-        ScreenWebView(route: route, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline)
+        ScreenWebView(route: route, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline, tries: tries)
             .opacity(loaded ? 1 : 0)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let offline {
-                    Label("Offline: this is how it looked \(offline.formatted(.relative(presentation: .named))).", systemImage: "wifi.slash")
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .glassEffect(.regular, in: .capsule)
-                        .padding(.vertical, 6)
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        HStack(spacing: 10) {
+                            Label("Offline: this is how it looked \(offline.kept.formatted(.relative(presentation: .named, unitsStyle: .wide))).", systemImage: "wifi.slash")
+                                .foregroundStyle(.secondary)
+                            if let next = offline.next {
+                                Text("Reconnecting in \(max(1, Int(next.timeIntervalSince(context.date).rounded(.up))))s")
+                                    .foregroundStyle(.tertiary)
+                                    .monospacedDigit()
+                                Button("Try Now") { tries += 1 }
+                                    .buttonStyle(.borderless)
+                            } else {
+                                ProgressView().controlSize(.small)
+                                Text("Reconnecting…").foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    .font(.footnote.weight(.medium))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .glassEffect(.regular, in: .capsule)
+                    .padding(.vertical, 6)
+                    .animation(.default, value: offline.next == nil)
                 }
             }
             .overlay {
@@ -70,21 +87,30 @@ private struct ScreenWebView: Representable {
     @Binding var title: String?
     @Binding var loaded: Bool
     @Binding var failure: String?
-    @Binding var offline: Date?
+    @Binding var offline: Offline?
+    var tries: Int
     @Environment(\.dynamicTypeSize) private var typeSize
 
     func makeCoordinator() -> Coordinator { Coordinator(view: self) }
 
     #if os(macOS)
     func makeNSView(context: Context) -> WKWebView { make(context) }
-    func updateNSView(_ web: WKWebView, context: Context) { context.coordinator.view = self }
+    func updateNSView(_ web: WKWebView, context: Context) { update(context) }
+    static func dismantleNSView(_ web: WKWebView, coordinator: Coordinator) { coordinator.stop() }
     #else
     func makeUIView(context: Context) -> WKWebView { make(context) }
     func updateUIView(_ web: WKWebView, context: Context) {
-        context.coordinator.view = self
+        update(context)
         web.evaluateJavaScript(zoomScript)
     }
+    static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) { coordinator.stop() }
     #endif
+
+    private func update(_ context: Context) {
+        let tried = context.coordinator.view.tries != tries
+        context.coordinator.view = self
+        if tried { Task { context.coordinator.tryAgain() } }
+    }
 
     private func make(_ context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -181,26 +207,53 @@ private struct ScreenWebView: Representable {
             web?.evaluateJavaScript("window.one && one.__event(\(json))")
         }
 
+        /// The node's tries since it last answered, for the wait before the next: 2, 4, 8, 16, then every 30 seconds.
+        private var misses = 0
+        private var loading: Task<Void, Never>?
+
         func load(into web: WKWebView) {
             self.web = web
             let route = view.route, node = view.store.node
-            Task {
+            loading?.cancel()
+            loading = Task { [weak self] in
                 do {
                     let page = try await node.page(app: route.app, screen: route.screen, params: route.params, scope: route.scope)
+                    guard let self, !Task.isCancelled else { return }
                     web.loadHTMLString(page.html, baseURL: page.base)
                     ScreenCache.keep(page.html, for: route)
+                    misses = 0
                     view.offline = nil
                 } catch {
-                    // Offline, the last copy of this screen stands in, saying so; its calls fail until the node answers.
-                    if let kept = ScreenCache.last(for: route) {
-                        web.loadHTMLString(kept.html, baseURL: nil)
-                        view.offline = kept.time
+                    // Offline, the last copy of this screen stands in, saying so; its calls fail until the node answers,
+                    // which it's asked again and again, waiting longer each time.
+                    guard let self, !Task.isCancelled else { return }
+                    let kept: Date
+                    if let offline = view.offline {
+                        kept = offline.kept
+                    } else if let copy = ScreenCache.last(for: route) {
+                        web.loadHTMLString(copy.html, baseURL: nil)
+                        kept = copy.time
                     } else {
                         view.failure = error.localizedDescription
+                        return
                     }
+                    misses += 1
+                    let wait = Double(min(30, 1 << min(misses, 5)))
+                    view.offline = Offline(kept: kept, next: .now + wait)
+                    try? await Task.sleep(for: .seconds(wait))
+                    guard !Task.isCancelled else { return }
+                    tryAgain()
                 }
             }
         }
+
+        func tryAgain() {
+            guard let web, view.offline != nil else { return }
+            view.offline?.next = nil
+            load(into: web)
+        }
+
+        func stop() { loading?.cancel() }
 
         #if os(iOS)
         private var host: UIView? { web }
@@ -450,6 +503,12 @@ struct RouteView: View {
 }
 
 /// The last copy of each screen this device drew, by route, for when the node can't be reached.
+/// A screen shown from its last copy: when that was kept, and when the node is next asked for it (nil while it's being asked).
+struct Offline {
+    var kept: Date
+    var next: Date?
+}
+
 enum ScreenCache {
     private static var dir: URL {
         let dir = URL.cachesDirectory.appending(path: "screens")
