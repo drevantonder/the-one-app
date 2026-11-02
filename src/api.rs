@@ -25,6 +25,11 @@ pub fn addr() -> String {
 }
 
 pub fn router(node: Node) -> Router {
+    guarded(routes(), node)
+}
+
+/// Every route of the local API, unguarded: `guarded` lets only this machine's programs and sign-ins in.
+pub fn routes() -> Router<Node> {
     Router::new()
         .route("/llms.txt", get(llms))
         .route("/skills/{name}/{*path}", get(skill_file))
@@ -90,8 +95,12 @@ pub fn router(node: Node) -> Router {
         .route("/v1/providers/{app}/calls", get(next_call))
         .route("/v1/providers/{app}/calls/{id}", post(reply))
         .route("/{app}/{*path}", any(app_http).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
-        .route_layer(axum::middleware::from_fn_with_state(node.clone(), only_this_machine))
-        .with_state(node)
+}
+
+/// Routes as only this machine's own programs, and people signed in with the kernel for what `SIGNED_IN` lists, may
+/// use them.
+pub fn guarded(routes: Router<Node>, node: Node) -> Router {
+    routes.route_layer(axum::middleware::from_fn_with_state(node.clone(), only_this_machine)).with_state(node)
 }
 
 /// Headers that say a request was passed on from elsewhere: the gateway sends `forwarded`, tunnels and proxies the rest.
@@ -106,6 +115,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/badges",
     "/v1/icons",
     "/v1/screens/{app}/{screen}",
+    "/v1/blobs",
     "/v1/blobs/{hash}",
     "/v1/events",
     "/v1/arrange",
@@ -116,6 +126,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/vault/request",
     "/v1/vault/answer",
     "/v1/vault/fetch",
+    "/mcp",
 ];
 
 /// The skills for this machine's person (src/skills.rs).
@@ -215,10 +226,10 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
 /// refuse both, so no web page can drive this machine's node. A request with a kernel sign-in's access token is
 /// someone's instead, for what `SIGNED_IN` lists.
 async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
     let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
     if let Some(token) = token {
-        let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str()).unwrap_or("");
-        if !SIGNED_IN.contains(&path) {
+        if !SIGNED_IN.contains(&path.as_str()) {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response();
         }
         return match signed_in(&node, token).await {
@@ -226,6 +237,7 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
                 req.extensions_mut().insert(me);
                 next.run(req).await
             }
+            Err(err) if path == "/mcp" => sign_in_first(&node, Some(format!("{err:#}"))),
             Err(err) => (StatusCode::UNAUTHORIZED, Json(json!({ "error": format!("{err:#}") }))).into_response(),
         };
     }
@@ -237,9 +249,24 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
     let origin = req.headers().get(axum::http::header::ORIGIN).and_then(|o| o.to_str().ok());
     let own = origin.is_some_and(|o| o.strip_prefix("http://").is_some_and(|h| h == host));
     if (origin.is_some() && !own) || !local {
+        if path == "/mcp" {
+            return sign_in_first(&node, None);
+        }
         return (StatusCode::FORBIDDEN, "only this machine's own programs may use this").into_response();
     }
     next.run(req).await
+}
+
+/// An MCP client elsewhere is told where to sign in, as MCP's authorization spec says: the install's
+/// protected-resource metadata, at its address, which names the kernel's auth service.
+fn sign_in_first(node: &Node, error: Option<String>) -> Response {
+    let Ok((address, _)) = node.kernel() else {
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "this install has no address to sign in at yet, so only this machine's own programs may use this" }))).into_response();
+    };
+    let invalid = if error.is_some() { r#"error="invalid_token", "# } else { "" };
+    let challenge = format!(r#"Bearer {invalid}resource_metadata="{}/.well-known/oauth-protected-resource/mcp", scope="openid profile offline_access""#, address.trim_end_matches('/'));
+    let error = error.unwrap_or_else(|| format!("sign in at {address} first"));
+    (StatusCode::UNAUTHORIZED, [(axum::http::header::WWW_AUTHENTICATE, challenge)], Json(json!({ "error": error }))).into_response()
 }
 
 struct Error(anyhow::Error);
@@ -307,7 +334,9 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     };
     let (claims, session) = tokio::task::spawn_blocking(move || {
         let claims = issuer.verify(&token, now)?;
-        anyhow::ensure!(claims.for_resource(&address), "that sign-in isn't for {address}");
+        // MCP clients sign in for the address's MCP endpoint, as MCP names a server.
+        let address = address.trim_end_matches('/');
+        anyhow::ensure!(claims.for_resource(address) || claims.for_resource(&format!("{address}/mcp")), "that sign-in isn't for {address}");
         let session = crate::kernel::Vault { url: vault }.session(&token)?;
         anyhow::ensure!(session.user == claims.sub, "that sign-in's session is someone else's");
         Ok((claims, session))

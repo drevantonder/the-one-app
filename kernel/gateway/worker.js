@@ -6,16 +6,16 @@
 // sandboxed into an opaque origin, can't be sniffed into another type, and sets no cookies here.
 
 /// Paths the auth service answers: exactly these, or under the ones ending in `/`.
-const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"];
+const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration", "/.well-known/oauth-protected-resource"];
 const NODE = ["/v1/", "/mcp"];
 
 /// What a node's answer is stamped with.
 const SANDBOX = "sandbox allow-scripts allow-forms allow-popups allow-downloads";
 
 /// The request headers a node gets: never the browser's cookies, which are the auth service's.
-const TO_NODE = ["authorization", "content-type", "accept", "accept-language", "last-event-id"];
-/// The answer headers a node may give.
-const FROM_NODE = ["content-type", "cache-control", "etag", "last-modified", "content-disposition", "retry-after"];
+const TO_NODE = ["authorization", "content-type", "accept", "accept-language", "last-event-id", "mcp-session-id", "mcp-protocol-version"];
+/// The answer headers a node may give: `www-authenticate` tells an MCP client where to sign in.
+const FROM_NODE = ["content-type", "cache-control", "etag", "last-modified", "content-disposition", "retry-after", "www-authenticate", "mcp-session-id"];
 
 const TYPES = {
   html: "text/html; charset=utf-8", js: "text/javascript; charset=utf-8", mjs: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8",

@@ -874,12 +874,30 @@ fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Resul
     Ok(body)
 }
 
+thread_local! {
+    /// The access token of the person an MCP request over HTTP came from, while it's answered (`mcp_http`).
+    static SIGNED_IN: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Whether what this thread asks the node, it asks for someone signed in elsewhere, not this machine's person.
+fn signed_in() -> bool {
+    SIGNED_IN.with(|t| t.borrow().is_some())
+}
+
+/// A request to this machine's node: as the person an MCP request over HTTP came from, while it's answered.
+fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
+    match SIGNED_IN.with(|t| t.borrow().clone()) {
+        Some(token) => r.header("authorization", format!("Bearer {token}")),
+        None => r,
+    }
+}
+
 fn get(path: &str) -> Result<Value> {
-    request(agent().get(format!("http://{}{path}", addr())).call())
+    request(to_node(agent().get(format!("http://{}{path}", addr()))).call())
 }
 
 fn post(path: &str, body: Value) -> Result<Value> {
-    request(agent().post(format!("http://{}{path}", addr())).send_json(&body))
+    request(to_node(agent().post(format!("http://{}{path}", addr()))).send_json(&body))
 }
 
 fn status(state: &Value) {
@@ -1078,7 +1096,8 @@ async fn serve() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr()).await.with_context(|| format!("listen on {}", addr()))?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
-    let http = axum::serve(listener, api::router(node));
+    let routes = api::routes().route("/mcp", axum::routing::post(mcp_http));
+    let http = axum::serve(listener, api::guarded(routes, node));
     tokio::select! {
         r = http => r?,
         _ = tokio::signal::ctrl_c() => {}
@@ -1095,54 +1114,98 @@ fn mcp(mode: Mode) -> Result<()> {
     // The agent this serves, credited on its calls: the client's own name for itself, else what its environment says.
     let mut agent = agent_from_env();
     for line in stdin.lock().lines() {
-        let line = line?;
-        let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
-        let Some(id) = msg.get("id").cloned() else { continue };
-        let result = match msg["method"].as_str().unwrap_or("") {
-            "initialize" => Ok({
-                if let Some(name) = msg["params"]["clientInfo"]["name"].as_str().filter(|n| !n.trim().is_empty()) {
-                    agent = Some(agent_name(name));
-                }
-                json!({
-                "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
-                "capabilities": { "tools": {}, "resources": {}, "extensions": { "io.modelcontextprotocol/skills": {} } },
-                "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
-                "instructions": instructions(mode),
-                })
-            }),
-            "ping" => Ok(json!({})),
-            "tools/list" => tools().map(|t| {
-                let mut t = match mode {
-                    Mode::All => [vec![code::search_tool(mode)], t].concat(),
-                    Mode::Code => code::code_tools(t),
-                };
-                t.extend(mcp_apps::tools());
-                json!({ "tools": t })
-            }),
-            "tools/call" => Ok(mcp_apps::call(msg["params"]["name"].as_str().unwrap_or(""), &msg["params"]["arguments"])
-                .unwrap_or_else(|| call_tool(&msg["params"], agent.as_deref(), mode))),
-            // Apps' widgets and screens, as MCP Apps (src/mcp_apps.rs).
-            "resources/list" => Ok(json!({ "resources": mcp_apps::resources() })),
-            "resources/read" => match msg["params"]["uri"].as_str().unwrap_or("") {
-                uri if uri.starts_with("skill://") => skill_resource(uri),
-                uri => mcp_apps::read(uri),
-            },
-            // Skills over MCP (SEP-2640): the same skills the agents sidecar writes into harnesses' folders.
-            "skills/list" => Ok(json!({ "resultType": "complete", "skills": skills().iter().map(skill_entry).collect::<Vec<_>>(), "ttlMs": 60_000, "cacheScope": "session" })),
-            "skills/get" => {
-                let uri = msg["params"]["uri"].as_str().unwrap_or("");
-                skills().iter().find(|s| format!("skill://{}/SKILL.md", s.name) == uri).map(|s| json!({ "skill": skill_entry(s) })).ok_or_else(|| json!({ "code": -32602, "message": format!("no skill {uri}") }))
-            }
-            other => Err(json!({ "code": -32601, "message": format!("unknown method {other}") })),
-        };
-        let reply = match result {
-            Ok(r) => json!({ "jsonrpc": "2.0", "id": id, "result": r }),
-            Err(e) => json!({ "jsonrpc": "2.0", "id": id, "error": e }),
-        };
-        writeln!(out, "{reply}")?;
-        out.flush()?;
+        let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
+        if let Some(reply) = mcp_answer(&msg, &mut agent, mode) {
+            writeln!(out, "{reply}")?;
+            out.flush()?;
+        }
     }
     Ok(())
+}
+
+/// MCP over Streamable HTTP, at `/mcp`: what `mcp` answers over stdio, for an MCP client elsewhere, as the person it
+/// signed in as with the install's kernel (the gateway sends it here), or for a program on this machine, as its
+/// person. Each POST is answered with JSON; the server sends nothing unasked, so there's no stream to GET. Nothing is
+/// kept between requests, since the next may reach another node: the session id carries only the client's name,
+/// credited on its calls.
+async fn mcp_http(headers: axum::http::HeaderMap, body: String) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let token = headers.get("authorization").and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
+    let mut agent = headers.get("mcp-session-id").and_then(|s| s.to_str().ok()).and_then(|s| s.split_once('.')).and_then(|(_, name)| data_encoding::BASE64URL_NOPAD.decode(name.as_bytes()).ok()).and_then(|n| String::from_utf8(n).ok());
+    let Ok(msg) = serde_json::from_str::<Value>(&body) else {
+        let error = json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "the body isn't JSON" } });
+        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(error)).into_response();
+    };
+    let initialize = msg["method"] == "initialize";
+    let answered = tokio::task::spawn_blocking(move || {
+        SIGNED_IN.with(|t| *t.borrow_mut() = token);
+        let reply = match &msg {
+            Value::Array(batch) => Some(json!(batch.iter().filter_map(|m| mcp_answer(m, &mut agent, Mode::All)).collect::<Vec<_>>())).filter(|r| r.as_array().is_some_and(|r| !r.is_empty())),
+            msg => mcp_answer(msg, &mut agent, Mode::All),
+        };
+        SIGNED_IN.with(|t| *t.borrow_mut() = None);
+        (reply, agent)
+    })
+    .await;
+    match answered {
+        Ok((None, _)) => axum::http::StatusCode::ACCEPTED.into_response(),
+        Ok((Some(reply), agent)) => {
+            let mut resp = axum::Json(reply).into_response();
+            if initialize {
+                let session = format!("{:016x}.{}", rand::random::<u64>(), data_encoding::BASE64URL_NOPAD.encode(agent.unwrap_or_default().as_bytes()));
+                resp.headers_mut().insert("mcp-session-id", session.parse().expect("base64url and hex are header-safe"));
+            }
+            resp
+        }
+        Err(err) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(json!({ "error": err.to_string() }))).into_response(),
+    }
+}
+
+/// The answer to one MCP message, over stdio or HTTP: None for a notification. `agent` is the client's name, which
+/// `initialize` says.
+fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode) -> Option<Value> {
+    let id = msg.get("id")?.clone();
+    let result = match msg["method"].as_str().unwrap_or("") {
+        "initialize" => Ok({
+            if let Some(name) = msg["params"]["clientInfo"]["name"].as_str().filter(|n| !n.trim().is_empty()) {
+                *agent = Some(agent_name(name));
+            }
+            json!({
+            "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
+            "capabilities": { "tools": {}, "resources": {}, "extensions": { "io.modelcontextprotocol/skills": {} } },
+            "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
+            "instructions": instructions(mode),
+            })
+        }),
+        "ping" => Ok(json!({})),
+        "tools/list" => tools().map(|t| {
+            let mut t = match mode {
+                Mode::All => [vec![code::search_tool(mode)], t].concat(),
+                Mode::Code => code::code_tools(t),
+            };
+            t.extend(mcp_apps::tools());
+            json!({ "tools": t })
+        }),
+        "tools/call" => Ok(mcp_apps::call(msg["params"]["name"].as_str().unwrap_or(""), &msg["params"]["arguments"])
+            .unwrap_or_else(|| call_tool(&msg["params"], agent.as_deref(), mode))),
+        // Apps' widgets and screens, as MCP Apps (src/mcp_apps.rs).
+        "resources/list" => Ok(json!({ "resources": mcp_apps::resources() })),
+        "resources/read" => match msg["params"]["uri"].as_str().unwrap_or("") {
+            uri if uri.starts_with("skill://") => skill_resource(uri),
+            uri => mcp_apps::read(uri),
+        },
+        // Skills over MCP (SEP-2640): the same skills the agents sidecar writes into harnesses' folders.
+        "skills/list" => Ok(json!({ "resultType": "complete", "skills": skills().iter().map(skill_entry).collect::<Vec<_>>(), "ttlMs": 60_000, "cacheScope": "session" })),
+        "skills/get" => {
+            let uri = msg["params"]["uri"].as_str().unwrap_or("");
+            skills().iter().find(|s| format!("skill://{}/SKILL.md", s.name) == uri).map(|s| json!({ "skill": skill_entry(s) })).ok_or_else(|| json!({ "code": -32602, "message": format!("no skill {uri}") }))
+        }
+        other => Err(json!({ "code": -32601, "message": format!("unknown method {other}") })),
+    };
+    Some(match result {
+        Ok(r) => json!({ "jsonrpc": "2.0", "id": id, "result": r }),
+        Err(e) => json!({ "jsonrpc": "2.0", "id": id, "error": e }),
+    })
 }
 
 /// The skills for this person: the root first (src/skills.rs).
@@ -1472,7 +1535,10 @@ fn secret_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Res
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
     let mut tools = one::vault::tools();
-    tools.extend(one::backups::tools());
+    // Backups are this machine's to run: a sign-in from elsewhere can't.
+    if !signed_in() {
+        tools.extend(one::backups::tools());
+    }
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
         // Operations starting with `_` are for the node, such as a sidecar's `_screen`.

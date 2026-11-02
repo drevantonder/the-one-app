@@ -576,7 +576,7 @@ fn mcp_file(v: &Value) -> Result<Value> {
         ensure!(bytes.len() <= MCP_FILE_LIMIT, "a file given as base64 is at most 1 MiB; give a file id or URL for a bigger one");
         (bytes, v["type"].as_str().or(v["mimeType"].as_str()).map(str::to_string), name)
     } else if let Some(id) = v["file"].as_str().or(v["blob"].as_str()) {
-        let mut resp = crate::agent().get(format!("http://{}/v1/blobs/{id}", crate::addr())).call().with_context(|| format!("{} isn't running here", one::config::NAME))?;
+        let mut resp = crate::to_node(crate::agent().get(format!("http://{}/v1/blobs/{id}", crate::addr()))).call().with_context(|| format!("{} isn't running here", one::config::NAME))?;
         ensure!(resp.status().is_success(), "no file {id} for you");
         (resp.body_mut().with_config().limit(FILE_LIMIT as u64).read_to_vec()?, v["type"].as_str().map(str::to_string), name)
     } else if let Some(url) = v["url"].as_str() {
@@ -615,13 +615,17 @@ pub fn mcp_content(ok: &Value) -> Value {
 /// Replaces each file in `v` (to a few levels deep) with a reference to a blob that holds it.
 fn keep_files(v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
     if let Some((name, ty, bytes)) = as_file(v) {
-        let put = crate::request(crate::agent().post(format!("http://{}/v1/blobs", crate::addr())).send(&bytes[..]));
+        let put = crate::request(crate::to_node(crate::agent().post(format!("http://{}/v1/blobs", crate::addr()))).send(&bytes[..]));
         if let Ok(r) = put {
             let id = r["blob"].as_str().unwrap_or("").to_string();
             if ty.starts_with("image/") && bytes.len() <= MCP_FILE_LIMIT {
                 shown.push(json!({ "type": "image", "data": data_encoding::BASE64.encode(&bytes), "mimeType": ty }));
             }
-            *v = json!({ "name": name, "type": ty, "size": bytes.len(), "file": id, "link": format!("http://{}/v1/blobs/{id}", crate::addr()) });
+            *v = json!({ "name": name, "type": ty, "size": bytes.len(), "file": id });
+            // A link to this machine's node works only on it.
+            if !crate::signed_in() {
+                v["link"] = json!(format!("http://{}/v1/blobs/{id}", crate::addr()));
+            }
         }
         return;
     }

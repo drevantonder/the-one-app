@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use one::config::CLI;
 
-use crate::{agent, addr, get};
+use crate::{agent, addr, get, to_node};
 
 const MIME: &str = "text/html;profile=mcp-app";
 
@@ -97,7 +97,7 @@ fn screen(input: &Value) -> anyhow::Result<Value> {
     }
     url.push('?');
     url.push_str(&query.iter().map(|(k, v)| format!("{k}={}", urlencode(v))).collect::<Vec<_>>().join("&"));
-    let mut resp = agent().get(&url).call()?;
+    let mut resp = to_node(agent().get(&url)).call()?;
     let html = resp.body_mut().read_to_string()?;
     anyhow::ensure!(resp.status().is_success(), "{}", html.trim());
     Ok(json!({

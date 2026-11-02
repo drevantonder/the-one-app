@@ -76,7 +76,8 @@ export class Auth extends DurableObject {
   options() {
     const env = this.env;
     const url = new URL(env.ADDRESS);
-    const resources = JSON.parse(env.RESOURCES || "[]");
+    // Each address, and its MCP endpoint, which is how MCP names a server.
+    const resources = JSON.parse(env.RESOURCES || "[]").flatMap((r) => [r, `${r}/mcp`]);
     const sql = this.ctx.storage.sql;
     const self = this;
     return {
@@ -101,7 +102,13 @@ export class Auth extends DurableObject {
       },
       hooks: {
         before: createAuthMiddleware(async (ctx) => {
-          if (ctx.path === "/oauth2/authorize" && ctx.query && !ctx.query.resource && resources[0]) ctx.query.resource = resources[0];
+          if (ctx.path === "/oauth2/authorize" && ctx.query) {
+            if (!ctx.query.resource && resources[0]) ctx.query.resource = resources[0];
+            // A client's keys are kept under its refresh token, so every client gets one, asked for or not: without
+            // it, it'd be signed in and open nothing.
+            const scopes = String(ctx.query.scope || "").split(" ").filter(Boolean);
+            if (!scopes.includes("offline_access")) ctx.query.scope = [...scopes, "offline_access"].join(" ");
+          }
           if (ctx.path === "/oauth2/token" && ctx.body && !ctx.body.resource && resources[0]) ctx.body.resource = resources[0];
         }),
         after: createAuthMiddleware(async (ctx) => {
@@ -178,6 +185,7 @@ export class Auth extends DurableObject {
         return new Response(meta.body, { status: meta.status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" } });
       }
       const name = this.auth.options.appName;
+      if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp") return this.protectedResource(path, name);
       if (path === "/sign-in" && request.method === "GET") return html(signInPage({ name }));
       if (path === "/invite" && request.method === "GET") return html(invitePage({ name }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
@@ -195,6 +203,19 @@ export class Auth extends DurableObject {
       console.error(err.stack || err);
       return json({ error: "the auth service failed" }, 500);
     }
+  }
+
+  /// What an MCP client asks first (RFC 9728): the address's MCP endpoint (or the address) is signed in to here.
+  protectedResource(path, name) {
+    const origin = new URL(this.env.ADDRESS).origin;
+    const meta = {
+      resource: path.endsWith("/mcp") ? `${origin}/mcp` : origin,
+      resource_name: name,
+      authorization_servers: [`${origin}/api/auth`],
+      scopes_supported: ["openid", "profile", "offline_access"],
+      bearer_methods_supported: ["header"],
+    };
+    return Response.json(meta, { headers: { "access-control-allow-origin": "*" } });
   }
 
   async session(request) {
