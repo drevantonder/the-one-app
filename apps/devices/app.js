@@ -89,12 +89,13 @@ export default {
       },
     },
     list: {
-      description: "List every device, online or not, with its memory, disk (bytes), CPU and GPU (percent busy, every 5 s over two minutes, oldest first), and each one's containers under it (host).",
-      input: { type: "object", properties: {} },
+      description: "List every device, online or not, with its memory, disk (bytes), CPU and GPU (percent busy now; with history, every 5 s over two minutes, oldest first), and each one's containers under it (host).",
+      input: { type: "object", properties: { history: { type: "boolean", description: "CPU and GPU every 5 s over two minutes" } } },
       reads: true,
-      async run(ctx) {
+      async run(ctx, { history } = {}) {
+        const now = (samples) => (samples?.length ? samples[samples.length - 1] : null);
         const list = await devices(ctx);
-        return { devices: list, text: list.map((d) => `${d.host ? "  " : ""}${d.name}${d.kind ? ` (${d.kind})` : ""}: ${line(d)}${d.sentWrong ? ` · sent other devices wrong data, ${new Date(d.sentWrong).toISOString()}` : ""}`).join("\n") };
+        return { devices: history ? list : list.map((d) => ({ ...d, cpu: now(d.cpu), gpu: now(d.gpu) })), text: list.map((d) => `${d.host ? "  " : ""}${d.name}${d.kind ? ` (${d.kind})` : ""}: ${line(d)}${d.sentWrong ? ` · sent other devices wrong data, ${new Date(d.sentWrong).toISOString()}` : ""}`).join("\n") };
       },
     },
   },
@@ -170,7 +171,7 @@ function card(d, guests) {
 }
 async function show() {
   try {
-    const { devices } = await one.call("list", {});
+    const { devices } = await one.call("list", { history: true });
     let html = "";
     for (let i = 0; i < devices.length; i++) {
       const d = devices[i];

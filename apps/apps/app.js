@@ -156,7 +156,7 @@ function addTo(name, { apps, places, admin }) {
     error = "";
     try {
       await one.call(box.checked ? "add" : "remove", { app: name, scope: box.dataset.scope, confirm: true });
-      ({ apps, places, admin } = await one.call("list", { images: true }));
+      ({ apps, places, admin } = await one.call("list", { full: true }));
     } catch (err) {
       error = one.plain(err).title;
     }
@@ -186,9 +186,11 @@ export default {
   ops: {
     list: {
       reads: true,
-      description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; its tagline, if it has one, and description; owner, where it's installed (that you can see), forks, and the places you may add it to. Each says whether it's a service: it has no screen or widget of its own (Gmail, AI), and shells keep it in each page's Services folder. With service, only those.",
-      input: { type: "object", properties: { service: { type: "boolean", description: "only services" }, images: { type: "boolean", description: "with each app's picture as a data URL (image), for drawing it: large" } } },
-      async run(ctx, { service: only, images } = {}) {
+      description: "Every app, a line each: its name, where it's added (that you can see), whether it's a service (no screen of its own, like Gmail: it's in each page's Services), and what it's for; then the places you may add apps to. With service, only services.",
+      // A screen asks with full for every app's details and picture, which are large.
+      input: { type: "object", properties: { service: { type: "boolean", description: "only services" } } },
+      async run(ctx, { service: only, full } = {}) {
+        const images = full;
         const name = namer(ctx);
         const all = (await ctx.catalog()).filter((a) => !a.deleted || !only);
         const services = await Promise.all(all.map((a) => isService(ctx, a).catch(() => false)));
@@ -206,7 +208,10 @@ export default {
           };
         }));
         apps.sort((a, b) => a.title.localeCompare(b.title));
-        return { apps, places: places(ctx), admin: ctx.me.role === "admin" };
+        if (full) return { apps, places: places(ctx), admin: ctx.me.role === "admin" };
+        const line = (a) => `${a.title} (${a.name}): ${a.deleted ? "deleted" : a.installed_names.length ? `added for ${a.installed_names.join(", ")}` : "not added"}`
+          + `${a.service ? ", a service" : ""}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.tagline || a.description || ""}`.trimEnd();
+        return [...apps.map(line), "", `You may add apps for: ${places(ctx).filter((p) => p.may).map((p) => p.scope === "user" ? "user (you)" : p.scope === "global" ? "global (everyone)" : p.name).join(", ")}.`].join("\n");
       },
     },
     add: {
@@ -384,7 +389,7 @@ document.getElementById("list").addEventListener("click", (e) => {
   const r = e.target.closest("[data-app]");
   if (r) one.open("app", { app: r.dataset.app });
 });
-const show = () => one.render("#list", async () => ((data = await one.call("list", { images: true })), html()), { loading: "Loading apps" });
+const show = () => one.render("#list", async () => ((data = await one.call("list", { full: true })), html()), { loading: "Loading apps" });
 one.on("changed", show);
 pick(tab);
 show();
@@ -524,7 +529,7 @@ function link(x) {
 }
 
 async function show() {
-  const [list, code, health, where] = await Promise.all([one.call("list", { images: true }), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("servers", { app: name }).catch(() => null)]);
+  const [list, code, health, where] = await Promise.all([one.call("list", { full: true }), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("servers", { app: name }).catch(() => null)]);
   data = list;
   const a = list.apps.find((x) => x.name === name);
   if (!a) return (document.getElementById("app").innerHTML = one.notFound({ title: name + " was erased.", text: "It's gone from every list.", home: "Back to the App Store" }));
