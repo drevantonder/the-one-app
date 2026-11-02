@@ -669,7 +669,7 @@ window.__one = {};
   }
 
   async function start() {
-    if (/^#[0-9a-f]{3,8}$/i.test(label.accent)) document.documentElement.style.setProperty("--accent", label.accent);
+    if (/^#[0-9a-f]{3,8}$/i.test(whiteLabel.accent)) document.documentElement.style.setProperty("--accent", whiteLabel.accent);
     schemed(document, appearance());
     if (location.pathname === "/callback") {
       try {
