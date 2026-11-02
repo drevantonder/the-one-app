@@ -91,7 +91,7 @@
   const find = () => one.api("GET", `/v1/vault/requests?scope=${encodeURIComponent(scope || "")}&id=${encodeURIComponent(id || "")}`).then((l) => l[0]);
   one.render("#request", async () => {
     [request, apps] = await Promise.all([find(), one.api("GET", "/v1/apps").catch(() => [])]);
-    if (!request) throw new Error("Can’t find this request: it isn’t for you, or it’s from another install.");
+    if (!request) throw new Error("Can’t find this request: it may be for someone else.");
     picked = request.matches?.[0]?.id ?? null;
     setTimeout(draw);
     return undefined;
