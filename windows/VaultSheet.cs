@@ -165,24 +165,4 @@ public static class VaultSheet
         await dialog.ShowAsync();
         open.Cancel();
     }
-
-    /// The requests waiting for this person, each opening in the sheet.
-    public static async Task Requests(XamlRoot root)
-    {
-        var list = (await Node.VaultRequests()).Where(r => r.State == "waiting").ToList();
-        var dialog = new ContentDialog { Title = "Requests", CloseButtonText = "Done", XamlRoot = root };
-        VaultRequest? chosen = null;
-        if (list.Count == 0) dialog.Content = Look.Text("Nothing waits for you.", 14, Look.Secondary);
-        else
-        {
-            var rows = list.Select(r =>
-            {
-                var app = Store.Shared.App(r.App);
-                return Look.Row(Look.Tile(app, 30, r.App), $"{app?.Label ?? r.App} wants {r.What}", $"{r.Asker} · {r.ScopeName}", click: () => { chosen = r; dialog.Hide(); }, chevron: true);
-            }).ToArray();
-            dialog.Content = new ScrollViewer { Content = Look.Section(rows: rows), MaxHeight = 480, Width = 440 };
-        }
-        await dialog.ShowAsync();
-        if (chosen != null) await Show(root, chosen.Scope, chosen.Id);
-    }
 }

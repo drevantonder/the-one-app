@@ -324,7 +324,7 @@ async fn the_apps_decode_what_the_node_sends() {
     assert!(classes["NodeState"].iter().any(|f| f.key == "me" && f.required), "@SerialName renames fields");
     assert!(classes["AppInfo"].iter().any(|f| f.key == "screens" && f.ty == "[AppScreenInfo]" && !f.required), "{:?}", classes["AppInfo"]);
     let windows_classes = csharp_classes(&read("windows/Models.cs"));
-    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "VaultItem", "VaultRequest", "ArrangedItem"] {
+    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "VaultItem", "VaultRequest", "ArrangedItem", "SettingsItem"] {
         assert!(windows_classes.get(name).is_some_and(|f| !f.is_empty()), "the test reads C#'s {name}: {:?}", windows_classes.keys());
     }
     assert!(windows_classes["NodeState"].iter().any(|f| f.key == "arrangements" && f.ty == "[String: Arrangement]" && !f.required), "{:?}", windows_classes["NodeState"]);

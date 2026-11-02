@@ -13,14 +13,14 @@ namespace One;
 /// A page: a person's own, a group's, or everyone's.
 public sealed record Page(string Scope, string Title, string Subtitle, string Whose, string? Group = null);
 
-/// Where the window is: a page, a page's Services, an app's screen, Settings or one of its own views.
+/// Where the window is: a page, a page's Services, an app's screen, Settings or one of its screens.
 public sealed record Route(string Kind, string? Scope = null, string? App = null, string Screen = "main", string Params = "{}", string? Setting = null)
 {
     public static Route PageOf(string scope) => new("page", Scope: scope);
     public static Route Services(string scope) => new("services", Scope: scope);
     public static Route ScreenOf(string app, string? scope, string screen = "main", string parameters = "{}") => new("screen", Scope: scope, App: app, Screen: screen, Params: parameters);
     public static readonly Route Settings = new("settings");
-    public static Route SettingOf(string name) => new("settings", Setting: name);
+    public static Route SettingOf(string name, string parameters = "{}") => new("settings", Params: parameters, Setting: name);
 }
 
 /// What a page shows, in order: an app's icon, or a copy of a widget as it's placed.
@@ -169,8 +169,9 @@ public sealed class Store
 
     public Route? ServiceStoreRoute() => StoreApp() is { } s ? ScreenRoute(s, null, "main", new JsonObject { ["service"] = true }) : null;
 
-    /// What waits for this person: invites to groups, and requests for items.
-    public int Requests => (Install?.Groups.Count(g => g.Invited?.Any(m => m.User == Me?.Id) == true) ?? 0) + (State?.Waiting ?? 0);
+    /// What Settings shows this person, in order, as the node says.
+    public List<SettingsItem> SettingsItems => State?.SettingsItems ?? [];
+    public SettingsItem? SettingsItemOf(string? name) => SettingsItems.FirstOrDefault(i => i.Name == name);
 
     // MARK: Loading
 

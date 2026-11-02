@@ -1,5 +1,5 @@
 // The window, as the Mac app's (apple/Mac/RootView.swift, Sidebar.swift): a sidebar with a section per page, listing
-// its apps and its Services, Settings at its foot; beside it, where the window is. A sidebar row replaces where the
+// its apps and its Services, then Settings', listing its items; beside it, where the window is. A sidebar row replaces where the
 // window is; what a screen opens is pushed on top, so Back returns to it. Signed out, it welcomes the person and signs
 // them in.
 using System;
@@ -290,7 +290,7 @@ public sealed class MainWindow : Window
         if (nav == null) return;
         DrawSidebar();
         // An open screen stays as it is while the rest of the window redraws around it.
-        if (Top.Kind == "screen" && shown != null) return;
+        if ((Top.Kind == "screen" || Top.Setting != null) && shown != null) return;
         if (pushed.Count > 0) pushed[^1] = (pushed[^1].route, View(pushed[^1].route));
         else shown = null;
         DrawDetail();
@@ -323,21 +323,18 @@ public sealed class MainWindow : Window
             case "screen":
                 return Screen(r);
             default:
-                return r.Setting switch
-                {
-                    "devices" => SettingsView.Devices(),
-                    "vault" => SettingsView.Vault(this),
-                    "appearance" => SettingsView.AppearanceView(this),
-                    _ => SettingsView.Home(this),
-                };
+                if (r.Setting == null) return SettingsView.Home(this);
+                // An item with an app (the App Store) opens that app.
+                return store.SettingsItemOf(r.Setting)?.App is { } a ? Screen(Route.ScreenOf(a, null)) : Screen(r);
         }
     }
 
-    /// An app's screen under a bar with its title, which the screen may change.
+    /// An app's screen, or a Settings screen, under a bar with its title, which the screen may change.
     FrameworkElement Screen(Route r)
     {
         var app = Store.Shared.App(r.App);
-        var title = new TextBlock { Text = app?.Screens?.FirstOrDefault(s => s.Name == r.Screen)?.Title ?? app?.Label ?? r.App, FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(20, 6, 20, 6), Height = 22 };
+        var named = r.Setting != null ? Store.Shared.SettingsItemOf(r.Setting)?.Title ?? "Settings" : app?.Screens?.FirstOrDefault(s => s.Name == r.Screen)?.Title ?? app?.Label ?? r.App;
+        var title = new TextBlock { Text = named, FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(20, 6, 20, 6), Height = 22 };
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -348,7 +345,7 @@ public sealed class MainWindow : Window
         return grid;
     }
 
-    /// One section per page, listing its apps and its Services; Settings at the foot, counting what waits.
+    /// One section per page, listing its apps and its Services; then Settings', listing its items with their counts.
     void DrawSidebar()
     {
         if (nav == null) return;
@@ -374,21 +371,25 @@ public sealed class MainWindow : Window
             return row;
         }
         var first = true;
+        void Head(Route route, string title)
+        {
+            var head = new TextBlock { Text = title, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = route == at ? Look.AccentBrush : Look.Secondary, TextWrapping = TextWrapping.WrapWholeWords, MaxLines = 3, Margin = new Thickness(0, first ? 0 : 10, 0, 0) };
+            first = false;
+            var headItem = Item(route, head);
+            headItem.MinHeight = 28;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(headItem, title);
+            nav.MenuItems.Add(headItem);
+        }
         foreach (var page in store.Pages())
         {
-            var head = new TextBlock { Text = page.Title, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Route.PageOf(page.Scope) == at ? Look.AccentBrush : Look.Secondary, TextWrapping = TextWrapping.WrapWholeWords, MaxLines = 3, Margin = new Thickness(0, first ? 0 : 10, 0, 0) };
-            first = false;
-            var headItem = Item(Route.PageOf(page.Scope), head);
-            headItem.MinHeight = 28;
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(headItem, page.Title);
-            nav.MenuItems.Add(headItem);
+            Head(Route.PageOf(page.Scope), page.Title);
             foreach (var app in store.AppsOn(page))
                 nav.MenuItems.Add(Item(store.ScreenRoute(app, page), Labeled(Look.Tile(app, 20), app.Label), store.Badge(app.Name, page)));
             nav.MenuItems.Add(Item(Route.Services(page.Scope), Labeled(Look.Folder(store.ServicesOn(page), 20), "Services")));
         }
-        var settings = Item(Route.Settings, Labeled(new FontIcon { Glyph = "", FontFamily = Look.Symbols, FontSize = 16, Width = 20 }, "Settings"), store.Requests);
-        if (at.Kind == "settings") selected = settings;
-        nav.FooterMenuItems.Add(settings);
+        Head(Route.Settings, "Settings");
+        foreach (var item in store.SettingsItems)
+            nav.MenuItems.Add(Item(Route.SettingOf(item.Name), Labeled(SettingsView.Icon(item, 20), item.Title), item.Badge ?? 0));
         nav.SelectedItem = selected;
     }
 

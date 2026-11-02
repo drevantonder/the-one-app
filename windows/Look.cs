@@ -59,7 +59,7 @@ public static class Look
         _ => otherwise ?? Themed("TextFillColorPrimaryBrush"),
     };
 
-    /// Windows' own symbols, for the window's own controls (Settings, the Vault, devices).
+    /// Windows' own symbols, for the window's own controls.
     public static readonly FontFamily Symbols = new("Segoe Fluent Icons,Segoe MDL2 Assets");
 
     /// Phosphor's icons (vendor/phosphor, beside the program), which apps name for their tiles, screens and widgets, so
@@ -286,13 +286,6 @@ public static class Look
         button.Click += (_, _) => click();
         return button;
     }
-
-    /// A shell icon, as Settings draws one: a white symbol on a colour.
-    public static FrameworkElement SymbolTile(string glyph, string color, double size = 28) => new Border
-    {
-        Width = size, Height = size, CornerRadius = new CornerRadius(size * 0.225), Background = new SolidColorBrush(Hex(color)),
-        Child = new FontIcon { Glyph = glyph, FontFamily = Symbols, FontSize = size * 0.5, Foreground = new SolidColorBrush(Colors.White) },
-    };
 
     /// A column as wide as the window allows, up to a readable width, scrolling down: Settings' and Services' pages.
     public static ScrollViewer Column(StackPanel panel)

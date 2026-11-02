@@ -128,7 +128,8 @@ public sealed class PageView : ContentControl
 
     FrameworkElement Folder() => Tile(Look.Folder(Store.Shared.ServicesOn(page), 60), "Services", 0, () => window.Go(Route.Services(page.Scope)));
 
-    static Button Tile(FrameworkElement icon, string name, int badge, Action click)
+    /// An icon with its name under it and its count, as a page draws an app's.
+    public static Button Tile(FrameworkElement icon, string name, int badge, Action click)
     {
         var face = new Grid { Width = 60, Height = 60, HorizontalAlignment = HorizontalAlignment.Center };
         face.Children.Add(icon);

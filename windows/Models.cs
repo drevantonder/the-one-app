@@ -31,7 +31,22 @@ public sealed class NodeState
     /// What this app's sign-in opens: some scopes and apps, or (null) all of them.
     [JsonPropertyName("sign_in")] public SignedIn? SignIn { get; init; }
 
+    /// What Settings shows this person, in order.
+    [JsonPropertyName("settings_items")] public List<SettingsItem>? SettingsItems { get; init; }
+
     public int Waiting => VaultRequests ?? SecretRequests ?? 0;
+}
+
+/// One of Settings' items: it opens the Settings screen it names, or with `app`, that app's main screen.
+public sealed class SettingsItem
+{
+    [JsonPropertyName("name")] public required string Name { get; init; }
+    [JsonPropertyName("title")] public required string Title { get; init; }
+    /// A Phosphor icon's name, on `color`.
+    [JsonPropertyName("icon")] public required string Icon { get; init; }
+    [JsonPropertyName("color")] public required string Color { get; init; }
+    [JsonPropertyName("badge")] public int? Badge { get; init; }
+    [JsonPropertyName("app")] public string? App { get; init; }
 }
 
 public sealed class SignedIn

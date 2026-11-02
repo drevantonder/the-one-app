@@ -103,6 +103,23 @@ public static class Node
         return await r.Content.ReadAsStringAsync();
     }
 
+    /// A Settings screen, as its page.
+    public static async Task<string> SettingsScreen(string name, string parameters)
+    {
+        using var r = await Send(HttpMethod.Get, $"/v1/settings-screens/{Uri.EscapeDataString(name)}", new() { ["params"] = parameters }, timeout: TimeSpan.FromSeconds(20));
+        return await r.Content.ReadAsStringAsync();
+    }
+
+    /// A Settings screen's `one.api`: the node's /v1 at the install's address, as this person; nothing else there.
+    public static Task<JsonNode?> Api(string method, string path, JsonNode? body)
+    {
+        var address = new Uri(Auth.Shared.Address!);
+        var url = new Uri(address, path);
+        if (url.Authority != address.Authority || !url.AbsolutePath.StartsWith("/v1/")) throw new NodeException("That isn’t your server’s.");
+        var get = method.Equals("GET", StringComparison.OrdinalIgnoreCase);
+        return Ask(new HttpMethod(method.ToUpperInvariant()), url.PathAndQuery, body: get ? null : body ?? new JsonObject());
+    }
+
     /// A file the node keeps, by its hash.
     public static async Task<byte[]> Blob(string hash)
     {
