@@ -134,4 +134,6 @@ dependencies {
     implementation("androidx.browser:browser:1.9.0")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    implementation("androidx.glance:glance-appwidget:1.2.0")
+    implementation("androidx.work:work-runtime:2.12.0")
 }

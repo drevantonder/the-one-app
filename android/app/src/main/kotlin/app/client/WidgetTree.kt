@@ -183,7 +183,7 @@ fun toned(tone: String?, otherwise: Color): Color {
 }
 
 /** "now", "5 min", "3 h", then the weekday, then the date; or as the node's `style` asks. */
-private fun time(node: WidgetNode, now: Long): String {
+fun time(node: WidgetNode, now: Long): String {
     val at = (node.at ?: 0.0).toLong()
     return when (node.style) {
         "relative" -> DateUtils.getRelativeTimeSpanString(at, now, DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString()

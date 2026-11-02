@@ -173,15 +173,18 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
     }
 
     suspend fun refreshWidgets() {
+        val raw = java.util.concurrent.ConcurrentHashMap<String, String>()
         val results = pages.map { p ->
             scope.async {
-                val w = runCatching { get<List<WidgetInfo>>("/v1/widgets", mapOf("scope" to p.scope)) }.getOrElse { widgets[p.scope] ?: emptyList() }
+                val w = runCatching { String(api("/v1/widgets", query = mapOf("scope" to p.scope))).also { raw[p.scope] = it }.let { json.decodeFromString<List<WidgetInfo>>(it) } }
+                    .getOrElse { widgets[p.scope] ?: emptyList() }
                 val b = runCatching { get<Map<String, Int>>("/v1/badges", mapOf("scope" to p.scope)) }.getOrElse { emptyMap() }
                 Triple(p.scope, w, b)
             }
         }.awaitAll()
         widgets = results.associate { it.first to it.second }
         badges = results.associate { it.first to it.third }
+        app.client.widget.HomeWidgets.saw(this, raw)
     }
 
     /** Draws the widgets again when the soonest asks to be (a tree's `next`), between a minute and fifteen from now. */
@@ -259,6 +262,7 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
         scope.launch {
             signIn.signOut()
             signedOut()
+            app.client.widget.HomeWidgets.signedOut()
             apps = emptyList()
             widgets = emptyMap()
         }

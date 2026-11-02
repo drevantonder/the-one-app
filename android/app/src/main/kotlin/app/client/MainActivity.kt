@@ -73,8 +73,9 @@ class MainActivity : ComponentActivity() {
         intent.data?.let(::open)
     }
 
-    /** `<cli>://signed-in/?code=…`: back from signing in. */
+    /** `<cli>://signed-in/?code=…`: back from signing in; `<cli>://open/…`: a home-screen widget, tapped. */
     private fun open(uri: Uri) {
+        if (uri.scheme == BuildConfig.CLI && uri.host == "open") return app.client.widget.HomeWidgets.open(store, uri)
         if (uri.scheme != BuildConfig.CLI || uri.host != "signed-in") return
         welcomeError = null
         store.signInFinished(uri) { welcomeError = it }
@@ -88,6 +89,11 @@ class MainActivity : ComponentActivity() {
 /** The app's process: one store, however many times the activity comes and goes. */
 class ClientApp : android.app.Application() {
     val store by lazy { Store(SignIn(this), getSharedPreferences("app", MODE_PRIVATE)) }
+
+    override fun onCreate() {
+        super.onCreate()
+        app.client.widget.HomeWidgets.start(this)
+    }
 }
 
 @Composable
