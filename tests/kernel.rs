@@ -764,6 +764,23 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert_eq!(seen["me"]["key"], "", "{}", seen["me"]);
     assert!(seen["install"]["servers"].as_array().unwrap().iter().all(|s| s["me"] == false), "{}", seen["install"]["servers"]);
     assert!(seen.get("client").is_none());
+
+    // A file is read only by whoever put it or may use a scope that names it: knowing its hash isn't enough. Only
+    // this machine's own programs put files, a sign-in's MCP answers among them.
+    let get = |token: &str, hash: &str| agent.get(format!("{api}/v1/blobs/{hash}")).header("authorization", format!("Bearer {token}")).header("forwarded", "host=\"one.example\"").call().unwrap().status().as_u16();
+    let theirs = node.put_blob(b"an attachment of someone else's").unwrap();
+    assert_eq!(get(&sams, &theirs), 400, "a sign-in reads a file nobody gave it");
+    let put = |token: &str, forwarded: bool| {
+        let req = agent.post(format!("{api}/v1/blobs")).header("authorization", format!("Bearer {token}"));
+        let mut resp = if forwarded { req.header("forwarded", "host=\"one.example\"") } else { req }.send(&b"Sam's file"[..]).unwrap();
+        (resp.status().as_u16(), resp.body_mut().read_json::<Value>().ok().and_then(|b| b["blob"].as_str().map(str::to_string)))
+    };
+    assert_eq!(put(&sams, true).0, 403, "a sign-in from elsewhere puts no files here");
+    let (status, sams_file) = put(&sams, false);
+    assert_eq!(status, 200);
+    let sams_file = sams_file.unwrap();
+    assert_eq!(get(&sams, &sams_file), 200, "Sam reads back what he put");
+    assert_eq!(get(&andres, &sams_file), 400, "and Andre doesn't, by its hash");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

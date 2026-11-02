@@ -303,6 +303,8 @@ pub struct Inner {
     logos: crate::logos::Logos,
     /// The calls, widgets and hooks running now, by the token their requests carry.
     grants: Mutex<HashMap<String, Grant>>,
+    /// The blobs sign-ins put here (their files in an MCP answer, say), by hash: for whom, so they may read them back.
+    put_by: Mutex<HashMap<String, std::collections::HashSet<String>>>,
     /// The port apps' requests go out through.
     outbound: u16,
     /// What each app did in its last minute, and the apps stopped here for looping.
@@ -432,6 +434,7 @@ impl Node {
             images: Mutex::new(HashMap::new()),
             logos: crate::logos::Logos::open(dir),
             grants: Mutex::new(HashMap::new()),
+            put_by: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             guard: Mutex::new(Guard::default()),
             running: Mutex::new(Default::default()),
@@ -2806,9 +2809,10 @@ impl Node {
             ("GET", p) if p.starts_with("/blob/") => {
                 let hash = &p["/blob/".len()..];
                 let built_in = self.0.built_in.values().any(|h| h == hash);
-                // A call asked on this machine may read what its local API would give it: a file put there to attach.
-                let local = grant.caller.key == self.0.id && release::blob_path(&self.0.dir, hash).is_ok_and(|p| p.exists());
-                ensure!(built_in || local || grant.puts.iter().any(|h| h == hash) || self.blob_named_for(hash, &grant.caller.user)?, "no such blob for you");
+                // A call this machine's own programs asked may read what its local API would give them: a file put there to
+                // attach. A sign-in's asks here too, but reads only what its person may.
+                let local = grant.caller.key == self.0.id && grant.caller.token.is_none() && release::blob_path(&self.0.dir, hash).is_ok_and(|p| p.exists());
+                ensure!(built_in || local || grant.puts.iter().any(|h| h == hash) || self.may_read_blob(&grant.caller.user, hash)?, "no such blob for you");
                 self.blob(hash).await?.into_response()
             }
             ("POST", "/appends") => {
@@ -3190,9 +3194,7 @@ impl Node {
             }
             ("GET", p) if p.starts_with("/v1/client-screens/") => json!({ "html": self.client_screen(me.clone(), &p["/v1/client-screens/".len()..], body["params"].clone())? }),
             ("GET", p) if p.starts_with("/v1/blobs/") => {
-                let hash = &p["/v1/blobs/".len()..];
-                ensure!(self.blob_named_for(hash, &me.user)?, "no such blob for you");
-                json!({ "blob": data_encoding::BASE64.encode(&self.blob(hash).await?) })
+                json!({ "blob": data_encoding::BASE64.encode(&self.blob_for(me, &p["/v1/blobs/".len()..]).await?) })
             }
             _ => bail!("no such request: {method} {path}"),
         })
@@ -3958,6 +3960,23 @@ impl Node {
             return Ok(bytes);
         }
         self.fetch_from(self.peers(), hash, 1 << 30).await
+    }
+
+    /// Keeps `bytes` as a blob a sign-in put, which its person may then read back.
+    pub fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String> {
+        let hash = self.put_blob(bytes)?;
+        self.0.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(caller.user.clone());
+        Ok(hash)
+    }
+
+    /// A blob for someone who isn't this machine's own programs: one they put, or an entry names in a scope they may use.
+    pub async fn blob_for(&self, caller: &Caller, hash: &str) -> Result<Vec<u8>> {
+        ensure!(self.may_read_blob(&caller.user, hash)?, "no such blob for you");
+        self.blob(hash).await
+    }
+
+    fn may_read_blob(&self, user: &str, hash: &str) -> Result<bool> {
+        Ok(self.0.put_by.lock().unwrap().get(hash).is_some_and(|users| users.contains(user)) || self.blob_named_for(hash, user)?)
     }
 
     /// Fetches a blob from the first of `peers` that has it, and keeps it.

@@ -111,7 +111,6 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/badges",
     "/v1/icons",
     "/v1/screens/{app}/{screen}",
-    "/v1/blobs",
     "/v1/client-screens/{name}",
     "/v1/blobs/{hash}",
     "/v1/events",
@@ -708,12 +707,20 @@ async fn app_http(State(node): State<Node>, Path((app, path)): Path<(String, Str
     Ok((status, [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response())
 }
 
-async fn put_blob(State(node): State<Node>, body: axum::body::Bytes) -> Reply {
-    Ok(Json(json!({ "blob": node.put_blob(&body)?, "size": body.len() })))
+async fn put_blob(State(node): State<Node>, me: Me, body: axum::body::Bytes) -> Reply {
+    let hash = match me.sign_in {
+        Some(_) => node.put_blob_for(&me.caller, &body)?,
+        None => node.put_blob(&body)?,
+    };
+    Ok(Json(json!({ "blob": hash, "size": body.len() })))
 }
 
-async fn blob(State(node): State<Node>, Path(hash): Path<String>) -> Result<Response, Error> {
-    Ok(([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], node.blob(&hash).await?).into_response())
+async fn blob(State(node): State<Node>, me: Me, Path(hash): Path<String>) -> Result<Response, Error> {
+    let bytes = match me.sign_in {
+        Some(_) => node.blob_for(&me.caller, &hash).await?,
+        None => node.blob(&hash).await?,
+    };
+    Ok(([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
 }
 
 async fn register(State(node): State<Node>, Path(app): Path<String>, Json(describe): Json<Value>) -> Reply {
