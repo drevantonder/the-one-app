@@ -19,7 +19,16 @@ import (
 // downloading Chrome from Google, and builds it again each week for Chrome's
 // security fixes. Cua's image turns browser sign-in and sync off for
 // Chromium; Chrome's policies here leave them to the person.
+//
+// Cua's viewer refuses to be shown in a frame (frame-ancestors 'none', built
+// into cua-spacesd); apps show it inside their own screens, and its link's
+// ticket is what lets someone watch, so the recipe lets any page frame it, a
+// same-length replacement in the binary. If Cua changes that string, the build
+// fails rather than leave the viewer unframeable.
 const recipe = `FROM ` + cuaImage + `
+RUN f=/usr/local/bin/cua-spacesd && grep -q "frame-ancestors 'none'" $f \
+ && perl -pi -e "s/frame-ancestors 'none'/frame-ancestors *     /g" $f \
+ && ! grep -q "frame-ancestors 'none'" $f
 RUN curl -fsSLo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_$(dpkg --print-architecture).deb \
  && apt-get update && apt-get install -y /tmp/chrome.deb \
  && apt-get purge -y chromium chromium-common && apt-get autoremove -y \
