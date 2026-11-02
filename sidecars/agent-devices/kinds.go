@@ -47,6 +47,10 @@ type kind interface {
 	make(ctx context.Context, v *vm, from *vm) error
 	start(ctx context.Context, v *vm) error
 	stop(ctx context.Context, v *vm) error
+	// pause freezes a running device, keeping its memory but using no CPU; resume carries on. A kind that can't
+	// shuts it down instead (iPhones: Simulator can't pause).
+	pause(ctx context.Context, v *vm) error
+	resume(ctx context.Context, v *vm) error
 	running(ctx context.Context, v *vm) bool
 	remove(ctx context.Context, v *vm) error
 	screen(ctx context.Context, v *vm) (image.Image, error)
@@ -70,6 +74,7 @@ type vm struct {
 	ID      string    `json:"id,omitempty"`      // android: its AVD; iphone: its simulator
 	CPUs    int       `json:"cpus,omitempty"`
 	GB      int       `json:"gb,omitempty"` // memory
+	Paused  bool      `json:"paused,omitempty"`
 	Made    time.Time `json:"made"`
 }
 
@@ -169,9 +174,34 @@ func (v *vm) kind() kind {
 
 func (v *vm) state(ctx context.Context) string {
 	if k := v.kind(); k != nil && k.can() == "" && k.running(ctx, v) {
+		if v.Paused {
+			return "paused"
+		}
 		return "running"
 	}
 	return "stopped"
+}
+
+// awake is a device running and not paused, started or resumed if it has to be; it counts as a call to it.
+func (ds *devices) awake(ctx context.Context, v *vm) error {
+	ds.touch(v.Name)
+	k := v.kind()
+	if !k.running(ctx, v) {
+		if !roomFor(gbOf(v)) {
+			return fmt.Errorf("%s is stopped, and this machine has no memory to spare to start it now", v.Name)
+		}
+		v.Paused = false
+		ds.saveVM(v)
+		return k.start(ctx, v)
+	}
+	if v.Paused {
+		if err := k.resume(ctx, v); err != nil {
+			return err
+		}
+		v.Paused = false
+		return ds.saveVM(v)
+	}
+	return nil
 }
 
 // makeVM makes a device of kind k here, named name: a copy of the lasting device from, or a new lasting one.
@@ -201,15 +231,6 @@ func (ds *devices) makeVM(ctx context.Context, k kind, name string, from *vm) (*
 		return nil, err
 	}
 	return v, nil
-}
-
-// startVM starts a device if it isn't running, and waits until it's ready.
-func startVM(ctx context.Context, v *vm) error {
-	k := v.kind()
-	if k.running(ctx, v) {
-		return nil
-	}
-	return k.start(ctx, v)
 }
 
 // deleteVM deletes a device and its files.
@@ -279,7 +300,7 @@ func (ds *devices) borrowVM(ctx context.Context, k kind, name string, copy bool,
 	}
 	ds.setLoan(got.Name, &l)
 	ds.touch(got.Name)
-	if err := startVM(ctx, got); err != nil {
+	if err := ds.awake(ctx, got); err != nil {
 		if got.Of != "" || got.Name != name && strings.HasPrefix(got.Name, poolPrefix) {
 			ds.deleteVM(context.WithoutCancel(ctx), got)
 		}
@@ -296,11 +317,12 @@ func gbOf(v *vm) int {
 	return 4
 }
 
-// roomFor reports whether this machine has gb of memory to spare, and 8 GB more for everything else it runs: a
-// machine short of memory kills what it must, a device or a build or an agent.
+// roomFor reports whether this machine has gb of memory to spare, and 4 GB more for everything else it runs, as
+// memory counts it (less the swap in use): a machine short of memory kills what it must, a device or a build or an
+// agent.
 func roomFor(gb int) bool {
 	free, _ := memory()
-	return free >= int64(gb+8)<<30
+	return free >= int64(gb+4)<<30
 }
 
 // giveBackVM ends a loan: a copy, or a device made for the loan, is deleted; a lasting one stays as it is.
@@ -309,6 +331,8 @@ func (ds *devices) giveBackVM(ctx context.Context, v *vm, why string) error {
 		if err := ds.deleteVM(ctx, v); err != nil {
 			return err
 		}
+	} else if v.Kind == "iphone" {
+		v.kind().stop(ctx, v) // a booted simulator holds gigabytes of the Mac's memory
 	}
 	ds.setLoan(v.Name, nil)
 	log.Printf("%s: %s", v.Name, why)
@@ -319,8 +343,17 @@ func (ds *devices) giveBackVM(ctx context.Context, v *vm, why string) error {
 // idleBorrowed, as a Linux device's.
 const idleLasting = time.Hour
 
-// tendVMs gives back loans of devices left idle, and of devices that are gone.
+// A device nobody has borrowed, called or watched for idlePause is paused, and after idleStop shut down: each holds
+// cores and gigabytes while it runs.
+const (
+	idlePauseVM = 15 * time.Minute
+	idleStopVM  = time.Hour
+)
+
+// tendVMs gives back loans of devices left idle, and of devices that are gone, and pauses and then shuts down
+// devices nobody is using.
 func (ds *devices) tendVMs(ctx context.Context) {
+	defer ds.restVMs(ctx)
 	for name, l := range ds.loans() {
 		v := ds.vmNamed(name)
 		if v == nil {
@@ -333,7 +366,7 @@ func (ds *devices) tendVMs(ctx context.Context) {
 		if ds.idle(name) < limit {
 			continue
 		}
-		if v.Kind == "windows" && connected(ctx, v.Port, 5900+v.Display) {
+		if ds.inUse(ctx, v) {
 			ds.touch(name)
 			continue
 		}
@@ -391,7 +424,9 @@ func (ds *devices) useVM(ctx context.Context, v *vm, tool string, args map[strin
 	if !k.running(ctx, v) {
 		return nil, fmt.Errorf("%s is stopped: start it first", v.Name)
 	}
-	ds.touch(v.Name)
+	if err := ds.awake(ctx, v); err != nil {
+		return nil, err
+	}
 	text := func(key string) string { s, _ := args[key].(string); return s }
 	f := func(key string) float64 { n, _ := args[key].(float64); return n }
 	a := action{X: f("x"), Y: f("y"), ToX: f("to_x"), ToY: f("to_y"), Text: text("text"), Key: text("key")}
@@ -565,7 +600,7 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 			if err != nil {
 				return nil, true, err
 			}
-			if err := startVM(ctx, v); err != nil {
+			if err := ds.awake(ctx, v); err != nil {
 				return nil, true, fmt.Errorf("made %s, but it didn't start: %w", v.Name, err)
 			}
 			return fmt.Sprintf("Made %s, a lasting %s device, and started it.", v.Name, k.title()), true, nil
@@ -610,9 +645,10 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 	}
 	switch op {
 	case "start":
-		ds.touch(v.Name)
-		return "Started.", true, startVM(ctx, v)
+		return "Started.", true, ds.awake(ctx, v)
 	case "stop":
+		v.Paused = false
+		ds.saveVM(v)
 		return fmt.Sprintf("Stopped %s. Its files stay; it stays stopped until started.", v.Name), true, k.stop(ctx, v)
 	case "delete":
 		if err := ds.deleteVM(ctx, v); err != nil {
@@ -632,6 +668,9 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		if !k.running(ctx, v) {
 			return nil, true, fmt.Errorf("%s is stopped: start it first", v.Name)
 		}
+		if err := ds.awake(ctx, v); err != nil {
+			return nil, true, err
+		}
 		m := minutes(60, 1440)
 		url, err := vmViewURL(ctx, v, m)
 		if err != nil {
@@ -641,6 +680,9 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 	case "screen":
 		if !k.running(ctx, v) {
 			return nil, true, fmt.Errorf("%s is stopped: start it first", v.Name)
+		}
+		if err := ds.awake(ctx, v); err != nil {
+			return nil, true, err
 		}
 		width := 640
 		if w, ok := in["width"].(float64); ok {
@@ -793,4 +835,65 @@ func userSystemd() {
 func runOutliving(ctx context.Context, name string, args ...string) (string, error) {
 	n, a := outliving(name, args...)
 	return run(ctx, n, a...)
+}
+
+// restVMs pauses the running devices nobody has used for idlePauseVM, and shuts down those idle for idleStopVM.
+func (ds *devices) restVMs(ctx context.Context) {
+	lent := ds.loans()
+	for _, v := range ds.vms() {
+		k := v.kind()
+		if _, ok := lent[v.Name]; ok || k == nil || k.can() != "" || !k.running(ctx, v) {
+			continue
+		}
+		if ds.inUse(ctx, v) {
+			ds.touch(v.Name)
+			continue
+		}
+		idle := ds.idle(v.Name)
+		switch {
+		case idle >= idleStopVM:
+			log.Printf("stopping %s, idle for %s", v.Name, idleStopVM)
+			if err := k.stop(ctx, v); err != nil {
+				log.Printf("stopping %s: %v", v.Name, err)
+			}
+			v.Paused = false
+			ds.saveVM(v)
+		case idle >= idlePauseVM && !v.Paused:
+			log.Printf("pausing %s, idle for %s", v.Name, idlePauseVM)
+			if err := k.pause(ctx, v); err != nil {
+				log.Printf("pausing %s: %v", v.Name, err)
+				continue
+			}
+			v.Paused = k.running(ctx, v)
+			ds.saveVM(v)
+		}
+	}
+}
+
+var traffic = map[string]int64{} // each device's bytes through adb at the last look
+
+// inUse reports whether something uses a device without calling this sidecar: an SSH or VNC session into Windows,
+// or more than adb's own chatter (512 KB in a look) to a phone.
+func (ds *devices) inUse(ctx context.Context, v *vm) bool {
+	switch v.Kind {
+	case "windows":
+		return connected(ctx, v.Port, 5900+v.Display)
+	case "android":
+		out, err := exec.CommandContext(ctx, "ss", "-tinH", "state", "established", fmt.Sprintf("( dport = :%d )", v.Port+1)).Output()
+		if err != nil {
+			return false
+		}
+		var n int64
+		for _, f := range strings.Fields(string(out)) {
+			if b, ok := strings.CutPrefix(f, "bytes_acked:"); ok {
+				var x int64
+				fmt.Sscan(b, &x)
+				n += x
+			}
+		}
+		was, seen := traffic[v.Name]
+		traffic[v.Name] = n
+		return seen && n-was > 512<<10
+	}
+	return false
 }

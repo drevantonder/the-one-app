@@ -417,7 +417,7 @@ func roomForOne() bool {
 	return free >= int64(sizes[0].GB)<<30
 }
 
-// memory is this server's available and total memory, in bytes.
+// memory is this server's available and total memory, in bytes: available less the swap in use.
 func memory() (free, total int64) {
 	if runtime.GOOS == "darwin" {
 		return macMemory()
@@ -426,6 +426,7 @@ func memory() (free, total int64) {
 	if err != nil {
 		return 0, 0
 	}
+	var swapTotal, swapFree int64
 	for line := range strings.Lines(string(b)) {
 		k, v, _ := strings.Cut(line, ":")
 		var n int64
@@ -435,9 +436,14 @@ func memory() (free, total int64) {
 			free = n << 10
 		case "MemTotal":
 			total = n << 10
+		case "SwapTotal":
+			swapTotal = n << 10
+		case "SwapFree":
+			swapFree = n << 10
 		}
 	}
-	return free, total
+	// Swap in use is memory already short: what's available counts only once it's paid back.
+	return max(free-(swapTotal-swapFree), 0), total
 }
 
 // macMemory reads vm_stat: free, inactive and speculative pages are

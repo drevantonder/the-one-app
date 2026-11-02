@@ -212,6 +212,16 @@ func (a androidEmulator) stop(ctx context.Context, v *vm) error {
 	return nil
 }
 
+func (androidEmulator) pause(ctx context.Context, v *vm) error {
+	_, err := adb(ctx, v, "emu", "avd", "pause")
+	return err
+}
+
+func (androidEmulator) resume(ctx context.Context, v *vm) error {
+	_, err := adb(ctx, v, "emu", "avd", "resume")
+	return err
+}
+
 func (a androidEmulator) remove(ctx context.Context, v *vm) error {
 	a.stop(ctx, v)
 	dir, err := avdDir(v.ID)

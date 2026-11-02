@@ -215,8 +215,13 @@ func (a *appleRT) hasImage(ctx context.Context, image string) bool {
 	return err == nil
 }
 
+// build builds with container's builder, a VM of its own, stopped once the image is built: it holds memory the Mac's
+// person needs.
 func (a *appleRT) build(ctx context.Context, image, dir string) error {
 	_, err := ctr(ctx, "build", "--tag", image, dir)
+	if _, stopErr := ctr(context.WithoutCancel(ctx), "builder", "stop"); stopErr != nil {
+		log.Printf("stopping container's builder: %v", stopErr)
+	}
 	return err
 }
 

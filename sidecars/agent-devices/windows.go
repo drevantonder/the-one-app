@@ -206,6 +206,16 @@ func (w windowsQEMU) stop(ctx context.Context, v *vm) error {
 	return nil
 }
 
+func (windowsQEMU) pause(_ context.Context, v *vm) error {
+	_, err := monitor(v, "stop")
+	return err
+}
+
+func (windowsQEMU) resume(_ context.Context, v *vm) error {
+	_, err := monitor(v, "cont")
+	return err
+}
+
 func (w windowsQEMU) remove(ctx context.Context, v *vm) error {
 	if w.running(ctx, v) {
 		monitor(v, "quit")

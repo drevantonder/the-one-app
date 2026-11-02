@@ -79,6 +79,9 @@ func (ds *devices) serveViewer() {
 		k := v.kind()
 		switch r.PathValue("what") {
 		case "":
+			if k.running(r.Context(), v) {
+				ds.awake(r.Context(), v) // a paused one carries on for whoever looks
+			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
 			fmt.Fprintf(w, viewerPage, v.Name, k.input(), k.limits())
