@@ -280,6 +280,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let shown = a.backups().unwrap();
     assert_eq!(shown["places"][0]["title"], "T7 Shield");
     assert_eq!(shown["places"][0]["last"]["server"], "backup-a", "the folder's own server backs it up: {shown}");
+    let first = shown["places"][0]["last"]["time"].clone();
     eventually("b to see it", async || !b.backups().unwrap()["places"][0]["last"].is_null()).await;
 
     // From nothing but the disk and the recovery key.
@@ -302,9 +303,12 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     // A change is backed up on the next run; only what's new is sent.
     a.call(board("post", json!({ "text": "after the backup" }))).await.unwrap();
     a.back_up_now();
-    eventually("the second backup", async || backed_up_posts(&dir, &install, &keys["global"]).await.len() == 2).await;
+    // A run is done once it says when it last backed up, not once its copy of the bucket has the post: it copies the
+    // bucket before writing the snapshot that names the copy, and backs up every scope.
+    eventually("the second backup", async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
     let again = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
     assert!(again.snapshot.databases["board/main"].0 > steps_then);
+    assert_eq!(backed_up_posts(&dir, &install, &keys["global"]).await, ["before the backup", "after the backup"]);
     let checked = a.check_backups().await.unwrap();
     assert_eq!(checked[0]["place"], "T7 Shield", "{checked}");
     assert!(checked[0]["error"].is_null(), "{checked}");
@@ -317,11 +321,10 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let copy = dir.join(&install).join("bucket");
     std::fs::rename(&copy, dir.join("bucket-aside")).unwrap();
     std::fs::write(&copy, b"not a folder").unwrap();
-    for text in ["broken once", "broken twice"] {
-        a.call(board("post", json!({ "text": text }))).await.unwrap();
-        a.back_up_now();
-        eventually("a failed run", async || a.backups().unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used") || t.contains("won't let"))).await;
-    }
+    // Its failure shows once it's done: nothing writes to the disk until the next run.
+    a.call(board("post", json!({ "text": "broken" }))).await.unwrap();
+    a.back_up_now();
+    eventually("a failed run", async || a.backups().unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used") || t.contains("won't let"))).await;
     let problem = a.state()["backups"].clone();
     assert_eq!(problem["fix"], "Check the disk on backup-a is plugged in and has room.", "{problem}");
     assert!(problem["text"].as_str().unwrap().starts_with("T7 Shield "), "{problem}");
