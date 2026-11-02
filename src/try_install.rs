@@ -400,7 +400,6 @@ fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &
     let person = person.filter(|name| Some(name.to_lowercase()) != first);
     match rest.first().map(String::as_str) {
         Some("web") => web(dir, settings, person.as_deref())?,
-        Some("windows") if person.is_some() => bail!("the Windows client signs in only as the try install's first person for now: --as works with web and android"),
         Some(kind @ ("android" | "windows")) => {
             if let Some(name) = &person {
                 // They join where anyone does, in a browser: the try install's own here.
@@ -571,7 +570,7 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, 
     };
     let built = match kind {
         "android" => android(dir, checkout, &device, settings, person),
-        _ => windows(checkout, &device, &settings.address),
+        _ => windows(dir, checkout, &device, settings, person),
     };
     building.store(false, std::sync::atomic::Ordering::Relaxed);
     let _ = keep.join();
@@ -689,43 +688,79 @@ fn ui_nodes(xml: &str) -> Vec<UiNode> {
 }
 
 /// The Windows app: built in the device itself (WinUI 3 builds only on Windows), which installs and starts it, then
-/// signed in at `address` as a person would: typing it and pressing Sign In, on the device's desktop.
-fn windows(checkout: &Path, device: &str, address: &str) -> Result<()> {
+/// signed in at the try install's address as a person would: typing it and pressing Sign In, on the device's desktop,
+/// as the try install's first person or `person`, whom Edge signs in as first. Once signed in on a device as them (a
+/// file in the try install's folder says so), a new build keeps that sign-in.
+fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Settings, person: Option<&str>) -> Result<()> {
+    let address = settings.address.as_str();
     build(checkout, "windows/build.sh", &[("DEVICE", device)])?;
-    let name = NAME.chars().filter(char::is_ascii_alphanumeric).collect::<String>();
-    // UI Automation reaches the desktop's windows only from the desktop: as a task signed in there, as build.ps1 does.
+    let file = NAME.chars().filter(char::is_ascii_alphanumeric).collect::<String>();
+    let signed_in = dir.join(format!("signed-in-{device}"));
+    let first = settings.try_person.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
+    let who = person.unwrap_or(first);
+    let here = format!("{address}\n{who}");
+    let kept = std::fs::read_to_string(&signed_in).is_ok_and(|was| was == here);
+    // A copy of the person's computer may have the app signed in elsewhere, or as someone else: what it kept goes (the
+    // app's own folder, or its package's, where it keeps it once packaged), and it signs in again. Edge, which it signs
+    // in through, signs in as them first. Signed in, the sidebar has Settings. UI Automation reaches the desktop's
+    // windows only from the desktop: as a task signed in there, as build.ps1 does.
     let script = format!(
         r#"$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 $A = [Windows.Automation.AutomationElement]
-function Find($in, $property, $value) {{ $in.FindFirst([Windows.Automation.TreeScope]::Descendants, (New-Object Windows.Automation.PropertyCondition($property, $value))) }}
+$all = [Windows.Automation.TreeScope]::Descendants
 $log = "$env:TEMP\one-try-sign-in.log"
+function Find($in, $property, $value) {{ $in.FindFirst($all, (New-Object Windows.Automation.PropertyCondition($property, $value))) }}
+function Window($process) {{
+  $p = Get-Process -Name $process -ErrorAction SilentlyContinue | Where-Object MainWindowHandle -ne 0 | Select-Object -First 1
+  if ($p) {{ $A::FromHandle($p.MainWindowHandle) }}
+}}
+function Texts($in) {{ if ($in) {{ ($in.FindAll($all, [Windows.Automation.Condition]::TrueCondition) | ForEach-Object {{ $_.Current.Name }} | Where-Object {{ $_ }}) -join ' | ' }} }}
 try {{
-  $until = (Get-Date).AddSeconds(60)
-  while ((Get-Date) -lt $until) {{
-    $p = Get-Process -Name '{name}' -ErrorAction SilentlyContinue | Where-Object MainWindowHandle -ne 0 | Select-Object -First 1
-    if ($p) {{
-      $window = $A::FromHandle($p.MainWindowHandle)
-      $button = Find $window $A::NameProperty 'Sign In'
-      $field = Find $window $A::ControlTypeProperty ([Windows.Automation.ControlType]::Edit)
-      # The welcome asks for the address first, with Continue, unless it has one; then Sign In.
-      $next = Find $window $A::NameProperty 'Continue'
-      if ($field -and $next) {{
-        $field.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('{address}')
-        Start-Sleep -Milliseconds 500
-        $next.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-        Start-Sleep -Seconds 1
-        continue
-      }}
-      if (-not $button) {{ 'signed in' | Set-Content $log; exit }}
-      $button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-      'pressed' | Set-Content $log
+  if (${fresh}) {{
+    Get-Process -Name '{file}' -ErrorAction SilentlyContinue | Stop-Process -Force
+    Remove-Item "$env:LOCALAPPDATA\{NAME}\sign-in.json", "$env:LOCALAPPDATA\Packages\{file}_*\LocalCache\Local\{NAME}\sign-in.json" -ErrorAction SilentlyContinue
+    Start-Process msedge '{address}/sign-in?as={as_}'
+    $until = (Get-Date).AddSeconds(60)
+    while ((Texts (Window msedge)) -notlike '*is signed in here as*') {{
+      if ((Get-Date) -gt $until) {{ throw "Edge didn't sign in as {who}: $(Texts (Window msedge))" }}
+      Start-Sleep 2
+    }}
+    Start-Process explorer.exe "shell:AppsFolder\$((Get-AppxPackage -Name '{file}').PackageFamilyName)!App"
+  }}
+  $until = (Get-Date).AddSeconds(120)
+  $pressed = $false
+  while ($true) {{
+    Start-Sleep 1
+    $window = Window '{file}'
+    if ((Get-Date) -gt $until) {{ throw "it didn't show its pages: $(Texts $window)" }}
+    if (-not $window) {{ continue }}
+    if (Find $window $A::NameProperty 'Settings') {{
+      # Edge, left on the page it came back to the app from, closes, and the app is in front.
+      Get-Process -Name msedge -ErrorAction SilentlyContinue | Where-Object MainWindowHandle -ne 0 | ForEach-Object {{ [void]$_.CloseMainWindow() }}
+      Start-Sleep 2
+      try {{ $window.SetFocus() }} catch {{ }}
+      'signed in' | Set-Content $log
       exit
     }}
-    Start-Sleep -Seconds 1
+    # The welcome asks for the address first, with Continue, unless it has one; then Sign In, once.
+    $field = Find $window $A::ControlTypeProperty ([Windows.Automation.ControlType]::Edit)
+    $next = Find $window $A::NameProperty 'Continue'
+    if ($field -and $next) {{
+      $field.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('{address}')
+      Start-Sleep -Milliseconds 500
+      $next.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+      continue
+    }}
+    $button = Find $window $A::NameProperty 'Sign In'
+    if ($button -and -not $pressed) {{
+      $button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+      $pressed = $true
+    }}
   }}
-  'no window' | Set-Content $log
-}} catch {{ "failed: $_" | Set-Content $log }}"#
+}} catch {{ "failed: $_" | Set-Content $log }}"#,
+        fresh = if kept { "false" } else { "true" },
+        as_ = who.replace(' ', "%20"),
     );
     let encoded = data_encoding::BASE64.encode(&script.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>());
     on_device(
@@ -735,17 +770,19 @@ try {{
 $a = New-ScheduledTaskAction -Execute powershell.exe -Argument '-NoProfile -WindowStyle Hidden -EncodedCommand {encoded}'
 $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
 Register-ScheduledTask -TaskName one-try-sign-in -Action $a -Principal $p -Force | Out-Null
-Start-ScheduledTask -TaskName one-try-sign-in
-$until = (Get-Date).AddSeconds(90)
-while (-not (Test-Path "$env:TEMP\one-try-sign-in.log") -and (Get-Date) -lt $until) {{ Start-Sleep 1 }}
-Get-Content "$env:TEMP\one-try-sign-in.log" -ErrorAction SilentlyContinue"#
+Start-ScheduledTask -TaskName one-try-sign-in"#
         ),
-    )
-    .and_then(|said| match said.trim() {
-        "signed in" | "pressed" => Ok(()),
-        said => bail!("couldn't press Sign In in the Windows app ({said}): look at it with {CLI} computer screen --device {device}"),
-    })?;
-    // The browser goes on by itself, back to the app at its own port.
-    std::thread::sleep(Duration::from_secs(15));
+    )?;
+    let start = Instant::now();
+    loop {
+        anyhow::ensure!(start.elapsed() < Duration::from_secs(240), "the Windows app didn't sign in: look at it with {CLI} computer screen --device {device}");
+        std::thread::sleep(Duration::from_secs(3));
+        match on_device(device, r#"$log = "$env:TEMP\one-try-sign-in.log"; if (Test-Path $log) { Get-Content $log }"#)?.trim() {
+            "signed in" => break,
+            "" => {}
+            said => bail!("the Windows app didn't sign in ({said}): look at it with {CLI} computer screen --device {device}"),
+        }
+    }
+    std::fs::write(&signed_in, &here)?;
     Ok(())
 }
