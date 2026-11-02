@@ -1886,7 +1886,14 @@ impl Node {
         })?;
         let by = (caller.key != self.0.id).then_some(caller.key);
         self.append_as(scope, &caller.user, by, members::node("vault-request", data)).await?;
-        Ok(json!({ "id": id, "scope": scope.to_string(), "link": format!("{}://vault?id={id}&scope={scope}", crate::config::CLI) }))
+        // At the install's address (where its kernel signs people in) the web client opens it in any browser; an
+        // install without one has only its apps to.
+        let web = self.with(|i| Ok(settings(&i.r.members).remove("kernel_auth")))?;
+        let link = match web.as_ref().and_then(Value::as_str).filter(|w| w.starts_with("https://") || w.starts_with("http://")) {
+            Some(web) => format!("{}/vault?id={id}&scope={scope}", web.trim_end_matches('/')),
+            None => format!("{}://vault?id={id}&scope={scope}", crate::config::CLI),
+        };
+        Ok(json!({ "id": id, "scope": scope.to_string(), "link": link }))
     }
 
     /// Answers a request in `scope`: switches its app on for `item`, or makes an item with `fields` (name → value)
