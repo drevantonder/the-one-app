@@ -106,7 +106,7 @@
         case "copy": await navigator.clipboard.writeText(msg.text); return reply(null);
         case "link": await request("ui/open-link", { url: msg.url }); return reply(null);
         case "alert": return reply(msg.action ? confirm([msg.title, msg.text].filter(Boolean).join("\n\n")) : null);
-        case "close": case "title": case "icon": case "haptic": return reply(null);
+        case "close": case "title": case "icon": case "haptic": case "cache": return reply(null);
         case "menu": case "save": case "preview": case "scan": case "vault": case "icons":
           return reply(undefined, "Open this in the app to do that.");
         case "request": case "api": case "signOut": case "appearance": case "device":

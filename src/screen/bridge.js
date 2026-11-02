@@ -36,7 +36,7 @@
   // or refuses it by name (tests/contracts.rs checks). Anything a person touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
-    "icons", "icon", "haptic", "api", "signOut", "appearance", "device"];
+    "icons", "icon", "haptic", "api", "signOut", "appearance", "device", "cache"];
 
   async function host(message) {
     if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
@@ -104,10 +104,20 @@
     // Closes this screen: a sheet goes, giving `value` to who opened it; a pushed screen goes back.
     close: (value = null) => host({ type: "close", value }),
     // The shell's own menu, at `at` ({ x, y } in this page, or the element it's for), of `items`, each
-    // `{ title, danger, checked }` → the index of the one chosen, or null.
+    // `{ title, danger, checked, icon, row, section }` → the index of the one chosen, or null. `icon` is a Phosphor
+    // icon's name, which a shell draws, or shows as its own symbol for it; items with `row`, first, are choices side by
+    // side (a widget's sizes), shown by their icons; `section` starts a group of its own. A menu for an element comes
+    // from it (`rect`, its bounds), opening away from the edge it's near; a shell without that opens at the point:
+    // the element's bottom middle, or its top in the lower half of the page.
     menu: (items, at) => {
-      if (at instanceof Element) at = (({ left, right, bottom }) => ({ x: (left + right) / 2, y: bottom }))(at.getBoundingClientRect());
-      return host({ type: "menu", items: items.map((i) => ({ title: String(i.title), danger: !!i.danger, checked: !!i.checked })), x: Math.round(at?.x || 0), y: Math.round(at?.y || 0) });
+      let rect;
+      if (at instanceof Element) {
+        const r = at.getBoundingClientRect();
+        rect = [r.left, r.top, r.width, r.height].map(Math.round);
+        at = { x: (r.left + r.right) / 2, y: r.top > innerHeight / 2 ? r.top : r.bottom };
+      }
+      const item = (i) => ({ title: String(i.title), danger: !!i.danger, checked: !!i.checked, ...(i.icon ? { icon: String(i.icon) } : {}), ...(i.row ? { row: true } : {}), ...(i.section ? { section: true } : {}) });
+      return host({ type: "menu", items: items.map(item), x: Math.round(at?.x || 0), y: Math.round(at?.y || 0), ...(rect ? { rect } : {}) });
     },
     // The shell's own alert: `title` and `text`, then OK; with `action` (its button's name; `danger` if it can't be
     // undone), Cancel and that → whether it was chosen.
@@ -157,6 +167,9 @@
     // answered with an item, false if declined or closed.
     request: (scope, id) => host({ type: "request", scope, id }),
     signOut: () => host({ type: "signOut" }),
+    // What this client keeps for its own screens between launches, by `key`: with `value` (JSON), keeps it; without,
+    // gives what was kept, or null. Forgotten when it signs out.
+    cache: (key, value) => host(value === undefined ? { type: "cache", key: String(key) } : { type: "cache", key: String(key), value }),
     appearance: (value) => host({ type: "appearance", value }),
     device: () => host({ type: "device" }),
     // A Phosphor icon by its name ("magnifying-glass", "check-circle-fill"), at the text's size and colour.

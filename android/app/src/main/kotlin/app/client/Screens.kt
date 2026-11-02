@@ -25,6 +25,8 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -320,20 +322,39 @@ private fun BoxScope.Offline(offline: Bridge.Offline, tryNow: () -> Unit) {
     }
 }
 
-/** `one.menu`: the items at the point the page asked for (CSS pixels are dp, at the scale screens are drawn). */
-private class MenuAsk(val items: List<MenuItem>, val x: Int, val y: Int, val chose: CompletableDeferred<Int?> = CompletableDeferred())
-private data class MenuItem(val title: String, val danger: Boolean, val checked: Boolean)
+/** `one.menu`: the items at the point the page asked for, or from the element it's for (`rect`: x, y, width,
+ *  height), opening away from the edge it's near (CSS pixels are dp, at the scale screens are drawn). */
+private class MenuAsk(val items: List<MenuItem>, val x: Int, val y: Int, val rect: List<Int>?, val chose: CompletableDeferred<Int?> = CompletableDeferred())
+private data class MenuItem(val title: String, val danger: Boolean, val checked: Boolean, val icon: String?, val row: Boolean, val section: Boolean)
 
 @Composable
 private fun Menu(ask: MenuAsk) {
     val p = LocalPalette.current
-    val marks = ask.items.any { it.checked }
-    Box(Modifier.offset(ask.x.dp, ask.y.dp).size(1.dp)) {
+    val marks = ask.items.any { it.checked && !it.row }
+    val row = ask.items.withIndex().filter { it.value.row }
+    val anchor = ask.rect?.let { Modifier.offset(it[0].dp, it[1].dp).size(it[2].coerceAtLeast(1).dp, it[3].coerceAtLeast(1).dp) } ?: Modifier.offset(ask.x.dp, ask.y.dp).size(1.dp)
+    Box(anchor) {
         DropdownMenu(expanded = true, onDismissRequest = { ask.chose.complete(null) }) {
+            // A widget's sizes, side by side as their shapes, the one it is filled in.
+            if (row.isNotEmpty()) {
+                Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    row.forEach { (i, item) ->
+                        IconButton({ ask.chose.complete(i) }, Modifier.size(52.dp, 40.dp).background(if (item.checked) p.accent else p.fill, RoundedCornerShape(10.dp))) {
+                            if (item.icon != null) Symbol(item.icon, if (item.checked) Color.White else p.label, 20.dp)
+                            else Text(item.title.take(1), color = if (item.checked) Color.White else p.label)
+                        }
+                    }
+                }
+                HorizontalDivider(color = p.separator)
+            }
             ask.items.forEachIndexed { i, item ->
+                if (item.row) return@forEachIndexed
+                if (item.section && i > row.size) HorizontalDivider(color = p.separator)
+                val tint = if (item.danger) p.red else p.label
                 DropdownMenuItem(
-                    text = { Text(item.title, color = if (item.danger) p.red else p.label) },
+                    text = { Text(item.title, color = tint) },
                     leadingIcon = if (marks) ({ if (item.checked) Icon(Icons.Rounded.Check, null, tint = p.label) else Spacer(Modifier.size(24.dp)) }) else null,
+                    trailingIcon = item.icon?.let { { Symbol(it, tint, 20.dp) } },
                     onClick = { ask.chose.complete(i) },
                 )
             }
@@ -516,7 +537,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
     /** Each of the bridge's messages (src/screen/bridge.js's list; tests/contracts.rs holds this to it). */
     private suspend fun answer(m: JsonObject): JsonElement? {
         val type = str(m, "type")
-        if (type in listOf("api", "signOut", "appearance", "device", "request") && !own) throw NodeError("Only the app’s own screens can do that.")
+        if (type in listOf("api", "signOut", "appearance", "device", "request", "cache") && !own) throw NodeError("Only the app’s own screens can do that.")
         when (type) {
             "call" -> {
                 val app = app ?: throw NodeError("This screen has no app to call.")
@@ -548,12 +569,14 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                 return null
             }
             "menu" -> {
+                val flag = { o: JsonObject, k: String -> (o[k] as? JsonPrimitive)?.booleanOrNull == true }
                 val items = (m["items"] as? JsonArray)?.mapNotNull { it as? JsonObject }?.map {
-                    MenuItem(str(it, "title") ?: "", (it["danger"] as? JsonPrimitive)?.booleanOrNull == true, (it["checked"] as? JsonPrimitive)?.booleanOrNull == true)
+                    MenuItem(str(it, "title") ?: "", flag(it, "danger"), flag(it, "checked"), str(it, "icon")?.ifEmpty { null }, flag(it, "row"), flag(it, "section"))
                 }.orEmpty()
                 if (items.isEmpty()) return JsonNull
                 val number = { k: String -> (m[k] as? JsonPrimitive)?.doubleOrNull?.toInt() ?: 0 }
-                val ask = MenuAsk(items, number("x"), number("y"))
+                val rect = (m["rect"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.doubleOrNull?.toInt() }?.takeIf { it.size == 4 }
+                val ask = MenuAsk(items, number("x"), number("y"), rect)
                 menu?.chose?.complete(null)
                 menu = ask
                 val chose = try { ask.chose.await() } finally { if (menu == ask) menu = null }
@@ -605,6 +628,12 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                         else -> HapticFeedbackConstants.CLOCK_TICK
                     },
                 )
+                return null
+            }
+            "cache" -> {
+                val key = str(m, "key") ?: ""
+                if (!m.containsKey("value")) return store.kept(key)?.let { runCatching { json.parseToJsonElement(it) }.getOrNull() } ?: JsonNull
+                store.keep(key, m["value"].toString())
                 return null
             }
             "api" -> {

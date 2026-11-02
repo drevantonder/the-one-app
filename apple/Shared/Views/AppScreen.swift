@@ -142,6 +142,7 @@ private struct ScreenWebView: Representable {
         web.scrollView.keyboardDismissMode = .interactive
         context.coordinator.menus.web = web
         web.addInteraction(UIContextMenuInteraction(delegate: context.coordinator.menus))
+        context.coordinator.menus.watch(web)
         #endif
         context.coordinator.load(into: web)
         return web
@@ -184,8 +185,18 @@ private struct ScreenWebView: Representable {
           @media (prefers-color-scheme: dark) { :root:root { --accent: \(accentCSS(accent, dark: true)); } }
         \(Self.platformCSS)`;
         document.documentElement.appendChild(style);
+        \(raised)
         \(zoomScript)
         """
+    }
+
+    /// On an iPhone, a sheet is raised: its background is grey in the dark, and the kit's cards are lighter on it.
+    private var raised: String {
+        #if os(iOS)
+        dismiss == nil ? "" : #"document.documentElement.setAttribute("data-raised", "");"#
+        #else
+        ""
+        #endif
     }
 
     private static let noZoom = """
@@ -285,7 +296,7 @@ private struct ScreenWebView: Representable {
             guard let body = message.body as? [String: Any] else { return (nil, "Not a message") }
             let route = view.route, store = view.store
             let type = body["type"] as? String ?? ""
-            if ["api", "signOut", "appearance", "device", "request"].contains(type) && !view.settings { return (nil, "Only Settings can do that.") }
+            if ["api", "signOut", "appearance", "device", "request", "cache"].contains(type) && !view.settings { return (nil, "Only Settings can do that.") }
             switch type {
             case "api":
                 do {
@@ -293,6 +304,11 @@ private struct ScreenWebView: Representable {
                 } catch {
                     return (nil, error.localizedDescription)
                 }
+            case "cache":
+                let key = body["key"] as? String ?? ""
+                guard body.keys.contains("value") else { return (ScreenCache.kept(key), nil) }
+                ScreenCache.keep(body["value"], as: key)
+                return (nil, nil)
             case "signOut":
                 #if os(iOS)
                 await Phone.shared.signOut()
@@ -345,8 +361,9 @@ private struct ScreenWebView: Representable {
             case "menu":
                 let items = ShellMenuItem.from(body["items"])
                 let point = CGPoint(x: body["x"] as? Double ?? 0, y: body["y"] as? Double ?? 0)
+                let rect = (body["rect"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
                 #if os(iOS)
-                return (await menus.show(items, at: point), nil)
+                return (await menus.show(items, at: point, from: rect), nil)
                 #else
                 return (shellMenu(items, at: point, in: web), nil)
                 #endif
@@ -644,6 +661,22 @@ enum ScreenCache {
         guard let data = try? Data(contentsOf: url) else { return nil }
         let time = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .now
         return (String(decoding: data, as: UTF8.self), time)
+    }
+
+    /// What the client's own screens keep between launches (`one.cache`), by key.
+    private static func file(_ key: String) -> URL? {
+        guard (1...40).contains(key.count), key.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }) else { return nil }
+        return dir.appending(path: "kept-\(key).json")
+    }
+
+    static func keep(_ value: Any?, as key: String) {
+        guard let url = file(key), let data = try? JSONSerialization.data(withJSONObject: value ?? NSNull(), options: .fragmentsAllowed) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func kept(_ key: String) -> Any? {
+        guard let url = file(key), let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
     }
 
     static func forget() {

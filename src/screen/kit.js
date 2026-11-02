@@ -38,12 +38,12 @@
       (retry ? '<button class="button" data-retry>Try again</button>' : "") + "</div>";
   };
 
-  // Draws `fn()`'s HTML into `el`: with a labelled spinner the first time, if it's slow, and a banner with Try again
-  // if it fails. Later draws (on "changed") replace what's there only once they're ready.
-  one.render = async (el, fn, { loading = "Loading" } = {}) => {
+  // Draws `fn()`'s HTML into `el`: with a labelled spinner the first time, if it's slow (`wait` ms), and a banner with
+  // Try again if it fails. Later draws (on "changed") replace what's there only once they're ready.
+  one.render = async (el, fn, { loading = "Loading", wait = 120 } = {}) => {
     if (typeof el === "string") el = document.querySelector(el);
     const turn = (el.__turn = (el.__turn || 0) + 1);
-    const slow = el.__drawn ? null : setTimeout(() => turn === el.__turn && (el.innerHTML = one.loading(loading)), 120);
+    const slow = el.__drawn ? null : setTimeout(() => turn === el.__turn && (el.innerHTML = one.loading(loading)), wait);
     try {
       const html = await fn();
       if (turn !== el.__turn) return;

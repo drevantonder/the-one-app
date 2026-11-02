@@ -56,6 +56,15 @@ a { color: inherit; }
 .menu-item.danger { color: var(--danger); }
 .menu-item.danger:hover { background: var(--danger); color: white; }
 .menu-check { display: inline-block; width: 16px; }
+.menu-item { display: flex; align-items: center; gap: 8px; }
+.menu-title { flex: 1; }
+.menu-icon { width: 15px; height: 15px; flex: none; opacity: 0.85; }
+.menu-line { height: 0.5px; margin: 5px 8px; background: var(--line); }
+.menu-row { display: flex; gap: 4px; padding: 2px 2px 6px; margin-bottom: 4px; border-bottom: 0.5px solid var(--line); }
+.menu-choice { flex: 1; height: 34px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }
+.menu-choice .menu-icon { width: 18px; height: 18px; }
+.menu-choice:hover { background: var(--line); }
+.menu-choice.on { background: var(--accent); color: white; }
 
 /* Sheets: the kit's, as wide as the Mac app's; a screen in one fills it. */
 .sheet { --sheet-bg: var(--window); font-size: 14px; }

@@ -155,13 +155,18 @@ impl Node {
     }
 
     /// Arranges a page for `caller` alone: the order of its apps and widgets, which widgets, their sizes and options,
-    /// and the apps taken off it, kept in their own scope so it follows them to every device.
-    pub async fn arrange(&self, caller: &Caller, page: &str, items: Value, hidden: Value) -> Result<()> {
+    /// and the apps taken off it, kept in their own scope so it follows them to every device; with their own page,
+    /// `pages`, the order of their groups' pages and those they hid.
+    pub async fn arrange(&self, caller: &Caller, page: &str, items: Value, hidden: Value, pages: Value) -> Result<()> {
         let scope = Scope::User(caller.user.clone());
         let content = self.with(|i| {
             ensure!(members::valid_page(page), "a page is user, group:<id> or global");
             ensure!(i.r.holds(&scope), "this device doesn't hold your data");
-            Ok(members::node("arrange", json!({ "page": page, "items": items, "hidden": if hidden.is_null() { json!([]) } else { hidden } })))
+            let mut data = json!({ "page": page, "items": items, "hidden": if hidden.is_null() { json!([]) } else { hidden } });
+            if page == "user" && !pages.is_null() {
+                data["pages"] = pages;
+            }
+            Ok(members::node("arrange", data))
         })?;
         let by = (caller.key != self.0.id).then_some(caller.key);
         self.append_as(&scope, &caller.user, by, content).await?;

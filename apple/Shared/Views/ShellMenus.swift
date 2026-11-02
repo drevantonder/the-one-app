@@ -1,18 +1,66 @@
 import SwiftUI
 import WebKit
 
-/// One of a menu's items, as a screen's `one.menu` gives it.
+/// One of a menu's items, as a screen's `one.menu` gives it: its Phosphor `icon`, and whether it's one of the choices
+/// in a row at the top (`row`, a widget's sizes) or starts a section of its own.
 struct ShellMenuItem {
     var title: String
     var danger = false
     var checked = false
+    var icon: String?
+    var row = false
+    var section = false
 
     static func from(_ list: Any?) -> [ShellMenuItem] {
         (list as? [[String: Any]] ?? []).map {
-            ShellMenuItem(title: $0["title"] as? String ?? "", danger: $0["danger"] as? Bool ?? false, checked: $0["checked"] as? Bool ?? false)
+            ShellMenuItem(title: $0["title"] as? String ?? "", danger: $0["danger"] as? Bool ?? false, checked: $0["checked"] as? Bool ?? false,
+                          icon: ($0["icon"] as? String).flatMap { $0.isEmpty ? nil : $0 }, row: $0["row"] as? Bool ?? false, section: $0["section"] as? Bool ?? false)
         }
     }
+
+    /// The system's symbol for the Phosphor icons menus name, as the native screens use them.
+    static let symbols = [
+        "dots-nine": "square.grid.3x3", "info": "info.circle", "minus-circle": "minus.circle", "copy": "doc.on.doc", "gear-six": "gearshape",
+        "bag": "bag", "trash": "trash", "list-bullets": "list.bullet", "square": "square", "rectangle": "rectangle", "squares-four": "square.grid.2x2",
+        "columns": "rectangle.split.2x1", "plus-circle": "plus.circle", "plus-square": "plus.rectangle.on.rectangle",
+    ]
+
+    #if os(iOS)
+    typealias Image = UIImage
+    #else
+    typealias Image = NSImage
+    #endif
+
+    /// Its icon: the system's symbol for it, or the Phosphor icon itself, drawn as a template.
+    var image: Image? {
+        guard let icon else { return nil }
+        if let name = Self.symbols[icon] { return Image(systemName: name) }
+        guard let shape = Icons.shape(icon) else { return nil }
+        let size = CGSize(width: 20, height: 20)
+        let path = shape.path(in: CGRect(origin: .zero, size: size)).cgPath
+        #if os(iOS)
+        return UIGraphicsImageRenderer(size: size).image { c in
+            c.cgContext.addPath(path)
+            c.cgContext.fillPath()
+        }.withRenderingMode(.alwaysTemplate)
+        #else
+        let image = NSImage(size: size, flipped: true) { _ in
+            guard let c = NSGraphicsContext.current?.cgContext else { return false }
+            c.addPath(path)
+            c.fillPath()
+            return true
+        }
+        image.isTemplate = true
+        return image
+        #endif
+    }
 }
+
+#if os(macOS)
+private extension NSImage {
+    convenience init?(systemName: String) { self.init(systemSymbolName: systemName, accessibilityDescription: nil) }
+}
+#endif
 
 #if os(iOS)
 /// A screen's menus, the iPhone's own: touch and hold lifts what's held out of the page with its menu, as the Home
@@ -22,7 +70,7 @@ struct ShellMenuItem {
 /// `contextmenu` (`script`). Once the hold lifts it, the page is sent a `contextmenu` there, which it answers with
 /// `one.menu`, and that's the menu shown.
 @MainActor
-final class ShellMenus: NSObject, UIContextMenuInteractionDelegate {
+final class ShellMenus: NSObject, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
     weak var web: WKWebView?
     /// What a finger is on: its frame in the web view, and its corners' radius.
     private var under: (rect: CGRect, radius: CGFloat)?
@@ -31,6 +79,7 @@ final class ShellMenus: NSObject, UIContextMenuInteractionDelegate {
     /// Before the page's scripts: marks what listens for `contextmenu`, and says what's under each finger that comes down.
     static let script = """
     (() => {
+      window.__oneLifts = true;
       const add = EventTarget.prototype.addEventListener;
       EventTarget.prototype.addEventListener = function (type, ...rest) {
         if (type === "contextmenu" && this instanceof Element) this.setAttribute("data-one-held", "");
@@ -77,15 +126,60 @@ final class ShellMenus: NSObject, UIContextMenuInteractionDelegate {
         under = (CGRect(x: r[0], y: r[1], width: r[2], height: r[3]), max(r[4], 12))
     }
 
-    /// `one.menu`: the held thing's, once its hold asked the page; otherwise at `point`. → the index chosen, or nil.
-    func show(_ items: [ShellMenuItem], at point: CGPoint) async -> Int? {
+    /// `one.menu`: the held thing's, once its hold asked the page; otherwise from `rect` (the element it's for), or
+    /// at `point`. → the index chosen, or nil.
+    func show(_ items: [ShellMenuItem], at point: CGPoint, from rect: CGRect? = nil) async -> Int? {
         if let hold, hold.items == nil {
             if hold.over { return nil }
             hold.items = items
             hold.ready?(items)
             return await withCheckedContinuation { done in hold.answer = { done.resume(returning: $0) } }
         }
-        return await withCheckedContinuation { done in present(items, at: point) { done.resume(returning: $0) } }
+        let frame = rect ?? CGRect(x: point.x - 1, y: point.y - 1, width: 2, height: 2)
+        return await withCheckedContinuation { done in present(items, from: frame) { done.resume(returning: $0) } }
+    }
+
+    // MARK: Carrying what's held
+
+    /// A finger that moves what a hold lifted carries it, as on the Home Screen: the menu goes, and the page (which
+    /// starts arranging) is told where the finger is until it lets go (`__oneDrag`).
+    private lazy var carry: UILongPressGestureRecognizer = {
+        let g = UILongPressGestureRecognizer(target: self, action: #selector(carried(_:)))
+        g.minimumPressDuration = 0.35
+        g.allowableMovement = .greatestFiniteMagnitude
+        g.cancelsTouchesInView = false
+        g.delaysTouchesEnded = false
+        g.delegate = self
+        return g
+    }()
+    private var carrying = false
+    private var start: CGPoint?
+
+    func watch(_ web: WKWebView) {
+        if carry.view !== web { web.addGestureRecognizer(carry) }
+    }
+
+    @objc private func carried(_ g: UILongPressGestureRecognizer) {
+        guard let web else { return }
+        let at = g.location(in: web)
+        let call = { (phase: String) in web.evaluateJavaScript("window.__oneDrag && __oneDrag(\"\(phase)\", \(at.x), \(at.y))") }
+        switch g.state {
+        case .began:
+            start = at
+        case .changed:
+            if carrying { call("move"); return }
+            // Only what a hold lifted, once it's moved far enough to be more than a wobble.
+            guard let start, let hold, !hold.over, hypot(at.x - start.x, at.y - start.y) > 12 else { return }
+            carrying = true
+            hold.finish(nil)
+            hold.items = hold.items ?? []
+            web.interactions.compactMap { $0 as? UIContextMenuInteraction }.forEach { $0.dismissMenu() }
+            web.evaluateJavaScript("window.__oneDrag && __oneDrag(\"start\", \(at.x), \(at.y))")
+        default:
+            if carrying { call("end") }
+            carrying = false
+            start = nil
+        }
     }
 
     // MARK: Touch and hold
@@ -161,11 +255,13 @@ final class ShellMenus: NSObject, UIContextMenuInteractionDelegate {
         return UITargetedPreview(view: snapshot, parameters: look, target: UIPreviewTarget(container: web, center: CGPoint(x: hold.rect.midX, y: hold.rect.midY)))
     }
 
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
     // MARK: Menus at a point
 
-    private func present(_ items: [ShellMenuItem], at point: CGPoint, done: @escaping (Int?) -> Void) {
+    private func present(_ items: [ShellMenuItem], from frame: CGRect, done: @escaping (Int?) -> Void) {
         guard let web, !items.isEmpty else { return done(nil) }
-        let button = MenuButton(frame: CGRect(x: point.x - 1, y: point.y - 1, width: 2, height: 2))
+        let button = MenuButton(frame: frame)
         button.done = done
         button.menu = UIMenu(children: elements(items) { [weak button] in button?.finish($0) })
         button.showsMenuAsPrimaryAction = true
@@ -196,15 +292,22 @@ final class ShellMenus: NSObject, UIContextMenuInteractionDelegate {
         }
     }
 
-    /// The items, as the iPhone lays a menu out: what can't be undone in a section of its own, at the end.
+    /// The items, as the iPhone lays a menu out: the row's choices across the top, as the Home Screen's sizes are,
+    /// then each section, what can't be undone in one of its own, at the end.
     private func elements(_ items: [ShellMenuItem], chose: @escaping (Int) -> Void) -> [UIMenuElement] {
         let actions = items.enumerated().map { i, item in
-            UIAction(title: item.title, attributes: item.danger ? .destructive : [], state: item.checked ? .on : .off) { _ in chose(i) }
+            UIAction(title: item.title, image: item.image, attributes: item.danger ? .destructive : [], state: item.checked ? .on : .off) { _ in chose(i) }
         }
-        let safe = actions.enumerated().filter { !items[$0.offset].danger }.map(\.element)
-        let danger = actions.enumerated().filter { items[$0.offset].danger }.map(\.element)
-        if safe.isEmpty || danger.isEmpty { return actions }
-        return [UIMenu(options: .displayInline, children: safe), UIMenu(options: .displayInline, children: danger)]
+        var out: [UIMenuElement] = []
+        let row = items.indices.filter { items[$0].row }
+        if !row.isEmpty { out.append(UIMenu(options: [.displayInline, .displayAsPalette], children: row.map { actions[$0] })) }
+        var sections: [[Int]] = []
+        for i in items.indices where !items[i].row {
+            let fresh = sections.isEmpty || items[i].section || (items[i].danger && !(sections.last?.last.map { items[$0].danger } ?? true))
+            if fresh { sections.append([i]) } else { sections[sections.count - 1].append(i) }
+        }
+        out += sections.map { UIMenu(options: .displayInline, children: $0.map { actions[$0] }) }
+        return out.count == 1 ? (out[0] as? UIMenu)?.children ?? out : out
     }
 }
 #endif
@@ -252,8 +355,9 @@ func shellMenu(_ items: [ShellMenuItem], at point: CGPoint, in web: WKWebView?) 
     let chooser = Chooser()
     let menu = NSMenu()
     for (i, item) in items.enumerated() {
-        if i > 0, item.danger, !items[i - 1].danger { menu.addItem(.separator()) }
+        if i > 0, (item.danger && !items[i - 1].danger) || item.section || (items[i - 1].row && !item.row) { menu.addItem(.separator()) }
         let entry = NSMenuItem(title: item.title, action: #selector(Chooser.choose(_:)), keyEquivalent: "")
+        entry.image = item.image
         entry.target = chooser
         entry.tag = i
         entry.state = item.checked ? .on : .off

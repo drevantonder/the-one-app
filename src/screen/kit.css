@@ -14,6 +14,9 @@
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #000000; --card: #1c1c1e; --text: #ffffff; --muted: #98989f; --faint: #48484a; --line: rgba(84, 84, 88, 0.6); --danger: #ff453a; }
+  /* Raised, as a shell's sheet is (data-raised): its own background is grey, so cards are a step lighter, as the
+     platform's grouped lists are there. */
+  :root[data-raised] { --bg: #1c1c1e; --card: #2c2c2e; --faint: #545458; }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }

@@ -24,7 +24,7 @@ window.home = (() => {
   }
 
   /// Every page this person can read: theirs, their groups', then everyone's.
-  function pages() {
+  function allPages() {
     const i = install(), u = me();
     if (!i || !u) return [];
     const devices = i.servers.filter((s) => s.user === u.id).length + i.clients.filter((c) => c.user === u.id).length;
@@ -36,7 +36,21 @@ window.home = (() => {
     out.push({ scope: "global", title: "Everyone", subtitle: `${people(i.users.length)} · ${chosenBy(i.users.filter((x) => x.role === "admin").map((x) => x.id))}`, whose: "For everyone" });
     return out;
   }
-  const page = (scope) => pages().find((p) => p.scope === scope);
+  /// How this person ordered their groups' pages and which they hid (Edit Pages…), kept with their own page's arrangement.
+  function pageChoices() {
+    const kept = h.state?.arrangements?.user?.pages;
+    return { order: kept?.order || [], hidden: kept?.hidden || [] };
+  }
+
+  /// The pages this person shows, in their order: theirs first, then their groups' as they ordered them (any they
+  /// haven't ordered after, by name), everyone's last.
+  function pages() {
+    const all = allPages(), { order, hidden } = pageChoices();
+    const rank = (p) => (order.includes(p.scope) ? order.indexOf(p.scope) : order.length + all.indexOf(p));
+    const groups = all.filter((p) => p.scope.startsWith("group:") && !hidden.includes(p.scope)).sort((a, b) => rank(a) - rank(b));
+    return [...all.filter((p) => p.scope === "user"), ...groups, ...all.filter((p) => p.scope === "global")];
+  }
+  const page = (scope) => allPages().find((p) => p.scope === scope);
 
   /// Whether this person may install into a scope: their own, a group they admin, or everyone's as an admin.
   function canArrange(scope) {
@@ -139,14 +153,14 @@ window.home = (() => {
   /// What an app's menu offers: its settings, its page in the App Store, taking it off this page, and deleting it.
   function actions(a, p) {
     const out = [];
-    if (settings(a, p)) out.push({ title: "Settings", run: settings(a, p) });
-    if (inStore(a)) out.push({ title: "Open in App Store", run: inStore(a) });
+    if (settings(a, p)) out.push({ title: "Settings", icon: "gear-six", run: settings(a, p) });
+    if (inStore(a)) out.push({ title: "Open in App Store", icon: "bag", run: inStore(a) });
     if (canArrange(p.scope) && (a.deploys || 0) > 0) {
-      out.push({ title: `Remove from ${p.title}`, danger: true, run: () => change(() => one.api("POST", "/v1/install", { app: a.name, scope: p.scope, installed: false })) });
+      out.push({ title: `Remove from ${p.title}`, icon: "minus-circle", danger: true, section: true, run: () => change(() => one.api("POST", "/v1/install", { app: a.name, scope: p.scope, installed: false })) });
     }
     if (owns(a) && (a.deploys || 0) > 0) {
       out.push({
-        title: "Delete App…", danger: true,
+        title: "Delete App…", icon: "trash", danger: true,
         run: async () => {
           const sure = await one.alert({
             title: `Delete ${label(a)}?`, action: "Delete App", danger: true,
@@ -177,7 +191,7 @@ window.home = (() => {
   }
 
   async function loadWidgets() {
-    await Promise.all(pages().map(async (p) => {
+    await Promise.all(allPages().map(async (p) => {
       [h.widgets[p.scope], h.badges[p.scope]] = await Promise.all([
         one.api("GET", `/v1/widgets?scope=${encodeURIComponent(p.scope)}`).catch(() => h.widgets[p.scope] || []),
         one.api("GET", `/v1/badges?scope=${encodeURIComponent(p.scope)}`).catch(() => ({})),
@@ -208,7 +222,7 @@ window.home = (() => {
   }
 
   return {
-    data: h, me, install, label, app, has, hasScreens, pages, page, canArrange, appsOn, servicesOn, badge, widgetsOn, items,
+    data: h, me, install, label, app, has, hasScreens, allPages, pageChoices, pages, page, canArrange, appsOn, servicesOn, badge, widgetsOn, items,
     supported, tree, store, open, settings, inStore, addService, openStore, call, failed, change, actions, menu, load, loadWidgets, watch,
   };
 })();

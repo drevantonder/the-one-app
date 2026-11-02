@@ -15,6 +15,9 @@ window.__one = {};
   // MARK: Signing in
 
   const KEPT = "one.signin";
+  // What the client's own screens keep between visits (one.cache), forgotten with the sign-in.
+  const SCREENS = "one.screens.";
+  const forgetScreens = () => Object.keys(localStorage).filter((k) => k.startsWith(SCREENS)).forEach((k) => localStorage.removeItem(k));
   const CLIENT = "one.client";
 
   const auth = {
@@ -99,7 +102,7 @@ window.__one = {};
           auth.keep({ ...tokens, refresh: tokens.refresh || kept.refresh });
           return tokens.access;
         } catch (err) {
-          if (err.signedOut) localStorage.removeItem(KEPT);
+          if (err.signedOut) localStorage.removeItem(KEPT), forgetScreens();
           throw err;
         }
       };
@@ -109,6 +112,7 @@ window.__one = {};
     async signOut() {
       const kept = auth.kept();
       localStorage.removeItem(KEPT);
+      forgetScreens();
       try {
         const meta = await auth.meta();
         const client = JSON.parse(localStorage.getItem(CLIENT) || "null")?.id;
@@ -438,7 +442,7 @@ window.__one = {};
     const reply = (ok) => f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*");
     const fail = (err) => f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err) }, "*");
     try {
-      if (["api", "signOut", "appearance", "device", "request"].includes(m.type) && !mine) return fail("Only Settings can do that.");
+      if (["api", "signOut", "appearance", "device", "request", "cache"].includes(m.type) && !mine) return fail("Only Settings can do that.");
       switch (m.type) {
         case "call":
           if (mine) return fail("Settings has no app to call.");
@@ -510,6 +514,14 @@ window.__one = {};
           return reply(await iconPaths(Array.isArray(m.names) ? m.names.map(String) : []));
         case "icon": case "haptic":
           return reply(null);
+        case "cache": {
+          const key = SCREENS + String(m.key || "");
+          if (!("value" in m)) return reply(JSON.parse(localStorage.getItem(key) || "null"));
+          try {
+            localStorage.setItem(key, JSON.stringify(m.value));
+          } catch {}
+          return reply(null);
+        }
         default:
           return fail("Unknown message");
       }
@@ -518,8 +530,9 @@ window.__one = {};
     }
   });
 
-  /// `one.menu`: a small menu at its point in the screen's frame → the index chosen, or null once it's closed by a
-  /// click elsewhere or Escape.
+  /// `one.menu`: a small menu at its point in the screen's frame, or beside the element it's for (`rect`) → the index
+  /// chosen, or null once it's closed by a click elsewhere or Escape. Its `row` items lead, side by side as their icons;
+  /// a `section` starts after a line.
   function menu(frame, m) {
     return new Promise((done) => {
       document.querySelector(".menu-backdrop")?.click();
@@ -531,12 +544,23 @@ window.__one = {};
       const el = document.createElement("div");
       el.className = "menu";
       el.tabIndex = -1;
-      el.innerHTML = entries.map((e, i) => `<button class="menu-item${e.danger ? " danger" : ""}" data-i="${i}"><span class="menu-check">${e.checked ? "✓" : ""}</span>${esc(e.title)}</button>`).join("");
+      const icon = (e) => (e.icon ? one.icon(String(e.icon), "menu-icon") : "");
+      const checks = entries.some((e) => e.checked && !e.row);
+      const row = entries.map((e, i) => [e, i]).filter(([e]) => e.row);
+      el.innerHTML = (row.length ? `<div class="menu-row">${row.map(([e, i]) => `<button class="menu-choice${e.checked ? " on" : ""}" data-i="${i}" title="${esc(e.title)}" aria-label="${esc(e.title)}">${icon(e) || esc(e.title)}</button>`).join("")}</div>` : "") +
+        entries.map((e, i) => (e.row ? "" : `${e.section && i > row.length ? '<div class="menu-line"></div>' : ""}<button class="menu-item${e.danger ? " danger" : ""}" data-i="${i}">` +
+          `${checks ? `<span class="menu-check">${e.checked ? "✓" : ""}</span>` : ""}<span class="menu-title">${esc(e.title)}</span>${icon(e)}</button>`)).join("");
       back.append(el);
       document.body.append(back);
-      // Its point in the frame, in the window.
+      // Its point in the frame, in the window: beside its element, opening away from the edge it's near.
       const box = frame.getBoundingClientRect();
-      const x = box.left + Number(m.x || 0), y = box.top + Number(m.y || 0);
+      const r = Array.isArray(m.rect) && m.rect.length === 4 ? m.rect.map(Number) : null;
+      let x = box.left + Number(m.x || 0), y = box.top + Number(m.y || 0);
+      if (r) {
+        const top = box.top + r[1], bottom = top + r[3];
+        x = box.left + r[0] + r[2] / 2 - el.offsetWidth / 2;
+        y = bottom + el.offsetHeight + 8 > innerHeight && top - el.offsetHeight - 6 > 0 ? top - el.offsetHeight - 6 : bottom + 6;
+      }
       el.style.top = `${Math.max(8, Math.min(y, innerHeight - el.offsetHeight - 8))}px`;
       el.style.left = `${Math.max(8, Math.min(x, innerWidth - el.offsetWidth - 8))}px`;
       const close = (i) => { back.remove(); done(i); };

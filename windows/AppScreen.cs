@@ -309,7 +309,7 @@ public sealed class AppScreen : Grid
         try
         {
             var type = Text(m, "type");
-            if (type is "api" or "signOut" or "appearance" or "device" or "request" && !Own)
+            if (type is "api" or "signOut" or "appearance" or "device" or "request" or "cache" && !Own)
             {
                 Fail(id, "Only Settings can do that.");
                 return;
@@ -323,6 +323,24 @@ public sealed class AppScreen : Grid
                     Reply(id, null);
                     await Window.SignOut();
                     return;
+                case "cache":
+                    {
+                        var file = KeptFile(Text(m, "key") ?? "");
+                        if (!m.ContainsKey("value"))
+                        {
+                            JsonNode? kept = null;
+                            try { if (file != null && File.Exists(file)) kept = JsonNode.Parse(await File.ReadAllTextAsync(file)); } catch { }
+                            Reply(id, kept);
+                            return;
+                        }
+                        if (file != null)
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                            await File.WriteAllTextAsync(file, m["value"]?.ToJsonString() ?? "null");
+                        }
+                        Reply(id, null);
+                        return;
+                    }
                 case "appearance":
                     if (Text(m, "value") is "automatic" or "light" or "dark") Appearance.Choose(Text(m, "value")!, Window);
                     Reply(id, Appearance.Chosen);
@@ -437,20 +455,34 @@ public sealed class AppScreen : Grid
     /// A request for an item, in its sheet → whether it was allowed, once the sheet's gone.
     static async Task<bool> Asked(Route request) => (await Window.Present(request))?.GetValueKind() == JsonValueKind.True;
 
+    /// Where the client's own screens keep what they ask to (`one.cache`), by key; forgotten when it signs out. (Not
+    /// "Screens", the web views' own folder, which is the same name on Windows.)
+    public static string Kept => Path.Combine(Brand.Folder, "Kept for screens");
+
+    static string? KeptFile(string key) => key.Length is > 0 and <= 40 && key.All(c => char.IsAsciiLetterOrDigit(c) || c == '-') ? Path.Combine(Kept, key + ".json") : null;
+
     /// `one.menu`: Windows' own menu at its point in the screen → the index of the one chosen, or null once it's closed.
-    /// A menu with a checked item shows each with its place for a check; one that can't be undone, in red.
+    /// A menu with a checked item shows each with its place for a check; one that can't be undone, in red; each with
+    /// its icon; a section after a line. Choices in a row (a widget's sizes) are the first items, then a line.
     Task<JsonNode?> Menu(JsonObject m)
     {
         var done = new TaskCompletionSource<JsonNode?>();
         var entries = (m["items"] as JsonArray ?? []).OfType<JsonObject>().ToList();
         if (entries.Count == 0) return Task.FromResult<JsonNode?>(null);
-        var checks = entries.Any(e => e["checked"]?.GetValueKind() == JsonValueKind.True);
+        static bool Flag(JsonObject e, string key) => e[key]?.GetValueKind() == JsonValueKind.True;
+        var checks = entries.Any(e => Flag(e, "checked"));
         var flyout = new MenuFlyout();
         for (var i = 0; i < entries.Count; i++)
         {
             var e = entries[i];
-            MenuFlyoutItem item = checks ? new ToggleMenuFlyoutItem { IsChecked = e["checked"]?.GetValueKind() == JsonValueKind.True } : new MenuFlyoutItem();
+            if (i > 0 && (Flag(e, "section") || (Flag(entries[i - 1], "row") && !Flag(e, "row")))) flyout.Items.Add(new MenuFlyoutSeparator());
+            MenuFlyoutItem item = checks ? new ToggleMenuFlyoutItem { IsChecked = Flag(e, "checked") } : new MenuFlyoutItem();
             item.Text = Text(e, "title") ?? "";
+            if (Text(e, "icon") is { } icon && Look.Icons.TryGetValue(icon, out var d) && Look.PathData(d) is { } geometry)
+            {
+                geometry.Transform = new Microsoft.UI.Xaml.Media.ScaleTransform { ScaleX = 16 / 256.0, ScaleY = 16 / 256.0 };
+                item.Icon = new PathIcon { Data = geometry };
+            }
             if (e["danger"]?.GetValueKind() == JsonValueKind.True)
             {
                 var red = Look.Critical;
@@ -466,7 +498,13 @@ public sealed class AppScreen : Grid
         flyout.Closed += (_, _) => done.TrySetResult(null);
         // Its point in the page, in CSS pixels, which are the window's (the web view isn't zoomed).
         double At(string key) => m[key] is JsonValue v && v.TryGetValue<double>(out var d) ? d : 0;
-        flyout.ShowAt(web, new FlyoutShowOptions { Position = new Point(Math.Clamp(At("x"), 0, web.ActualWidth), Math.Clamp(At("y"), 0, web.ActualHeight)) });
+        // From an element in the page's lower half, it opens upward.
+        var up = m["rect"] is JsonArray r && r.Count == 4 && r[1] is JsonValue top && top.TryGetValue<double>(out var t) && t > web.ActualHeight / 2;
+        flyout.ShowAt(web, new FlyoutShowOptions
+        {
+            Position = new Point(Math.Clamp(At("x"), 0, web.ActualWidth), Math.Clamp(At("y"), 0, web.ActualHeight)),
+            Placement = up ? FlyoutPlacementMode.Top : FlyoutPlacementMode.Auto,
+        });
         return done.Task;
     }
 

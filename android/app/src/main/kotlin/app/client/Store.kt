@@ -288,7 +288,15 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
         }
     }
 
+    /** What the app's own screens keep between launches (`one.cache`), by key, forgotten when it signs out. */
+    fun kept(key: String): String? = prefs.getString("screen:$key", null)
+
+    fun keep(key: String, value: String) {
+        if (key.isNotEmpty() && key.length <= 40) prefs.edit().putString("screen:$key", value).apply()
+    }
+
     fun signOut() {
+        prefs.edit().apply { prefs.all.keys.filter { it.startsWith("screen:") }.forEach(::remove) }.apply()
         scope.launch {
             signIn.signOut()
             signedOut()

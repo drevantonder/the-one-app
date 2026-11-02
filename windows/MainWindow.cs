@@ -401,6 +401,7 @@ public sealed class MainWindow : Window
     {
         listening?.Cancel();
         await Auth.Shared.SignOut();
+        try { System.IO.Directory.Delete(AppScreen.Kept, true); } catch { }
         pushed.Clear();
         selection = Route.PageOf("user");
         Welcome(null);

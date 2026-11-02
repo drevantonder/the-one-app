@@ -426,9 +426,10 @@ async fn retire(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
     done()
 }
 
-/// `{ page, items, hidden }`: how the local user arranges one of their pages.
+/// `{ page, items, hidden, pages }`: how the local user arranges one of their pages (`pages` with their own: the order
+/// of their groups' pages, `{ order, hidden }`).
 async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    node.arrange(&me.caller, text(&body, "page")?, body["items"].clone(), body["hidden"].clone()).await?;
+    node.arrange(&me.caller, text(&body, "page")?, body["items"].clone(), body["hidden"].clone(), body["pages"].clone()).await?;
     done()
 }
 

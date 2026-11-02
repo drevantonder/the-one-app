@@ -760,7 +760,14 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             }
             let hidden = data["hidden"].as_array().cloned().unwrap_or_default();
             ensure!(hidden.iter().all(|a| a.as_str().is_some_and(valid_app_name)), "hidden lists apps");
-            state.arrangements.insert(page.to_string(), json!({ "items": items, "hidden": hidden, "time": e.time() }));
+            let mut kept = json!({ "items": items, "hidden": hidden, "time": e.time() });
+            // With your own page: the order of your groups' pages, and those you hid (Edit Pages…).
+            if page == "user" && !data["pages"].is_null() {
+                let groups = |k: &str| data["pages"][k].as_array().is_some_and(|l| l.len() <= 500 && l.iter().all(|g| g.as_str().is_some_and(|g| g.starts_with("group:") && valid_page(g))));
+                ensure!(groups("order") && groups("hidden"), "pages orders and hides groups' pages");
+                kept["pages"] = json!({ "order": data["pages"]["order"], "hidden": data["pages"]["hidden"] });
+            }
+            state.arrangements.insert(page.to_string(), kept);
         }
         _ if scope == Scope::Global => {}
         other => bail!("{other} isn't a node entry of a user or group scope"),
