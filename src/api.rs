@@ -293,9 +293,16 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
         if path == "/mcp" {
             return sign_in_first(&node, None);
         }
-        return (StatusCode::FORBIDDEN, "only this machine's own programs may use this").into_response();
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine() }))).into_response();
     }
     next.run(req).await
+}
+
+/// What a program that didn't show the token is told, as JSON: an older client shows it as it shows any error. One
+/// started before the node updated (an agent's MCP server, most often) is this machine's, and starting it again mends it.
+fn not_this_machine() -> String {
+    let name = crate::config::NAME;
+    format!("{name} on this machine was updated after this program started, or this isn't one of this machine's own programs: start it again. An agent reconnects its {name} MCP server (/mcp in Claude Code) or starts a new session.")
 }
 
 /// Whether a request is from one of this machine's own programs: over a connection from this machine (its loopback),

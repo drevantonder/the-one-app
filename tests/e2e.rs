@@ -157,6 +157,8 @@ async fn only_this_machines_own_programs_use_the_local_api() {
             assert_eq!(get_at(&own, "/v1/vault", headers).status(), 403, "{headers:?}");
             assert_eq!(get_at(&own, "/v1/state", headers).status(), 403, "{headers:?}");
         }
+        let told: Value = get_at(&own, "/v1/state", &[]).body_mut().read_json().unwrap();
+        assert!(told["error"].as_str().unwrap().contains("start it again"), "an older program is told what to do, as JSON it shows: {told}");
         // From another machine, even with the token.
         assert_eq!(get_at(&elsewhere, "/v1/vault", &[mine, ("host", "127.0.0.1")]).status(), 403);
         // What a page at the node's own address asks, a same-origin GET (Sec-Fetch-Site only) or anything with an Origin.
