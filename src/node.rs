@@ -473,6 +473,9 @@ impl Node {
         });
         if dir.join("install").join("install.json").exists() {
             node.open_install().context("open the install")?;
+            if let Err(err) = node.bucket().and_then(|b| b.forget_sent()) {
+                tracing::warn!("forgetting steps other servers sent: {err:#}");
+            }
             node.replay_all().await?;
             node.keep_alone_here()?;
             node.follow_storage();

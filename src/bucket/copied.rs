@@ -38,6 +38,21 @@ impl<B: Bucket + Clone> Copied<B> {
         Copied { reach: false, ..self.clone() }
     }
 
+    /// Forgets the steps other servers sent before they stopped sending them, whose notes `.sent/` keeps, unchecked
+    /// against the bucket: each is read from it again when it's next needed.
+    pub fn forget_sent(&self) -> Result<()> {
+        let Place::Folder(dir) = &self.here else { unreachable!("a copy is a folder") };
+        let sent = Place::Folder(dir.join(".sent"));
+        if !dir.join(".sent").exists() {
+            return Ok(());
+        }
+        for name in sent.names()? {
+            self.here.delete(&name)?;
+        }
+        std::fs::remove_dir_all(dir.join(".sent"))?;
+        Ok(())
+    }
+
     /// A kept object, without asking the bucket.
     pub fn kept(&self, name: &str) -> Result<Option<Vec<u8>>> {
         if !kept(name) {
