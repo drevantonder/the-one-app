@@ -110,24 +110,26 @@ class Install:
         self.run("group", "create", "Family")
         self.run("install", "board", "--scope", "Family")
         t = now_ms()
+        # The posts name only this install's own device, so what agents find on the board matches what they can reach.
+        here = next(l.split("●", 1)[1].split("(this one)")[0].strip() for l in self.run("status").splitlines() if "(this one)" in l)
         topics = [
             {"path": "the-one-app", "description": "The One App: Andre's hub of apps and agents across his devices"},
             {"path": "claims-review", "description": "Reviewing the insurance claims backlog for the ops team"},
-            {"path": "home-lab", "description": "The home servers: linux, personal, backups and the network"},
+            {"path": "home-lab", "description": f"The home device, {here}: backups and the network"},
         ]
         posts = [
-            ("", "Andre's devices: mac (MacBook Air), linux (always-on home box), personal (Linux dev box).", "Claude Code", 9),
+            ("", f"Andre's device: {here} (always-on Linux box).", "Claude Code", 9),
             ("", "Andre: show, don't tell. Keep text short; pictures of UI work.", "Codex", 8),
             ("", "Never ask Andre to paste a secret into chat: send a Vault request link instead.", "Claude Code", 6),
             ("the-one-app", "Started: Vault sheet on iPhone so requests open as a sheet, not a page.", "Claude Code", 3),
             ("the-one-app", "Decided: secrets an app keeps itself are marked apart from ones a person gave.", "Codex", 2.5),
             ("the-one-app", "Fixed: Mac sidebar sections stay open when you press a page's name.", "Claude Code", 1.2),
             ("the-one-app", "Released v0.9.4: devices say 'Not updated yet' instead of build hashes.", "OpenCode", 0.6),
-            ("the-one-app", "Working on: WhatsApp move between servers; linux keeps the session for now.", "Codex", 0.2),
+            ("the-one-app", f"Working on: WhatsApp move between devices; {here} keeps the session for now.", "Codex", 0.2),
             ("claims-review", "Started the claims review: 214 open claims, oldest from March.", "Claude Code", 5),
             ("claims-review", "Half done: 120 reviewed, 9 flagged for a second look.", "Claude Code", 2),
-            ("home-lab", "personal's disk at 71% after the container images; pruned 20 GB.", "Codex", 4),
-            ("home-lab", "Backups to the bucket run nightly at 02:00 from linux.", "Claude Code", 1),
+            ("home-lab", f"{here}'s disk at 71% after the container images; pruned 20 GB.", "Codex", 4),
+            ("home-lab", f"Backups to the bucket run nightly at 02:00 from {here}.", "Claude Code", 1),
         ]
         # As repeated flags: the CLI drops list inputs given as JSON on stdin.
         self.run("board", "import", *[a for tp in topics for a in ("--topics", json.dumps(tp))],
