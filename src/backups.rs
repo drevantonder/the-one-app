@@ -296,14 +296,18 @@ const SETTLE: u64 = HOUR;
 /// How long an object no snapshot names at all may stay, in case it's from a run still going.
 const STRAY: u64 = DAY;
 
-/// Which snapshots to keep, by time: every one for 2 days, the last of each day for 30 days, the last of each month
+/// Which snapshots to keep, by time: the last of each hour for 2 days, the last of each day for 30 days, the last of each month
 /// for 12 months, and always the newest. Days and months are UTC's, so every device keeps the same ones.
 pub fn kept(times: &[u64], now: u64) -> BTreeSet<u64> {
-    let mut out: BTreeSet<u64> = times.iter().copied().filter(|t| *t + 2 * DAY > now).collect();
-    out.extend(times.iter().max());
+    let mut out: BTreeSet<u64> = times.iter().copied().max().into_iter().collect();
+    let mut hours: BTreeMap<u64, u64> = BTreeMap::new();
     let mut days: BTreeMap<u64, u64> = BTreeMap::new();
     let mut months: BTreeMap<(i16, i8), u64> = BTreeMap::new();
     for &t in times {
+        if t + 2 * DAY > now {
+            let last = hours.entry(t / HOUR).or_insert(t);
+            *last = (*last).max(t);
+        }
         if t + 30 * DAY > now {
             let last = days.entry(t / DAY).or_insert(t);
             *last = (*last).max(t);
@@ -314,6 +318,7 @@ pub fn kept(times: &[u64], now: u64) -> BTreeSet<u64> {
             *last = (*last).max(t);
         }
     }
+    out.extend(hours.into_values());
     out.extend(days.into_values());
     out.extend(months.into_values());
     out
@@ -351,18 +356,28 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
             continue;
         };
         let mut snaps: Vec<(String, Snapshot)> = Vec::new();
+        let mut opened = true;
         for name in place.list(&format!("{install}/snapshots/{dir}"))? {
             let path = format!("{install}/snapshots/{dir}/{name}");
             let Some(bytes) = place.get(&path)? else { continue };
             match open_snapshot(&[*key], &bytes)? {
                 Some((s, _)) => snaps.push((path, s)),
-                None => opened_all = false,
+                None => opened = false,
             }
         }
+        opened_all &= opened;
         let Some(newest) = snaps.iter().map(|(_, s)| s.time).max() else { continue };
         let latest: BTreeSet<String> = snaps.iter().filter(|(_, s)| s.time == newest).flat_map(|(_, s)| s.blobs.keys().cloned()).collect();
         let times: Vec<u64> = snaps.iter().map(|(_, s)| s.time).collect();
         let kept = kept(&times, now);
+        // Each database's oldest copy a kept snapshot starts from.
+        let mut floors: BTreeMap<String, u64> = BTreeMap::new();
+        for (_, s) in snaps.iter().filter(|(_, s)| kept.contains(&s.time)) {
+            for (database, (_, copied)) in &s.databases {
+                let floor = floors.entry(database.clone()).or_insert(*copied);
+                *floor = (*floor).min(*copied);
+            }
+        }
         for (path, mut s) in snaps {
             if !kept.contains(&s.time) {
                 place.delete(&path)?;
@@ -380,6 +395,21 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
                 }
             }
             keep.extend(names(&s));
+        }
+        // The bucket's copy of each database goes up to there: no kept snapshot starts from an older copy or step. A
+        // run builds on the newest, from that copy or a newer one.
+        if !opened {
+            continue;
+        }
+        for (database, floor) in floors.into_iter().filter(|(_, f)| *f > 0) {
+            let prefix = format!("{install}/bucket/{dir}/{database}");
+            let steps = place.objects(&prefix)?.into_iter().filter(|o| o.0.parse::<u64>().is_ok_and(|n| n <= floor));
+            let copies = place.objects(&format!("{prefix}/copy"))?.into_iter().filter(|o| o.0.parse::<u64>().is_ok_and(|n| n < floor));
+            for (name, size) in steps.map(|o| (format!("{prefix}/{}", o.0), o.2)).chain(copies.map(|o| (format!("{prefix}/copy/{}", o.0), o.2))).collect::<Vec<_>>() {
+                place.delete(&name)?;
+                out.bytes += size;
+                out.objects += 1;
+            }
         }
     }
     // Listed again: an object a run sent since the first listing has just been written.
@@ -595,6 +625,58 @@ mod tests {
         let restored = restore(&place, install, "global", &[key]).unwrap();
         assert_eq!(restored.entries.len(), 8);
         assert_eq!(restored.blobs.iter().map(|b| &b.0).collect::<BTreeSet<_>>(), [&release2.0, &repo.0].into());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn retention_keeps_the_last_of_each_hour_and_the_bucket_copy_only_what_kept_snapshots_need() {
+        let now = 100 * DAY;
+        let times = [now - 3 * HOUR + 60_000, now - 3 * HOUR + 50 * 60_000, now - 2 * DAY - HOUR, now - HOUR + 60_000, now - 10];
+        assert_eq!(kept(&times, now), [now - 2 * DAY - HOUR, now - 3 * HOUR + 50 * 60_000, now - 10].into(), "the last of each hour, and of each day");
+
+        let dir = std::env::temp_dir().join(format!("backups-copy-{}", hex(&rand::random())));
+        let (place, bucket) = (Place::Folder(dir.join("place")), Place::Folder(dir.join("bucket")));
+        let install = "0123456789abcdef";
+        let (recovery, device) = (SigningKey::generate(), SigningKey::generate());
+        let key: [u8; 32] = rand::random();
+        let all = entries(&device, "global", 2, None);
+        let prefix = "global/board/main";
+        let real = jiff::Timestamp::now().as_millisecond() as u64;
+        let hour = (real / HOUR - 2) * HOUR;
+        let mut previous = None;
+        // Steps 1 to 5; then a copy at 8 and steps to 10, both backed up in one hour.
+        for (n, (at, copy)) in [(1, (5, 0)), (2, (10, 8))] {
+            for step in 1..=at {
+                bucket.put(&crate::db::step_name(prefix, step), format!("step {step}").as_bytes()).unwrap();
+            }
+            if copy > 0 {
+                bucket.put(&crate::db::copy_name(prefix, copy), b"copy").unwrap();
+            }
+            bucket.put(&crate::db::newest_name(prefix), &serde_json::to_vec(&json!({ "at": at, "copy": copy })).unwrap()).unwrap();
+            let job = Job {
+                place: &place,
+                install,
+                scope: "global",
+                key,
+                recovery: *recovery.verifying_key().as_bytes(),
+                device: *device.verifying_key().as_bytes(),
+                now: hour + n as u64 * 60_000,
+                previous: previous.clone(),
+                entries: all[..n].to_vec(),
+                blobs: BTreeSet::new(),
+                bucket: Some(&bucket),
+            };
+            previous = back_up(job, |_| None).unwrap();
+        }
+        let copied = |name: &str| place.get(&format!("{install}/bucket/{name}")).unwrap().is_some();
+        assert!((1..=5).all(|n| copied(&crate::db::step_name(prefix, n))));
+
+        let scopes: BTreeMap<String, [u8; 32]> = [("global".to_string(), key)].into();
+        let pruned = prune(&place, install, &scopes, &BTreeSet::new(), real).unwrap();
+        assert_eq!((pruned.snapshots, pruned.objects), (1, 5), "the hour's first snapshot, and the steps only it started from");
+        assert!((1..=5).all(|n| !copied(&crate::db::step_name(prefix, n))));
+        assert!(copied(&crate::db::copy_name(prefix, 8)) && (9..=10).all(|n| copied(&crate::db::step_name(prefix, n))), "the kept snapshot's copy and steps stay");
+        assert_eq!(restore(&place, install, "global", &[key]).unwrap().snapshot.databases["board/main"], (10, 8));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
