@@ -446,7 +446,8 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
 
 /// The gateway (`kernel/gateway/worker.js`) sends a node every path the node takes kernel sign-ins at
 /// (`api::SIGNED_IN`), and marks each with a header the node knows means it came from elsewhere (`api::FORWARDED`),
-/// so a node on the gateway's own machine never takes it as one of the machine's own programs.
+/// so a node on the gateway's own machine never takes it as one of the machine's own programs; through a Cloudflare
+/// Tunnel, which adds no such header, it also addresses the node by its own host, never one a node takes as local.
 #[test]
 fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere() {
     use std::io::{BufRead, BufReader, Write};
@@ -474,37 +475,50 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
         }
     });
 
+    // A node behind a Cloudflare Tunnel, as the gateway's `NODE` binding reaches it: it answers each request with the
+    // request's line, its Host, and its headers' names.
+    let tunnelled = br#"export default { fetch(r) { const u = new URL(r.url); return Response.json({ line: `${r.method} ${u.pathname}${u.search} HTTP/1.1`, host: u.host, headers: [...r.headers.keys()] }); } };"#;
+
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
     let files = vec![("gateway/worker.js".to_string(), std::fs::read(root.join("gateway/worker.js")).unwrap())];
-    let dir = std::env::temp_dir().join(format!("one-gateway-{}", rand::random::<u64>()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let addr = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
-    let served = kernel::Served {
-        name: "gateway".into(),
-        module: kernel::module_from(files, "gateway/worker.js").unwrap(),
-        class: None,
-        listen: addr.clone(),
-        bindings: vec![("NODE_URL".into(), node)],
-        assets: None,
-        outbound: Some(kernel::NEARBY.into()),
-    };
-    let mut child = kernel::start(&kernel::write_config(&dir, &[served]).unwrap()).unwrap();
-    let started = std::time::Instant::now();
-    while std::net::TcpStream::connect(&addr).is_err() {
-        assert!(started.elapsed().as_secs() < 30, "workerd didn't start");
-        std::thread::sleep(std::time::Duration::from_millis(50));
+    let free = || format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
+    for tunnel in [false, true] {
+        let dir = std::env::temp_dir().join(format!("one-gateway-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let addr = free();
+        let mut served = vec![kernel::Served {
+            name: "gateway".into(),
+            module: kernel::module_from(files.clone(), "gateway/worker.js").unwrap(),
+            class: None,
+            listen: addr.clone(),
+            bindings: vec![if tunnel { ("NODE".into(), "service:tunnelled".into()) } else { ("NODE_URL".into(), node.clone()) }],
+            assets: None,
+            outbound: Some(kernel::NEARBY.into()),
+        }];
+        if tunnel {
+            served.push(kernel::Served { name: "tunnelled".into(), module: tunnelled.to_vec(), class: None, listen: free(), bindings: vec![], assets: None, outbound: None });
+        }
+        let mut child = kernel::start(&kernel::write_config(&dir, &served).unwrap()).unwrap();
+        let started = std::time::Instant::now();
+        while std::net::TcpStream::connect(&addr).is_err() {
+            assert!(started.elapsed().as_secs() < 30, "workerd didn't start");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        for route in one::api::SIGNED_IN {
+            let path = route.replace("{app}", "board").replace("{screen}", "main").replace("{hash}", "00");
+            let seen: Value = agent.get(format!("http://{addr}{path}")).header("host", "one.example").call().unwrap().body_mut().read_json().unwrap_or(Value::Null);
+            assert_eq!(seen["line"], format!("GET {path} HTTP/1.1"), "the gateway didn't send {path} to the node");
+            let marked = seen["headers"].as_array().unwrap().iter().any(|h| one::api::FORWARDED.contains(&h.as_str().unwrap()));
+            assert!(marked, "the gateway sent {path} without saying it came from elsewhere: {seen}");
+            if tunnel {
+                assert_eq!(seen["host"], "one.example", "through a tunnel, the gateway addressed the node by a host not its own");
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&dir);
     }
-    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-    for route in one::api::SIGNED_IN {
-        let path = route.replace("{app}", "board").replace("{screen}", "main").replace("{hash}", "00");
-        let seen: Value = agent.get(format!("http://{addr}{path}")).call().unwrap().body_mut().read_json().unwrap_or(Value::Null);
-        assert_eq!(seen["line"], format!("GET {path} HTTP/1.1"), "the gateway didn't send {path} to the node");
-        let marked = seen["headers"].as_array().unwrap().iter().any(|h| one::api::FORWARDED.contains(&h.as_str().unwrap()));
-        assert!(marked, "the gateway sent {path} without saying it came from elsewhere: {seen}");
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Every node path the web client (`kernel/web/web.js`) asks with its sign-in is one a node takes sign-ins at

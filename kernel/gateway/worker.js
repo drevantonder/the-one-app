@@ -41,11 +41,14 @@ async function toNode(request, env, url) {
   for (const name of TO_NODE) if (request.headers.has(name)) headers.set(name, request.headers.get(name));
   // Says it came from elsewhere, so a node on this machine never takes it as one of the machine's own programs.
   headers.set("forwarded", `host="${url.host}";proto=${url.protocol.slice(0, -1)}`);
-  if (!env.NODE_URL) return refuse(503, "this install's kernel has no node to send that to yet");
+  if (!env.NODE && !env.NODE_URL) return refuse(503, "this install's kernel has no node to send that to yet");
   const init = { method: request.method, headers, body: ["GET", "HEAD"].includes(request.method) ? null : request.body, redirect: "manual" };
   let resp;
   try {
-    resp = await fetch(`${env.NODE_URL}${url.pathname}${url.search}`, init);
+    // Through a Cloudflare Tunnel (`NODE`, a Workers VPC service), a URL's host is only the Host the node sees, and
+    // cloudflared adds nothing saying it came from elsewhere: the gateway's own host is never one a node takes as its
+    // machine's.
+    resp = env.NODE ? await env.NODE.fetch(`http://${url.host}${url.pathname}${url.search}`, init) : await fetch(`${env.NODE_URL}${url.pathname}${url.search}`, init);
   } catch {
     return refuse(502, "the node can't be reached");
   }

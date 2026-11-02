@@ -1201,6 +1201,15 @@ fn a_deploy_to_cloudflare_uploads_each_service_with_its_bindings_and_object() {
         let name = kernel::worker_name(service);
         assert_eq!((&addresses[&format!("{name}.andre.example")], &addresses[&format!("{name}.workers.dev")]), (&json!(name), &json!(false)));
     }
+    drop(addresses);
+
+    // A node behind a Cloudflare Tunnel is the gateway's Workers VPC service binding, not a URL.
+    settings.node_url = Some("cloudflare:0191dce4-9ab4-7fce-b660-8e5dec5172da".into());
+    kernel::deploy(&cf, &settings, &modules, &web).unwrap();
+    let gateway = scripts.lock().unwrap()[&kernel::worker_name("gateway")].0.clone();
+    let node: Vec<&Value> = gateway["bindings"].as_array().unwrap().iter().filter(|b| b["name"].as_str().unwrap().starts_with("NODE")).collect();
+    assert_eq!(node, [&json!({ "type": "vpc_service", "name": "NODE", "service_id": "0191dce4-9ab4-7fce-b660-8e5dec5172da" })]);
+
     settings.auth_url = "https://one-auth.someone-else.example".into();
     assert!(kernel::deploy(&cf, &settings, &modules, &web).is_err(), "a host in none of the account's domains is refused");
 }

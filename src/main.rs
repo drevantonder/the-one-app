@@ -81,9 +81,10 @@ Usage:
                                        passkey, as who they are in the install (--user, or this machine's person for
                                        the first), so nodes know them; nobody joins uninvited, the first person too.
                                        For someone who lost every passkey, --user them and pipe the recovery key
-  {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/), auth-url, vault-url,
-                                       schedules-url, resources (nodes' own addresses, comma-separated) or bucket
-                                       (its JSON object piped, with - as its value)
+  {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/: a node's address, or
+                                       cloudflare:<id>, the Workers VPC service of a Cloudflare Tunnel to one),
+                                       auth-url, vault-url, schedules-url, resources (nodes' own addresses,
+                                       comma-separated) or bucket (its JSON object piped, with - as its value)
   {CLI} kernel use <address> <vault> <schedules>
                                        point this install at its kernel: its nodes take sign-ins made at the address
   {CLI} storage                        where the install's data is kept

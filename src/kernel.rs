@@ -334,7 +334,8 @@ pub struct Settings {
     /// Where nodes reach the vault and the schedules service.
     pub vault_url: String,
     pub schedules_url: String,
-    /// Where the gateway sends `/v1/` and `/mcp`: a node's address.
+    /// Where the gateway sends `/v1/` and `/mcp`: a node's address, or `cloudflare:<id>` for a node behind a Cloudflare
+    /// Tunnel with no public address, which the gateway on Cloudflare reaches by that Workers VPC service.
     #[serde(default)]
     pub node_url: Option<String>,
     /// The local ports each service listens on, in `SERVICES`' order, when this machine runs them.
@@ -404,11 +405,17 @@ impl Settings {
         Ok(std::fs::rename(part, path)?)
     }
 
-    /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service.
+    /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service, and
+    /// `vpc:<id>` a Cloudflare Workers VPC service.
     pub fn bindings(&self, service: &str) -> Vec<(String, String, bool)> {
         // The gateway holds no secrets.
         if service == "gateway" {
-            return vec![("AUTH".into(), "service:auth".into(), false), ("NODE_URL".into(), self.node_url.clone().unwrap_or_default(), false)];
+            let node = self.node_url.clone().unwrap_or_default();
+            let node = match node.strip_prefix("cloudflare:") {
+                Some(id) => ("NODE".into(), format!("vpc:{id}"), false),
+                None => ("NODE_URL".into(), node, false),
+            };
+            return vec![("AUTH".into(), "service:auth".into(), false), node];
         }
         let issuer = format!("{}/api/auth", self.address);
         let mut out = vec![("KERNEL_SECRET".into(), self.kernel_secret.clone(), true)];
@@ -583,6 +590,7 @@ pub fn write_config(dir: &Path, servers: &[Served]) -> Result<PathBuf> {
             bindings.push(format!("(name = \"ASSETS\", service = {})", quote(&format!("{}-assets", s.name))));
         }
         for (name, value) in &s.bindings {
+            ensure!(!value.starts_with("vpc:"), "a node behind a Cloudflare Tunnel is reached only by a kernel on Cloudflare: give kernel set node-url a node's address");
             bindings.push(match value.strip_prefix("service:") {
                 Some(service) => format!("(name = {}, service = {})", quote(name), quote(service)),
                 None => format!("(name = {}, text = {})", quote(name), quote(value)),
@@ -814,7 +822,10 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrate
         match value.strip_prefix("service:") {
             Some(other) if exists(&worker_name(other)) => bindings.push(json!({ "type": "service", "name": name, "service": worker_name(other) })),
             Some(_) => complete = false,
-            None => bindings.push(json!({ "type": if secret { "secret_text" } else { "plain_text" }, "name": name, "text": value })),
+            None => match value.strip_prefix("vpc:") {
+                Some(id) => bindings.push(json!({ "type": "vpc_service", "name": name, "service_id": id })),
+                None => bindings.push(json!({ "type": if secret { "secret_text" } else { "plain_text" }, "name": name, "text": value })),
+            },
         }
     }
     let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::apps::COMPATIBILITY_DATE, "bindings": bindings });
