@@ -33,6 +33,7 @@ const INVITE = 3 * 86_400_000;
 
 /// The hash an invite is kept by, so the auth service's database holds no link that works.
 async function inviteId(token) {
+  if (!token) refuse(403, "Joining takes an invite link: ask whoever runs this install for one.");
   if (typeof token !== "string" || token.length < 32) refuse(404, "That invite link isn't whole: open the link you were sent as it is.");
   return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -50,8 +51,6 @@ function passkeyName(aaguid, transports = [], agent = "") {
 export class Auth extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    // Invites were by email address until links replaced them.
-    if (ctx.storage.sql.exec("select 1 from pragma_table_info('invites') where name = 'email'").toArray().length) ctx.storage.sql.exec("drop table invites");
     ctx.storage.sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null, until integer not null, used integer)");
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const options = this.options();
@@ -238,7 +237,8 @@ export class Auth extends DurableObject {
   /// The invite a link's secret opens, while it works.
   async openInvite(token) {
     const [invite] = this.ctx.storage.sql.exec("select * from invites where id = ?", await inviteId(token)).toArray();
-    if (!invite || invite.used) refuse(404, "That invite link has been used. Ask for a new one.");
+    if (!invite) refuse(404, "That invite link doesn't work. Ask for a new one.");
+    if (invite.used) refuse(404, "That invite link has been used. Ask for a new one.");
     if (invite.until <= Date.now()) refuse(404, "That invite link has expired. Ask for a new one.");
     return invite;
   }
