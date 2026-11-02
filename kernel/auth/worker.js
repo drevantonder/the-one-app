@@ -24,7 +24,7 @@ const hex16 = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.
 export class Auth extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    ctx.storage.sql.exec("create table if not exists invites (email text primary key, at integer not null)");
+    ctx.storage.sql.exec("create table if not exists invites (email text primary key, at integer not null, user text)");
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const options = this.options();
       const { runMigrations } = await getMigrations(options);
@@ -47,7 +47,7 @@ export class Auth extends DurableObject {
 
   options() {
     const env = this.env;
-    const url = new URL(env.AUTH_URL);
+    const url = new URL(env.ADDRESS);
     const resources = JSON.parse(env.RESOURCES || "[]");
     const sql = this.ctx.storage.sql;
     const self = this;
@@ -66,11 +66,13 @@ export class Auth extends DurableObject {
         user: {
           create: {
             // Only someone invited signs up, the install's first person too (one kernel invite), so nobody who finds
-            // the sign-in page first takes the install.
+            // the sign-in page first takes the install. They sign up as who the invite says they are in the install,
+            // so nodes know them by the same id.
             async before(user) {
-              const invited = sql.exec("select email from invites where email = ?", user.email.toLowerCase()).toArray().length;
-              if (!invited) return false;
+              const [invite] = sql.exec("select user from invites where email = ?", user.email.toLowerCase()).toArray();
+              if (!invite) return false;
               sql.exec("delete from invites where email = ?", user.email.toLowerCase());
+              if (invite.user) return { data: { ...user, id: invite.user } };
             },
           },
         },
@@ -215,11 +217,13 @@ export class Auth extends DurableObject {
     return { url: redirect };
   }
 
-  /// Lets someone sign up: the kernel's own tools ask, with its secret.
-  invite(request, { email }) {
+  /// Lets someone sign up, as `user` (their id in the install) if it's given: the kernel's own tools ask, with its secret.
+  invite(request, { email, user }) {
     if (request.headers.get("x-kernel-secret") !== this.env.KERNEL_SECRET) throw Object.assign(new Error("only the kernel asks that"), { status: 403 });
     if (typeof email !== "string" || !email.includes("@")) throw Object.assign(new Error("not an email address"), { status: 400 });
-    this.ctx.storage.sql.exec("insert or replace into invites (email, at) values (?, ?)", email.toLowerCase(), Date.now());
+    if (user != null && !/^[0-9a-f]{16}$/.test(user)) throw Object.assign(new Error("a user id is 16 hex characters"), { status: 400 });
+    if (user != null && this.ctx.storage.sql.exec("select id from user where id = ?", user).toArray().length) throw Object.assign(new Error("someone has signed up as that user already"), { status: 409 });
+    this.ctx.storage.sql.exec("insert or replace into invites (email, at, user) values (?, ?, ?)", email.toLowerCase(), Date.now(), user ?? null);
     return {};
   }
 }

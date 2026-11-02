@@ -126,8 +126,8 @@ impl Vault {
         let schedules_key = json!({ "secret": B64U.encode(&own), "public": B64U.encode(&kernel::public_of(&own)) }).to_string();
         let bucket = json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }).to_string();
         let running = run(vec![
-            Served { name: "auth".into(), module: module("test/auth.js"), class: None, listen: format!("127.0.0.1:{auth}"), bindings: vec![], outbound: None },
-            Served { name: "sites".into(), module: module("test/sites.js"), class: None, listen: format!("127.0.0.1:{sites}"), bindings: vec![], outbound: None },
+            Served { name: "auth".into(), module: module("test/auth.js"), class: None, listen: format!("127.0.0.1:{auth}"), bindings: vec![], assets: None, outbound: None },
+            Served { name: "sites".into(), module: module("test/sites.js"), class: None, listen: format!("127.0.0.1:{sites}"), bindings: vec![], assets: None, outbound: None },
             Served {
                 name: "vault".into(),
                 module: module("vault/worker.js"),
@@ -140,6 +140,7 @@ impl Vault {
                     ("RECOVERY_KEY".into(), B64U.encode(&recovery_public)),
                     ("BUCKET".into(), bucket),
                 ],
+                assets: None,
                 outbound: Some("sites".into()),
             },
             Served {
@@ -154,9 +155,10 @@ impl Vault {
                     ("KERNEL_SECRET".into(), secret.clone()),
                     ("SCHEDULES_KEY".into(), schedules_key),
                 ],
+                assets: None,
                 outbound: Some("node".into()),
             },
-            Served { name: "node".into(), module: module("test/node.js"), class: None, listen: format!("127.0.0.1:{node}"), bindings: vec![("VAULT".into(), "service:vault".into())], outbound: None },
+            Served { name: "node".into(), module: module("test/node.js"), class: None, listen: format!("127.0.0.1:{node}"), bindings: vec![("VAULT".into(), "service:vault".into())], assets: None, outbound: None },
         ]);
         Vault {
             _running: running,
@@ -564,10 +566,11 @@ impl Passkey {
     }
 }
 
-/// The real kernel services, as an install runs them.
+/// The real kernel services, as an install runs them: people reach them at its address, the gateway's.
 struct Kernel {
     /// The workerd running them here, if not deployed.
     running: Option<Running>,
+    address: String,
     auth: String,
     vault: String,
     schedules: String,
@@ -579,23 +582,32 @@ struct Kernel {
 const RESOURCE: &str = "https://node.test/mcp";
 
 impl Kernel {
-    /// Runs them as `one kernel serve` does, from new settings, with the stand-in sites as the bucket.
-    fn start() -> Kernel {
-        let auth = port();
-        let (mut settings, recovery) = kernel::Settings::new("Test", &format!("http://localhost:{auth}"));
-        settings.ports = [auth, port(), port()];
+    /// Runs them as `one kernel serve` does, from new settings, with the stand-in sites as the bucket, the gateway
+    /// sending `/v1/` to `node_url` and serving a web client of two pages.
+    fn start(node_url: Option<String>) -> Kernel {
+        let gateway = port();
+        let (mut settings, recovery) = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
+        settings.ports = [port(), port(), port(), gateway];
+        settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
         (settings.vault_url, settings.schedules_url) = (format!("http://127.0.0.1:{}", settings.ports[1]), format!("http://127.0.0.1:{}", settings.ports[2]));
         settings.resources = vec![RESOURCE.into()];
+        settings.node_url = node_url;
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let modules = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();
         let sites = port();
-        let mut served = kernel::served(&settings, modules);
+        let web = std::env::temp_dir().join(format!("one-kernel-web-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(web.join("screen")).unwrap();
+        std::fs::write(web.join("index.html"), "<!doctype html><title>The web client</title>").unwrap();
+        std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
+        std::fs::write(web.join("screen/kit.css"), include_str!("../src/screen/kit.css")).unwrap();
+        let mut served = kernel::served(&settings, modules, &web);
         served[1].outbound = Some("sites".into());
-        served.push(Served { name: "sites".into(), module: module("test/sites.js"), class: None, listen: format!("127.0.0.1:{sites}"), bindings: vec![], outbound: None });
+        served.push(Served { name: "sites".into(), module: module("test/sites.js"), class: None, listen: format!("127.0.0.1:{sites}"), bindings: vec![], assets: None, outbound: None });
         let running = run(served);
         let seed: [u8; 32] = data_encoding::HEXLOWER.decode(recovery.as_bytes()).unwrap().try_into().unwrap();
         Kernel {
             running: Some(running),
+            address: settings.address.clone(),
             auth: settings.auth_url.clone(),
             vault: settings.vault_url.clone(),
             schedules: settings.schedules_url.clone(),
@@ -616,6 +628,7 @@ impl Kernel {
         let seed: [u8; 32] = data_encoding::HEXLOWER.decode(read("ONE_TEST_KERNEL_RECOVERY").trim().as_bytes()).unwrap().try_into().unwrap();
         Kernel {
             running: None,
+            address: settings.address.clone(),
             auth: settings.auth_url.clone(),
             vault: settings.vault_url.clone(),
             schedules: settings.schedules_url.clone(),
@@ -626,13 +639,13 @@ impl Kernel {
     }
 
     fn browser(&self) -> Browser {
-        Browser { origin: self.auth.clone(), cookies: Default::default() }
+        Browser { origin: self.address.clone(), cookies: Default::default() }
     }
 
-    /// A passkey for the auth service's host, as passkeys belong to it.
+    /// A passkey for the install's address, as passkeys belong to it.
     fn passkey(&self) -> Passkey {
-        let rp = self.auth.split("://").nth(1).unwrap().split([':', '/']).next().unwrap().to_string();
-        Passkey { key: ed25519_dalek::SigningKey::from_bytes(&rand::random()), id: rand::random::<[u8; 16]>().to_vec(), rp, origin: self.auth.clone() }
+        let rp = self.address.split("://").nth(1).unwrap().split([':', '/']).next().unwrap().to_string();
+        Passkey { key: ed25519_dalek::SigningKey::from_bytes(&rand::random()), id: rand::random::<[u8; 16]>().to_vec(), rp, origin: self.address.clone() }
     }
 }
 
@@ -663,7 +676,7 @@ fn enc(s: &str) -> String {
 
 #[test]
 fn an_mcp_client_signs_in_with_a_passkey_and_its_tokens_open_its_keys() {
-    signs_in(&Kernel::start());
+    signs_in(&Kernel::start(None));
 }
 
 /// The install's first person signs up, makes a passkey with PRF, and lets Claude Code in through OAuth; its tokens
@@ -676,7 +689,7 @@ fn signs_in(k: &Kernel) -> (String, String) {
     let (status, meta, _) = browser.get("/.well-known/oauth-authorization-server/api/auth");
     assert_eq!(status, 200, "{meta}");
     let issuer = meta["issuer"].as_str().unwrap().to_string();
-    assert_eq!(issuer, format!("{}/api/auth", k.auth));
+    assert_eq!(issuer, format!("{}/api/auth", k.address));
     for field in ["authorization_endpoint", "token_endpoint", "registration_endpoint", "jwks_uri"] {
         assert!(meta[field].is_string(), "no {field} in {meta}");
     }
@@ -999,8 +1012,8 @@ fn a_deploy_to_cloudflare_uploads_each_service_with_its_bindings_and_object() {
     let (api, scripts, addresses) = cloudflare();
     let cf = kernel::Cloudflare { api, token: "token".into(), account: "acct".into() };
     let at = |service: &str, domain: &str| format!("https://{}.{domain}", kernel::worker_name(service));
-    let (mut settings, _) = kernel::Settings::new("Test", &at("auth", "andre.workers.dev"));
-    (settings.vault_url, settings.schedules_url) = (at("vault", "andre.workers.dev"), at("schedules", "andre.workers.dev"));
+    let (mut settings, _) = kernel::Settings::new("Test", &at("gateway", "andre.workers.dev"));
+    (settings.auth_url, settings.vault_url, settings.schedules_url) = (at("auth", "andre.workers.dev"), at("vault", "andre.workers.dev"), at("schedules", "andre.workers.dev"));
     let modules: Vec<Vec<u8>> = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();
     kernel::deploy(&cf, &settings, &modules).unwrap();
     for (service, _, _) in kernel::SERVICES {
@@ -1009,13 +1022,13 @@ fn a_deploy_to_cloudflare_uploads_each_service_with_its_bindings_and_object() {
 
     // Each service is one Worker, its Durable Object made the first time, every binding there: the others by name.
     let deployed = scripts.lock().unwrap().clone();
-    assert_eq!(deployed.keys().cloned().collect::<Vec<_>>(), [kernel::worker_name("auth"), kernel::worker_name("schedules"), kernel::worker_name("vault")]);
+    assert_eq!(deployed.keys().cloned().collect::<Vec<_>>(), ["auth", "gateway", "schedules", "vault"].map(kernel::worker_name));
     for (service, _, class) in kernel::SERVICES {
         let (meta, module) = &deployed[&kernel::worker_name(service)];
         assert_eq!(meta["main_module"], "worker.js");
         assert!(!module.is_empty());
         let names: BTreeSet<String> = meta["bindings"].as_array().unwrap().iter().map(|b| b["name"].as_str().unwrap().to_string()).collect();
-        let want: BTreeSet<String> = settings.bindings(service).into_iter().map(|(n, _, _)| n).chain([class.to_uppercase()]).collect();
+        let want: BTreeSet<String> = settings.bindings(service).into_iter().map(|(n, _, _)| n).chain(class.map(str::to_uppercase)).collect();
         assert_eq!(names, want, "{service}'s bindings");
         for b in meta["bindings"].as_array().unwrap() {
             if b["name"] == "KERNEL_SECRET" || b["name"] == "AUTH_SECRET" || b["name"] == "SCHEDULES_KEY" {
@@ -1030,7 +1043,7 @@ fn a_deploy_to_cloudflare_uploads_each_service_with_its_bindings_and_object() {
     assert_eq!(deployed[&kernel::worker_name("vault")].0["migrations"]["new_sqlite_classes"], json!(["Vault"]));
 
     // At one of the account's domains instead, each service is on its own host there, with workers.dev off.
-    (settings.auth_url, settings.vault_url, settings.schedules_url) = (at("auth", "andre.example"), at("vault", "andre.example"), at("schedules", "andre.example"));
+    (settings.address, settings.auth_url, settings.vault_url, settings.schedules_url) = (at("gateway", "andre.example"), at("auth", "andre.example"), at("vault", "andre.example"), at("schedules", "andre.example"));
     kernel::deploy(&cf, &settings, &modules).unwrap();
     let addresses = addresses.lock().unwrap();
     for (service, _, _) in kernel::SERVICES {
@@ -1039,4 +1052,118 @@ fn a_deploy_to_cloudflare_uploads_each_service_with_its_bindings_and_object() {
     }
     settings.auth_url = "https://one-auth.someone-else.example".into();
     assert!(kernel::deploy(&cf, &settings, &modules).is_err(), "a host in none of the account's domains is refused");
+}
+
+/// Asks `url` as a browser's script would: → (status, headers, body).
+fn ask(method: &str, url: &str, headers: &[(&str, &str)], body: Option<Value>) -> (u16, std::collections::BTreeMap<String, String>, String) {
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).build().into();
+    let mut resp = match body {
+        None => {
+            let mut req = agent.request_builder_get(method, url);
+            for (k, v) in headers {
+                req = req.header(*k, *v);
+            }
+            req.call().unwrap()
+        }
+        Some(body) => {
+            let mut req = agent.post(url);
+            for (k, v) in headers {
+                req = req.header(*k, *v);
+            }
+            req.send_json(body).unwrap()
+        }
+    };
+    let got = resp.headers().iter().map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string())).collect();
+    (resp.status().as_u16(), got, resp.body_mut().read_to_string().unwrap_or_default())
+}
+
+trait GetWith {
+    fn request_builder_get(&self, method: &str, url: &str) -> ureq::RequestBuilder<ureq::typestate::WithoutBody>;
+}
+
+impl GetWith for ureq::Agent {
+    fn request_builder_get(&self, method: &str, url: &str) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
+        match method {
+            "HEAD" => self.head(url),
+            _ => self.get(url),
+        }
+    }
+}
+
+/// A stand-in node that answers every request with what it was sent, as a page that would run script, sets a cookie
+/// and may be framed: → its address.
+fn hostile_node() -> String {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let mut headers = serde_json::Map::new();
+            loop {
+                let mut h = String::new();
+                if reader.read_line(&mut h).unwrap() == 0 || h.trim().is_empty() {
+                    break;
+                }
+                if let Some((k, v)) = h.trim().split_once(':') {
+                    headers.insert(k.trim().to_lowercase(), json!(v.trim()));
+                }
+            }
+            let body = json!({ "request": line.trim(), "headers": headers }).to_string();
+            let mut stream = stream;
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\nset-cookie: better-auth.session_token=planted; Path=/\r\naccess-control-allow-origin: *\r\nservice-worker-allowed: /\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    addr
+}
+
+#[test]
+fn the_gateway_sends_each_path_where_it_belongs_and_nothing_a_node_says_runs_at_its_origin() {
+    let node = hostile_node();
+    let k = Kernel::start(Some(node));
+    let at = |path: &str| format!("{}{path}", k.address);
+
+    // The web client's files: its page at / and wherever it routes itself, the screens' kit, the frame screens load.
+    for path in ["/", "/callback", "/vault?id=1&scope=user"] {
+        let (status, headers, body) = ask("GET", &at(path), &[], None);
+        assert_eq!((status, headers["content-type"].as_str()), (200, "text/html; charset=utf-8"), "{path}");
+        assert!(body.contains("The web client"), "{path}: {body}");
+        assert_eq!(headers["x-content-type-options"], "nosniff");
+    }
+    let (status, headers, body) = ask("GET", &at("/frame.html"), &[], None);
+    assert!(status == 200 && body.contains("A screen's frame"));
+    assert!(!headers.contains_key("content-security-policy") && !headers.contains_key("x-frame-options"), "a screen's frame carries its own policy: {headers:?}");
+    let (status, headers, _) = ask("GET", &at("/screen/kit.css"), &[], None);
+    assert_eq!((status, headers["content-type"].as_str()), (200, "text/css; charset=utf-8"));
+    assert_eq!(ask("GET", &at("/nothing.js"), &[], None).0, 404, "a missing file isn't the page");
+
+    // Sign-in goes to the auth service, as the install's address; its own routes don't.
+    let (status, _, meta) = ask("GET", &at("/.well-known/oauth-authorization-server/api/auth"), &[], None);
+    assert_eq!(status, 200, "{meta}");
+    assert_eq!(serde_json::from_str::<Value>(&meta).unwrap()["issuer"], at("/api/auth"));
+    let (status, _, _) = ask("POST", &at("/internal/invite"), &[], Some(json!({ "email": "mallory@example.com" })));
+    assert_eq!(status, 405, "the kernel's own routes aren't reachable at the address");
+
+    // A node gets the token, never the browser's cookies, and what it says is stamped so it can't run here.
+    let (status, headers, body) = ask("GET", &at("/v1/screens/board/main?scope=user"), &[("authorization", "Bearer a token"), ("cookie", "better-auth.session_token=mine")], None);
+    assert_eq!(status, 200);
+    let seen: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(seen["request"], "GET /v1/screens/board/main?scope=user HTTP/1.1");
+    assert_eq!(seen["headers"]["authorization"], "Bearer a token");
+    assert!(seen["headers"].get("cookie").is_none(), "{seen}");
+    assert!(seen["headers"]["forwarded"].as_str().is_some_and(|f| f.starts_with("host=")), "a node knows it came from elsewhere: {seen}");
+    assert_eq!(headers["content-security-policy"], "sandbox allow-scripts allow-forms allow-popups allow-downloads");
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    for header in ["set-cookie", "access-control-allow-origin", "service-worker-allowed"] {
+        assert!(!headers.contains_key(header), "a node's {header} reached the browser: {headers:?}");
+    }
+    assert_eq!(ask("POST", &at("/v1/call"), &[], Some(json!({}))).0, 200);
+    assert_eq!(ask("GET", &at("/mcp"), &[], None).0, 200, "/mcp is a node's");
+    assert_eq!(ask("GET", &at("/v1/state"), &[("service-worker", "script")], None).0, 403, "no node's answer becomes a service worker");
 }

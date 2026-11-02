@@ -278,8 +278,13 @@ impl Vault {
 
 // Building and running.
 
-/// The kernel's services: each one's name, its module, and its Durable Object's class.
-pub const SERVICES: &[(&str, &str, &str)] = &[("auth", "auth/worker.js", "Auth"), ("vault", "vault/worker.js", "Vault"), ("schedules", "schedules/worker.js", "Schedules")];
+/// The kernel's services: each one's name, its module, and its Durable Object's class, if it keeps anything.
+pub const SERVICES: &[(&str, &str, Option<&str>)] = &[
+    ("auth", "auth/worker.js", Some("Auth")),
+    ("vault", "vault/worker.js", Some("Vault")),
+    ("schedules", "schedules/worker.js", Some("Schedules")),
+    ("gateway", "gateway/worker.js", None),
+];
 
 /// How an install's kernel is set up, wherever it runs: kept in `<home>/kernel/settings.json`, readable only by its
 /// owner, since it holds the kernel's secrets.
@@ -287,13 +292,19 @@ pub const SERVICES: &[(&str, &str, &str)] = &[("auth", "auth/worker.js", "Auth")
 pub struct Settings {
     /// The install's name, as sign-in screens say it.
     pub name: String,
-    /// Where people reach the auth service: passkeys belong to its host name, so it doesn't change.
+    /// The install's address, the one people use: the gateway's, which sends sign-in to the auth service, `/v1/` to a
+    /// node and the rest to the web client. Passkeys belong to its host name, so it doesn't change.
+    pub address: String,
+    /// Where the kernel's own tools reach the auth service; people reach it at the address.
     pub auth_url: String,
     /// Where nodes reach the vault and the schedules service.
     pub vault_url: String,
     pub schedules_url: String,
-    /// The local ports each service listens on, when this machine runs them.
-    pub ports: [u16; 3],
+    /// Where the gateway sends `/v1/` and `/mcp`: a node's address.
+    #[serde(default)]
+    pub node_url: Option<String>,
+    /// The local ports each service listens on, in `SERVICES`' order, when this machine runs them.
+    pub ports: [u16; 4],
     /// The secret only the kernel's services share, for asking each other.
     pub kernel_secret: String,
     /// Better Auth's own secret, for its cookies and the keys it keeps.
@@ -302,7 +313,7 @@ pub struct Settings {
     pub schedules_key: Value,
     /// The recovery key's X25519 twin's public half.
     pub recovery_key: String,
-    /// The nodes' addresses MCP clients sign in for (each a resource, in OAuth's words).
+    /// Nodes' own addresses MCP clients sign in for (each a resource, in OAuth's words), besides the install's.
     #[serde(default)]
     pub resources: Vec<String>,
     /// The install's bucket: `{ endpoint, bucket, region, key_id, secret }`.
@@ -320,22 +331,24 @@ impl Settings {
 
     pub fn load() -> Result<Settings> {
         let path = Settings::path();
-        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine runs no kernel yet: {} kernel serve --auth-url <url> starts one", crate::config::CLI))?;
+        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine runs no kernel yet: {} kernel serve --address <url> starts one", crate::config::CLI))?;
         serde_json::from_str(&text).with_context(|| format!("{} isn't a kernel's settings", path.display()))
     }
 
     /// New settings, with new secrets: → them, and the new recovery key's secret, to be shown once.
-    pub fn new(name: &str, auth_url: &str) -> (Settings, String) {
+    pub fn new(name: &str, address: &str) -> (Settings, String) {
         let port = crate::config::PORT;
-        let ports = [port + 10, port + 11, port + 12];
+        let ports = [port + 10, port + 11, port + 12, port + 13];
         let secret = || B64U.encode(&rand::random::<[u8; 32]>());
         let own: [u8; 32] = rand::random();
         let seed: [u8; 32] = rand::random();
         let settings = Settings {
             name: name.into(),
-            auth_url: auth_url.trim_end_matches('/').into(),
+            address: address.trim_end_matches('/').into(),
+            auth_url: format!("http://127.0.0.1:{}", ports[0]),
             vault_url: format!("http://127.0.0.1:{}", ports[1]),
             schedules_url: format!("http://127.0.0.1:{}", ports[2]),
+            node_url: None,
             ports,
             kernel_secret: secret(),
             auth_secret: secret(),
@@ -363,15 +376,21 @@ impl Settings {
 
     /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service.
     pub fn bindings(&self, service: &str) -> Vec<(String, String, bool)> {
-        let issuer = format!("{}/api/auth", self.auth_url);
+        // The gateway holds no secrets.
+        if service == "gateway" {
+            return vec![("AUTH".into(), "service:auth".into(), false), ("NODE_URL".into(), self.node_url.clone().unwrap_or_default(), false)];
+        }
+        let issuer = format!("{}/api/auth", self.address);
         let mut out = vec![("KERNEL_SECRET".into(), self.kernel_secret.clone(), true)];
         let mut plain = |name: &str, value: String| out.push((name.into(), value, false));
         match service {
             "auth" => {
                 plain("VAULT", "service:vault".into());
-                plain("AUTH_URL", self.auth_url.clone());
+                plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
-                plain("RESOURCES", json!(self.resources).to_string());
+                // Tokens are for the install's address unless a client asks for a node's own.
+                let resources: Vec<&String> = std::iter::once(&self.address).chain(&self.resources).collect();
+                plain("RESOURCES", json!(resources).to_string());
             }
             "vault" => {
                 plain("AUTH", "service:auth".into());
@@ -402,8 +421,9 @@ impl Settings {
     }
 }
 
-/// The kernel's services as one workerd runs them, with `modules` in `SERVICES`' order.
-pub fn served(settings: &Settings, modules: Vec<Vec<u8>>) -> Vec<Served> {
+/// The kernel's services as one workerd runs them, with `modules` in `SERVICES`' order, and the gateway serving the
+/// web client's files from `web`.
+pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Served> {
     SERVICES
         .iter()
         .zip(modules)
@@ -411,20 +431,34 @@ pub fn served(settings: &Settings, modules: Vec<Vec<u8>>) -> Vec<Served> {
         .map(|(i, ((name, _, class), module))| Served {
             name: name.to_string(),
             module,
-            class: Some(class.to_string()),
+            class: class.map(str::to_string),
             listen: format!("127.0.0.1:{}", settings.ports[i]),
             bindings: settings.bindings(name).into_iter().map(|(n, v, _)| (n, v)).collect(),
-            outbound: None,
+            assets: (*name == "gateway").then(|| web.to_path_buf()),
+            // The gateway's node may be on this machine or its private network, as a node behind a tunnel is.
+            outbound: (*name == "gateway").then(|| NEARBY.to_string()),
         })
         .collect()
 }
 
+/// The web client's files, as this release has them: (path in `kernel/web/`, bytes).
+pub fn web_files() -> impl Iterator<Item = (&'static str, &'static [u8])> {
+    crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?, *bytes)))
+}
+
 /// Runs the kernel's services on this machine, in the pinned workerd, until it stops: their modules built from this
-/// release, their storage in `<home>/kernel/data`.
+/// release, the web client's files in `<home>/kernel/web`, and their storage in `<home>/kernel/data`.
 pub fn serve(settings: &Settings) -> Result<()> {
     let dir = Settings::path().parent().unwrap().to_path_buf();
     let modules = SERVICES.iter().map(|(_, entry, _)| module(entry)).collect::<Result<Vec<_>>>()?;
-    let config = write_config(&dir, &served(settings, modules))?;
+    let web = dir.join("web");
+    let _ = std::fs::remove_dir_all(&web);
+    for (file, bytes) in web_files() {
+        let path = web.join(file);
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        std::fs::write(path, bytes)?;
+    }
+    let config = write_config(&dir, &served(settings, modules, &web))?;
     let mut child = start(&config)?;
     let status = child.wait()?;
     bail!("the kernel's workerd stopped: {status}")
@@ -491,15 +525,23 @@ pub struct Served {
     pub class: Option<String>,
     pub listen: String,
     pub bindings: Vec<(String, String)>,
-    /// The service its own requests go to, if not the internet (a test's stand-in sites).
+    /// A folder it reads as `ASSETS`, as a Worker reads its static assets on Cloudflare.
+    pub assets: Option<PathBuf>,
+    /// The service its own requests go to, if not the internet: `NEARBY`, or a test's stand-in sites.
     pub outbound: Option<String>,
 }
+
+/// The internet, this machine and its private networks, as an outbound.
+pub const NEARBY: &str = "nearby";
 
 /// Writes the workerd config that runs `servers` into `dir` (their modules beside it, their storage in `dir/data`),
 /// readable only by its owner, since bindings hold the kernel's secrets.
 pub fn write_config(dir: &Path, servers: &[Served]) -> Result<PathBuf> {
     let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"));
     let mut services = Vec::new();
+    if servers.iter().any(|s| s.outbound.as_deref() == Some(NEARBY)) {
+        services.push(format!("(name = {}, network = (allow = [\"public\", \"private\", \"local\"]))", quote(NEARBY)));
+    }
     let mut sockets = Vec::new();
     let mut workers = Vec::new();
     for (i, s) in servers.iter().enumerate() {
@@ -511,6 +553,10 @@ pub fn write_config(dir: &Path, servers: &[Served]) -> Result<PathBuf> {
         services.push(format!("(name = {}, disk = (path = {}, writable = true))", quote(&format!("{}-data", s.name)), quote(&data.to_string_lossy())));
         sockets.push(format!("(name = {}, address = {}, http = (), service = {})", quote(&s.name), quote(&s.listen), quote(&s.name)));
         let mut bindings: Vec<String> = s.class.iter().map(|c| format!("(name = {}, durableObjectNamespace = {})", quote(&c.to_uppercase()), quote(c))).collect();
+        if let Some(assets) = &s.assets {
+            services.push(format!("(name = {}, disk = (path = {}, writable = false))", quote(&format!("{}-assets", s.name)), quote(&assets.to_string_lossy())));
+            bindings.push(format!("(name = \"ASSETS\", service = {})", quote(&format!("{}-assets", s.name))));
+        }
         for (name, value) in &s.bindings {
             bindings.push(match value.strip_prefix("service:") {
                 Some(service) => format!("(name = {}, service = {})", quote(name), quote(service)),
@@ -657,9 +703,9 @@ pub fn worker_name(service: &str) -> String {
 
 /// What a Worker's upload says besides its module: its bindings (another service's by its Worker's name), its Durable
 /// Object class, and that class's migration the first time.
-pub fn metadata(settings: &Settings, service: &str, class: &str, migrated: bool, exists: impl Fn(&str) -> bool) -> (Value, bool) {
+pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrated: bool, exists: impl Fn(&str) -> bool) -> (Value, bool) {
     let mut complete = true;
-    let mut bindings = vec![json!({ "type": "durable_object_namespace", "name": class.to_uppercase(), "class_name": class })];
+    let mut bindings: Vec<Value> = class.iter().map(|class| json!({ "type": "durable_object_namespace", "name": class.to_uppercase(), "class_name": class })).collect();
     for (name, value, secret) in settings.bindings(service) {
         match value.strip_prefix("service:") {
             Some(other) if exists(&worker_name(other)) => bindings.push(json!({ "type": "service", "name": name, "service": worker_name(other) })),
@@ -668,7 +714,7 @@ pub fn metadata(settings: &Settings, service: &str, class: &str, migrated: bool,
         }
     }
     let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::apps::COMPATIBILITY_DATE, "bindings": bindings });
-    if !migrated {
+    if let Some(class) = class.filter(|_| !migrated) {
         meta["migrations"] = json!({ "new_tag": "v1", "new_sqlite_classes": [class] });
     }
     (meta, complete)
@@ -686,7 +732,7 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>]) -> Resu
             let migrated = scripts.get(&worker_name(service)).is_some_and(|tag| tag.as_deref() == Some("v1"));
             let (meta, complete) = metadata(settings, service, class, migrated, |name| scripts.contains_key(name) || name == worker_name(service));
             cf.upload(&worker_name(service), &modules[i], &meta)?;
-            cf.reach(&worker_name(service), [&settings.auth_url, &settings.vault_url, &settings.schedules_url][i])?;
+            cf.reach(&worker_name(service), [&settings.auth_url, &settings.vault_url, &settings.schedules_url, &settings.address][i])?;
             if !complete {
                 again.push(i);
             }

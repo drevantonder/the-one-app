@@ -81,6 +81,12 @@ fn main() {
     let mut files = Vec::new();
     collect(&kernel, &kernel, &mut files);
     files.retain(|(rel, _)| !rel.starts_with("test/"));
+    // The gateway serves the screens' design kit beside the web client, the same files nodes put in screens.
+    let screen = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("src/screen");
+    println!("cargo:rerun-if-changed={}", screen.display());
+    let mut kit = Vec::new();
+    collect(&screen, &screen, &mut kit);
+    files.extend(kit.into_iter().map(|(rel, abs)| (format!("web/screen/{rel}"), abs)));
     files.sort();
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
     let out = format!("{out}pub const KERNEL: &[(&str, &[u8])] = &[{}];\n", files.join(", "));

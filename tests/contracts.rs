@@ -380,7 +380,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     let dir = std::env::temp_dir().join(format!("one-formats-{}", rand::random::<u64>()));
     std::fs::create_dir_all(&dir).unwrap();
     let addr = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
-    let served = kernel::Served { name: "formats".into(), module: kernel::module_from(files.to_vec(), "test/formats.js").unwrap(), class: None, listen: addr.clone(), bindings: vec![], outbound: None };
+    let served = kernel::Served { name: "formats".into(), module: kernel::module_from(files.to_vec(), "test/formats.js").unwrap(), class: None, listen: addr.clone(), bindings: vec![], assets: None, outbound: None };
     let mut child = kernel::start(&kernel::write_config(&dir, &[served]).unwrap()).unwrap();
     let started = std::time::Instant::now();
     while std::net::TcpStream::connect(&addr).is_err() {

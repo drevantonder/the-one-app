@@ -67,18 +67,20 @@ Usage:
   {CLI} vault requests                 the requests waiting for you; vault answer <id> [--item <id> | --decline]
                                        answers one, a new item's values on stdin (one line, or a JSON object)
   {CLI} kernel                         where this machine's kernel is: its services' addresses and what it's set to
-  {CLI} kernel serve [--auth-url <url>]
-                                       run the kernel's services (auth, vault, schedules) on this machine; the first
-                                       time, with where people will reach its sign-in, and it shows a new recovery key
-  {CLI} kernel deploy [--domain <domain>] [--account <id>]
+  {CLI} kernel serve [--address <url>]
+                                       run the kernel's services (auth, vault, schedules, and the gateway people reach
+                                       at the install's address) on this machine; the first time, with that address,
+                                       and it shows a new recovery key
+  {CLI} kernel deploy [--domain <domain>] [--address <url>] [--account <id>]
                                        deploy the kernel's services to Cloudflare as Workers, with an API token that
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
-                                       domains (sign-in at {CLI}-auth.<domain>, for good: passkeys belong to it), or
-                                       at its workers.dev address
+                                       domains ({CLI}-<service>.<domain>, the install's address {CLI}.<domain> unless
+                                       --address says, for good: passkeys belong to it), or at its workers.dev address
   {CLI} kernel invite <email>         let someone sign up at the kernel's sign-in: nobody can uninvited, its first
                                        person too
-  {CLI} kernel set <setting> <value>   change one: auth-url, vault-url, schedules-url, resources (nodes' addresses,
-                                       comma-separated), bucket or google (its JSON object piped, with - as its value)
+  {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/), auth-url, vault-url,
+                                       schedules-url, resources (nodes' own addresses, comma-separated), bucket or
+                                       google (its JSON object piped, with - as its value)
   {CLI} kernel use <auth> <vault> <schedules>
                                        point this install at its kernel's services
   {CLI} storage                        where the install's data is kept
@@ -325,7 +327,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let settings = match one::kernel::Settings::load() {
                 Ok(settings) => settings,
                 Err(_) => {
-                    let url = flags.get("auth-url").and_then(Value::as_str).context("say where people will reach its sign-in, with --auth-url https://…")?;
+                    let url = flags.get("address").and_then(Value::as_str).context("say where people will reach the install, with --address https://…")?;
                     let (settings, recovery) = one::kernel::Settings::new(NAME, url);
                     settings.save()?;
                     println!("Its recovery key, shown only this once; keep it in your admins' password manager:\n\n  {recovery}\n");
@@ -346,13 +348,18 @@ fn run(args: Vec<String>) -> Result<()> {
             let settings = match one::kernel::Settings::load() {
                 Ok(settings) => settings,
                 Err(_) => {
-                    let domain = match flags.get("domain").and_then(Value::as_str) {
-                        Some(domain) => domain.trim_matches('.').to_string(),
-                        None => format!("{}.workers.dev", cf.subdomain()?),
+                    let domain = flags.get("domain").and_then(Value::as_str).map(|d| d.trim_matches('.').to_string());
+                    let (domain, address) = match domain {
+                        Some(domain) => (domain.clone(), format!("https://{CLI}.{domain}")),
+                        None => {
+                            let domain = format!("{}.workers.dev", cf.subdomain()?);
+                            (domain.clone(), format!("https://{}.{domain}", one::kernel::worker_name("gateway")))
+                        }
                     };
                     let at = |service: &str| format!("https://{}.{domain}", one::kernel::worker_name(service));
-                    let (mut settings, recovery) = one::kernel::Settings::new(NAME, &at("auth"));
-                    (settings.vault_url, settings.schedules_url) = (at("vault"), at("schedules"));
+                    let address = flags.get("address").and_then(Value::as_str).map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
+                    let (mut settings, recovery) = one::kernel::Settings::new(NAME, &address);
+                    (settings.auth_url, settings.vault_url, settings.schedules_url) = (at("auth"), at("vault"), at("schedules"));
                     settings.save()?;
                     println!("Its recovery key, shown only this once; keep it in your admins' password manager:\n\n  {recovery}\n");
                     println!("Keep {} too: the kernel's secrets are in it, and a deploy without them can't read what's there.\n", one::kernel::Settings::path().display());
@@ -366,12 +373,13 @@ fn run(args: Vec<String>) -> Result<()> {
         ["kernel", "invite", email] => {
             let settings = one::kernel::Settings::load()?;
             one::kernel::invite(&settings.auth_url, &settings.kernel_secret, email)?;
-            println!("{email} can sign up at {}/sign-in now.", settings.auth_url);
+            println!("{email} can sign up at {}/sign-in now.", settings.address);
         }
         ["kernel", "set", name, value] => {
             let mut settings = one::kernel::Settings::load()?;
             let piped = || -> Result<Value> { serde_json::from_reader(std::io::stdin()).context("pipe its JSON object on stdin") };
             match *name {
+                "node-url" => settings.node_url = Some(value.trim_end_matches('/').to_string()).filter(|v| !v.is_empty() && v != "-"),
                 "auth-url" => settings.auth_url = value.trim_end_matches('/').to_string(),
                 "vault-url" => settings.vault_url = value.trim_end_matches('/').to_string(),
                 "schedules-url" => settings.schedules_url = value.trim_end_matches('/').to_string(),
@@ -379,7 +387,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 "bucket" if *value == "-" => settings.bucket = Some(piped()?),
                 "google" if *value == "-" => settings.google = Some(piped()?),
                 "bucket" | "google" => bail!("pipe {name}'s JSON object on stdin and give - as its value, so it's in no shell's history"),
-                _ => bail!("no kernel setting {name}: auth-url, vault-url, schedules-url, resources, bucket or google"),
+                _ => bail!("no kernel setting {name}: node-url, auth-url, vault-url, schedules-url, resources, bucket or google"),
             }
             settings.save()?;
             println!("Set {name}. {CLI} kernel serve takes it at its next start, and {CLI} kernel deploy when it next runs.");
@@ -1230,11 +1238,14 @@ fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> 
 /// Backups' status, for people.
 /// Where a kernel is, and what it's set to, without its secrets.
 fn kernel_said(s: &one::kernel::Settings) -> String {
-    let mut out = format!("{}'s kernel\n  sign-in   {}\n  vault     {}\n  schedules {}\n", s.name, s.auth_url, s.vault_url, s.schedules_url);
+    let mut out = format!("{}'s kernel\n  address   {}\n  vault     {}\n  schedules {}\n", s.name, s.address, s.vault_url, s.schedules_url);
     if s.vault_url.starts_with("http://127.0.0.1") {
-        out += &format!("  here on   127.0.0.1:{} (auth), :{} (vault), :{} (schedules)\n", s.ports[0], s.ports[1], s.ports[2]);
+        out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth), :{} (vault), :{} (schedules)\n", s.ports[3], s.ports[0], s.ports[1], s.ports[2]);
     }
-    out += &format!("  nodes     {}\n", if s.resources.is_empty() { "none yet: kernel set resources".into() } else { s.resources.join(", ") });
+    out += &format!("  /v1/ to   {}\n", s.node_url.as_deref().unwrap_or("no node yet: kernel set node-url"));
+    if !s.resources.is_empty() {
+        out += &format!("  nodes     {}\n", s.resources.join(", "));
+    }
     out += &format!("  bucket    {}\n", s.bucket.as_ref().map(|b| format!("{} in {}", b["bucket"].as_str().unwrap_or("?"), b["endpoint"].as_str().unwrap_or("?"))).unwrap_or("none yet: kernel set bucket -".into()));
     out += &format!("  Google    {}\n", if s.google.is_some() { "sign-in on" } else { "sign-in off" });
     out

@@ -175,11 +175,16 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
     found
 }
 
+/// Headers that say a request was passed on from elsewhere: the gateway sends `forwarded`, tunnels and proxies the rest.
+pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip", "cf-worker"];
+
 /// Browsers send an Origin, and a page that rebinds its DNS to 127.0.0.1 still sends its own Host:
 /// refuse both, so no web page can drive this machine's node.
 async fn only_this_machine(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let host = req.headers().get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
-    let local = host.split(':').next().is_some_and(|h| matches!(h, "127.0.0.1" | "localhost" | "[::1]"));
+    // The gateway, a tunnel or a proxy on this machine still says it passed on someone else's request.
+    let forwarded = FORWARDED.iter().any(|h| req.headers().contains_key(*h));
+    let local = !forwarded && host.split(':').next().is_some_and(|h| matches!(h, "127.0.0.1" | "localhost" | "[::1]"));
     // A screen this node served may call it: its origin is this node's own address.
     let origin = req.headers().get(axum::http::header::ORIGIN).and_then(|o| o.to_str().ok());
     let own = origin.is_some_and(|o| o.strip_prefix("http://").is_some_and(|h| h == host));
