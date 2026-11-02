@@ -63,12 +63,12 @@ function untar(bytes) {
 }
 
 /// What a built-in app the install hasn't added says about itself: nothing runs it yet, so its code says (the first
-/// `title`, `icon`, `color`, `tagline` and `description` after `export default` given as plain strings, as the built-in
+/// `title`, `icon`, `color`, `tagline` and `description` after the line starting `export default` given as plain strings, as the built-in
 /// apps give them before their ops).
 async function described(ctx, bundle) {
   const file = untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
   const all = file ? new TextDecoder().decode(file.bytes) : "";
-  const code = all.slice(Math.max(0, all.indexOf("export default")));
+  const code = all.slice(Math.max(0, all.search(/^export default/m)));
   const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
   const parts = code.match(/\buses:\s*\{[^}]*\bsidecars:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
   return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), uses: { apps: [], sidecars: parts } };
