@@ -101,7 +101,7 @@ export class Relay {
   }
 
   /// The install's devices, as the deploy said them (`{ keys, at }`) and the devices admitted since (`added`: key →
-  /// when), with the pairing codes made since (`pairings`: hash of its ticket → until when). None at all: anyone.
+  /// when), with the pairing codes made since (`pairings`: hash of its ticket → until when). None at all: no one.
   async devices() {
     const said = this.env.DEVICES ? JSON.parse(this.env.DEVICES) : null;
     let known = (await this.ctx.storage.get("devices")) || { keys: [], at: -1, added: {}, pairings: {} };
@@ -125,7 +125,7 @@ export class Relay {
     const known = await this.devices();
     const now = Date.now();
     let joining = null;
-    if ((known.keys.length || Object.keys(known.added).length) && !known.keys.includes(key) && !(key in known.added)) {
+    if (!known.keys.includes(key) && !(key in known.added)) {
       const ticket = url.searchParams.get("pairing") || "";
       const until = /^[0-9a-f]{64}$/.test(ticket) && known.pairings[await sha256(ticket)];
       if (!until || until < now) return refuse(403, "the relay takes only your One App's devices");

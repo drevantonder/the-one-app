@@ -80,7 +80,8 @@ Usage:
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
                                        domains ({CLI}-<service>.<domain>, the install's address {CLI}.<domain> unless
                                        --address says, for good: passkeys belong to it), or at its workers.dev address;
-                                       and the serverless node with it, once serverless deploy put it there
+                                       and the serverless node with it, once serverless deploy put it there; beside a
+                                       node of the install, whose devices its relay takes, unless --new
   {CLI} kernel invite <name> [--user <id>]
                                        a link that lets someone join, once and for a few days, by making their
                                        passkey, as who they are in the install (--user, or this machine's person for
@@ -163,10 +164,12 @@ Usage:
 }
 
 /// `settings` with the keys of the install's devices, as the node on this machine knows them, and when its log last
-/// changed them, for the relay to take only them; none when no node answers here.
-fn devices_here(settings: one::kernel::Settings) -> Result<one::kernel::Settings> {
+/// changed them, for the relay to take only them; none when no node answers here, which `needed` refuses, since that
+/// relay would take no one.
+fn devices_here(settings: one::kernel::Settings, needed: bool) -> Result<one::kernel::Settings> {
     let state = get("/v1/state").unwrap_or_default();
     let devices: Vec<String> = state["install"]["devices"].as_array().into_iter().flatten().filter_map(|d| d["key"].as_str().map(str::to_string)).filter(|k| k.len() == 64).collect();
+    anyhow::ensure!(!needed || !devices.is_empty(), "no node of your One App answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new install, whose relay takes devices once this runs again beside one");
     Ok(one::kernel::Settings { devices, devices_at: state["install"]["devices_at"].as_u64().unwrap_or(0), ..settings })
 }
 
@@ -387,7 +390,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             };
             print!("{}", kernel_said(&settings));
-            let settings = devices_here(settings)?;
+            let settings = devices_here(settings, false)?;
             one::kernel::serve(&settings)?
         }
         ["kernel", "deploy"] => {
@@ -422,7 +425,7 @@ fn run(args: Vec<String>) -> Result<()> {
                     }
                 }
             };
-            let settings = devices_here(settings)?;
+            let settings = devices_here(settings, !flags.contains_key("new"))?;
             let modules = one::kernel::SERVICES.iter().map(|(_, entry, _)| one::kernel::module(entry)).collect::<Result<Vec<_>>>()?;
             let web = settings.web();
             one::kernel::deploy(&cf, &settings, &modules, &web)?;
@@ -445,7 +448,7 @@ fn run(args: Vec<String>) -> Result<()> {
             }
         }
         ["serverless", "deploy"] => {
-            let mut settings = devices_here(one::kernel::Settings::load()?)?;
+            let mut settings = devices_here(one::kernel::Settings::load()?, true)?;
             let cf = cloudflare(&flags, Some(&settings))?;
             one::serverless::deploy(&cf, &settings)?;
             if !settings.serverless {
