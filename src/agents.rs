@@ -85,20 +85,44 @@ fn valid(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
 /// Whether a new skill's SKILL.md starts with the frontmatter harnesses load it by: without a name and description,
 /// it's never used.
 fn introduced(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
-    // As harnesses read it: lines may end in \r\n or spaces.
-    let md = files.get("SKILL.md").map(String::as_str).unwrap_or("").replace("\r\n", "\n");
-    let mut lines = md.lines().map(str::trim).skip_while(|l| l.is_empty());
     let example = format!("---\nname: {name}\ndescription: what it's for, and when to use it\n---");
-    ensure!(lines.next() == Some("---"), "Not added: SKILL.md's first line must be ---, starting its frontmatter:\n{example}");
-    let front: Vec<&str> = lines.by_ref().take_while(|l| *l != "---").collect();
-    let field = |k: &str| front.iter().find_map(|l| l.strip_prefix(&format!("{k}:"))).map(|v| v.trim().trim_matches(['"', '\'']).to_string()).filter(|v| !v.is_empty());
-    match field("name") {
+    let front = match frontmatter(files.get("SKILL.md").map(String::as_str).unwrap_or("")) {
+        Ok(front) => front,
+        Err(missing) => bail!("Not added: SKILL.md's {missing}:\n{example}"),
+    };
+    match front.get("name") {
         None => bail!("Not added: SKILL.md's frontmatter has no name; it starts:\n{example}"),
         Some(n) if n != name => bail!("Not added: SKILL.md's frontmatter names it {n}, not {name}: they must be the same"),
         _ => {}
     }
-    ensure!(field("description").is_some(), "Not added: SKILL.md's frontmatter has no description, which says what it's for and when to use it:\n{example}");
+    ensure!(front.contains_key("description"), "Not added: SKILL.md's frontmatter has no description, which says what it's for and when to use it:\n{example}");
     Ok(())
+}
+
+/// A SKILL.md's frontmatter as harnesses read it: `---` on the first line and on one after it, between them each
+/// `key: value` with a value, a folded one (`key: >`) on the indented lines after it. Lines may end in \r\n or
+/// spaces. Err says what's missing.
+fn frontmatter(md: &str) -> std::result::Result<BTreeMap<String, String>, &'static str> {
+    let mut lines = md.lines().map(str::trim_end);
+    if lines.next() != Some("---") {
+        return Err("first line must be ---, starting its frontmatter");
+    }
+    let rest: Vec<&str> = lines.collect();
+    let front = &rest[..rest.iter().position(|l| *l == "---").ok_or("frontmatter must end with a line of ---")?];
+    let mut out = BTreeMap::new();
+    for (i, line) in front.iter().enumerate() {
+        let Some((key, value)) = line.split_once(':').filter(|(k, _)| !k.is_empty() && !k.starts_with([' ', '\t'])) else { continue };
+        let mut value = value.trim().to_string();
+        if value.starts_with(['>', '|']) && value[1..].chars().all(|c| c == '-' || c == '+' || c.is_ascii_digit()) {
+            let folded: Vec<&str> = front[i + 1..].iter().take_while(|l| l.is_empty() || l.starts_with([' ', '\t'])).map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+            value = folded.join(" ");
+        }
+        let value = value.trim_matches(['"', '\'']).trim();
+        if !value.is_empty() {
+            out.insert(key.to_string(), value.to_string());
+        }
+    }
+    Ok(out)
 }
 
 pub fn call(op: String, input: Value, _caller: Me, records: Vec<Record>) -> Reply {
@@ -193,7 +217,7 @@ fn first_change(before: &str, now: &str) -> String {
 }
 
 fn description(skill_md: &str) -> String {
-    skill_md.lines().find_map(|l| l.strip_prefix("description:")).map(|d| d.trim().trim_matches('"').to_string()).unwrap_or_default()
+    frontmatter(skill_md).ok().and_then(|mut f| f.remove("description")).unwrap_or_default()
 }
 
 /// Sets up every harness installed on this device: AGENTS.md, the skills, the board's prompt hook and the MCP server.
