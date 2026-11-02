@@ -239,7 +239,12 @@ fn input(schema: &Value, places: &[String], words: Vec<String>, flags: BTreeMap<
     }
     let rest: Vec<String> = words.collect();
     let Some(first) = rest.first() else { return Ok(input) };
-    ensure!(!filled, "{} is left over: put text with spaces in quotes (see --help)", rest.join(" "));
+    ensure!(
+        !filled,
+        "{} is left over: words fill {} and nothing more, so put text with spaces in quotes, or give it as a --flag (see --help)",
+        rest.join(" "),
+        places.iter().map(|p| format!("<{}>", kebab(p))).collect::<Vec<_>>().join(" ")
+    );
     let unset: Vec<&String> = props.keys().filter(|p| !input.contains_key(*p) && props[*p]["type"] == "string").collect();
     bail!(
         "{} isn't an input: {} (see --help)",
