@@ -295,10 +295,25 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
     next.run(req).await
 }
 
-/// Refuses a request once what it sends is read, up to 1 MiB: refused mid-body, the rest unread, the connection closes
-/// with a reset that can reach the client before the refusal does, which it sees as a broken connection instead.
-async fn refuse(req: axum::extract::Request, refusal: Response) -> Response {
-    let _ = axum::body::to_bytes(req.into_body(), 1 << 20).await;
+/// Refuses a request once what it sends is read, dropped as it comes: refused mid-body, the rest unread, the connection
+/// closes with a reset that can reach the client before the refusal does, which it sees as a broken connection instead.
+/// One that sends more than 1 MiB, or takes longer than a few seconds (anyone can reach this through the gateway), is
+/// refused with the connection closed, holding nothing.
+async fn refuse(req: axum::extract::Request, mut refusal: Response) -> Response {
+    let mut body = req.into_body().into_data_stream();
+    let drain = async {
+        let mut read = 0;
+        while let Some(chunk) = body.next().await {
+            read += chunk.map_err(|_| ())?.len();
+            if read > 1 << 20 {
+                return Err(());
+            }
+        }
+        Ok(())
+    };
+    if !matches!(tokio::time::timeout(std::time::Duration::from_secs(5), drain).await, Ok(Ok(()))) {
+        refusal.headers_mut().insert(axum::http::header::CONNECTION, axum::http::HeaderValue::from_static("close"));
+    }
     refusal
 }
 
