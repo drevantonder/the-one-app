@@ -44,7 +44,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     let places = places(o);
     let mut input = input(&schema, &places, words, flags, &files)?;
     let missing = missing(&schema, &input);
-    if !missing.is_empty() {
+    if !missing.is_empty() || stdin_ready() {
         from_stdin(&schema, &missing, &mut input)?;
         let missing = self::missing(&schema, &input);
         ensure!(
@@ -303,9 +303,17 @@ fn from_stdin(schema: &Value, missing: &[String], input: &mut Map<String, Value>
             let text = text.strip_suffix('\n').unwrap_or(&text).to_string();
             input.insert(missing[0].clone(), value(&missing[0], &[Some(text)], props.get(&missing[0]))?);
         }
+        _ if missing.is_empty() => {}
         _ => bail!("what's piped isn't a JSON object of inputs"),
     }
     Ok(())
+}
+
+/// Whether stdin holds something to read now: a file, or a pipe written to within a moment. Read only then when no
+/// input is missing, since an agent's shell may leave stdin open and empty, which mustn't hold up every command.
+fn stdin_ready() -> bool {
+    let mut fd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
+    !std::io::stdin().is_terminal() && unsafe { libc::poll(&mut fd, 1, 100) } > 0 && fd.revents & libc::POLLIN != 0
 }
 
 /// What's piped to stdin, or None when nothing comes: an agent's shell may leave stdin open and empty, so wait only
@@ -513,7 +521,7 @@ pub fn help(app: &Value, op: &Value) -> String {
         (_, true) => "It sends or can't be undone: it asks first, or give --confirm once the person agreed.\n",
         _ => "",
     });
-    if !required.is_empty() {
+    if !props.is_empty() {
         text.push_str(&format!("Inputs not given are read as JSON from stdin: {CLI} {a} {o} < input.json\n"));
     }
     text
