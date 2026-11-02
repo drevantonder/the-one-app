@@ -230,7 +230,11 @@ private class Bridge(val context: Context, val store: Store, route: Route, val s
                 str(m, "value")?.let { v -> Appearance.entries.firstOrNull { it.name.equals(v, ignoreCase = true) }?.let(store::choose) }
                 return JsonPrimitive(store.appearance.name.lowercase())
             }
-            "device" -> return obj("name" to SignIn.deviceName(context), "build" to "${store.config?.name ?: BuildConfig.NAME}, app ${BuildConfig.COMMIT}", "signOut" to true)
+            "device" -> {
+                val server = store.install?.servers?.firstOrNull { it.key == store.state?.host?.key }
+                val build = "${store.config?.name ?: BuildConfig.NAME}, app ${BuildConfig.COMMIT}" + (server?.build?.let { "\n${server.name} runs $it" } ?: "")
+                return obj("name" to SignIn.deviceName(context), "build" to build, "signOut" to true)
+            }
             "request" -> return JsonPrimitive(ask(str(m, "scope") ?: "", str(m, "id") ?: ""))
             "call" -> {
                 if (settings != null) throw NodeError("Settings has no app to call.")
