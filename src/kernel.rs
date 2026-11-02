@@ -528,3 +528,137 @@ pub fn write_config(dir: &Path, servers: &[Served]) -> Result<PathBuf> {
 pub fn start(config: &Path) -> Result<std::process::Child> {
     Ok(std::process::Command::new(crate::apps::workerd()?).arg("serve").arg(config).arg("--experimental").stdin(std::process::Stdio::null()).spawn()?)
 }
+
+// Cloudflare.
+
+/// Cloudflare's API, with an API token that may edit Workers.
+pub struct Cloudflare {
+    pub api: String,
+    pub token: String,
+    pub account: String,
+}
+
+impl Cloudflare {
+    fn call(&self, method: &str, path: &str, body: Option<(String, Vec<u8>)>) -> Result<Value> {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(120))).build().into();
+        let url = format!("{}{path}", self.api);
+        let auth = format!("Bearer {}", self.token);
+        let mut resp = match (method, body) {
+            ("GET", _) | (_, None) => agent.get(&url).header("authorization", &auth).call()?,
+            ("PUT", Some((kind, bytes))) => agent.put(&url).header("authorization", &auth).header("content-type", &kind).send(&bytes[..])?,
+            (_, Some((kind, bytes))) => agent.post(&url).header("authorization", &auth).header("content-type", &kind).send(&bytes[..])?,
+        };
+        let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
+        if out["success"] != true {
+            let errors: Vec<String> = out["errors"].as_array().into_iter().flatten().map(|e| e["message"].as_str().unwrap_or("").to_string()).collect();
+            bail!("Cloudflare said {} to {method} {path}: {}", resp.status(), errors.join("; "));
+        }
+        Ok(out["result"].clone())
+    }
+
+    fn send(&self, method: &str, path: &str, body: Value) -> Result<Value> {
+        self.call(method, path, Some(("application/json".into(), body.to_string().into_bytes())))
+    }
+
+    /// The token's account, when it has just one.
+    pub fn accounts(&self) -> Result<String> {
+        let list = self.call("GET", "/accounts", None)?;
+        let ids: Vec<&str> = list.as_array().into_iter().flatten().filter_map(|a| a["id"].as_str()).collect();
+        match ids.as_slice() {
+            [one] => Ok(one.to_string()),
+            [] => bail!("that token reaches no Cloudflare account"),
+            _ => bail!("that token reaches several accounts: say which with --account <id>"),
+        }
+    }
+
+    /// The account's workers.dev subdomain: services are at `https://<name>.<subdomain>.workers.dev`.
+    pub fn subdomain(&self) -> Result<String> {
+        Ok(self.call("GET", &format!("/accounts/{}/workers/subdomain", self.account), None)?["subdomain"].as_str().context("the account has no workers.dev subdomain yet: open Workers in Cloudflare's dashboard once")?.to_string())
+    }
+
+    /// The account's Workers, by name, with the Durable Object migration each has had.
+    fn scripts(&self) -> Result<std::collections::BTreeMap<String, Option<String>>> {
+        let list = self.call("GET", &format!("/accounts/{}/workers/scripts", self.account), None)?;
+        Ok(list.as_array().into_iter().flatten().filter_map(|s| Some((s["id"].as_str()?.to_string(), s["migration_tag"].as_str().map(str::to_string)))).collect())
+    }
+
+    /// Uploads a Worker: its module, bindings and Durable Object class, and turns its workers.dev address on.
+    fn upload(&self, name: &str, module: &[u8], metadata: &Value) -> Result<()> {
+        let boundary = format!("kernel-{}", data_encoding::HEXLOWER.encode(&rand::random::<[u8; 12]>()));
+        let mut body = Vec::new();
+        body.extend(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n").as_bytes());
+        body.extend(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"worker.js\"; filename=\"worker.js\"\r\nContent-Type: application/javascript+module\r\n\r\n").as_bytes());
+        body.extend(module);
+        body.extend(format!("\r\n--{boundary}--\r\n").as_bytes());
+        self.call("PUT", &format!("/accounts/{}/workers/scripts/{name}", self.account), Some((format!("multipart/form-data; boundary={boundary}"), body)))?;
+        Ok(())
+    }
+
+    /// Puts a Worker at `url`: its workers.dev address, or a host in one of the account's domains, with its
+    /// workers.dev address off, so each service has one address.
+    fn reach(&self, name: &str, url: &str) -> Result<()> {
+        let host = url.split("://").nth(1).unwrap_or(url).split(['/', ':']).next().unwrap_or("");
+        let subdomain = format!("/accounts/{}/workers/scripts/{name}/subdomain", self.account);
+        if host.ends_with(".workers.dev") {
+            self.send("POST", &subdomain, json!({ "enabled": true, "previews_enabled": false }))?;
+            return Ok(());
+        }
+        let labels: Vec<&str> = host.split('.').collect();
+        let zone = (1..labels.len().saturating_sub(1))
+            .map(|i| labels[i..].join("."))
+            .find_map(|domain| self.call("GET", &format!("/zones?name={domain}"), None).ok()?.as_array()?.first()?["id"].as_str().map(str::to_string))
+            .with_context(|| format!("{host} is in none of the account's domains"))?;
+        self.send("PUT", &format!("/accounts/{}/workers/domains", self.account), json!({ "environment": "production", "hostname": host, "service": name, "zone_id": zone }))?;
+        self.send("POST", &subdomain, json!({ "enabled": false, "previews_enabled": false }))?;
+        Ok(())
+    }
+}
+
+/// A kernel service's Worker's name on Cloudflare: `<cli>-<service>`, so white labels sharing an account don't clash.
+pub fn worker_name(service: &str) -> String {
+    format!("{}-{service}", crate::config::CLI)
+}
+
+/// What a Worker's upload says besides its module: its bindings (another service's by its Worker's name), its Durable
+/// Object class, and that class's migration the first time.
+pub fn metadata(settings: &Settings, service: &str, class: &str, migrated: bool, exists: impl Fn(&str) -> bool) -> (Value, bool) {
+    let mut complete = true;
+    let mut bindings = vec![json!({ "type": "durable_object_namespace", "name": class.to_uppercase(), "class_name": class })];
+    for (name, value, secret) in settings.bindings(service) {
+        match value.strip_prefix("service:") {
+            Some(other) if exists(&worker_name(other)) => bindings.push(json!({ "type": "service", "name": name, "service": worker_name(other) })),
+            Some(_) => complete = false,
+            None => bindings.push(json!({ "type": if secret { "secret_text" } else { "plain_text" }, "name": name, "text": value })),
+        }
+    }
+    let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::apps::COMPATIBILITY_DATE, "bindings": bindings });
+    if !migrated {
+        meta["migrations"] = json!({ "new_tag": "v1", "new_sqlite_classes": [class] });
+    }
+    (meta, complete)
+}
+
+/// Deploys the kernel's services to Cloudflare, each a Worker with its Durable Object, built from this release. A
+/// service whose binding names one not deployed yet goes up without it, and again once that one is.
+pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>]) -> Result<()> {
+    let mut left: Vec<usize> = (0..SERVICES.len()).collect();
+    for _ in 0..2 {
+        let mut again = Vec::new();
+        for i in left {
+            let (service, _, class) = SERVICES[i];
+            let scripts = cf.scripts()?;
+            let migrated = scripts.get(&worker_name(service)).is_some_and(|tag| tag.as_deref() == Some("v1"));
+            let (meta, complete) = metadata(settings, service, class, migrated, |name| scripts.contains_key(name) || name == worker_name(service));
+            cf.upload(&worker_name(service), &modules[i], &meta)?;
+            cf.reach(&worker_name(service), [&settings.auth_url, &settings.vault_url, &settings.schedules_url][i])?;
+            if !complete {
+                again.push(i);
+            }
+        }
+        left = again;
+        if left.is_empty() {
+            return Ok(());
+        }
+    }
+    bail!("some services' bindings never resolved")
+}

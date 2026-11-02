@@ -70,6 +70,11 @@ Usage:
   {CLI} kernel serve [--auth-url <url>]
                                        run the kernel's services (auth, vault, schedules) on this machine; the first
                                        time, with where people will reach its sign-in, and it shows a new recovery key
+  {CLI} kernel deploy [--domain <domain>] [--account <id>]
+                                       deploy the kernel's services to Cloudflare as Workers, with an API token that
+                                       may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
+                                       domains (sign-in at {CLI}-auth.<domain>, for good: passkeys belong to it), or
+                                       at its workers.dev address
   {CLI} kernel set <setting> <value>   change one: auth-url, vault-url, schedules-url, resources (nodes' addresses,
                                        comma-separated), bucket or google (its JSON object piped, with - as its value)
   {CLI} kernel use <auth> <vault> <schedules>
@@ -328,6 +333,34 @@ fn run(args: Vec<String>) -> Result<()> {
             print!("{}", kernel_said(&settings));
             one::kernel::serve(&settings)?
         }
+        ["kernel", "deploy"] => {
+            let token = std::env::var("CLOUDFLARE_API_TOKEN").context("give a Cloudflare API token that may edit Workers in CLOUDFLARE_API_TOKEN")?;
+            let api = "https://api.cloudflare.com/client/v4".to_string();
+            let account = match flags.get("account").and_then(Value::as_str) {
+                Some(account) => account.to_string(),
+                None => one::kernel::Cloudflare { api: api.clone(), token: token.clone(), account: String::new() }.accounts()?,
+            };
+            let cf = one::kernel::Cloudflare { api, token, account };
+            let settings = match one::kernel::Settings::load() {
+                Ok(settings) => settings,
+                Err(_) => {
+                    let domain = match flags.get("domain").and_then(Value::as_str) {
+                        Some(domain) => domain.trim_matches('.').to_string(),
+                        None => format!("{}.workers.dev", cf.subdomain()?),
+                    };
+                    let at = |service: &str| format!("https://{}.{domain}", one::kernel::worker_name(service));
+                    let (mut settings, recovery) = one::kernel::Settings::new(NAME, &at("auth"));
+                    (settings.vault_url, settings.schedules_url) = (at("vault"), at("schedules"));
+                    settings.save()?;
+                    println!("Its recovery key, shown only this once; keep it in your admins' password manager:\n\n  {recovery}\n");
+                    println!("Keep {} too: the kernel's secrets are in it, and a deploy without them can't read what's there.\n", one::kernel::Settings::path().display());
+                    settings
+                }
+            };
+            let modules = one::kernel::SERVICES.iter().map(|(_, entry, _)| one::kernel::module(entry)).collect::<Result<Vec<_>>>()?;
+            one::kernel::deploy(&cf, &settings, &modules)?;
+            print!("Deployed.\n{}", kernel_said(&settings));
+        }
         ["kernel", "set", name, value] => {
             let mut settings = one::kernel::Settings::load()?;
             let piped = || -> Result<Value> { serde_json::from_reader(std::io::stdin()).context("pipe its JSON object on stdin") };
@@ -342,7 +375,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 _ => bail!("no kernel setting {name}: auth-url, vault-url, schedules-url, resources, bucket or google"),
             }
             settings.save()?;
-            println!("Set {name}. {CLI} kernel serve runs with it from its next start.");
+            println!("Set {name}. {CLI} kernel serve takes it at its next start, and {CLI} kernel deploy when it next runs.");
         }
         ["kernel", "use", auth, vault, schedules] => {
             for (name, url) in [("kernel_auth", auth), ("kernel_vault", vault), ("kernel_schedules", schedules)] {
@@ -1191,7 +1224,9 @@ fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> 
 /// Where a kernel is, and what it's set to, without its secrets.
 fn kernel_said(s: &one::kernel::Settings) -> String {
     let mut out = format!("{}'s kernel\n  sign-in   {}\n  vault     {}\n  schedules {}\n", s.name, s.auth_url, s.vault_url, s.schedules_url);
-    out += &format!("  here on   127.0.0.1:{} (auth), :{} (vault), :{} (schedules)\n", s.ports[0], s.ports[1], s.ports[2]);
+    if s.vault_url.starts_with("http://127.0.0.1") {
+        out += &format!("  here on   127.0.0.1:{} (auth), :{} (vault), :{} (schedules)\n", s.ports[0], s.ports[1], s.ports[2]);
+    }
     out += &format!("  nodes     {}\n", if s.resources.is_empty() { "none yet: kernel set resources".into() } else { s.resources.join(", ") });
     out += &format!("  bucket    {}\n", s.bucket.as_ref().map(|b| format!("{} in {}", b["bucket"].as_str().unwrap_or("?"), b["endpoint"].as_str().unwrap_or("?"))).unwrap_or("none yet: kernel set bucket -".into()));
     out += &format!("  Google    {}\n", if s.google.is_some() { "sign-in on" } else { "sign-in off" });
