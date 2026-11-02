@@ -1551,7 +1551,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
 async fn backed_up_posts(dir: &std::path::Path, install: &str, keys: &[[u8; 32]]) -> Vec<String> {
     let copy = one::bucket::Place::Folder(dir.join(install).join("bucket"));
     for key in keys {
-        let key = one::db::database_key(&one::db::app_key(key, "board"), "main");
+        let key = one::kernel::database_key(&one::kernel::app_key(key, "board"), "main");
         if let Ok(db) = one::db::Db::open(&copy, "global/board/main", key).await {
             return db.query("select text from posts order by time", &[]).unwrap().into_iter().map(|r| r["text"].as_str().unwrap().to_string()).collect();
         }

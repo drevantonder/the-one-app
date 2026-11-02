@@ -9,7 +9,8 @@
 //! <prefix>/copy/<n>          the whole database after step n
 //! ```
 //!
-//! No clock, disk or network: the bucket is all it reads and writes, so it runs wherever SQLite does.
+//! No clock, disk or network: the bucket is all it reads and writes, so it runs wherever SQLite does. Its keys come
+//! from the kernel's tree (`src/kernel.rs`): scope, then app, then database.
 
 use std::ffi::{c_char, c_int, c_void};
 
@@ -26,24 +27,6 @@ use crate::bucket::Bucket;
 const COPY_EVERY: u64 = 100;
 /// How many times a write runs again after losing a race before it gives up.
 const TRIES: usize = 50;
-
-/// An app's key in a scope, from the scope's: what a server is given to reach only that app's data there. The kernel's
-/// vault derives the same (`kernel/shared/crypto.js`).
-pub fn app_key(scope_key: &[u8; 32], app: &str) -> [u8; 32] {
-    hkdf(scope_key, format!("one/app\0{app}").as_bytes())
-}
-
-/// A database's key, from its app's.
-pub fn database_key(app_key: &[u8; 32], database: &str) -> [u8; 32] {
-    hkdf(app_key, format!("one/database\0{database}").as_bytes())
-}
-
-/// HKDF-SHA256 with no salt, as WebCrypto in workerd has it.
-fn hkdf(ikm: &[u8], info: &[u8]) -> [u8; 32] {
-    let mut out = [0; 32];
-    hkdf::Hkdf::<sha2::Sha256>::new(None, ikm).expand(info, &mut out).expect("32 bytes is a valid length");
-    out
-}
 
 /// Seals an object under its key and name, so it can't be read, changed, or passed off as another object: → a random
 /// nonce ‖ the ciphertext.

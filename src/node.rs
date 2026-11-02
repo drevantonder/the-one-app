@@ -978,7 +978,7 @@ impl Node {
     /// them: from the scope's key.
     async fn database_key(&self, scope: &Scope, app: &str, database: &str) -> Result<[u8; 32]> {
         let scope_key = self.scope_key(scope).await?;
-        Ok(crate::db::database_key(&crate::db::app_key(&scope_key, app), database))
+        Ok(crate::kernel::database_key(&crate::kernel::app_key(&scope_key, app), database))
     }
 
     /// A scope's key, which its databases and backups are sealed with. The first server to need one makes it, and the

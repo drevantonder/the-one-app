@@ -249,10 +249,6 @@ impl Vault {
     }
 }
 
-/// A scope's folder in the bucket: `user:<id>` is written `user-<id>`.
-pub fn folder_of(scope: &str) -> String {
-    scope.replacen(':', "-", 1)
-}
 
 // Building and running.
 

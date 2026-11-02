@@ -114,7 +114,7 @@ fn state(db: &Db) -> (Vec<(u64, u64)>, u64) {
 
 async fn run(seed: u64) {
     let link = Link { objects: Default::default(), rng: Arc::new(Mutex::new(StdRng::seed_from_u64(seed))) };
-    let key = one::db::database_key(&one::db::app_key(&[seed as u8; 32], "sim"), "main");
+    let key = one::kernel::database_key(&one::kernel::app_key(&[seed as u8; 32], "sim"), "main");
     let mut servers = Vec::new();
     for server in 0..SERVERS {
         let link = link.clone();
