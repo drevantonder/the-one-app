@@ -117,7 +117,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
     json!({
         "name": m.name, "root": m.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
         "member": here.member,
-        "users": users, "groups": groups, "devices": devices, "clients": clients,
+        "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at, "clients": clients,
         "entries": here.entries, "settings": settings,
         // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
         "serverless": settings.contains_key("serverless").then(|| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE) })),

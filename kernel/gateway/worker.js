@@ -104,7 +104,7 @@ export class Relay {
   /// when), with the pairing codes made since (`pairings`: hash of its ticket → until when). None at all: anyone.
   async devices() {
     const said = this.env.DEVICES ? JSON.parse(this.env.DEVICES) : null;
-    let known = (await this.ctx.storage.get("devices")) || { keys: [], at: 0, added: {}, pairings: {} };
+    let known = (await this.ctx.storage.get("devices")) || { keys: [], at: -1, added: {}, pairings: {} };
     if (said && said.at > known.at) {
       const added = Object.fromEntries(Object.entries(known.added).filter(([, t]) => t > said.at));
       known = { keys: said.keys, at: said.at, added, pairings: known.pairings };

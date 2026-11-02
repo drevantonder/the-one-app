@@ -141,6 +141,8 @@ pub struct Members {
     pub apps: BTreeMap<String, App>,
     /// The latest `sidecar` entry of each sidecar on each device: (device, sidecar).
     pub sidecars: BTreeMap<(Key, String), SidecarInstall>,
+    /// When the install's devices last changed, by the newest genesis, admit or remove: the relay's list is as of then.
+    pub devices_at: u64,
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
@@ -383,6 +385,7 @@ impl Members {
                 self.recovery = data["recovery"].as_str().and_then(|k| unhex(k).ok());
                 self.users.insert(user.clone(), User { id: user.clone(), name: text("user_name")?, role: Role::Admin, removed: false });
                 self.machines.insert(author, Machine { key: author, user, name: text("device_name")?, device: true, removed: false });
+                self.devices_at = e.time();
             }
             "admit" => {
                 let key = key_of("key")?;
@@ -402,6 +405,9 @@ impl Members {
                     }
                 }
                 self.machines.insert(key, Machine { key, user, name: text("name")?, device, removed: false });
+                if device {
+                    self.devices_at = self.devices_at.max(e.time());
+                }
             }
             "acl" => {
                 let device = key_of("device")?;
@@ -445,6 +451,7 @@ impl Members {
                     ensure!(allowed, "not allowed to remove that key");
                     self.machines.get_mut(&key).unwrap().removed = true;
                 }
+                self.devices_at = self.devices_at.max(e.time());
             }
             "group" => {
                 let group = id_of("group")?;

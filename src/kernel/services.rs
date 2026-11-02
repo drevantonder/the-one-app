@@ -49,6 +49,9 @@ pub struct Settings {
     /// the relay takes only them, those they admit since, and a computer joining with a pairing code one made.
     #[serde(skip)]
     pub devices: Vec<String>,
+    /// When the install's log last changed its devices (ms), so the same devices give the gateway the same binding.
+    #[serde(skip)]
+    pub devices_at: u64,
     /// The secret only the kernel's services share, for asking each other.
     #[serde(default, skip_serializing)]
     pub kernel_secret: String,
@@ -257,6 +260,7 @@ impl Settings {
             google: None,
             cloudflare_token: None,
             devices: vec![],
+            devices_at: 0,
             try_person: None,
         };
         (settings, data_encoding::HEXLOWER.encode(&seed))
@@ -344,8 +348,7 @@ impl Settings {
             };
             let mut out = vec![("AUTH".into(), "service:auth".into(), false), node];
             if !self.devices.is_empty() {
-                let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                out.push(("DEVICES".into(), json!({ "keys": self.devices, "at": at }).to_string(), false));
+                out.push(("DEVICES".into(), json!({ "keys": self.devices, "at": self.devices_at }).to_string(), false));
             }
             return out;
         }

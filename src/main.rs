@@ -162,11 +162,12 @@ Usage:
     )
 }
 
-/// The keys of the install's devices, as the node on this machine knows them, for the relay to take only them; none
-/// when no node answers here.
-fn devices_here() -> Vec<String> {
+/// `settings` with the keys of the install's devices, as the node on this machine knows them, and when its log last
+/// changed them, for the relay to take only them; none when no node answers here.
+fn devices_here(settings: one::kernel::Settings) -> Result<one::kernel::Settings> {
     let state = get("/v1/state").unwrap_or_default();
-    state["install"]["devices"].as_array().into_iter().flatten().filter_map(|d| d["key"].as_str().map(str::to_string)).filter(|k| k.len() == 64).collect()
+    let devices: Vec<String> = state["install"]["devices"].as_array().into_iter().flatten().filter_map(|d| d["key"].as_str().map(str::to_string)).filter(|k| k.len() == 64).collect();
+    Ok(one::kernel::Settings { devices, devices_at: state["install"]["devices_at"].as_u64().unwrap_or(0), ..settings })
 }
 
 fn addr() -> String {
@@ -386,7 +387,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             };
             print!("{}", kernel_said(&settings));
-            let settings = one::kernel::Settings { devices: devices_here(), ..settings };
+            let settings = devices_here(settings)?;
             one::kernel::serve(&settings)?
         }
         ["kernel", "deploy"] => {
@@ -421,7 +422,7 @@ fn run(args: Vec<String>) -> Result<()> {
                     }
                 }
             };
-            let settings = one::kernel::Settings { devices: devices_here(), ..settings };
+            let settings = devices_here(settings)?;
             let modules = one::kernel::SERVICES.iter().map(|(_, entry, _)| one::kernel::module(entry)).collect::<Result<Vec<_>>>()?;
             let web = settings.web();
             one::kernel::deploy(&cf, &settings, &modules, &web)?;
@@ -444,7 +445,7 @@ fn run(args: Vec<String>) -> Result<()> {
             }
         }
         ["serverless", "deploy"] => {
-            let mut settings = one::kernel::Settings { devices: devices_here(), ..one::kernel::Settings::load()? };
+            let mut settings = devices_here(one::kernel::Settings::load()?)?;
             let cf = cloudflare(&flags, Some(&settings))?;
             one::serverless::deploy(&cf, &settings)?;
             if !settings.serverless {
