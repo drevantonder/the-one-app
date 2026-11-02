@@ -113,7 +113,9 @@ fn start(dir: &Path) -> Result<String> {
     eprintln!("Starting this checkout's try install again…");
     stop(dir, false)?;
     let was = std::fs::read_to_string(dir.join("addr"))?.trim().to_string();
-    let addr = spawn_node(dir, std::net::TcpListener::bind(&was).is_ok().then_some(was.as_str()))?;
+    // Its own statement: a listener made in spawn_node's arguments would hold the port while the node starts.
+    let free = std::net::TcpListener::bind(&was).is_ok();
+    let addr = spawn_node(dir, free.then_some(was.as_str()))?;
     let mut settings = load_kernel(dir)?;
     if settings.node_url.as_deref() != Some(&format!("http://{addr}")) {
         settings.node_url = Some(format!("http://{addr}"));
@@ -534,8 +536,12 @@ fn android(dir: &Path, checkout: &Path, device: &str, address: &str) -> Result<(
         let find = |text: &str| nodes.iter().find(|n| n.text == text);
         let ours = nodes.iter().any(|n| n.package == package);
         if ours && let Some(field) = nodes.iter().find(|n| n.class == "android.widget.EditText").filter(|_| !typed) {
-            on_device(device, &format!("input tap {} {}", field.x, field.y))?;
-            on_device(device, &format!("input text '{address}'"))?;
+            // The welcome keeps the address it was last signed in at: anything else there goes first.
+            if field.text != address {
+                on_device(device, &format!("input tap {} {}", field.x, field.y))?;
+                on_device(device, "input keycombination KEYCODE_CTRL_LEFT KEYCODE_A; input keyevent KEYCODE_DEL")?;
+                on_device(device, &format!("input text '{address}'"))?;
+            }
             typed = true;
             continue;
         }
