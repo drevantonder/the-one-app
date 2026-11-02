@@ -1,5 +1,5 @@
-// A widget's tree as an Adaptive Card, for the Widgets board (Widgets.cs), drawing each node as WidgetTree.cs draws it
-// in the window: text as the card's own text, in the board's font and colours; rings, sparks, bars, charts and icons
+// A widget's tree as an Adaptive Card, for the Widgets board (Widgets.cs), drawing each node as src/screen/widgets.js draws it
+// on a page: text as the card's own text, in the board's font and colours; rings, sparks, bars, charts and icons
 // as pictures (WidgetArt.cs), since a card draws nothing else. Nodes it doesn't know draw nothing.
 //
 // The board fills a card in from data, so every text goes in the data and the card names it (`${s3}`): nothing a
@@ -432,7 +432,7 @@ public sealed class WidgetCard
         return new JsonObject { ["type"] = "ColumnSet", ["columns"] = columns };
     }
 
-    /// "now", "5 min", "3 h", then the weekday, then the date; or as `style` says (WidgetTree.cs's).
+    /// "now", "5 min", "3 h", then the weekday, then the date; or as `style` says (src/screen/widgets.js's).
     static string Time(JsonElement n)
     {
         var at = DateTimeOffset.FromUnixTimeMilliseconds((long)(Num(n, "at") ?? 0)).ToLocalTime();

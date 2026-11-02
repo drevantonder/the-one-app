@@ -84,10 +84,6 @@ public static class Node
     public static Task<List<AppInfo>> Apps() => Get<List<AppInfo>>("/v1/apps");
     public static Task<List<WidgetInfo>> Widgets(string scope) => Get<List<WidgetInfo>>("/v1/widgets", new() { ["scope"] = scope });
     public static Task<Dictionary<string, int>> Badges(string scope) => Get<Dictionary<string, int>>("/v1/badges", new() { ["scope"] = scope });
-    public static Task<List<VaultItem>> Vault() => Get<List<VaultItem>>("/v1/vault");
-
-    public static Task<List<VaultRequest>> VaultRequests(string? scope = null, string? id = null) =>
-        Get<List<VaultRequest>>("/v1/vault/requests", new() { ["scope"] = scope, ["id"] = id });
 
     /// Runs an app's operation as this person → its result.
     public static async Task<JsonNode?> Call(string app, string op, JsonNode? input = null)
@@ -103,21 +99,25 @@ public static class Node
         return await r.Content.ReadAsStringAsync();
     }
 
-    /// A Settings screen, as its page.
-    public static async Task<string> SettingsScreen(string name, string parameters)
+    /// One of this app's own screens (a page, Services, a Vault request, Settings'), as its page: the same on every client.
+    public static async Task<string> ClientScreen(string name, string parameters)
     {
         using var r = await Send(HttpMethod.Get, $"/v1/client-screens/{Uri.EscapeDataString(name)}", new() { ["params"] = parameters }, timeout: TimeSpan.FromSeconds(20));
         return await r.Content.ReadAsStringAsync();
     }
 
-    /// A Settings screen's `one.api`: the node's /v1 at the install's address, as this person; nothing else there.
+    /// An own screen's `one.api`: the node's /v1 at your One App's address, as this person; nothing else there. A call
+    /// says it's this app's, as Call does.
     public static Task<JsonNode?> Api(string method, string path, JsonNode? body)
     {
         var address = new Uri(Auth.Shared.Address!);
         var url = new Uri(address, path);
         if (url.Authority != address.Authority || !url.AbsolutePath.StartsWith("/v1/")) throw new NodeException("That isn’t your server’s.");
         var get = method.Equals("GET", StringComparison.OrdinalIgnoreCase);
-        return Ask(new HttpMethod(method.ToUpperInvariant()), url.PathAndQuery, body: get ? null : body ?? new JsonObject());
+        body = get ? null : body ?? new JsonObject();
+        var call = url.AbsolutePath == "/v1/call";
+        if (call && body is JsonObject o) o["client"] = "windows";
+        return Ask(new HttpMethod(method.ToUpperInvariant()), url.PathAndQuery, body: body, timeout: call ? TimeSpan.FromMinutes(5) : null);
     }
 
     /// A file the node keeps, by its hash.
@@ -127,26 +127,9 @@ public static class Node
         return await r.Content.ReadAsByteArrayAsync();
     }
 
-    public static Task Arrange(string page, IEnumerable<ArrangedItem> items, IEnumerable<string> hidden) =>
-        Post("/v1/arrange", new JsonObject
-        {
-            ["page"] = page,
-            ["items"] = JsonSerializer.SerializeToNode(items.ToList(), Json),
-            ["hidden"] = new JsonArray(hidden.Select(h => (JsonNode)h).ToArray()),
-        });
-
-    public static Task Install(string app, string scope, bool installed) => Post("/v1/install", new JsonObject { ["app"] = app, ["scope"] = scope, ["installed"] = installed });
-    public static Task Retire(string app, string how) => Post("/v1/retire", new JsonObject { ["app"] = app, ["how"] = how });
-
     /// Asks for an item an app declares → the request's id.
     public static async Task<string?> RequestItem(string scope, string app, string need) =>
         (await Post("/v1/vault/request", new JsonObject { ["scope"] = scope, ["app"] = app, ["need"] = need }))?["id"]?.GetValue<string>();
-
-    public static Task Answer(JsonObject answer) => Post("/v1/vault/answer", answer);
-
-    /// Lets an app use an item.
-    public static Task Share(VaultItem item, IEnumerable<string> apps) =>
-        Post("/v1/vault", new JsonObject { ["scope"] = item.Scope, ["id"] = item.Id, ["apps"] = new JsonArray(apps.Select(a => (JsonNode)a).ToArray()) });
 
     /// The node's events, as they come, until `cancel`: what changed, so the window and the open screen keep up.
     public static async Task Events(Action<JsonNode> each, CancellationToken cancel)

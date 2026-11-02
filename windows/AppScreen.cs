@@ -1,8 +1,9 @@
-// An app's screen, or a Settings screen: the page its node serves, in a WebView2 of its own that answers its bridge as
-// the Apple apps' web view does (apple/Shared/Views/AppScreen.swift). Screens are untrusted: each is served at an origin
-// of its own app's (Settings' its own), which reaches nothing (this app makes every request itself), and talks only
-// through the bridge's messages, an app's acting only as that app, and only Settings' as the person. Anything that would
-// take the screen away goes to the browser instead.
+// A screen: an app's, or one of this app's own (a page, Services, a Vault request, Settings'), the same on every client.
+// The page its node serves, in a WebView2 of its own that answers its bridge (src/screen/bridge.js) as the web client's
+// page answers its frames (kernel/web/web.js), natively for whatever a person touches: menus, alerts, sheets, files and
+// links. Screens are untrusted: each is served at an origin of its own app's (the own screens' their own), which reaches
+// nothing (this app makes every request itself), and talks only through the bridge's messages, an app's acting only as
+// that app, and only the own screens' as the person. Anything that would take the screen away goes to the browser.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -14,8 +15,10 @@ using System.Threading.Tasks;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.Web.WebView2.Core;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 using Windows.Storage.Pickers;
 
 namespace One;
@@ -23,21 +26,26 @@ namespace One;
 public sealed class AppScreen : Grid
 {
     readonly Route route;
-    readonly Action<Route> push;
     readonly Action<string> retitle;
+    /// The sheet it's in, if it's in one.
+    readonly Sheet? sheet;
     readonly WebView2 web = new() { DefaultBackgroundColor = Colors.Transparent, Opacity = 0 };
     readonly string origin;
     string? html;
 
-    /// `push` opens another screen over this one; `retitle` sets the bar's title (empty while the screen shows its own).
-    public AppScreen(Route route, Action<Route> push, Action<string> retitle)
+    /// When this computer's appearance changes: every screen's web view follows.
+    public static event Action? Restyled;
+    public static void Restyle() => Restyled?.Invoke();
+
+    /// `retitle` sets its bar's title (empty while the screen shows its own); in a sheet, the sheet's.
+    public AppScreen(Route route, Action<string> retitle, Sheet? sheet = null)
     {
         this.route = route;
-        this.push = push;
         this.retitle = retitle;
+        this.sheet = sheet;
         // A host name of its app's own: letters, digits and dashes.
         var name = new string((route.App ?? "").ToLowerInvariant().Select(c => char.IsAsciiLetterOrDigit(c) || c == '-' ? c : '-').ToArray()).Trim('-');
-        origin = Settings ? "https://settings.localhost" : $"https://{(name.Length == 0 ? "app" : name)}.screen.localhost";
+        origin = Own ? "https://own.localhost" : $"https://{(name.Length == 0 ? "app" : name)}.screen.localhost";
         Children.Add(web);
         Children.Add(new ProgressRing { IsActive = true, Width = 28, Height = 28, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         // Node events reach the screen as the bridge's `one.__event`, while it's in the window.
@@ -45,22 +53,35 @@ public sealed class AppScreen : Grid
         {
             Store.Shared.Event -= Forward;
             Store.Shared.Event += Forward;
+            Restyled -= Rescheme;
+            Restyled += Rescheme;
             await Start();
         };
-        Unloaded += (_, _) => Store.Shared.Event -= Forward;
+        Unloaded += (_, _) =>
+        {
+            Store.Shared.Event -= Forward;
+            Restyled -= Rescheme;
+        };
     }
 
-    /// Whether it's a Settings screen: the route this app chose, never anything the page says.
-    bool Settings => route.Kind == "settings" && route.Setting != null;
+    /// Whether it's one of this app's own screens: the route this app chose, never anything the page says.
+    bool Own => route.Own;
+
+    static MainWindow Window => App.Window!;
 
     void Forward(JsonNode e) => web.CoreWebView2?.PostWebMessageAsJson(new JsonObject { ["oneEvent"] = e.DeepClone() }.ToJsonString());
+
+    void Rescheme()
+    {
+        if (web.CoreWebView2 != null) web.CoreWebView2.Profile.PreferredColorScheme = Scheme;
+    }
 
     async Task Start()
     {
         if (web.CoreWebView2 != null) return;
         try
         {
-            html = Settings ? await Node.SettingsScreen(route.Setting!, route.Params) : await Node.Screen(route.App!, route.Screen, route.Params, route.Scope);
+            html = Own ? await Node.ClientScreen(route.Screen, route.Params) : await Node.Screen(route.App!, route.Screen, route.Params, route.Scope);
         }
         catch (Exception error)
         {
@@ -155,7 +176,7 @@ public sealed class AppScreen : Grid
         """;
 
     /// What makes a screen sit in the window as its own: the window's backdrop shows through, the install's accent in
-    /// light and dark, and on a computer, Windows' size of text.
+    /// light and dark, and on a computer, Windows' size of text (a page's widgets keep their own size).
     static string Fitted()
     {
         var accent = Store.Shared.Config?.Accent ?? Brand.Accent;
@@ -182,12 +203,13 @@ public sealed class AppScreen : Grid
         if (Uri.TryCreate(uri, UriKind.Absolute, out var url) && url.Scheme is "https" or "http" or "mailto" or "tel") Shell.Open(url.AbsoluteUri);
     }
 
-    void Reply(JsonNode? id, JsonNode? ok) => web.CoreWebView2?.PostWebMessageAsJson(new JsonObject { ["oneReply"] = id?.DeepClone(), ["ok"] = ok }.ToJsonString());
+    void Reply(JsonNode? id, JsonNode? ok) => web.CoreWebView2?.PostWebMessageAsJson(new JsonObject { ["oneReply"] = id?.DeepClone(), ["ok"] = ok?.DeepClone() }.ToJsonString());
     void Fail(JsonNode? id, string error) => web.CoreWebView2?.PostWebMessageAsJson(new JsonObject { ["oneReply"] = id?.DeepClone(), ["error"] = error }.ToJsonString());
 
-    /// The bridge: `{ one: { type: "call" | "open" | "title" | "save" | "preview" | "copy" | "vault" | "icons" | …, … }, id }`,
-    /// and for Settings screens alone, `"api" | "signOut" | "appearance" | "device" | "request"`. A screen only ever calls
-    /// its own app, but may open another's screens.
+    static string? Text(JsonObject m, string key) => m[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    /// The bridge: `{ one: { type, … }, id }`, each of its `messages`. `api`, `signOut`, `appearance`, `device` and
+    /// `request` are this app's own screens' alone. A screen only ever calls its own app, but may open another's screens.
     async Task Answer(string json)
     {
         JsonNode? message;
@@ -196,8 +218,8 @@ public sealed class AppScreen : Grid
         if (message?["one"] is not JsonObject m) return;
         try
         {
-            var type = m["type"]?.GetValue<string>();
-            if (type is "api" or "signOut" or "appearance" or "device" or "request" && !Settings)
+            var type = Text(m, "type");
+            if (type is "api" or "signOut" or "appearance" or "device" or "request" && !Own)
             {
                 Fail(id, "Only Settings can do that.");
                 return;
@@ -205,18 +227,14 @@ public sealed class AppScreen : Grid
             switch (type)
             {
                 case "api":
-                    Reply(id, await Node.Api(m["method"]?.GetValue<string>() ?? "GET", m["path"]?.GetValue<string>() ?? "", m["body"]?.DeepClone()));
+                    Reply(id, await Node.Api(Text(m, "method") ?? "GET", Text(m, "path") ?? "", m["body"]?.DeepClone()));
                     return;
                 case "signOut":
                     Reply(id, null);
-                    if (App.Window is { } window) await window.SignOut();
+                    await Window.SignOut();
                     return;
                 case "appearance":
-                    if (m["value"]?.GetValue<string>() is "automatic" or "light" or "dark" && App.Window is { } w)
-                    {
-                        Appearance.Choose(m["value"]!.GetValue<string>(), w);
-                        if (web.CoreWebView2 != null) web.CoreWebView2.Profile.PreferredColorScheme = Scheme;
-                    }
+                    if (Text(m, "value") is "automatic" or "light" or "dark") Appearance.Choose(Text(m, "value")!, Window);
                     Reply(id, Appearance.Chosen);
                     return;
                 case "device":
@@ -228,24 +246,46 @@ public sealed class AppScreen : Grid
                         return;
                     }
                 case "request":
-                    Reply(id, await Ask(m["scope"]?.GetValue<string>() ?? "", m["id"]?.GetValue<string>() ?? ""));
+                    Reply(id, await Asked(Route.Request(Text(m, "scope") ?? "", Text(m, "id") ?? "")));
                     return;
                 case "call":
-                    if (Settings) Fail(id, "Settings has no app to call.");
-                    else Reply(id, await Node.Call(route.App!, m["op"]?.GetValue<string>() ?? "", m["input"]?.DeepClone() ?? new JsonObject()));
+                    if (Own) Fail(id, "Settings has no app to call.");
+                    else Reply(id, await Node.Call(route.App!, Text(m, "op") ?? "", m["input"]?.DeepClone() ?? new JsonObject()));
                     return;
                 case "open":
                     {
+                        // Another app's screen; else, from an own screen, another own one; else one of this app's.
                         var parameters = (m["params"] ?? new JsonObject()).ToJsonString();
-                        var app = m["app"]?.GetValue<string>() is { Length: > 0 } other ? other : null;
+                        var screen = Text(m, "screen");
+                        var to = Text(m, "app") is { Length: > 0 } app ? Route.ScreenOf(app, Text(m, "scope") ?? route.Scope, screen ?? "main", parameters)
+                            : Own ? Route.OwnOf(screen ?? "", parameters)
+                            : Route.ScreenOf(route.App!, Text(m, "scope") ?? route.Scope, screen ?? "main", parameters);
+                        if (m["sheet"]?.GetValueKind() == JsonValueKind.True)
+                        {
+                            Reply(id, await Window.Present(to));
+                            return;
+                        }
                         Reply(id, null);
-                        push(Settings && app == null ? Route.SettingOf(m["screen"]?.GetValue<string>() ?? "", parameters)
-                            : Route.ScreenOf(app ?? route.App!, route.Scope, m["screen"]?.GetValue<string>() ?? "main", parameters));
+                        // From a sheet, the sheet goes and it opens where the window is.
+                        sheet?.Close(null);
+                        Window.Push(to);
                         return;
                     }
-                case "title":
-                    retitle(m["text"]?.GetValue<string>() ?? "");
+                case "close":
                     Reply(id, null);
+                    if (sheet != null) sheet.Close(m["value"]);
+                    else Window.Back(this);
+                    return;
+                case "title":
+                    if (sheet != null) sheet.Retitle(Text(m, "text") ?? "");
+                    else retitle(Text(m, "text") ?? "");
+                    Reply(id, null);
+                    return;
+                case "menu":
+                    Reply(id, await Menu(m));
+                    return;
+                case "alert":
+                    Reply(id, await Alert(m));
                     return;
                 case "save":
                     await Save(m["file"] as JsonObject ?? []);
@@ -264,14 +304,19 @@ public sealed class AppScreen : Grid
                         return;
                     }
                 case "link":
-                    Outside(m["url"]?.GetValue<string>() ?? "");
+                    Outside(Text(m, "url") ?? "");
                     Reply(id, null);
                     return;
                 case "vault":
-                    Reply(id, await AskVault(m["need"]?.GetValue<string>() ?? ""));
-                    return;
+                    {
+                        if (Own) throw new Exception("Settings has no app to ask for.");
+                        var scope = route.Scope ?? "user";
+                        var asked = await Node.RequestItem(scope, route.App!, Text(m, "need") ?? "") ?? throw new Exception("The Vault didn’t take the request");
+                        Reply(id, await Asked(Route.Request(scope, asked)));
+                        return;
+                    }
                 case "scan":
-                    Fail(id, "Scanning documents needs the iPhone or iPad app. Choose the files instead.");
+                    Fail(id, "Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
                     return;
                 case "icons":
                     {
@@ -297,6 +342,69 @@ public sealed class AppScreen : Grid
         {
             Fail(id, error.Message);
         }
+    }
+
+    /// A request for an item, in its sheet → whether it was allowed, once the sheet's gone.
+    static async Task<bool> Asked(Route request) => (await Window.Present(request))?.GetValueKind() == JsonValueKind.True;
+
+    /// `one.menu`: Windows' own menu at its point in the screen → the index of the one chosen, or null once it's closed.
+    /// A menu with a checked item shows each with its place for a check; one that can't be undone, in red.
+    Task<JsonNode?> Menu(JsonObject m)
+    {
+        var done = new TaskCompletionSource<JsonNode?>();
+        var entries = (m["items"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+        if (entries.Count == 0) return Task.FromResult<JsonNode?>(null);
+        var checks = entries.Any(e => e["checked"]?.GetValueKind() == JsonValueKind.True);
+        var flyout = new MenuFlyout();
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var e = entries[i];
+            MenuFlyoutItem item = checks ? new ToggleMenuFlyoutItem { IsChecked = e["checked"]?.GetValueKind() == JsonValueKind.True } : new MenuFlyoutItem();
+            item.Text = Text(e, "title") ?? "";
+            if (e["danger"]?.GetValueKind() == JsonValueKind.True)
+            {
+                var red = Look.Critical;
+                item.Foreground = red;
+                foreach (var key in new[] { "MenuFlyoutItemForeground", "MenuFlyoutItemForegroundPointerOver", "MenuFlyoutItemForegroundPressed", "ToggleMenuFlyoutItemForeground", "ToggleMenuFlyoutItemForegroundPointerOver", "ToggleMenuFlyoutItemForegroundPressed" })
+                    item.Resources[key] = red;
+            }
+            var index = i;
+            item.Click += (_, _) => done.TrySetResult(index);
+            flyout.Items.Add(item);
+        }
+        // Windows says which was chosen before the menu goes: closed with none, it's null.
+        flyout.Closed += (_, _) => done.TrySetResult(null);
+        // Its point in the page, in CSS pixels, which are the window's (the web view isn't zoomed).
+        double At(string key) => m[key] is JsonValue v && v.TryGetValue<double>(out var d) ? d : 0;
+        flyout.ShowAt(web, new FlyoutShowOptions { Position = new Point(Math.Clamp(At("x"), 0, web.ActualWidth), Math.Clamp(At("y"), 0, web.ActualHeight)) });
+        return done.Task;
+    }
+
+    /// `one.alert`: Windows' own dialog, its title and text, then OK; or Cancel and its action (red if it can't be
+    /// undone) → whether that was chosen.
+    async Task<JsonNode?> Alert(JsonObject m)
+    {
+        var action = Text(m, "action") is { Length: > 0 } a ? a : null;
+        var dialog = new ContentDialog
+        {
+            Title = Text(m, "title") ?? "",
+            Content = new TextBlock { Text = Text(m, "text") ?? "", TextWrapping = TextWrapping.WrapWholeWords },
+            CloseButtonText = action == null ? "OK" : "Cancel",
+            XamlRoot = XamlRoot,
+            RequestedTheme = Appearance.Theme,
+        };
+        if (action != null)
+        {
+            dialog.PrimaryButtonText = action;
+            dialog.DefaultButton = ContentDialogButton.Primary;
+            if (m["danger"]?.GetValueKind() == JsonValueKind.True)
+            {
+                var red = Look.Critical;
+                foreach (var key in new[] { "AccentButtonBackground", "AccentButtonBackgroundPointerOver", "AccentButtonBackgroundPressed" })
+                    dialog.Resources[key] = red;
+            }
+        }
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
     /// An app's tile, as the window draws them (Look.Tile), as an image a page shows: a finished app icon as it is, a
@@ -351,21 +459,5 @@ public sealed class AppScreen : Grid
         var path = Path.Combine(dir, Path.GetFileName(name));
         await System.IO.File.WriteAllBytesAsync(path, bytes);
         Shell.Open(path);
-    }
-
-    /// `one.vault(need)`: asks for what the app declares, in the Vault's sheet → whether it's allowed once it's gone.
-    async Task<bool> AskVault(string need)
-    {
-        if (Settings) throw new Exception("Settings has no app to ask for.");
-        var scope = route.Scope ?? "user";
-        var id = await Node.RequestItem(scope, route.App!, need) ?? throw new Exception("The Vault didn’t take the request");
-        return await Ask(scope, id);
-    }
-
-    /// A request for an item, in the Vault's sheet → whether it's allowed once it's gone.
-    async Task<bool> Ask(string scope, string id)
-    {
-        await VaultSheet.Show(XamlRoot, scope, id);
-        return (await Node.VaultRequests(scope, id)).FirstOrDefault()?.State == "set";
     }
 }

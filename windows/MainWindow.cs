@@ -1,11 +1,13 @@
-// The window, as the Mac app's (apple/Mac/RootView.swift, Sidebar.swift): a sidebar with a section per page, listing
-// its apps and its Services, then Settings', listing its items; beside it, where the window is. A sidebar row replaces where the
-// window is; what a screen opens is pushed on top, so Back returns to it. Signed out, it welcomes the person and signs
+// The window, as the web client's (kernel/web/web.js): a sidebar with a section per page, listing its apps and its
+// Services, then Settings', listing its items; beside it, where the window is: a screen the node serves (AppScreen), a
+// page, Services, a Settings screen or an app's. A sidebar row replaces where the window is; what a screen opens is
+// pushed on top, so Back returns to it, or slides up over it as a sheet. Signed out, it welcomes the person and signs
 // them in.
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Text;
@@ -55,19 +57,16 @@ public sealed class MainWindow : Window
         root.Children.Add(body);
         root.RequestedTheme = Appearance.Theme;
         Content = root;
-        // Windows turning dark or light while it's open: what's drawn with the other's colours is drawn again.
+        // Windows turning dark or light while it's open: the sidebar and the title bar's buttons are drawn again; the
+        // screens follow by themselves.
         root.ActualThemeChanged += (_, _) =>
         {
             Buttons();
-            Redraw();
+            DrawSidebar();
         };
         Buttons();
-        Store.Shared.Changed += Redraw;
-        // An app's own change (a sign-in finished on its settings screen) lists its accounts again.
-        Store.Shared.Event += e =>
-        {
-            if (e["type"]?.GetValue<string>() == "changed") ServicesView.Stale((e["apps"] as System.Text.Json.Nodes.JsonArray)?.Select(a => a?.ToString() ?? ""));
-        };
+        // The screens keep up by themselves; the sidebar, with what the store reads.
+        Store.Shared.Changed += DrawSidebar;
         // The Widgets board's widgets keep up with the window's.
         Store.Shared.WidgetsRead += () =>
         {
@@ -145,7 +144,7 @@ public sealed class MainWindow : Window
                 "page" when At(1) is { } scope => Route.PageOf(scope),
                 "services" when At(1) is { } scope => Route.Services(scope),
                 "app" when At(1) is { } app => Route.ScreenOf(app, q["scope"], At(2) ?? "main", q["params"] ?? "{}"),
-                "settings" => At(1) is { } item ? Route.SettingOf(item, q["params"] ?? "{}") : Route.Settings,
+                "settings" => At(1) is { } item ? Route.OwnOf(item, q["params"] ?? "{}") : Route.Settings,
                 _ => Route.PageOf("user"),
             };
         }
@@ -164,12 +163,12 @@ public sealed class MainWindow : Window
         {
             opening = null;
             // Its page, if this computer opens it; an app's screen on a page it isn't on still opens.
-            if (r.Kind is not ("page" or "services") || Store.Shared.PageFor(r.Scope) != null) Go(r);
+            if (!OnNoPage(r)) Go(r);
         }
         if (asking is { } a)
         {
             asking = null;
-            DispatcherQueue.TryEnqueue(async () => await VaultSheet.Show(Content.XamlRoot, a.scope, a.id));
+            _ = Present(Route.Request(a.scope, a.id));
         }
     }
 
@@ -187,10 +186,14 @@ public sealed class MainWindow : Window
         Welcome(null, invited: true);
     }
 
+    /// Whether it's a page, or a page's Services, that this computer wasn't let into.
+    static bool OnNoPage(Route r) => r.Own && r.Screen is "pages" or "services" && r.Scope != "settings" && Store.Shared.PageFor(r.Scope) == null;
+
     public void Restyle()
     {
         root.RequestedTheme = Appearance.Theme;
-        Redraw();
+        AppScreen.Restyle();
+        DrawSidebar();
     }
 
     // MARK: Starting
@@ -256,13 +259,14 @@ public sealed class MainWindow : Window
     void Welcome(string? error, bool invited = false)
     {
         listening?.Cancel();
+        Sheet.CloseAll();
         nav = null;
         Store.Shared.Clear();
         var panel = new StackPanel { Spacing = 14, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var logo = new Image { Source = new BitmapImage(new Uri(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Logo.png"))), Width = 112, Height = 112, HorizontalAlignment = HorizontalAlignment.Center };
         panel.Children.Add(logo);
         panel.Children.Add(new TextBlock { Text = Brand.Name, FontSize = 32, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords, Margin = new Thickness(0, 0, 0, 14) });
-        var problem = new TextBlock { Text = error ?? "", Foreground = Look.Toned("bad"), HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords, Visibility = error == null ? Visibility.Collapsed : Visibility.Visible };
+        var problem = new TextBlock { Text = error ?? "", Foreground = Look.Critical, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords, Visibility = error == null ? Visibility.Collapsed : Visibility.Visible };
 
         if (Auth.Shared.Address == null)
         {
@@ -363,6 +367,8 @@ public sealed class MainWindow : Window
         detail = new Grid();
         pushed.Clear();
         shown = null;
+        // A page this computer wasn't let into opens the first it was.
+        if (OnNoPage(selection) && Store.Shared.Pages().FirstOrDefault() is { } first) selection = Route.PageOf(first.Scope);
         nav = new NavigationView
         {
             PaneDisplayMode = NavigationViewPaneDisplayMode.Left, IsSettingsVisible = false, IsPaneToggleButtonVisible = false,
@@ -375,7 +381,8 @@ public sealed class MainWindow : Window
         };
         nav.BackRequested += (_, _) => Back();
         body.Content = nav;
-        Redraw();
+        DrawSidebar();
+        DrawDetail();
         Opening();
     }
 
@@ -394,7 +401,7 @@ public sealed class MainWindow : Window
     public void Push(Route r)
     {
         if (nav == null) return;
-        pushed.Add((r, View(r)));
+        pushed.Add((r, Screen(r)));
         DrawDetail();
     }
 
@@ -405,23 +412,25 @@ public sealed class MainWindow : Window
         DrawDetail();
     }
 
-    void Redraw()
+    /// A screen's `one.close`, where it was pushed: back to what's under it.
+    public void Back(AppScreen screen)
     {
-        if (nav == null) return;
-        DrawSidebar();
-        // An open screen stays as it is while the rest of the window redraws around it.
-        if ((Top.Kind == "screen" || Top.Setting != null) && shown != null) return;
-        if (pushed.Count > 0) pushed[^1] = (pushed[^1].route, View(pushed[^1].route));
-        else shown = null;
-        DrawDetail();
+        if (pushed.Count > 0 && pushed[^1].view == screen.Parent) Back();
     }
 
-    Route Top => pushed.Count > 0 ? pushed[^1].route : selection;
+    /// A screen over the window, as a sheet → what it gave `one.close` once it's gone, else null.
+    public Task<JsonNode?> Present(Route r)
+    {
+        // A request is answered in it, or not: Cancel, not Done.
+        var sheet = new Sheet(root, r, TitleOf(r), r.Own && r.Screen == "request" ? "Cancel" : "Done");
+        sheet.Show();
+        return sheet.Closed;
+    }
 
-    /// Shows the view on top; those under it stay in the window, hidden, so a screen under another keeps its page.
+    /// Shows the screen on top; those under it stay in the window, hidden, so each keeps its place.
     void DrawDetail()
     {
-        var view = pushed.Count > 0 ? pushed[^1].view : shown ??= View(selection);
+        var view = pushed.Count > 0 ? pushed[^1].view : shown ??= Screen(selection);
         var kept = pushed.Select(p => p.view).Append(shown).ToHashSet();
         foreach (var gone in detail.Children.OfType<FrameworkElement>().Where(c => !kept.Contains(c)).ToList()) detail.Children.Remove(gone);
         foreach (var child in detail.Children.OfType<FrameworkElement>()) child.Visibility = child == view ? Visibility.Visible : Visibility.Collapsed;
@@ -429,37 +438,38 @@ public sealed class MainWindow : Window
         nav!.IsBackEnabled = pushed.Count > 0;
     }
 
-    /// What a route shows.
-    FrameworkElement View(Route r)
+    /// What a route is called: a page's name, Services, Vault, a Settings item's, or an app screen's.
+    static string TitleOf(Route r)
     {
         var store = Store.Shared;
-        switch (r.Kind)
-        {
-            case "page":
-                return store.PageFor(r.Scope) is { } p ? new PageView(p, this) : store.Pages().FirstOrDefault() is { } first ? new PageView(first, this)
-                    : Look.Unavailable("Nothing Here Yet", "This computer was let into none of your pages. Sign out in Settings and sign in again to choose them.");
-            case "services":
-                return store.PageFor(r.Scope) is { } sp ? new ServicesView(sp, this) : new Grid();
-            case "screen":
-                return Screen(r);
-            default:
-                if (r.Setting == null) return SettingsView.Home(this);
-                // An item with an app (the App Store) opens that app.
-                return store.SettingsItemOf(r.Setting)?.App is { } a ? Screen(Route.ScreenOf(a, null)) : Screen(r);
-        }
+        if (r.Own)
+            return r.Screen switch
+            {
+                "pages" => r.Scope == "settings" ? "Settings" : store.PageFor(r.Scope)?.Title ?? "",
+                "services" => "Services",
+                "request" => "Vault",
+                _ => store.SettingsItems.FirstOrDefault(i => i.Name == r.Screen)?.Title ?? "Settings",
+            };
+        var app = store.App(r.App);
+        return app?.Screens?.FirstOrDefault(s => s.Name == r.Screen)?.Title ?? app?.Label ?? r.App ?? "";
     }
 
-    /// An app's screen, or a Settings screen, under a bar with its title, which the screen may change.
+    /// A screen under a bar with its title, which the screen may change; a page shows its own large title, so its bar
+    /// has none.
     FrameworkElement Screen(Route r)
     {
-        var app = Store.Shared.App(r.App);
-        var named = r.Setting != null ? Store.Shared.SettingsItemOf(r.Setting)?.Title ?? "Settings" : app?.Screens?.FirstOrDefault(s => s.Name == r.Screen)?.Title ?? app?.Label ?? r.App;
-        var title = new TextBlock { Text = named, FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(20, 6, 20, 6), Height = 22 };
+        var title = new TextBlock { FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(20, 6, 20, 6), Height = 22 };
+        void Retitle(string text)
+        {
+            title.Text = text;
+            title.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        Retitle(r.Own && r.Screen == "pages" ? "" : TitleOf(r));
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.Children.Add(title);
-        var screen = new AppScreen(r, Push, text => title.Text = text);
+        var screen = new AppScreen(r, Retitle);
         Grid.SetRow(screen, 1);
         grid.Children.Add(screen);
         return grid;
@@ -504,25 +514,14 @@ public sealed class MainWindow : Window
         {
             Head(Route.PageOf(page.Scope), page.Title);
             foreach (var app in store.AppsOn(page))
-                nav.MenuItems.Add(Item(store.ScreenRoute(app, page), Labeled(Look.Tile(app, 20), app.Label), store.Badge(app.Name, page)));
+                nav.MenuItems.Add(Item(Route.ScreenOf(app.Name, page.Scope), Labeled(Look.Tile(app, 20), app.Label), store.Badge(app.Name, page)));
             nav.MenuItems.Add(Item(Route.Services(page.Scope), Labeled(Look.Folder(store.ServicesOn(page), 20), "Services")));
         }
         Head(Route.Settings, "Settings");
+        // An item with an app (the App Store) opens that app.
         foreach (var item in store.SettingsItems)
-            nav.MenuItems.Add(Item(Route.SettingOf(item.Name), Labeled(SettingsView.Icon(item, 20), item.Title), item.Badge ?? 0));
+            nav.MenuItems.Add(Item(item.App is { } a ? Route.ScreenOf(a, null) : Route.OwnOf(item.Name), Labeled(Look.Setting(item, 20), item.Title), item.Badge ?? 0));
         nav.SelectedItem = selected;
     }
-
-    /// Runs a change, then takes in what it changed; says what went wrong if it failed.
-    public async Task Changing(Func<Task> work)
-    {
-        try { await Store.Shared.Change(work); }
-        catch (Exception e) { await Alert(e.Message); }
-    }
-
-    public async Task Alert(string message)
-    {
-        if (Content.XamlRoot == null) return;
-        await new ContentDialog { RequestedTheme = Look.Theme, Title = "Couldn’t Do That", Content = message, CloseButtonText = "OK", XamlRoot = Content.XamlRoot }.ShowAsync();
-    }
 }
+

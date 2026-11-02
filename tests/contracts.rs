@@ -324,10 +324,10 @@ async fn the_apps_decode_what_the_node_sends() {
     assert!(classes["NodeState"].iter().any(|f| f.key == "me" && f.required), "@SerialName renames fields");
     assert!(classes["AppInfo"].iter().any(|f| f.key == "screens" && f.ty == "[AppScreenInfo]" && !f.required), "{:?}", classes["AppInfo"]);
     let windows_classes = csharp_classes(&read("windows/Models.cs"));
-    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "VaultItem", "VaultRequest", "ArrangedItem", "SettingsItem"] {
+    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "SettingsItem"] {
         assert!(windows_classes.get(name).is_some_and(|f| !f.is_empty()), "the test reads C#'s {name}: {:?}", windows_classes.keys());
     }
-    assert!(windows_classes["NodeState"].iter().any(|f| f.key == "arrangements" && f.ty == "[String: Arrangement]" && !f.required), "{:?}", windows_classes["NodeState"]);
+    assert!(windows_classes["NodeState"].iter().any(|f| f.key == "settings_items" && f.ty == "[SettingsItem]" && !f.required), "{:?}", windows_classes["NodeState"]);
 
     let (node, _router) = start("contracts").await;
     node.create("Contracts", "Andre").await.unwrap();
@@ -369,7 +369,7 @@ async fn the_apps_decode_what_the_node_sends() {
         check(&classes, "", ty, &api(&addr, "GET", path, Value::Null).await, path, &mut android);
     }
     let mut windows = vec![];
-    for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]"), ("/v1/badges?scope=user", "[String: Int32]"), ("/v1/vault", "[VaultItem]"), ("/v1/vault/requests", "[VaultRequest]")] {
+    for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]"), ("/v1/badges?scope=user", "[String: Int32]")] {
         check(&windows_classes, "", ty, &api(&addr, "GET", path, Value::Null).await, path, &mut windows);
     }
     let state = api(&addr, "GET", "/v1/state", Value::Null).await;
@@ -563,7 +563,7 @@ fn every_host_answers_each_message_of_the_bridge() {
         }
         out
     };
-    for path in ["kernel/web/web.js", "src/mcp_view.html", "android/app/src/main/kotlin/app/client/Screens.kt"] {
+    for path in ["kernel/web/web.js", "src/mcp_view.html", "android/app/src/main/kotlin/app/client/Screens.kt", "windows/AppScreen.cs"] {
         let names = named(&read(path));
         let missing: Vec<_> = messages.iter().filter(|m| !names.contains(**m)).collect();
         assert!(missing.is_empty(), "{path} doesn't answer the bridge's {missing:?}");

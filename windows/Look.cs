@@ -1,9 +1,9 @@
-// The look: the install's accent, app icons as tiles, people's initials, and the icons apps name (Phosphor's).
+// The look of the window's own parts (the sidebar, the welcome): the install's accent, app icons as tiles, people's
+// initials, the icons apps name (Phosphor's), and light or dark.
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -40,7 +40,7 @@ public static class Look
     public static Brush Tertiary => new SolidColorBrush(Dark ? Color.FromArgb(0x87, 255, 255, 255) : Color.FromArgb(0x72, 0, 0, 0));
     public static Brush Card => Themed("CardBackgroundFillColorDefaultBrush");
     public static Brush CardStroke => Themed("CardStrokeColorDefaultBrush");
-    public static Brush Divider => Themed("DividerStrokeColorDefaultBrush");
+    public static Brush Critical => Themed("SystemFillColorCriticalBrush");
 
     /// A brush of the Fluent styles, as the window's theme (the person's choice, or Windows') has it.
     public static Brush Themed(string key)
@@ -50,22 +50,6 @@ public static class Look
                 if (d.ThemeDictionaries.TryGetValue(theme, out var t) && t is ResourceDictionary r && r.TryGetValue(key, out var brush)) return (Brush)brush;
         return (Brush)Application.Current.Resources[key];
     }
-
-    /// What a tone colours: `muted` is secondary text; none, `otherwise`.
-    public static Brush Toned(string? tone, Brush? otherwise = null) => tone switch
-    {
-        "muted" => Secondary,
-        "accent" => AccentBrush,
-        "good" => new SolidColorBrush(Hex("#34c759")),
-        "warn" => new SolidColorBrush(Hex("#ff9f0a")),
-        "bad" => new SolidColorBrush(Hex("#ff3b30")),
-        "blue" => new SolidColorBrush(Hex("#0a9edc")),
-        "purple" => new SolidColorBrush(Hex("#a550d9")),
-        _ => otherwise ?? Primary,
-    };
-
-    /// Windows' own symbols, for the window's own controls.
-    public static readonly FontFamily Symbols = new("Segoe Fluent Icons,Segoe MDL2 Assets");
 
     /// Phosphor's icons (vendor/phosphor, beside the program), which apps name for their tiles, screens and widgets, so
     /// every device draws the same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one,
@@ -208,17 +192,9 @@ public static class Look
         };
     }
 
-    /// A red count, as an icon's badge.
-    public static FrameworkElement Count(int n, bool red = true) => new Border
-    {
-        MinWidth = 20, Height = 20, Padding = new Thickness(6, 0, 6, 0), CornerRadius = new CornerRadius(10),
-        Background = red ? new SolidColorBrush(Hex("#ff3b30")) : Themed("ControlFillColorTertiaryBrush"),
-        Child = new TextBlock
-        {
-            Text = n > 99 ? "99+" : n.ToString(), FontSize = 12, FontWeight = FontWeights.SemiBold,
-            Foreground = red ? new SolidColorBrush(Colors.White) : Secondary, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-        },
-    };
+    /// A Settings item's icon: yours is your picture; the rest, its symbol on its colour, as an app's tile.
+    public static FrameworkElement Setting(SettingsItem item, double size) =>
+        item.Name == "account" && Store.Shared.Me is { } me ? Avatar(me.Id, me.Name, size) : Tile(item.Icon, item.Name, item.Color, null, null, size);
 
     public static TextBlock Text(string text, double size = 14, Brush? brush = null, bool semibold = false, int lines = 0, bool wrap = false)
     {
@@ -227,73 +203,6 @@ public static class Look
         if (semibold) t.FontWeight = FontWeights.SemiBold;
         if (lines > 0) t.MaxLines = lines;
         return t;
-    }
-
-    /// A page's large title and its line under it, as the Mac app's pages start.
-    public static FrameworkElement Header(string title, string subtitle)
-    {
-        var panel = new StackPanel { Spacing = 2, Margin = new Thickness(0, 0, 0, 20) };
-        panel.Children.Add(Text(title, 28, semibold: true));
-        if (subtitle.Length > 0) panel.Children.Add(Text(subtitle, 13, Secondary));
-        return panel;
-    }
-
-    /// A grouped list, as a list's inset section: rows on a card, with hairlines between.
-    public static StackPanel Section(string? heading = null, string? footer = null, params FrameworkElement[] rows)
-    {
-        var outer = new StackPanel { Spacing = 6 };
-        if (heading != null) outer.Children.Add(new TextBlock { Text = heading, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 0, 0, 2) });
-        var card = new StackPanel { Background = Card, BorderBrush = CardStroke, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8) };
-        for (var i = 0; i < rows.Length; i++)
-        {
-            if (i > 0) card.Children.Add(new Border { Height = 1, Background = Divider, Margin = new Thickness(16, 0, 0, 0) });
-            card.Children.Add(rows[i]);
-        }
-        outer.Children.Add(card);
-        if (footer != null) outer.Children.Add(Text(footer, 12, Secondary, wrap: true));
-        return outer;
-    }
-
-    /// A row of a grouped list: an icon, a title and line under it, something at its end; with `click`, a button.
-    public static FrameworkElement Row(FrameworkElement? icon, string title, string? sub = null, FrameworkElement? end = null, Action? click = null, bool chevron = false, Brush? titleBrush = null)
-    {
-        var grid = new Grid { ColumnSpacing = 12, Padding = new Thickness(16, 10, 14, 10), MinHeight = 48 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        if (icon != null)
-        {
-            icon.VerticalAlignment = VerticalAlignment.Center;
-            grid.Children.Add(icon);
-        }
-        var texts = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
-        texts.Children.Add(Text(title, 14, titleBrush));
-        if (!string.IsNullOrEmpty(sub)) texts.Children.Add(Text(sub, 12, Secondary, lines: 3));
-        Grid.SetColumn(texts, 1);
-        grid.Children.Add(texts);
-        var trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
-        if (end != null) trailing.Children.Add(end);
-        if (chevron) trailing.Children.Add(new FontIcon { Glyph = "", FontFamily = Symbols, FontSize = 12, Foreground = Tertiary });
-        Grid.SetColumn(trailing, 2);
-        grid.Children.Add(trailing);
-        if (click == null) return grid;
-        var button = new Button
-        {
-            Content = grid, Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0),
-        };
-        button.Click += (_, _) => click();
-        return button;
-    }
-
-    /// A column as wide as the window allows, up to a readable width, scrolling down: Settings' and Services' pages.
-    public static ScrollViewer Column(StackPanel panel)
-    {
-        panel.Padding = new Thickness(32, 8, 32, 48);
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MaxWidth = 760 });
-        grid.Children.Add(panel);
-        return new ScrollViewer { Content = grid, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollMode = ScrollMode.Disabled };
     }
 
     /// A message filling the place it's in: a title and what to do.
@@ -318,17 +227,34 @@ public static class Look
         return b;
     }
 
-    public static Button Plain(string text, Action click)
-    {
-        var b = new Button { Content = text };
-        b.Click += (_, _) => click();
-        return b;
-    }
-
     public static HyperlinkButton Link(string text, Action click)
     {
         var b = new HyperlinkButton { Content = text, Padding = new Thickness(4, 2, 4, 2) };
         b.Click += (_, _) => click();
         return b;
+    }
+}
+
+/// Light, Dark or Automatic, as chosen on this computer.
+public static class Appearance
+{
+    static string File => Path.Combine(Brand.Folder, "appearance");
+
+    public static string Chosen
+    {
+        get
+        {
+            try { return System.IO.File.ReadAllText(File).Trim() is "light" or "dark" ? System.IO.File.ReadAllText(File).Trim() : "automatic"; }
+            catch { return "automatic"; }
+        }
+    }
+
+    public static ElementTheme Theme => Chosen switch { "light" => ElementTheme.Light, "dark" => ElementTheme.Dark, _ => ElementTheme.Default };
+
+    public static void Choose(string a, MainWindow window)
+    {
+        Directory.CreateDirectory(Brand.Folder);
+        System.IO.File.WriteAllText(File, a);
+        window.Restyle();
     }
 }

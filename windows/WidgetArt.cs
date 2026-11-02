@@ -1,4 +1,4 @@
-// The pictures a widget's card shows (WidgetCard.cs), drawn as WidgetTree.cs draws them in the window: rings, sparks,
+// The pictures a widget's card shows (WidgetCard.cs), drawn as src/screen/widgets.js draws them on a page: rings, sparks,
 // bars, charts, dots, switches and icons, each as an image's data, since a card draws nothing but text and images.
 using System;
 using System.Collections.Generic;
