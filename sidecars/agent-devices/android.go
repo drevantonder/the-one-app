@@ -66,6 +66,10 @@ func (androidEmulator) can() string {
 		} else {
 			f.Close()
 		}
+		// Without its own network, a phone's apps would reach this machine's 127.0.0.1 and adb (start).
+		if _, err := exec.LookPath("pasta"); err != nil {
+			return "Android needs pasta here (the passt package), for a network of its own"
+		}
 	case "darwin":
 	default:
 		return "Android runs on Linux x86 machines with KVM, and on Macs"
@@ -175,8 +179,7 @@ func (a androidEmulator) start(ctx context.Context, v *vm) error {
 	// to. On Linux it runs in a network of its own (pasta), reaching the internet as this machine does but none of its
 	// 127.0.0.1, which takes only its console and adb's port in; and asks this machine's resolvers, not its stub. A Mac
 	// has nothing like it, so there a phone's apps reach the Mac's 127.0.0.1 (ARCHITECTURE.md).
-	_, err = exec.LookPath("pasta")
-	apart := err == nil && runtime.GOOS == "linux"
+	apart := runtime.GOOS == "linux"
 	if apart {
 		ports := fmt.Sprintf("127.0.0.1/%d-%d", v.Port, v.Port+1)
 		emulator = append([]string{"pasta", "--config-net", "--no-map-gw", "-T", "none", "-U", "none", "-u", "none", "-t", ports, "--quiet", "--"}, emulator...)
