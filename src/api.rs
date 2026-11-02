@@ -474,8 +474,8 @@ async fn create(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 }
 
 async fn pair(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let (code, user) = node.pair_as(&me.caller, crate::node::new_user(&body)?, body["user"].as_str())?;
-    Ok(Json(json!({ "code": code, "user": user, "qr": crate::node::qr(&code)? })))
+    let (code, user) = node.pair_as(&me.caller, body["user"].as_str())?;
+    Ok(Json(json!({ "code": code, "user": user })))
 }
 
 async fn join(State(node): State<Node>, Json(body): Json<Value>) -> Reply {

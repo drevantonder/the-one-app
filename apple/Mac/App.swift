@@ -58,7 +58,7 @@ struct MacApp: App {
                     .keyboardShortcut("\\", modifiers: .command)
             }
             CommandGroup(replacing: .newItem) {
-                Button("Pair a Phone or Computer…") { store.sheet = .pair }
+                Button("Pair a Computer…") { store.sheet = .pair }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
                     .disabled(store.install == nil)
                 Button("Join with a Pairing Code…") { store.sheet = .join }

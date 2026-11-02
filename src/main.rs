@@ -23,8 +23,7 @@ Usage:
                                        your devices; {CLI} and {CLI} mcp here then act as you
   {CLI} sign-out                       sign this machine out
   {CLI} create <name> --as <your name> create an install, with you as its first admin
-  {CLI} pair [--new-user <name> [--admin] | --user <name>]
-                                       a pairing code for another of your machines (or, for admins, a new user or someone else)
+  {CLI} pair [--user <name>]           a pairing code for another of your machines (or, for admins, someone else's)
   {CLI} join <code>                    join an install with a pairing code
   {CLI} rename <name>                  rename this server
   {CLI} remove <server|client> | --user <user>
@@ -244,8 +243,7 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
         }
         ["pair"] => {
-            let new_user = flags.get("new-user").and_then(Value::as_str).map(|n| json!({ "name": n, "role": if flags.contains_key("admin") { "admin" } else { "member" } }));
-            let r = post("/v1/pair", json!({ "new_user": new_user, "user": flags.get("user") }))?;
+            let r = post("/v1/pair", json!({ "user": flags.get("user") }))?;
             println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for a week.", r["code"].as_str().unwrap_or(""));
         }
         ["join", code] => {

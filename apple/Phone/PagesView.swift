@@ -62,10 +62,9 @@ struct PagesView: View {
         }
         .sheet(item: $store.sheet) { sheet in
             switch sheet {
-            case .pair: PairSheet()
             case .pages: PagesEditor()
             case .addWidget(let scope): AddWidgetSheet(scope: scope)
-            case .join, .services: EmptyView()
+            case .pair, .join, .services: EmptyView()
             case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
             case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
             }

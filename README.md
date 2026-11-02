@@ -40,7 +40,7 @@ cargo build --release
 sh install.sh target/release/one         # runs the node as a service
 one try                                  # look around first: a new install of its own, beside yours; one try stop deletes it
 one create Home --as Andre               # a new install, on your first server; keep its recovery key in 1Password
-one pair                                 # a pairing code for your next server or phone
+one pair                                 # a pairing code for your next server
 one join <code>                          # on it
 one board post --text "hello from here"
 one group create Family                  # share data with others: one group invite Family <user>

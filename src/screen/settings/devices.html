@@ -12,8 +12,6 @@
   a.row { cursor: pointer; }
   #page h2.section:first-of-type { margin-top: 8px; }
   .pair { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 8px 0 4px; }
-  .qr { width: 236px; height: 236px; padding: 16px; border-radius: 18px; background: #fff; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12); display: grid; place-items: center; }
-  .qr svg { width: 100%; height: 100%; display: block; shape-rendering: crispEdges; }
   .code { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--code-bg); }
   .pair code { font: 0.92em var(--mono); }
   .code span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
@@ -108,7 +106,7 @@
       html += `<h2 class="section">This Device</h2><div class="list"><label class="row plain"><input class="field" id="name" aria-label="This device’s name" value="${one.esc(here.name)}" autocomplete="off" spellcheck="false" enterkeyhint="done"></label></div>`;
     }
     html += '<h2 class="section">Your Devices</h2><div class="list">' + mine.map(serverRow).join("") + clients.filter((c) => c.user === me()).map(clientRow).join("") +
-      `<a class="row plain action-row" onclick="pair()">${one.icon("qr-code")}<span>Pair a Phone or Computer</span></a></div><div id="ask"></div>`;
+      `<a class="row plain action-row" onclick="pair()">${one.icon("desktop")}<span>Pair a Computer</span></a></div><div id="ask"></div>`;
     if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(serverRow).join("") + "</div>";
     html += orderSection();
     const holding = servers.filter(holds).map((s) => shown(s.name));
@@ -169,13 +167,12 @@
   }
 
   function pair() {
-    const { body } = one.sheet({ title: "Pair a Phone or Computer", html: one.loading("Making a code") });
+    const { body } = one.sheet({ title: "Pair a Computer", html: one.loading("Making a code") });
     one.api("POST", "/v1/pair", {}).then(
-      ({ code, qr }) => {
+      ({ code }) => {
         body.innerHTML = `<div class="pair"><div class="muted">It joins as you, with everything you can see and do.</div>
-          <div class="qr" role="img" aria-label="QR code of the pairing code">${qr}</div>
           <div class="code"><span>${one.esc(code)}</span>${one.copyButton(code)}</div>
-          <div class="small muted">Scan it with the other device’s camera, or run <code>${one.esc(one.config.cli)} join</code> with the code there. It works once, for seven days.</div></div>`;
+          <div class="small muted">On the other computer, choose Join with a Pairing Code, or run <code>${one.esc(one.config.cli)} join</code> with the code. It works once, for seven days.</div></div>`;
       },
       (err) => (body.innerHTML = one.banner(err, { retry: false })),
     );

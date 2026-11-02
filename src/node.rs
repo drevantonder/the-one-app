@@ -158,11 +158,7 @@ struct Pairing {
     /// The client that asked for it, if one did.
     #[serde(default)]
     by: Option<String>,
-    /// For a new user: their name and role.
-    #[serde(default)]
-    new_user: Option<(String, Role)>,
-    /// The user the machine joins as, when it isn't the asker's: an admin's code for someone else's machine, or a new
-    /// user's id, chosen when the code is made. Codes made before this have none, and a new user's id is chosen then.
+    /// The user the machine joins as, when it isn't the asker's: an admin's code for someone else's machine.
     #[serde(default)]
     admits: Option<String>,
     /// Milliseconds since 1970 after which it no longer works.
@@ -3033,29 +3029,26 @@ impl Node {
 
     // Pairing.
 
-    /// Makes a one-time pairing code for another of the local user's machines, or, for an admin, a new user's.
-    pub fn pair(&self, new_user: Option<(String, Role)>) -> Result<String> {
-        Ok(self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None, token: None }, new_user, None)?.0)
+    /// Makes a one-time pairing code for another of the local user's machines, which joins as a server.
+    pub fn pair(&self) -> Result<String> {
+        Ok(self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None, token: None }, None)?.0)
     }
 
     /// Like `pair`, for `asker`, or for an admin, a code for another machine of `user` (an id or a name). With the id
     /// of the user the code admits.
-    pub fn pair_as(&self, asker: &Caller, new_user: Option<(String, Role)>, user: Option<&str>) -> Result<(String, String)> {
+    pub fn pair_as(&self, asker: &Caller, user: Option<&str>) -> Result<(String, String)> {
         let user = user.map(|u| self.find_user(u)).transpose()?;
         self.with(|i| {
             let m = &i.r.members;
             ensure!(m.server(&self.0.id).is_some(), "this server isn't in the install yet");
-            ensure!(new_user.is_none() || m.is_admin(&asker.user), "only admins add users; pair one of your own machines instead");
-            ensure!(new_user.is_none() || user.is_none(), "a code is for a new user or an existing one, not both");
             ensure!(user.as_ref().is_none_or(|u| *u == asker.user) || m.is_admin(&asker.user), "only admins pair other people's machines");
             ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.server_name());
             Ok(())
         })?;
-        let admits = user.or_else(|| new_user.as_ref().map(|_| new_id()));
-        let joins_as = admits.clone().unwrap_or_else(|| asker.user.clone());
+        let joins_as = user.clone().unwrap_or_else(|| asker.user.clone());
         let secret: [u8; 16] = rand::random();
         let by = (asker.key != self.0.id).then(|| hex(&asker.key));
-        self.add_pairing(secret, Pairing { user: asker.user.clone(), by, new_user, admits, until: now_ms() + PAIRING_LIFE })?;
+        self.add_pairing(secret, Pairing { user: asker.user.clone(), by, admits: user, until: now_ms() + PAIRING_LIFE })?;
         let code = PairingCode { from: self.0.endpoint.addr(), secret };
         let mut bytes = Vec::new();
         ciborium::into_writer(&code, &mut bytes)?;
@@ -3130,33 +3123,12 @@ impl Node {
 
     async fn admit(&self, key: Key, request: JoinRequest) -> Result<JoinReply> {
         let pairing = self.take_pairing(&request.secret)?.filter(|p| p.until > now_ms()).context("this pairing code was already used or has expired")?;
-        let server = match request.as_.as_str() {
-            "server" => true,
-            "client" => false,
-            other => bail!("can't join as {other}"),
-        };
-        let user = match (&pairing.admits, &pairing.new_user) {
-            (Some(user), _) => user.clone(),
-            (None, Some(_)) => new_id(),
-            (None, None) => pairing.user.clone(),
-        };
-        let root = self.with(|i| {
-            let m = &i.r.members;
-            // A phone only asks servers: one must serve its user, or the phone could do nothing.
-            if !server {
-                let served = match &pairing.new_user {
-                    Some(_) => m.servers().any(|s| m.privileged(&s.key) && m.users_of(&s.key).contains(&Principal::Install)),
-                    None => m.servers().any(|s| m.serves(&s.key, &user)),
-                };
-                ensure!(served, "this install has no server for you yet: a phone needs one of your own servers, or one the install shares with everyone");
-            }
-            let root = i.r.root.map(|r| r.to_hex()).context("no install")?;
-            Ok((root, i.bucket.as_ref().filter(|_| server).map(|(_, f)| f.clone())))
-        })?;
-        let (root, bucket) = root;
+        // Phones joined as clients before they signed in at your One App's address: only servers join now.
+        ensure!(request.as_ == "server", "only computers join with a pairing code: sign in at your One App's address instead");
+        let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
+        let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no install")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
-        let new_user = pairing.new_user.as_ref().map(|(name, role)| (name.as_str(), *role));
-        let admit = members::admit(&key, &user, &request.name, server, new_user);
+        let admit = members::admit(&key, &user, &request.name, true, None);
         self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, "admit", admit.data).await.context("this server can no longer admit that machine")?;
         Ok(JoinReply { root, user, bucket })
     }
@@ -3704,18 +3676,6 @@ pub fn deploy(app: &str, bundle: &str) -> Content {
     Content { blobs: vec![bundle.into()], ..members::node("deploy", json!({ "app": app, "bundle": bundle })) }
 }
 
-/// `{ new_user: { name, role } }` in a pairing request.
-pub fn new_user(body: &Value) -> Result<Option<(String, Role)>> {
-    match &body["new_user"] {
-        Value::Null | Value::Bool(false) => Ok(None),
-        v => {
-            let name = v["name"].as_str().filter(|n| !n.trim().is_empty()).context("give the new user a name")?.trim().to_string();
-            let role: Role = serde_json::from_value(v.get("role").cloned().unwrap_or(json!("member")))?;
-            Ok(Some((name, role)))
-        }
-    }
-}
-
 impl Node {
     /// Publishes `binary` (a build of this node for `target`, with the release key's `signature` over it) as the
     /// install's newest release.
@@ -3995,11 +3955,6 @@ impl ProtocolHandler for CallHandler {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         self.0.accept_call(conn).await.map_err(accept_err)
     }
-}
-
-/// `text` as a QR code, an SVG with no margin, for a screen to draw on white: a pairing code, for a phone's camera.
-pub fn qr(text: &str) -> Result<String> {
-    Ok(qrcode::QrCode::new(text)?.render::<qrcode::render::svg::Color>().quiet_zone(false).build())
 }
 
 

@@ -3,6 +3,11 @@
 
 /// A screen's page: `context` is `{ app, screen, params, me, scope, config }` (a Settings screen has no app or scope), `body` its HTML.
 pub fn page(context: &serde_json::Value, body: &str) -> String {
+    let mut context = context.clone();
+    // The domain whose people join by signing in with Google, for Users to say so.
+    if crate::config::SIGN_IN == "google" {
+        context["config"]["join_domain"] = crate::config::JOIN_DOMAIN.into();
+    }
     // `</` can't appear inside the inline script, so it can't end it early.
     let context = context.to_string().replace("</", "<\\/");
     format!(

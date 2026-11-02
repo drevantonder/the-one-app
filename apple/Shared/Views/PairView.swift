@@ -1,12 +1,9 @@
-import CoreImage.CIFilterBuiltins
 import SwiftUI
 
-/// A pairing code, as a QR code and text: for another of this user's devices, or, from Users, for someone new.
+/// A pairing code, for another of this user's computers.
 struct PairSheet: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
-    /// Someone new, named, as an admin or member.
-    var newUser: (name: String, role: String)?
     @State private var code: String?
     @State private var error: String?
     @State private var copied = false
@@ -14,30 +11,16 @@ struct PairSheet: View {
     var body: some View {
         VStack(spacing: 18) {
             VStack(spacing: 6) {
-                Text(newUser.map { "Invite \($0.name)" } ?? String(localized: "Pair a Phone or Computer")).font(.title2.weight(.semibold))
-                Text(newUser == nil
-                     ? "It joins as you, with everything you can see and do."
-                     : "They join \(store.install?.name ?? "the install") as a new user, on the device that scans this.")
+                Text("Pair a Computer").font(.title2.weight(.semibold))
+                Text("It joins as you, with everything you can see and do.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.white)
-                    .shadow(color: .black.opacity(0.12), radius: 10, y: 3)
-                if let code, let qr = qrCode(code) {
-                    Image(decorative: qr, scale: 1)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .padding(16)
-                } else if let error {
-                    Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red).padding()
-                } else {
-                    ProgressView()
-                }
+            if let error {
+                Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+            } else if code == nil {
+                ProgressView()
             }
-            .frame(width: 236, height: 236)
             HStack(spacing: 10) {
                 Text(code ?? " ")
                     .font(.system(.callout, design: .monospaced))
@@ -52,7 +35,7 @@ struct PairSheet: View {
             .padding(.trailing, 4)
             .padding(.vertical, 4)
             .background(.quaternary.opacity(0.5), in: .capsule)
-            Text("Scan it with the other device’s camera, or run \(store.config?.cli ?? "") join with the code there. It works once, for seven days.")
+            Text("On the other computer, choose Join with a Pairing Code, or run \(store.config?.cli ?? "") join with the code. It works once, for seven days.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -64,7 +47,7 @@ struct PairSheet: View {
         .frame(width: 440)
         #endif
         .task {
-            do { code = try await store.node.pair(newUser: newUser) } catch { self.error = error.localizedDescription }
+            do { code = try await store.node.pair() } catch { self.error = error.localizedDescription }
         }
     }
 
@@ -77,14 +60,6 @@ struct PairSheet: View {
         UIPasteboard.general.string = code
         #endif
         copied = true
-    }
-
-    private func qrCode(_ text: String) -> CGImage? {
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(text.utf8)
-        filter.correctionLevel = "M"
-        guard let image = filter.outputImage else { return nil }
-        return CIContext().createCGImage(image, from: image.extent)
     }
 }
 

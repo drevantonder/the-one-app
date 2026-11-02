@@ -58,11 +58,11 @@ async fn servers_share_a_deployed_board() {
     assert!(listed["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == "post")), "{listed}");
     assert_eq!(a.call(board("post", json!({ "text": "from a" }))).await.unwrap(), "Posted as #1 in the top.");
 
-    b.join(&a.pair(None).unwrap()).await.unwrap();
+    b.join(&a.pair().unwrap()).await.unwrap();
     assert_eq!(b.user().unwrap(), a.user().unwrap(), "a pairing code from a's user makes another of their servers");
     eventually("b to run the board and see a's post", async || sees(&b, "global", "from a").await).await;
     b.call(board("post", json!({ "text": "from b" }))).await.unwrap();
-    assert!(b.join(&a.pair(None).unwrap()).await.is_err(), "a server in an install joins no other");
+    assert!(b.join(&a.pair().unwrap()).await.is_err(), "a server in an install joins no other");
     eventually("a to see b's post", async || sees(&a, "global", "from b").await).await;
     let read = a.call(board("read", json!({}))).await.unwrap();
     let read = read.as_str().unwrap();
@@ -257,7 +257,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let (a, _ra) = start("backup-a").await;
     let (b, _rb) = start("backup-b").await;
     let recovery = a.create("Home", "Andre").await.unwrap();
-    b.join(&a.pair(None).unwrap()).await.unwrap();
+    b.join(&a.pair().unwrap()).await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     eventually("the board to run", async || a.call(board("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
     a.set_item(&me, &one::entry::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();

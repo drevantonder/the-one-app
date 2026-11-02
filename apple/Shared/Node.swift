@@ -522,10 +522,9 @@ struct NodeClient: Sendable {
         try await post("v1/create", ["name": name, "user_name": userName])["recovery"] as? String
     }
 
-    /// A pairing code: for another of this user's machines, or for someone new (admins only).
-    func pair(newUser: (name: String, role: String)? = nil) async throws -> String {
-        let fields: [String: Any?] = newUser.map { ["new_user": ["name": $0.name, "role": $0.role]] } ?? [:]
-        return try await post("v1/pair", fields)["code"] as? String ?? ""
+    /// A pairing code for another of this user's computers.
+    func pair() async throws -> String {
+        try await post("v1/pair", [:])["code"] as? String ?? ""
     }
 
     func join(_ code: String) async throws { try await post("v1/join", ["code": code], timeout: 60) }
@@ -596,7 +595,7 @@ func joinFailure(_ error: Error) -> String {
     } else if lower.contains("already belongs") {
         next = String(localized: "This device is already in an install. Remove it there first, or install the other context’s own app.")
     } else if lower.contains("decode") || lower.contains("invalid") || lower.contains("base") || lower.contains("parse") || lower.contains("bad") {
-        next = String(localized: "That isn’t a whole pairing code. Copy it again, all of it, or scan its QR code instead.")
+        next = String(localized: "That isn’t a whole pairing code. Copy it again, all of it.")
     } else if lower.contains("timed out") || lower.contains("timeout") || lower.contains("connect") || lower.contains("unreachable") || lower.contains("no route") || lower.contains("network") {
         next = String(localized: "Couldn’t reach the device that made the code. Check that it’s on and online (and so is this one), then try again.")
     } else {
