@@ -39,7 +39,7 @@ async function pick(accounts) {
     const profile = select.value || name.value.trim();
     if (!profile) return name.focus();
     e.target.disabled = true;
-    e.target.textContent = "Opening a computer…";
+    e.target.textContent = "Opening a device…";
     try { signingIn(await one.call("sign_in", { profile })); }
     catch (err) { document.getElementById("err").textContent = err.message; e.target.disabled = false; e.target.textContent = "Sign in to Messenger"; }
   };
@@ -47,7 +47,7 @@ async function pick(accounts) {
 
 function signingIn(r) {
   const c = document.getElementById("connect");
-  c.innerHTML = `<ol><li><a href="${one.esc(r.url)}">Open the computer</a>: its browser is on messenger.com, in the ${one.esc(r.profile)} profile.</li>
+  c.innerHTML = `<ol><li><a href="${one.esc(r.url)}">Open the device</a>: its browser is on messenger.com, in the ${one.esc(r.profile)} profile.</li>
     <li>Sign in there, and tick Keep me signed in.</li><li>Come back and press Done.</li></ol>
     <button class="primary" id="done">Done</button><div id="err" class="error small"></div>`;
   document.getElementById("done").onclick = async (e) => {
