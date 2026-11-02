@@ -751,10 +751,11 @@ impl Cloudflare {
         Ok(list.as_array().into_iter().flatten().filter_map(|s| Some((s["id"].as_str()?.to_string(), script(s)))).collect())
     }
 
-    /// The versions a Worker's active deployment runs, as one string, if it has one.
+    /// The versions a Worker's active deployment runs, as one string, if it has one: without hyphens, as `upload`
+    /// gives them.
     pub(crate) fn active(&self, name: &str) -> Result<Option<String>> {
         let list = self.call("GET", &format!("/accounts/{}/workers/scripts/{name}/deployments", self.account), None)?;
-        let versions = list["deployments"][0]["versions"].as_array().into_iter().flatten().filter_map(|v| v["version_id"].as_str()).collect::<Vec<_>>();
+        let versions = list["deployments"][0]["versions"].as_array().into_iter().flatten().filter_map(|v| Some(v["version_id"].as_str()?.replace('-', ""))).collect::<Vec<_>>();
         Ok((!versions.is_empty()).then(|| versions.join(",")))
     }
 
