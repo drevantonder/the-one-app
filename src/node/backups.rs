@@ -314,7 +314,7 @@ impl Node {
             let mut snapshots = Vec::new();
             let mut error = None;
             for d in due {
-                match self.back_up_scope(&place, &p.id, &install, recovery, &d, now).await {
+                match self.back_up_scope(&place, &p.id, &install, recovery, &d, now, force).await {
                     Ok(Some(s)) => snapshots.push(s),
                     Ok(None) => {}
                     Err(err) => {
@@ -356,8 +356,9 @@ impl Node {
         out
     }
 
-    /// Backs up one scope to one place, with the scope's key: sends what the place lacks.
-    async fn back_up_scope(&self, place: &Place, place_id: &str, install: &str, recovery: Key, d: &Due, now: u64) -> Result<Option<Snapshot>> {
+    /// Backs up one scope to one place, with the scope's key: sends what the place lacks, unless (but for `force`) the
+    /// place has a snapshot of it from within the hour, which a device that just started doesn't know of yet.
+    async fn back_up_scope(&self, place: &Place, place_id: &str, install: &str, recovery: Key, d: &Due, now: u64, force: bool) -> Result<Option<Snapshot>> {
         let scope = Scope::parse(&d.scope)?;
         let key = match d.key {
             Some(key) => key,
@@ -380,6 +381,9 @@ impl Node {
                 (_, None) => None,
                 _ => b::latest(&place, &install, &scope_name, &[key])?.map(|(s, _)| s),
             };
+            if !force && previous.as_ref().is_some_and(|p| p.time + b::EVERY > now) {
+                return Ok((None, previous));
+            }
             let job = b::Job { place: &place, install: &install, scope: &scope_name, key, recovery, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
             let written = b::back_up(job, |hash| std::fs::read(release::blob_path(&dir, hash).ok()?).ok())?;
             Ok((written.clone(), written.or(previous)))
