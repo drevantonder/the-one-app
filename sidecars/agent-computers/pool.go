@@ -51,9 +51,11 @@ type loan struct {
 
 // caches are left out of saved profiles and backups: they are most of a
 // browser profile's size and rebuild themselves. So are a running browser's
-// locks, which would make a copy look in use by another computer.
+// locks, which would make a copy look in use by another computer. Service
+// Worker/ScriptCache isn't one: it's the only copy of an extension's
+// background script, and without it the extension (1Password) never answers.
 var caches = []string{"./.cache", "*/Cache", "*/Code Cache", "*/GPUCache", "*/DawnCache", "*/GrShaderCache", "*/ShaderCache",
-	"*/Service Worker/CacheStorage", "*/Service Worker/ScriptCache", "*/SingletonLock", "*/SingletonSocket", "*/SingletonCookie"}
+	"*/Service Worker/CacheStorage", "*/SingletonLock", "*/SingletonSocket", "*/SingletonCookie"}
 
 func (ds *computers) loans() map[string]loan {
 	ds.poolMu.Lock()
