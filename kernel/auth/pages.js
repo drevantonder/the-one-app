@@ -172,6 +172,27 @@ function googlePage({ name, google }) {
   return page(`Sign in to ${name}`, body, script);
 }
 
+/// Signing in on a try install (`one try`): its one person, with no passkey, straight on, so a client being tested
+/// signs in with nobody there. The button is for a browser that won't go on to an app by itself.
+export function tryPage({ name, person }) {
+  const body = `
+    <h1 id="title">Sign in to ${escape(name)}</h1>
+    <p id="what">As ${escape(person)}, in a try install: no passkey here.</p>
+    <button class="primary" id="go">Sign In as ${escape(person)}</button>`;
+  const script = `
+    const oauth_query = location.search.slice(1);
+    const go = async () => {
+      say();
+      try {
+        await api("/api/auth/try/sign-in", {});
+        location.href = new URLSearchParams(oauth_query).get("client_id") ? (await api("/sign-in/accept", { oauth_query })).url : "/";
+      } catch (err) { say(err.message); }
+    };
+    document.getElementById("go").onclick = go;
+    go();`;
+  return page(`Sign in to ${name}`, body, script);
+}
+
 export function invitePage({ name }) {
   const body = `
     <section id="join">

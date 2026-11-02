@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds the Windows app in the Windows VM on this machine (Agent Devices' windows: WinUI 3 builds only on Windows), then
-# installs it there and starts it. CONFIG=path/to/config.toml builds another white label.
+# Builds the Windows app in the Windows VM on this machine (Agent Devices' windows, or DEVICE=<name>, a copy borrowed for
+# it: WinUI 3 builds only on Windows), then installs it there and starts it. CONFIG=path/to/config.toml builds another
+# white label.
 set -euo pipefail
 cd "$(dirname "$0")"
 root=$(cd .. && pwd)
@@ -53,8 +54,13 @@ public static class Brand
 CS
 printf '{"name":%s,"file":%s,"publisher":%s}\n' "$(quote "$name")" "$(quote "$file")" "$(quote "CN=${name//[^A-Za-z0-9 ]/}")" > "$stage/build.json"
 
-ssh=(ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=$HOME/.local/share/one/agent-devices/windows/windows/known_hosts -o LogLevel=ERROR -o ConnectTimeout=10 one@127.0.0.1)
-"${ssh[@]}" exit 2>/dev/null || { one agent-devices start windows >/dev/null; until "${ssh[@]}" exit 2>/dev/null; do sleep 5; done; }
+# The device's SSH port and folder, as Agent Devices keeps them.
+device=${DEVICE:-windows}
+kept=$HOME/.local/share/one/agent-devices/devices/$device.json
+port=$(sed -n 's/.*"port": *\([0-9]*\).*/\1/p' "$kept") dir=$(sed -n 's/.*"dir": *"\([^"]*\)".*/\1/p' "$kept")
+opts=(-o StrictHostKeyChecking=no -o "UserKnownHostsFile=$dir/known_hosts" -o LogLevel=ERROR -o ConnectTimeout=10)
+ssh=(ssh -p "$port" "${opts[@]}" one@127.0.0.1)
+"${ssh[@]}" exit 2>/dev/null || { one agent-devices start "$device" >/dev/null; until "${ssh[@]}" exit 2>/dev/null; do sleep 5; done; }
 "${ssh[@]}" "Remove-Item -Recurse -Force build\\$cli -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force build | Out-Null"
-scp -q -r -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$HOME/.local/share/one/agent-devices/windows/windows/known_hosts" -o LogLevel=ERROR "$stage" "one@127.0.0.1:build/"
+scp -q -r -P "$port" "${opts[@]}" "$stage" "one@127.0.0.1:build/"
 "${ssh[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File build\\$cli\\build.ps1"

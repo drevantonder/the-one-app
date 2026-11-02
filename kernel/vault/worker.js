@@ -5,9 +5,10 @@
 // (a passkey's PRF output, an OAuth client's refresh token) and kept by a hash of that secret; a session is a copy
 // sealed under an access token, kept until the token expires or its client signs out. On an install whose people sign
 // in with Google (`SIGN_IN`), a person's first copy is sealed under a secret only the vault has (`VAULT_KEY`), which it
-// opens itself once the auth service says Google signed them in: so the kernel can open everyone's keys there. Each scope's key is sealed to the public half of every
-// person who may open it, and to the install's recovery key. A request that brings an access token gets the keys it
-// names from its session.
+// opens itself once the auth service says Google signed them in: so the kernel can open everyone's keys there. A try
+// install's kernel (`SIGN_IN` is "try", which only `one try` sets) does the same for its one person, with no Google.
+// Each scope's key is sealed to the public half of every person who may open it, and to the install's recovery key. A
+// request that brings an access token gets the keys it names from its session.
 //
 // The auth service is the only one that sees clients' secrets (it issues them), so it alone calls the routes under
 // /internal/, with the kernel's shared secret. Everyone else brings an access token.
@@ -18,6 +19,9 @@ import { bucketUrls } from "../shared/s3.js";
 import { Items, schema } from "./items.js";
 import { bearer, Issuer } from "../shared/token.js";
 
+/// Whether the vault opens people's keys itself, with its own key: on an install whose people sign in with Google, and a
+/// try install's.
+const opensItself = (env) => env.SIGN_IN === "google" || env.SIGN_IN === "try";
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SCOPE = /^(global|user:[0-9a-f]{16}|group:[0-9a-f]{16})$/;
 const USER = /^[0-9a-f]{16}$/;
@@ -98,7 +102,7 @@ export class Vault extends DurableObject {
       switch (`${request.method} ${path}`) {
         case "POST /internal/passkey": return json(await this.passkey(body));
         case "POST /internal/grant": return json(await this.grant(body));
-        case "POST /internal/google": return json(await this.google(body));
+        case "POST /internal/own": return json(await this.own(body));
         case "POST /internal/rekey": return json(await this.rekey(body));
         case "POST /internal/forget": return json(await this.forget(body));
         case "POST /internal/forget-passkeys": return json(this.forgetPasskeys(body));
@@ -192,7 +196,7 @@ export class Vault extends DurableObject {
   /// A passkey's copy, for `user`. Their first makes their keys (`person`); a later one is opened from another of
   /// their passkeys, or an invite link made with the recovery key.
   async passkey({ user, secret, name, from, client = null }) {
-    if (this.env.SIGN_IN === "google") refuse(403, "people here sign in with Google");
+    if (opensItself(this.env)) refuse(403, "people here don't sign in with a passkey");
     if (!USER.test(user || "")) refuse(400, "not a user id");
     secret = secretOf(secret);
     const known = this.sql.exec("select user from people where user = ?", user).toArray()[0];
@@ -221,18 +225,19 @@ export class Vault extends DurableObject {
 
   /// The secret a person's own copy is sealed under on an install whose people sign in with Google: only the vault
   /// can make it.
-  async own(user) {
+  async ownSecret(user) {
     const key = await crypto.subtle.importKey("raw", b64u.decode(this.env.VAULT_KEY || refuse(503, "the vault has no key of its own")), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     return new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`one/vault\0${user}`)));
   }
 
   /// A copy for a client being added, on an install whose people sign in with Google, once the auth service says
-  /// Google signed `user` in: opened with the vault's own key, and sealed under the client's authorization code
-  /// (`to`) as `grant` seals it. Their first sign-in makes their keys, and opens Everyone's to them.
-  async google({ user, to, name, client }) {
-    if (this.env.SIGN_IN !== "google") refuse(403, "people here open their keys with a passkey");
+  /// Google signed `user` in (or a try install's, for its one person): opened with the vault's own key, and sealed
+  /// under the client's authorization code (`to`) as `grant` seals it. Their first sign-in makes their keys, and opens
+  /// Everyone's to them.
+  async own({ user, to, name, client }) {
+    if (!opensItself(this.env)) refuse(403, "people here open their keys with a passkey");
     if (!USER.test(user || "")) refuse(400, "not a user id");
-    const own = await this.own(user);
+    const own = await this.ownSecret(user);
     let held = (await this.open(own, ["own"]))?.held;
     if (!held) {
       if (this.sql.exec("select user from people where user = ?", user).toArray().length) refuse(409, "this person's keys were made with a passkey");
@@ -247,7 +252,7 @@ export class Vault extends DurableObject {
   async everyone(held) {
     if (this.sql.exec("select user from grants where user = ? and scope = 'global'", held.user).toArray().length) return;
     for (const { user } of this.sql.exec("select user from grants where scope = 'global'").toArray()) {
-      const other = (await this.open(await this.own(user), ["own"]))?.held;
+      const other = (await this.open(await this.ownSecret(user), ["own"]))?.held;
       if (!other) continue;
       const key = await this.scopeKey(other, "global");
       this.sql.exec("insert into grants (user, scope, sealed) values (?, 'global', ?)", held.user, await sealTo(b64u.decode(held.public), key));
@@ -487,7 +492,7 @@ export class Vault extends DurableObject {
   /// An invite link's secret for someone new, called `name`, and until when it works, made by the auth service as
   /// for `kernel invite`: asked by an admin of the install (as the vault last heard who is), signed in.
   async invite(token, claims, { name }) {
-    if (this.env.SIGN_IN === "google") refuse(403, "people here join by signing in with Google");
+    if (opensItself(this.env)) refuse(403, "people here join by signing in, with no invite");
     if (token.startsWith("run.")) refuse(403, "work left running invites nobody");
     await this.sessionOf(token);
     if (!this.sql.exec("select 1 from admins where scope = 'global' and user = ?", claims.sub).toArray().length) refuse(403, "only an admin invites someone");

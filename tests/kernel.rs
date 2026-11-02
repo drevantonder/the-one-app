@@ -269,7 +269,7 @@ fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
 #[test]
 fn where_people_sign_in_with_google_the_vault_opens_their_keys_itself_and_only_there() {
     let passkeys = Vault::start();
-    assert_eq!(passkeys.internal("google", json!({ "user": ANDRE, "to": "a code for andre", "client": "web" })).0, 403, "a passkey's install opens nobody's keys for them");
+    assert_eq!(passkeys.internal("own", json!({ "user": ANDRE, "to": "a code for andre", "client": "web" })).0, 403, "a passkey's install opens nobody's keys for them");
 
     let v = Vault::start_with(vec![("SIGN_IN".into(), "google".into()), ("VAULT_KEY".into(), B64U.encode(&rand::random::<[u8; 32]>()))]);
     let vault = kernel::Vault { url: v.url.clone() };
@@ -277,7 +277,7 @@ fn where_people_sign_in_with_google_the_vault_opens_their_keys_itself_and_only_t
     // Each time Google signs someone in, the vault gives their new client the same keys.
     let signs_in = |user: &str, client: &str| {
         let code = format!("{client}'s authorization code for {user}");
-        assert_eq!(v.internal("google", json!({ "user": user, "to": code, "client": client })).0, 200);
+        assert_eq!(v.internal("own", json!({ "user": user, "to": code, "client": client })).0, 200);
         let (token, until) = v.token(user, client);
         assert_eq!(v.internal("rekey", json!({ "from": code, "to": format!("{client}'s refresh token for {user}"), "token": token, "until": until })).1["moved"], true);
         token
@@ -291,7 +291,7 @@ fn where_people_sign_in_with_google_the_vault_opens_their_keys_itself_and_only_t
     assert_eq!(vault.keys_until(&sam, &[("global", "board", None)]).unwrap().0, vault.keys_until(&web, &[("global", "board", None)]).unwrap().0);
     assert!(vault.keys_until(&sam, &[(&mine, "board", None)]).is_err());
     // Only the auth service asks, once Google has said yes.
-    let (status, _) = post(&format!("{}/internal/google", v.url), &[("x-kernel-secret", "a guess")], json!({ "user": SAM, "to": "mallory's code", "client": "web" }));
+    let (status, _) = post(&format!("{}/internal/own", v.url), &[("x-kernel-secret", "a guess")], json!({ "user": SAM, "to": "mallory's code", "client": "web" }));
     assert_eq!(status, 403);
 }
 
@@ -311,7 +311,7 @@ fn someone_removed_opens_nothing_at_once_and_only_an_admin_removes_them() {
                 return v.client(user, &format!("{user}'s passkey prf output"), client);
             }
             let code = format!("{client}'s authorization code for {user}");
-            assert_eq!(v.internal("google", json!({ "user": user, "to": code, "client": client })).0, 200);
+            assert_eq!(v.internal("own", json!({ "user": user, "to": code, "client": client })).0, 200);
             let (token, until) = v.token(user, client);
             v.internal("rekey", json!({ "from": code, "to": format!("{client}'s refresh token for {user}"), "token": token, "until": until }));
             token
@@ -959,6 +959,22 @@ fn a_client_is_shown_by_where_it_goes_and_none_is_named_as_the_install() {
     assert_eq!(goes("Claude Code", "http://localhost:33418/callback").1, "an app on this device");
     assert_eq!(goes("Test on Andre's iPhone", "one://signed-in/").1, "an app on this device");
     assert_eq!(goes("Test on a server", &format!("{}/sign-in/code/done", k.address)).1, "where you got your code");
+}
+
+#[test]
+fn only_a_try_installs_kernel_signs_its_person_in_with_nothing_to_show() {
+    let k = Kernel::start(None);
+    let (status, out) = k.browser().post("/api/auth/try/sign-in", json!({}));
+    assert_eq!(status, 404, "a kernel people use signed someone in with no passkey: {out}");
+    let (status, _) = post(&format!("{}/internal/own", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": "0123456789abcdef", "to": "a code", "client": "web" }));
+    assert_eq!(status, 403, "the vault of a kernel people use opened someone's keys itself");
+    // Only `one try` makes such settings, and nothing puts them where anyone but this machine reaches them.
+    let mut tried = k.settings.clone();
+    tried.try_person = Some(("0123456789abcdef".into(), "Andre".into()));
+    let cf = kernel::Cloudflare { api: "http://127.0.0.1:9".into(), token: "a token".into(), account: "an account".into() };
+    for refused in [kernel::deploy(&cf, &tried, &[], &[]), one::serverless::deploy(&cf, &tried)] {
+        assert!(refused.unwrap_err().to_string().contains("try install"));
+    }
 }
 
 #[test]

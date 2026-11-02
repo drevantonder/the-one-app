@@ -10,6 +10,7 @@ use serde_json::{Map, Value, json};
 mod code;
 mod mcp_apps;
 mod ops;
+mod try_install;
 mod update;
 
 fn help() -> String {
@@ -139,9 +140,11 @@ Usage:
                                        repeat a flag, inputs not given are read as JSON from stdin, --file
                                        <input>=<path> gives a file and --out <path> saves what it gives back.
                                        --server <name> runs it on that device
-  {CLI} try [<command>]                a new install, on this machine beside yours, with only what every new install
-                                       starts with: to look around and test in. {CLI} try <command> runs a command in
-                                       it ({CLI} try mcp for an agent), and {CLI} try stop deletes it
+  {CLI} try [<command>]                a new install for this checkout, on this machine beside yours, with only what
+                                       every new install starts with: to look around and test in. {CLI} try <command>
+                                       runs a command in it ({CLI} try mcp for an agent), {CLI} try client web, android
+                                       or windows gives a client of this checkout's build signed in to it, and
+                                       {CLI} try stop deletes it
   {CLI} update                         test and build main's tip on this machine and the Macs, and run it everywhere
   {CLI} release <vX.Y.Z>               the same, signed off and published on GitHub for the installer
   {CLI} publish [binary]               sign and publish a build you made; every device on its platform updates
@@ -173,7 +176,7 @@ fn main() {
 
 fn run(args: Vec<String>) -> Result<()> {
     if args.first().map(String::as_str) == Some("try") {
-        return try_install(&args[1..]);
+        return try_install::try_install(&args[1..]);
     }
     let (positional, flags) = parse(&args);
     if !matches!(positional.first().map(String::as_str), Some("serve" | "mcp")) {
@@ -1084,114 +1087,6 @@ fn usual_path() {
     }
 }
 
-/// `try`: an install of its own, made as `create` makes every new one, by a node beside this machine's own with its own
-/// home and port, so it touches nothing of the person's (src/agents.rs leaves the harnesses alone for a node given a
-/// home). A command after `try` runs in it; it starts one first if none is running.
-fn try_install(rest: &[String]) -> Result<()> {
-    let dir = PathBuf::from(format!("{}-try", one::home().display()));
-    let addr_var = format!("{}_ADDR", CLI.to_uppercase());
-    let running = std::fs::read_to_string(dir.join("addr")).ok().map(|a| a.trim().to_string()).filter(|a| agent().get(format!("http://{a}/v1/state")).call().is_ok());
-    match rest.first().map(String::as_str) {
-        Some("stop") => {
-            stop_try(&dir)?;
-            println!("Stopped and deleted the try install. {CLI} try starts a new one.");
-            return Ok(());
-        }
-        Some(cmd @ ("serve" | "update" | "release" | "publish" | "try")) => bail!("{CLI} {cmd} isn't for the try install"),
-        _ => {}
-    }
-    if rest == ["kernel", "serve"] {
-        // A kernel beside the try install stops with it (its workerd with it: kernel::start).
-        let addr = running.clone().with_context(|| format!("start the try install first: {CLI} try"))?;
-        std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_secs(60));
-            // Not asked over HTTP, which would keep it running (serve).
-            if std::net::TcpStream::connect(&addr).is_err() {
-                std::process::exit(0);
-            }
-        });
-    }
-    let addr = match running {
-        Some(addr) => addr,
-        None => {
-            eprintln!("Starting a new try install…");
-            // Called what the person is called in their own install, if this machine is in one.
-            let me = get("/v1/state").ok().and_then(|s| s["user"]["name"].as_str().or(s["me"]["name"].as_str()).map(String::from));
-            let me = me.or_else(|| std::env::var("USER").ok()).unwrap_or_else(|| "You".into());
-            let addr = start_try(&dir)?;
-            // Before any thread starts: the CLI has none.
-            unsafe { std::env::set_var(&addr_var, &addr) };
-            post("/v1/create", json!({ "name": "Try", "user_name": me }))?;
-            addr
-        }
-    };
-    unsafe { std::env::set_var(&addr_var, &addr) };
-    if !rest.is_empty() {
-        return run(rest.to_vec());
-    }
-    let state = get("/v1/state")?;
-    let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("you");
-    println!(
-        "The try install is running beside yours, on {addr}: a new install, Try, with only what every new install
-starts with, and {me} as its admin.
-
-  {CLI} try <command>   any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
-  {CLI} try mcp         its MCP server, for an agent: claude mcp add {CLI}-try -- {CLI} try mcp
-  {CLI} try stop        stop and delete it; {CLI} try then starts a new one"
-    );
-    Ok(())
-}
-
-/// Starts the try install's node, in `dir` made empty but for what it downloaded or built before, and gives its address
-/// once it answers.
-fn start_try(dir: &std::path::Path) -> Result<String> {
-    use std::os::unix::process::CommandExt;
-    stop_try(dir)?;
-    std::fs::create_dir_all(dir)?;
-    let free = |port| std::net::TcpListener::bind(("127.0.0.1", port)).ok().and_then(|l| l.local_addr().ok());
-    let addr = free(one::config::PORT + 100).or_else(|| free(0)).context("no free port for the try install")?.to_string();
-    let log = std::fs::File::create(dir.join("node.log"))?;
-    let child = std::process::Command::new(std::env::current_exe()?)
-        .args(["serve", "--try"])
-        .env(format!("{}_HOME", CLI.to_uppercase()), dir)
-        .env(format!("{}_ADDR", CLI.to_uppercase()), &addr)
-        .stdin(std::process::Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log)
-        // Its own group, so it outlives this command, and stopping it stops what it started.
-        .process_group(0)
-        .spawn()?;
-    std::fs::write(dir.join("pid"), child.id().to_string())?;
-    std::fs::write(dir.join("addr"), &addr)?;
-    let start = std::time::Instant::now();
-    while agent().get(format!("http://{addr}/v1/state")).call().is_err() {
-        if start.elapsed() > std::time::Duration::from_secs(60) {
-            bail!("the try install's node didn't start: {}", dir.join("node.log").display());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(250));
-    }
-    Ok(addr)
-}
-
-/// Stops the try install's node, if it runs, and deletes all of it but what it downloaded or built.
-fn stop_try(dir: &std::path::Path) -> Result<()> {
-    if let Some(pid) = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse::<i32>().ok()) {
-        let start = std::time::Instant::now();
-        unsafe { libc::kill(-pid, libc::SIGTERM) };
-        while unsafe { libc::kill(pid, 0) } == 0 && start.elapsed() < std::time::Duration::from_secs(10) {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        unsafe { libc::kill(-pid, libc::SIGKILL) };
-    }
-    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        if entry.file_name() != "cache" {
-            let path = entry.path();
-            if path.is_dir() { std::fs::remove_dir_all(&path)? } else { std::fs::remove_file(&path)? }
-        }
-    }
-    Ok(())
-}
-
 /// How long a try install's node runs with nobody asking it anything.
 const TRY_IDLE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
@@ -1211,6 +1106,12 @@ async fn serve(is_try: bool) -> Result<()> {
     let routes = api::routes().route("/mcp", axum::routing::post(mcp_http));
     let mut routes = api::guarded(routes, node);
     if is_try {
+        let home = dir.clone();
+        tokio::spawn(async move {
+            if let Err(err) = try_install::bucket(home).await {
+                tracing::warn!("the try install's bucket stopped: {err:#}");
+            }
+        });
         // Left running, a try install stops by itself; `try` starts it again.
         let started = std::time::Instant::now();
         routes = routes.layer(axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
@@ -1224,7 +1125,8 @@ async fn serve(is_try: bool) -> Result<()> {
             }
             tracing::info!("nobody asked the try install anything for {} minutes: stopping", TRY_IDLE.as_secs() / 60);
             let _ = std::fs::remove_file(dir.join("pid"));
-            // It leads its group (start_try): this stops what it started too.
+            // Its kernel and browser, then its own group: it keeps its data, for `try` to start it again.
+            try_install::stop_others(&dir);
             unsafe { libc::kill(0, libc::SIGTERM) };
         });
     }

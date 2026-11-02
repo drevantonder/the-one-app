@@ -52,6 +52,7 @@ pub fn metadata(settings: &Settings) -> Value {
 
 /// Puts the serverless node in the kernel's Cloudflare account, with no address but the gateway's binding to it.
 pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
+    anyhow::ensure!(settings.try_person.is_none(), "a try install's kernel runs only beside its try install");
     let modules = modules()?;
     let modules: Vec<(&str, &str, &[u8])> = modules.iter().map(|(n, k, b)| (n.as_str(), *k, b.as_slice())).collect();
     cf.upload(&worker_name(SERVICE), &modules, &metadata(settings))?;

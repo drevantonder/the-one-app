@@ -17,15 +17,21 @@
 // Signing in with Google, anyone at the domain joins by signing in, and the vault opens their keys itself once Google
 // says it's them. An invite there only says who someone with an email is in the install, for those who were in it
 // before it signed people in this way.
+//
+// A try install's kernel (`SIGN_IN` is "try") signs in its one person (`TRY_USER`, `TRY_NAME`) with no passkey and no
+// Google: its sign-in page goes straight on, and the vault opens their keys itself, as for Google. It's for testing
+// clients without a person: only `one try` turns it on (kernel::Settings::try_person), on a kernel that listens only
+// on its own machine, and `kernel deploy` refuses one, so no real install's kernel ever does this.
 
 import { DurableObject } from "cloudflare:workers";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { getAuthenticatorName, passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
-import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
-import { NO_PRF, codePage, invitePage, passkeysPage, signInPage } from "./pages.js";
+import { NO_PRF, codePage, invitePage, passkeysPage, signInPage, tryPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
 
 const json = (v, status = 200) => Response.json(v, { status });
@@ -111,6 +117,7 @@ export class Auth extends DurableObject {
     const sql = this.ctx.storage.sql;
     const self = this;
     const google = env.SIGN_IN === "google";
+    const tried = env.SIGN_IN === "try";
     return {
       appName: env.NAME || "The One App",
       baseURL: url.origin,
@@ -128,6 +135,7 @@ export class Auth extends DurableObject {
             // are in the install, so nodes know them by the same id. Signing in with Google, anyone at the domain
             // does, as who an invite for their email says, if there is one.
             async before(user) {
+              if (tried) return user.id === env.TRY_USER ? undefined : false;
               if (!google) return self.admitting && user.id === self.admitting ? undefined : false;
               const email = String(user.email || "").toLowerCase();
               if (!user.emailVerified || !email.endsWith(`@${env.JOIN_DOMAIN}`)) return false;
@@ -163,7 +171,8 @@ export class Auth extends DurableObject {
       },
       plugins: [
         jwt({ jwks: { keyPairConfig: { alg: "EdDSA", crv: "Ed25519" } }, jwt: { issuer: `${url.origin}/api/auth`, expirationTime: "1h" } }),
-        ...(google ? [] : [passkey({
+        ...(tried ? [tryInstall(env.TRY_USER, env.TRY_NAME)] : []),
+        ...(google || tried ? [] : [passkey({
           rpID: url.hostname,
           rpName: env.NAME || "The One App",
           origin: url.origin,
@@ -230,16 +239,20 @@ export class Auth extends DurableObject {
       const name = this.auth.options.appName;
       if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp") return this.protectedResource(path, name);
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
-      if (path === "/sign-in" && request.method === "GET") return html(signInPage({ name, google }));
+      const tried = this.env.SIGN_IN === "try";
+      if (path === "/sign-in" && request.method === "GET") return html(tried ? tryPage({ name, person: this.env.TRY_NAME }) : signInPage({ name, google }));
       if (path === "/internal/invite" && request.method === "POST") return json(await this.invite(request, await request.json()));
       if (path === "/sign-in/about") return json(await this.about(request, url.searchParams.get("client_id"), url.searchParams.get("redirect_uri")));
       if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
       if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), name, google);
       if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ name, google, done: await this.codeDone(url.searchParams) }));
       if (path === "/sign-in/code/take" && request.method === "POST") return this.codeTaken(await request.json());
-      if (path === "/sign-in/accept" && request.method === "POST") return json(await (google ? this.acceptGoogle(request, await request.json()) : this.accept(request, await request.json())));
+      if (path === "/sign-in/accept" && request.method === "POST") {
+        const body = await request.json();
+        return json(await (tried ? this.acceptTry(request, body) : google ? this.acceptGoogle(request, body) : this.accept(request, body)));
+      }
       // Passkeys and invite links are only for an install whose people sign in with a passkey.
-      if (google) return new Response("not found", { status: 404 });
+      if (google || tried) return new Response("not found", { status: 404 });
       if (path === "/invite" && request.method === "GET") return html(invitePage({ name }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
       if (path === "/invite/keys" && request.method === "POST") return json(await this.inviteKeys(request, await request.json()));
@@ -433,7 +446,14 @@ export class Auth extends DurableObject {
     if (!fresh(signedIn)) refuse(403, "Sign in with Google again.");
     const { user } = signedIn;
     return this.consent(request, user, oauth_query, (client, code) =>
-      this.vault("google", { user: user.id, to: code, name: client.name || client.clientId, client: client.clientId }));
+      this.vault("own", { user: user.id, to: code, name: client.name || client.clientId, client: client.clientId }));
+  }
+
+  /// Signing in to a client on a try install: its one person, with nothing to show, and the vault opens their keys.
+  async acceptTry(request, { oauth_query }) {
+    const { user } = await this.session(request);
+    return this.consent(request, user, oauth_query, (client, code) =>
+      this.vault("own", { user: user.id, to: code, name: client.name || client.clientId, client: client.clientId }));
   }
 
   /// Lets a client's authorization (`oauth_query`) through as `user`, with `keys(client, code)` giving its code a copy of
@@ -471,6 +491,21 @@ export class Auth extends DurableObject {
     this.ctx.storage.sql.exec("insert into invites (id, name, user, until, email) values (?, ?, ?, ?, ?)", await inviteId(token), name.trim(), user ?? hex16(), until, google ? email.toLowerCase() : null);
     return google ? { until } : { token, until };
   }
+}
+
+/// A try install's sign-in: signs its one person in here, making them the first time, with no passkey.
+function tryInstall(id, name) {
+  return {
+    id: "try",
+    endpoints: {
+      signInToTry: createAuthEndpoint("/try/sign-in", { method: "POST" }, async (ctx) => {
+        const adapter = ctx.context.internalAdapter;
+        const user = (await adapter.findUserById(id)) || (await adapter.createUser({ id, name, email: `${id}@people.invalid`, emailVerified: false }));
+        await setSessionCookie(ctx, { session: await adapter.createSession(user.id), user });
+        return ctx.json({ person: user.name });
+      }),
+    },
+  };
 }
 
 /// Whether a sign-in here was made just now: Google's, which a client is added with.

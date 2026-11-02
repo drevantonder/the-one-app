@@ -16,9 +16,9 @@ function encode(s) {
   return encodeURIComponent(s).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
-/// A presigned URL for `method` on `https://<host><path>`, good for `expires` seconds from `date`. `headers` are
+/// A presigned URL for `method` on `<scheme>://<host><path>`, good for `expires` seconds from `date`. `headers` are
 /// signed in, so the request must send them as given.
-export async function presign({ method, host, path, region, keyId, secret, expires, date = new Date(), headers = {} }) {
+export async function presign({ method, scheme = "https", host, path, region, keyId, secret, expires, date = new Date(), headers = {} }) {
   const stamp = date.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
   const day = stamp.slice(0, 8);
   const scope = `${day}/${region}/s3/aws4_request`;
@@ -37,7 +37,7 @@ export async function presign({ method, host, path, region, keyId, secret, expir
   const toSign = ["AWS4-HMAC-SHA256", stamp, scope, hex(await crypto.subtle.digest("SHA-256", text.encode(canonical)))].join("\n");
   let key = await hmac(`AWS4${secret}`, day);
   for (const part of [region, "s3", "aws4_request"]) key = await hmac(key, part);
-  return `https://${host}${canonicalPath}?${canonicalQuery}&X-Amz-Signature=${hex(await hmac(key, toSign))}`;
+  return `${scheme}://${host}${canonicalPath}?${canonicalQuery}&X-Amz-Signature=${hex(await hmac(key, toSign))}`;
 }
 
 /// URLs to read objects, to create them, to replace them while they're the version an ETag names, and to delete them
@@ -45,7 +45,8 @@ export async function presign({ method, host, path, region, keyId, secret, expir
 /// path-style, good for `expires` seconds.
 export async function bucketUrls(bucket, { read = [], create = [], replace = [], remove = [] }, expires = 900) {
   const endpoint = new URL(bucket.endpoint.includes("://") ? bucket.endpoint : `https://${bucket.endpoint}`);
-  const common = { host: endpoint.host, region: bucket.region || "auto", keyId: bucket.key_id, secret: bucket.secret, expires, date: new Date() };
+  // http only for a try install's, on its own machine (src/try_install.rs).
+  const common = { scheme: endpoint.protocol === "http:" ? "http" : "https", host: endpoint.host, region: bucket.region || "auto", keyId: bucket.key_id, secret: bucket.secret, expires, date: new Date() };
   const at = (name) => `${endpoint.pathname.replace(/\/$/, "")}/${bucket.bucket}/${name}`;
   const out = { read: {}, create: {}, replace: {} };
   if (remove.length) out.remove = {};

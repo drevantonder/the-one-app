@@ -76,6 +76,11 @@ pub struct Settings {
     /// CLOUDFLARE_API_TOKEN isn't set.
     #[serde(default, skip_serializing)]
     pub cloudflare_token: Option<String>,
+    /// A try install's one person, `(id, name)`, whom its kernel signs in with no passkey and no Google, so clients
+    /// are tested with nobody there. Only `one try` sets it, on the kernel it runs beside its try install, listening
+    /// only on this machine; `deploy` refuses settings with it, so no kernel people use ever has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub try_person: Option<(String, String)>,
 }
 
 /// Whether people sign in with Google, which the vault then opens their keys for itself.
@@ -205,7 +210,9 @@ impl Settings {
         settings.schedules_key = serde_json::from_str(&get("SCHEDULES_KEY").context("no SCHEDULES_KEY")?).context("SCHEDULES_KEY isn't JSON")?;
         settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
-        if google() {
+        if settings.try_person.is_some() {
+            settings.vault_key = get("VAULT_KEY").context("no VAULT_KEY, which a try install's kernel needs")?;
+        } else if google() {
             settings.vault_key = get("VAULT_KEY").context("no VAULT_KEY, which people signing in with Google need")?;
             settings.google = get("GOOGLE_CLIENT_ID").zip(get("GOOGLE_CLIENT_SECRET"));
             ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client people sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
@@ -245,8 +252,38 @@ impl Settings {
             vault_key: if google() { secret() } else { String::new() },
             google: None,
             cloudflare_token: None,
+            try_person: None,
         };
         (settings, data_encoding::HEXLOWER.encode(&seed))
+    }
+
+    /// A try install's kernel (`one try`): on free ports here, its address its gateway's at 127.0.0.1, which `one try`
+    /// lets each device it borrows reach at the same address; its node `node`, its bucket where that node serves its
+    /// data (`bucket`), its recovery key the try install's (`recovery`, as hex), and `person` signed in with nothing
+    /// to show.
+    pub fn for_try(node: &str, bucket: &str, recovery: &str, person: (String, String)) -> Result<Settings> {
+        let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
+        let ports = [free()?, free()?, free()?, free()?];
+        let (mut settings, _) = Settings::new("Try", &format!("http://127.0.0.1:{}", ports[3]));
+        let seed: [u8; 32] = data_encoding::HEXLOWER.decode(recovery.trim().as_bytes()).ok().and_then(|s| s.try_into().ok()).context("that isn't a recovery key")?;
+        settings.recovery_key = B64U.encode(&twin(&seed).1);
+        (settings.auth_url, settings.vault_url, settings.schedules_url) = (format!("http://127.0.0.1:{}", ports[0]), format!("http://127.0.0.1:{}", ports[1]), format!("http://127.0.0.1:{}", ports[2]));
+        settings.ports = ports;
+        settings.node_url = Some(format!("http://{node}"));
+        settings.vault_key = B64U.encode(&rand::random::<[u8; 32]>());
+        settings.try_person = Some(person);
+        // The try install's node serves its data there (try_install::bucket), signed or not.
+        settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try", "region": "auto", "key_id": "try", "secret": "try" }));
+        Ok(settings)
+    }
+
+    /// Makes a try install's person's keys at its vault, as their first sign-in would, so the install's own keys are
+    /// given to the vault (`give_keys`) before any client signs in.
+    pub fn try_person_keys(&self) -> Result<()> {
+        let (user, _) = self.try_person.as_ref().context("not a try install's kernel")?;
+        let code = B64U.encode(&rand::random::<[u8; 32]>());
+        internal(&self.vault_url, "own", &self.kernel_secret, json!({ "user": user, "to": code, "name": "one try", "client": "one try" }))?;
+        Ok(())
     }
 
     /// Writes the settings, and, the first time, the secrets' values to `.env.local`; after that a secret changes
@@ -310,7 +347,11 @@ impl Settings {
                 plain("VAULT", "service:vault".into());
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
-                if google() {
+                if let Some((id, name)) = &self.try_person {
+                    plain("SIGN_IN", "try".into());
+                    plain("TRY_USER", id.clone());
+                    plain("TRY_NAME", name.clone());
+                } else if google() {
                     plain("SIGN_IN", "google".into());
                     plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN.into());
                 }
@@ -322,7 +363,9 @@ impl Settings {
                 plain("AUTH", "service:auth".into());
                 plain("ISSUER", issuer);
                 plain("RECOVERY_KEY", self.recovery_key.clone());
-                if google() {
+                if self.try_person.is_some() {
+                    plain("SIGN_IN", "try".into());
+                } else if google() {
                     plain("SIGN_IN", "google".into());
                 }
             }
@@ -344,7 +387,7 @@ impl Settings {
                 if let Some(bucket) = &self.bucket {
                     out.push(("BUCKET".into(), bucket.to_string(), true));
                 }
-                if google() {
+                if google() || self.try_person.is_some() {
                     out.push(("VAULT_KEY".into(), self.vault_key.clone(), true));
                 }
             }
@@ -368,8 +411,9 @@ pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Ser
             listen: format!("127.0.0.1:{}", settings.ports[i]),
             bindings: settings.bindings(name).into_iter().map(|(n, v, _)| (n, v)).collect(),
             assets: (*name == "gateway").then(|| web.to_path_buf()),
-            // The gateway's node may be on this machine or its private network, as a node behind a tunnel is.
-            outbound: (*name == "gateway").then(|| NEARBY.to_string()),
+            // The gateway's node may be on this machine or its private network, as a node behind a tunnel is; a try
+            // install's vault reaches its bucket on this machine.
+            outbound: (*name == "gateway" || *name == "vault" && settings.try_person.is_some()).then(|| NEARBY.to_string()),
         })
         .collect()
 }
@@ -877,6 +921,7 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[
 
 /// `deploy`, of only the services named.
 pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[(String, Vec<u8>)], services: &[&str]) -> Result<()> {
+    ensure!(settings.try_person.is_none(), "a try install's kernel signs in anyone who reaches it, so it runs only beside its try install");
     if services.contains(&"gateway") {
         parses(web)?;
     }
