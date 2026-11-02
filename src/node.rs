@@ -1183,6 +1183,28 @@ impl Node {
         Ok(())
     }
 
+    /// What a node that sends no pings (the serverless one) said it wrote, as someone who may use `scope`: step `at`
+    /// of `app`'s `database`, which this server fetches from the bucket into its copy, if it holds the scope, and
+    /// passes on to the others that do as if it wrote it. Only a hint, which each checks against the bucket.
+    pub async fn written_elsewhere(&self, me: &Caller, scope: &Scope, app: &str, database: &str, at: u64) -> Result<()> {
+        let holds = self.with(|i| {
+            ensure!(i.r.members.may_use(&me.user, scope), "you can't use {scope}");
+            Ok(i.r.members.holds(&self.0.id, scope))
+        })?;
+        if holds && at > 0 {
+            let bucket = self.bucket()?;
+            let prefix = format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()));
+            crate::bucket::Bucket::get(&bucket, &crate::db::step_name(&prefix, at)).await?;
+            // A step whose one before isn't here may follow one this server hasn't read.
+            if at > 1 && bucket.kept(&crate::db::step_name(&prefix, at - 1))?.is_none() {
+                self.0.behind.lock().unwrap().insert((scope.clone(), format!("{app}/{database}")));
+            }
+            self.emit(Event::Changed { apps: vec![app.to_string()] });
+        }
+        self.ping(scope, Some((app, database, at)));
+        Ok(())
+    }
+
     /// Brings a database up to date for a call that reads it, as far as this server's copy goes: other servers send
     /// what they write with their pings, and `fill_copies` keeps up with the bucket. Only when a ping said it changed
     /// without sending what is the bucket asked first, and if it doesn't answer, the copy is read as it is: behind,
@@ -1201,7 +1223,7 @@ impl Node {
     }
 
     /// Fetches into this server's copy what the bucket has of each database open here that it lacks, every tick: a
-    /// ping that was lost, or a write by a node that sends none (the serverless one). A database a call is using is
+    /// ping that was lost, or a serverless write no server was told of. A database a call is using is
     /// left for the next. First, the steps other servers sent are checked against the bucket's: a database that read
     /// one that differs is read again from the bucket's, and the server that sent it is recorded, for Devices.
     async fn fill_copies(&self) {

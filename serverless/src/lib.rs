@@ -108,14 +108,18 @@ pub fn query(handle: u32, sql: &str, params: &str) -> Result<String, JsError> {
     })
 }
 
-/// Writes a call's statements (JSON, `[[sql, params, check]]`) as one step.
+/// Writes a call's statements (JSON, `[[sql, params, check]]`) as one step: → its position, or 0 if they changed
+/// nothing.
 #[wasm_bindgen]
-pub async fn write(handle: u32, bucket: JsValue, statements: String) -> Result<(), JsError> {
+pub async fn write(handle: u32, bucket: JsValue, statements: String) -> Result<f64, JsError> {
     let list: Vec<(String, Vec<Value>, Option<String>)> = serde_json::from_str(&statements)?;
     let mut db = take(handle).map_err(thrown)?;
+    let at = db.at();
     let wrote = db.write(&Js(bucket), |c| one::db::statements(c, &list)).await;
+    let step = if db.at() > at { db.at() as f64 } else { 0.0 };
     put(handle, db);
-    wrote.map_err(thrown)
+    wrote.map_err(thrown)?;
+    Ok(step)
 }
 
 #[wasm_bindgen]
