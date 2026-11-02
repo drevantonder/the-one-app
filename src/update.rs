@@ -521,7 +521,8 @@ while want=$(cat "$c/want") && [ "$want" != "$(cat "$c/built" 2>/dev/null)" ]; d
 	# so the Mac stays quick to use.
 	sleep 600
 	[ "$want" = "$(cat "$c/want")" ] || continue
-	if taskpolicy -b /bin/sh "$c/build.sh" $want > "$c/update.log" 2>&1; then echo "$want" > "$c/built"; else echo "$want" > "$c/failed"; exit 1; fi
+	# launchd runs this in the login shell, zsh on a Mac, which doesn't split "$want" into its commit and config.
+	if taskpolicy -b /bin/sh "$c/build.sh" "${{want%% *}}" "${{want#* }}" > "$c/update.log" 2>&1; then echo "$want" > "$c/built"; else echo "$want" > "$c/failed"; exit 1; fi
 done
 JOB
 {start}"#,
