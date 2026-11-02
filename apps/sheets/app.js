@@ -2,7 +2,7 @@
 // Google app: see "signing in" below.
 
 const APP = "sheets";
-const TITLE = "Google Sheets";
+const TITLE = "Google Sheets"; // also export default's title, a plain string there for the App Store to read
 const OAUTH = "oauth2.googleapis.com";
 const SCOPES = "openid email https://www.googleapis.com/auth/spreadsheets";
 const API = "https://sheets.googleapis.com/v4/";
@@ -232,10 +232,10 @@ async function rangeOr(ctx, email, spreadsheet, range) {
 
 export default {
   name: APP,
-  title: TITLE,
+  title: "Google Sheets",
   icon: "table",
   color: "#34a853",
-  description: "Your Google Sheets: read ranges, add rows, change cells and make spreadsheets.",
+  description: "Your Google Sheets: read ranges, add rows, change cells and make spreadsheets",
   instructions: `Sheets is the person's Google Sheets. ${APP}_spreadsheet lists a spreadsheet's tabs; ${APP}_read reads a range (A1 notation, like Budget!A1:F20; the first tab when left out). ${APP}_append adds rows after a table, ${APP}_update writes over a range and ${APP}_create makes a spreadsheet: change only what the person asked. Spreadsheets are given by id or address. With several accounts, each operation takes account.`,
   vault: VAULT,
   schema: signInSchema,

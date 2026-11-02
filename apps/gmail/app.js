@@ -507,7 +507,7 @@ export default {
   icon: "envelope",
   color: "#ea4335",
   domain: "mail.google.com",
-  description: "Your Gmail accounts, for you and your agents: search, read, label, draft and send.",
+  description: "Your Gmail accounts, for you and your agents: search, read, label, draft and send",
   instructions: "Gmail is the person's Gmail accounts. gmail_search finds messages with Gmail's search syntax " +
     "(from:, is:unread, in:inbox, newer_than:2d, ...); gmail_read reads one and gmail_thread a whole conversation; gmail_attachment gets one of a message's files. " +
     "gmail_label archives (remove INBOX), marks read (remove UNREAD), stars or labels messages. Write with gmail_draft and let the person send it, unless they asked you to send: " +

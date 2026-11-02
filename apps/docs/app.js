@@ -2,7 +2,7 @@
 // Google app: see "signing in" below.
 
 const APP = "docs";
-const TITLE = "Google Docs";
+const TITLE = "Google Docs"; // also export default's title, a plain string there for the App Store to read
 const OAUTH = "oauth2.googleapis.com";
 const SCOPES = "openid email https://www.googleapis.com/auth/documents";
 const API = "https://docs.googleapis.com/v1/";
@@ -294,10 +294,10 @@ function render(doc, md) {
 
 export default {
   name: APP,
-  title: TITLE,
+  title: "Google Docs",
   icon: "file-text",
   color: "#4285f4",
-  description: "Your Google Docs: read them as markdown or text, make them, and add or replace text.",
+  description: "Your Google Docs: read them as markdown or text, make them, and add or replace text",
   instructions: `Docs is the person's Google Docs. ${APP}_read reads a document as markdown (or text). ${APP}_create makes one, ${APP}_append adds text at its end, and ${APP}_replace replaces every match of some text: change only what the person asked. Documents are given by id or address. With several accounts, each operation takes account.`,
   vault: VAULT,
   schema: signInSchema,
