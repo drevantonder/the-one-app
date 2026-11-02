@@ -534,3 +534,11 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// The address lists the Android app by the package the app's build gives it, so links to the address open it.
+#[test]
+fn the_address_lists_the_android_app_by_its_package() {
+    let gradle = read("android/app/build.gradle.kts");
+    assert!(gradle.contains(r#"applicationId = "app.$cli.android""#), "android/app/build.gradle.kts names the app's package otherwise: change one::kernel::android_package too");
+    assert_eq!(one::kernel::android_package(), format!("app.{}.android", one::config::CLI));
+}

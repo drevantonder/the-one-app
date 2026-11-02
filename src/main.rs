@@ -93,7 +93,9 @@ Usage:
   {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/: a node's address, or
                                        cloudflare:<id>, the Workers VPC service of a Cloudflare Tunnel to one),
                                        auth-url, vault-url, schedules-url, resources (nodes' own addresses,
-                                       comma-separated) or bucket (its JSON object piped, with - as its value)
+                                       comma-separated), bucket (its JSON object piped, with - as its value) or
+                                       android (the SHA-256 fingerprints of the certificates the Android app is signed
+                                       with, comma-separated, or -: links to the address open the app)
   {CLI} kernel use <address> <vault> <schedules>
                                        point this install at its kernel: its nodes take sign-ins made at the address
   {CLI} kernel tunnel                  whether this server runs a connector for the install's Cloudflare Tunnel, which
@@ -383,7 +385,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             };
             let modules = one::kernel::SERVICES.iter().map(|(_, entry, _)| one::kernel::module(entry)).collect::<Result<Vec<_>>>()?;
-            let web: Vec<(String, Vec<u8>)> = one::kernel::web_files().map(|(path, bytes)| (path.to_string(), bytes.to_vec())).collect();
+            let web = settings.web();
             one::kernel::deploy(&cf, &settings, &modules, &web)?;
             print!("Deployed.\n{}", kernel_said(&settings));
         }
@@ -406,7 +408,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 let gateway = one::kernel::SERVICES.iter().position(|(s, _, _)| *s == "gateway").unwrap();
                 let mut modules = vec![Vec::new(); one::kernel::SERVICES.len()];
                 modules[gateway] = one::kernel::module(one::kernel::SERVICES[gateway].1)?;
-                let web: Vec<(String, Vec<u8>)> = one::kernel::web_files().map(|(path, bytes)| (path.to_string(), bytes.to_vec())).collect();
+                let web = settings.web();
                 one::kernel::deploy_some(&cf, &settings, &modules, &web, &["gateway"])?;
             }
             // So Devices shows it, for its admins to say where it comes in the order things run in.
@@ -442,7 +444,17 @@ fn run(args: Vec<String>) -> Result<()> {
                     settings.bucket = Some(bucket);
                 }
                 "bucket" => bail!("pipe its JSON object on stdin and give - as its value, so it's in no shell's history"),
-                _ => bail!("no kernel setting {name}: node-url, auth-url, vault-url, schedules-url, resources or bucket"),
+                "android" => {
+                    // As assetlinks.json writes them: 32 pairs of hex digits, in capitals, between colons.
+                    let mut prints = Vec::new();
+                    for given in value.split(',').map(str::trim).filter(|p| !p.is_empty() && *p != "-") {
+                        let hex = given.replace(':', "").to_uppercase();
+                        anyhow::ensure!(hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()), "{given} isn't a certificate's SHA-256 fingerprint (apksigner verify --print-certs <apk> says it)");
+                        prints.push(hex.as_bytes().chunks(2).map(|p| std::str::from_utf8(p).unwrap()).collect::<Vec<_>>().join(":"));
+                    }
+                    settings.android = prints;
+                }
+                _ => bail!("no kernel setting {name}: node-url, auth-url, vault-url, schedules-url, resources, bucket or android"),
             }
             settings.save()?;
             println!("Set {name}. {CLI} kernel serve takes it at its next start, and {CLI} kernel deploy when it next runs.");
@@ -1460,6 +1472,9 @@ fn kernel_said(s: &one::kernel::Settings) -> String {
         out += &format!("  nodes     {}\n", s.resources.join(", "));
     }
     out += &format!("  bucket    {}\n", s.bucket.as_ref().map(|b| format!("{} in {}", b["bucket"].as_str().unwrap_or("?"), b["endpoint"].as_str().unwrap_or("?"))).unwrap_or("none yet: kernel set bucket -".into()));
+    if !s.android.is_empty() {
+        out += &format!("  android   {} signed by {}\n", one::kernel::android_package(), s.android.join(", "));
+    }
     out
 }
 

@@ -62,6 +62,10 @@ pub struct Settings {
     /// The install's bucket: `{ endpoint, bucket, region, key_id, secret }`.
     #[serde(default, skip_serializing)]
     pub bucket: Option<Value>,
+    /// The SHA-256 fingerprints of the certificates the Android app is signed with: Android opens links to the address
+    /// in the app (App Links) only if the address lists the app's package and one of them.
+    #[serde(default)]
+    pub android: Vec<String>,
 }
 
 /// What Varlock reads the kernel's secrets by, each named as the services' binding is; `.env.local` gives their values.
@@ -194,6 +198,7 @@ impl Settings {
             recovery_key: B64U.encode(&twin(&seed).1),
             resources: vec![],
             bucket: None,
+            android: vec![],
         };
         (settings, data_encoding::HEXLOWER.encode(&seed))
     }
@@ -304,9 +309,26 @@ pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Ser
         .collect()
 }
 
-/// The web client's files, as this release has them: (path in `kernel/web/`, bytes).
-pub fn web_files() -> impl Iterator<Item = (&'static str, &'static [u8])> {
-    crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?, *bytes)))
+/// The Android app's package, as android/app/build.gradle.kts names it.
+pub fn android_package() -> String {
+    format!("app.{}.android", crate::config::CLI)
+}
+
+impl Settings {
+    /// The files the address serves itself: the web client's, as this release has them, and Android's App Links file
+    /// (`.well-known/assetlinks.json`), which lets the app open links to the address.
+    pub fn web(&self) -> Vec<(String, Vec<u8>)> {
+        let mut files: Vec<(String, Vec<u8>)> =
+            crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
+        if !self.android.is_empty() {
+            let links = json!([{
+                "relation": ["delegate_permission/common.handle_all_urls"],
+                "target": { "namespace": "android_app", "package_name": android_package(), "sha256_cert_fingerprints": self.android },
+            }]);
+            files.push((".well-known/assetlinks.json".into(), links.to_string().into_bytes()));
+        }
+        files
+    }
 }
 
 /// Runs the kernel's services on this machine, in the pinned workerd, until it stops: their modules built from this
@@ -316,7 +338,7 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let modules = SERVICES.iter().map(|(_, entry, _)| module(entry)).collect::<Result<Vec<_>>>()?;
     let web = dir.join("web");
     let _ = std::fs::remove_dir_all(&web);
-    for (file, bytes) in web_files() {
+    for (file, bytes) in settings.web() {
         let path = web.join(file);
         std::fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(path, bytes)?;
