@@ -50,7 +50,7 @@ pub fn server_name() -> String {
 pub fn mcp_entries() -> String {
     let server = server_name();
     format!(
-        "MCP runs as a command on the device you're on, so `{CLI}` needs to be there first. Add one of two entries:\n\n- `{CLI} mcp`: every tool, two hundred or so, and `search`. For agents that already find tools themselves or run code with them: Claude Code, OpenCode, Codex, Cursor. In Claude Code: `claude mcp add --scope user {server} -- {CLI} mcp`\n- `{CLI} mcp --code`: a few tools. `search` finds what's possible, `execute` runs a short script with it, and {} stay tools of their own. For every other agent.\n\nPick the one that fits you, or tell the person in one line which you're adding and why. On their devices, {NAME} adds the right one to Claude Code, Codex, OpenCode and Amp by itself.",
+        "On a device where `{CLI}` runs, MCP is a command there, one of two entries:\n\n- `{CLI} mcp`: every tool, two hundred or so, and `search`. For agents that already find tools themselves or run code with them: Claude Code, OpenCode, Codex, Cursor. In Claude Code: `claude mcp add --scope user {server} -- {CLI} mcp`\n- `{CLI} mcp --code`: a few tools. `search` finds what's possible, `execute` runs a short script with it, and {} stay tools of their own. For every other agent.\n\nPick the one that fits you, or tell the person in one line which you're adding and why. On their devices, {NAME} adds the right one to Claude Code, Codex, OpenCode and Amp by itself.",
         crate::config::ALWAYS_ON.iter().map(|a| format!("{a}'s tools")).chain(["`vault_request`".to_string()]).collect::<Vec<_>>().join(" and ")
     )
 }
@@ -63,12 +63,22 @@ fn install() -> String {
     }
 }
 
-/// Connecting for a person: what to do with a terminal, with MCP alone, or with neither.
+/// Connecting for a person: by the install's address, or with the command line on one of their devices.
 pub fn connecting() -> String {
     format!(
-        "When someone asks you to connect to {NAME}, do as much as you can yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- With a terminal, use the command line. If `{CLI} status` answers, you're connected. If there's no `{CLI}`, this device isn't part of their install yet: {}. Then ask them for a pairing code (on their phone or Mac: Settings, then Devices, then Pair a Phone or Computer) and run `{CLI} join <code>`. Add MCP too if you can (below).\n- With no terminal but a way to add MCP servers, add the entry below, if `{CLI}` is on the device you run on.\n- With neither (a chat app in a browser or on a phone, like ChatGPT or Claude), coach the person through adding {NAME} to you as a connector: its address is their install's web address, where they sign in in a browser, followed by `/mcp` (like `https://{CLI}.example.com/mcp`). Adding it, they sign in with their passkey, and you act as them.",
+        "When someone asks you to connect to {NAME}, do as much as you can yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- If you can add an MCP server by its address (Claude Code, Codex, ChatGPT and Claude can), add their {NAME}'s web address followed by `/mcp`, like `https://{CLI}.example.com/mcp`. They sign in with their passkey when it asks, and you act as them.\n- With a terminal, if `{CLI} status` answers, you're on one of their devices already: use the command line, and add MCP as below. If there's no `{CLI}`, {}, then ask them for a pairing code (Settings, then Devices) and run `{CLI} join <code>`.",
         install()
     )
+}
+
+/// What to paste into an agent so it connects itself: the MCP server at the install's address, where it has one; else
+/// the skills a server serves on its tailnet, or, where it serves none, the command line's guide.
+pub fn agent_prompt(address: Option<&str>) -> String {
+    match (address.filter(|a| !a.is_empty()), self::address()) {
+        (Some(address), _) => format!("Connect yourself to {NAME}: add the MCP server {}/mcp, and I'll sign in when it asks.", address.trim_end_matches('/')),
+        (None, Some(guide)) => format!("Connect yourself to {NAME}: read {guide} and set it up for me."),
+        (None, None) => format!("Connect yourself to {NAME}: run \"{CLI} guide\" in a terminal and set it up for me."),
+    }
 }
 
 /// A skill: its name and description (its frontmatter), the body of its SKILL.md, and its other files.

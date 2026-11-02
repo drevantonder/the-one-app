@@ -150,8 +150,8 @@ final class Store {
     var install: Install? { state?.install }
     var me: Person? { state?.user }
     var isAdmin: Bool { me?.admin == true }
-    /// What to paste into an agent to connect it: the answering server's skills, if it serves them on the tailnet.
-    var askYourAgent: String { agentPrompt(name: config?.name ?? appName, cli: config?.cli ?? Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "", guide: state?.host?.guide) }
+    /// What to paste into an agent to connect it, as the node says.
+    var askYourAgent: String { state?.agentPrompt ?? agentPrompt(address: nil) }
 
     func app(_ name: String) -> AppInfo? { apps.first { $0.name == name } }
     /// What a person calls an app that uses an item: its label, or Backups for the node's own (a place to back up to).

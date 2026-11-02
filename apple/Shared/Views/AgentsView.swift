@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// What to paste into an agent so it connects itself: read the skills this server serves on the tailnet, or, where
-/// it serves none, run the command line's guide.
-func agentPrompt(name: String, cli: String, guide: String?) -> String {
-    if let guide {
-        "Connect yourself to \(name): read \(guide) and set it up for me."
-    } else {
-        "Connect yourself to \(name): run \"\(cli) guide\" in a terminal and set it up for me."
+/// What to paste into an agent so it connects itself, before there's a node to ask (`agent_prompt` in its state, from
+/// src/skills.rs, says it once there is): the MCP server at your One App's `address`, or the command line's guide.
+func agentPrompt(address: String?) -> String {
+    let name = appName, cli = Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? ""
+    if let address = address.flatMap({ URL(string: $0.contains("://") ? $0 : "https://\($0)") }).flatMap({ $0.host() }) {
+        return "Connect yourself to \(name): add the MCP server https://\(address)/mcp, and I'll sign in when it asks."
     }
+    return "Connect yourself to \(name): run \"\(cli) guide\" in a terminal and set it up for me."
 }
 
 /// The prompt, and a button that copies it.

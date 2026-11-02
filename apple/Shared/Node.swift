@@ -29,12 +29,14 @@ struct NodeState: Decodable, Sendable, Equatable {
     var backups: Backups.Problem?
     /// What Settings shows this user, in order; nil from a server too old to say.
     var settingsItems: [SettingsItem]?
+    /// What to paste into an agent so it connects itself; nil from a server too old to say.
+    var agentPrompt: String?
 
     var waitingRequests: Int { vaultRequests ?? secretRequests ?? 0 }
 
     enum CodingKeys: String, CodingKey {
         case config, machine = "me", host = "server", user, install, vaultRequests = "vault_requests", secretRequests = "secret_requests", arrangements, backups
-        case settingsItems = "settings_items"
+        case settingsItems = "settings_items", agentPrompt = "agent_prompt"
     }
 }
 
@@ -69,8 +71,6 @@ struct Arrangement: Codable, Sendable, Equatable {
 struct Machine: Codable, Sendable, Equatable {
     var key: String
     var name: String
-    /// Where a server serves its skills on the tailnet (its `/llms.txt`), once it does.
-    var guide: String?
 }
 
 struct Person: Codable, Sendable, Equatable, Identifiable {

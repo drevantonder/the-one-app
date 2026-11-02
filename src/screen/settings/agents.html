@@ -8,18 +8,10 @@
   .prompt .copy.copied { color: var(--ok); }
 </style>
 <script>
-  // What to paste into an agent so it connects itself: the install's MCP server at its address, where it has one;
-  // else the skills this server serves on the tailnet, or, where it serves none, the command line's guide.
-  const prompt = (state) => {
-    const name = state.config?.name || one.config.name, cli = state.config?.cli || one.config.cli;
-    const address = state.install?.settings?.address;
-    if (address) return `Connect yourself to ${name}: add the MCP server ${address}/mcp, and I'll sign in when it asks.`;
-    if (state.server?.guide) return `Connect yourself to ${name}: read ${state.server.guide} and set it up for me.`;
-    return `Connect yourself to ${name}: run "${cli} guide" in a terminal and set it up for me.`;
-  };
   one.title("Agents");
   one.render("#ask", async () => {
-    const text = prompt(await one.api("GET", "/v1/state"));
+    // What to paste into an agent so it connects itself, as the node says.
+    const text = (await one.api("GET", "/v1/state")).agent_prompt;
     return `<h2 class="section">Ask Your Agent</h2><div class="list"><div class="row prompt"><p>${one.esc(text)}</p>${one.copyButton(text)}</div></div>`;
   });
 </script>

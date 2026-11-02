@@ -3065,6 +3065,8 @@ impl Node {
             "backups": backups,
             // What Settings shows this user, in order (see `settings_items`).
             "settings_items": settings_items,
+            // What to paste into an agent so it connects itself, for Ask Your Agent.
+            "agent_prompt": crate::skills::agent_prompt(settings.get("address").and_then(|a| a.as_str())),
         });
         if sign_in.is_none() && viewer.key != self.0.id {
             state["client"] = json!({ "key": hex(&viewer.key), "name": viewer_name });

@@ -83,7 +83,7 @@ struct WelcomeView: View {
         }
         .animation(.snappy, value: phone.joinError)
         .sheet(isPresented: $asking) {
-            AskYourAgentSheet(prompt: agentPrompt(name: appName, cli: Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "", guide: nil))
+            AskYourAgentSheet(prompt: agentPrompt(address: given.isEmpty ? nil : given))
         }
     }
 
