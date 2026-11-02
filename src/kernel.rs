@@ -204,6 +204,9 @@ pub struct Session {
     pub scopes: Vec<String>,
     /// The apps it may use, if it's limited to some (as a scheduled run is).
     pub apps: Option<Vec<String>>,
+    /// Whether it was let only read: it gets keys and read URLs, and changes and sends nothing.
+    #[serde(default)]
+    pub read_only: bool,
     pub until: u64,
 }
 

@@ -6,6 +6,12 @@ const objects = new Map();
 export default {
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.host === "s3.test" && url.pathname === "/install" && url.searchParams.get("list-type") === "2") {
+      const prefix = "/install/" + url.searchParams.get("prefix");
+      const folders = new Set([...objects.keys()].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length).split("/")[0] + "/").filter((f) => f.length > 1));
+      const xml = [...folders].map((f) => `<CommonPrefixes><Prefix>${url.searchParams.get("prefix")}${f}</Prefix></CommonPrefixes>`).join("");
+      return new Response(`<ListBucketResult>${xml}</ListBucketResult>`);
+    }
     if (url.host === "s3.test" || url.pathname.startsWith("/install/")) {
       const name = url.pathname;
       if (request.method === "GET") return objects.has(name) ? new Response(objects.get(name)) : new Response("", { status: 404 });

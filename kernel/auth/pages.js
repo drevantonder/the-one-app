@@ -13,8 +13,13 @@ const style = `
   input { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); background: transparent; color: inherit; }
   button { border: 0; background: color-mix(in srgb, CanvasText 8%, transparent); color: inherit; cursor: pointer; }
   button.primary { background: var(--accent); color: white; font-weight: 600; }
-  label.scope { display: flex; gap: 10px; align-items: center; padding: 10px 2px; }
-  label.scope input { width: auto; margin: 0; }
+  fieldset { border: 0; margin: 0 0 18px; padding: 0; }
+  legend { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; opacity: .55; padding: 0; margin-bottom: 4px; }
+  label.choice { display: flex; gap: 10px; align-items: flex-start; padding: 8px 2px; cursor: pointer; }
+  label.choice input { width: auto; margin: 3px 0 0; flex: none; }
+  label.choice small { display: block; opacity: .6; font-size: 14px; }
+  #some { margin-left: 26px; }
+  #summary { opacity: 1; margin: 4px 0 16px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
   details { margin-top: 14px; } summary { cursor: pointer; opacity: .7; margin-bottom: 12px; }
   .error { color: #d70015; min-height: 1.4em; margin-top: 8px; opacity: 1; }
   [hidden] { display: none !important; }
@@ -105,34 +110,71 @@ export function signInPage({ name, google, first }) {
 export function consentPage({ name }) {
   const body = `
     <h1 id="title">Let an app in</h1>
-    <p id="what">Use your passkey to give it your keys.</p>
+    <p id="what">Use your passkey to choose what it can use.</p>
     <button class="primary" id="passkey">Continue with Passkey</button>
     <form id="choose" hidden>
-      <div id="scopes"></div>
-      <button class="primary" type="submit">Allow</button>
+      <fieldset><legend>Where</legend><div id="scopes"></div></fieldset>
+      <fieldset><legend>Apps</legend>
+        <label class="choice"><input type="radio" name="apps" value="every" checked><span>Every app<small>And ones added later.</small></span></label>
+        <label class="choice"><input type="radio" name="apps" value="some"><span>Only some</span></label>
+        <div id="some" hidden></div>
+      </fieldset>
+      <fieldset><legend>It can</legend>
+        <label class="choice"><input type="radio" name="access" value="change" checked><span>Read and change<small>Add, edit and delete things, and send as you.</small></span></label>
+        <label class="choice"><input type="radio" name="access" value="read"><span>Only read<small>It sees what's there, and changes and sends nothing.</small></span></label>
+      </fieldset>
+      <p id="summary"></p>
+      <button class="primary" type="submit" id="allow">Allow</button>
     </form>
     <button id="deny">Don't Allow</button>`;
   const script = `
     const oauth_query = location.search.slice(1);
     const client_id = new URLSearchParams(oauth_query).get("client_id");
-    const label = (s) => s === "global" ? "Everyone in ${escape(name)}" : s.startsWith("user:") ? "Your own" : "A group (" + s.slice(6) + ")";
-    let opened = null;
+    const install = ${JSON.stringify(name).replaceAll("<", "\\u003c")};
+    const where = (s) => s === "global" ? "Everyone in " + install : s.startsWith("user:") ? "Your own" : "A group";
+    const title = (a) => a.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    const whose = (s) => s === "global" ? "Everyone's" : s.startsWith("user:") ? "your own" : "a group's";
+    const order = (s) => s.startsWith("user:") ? 0 : s === "global" ? 1 : 2;
+    const list = (xs) => xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1];
+    const esc = (t) => String(t).replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
+    let opened = null, client = "It", person = "", apps = {};
     (async () => {
       try {
         const about = await api("/consent/about?client_id=" + encodeURIComponent(client_id));
+        client = about.client;
+        person = about.person;
         document.getElementById("title").textContent = "Let " + about.client + " in?";
-        document.getElementById("what").textContent = about.passkeys ? "It can use what you choose, as you, " + about.person + "." : "First, make a passkey: it's what opens your keys.";
+        document.getElementById("what").textContent = about.passkeys ? acting() : "First, make a passkey: it's what opens your keys.";
         const kept = JSON.parse(sessionStorage.getItem("passkey") || "null");
         sessionStorage.removeItem("passkey");
         if (kept) await open(kept);
       } catch (err) { say(err.message); }
     })();
+    const acting = () => "It will act as you, " + person + ", with only what you choose here. You can sign it out at any time.";
+    const chosen = (name) => [...document.querySelectorAll("input[name=" + name + "]:checked")].map((i) => i.value);
+    function summarise() {
+      const scopes = chosen("scope"), every = chosen("apps")[0] === "every", some = chosen("app"), read = chosen("access")[0] === "read";
+      const none = !scopes.length || (!every && !some.length);
+      document.getElementById("allow").disabled = none;
+      document.getElementById("some").hidden = every;
+      document.getElementById("summary").textContent = none ? "Choose at least one place and one app." :
+        client + " will be able to " + (read ? "read" : "read and change") + " " + (every ? "every app" : list(some.map(title))) + " in " + list(scopes.sort((a, b) => order(a) - order(b)).map(whose)) + ".";
+    }
     async function open(passkey) {
-      const { scopes } = await api("/consent/scopes", passkey);
+      const got = await api("/consent/scopes", passkey);
       opened = passkey;
-      document.getElementById("scopes").innerHTML = scopes.map((s) => '<label class="scope"><input type="checkbox" checked value="' + s + '"> ' + label(s) + '</label>').join("");
+      apps = got.apps || {};
+      document.getElementById("what").textContent = acting();
+      document.getElementById("scopes").innerHTML = got.scopes.sort((a, b) => order(a) - order(b)).map((s) => {
+        const here = (apps[s] || []).map(title);
+        return '<label class="choice"><input type="checkbox" name="scope" checked value="' + esc(s) + '"><span>' + esc(where(s)) + '<small>' + esc(here.length ? list(here) : "Nothing here yet") + '</small></span></label>';
+      }).join("");
+      const all = [...new Set(Object.values(apps).flat())].sort();
+      document.getElementById("some").innerHTML = all.length ? all.map((a) => '<label class="choice"><input type="checkbox" name="app" checked value="' + esc(a) + '"><span>' + esc(title(a)) + '</span></label>').join("") : '<p>No app has anything here yet.</p>';
       document.getElementById("passkey").hidden = true;
       document.getElementById("choose").hidden = false;
+      document.getElementById("choose").onchange = summarise;
+      summarise();
     }
     document.getElementById("passkey").onclick = async () => {
       say();
@@ -146,8 +188,11 @@ export function consentPage({ name }) {
     };
     document.getElementById("choose").onsubmit = async (e) => {
       e.preventDefault();
-      const scopes = [...document.querySelectorAll("#scopes input:checked")].map((i) => i.value);
-      try { location.href = (await api("/consent/accept", { oauth_query, accept: true, prf: opened.prf, scopes })).url; }
+      const every = chosen("apps")[0] === "every";
+      try {
+        location.href = (await api("/consent/accept", { oauth_query, accept: true, prf: opened.prf, scopes: chosen("scope"),
+          apps: every ? undefined : chosen("app"), read_only: chosen("access")[0] === "read" })).url;
+      }
       catch (err) { say(err.message); }
     };
     document.getElementById("deny").onclick = async () => {

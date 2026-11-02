@@ -11,7 +11,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, random, sealAppKey, sealTo, sealUnder } from "../shared/crypto.js";
-import { bucketUrls } from "../shared/s3.js";
+import { bucketList, bucketUrls, listedFolders } from "../shared/s3.js";
 import { Items, schema } from "./items.js";
 import { bearer, Issuer } from "../shared/token.js";
 
@@ -102,7 +102,7 @@ export class Vault extends DurableObject {
       case "POST /share": return json(await this.share(token, claims, body));
       case "POST /erase": return json(await this.erase(token, claims, body));
       case "GET /items": return json(this.items.list((await this.sessionOf(token)).held, url.searchParams.get("scope")));
-      case "POST /items": return json(await this.items.set((await this.sessionOf(token)).held, body));
+      case "POST /items": return json(await this.items.set(mayChange((await this.sessionOf(token)).held), body));
       case "POST /fetch": return json(await this.fetchFor(token, claims, body));
       case "POST /fill": return json(await this.fillFor(token, claims, body));
       case "GET /copies": return json(this.copies(claims.sub));
@@ -129,7 +129,7 @@ export class Vault extends DurableObject {
   /// What a token's session opens: who it's for, the client, the scopes and apps it may use, and until when.
   async sessionAbout(token) {
     const { row, held } = await this.sessionOf(token);
-    return { user: row.user, client: row.client, name: row.name, scopes: this.held(held), apps: held.apps || null, until: row.until };
+    return { user: row.user, client: row.client, name: row.name, scopes: this.held(held), apps: held.apps || null, read_only: !!held.read_only, until: row.until };
   }
 
   /// Work a person lets run while they're away: a copy of what their session opens, limited to `scopes` and `apps`,
@@ -204,11 +204,13 @@ export class Vault extends DurableObject {
   }
 
   /// A copy for a client being added, opened with a passkey (`from`) and sealed under its authorization code (`to`)
-  /// until its first token, limited to `scopes` (all of the person's, if not given).
-  async grant({ user, from, to, name, client, scopes }) {
+  /// until its first token, limited to `scopes` (all of the person's, if not given), to `apps` (every app, if not
+  /// given), and to reading if `read_only`.
+  async grant({ user, from, to, name, client, scopes, apps, read_only }) {
     const opened = await this.open(secretOf(from), ["passkey"]);
     if (!opened || opened.held.user !== user) refuse(403, "that passkey isn't this person's");
-    const held = { ...opened.held, scopes: narrow(opened.held.scopes, scopes) };
+    if (apps !== undefined && apps !== null && !(Array.isArray(apps) && apps.length && apps.every((a) => NAME.test(a)))) refuse(400, "name the apps it may use");
+    const held = { ...opened.held, scopes: narrow(opened.held.scopes, scopes), apps: apps ? apps.filter((a) => !opened.held.apps || opened.held.apps.includes(a)) : opened.held.apps, read_only: !!(read_only || opened.held.read_only) };
     return { id: await this.seal(secretOf(to), { user, kind: "pending", name: String(name || "Client"), client, held, until: Date.now() + PENDING }) };
   }
 
@@ -231,11 +233,24 @@ export class Vault extends DurableObject {
     await this.seal(secretOf(token), { user: row.user, kind: "session", name: row.name, client: row.client, held, until: expires });
   }
 
-  /// The scopes a passkey opens, for a consent screen to offer.
+  /// The scopes a passkey opens, and the apps with data in each, for a consent screen to offer: `{ scopes, apps:
+  /// { <scope>: [app] } }`.
   async scopesOf({ user, secret }) {
     const opened = await this.open(secretOf(secret), ["passkey"]);
     if (!opened || opened.held.user !== user) refuse(403, "that passkey isn't this person's");
-    return { scopes: this.held(opened.held) };
+    const scopes = this.held(opened.held);
+    const apps = {};
+    for (const scope of scopes) apps[scope] = await this.appsIn(scope).catch(() => []);
+    return { scopes, apps };
+  }
+
+  /// The apps with data in a scope: the folders in its folder in the bucket.
+  async appsIn(scope) {
+    if (!this.env.BUCKET) return [];
+    const prefix = `${folderOf(scope)}/`;
+    const resp = await fetch(await bucketList(this.bucket(), prefix));
+    if (!resp.ok) return [];
+    return listedFolders(await resp.text(), prefix).filter((a) => NAME.test(a)).sort();
   }
 
   /// Deletes the copy a secret opens (a refresh token that was revoked).
@@ -343,6 +358,7 @@ export class Vault extends DurableObject {
     const { row, held } = await this.sessionOf(token);
     if (!NAME.test(app || "")) refuse(400, `${app} isn't an app's name`);
     if (held.apps) refuse(403, "this may not erase apps");
+    mayChange(held);
     await this.scopeKey(held, scope);
     const name = appKeyName(scope, app);
     const resp = await fetch((await bucketUrls(this.bucket(), { remove: [name] }, 60)).remove[name], { method: "DELETE" });
@@ -356,6 +372,7 @@ export class Vault extends DurableObject {
     const { row, held } = await this.sessionOf(token);
     if (!NAME.test(body.app || "")) refuse(400, "name the app whose request it is");
     mayUse(held, body.app);
+    if (String(body.method || "GET").toUpperCase() !== "GET") mayChange(held);
     const used = new Set();
     const out = await this.items.fetch(held, body, used).catch((err) => refuse(400, err.message));
     if (used.size) this.record(held.user, row.client || claims.azp, [...used].map((id) => `${body.app} used ${id}`));
@@ -367,6 +384,7 @@ export class Vault extends DurableObject {
     const { row, held } = await this.sessionOf(token);
     if (!NAME.test(app || "") || typeof host !== "string" || typeof text !== "string") refuse(400, "give app, host and text");
     mayUse(held, app);
+    mayChange(held);
     const used = new Set();
     const filled = await this.items.fill(held, app, text, host.toLowerCase(), used).catch((err) => refuse(400, err.message));
     if (used.size) this.record(held.user, row.client || claims.azp, [...used].map((id) => `${app} used ${id}`));
@@ -390,6 +408,7 @@ export class Vault extends DurableObject {
     if (![read, create, replace].every(Array.isArray) || read.length + create.length + replace.length > 256) refuse(400, "name at most 256 objects");
     const bucket = this.bucket();
     const { held } = await this.sessionOf(token);
+    if (create.length || replace.length) mayChange(held);
     const scopes = this.held(held);
     const open = new Set(scopes.map(folderOf));
     const reachable = (name) => {
@@ -410,6 +429,7 @@ export class Vault extends DurableObject {
   /// Opens a scope to another person: `{ scope, user }`, by someone whose session opens it.
   async share(token, claims, { scope, user }) {
     const { held } = await this.sessionOf(token);
+    mayChange(held);
     const key = await this.scopeKey(held, scope);
     const person = this.sql.exec("select public from people where user = ?", user).toArray()[0] || refuse(404, "that person has no keys yet");
     this.sql.exec("insert or replace into grants (user, scope, sealed) values (?, ?, ?)", user, scope, await sealTo(person.public, key));
@@ -420,6 +440,12 @@ export class Vault extends DurableObject {
 /// Refuses unless a session may use `app` (standing work may use only the apps it was let run).
 function mayUse(held, app) {
   if (held.apps && !held.apps.includes(app)) refuse(403, `this may not use ${app}`);
+}
+
+/// Refuses unless a session may change things: one let only read gets keys and read URLs, and sends nothing.
+function mayChange(held) {
+  if (held.read_only) refuse(403, "this was let only read");
+  return held;
 }
 
 /// A client's scopes: those asked for, within what the passkey allows.

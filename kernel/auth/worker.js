@@ -174,7 +174,7 @@ export class Auth extends DurableObject {
     return { client: client.name || client.clientId, person: user.name || user.email, passkeys };
   }
 
-  /// The scopes the person's passkey opens. Their first passkey makes their keys.
+  /// The scopes the person's passkey opens, with the apps that have data in each. Their first passkey makes their keys.
   async scopes(request, { prf, credential }) {
     const { user } = await this.session(request);
     const mine = this.ctx.storage.sql.exec("select credentialID from passkey where userId = ? and credentialID = ?", user.id, String(credential || "")).toArray();
@@ -190,8 +190,9 @@ export class Auth extends DurableObject {
     }
   }
 
-  /// Consent: the client gets a code, and a copy of the person's keys sealed under it, for the scopes they chose.
-  async accept(request, { oauth_query, prf, scopes, accept }) {
+  /// Consent: the client gets a code, and a copy of the person's keys sealed under it, for the scopes they chose, the
+  /// apps (every one, if not given), and only to read if they said so.
+  async accept(request, { oauth_query, prf, scopes, apps, read_only, accept }) {
     const { user } = await this.session(request);
     const query = new URLSearchParams(oauth_query || "");
     const client = await this.client(query.get("client_id"));
@@ -209,7 +210,7 @@ export class Auth extends DurableObject {
     if (accept) {
       const code = new URL(redirect).searchParams.get("code");
       if (!code) throw Object.assign(new Error("the consent gave no code"), { status: 500 });
-      await this.vault("grant", { user: user.id, from: prf, to: code, name: client.name || client.clientId, client: client.clientId, scopes });
+      await this.vault("grant", { user: user.id, from: prf, to: code, name: client.name || client.clientId, client: client.clientId, scopes, apps, read_only });
     }
     return { url: redirect };
   }

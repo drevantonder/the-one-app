@@ -337,6 +337,36 @@ fn a_client_added_with_a_passkey_gets_keys_for_what_it_may_use() {
 }
 
 #[test]
+fn a_client_let_only_read_some_apps_gets_only_that() {
+    let v = Vault::start();
+    let vault = kernel::Vault { url: v.url.clone() };
+    let me = format!("user:{ANDRE}");
+    v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
+    let full = v.client(ANDRE, "andre's passkey prf output", "iphone");
+    vault.keys(&full, &[(&me, "board", None), (&me, "gmail", None)]).unwrap();
+
+    // The consent screen offers each scope with the apps that have data there.
+    let (_, offered) = v.internal("scopes", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
+    assert_eq!(offered["apps"][&me], json!(["board", "gmail"]), "{offered}");
+
+    // He lets Claude Code only read, and only the Board.
+    let code = "claude code's authorization code";
+    let (status, _) = v.internal("grant", json!({ "user": ANDRE, "from": "andre's passkey prf output", "to": code, "client": "claude-code", "scopes": [me], "apps": ["board"], "read_only": true }));
+    assert_eq!(status, 200);
+    let (token, until) = v.token(ANDRE, "claude-code");
+    assert_eq!(v.internal("rekey", json!({ "from": code, "to": "claude code's refresh token", "token": token, "until": until })).1["moved"], true);
+    let session = vault.session(&token).unwrap();
+    assert_eq!((session.apps.clone(), session.read_only), (Some(vec!["board".to_string()]), true));
+    assert!(vault.keys(&token, &[(&me, "board", None)]).is_ok());
+    assert!(vault.keys(&token, &[(&me, "gmail", None)]).is_err(), "only the Board");
+    let name = format!("{}/board/main/newest", one::backups::folder(&me));
+    assert!(vault.urls(&token, &[&name], &[], &[]).is_ok(), "it reads");
+    assert!(vault.urls(&token, &[], &[&name], &[]).unwrap_err().to_string().contains("only read"), "and writes nothing");
+    assert_eq!(v.ask(&token, "POST", "/erase", json!({ "scope": me, "app": "board" })).0, 403);
+    assert_eq!(v.ask(&token, "POST", "/fetch", json!({ "app": "board", "url": "https://example.com/send", "method": "POST" })).0, 403, "nor sends");
+}
+
+#[test]
 fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
     let v = Vault::start();
     let vault = kernel::Vault { url: v.url.clone() };
@@ -700,6 +730,7 @@ fn signs_in(k: &Kernel) -> (String, String) {
     let mut opened: Vec<String> = scopes["scopes"].as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect();
     opened.sort();
     assert_eq!(opened, ["global".to_string(), mine.clone()], "his first passkey makes his keys, and Everyone's");
+    assert_eq!(scopes["apps"][&mine], json!([]), "and nothing is there yet: {scopes}");
     let (status, wrong) = browser.post("/consent/scopes", json!({ "prf": B64U.encode(&rand::random::<[u8; 32]>()), "credential": B64U.encode(&passkey.id) }));
     assert_eq!(status, 403, "another PRF output opens nothing: {wrong}");
     let (status, accepted) = browser.post("/consent/accept", json!({ "oauth_query": oauth_query, "accept": true, "prf": prf, "scopes": [mine] }));
@@ -793,8 +824,9 @@ fn a_deployed_kernel_signs_people_in_and_runs_what_they_let_run() {
     let started = std::time::Instant::now();
     loop {
         let (_, list) = ask_at(&k.schedules, &token, "GET", "/schedules", json!({}));
-        if !list["schedules"][0]["last"].is_null() {
-            assert_eq!(list["schedules"][0]["last"]["status"], "ran", "{list}");
+        let last = &list["schedules"][0]["last"];
+        if !last.is_null() && last["status"] != "running" {
+            assert_eq!(last["status"], "ran", "{list}");
             break;
         }
         assert!(started.elapsed() < Duration::from_secs(150), "its alarm didn't run it: {list}");
