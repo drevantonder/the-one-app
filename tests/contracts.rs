@@ -317,6 +317,16 @@ fn the_apple_apps_answer_everything_a_screen_asks() {
     assert!(missing.is_empty(), "screens ask for what the Apple apps don't answer: {missing:?}");
 }
 
+/// Everything a screen asks of the page holding its frame, the web client answers.
+#[test]
+fn the_web_client_answers_everything_a_screen_asks() {
+    let asked = quoted(&read("src/screen/bridge.js"), "{ type:");
+    assert!(asked.contains("link"), "{asked:?}");
+    let answered = quoted(&read("kernel/web/web.js"), "case");
+    let missing: Vec<_> = asked.difference(&answered).collect();
+    assert!(missing.is_empty(), "screens ask for what the web client doesn't answer: {missing:?}");
+}
+
 /// A sidecar written in Go reads each call the node hands it by the names the node gives its fields.
 #[test]
 fn go_sidecars_read_the_calls_the_node_hands_them() {
