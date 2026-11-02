@@ -74,8 +74,8 @@ fn state(records: &[Record]) -> (String, BTreeMap<String, BTreeMap<String, Strin
 
 /// A skill's name is one folder, and its files stay inside it.
 fn valid(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
-    ensure!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'), "skill names are lowercase words joined by -");
-    ensure!(files.contains_key("SKILL.md"), "a skill needs a SKILL.md");
+    ensure!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'), "Not added: skill names are lowercase words joined by -");
+    ensure!(files.contains_key("SKILL.md"), "Not added: a skill needs a SKILL.md");
     for path in files.keys() {
         ensure!(!path.starts_with('/') && !path.contains('\\') && !path.split('/').any(|p| p.is_empty() || p == "." || p == ".."), "{path} isn't a path inside the skill");
     }
@@ -85,13 +85,19 @@ fn valid(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
 /// Whether a new skill's SKILL.md starts with the frontmatter harnesses load it by: without a name and description,
 /// it's never used.
 fn introduced(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
-    let md = files.get("SKILL.md").map(String::as_str).unwrap_or("");
-    let front = md.strip_prefix("---\n").and_then(|rest| rest.split_once("\n---")).map(|(f, _)| f).unwrap_or("");
-    let field = |k: &str| front.lines().find_map(|l| l.strip_prefix(&format!("{k}:"))).map(|v| v.trim().trim_matches('"').to_string()).filter(|v| !v.is_empty());
-    ensure!(
-        field("name").as_deref() == Some(name) && field("description").is_some(),
-        "SKILL.md starts with frontmatter naming it and saying when to use it:\n---\nname: {name}\ndescription: what it's for, and when to use it\n---"
-    );
+    // As harnesses read it: lines may end in \r\n or spaces.
+    let md = files.get("SKILL.md").map(String::as_str).unwrap_or("").replace("\r\n", "\n");
+    let mut lines = md.lines().map(str::trim).skip_while(|l| l.is_empty());
+    let example = format!("---\nname: {name}\ndescription: what it's for, and when to use it\n---");
+    ensure!(lines.next() == Some("---"), "Not added: SKILL.md's first line must be ---, starting its frontmatter:\n{example}");
+    let front: Vec<&str> = lines.by_ref().take_while(|l| *l != "---").collect();
+    let field = |k: &str| front.iter().find_map(|l| l.strip_prefix(&format!("{k}:"))).map(|v| v.trim().trim_matches(['"', '\'']).to_string()).filter(|v| !v.is_empty());
+    match field("name") {
+        None => bail!("Not added: SKILL.md's frontmatter has no name; it starts:\n{example}"),
+        Some(n) if n != name => bail!("Not added: SKILL.md's frontmatter names it {n}, not {name}: they must be the same"),
+        _ => {}
+    }
+    ensure!(field("description").is_some(), "Not added: SKILL.md's frontmatter has no description, which says what it's for and when to use it:\n{example}");
     Ok(())
 }
 
