@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result, anyhow};
 use js_sys::{Function, Promise, Reflect, Uint8Array};
-use one::bucket::{Bucket, Object};
+use one::bucket::{Bucket, Failed, Object, Trouble};
 use one::call::Append;
 use one::db::Db;
 use one::entry::{Entry, Scope};
@@ -25,7 +25,10 @@ impl Js {
     async fn ask(&self, method: &str, args: &[JsValue]) -> Result<JsValue> {
         let f: Function = Reflect::get(&self.0, &method.into()).map_err(said)?.dyn_into().map_err(|_| anyhow!("the bucket has no {method}"))?;
         let promise: Promise = f.apply(&self.0, &args.iter().collect()).map_err(said)?.dyn_into().map_err(|_| anyhow!("{method} gave no promise"))?;
-        JsFuture::from(promise).await.map_err(said)
+        JsFuture::from(promise).await.map_err(|err| match Reflect::get(&err, &"unanswered".into()).is_ok_and(|u| u.is_truthy()) {
+            true => Failed(Trouble::Unreachable, format!("{}", said(err))).into(),
+            false => said(err),
+        })
     }
 }
 

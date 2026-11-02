@@ -11,55 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::entry::hex;
 
-use super::{Bucket, Object};
-
-/// What went wrong at a place, so a person can be told how to fix it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Trouble {
-    /// The place rejected the key.
-    Key,
-    /// It has no such bucket.
-    Bucket,
-    /// The key may not write there.
-    Refused,
-    /// The place couldn't be reached.
-    Unreachable,
-    /// A folder's disk couldn't be written or read.
-    Disk,
-}
-
-impl Trouble {
-    pub fn name(self) -> &'static str {
-        match self {
-            Trouble::Key => "key",
-            Trouble::Bucket => "bucket",
-            Trouble::Refused => "refused",
-            Trouble::Unreachable => "unreachable",
-            Trouble::Disk => "disk",
-        }
-    }
-
-    pub fn parse(name: &str) -> Option<Trouble> {
-        [Trouble::Key, Trouble::Bucket, Trouble::Refused, Trouble::Unreachable, Trouble::Disk].into_iter().find(|t| t.name() == name)
-    }
-
-    /// The trouble behind an error, if a place said what it was.
-    pub fn of(err: &anyhow::Error) -> Option<Trouble> {
-        err.chain().find_map(|e| e.downcast_ref::<Failed>()).map(|f| f.0)
-    }
-}
-
-/// A place's failure, in words that follow the place's name ("rejected the key"), and what kind it is.
-#[derive(Debug)]
-pub struct Failed(pub Trouble, pub String);
-
-impl std::fmt::Display for Failed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.1)
-    }
-}
-
-impl std::error::Error for Failed {}
+use super::{Bucket, Failed, Object, Trouble};
 
 /// A folder's I/O error, as a disk's trouble, in words.
 fn disk(dir: &std::path::Path, err: std::io::Error) -> anyhow::Error {
@@ -484,7 +436,8 @@ impl S3 {
         }
         .map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({host}: {e})")))?;
         let tag = resp.headers().get("etag").and_then(|t| t.to_str().ok()).map(str::to_string);
-        let bytes = resp.body_mut().with_config().limit(4 << 30).read_to_vec()?;
+        // An answer cut short says nothing of what the request did.
+        let bytes = resp.body_mut().with_config().limit(4 << 30).read_to_vec().map_err(|e| Failed(Trouble::Unreachable, format!("cut its answer short ({host}: {e})")))?;
         Ok((resp.status().as_u16(), tag, bytes))
     }
 }

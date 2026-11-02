@@ -1,9 +1,10 @@
 //! Many devices writing one app's database in one bucket over bad links: every request is slow by a random amount, so
 //! they arrive out of order, and some fail, before or after the bucket did what they asked, or time out while still on
-//! their way and land later; now and then the bucket is out of reach for up to a minute and a half. Some writes are
-//! given up on part way, as a call that runs out of time is, and what they sent goes on. Every seed must end with every
-//! device reading the same database, holding every write it was told landed, once, none it was told failed, and nothing
-//! one attempt wrote twice. A failing seed is a bug. `ONE_SIM_SEEDS=<from>..<to>` sweeps more.
+//! their way and land later; now and then the bucket is out of reach for up to a minute and a half, or refuses to write
+//! for as long. Some writes are given up on part way, as a call that runs out of time is, and what they sent goes on.
+//! Every seed must end with every device reading the same database, holding every write it was told landed, once, none
+//! it was told failed, and nothing one attempt wrote twice; and a write says it may have been made only when the bucket
+//! left one of its requests unanswered. A failing seed is a bug. `ONE_SIM_SEEDS=<from>..<to>` sweeps more.
 //!
 //! Then the same with each device keeping a copy on its disk, told of some of the others' writes as they're made, and
 //! fetching what it's told of from the bucket into its copy, and reading from its copy alone in between: what it reads
@@ -14,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-use one::bucket::{Bucket, Copied, Object};
+use one::bucket::{Bucket, Copied, Failed, Object, Trouble};
 use one::db::{Db, execute};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -38,6 +39,8 @@ struct Link {
     steady: bool,
     /// Until when the bucket is out of reach.
     down: Arc<Mutex<tokio::time::Instant>>,
+    /// Until when it refuses to write, as it does a key that may not, or URLs the vault won't sign.
+    refusing: Arc<Mutex<tokio::time::Instant>>,
     /// The attempts at writing that were told they failed, and not that they may have landed.
     failed: Arc<Mutex<Vec<i64>>>,
 }
@@ -45,7 +48,8 @@ struct Link {
 impl Link {
     fn new(seed: u64) -> Link {
         let rng = Arc::new(Mutex::new(StdRng::seed_from_u64(seed)));
-        Link { objects: Default::default(), rng, going: Default::default(), steady: false, down: Arc::new(Mutex::new(tokio::time::Instant::now())), failed: Default::default() }
+        let now = || Arc::new(Mutex::new(tokio::time::Instant::now()));
+        Link { objects: Default::default(), rng, going: Default::default(), steady: false, down: now(), refusing: now(), failed: Default::default() }
     }
 
     /// The same bucket over a link that fails nothing: a new device's read of it, which on a device's own copy goes
@@ -81,14 +85,14 @@ impl Link {
             tokio::time::sleep(Duration::from_millis(back)).await;
             going.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
             match done {
-                None => bail!("the link dropped it"),
-                Some(_) if after => bail!("the link dropped the answer"),
+                None => Err(dropped("the link dropped it")),
+                Some(_) if after => Err(dropped("the link dropped the answer")),
                 Some(done) => Ok(done),
             }
         });
         if late {
             tokio::time::sleep(Duration::from_millis(there / 2)).await;
-            bail!("the link dropped it, or it's late");
+            return Err(dropped("the link dropped it, or it's late"));
         }
         request.await.unwrap()
     }
@@ -120,7 +124,15 @@ impl Link {
     async fn write<B: Bucket>(&self, db: &mut Db, bucket: &B, id: u64, device: usize) {
         retry(async || {
             let attempt = self.rng.lock().unwrap().r#gen::<i64>();
-            let wrote = tokio::time::timeout(self.patience(), db.write(bucket, write(id, device, attempt))).await.unwrap_or_else(|_| bail!("given up on"));
+            let (wrote, unanswered) = UNANSWERED
+                .scope(Default::default(), async {
+                    let wrote = tokio::time::timeout(self.patience(), db.write(bucket, write(id, device, attempt))).await.unwrap_or_else(|_| bail!("given up on"));
+                    (wrote, UNANSWERED.with(|u| u.get()))
+                })
+                .await;
+            if let Err(e) = &wrote {
+                assert!(unanswered || !format!("{e:#}").contains("may have been"), "a write said it may have been made, but the bucket answered all it sent: {e:#}");
+            }
             if wrote.as_ref().is_err_and(|e| !format!("{e:#}").contains("given up on") && !format!("{e:#}").contains("may have been")) {
                 self.failed.lock().unwrap().push(attempt);
             }
@@ -128,6 +140,16 @@ impl Link {
         })
         .await
     }
+}
+
+tokio::task_local! {
+    /// Whether a create the attempt running sent went unanswered.
+    static UNANSWERED: std::cell::Cell<bool>;
+}
+
+/// A request that failed on the link, with no answer from the bucket: it may have done what it asked.
+fn dropped(what: &str) -> anyhow::Error {
+    Failed(Trouble::Unreachable, what.into()).into()
 }
 
 fn tag(bytes: &[u8]) -> String {
@@ -145,8 +167,23 @@ impl Bucket for Link {
     }
 
     async fn create(&self, name: &str, bytes: &[u8]) -> Result<bool> {
+        let now = tokio::time::Instant::now();
+        {
+            let mut rng = self.rng.lock().unwrap();
+            let mut refusing = self.refusing.lock().unwrap();
+            if !self.steady && *refusing <= now && rng.gen_bool(0.002) {
+                *refusing = now + Duration::from_millis(rng.gen_range(1_000..90_000));
+            }
+            if now < *refusing {
+                return Err(Failed(Trouble::Refused, "won't let this device write".into()).into());
+            }
+        }
         let (name, bytes) = (name.to_string(), bytes.to_vec());
-        self.send(move |objects| !objects.contains_key(&name) && objects.insert(name, bytes).is_none()).await
+        let created = self.send(move |objects| !objects.contains_key(&name) && objects.insert(name, bytes).is_none()).await;
+        if created.is_err() {
+            let _ = UNANSWERED.try_with(|u| u.set(true));
+        }
+        created
     }
 
     async fn replace(&self, name: &str, bytes: &[u8], tag_was: Option<&str>) -> Result<bool> {
@@ -182,7 +219,7 @@ async fn retry<T>(mut f: impl AsyncFnMut() -> Result<T>) -> T {
     for _ in 0..10_000 {
         match f().await {
             Ok(v) => return v,
-            Err(err) if !format!("{err:#}").contains("the link dropped") && !format!("{err:#}").contains("given up on") && !format!("{err:#}").contains("changed too often") && !format!("{err:#}").contains("may have been") => panic!("it failed, not the link: {err:#}"),
+            Err(err) if !format!("{err:#}").contains("the link dropped") && !format!("{err:#}").contains("given up on") && !format!("{err:#}").contains("changed too often") && !format!("{err:#}").contains("may have been") && !format!("{err:#}").contains("won't let") => panic!("it failed, not the link: {err:#}"),
             Err(err) => last = Some(err),
         }
         tokio::time::sleep(Duration::from_millis(50)).await;

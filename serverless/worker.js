@@ -162,8 +162,13 @@ class Bucket {
 
   async put(url, headers, name, bytes) {
     this.fetched.delete(name);
-    const r = await fetch(url, { method: "PUT", headers, body: bytes });
+    // A write with no answer may have been made, which src/lib.rs reads as `unanswered`; one refused wasn't.
+    const unanswered = (message) => Object.assign(new Error(message), { unanswered: true });
+    const r = await fetch(url, { method: "PUT", headers, body: bytes }).catch((err) => {
+      throw unanswered(`the bucket couldn't be reached to write ${name}: ${err.message}`);
+    });
     if (r.status === 412) return false;
+    if (r.status >= 500) throw unanswered(`the bucket said ${r.status} to writing ${name}`);
     if (!r.ok) throw new Error(`the bucket said ${r.status} to writing ${name}`);
     return true;
   }

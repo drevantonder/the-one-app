@@ -24,6 +24,54 @@ pub trait Bucket {
     fn wait(&self, ms: u64) -> impl Future<Output = ()>;
 }
 
+/// What went wrong at a place, so a person can be told how to fix it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trouble {
+    /// The place rejected the key.
+    Key,
+    /// It has no such bucket.
+    Bucket,
+    /// The key may not write there.
+    Refused,
+    /// The place couldn't be reached.
+    Unreachable,
+    /// A folder's disk couldn't be written or read.
+    Disk,
+}
+
+impl Trouble {
+    pub fn name(self) -> &'static str {
+        match self {
+            Trouble::Key => "key",
+            Trouble::Bucket => "bucket",
+            Trouble::Refused => "refused",
+            Trouble::Unreachable => "unreachable",
+            Trouble::Disk => "disk",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Trouble> {
+        [Trouble::Key, Trouble::Bucket, Trouble::Refused, Trouble::Unreachable, Trouble::Disk].into_iter().find(|t| t.name() == name)
+    }
+
+    /// The trouble behind an error, if a place said what it was.
+    pub fn of(err: &anyhow::Error) -> Option<Trouble> {
+        err.chain().find_map(|e| e.downcast_ref::<Failed>()).map(|f| f.0)
+    }
+}
+
+/// A place's failure, in words that follow the place's name ("rejected the key"), and what kind it is.
+#[derive(Debug)]
+pub struct Failed(pub Trouble, pub String);
+
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.1)
+    }
+}
+
+impl std::error::Error for Failed {}
+
 /// A scope's folder in the bucket: `user:<id>` is written `user-<id>`, which every disk takes.
 pub fn folder(scope: &str) -> String {
     scope.replacen(':', "-", 1)
