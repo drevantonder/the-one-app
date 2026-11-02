@@ -26,6 +26,7 @@ pub fn rules() -> String {
         format!("Anything that sends or can't be undone takes `confirm: true` (`--confirm` in the terminal), given only once the person agreed to that action. Without it, it refuses: ask them rather than guess."),
         "Never ask for a password, key or token in the chat, and never paste one. `vault_request` gives the person a link to a sheet on their own device, where they pick or type it; `vault_fetch` makes a web request with an item they let agents use, and you never see the secret. If someone pastes one anyway, keep it with `vault_set` and don't repeat it.".to_string(),
         "If something says you aren't allowed, stop and tell the person. Nothing widens access by itself.".to_string(),
+        "Post to the board only when the person asked, or when you changed something; never a decision they didn't make.".to_string(),
     ]
     .iter()
     .map(|r| format!("- {r}"))
@@ -36,7 +37,7 @@ pub fn rules() -> String {
 /// How to find what's possible, from the command line.
 pub fn finding() -> String {
     format!(
-        "- Each area has a skill of its own, listed below: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations, as `tools.<app>.<op>({{ ... }})`, and prints what it returns.\n- `{CLI} status` says who you are, and which devices are in the install."
+        "- Each area has a skill of its own, listed below: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and which devices are in the install."
     )
 }
 
@@ -163,9 +164,8 @@ pub fn app_skill(app: &Value) -> Skill {
     let about = app["description"].as_str().map(|d| d.trim().trim_end_matches('.')).filter(|d| !d.is_empty()).map(|d| format!(": {d}")).unwrap_or_default();
     let description: String = format!("{title} in {NAME}{about}. Use when the person asks about {title}, and before using its tools ({name}_...).").chars().take(1024).collect();
     let mut body = format!(
-        "# {title}\n\n{}\n\n## Operations\n\nEach is the MCP tool `{name}_<op>`, the command `{CLI} {name} <op>` (`--help` says more), and `{}` in a script. What sends or can't be undone takes `confirm: true` (`--confirm`), given once the person agreed.\n",
+        "# {title}\n\n{}\n\n## Operations\n\nEach is the command `{CLI} {name} <op>` (`--help` says more) and the MCP tool `{name}_<op>`. Never ask for a password, key or token in the chat: vault_request gives the person a link. What sends or can't be undone takes `confirm: true` (`--confirm`), given only once the person agreed to that very action. Post to the board only when the person asked, or when you changed something.\n",
         app["instructions"].as_str().unwrap_or("").trim(),
-        path(name, "<op>").replace("[\"<op>\"]", ".<op>")
     );
     for op in app["ops"].as_array().into_iter().flatten().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')) {
         let mark = match (op["reads"] == true, op["confirm"] == true) {
