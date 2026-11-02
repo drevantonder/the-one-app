@@ -2,7 +2,8 @@
   html, body { height: 100%; }
   body { padding: 0; max-width: none; overflow: hidden; --w-card: var(--card); }
   @media (prefers-color-scheme: dark) { body { --w-card: var(--card); } }
-  #pages { height: 100%; }
+  /* A home screen: touching and holding it offers what it does, never selecting its words. */
+  #pages { height: 100%; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   /* Side by side, a page each: swipe between them, scroll within one. */
   .strip { display: flex; height: 100%; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
   .strip::-webkit-scrollbar { display: none; }
@@ -42,6 +43,14 @@
   .capsule .marks i.on { width: 16px; background: var(--text); }
   .capsule .cog { position: relative; padding: 0 18px 0 6px; font-size: 18px; }
   .capsule .cog.on { color: var(--text); }
+  /* Add Widget: each widget once, at the size chosen, as it would look on the page. */
+  .adding { padding: 14px 0 18px; border-bottom: 0.5px solid var(--line); }
+  .adding:last-child { border-bottom: 0; }
+  .adding-head { display: flex; align-items: center; gap: 10px; }
+  .adding-head .app-icon { --size: 28px !important; width: 28px; height: 28px; }
+  .adding-preview { --w-card: var(--card); display: flex; justify-content: center; margin: 4px 0 14px; pointer-events: none; }
+  .adding-preview .w-card { height: 100%; box-sizing: border-box; }
+  .adding .button { width: 100%; }
   .capsule .cog.attention::after { content: ""; position: absolute; top: 11px; right: 14px; width: 7px; height: 7px; border-radius: 4px; background: var(--danger); }
 </style>
 <div id="pages"></div>
@@ -119,10 +128,59 @@
     return out;
   }
 
-  /// Keeps a page in its person's order with `edit` applied to each item (null takes it off), then draws it again.
-  async function arrange(p, edit) {
+  /// What touching and holding a page offers, or an app on it (`a`): adding a widget of its apps', or that app's.
+  function addActions(p, a) {
+    return home.widgetsOn(p).some((w) => !a || w.app === a.name) ? [{ title: "Add Widget…", run: () => addWidget(p, a) }] : [];
+  }
+
+  /// Adds one of a page's widgets (only `only`'s, if given), in a sheet: each widget once, as it would look on the
+  /// page at the size chosen, with Add Widget, which puts it at the page's end.
+  function addWidget(p, only) {
+    const widgets = home.widgetsOn(p).filter((w) => !only || w.app === only.name);
+    const grid = document.querySelector(`.one-page[data-scope="${CSS.escape(p.scope)}"] .grid`);
+    const columns = grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : 4;
+    const { body, close } = one.sheet({ title: only ? `Add Widget · ${home.label(only)}` : `Add Widget · ${p.title}`, done: "Cancel" });
+    const quiet = { run: async () => {}, follow: () => {} };
+    for (const w of widgets) {
+      const a = home.app(w.app), title = w.title || home.label(a) || w.widget;
+      const sizes = home.supported(w).filter((s) => CELLS[s][0] <= columns);
+      if (!sizes.length) continue;
+      let size = sizes.includes(w.size) ? w.size : sizes[0];
+      const el = document.createElement("section");
+      el.className = "adding";
+      el.innerHTML = `<div class="adding-head">${a ? one.appIcon(a, 28) : ""}<b>${esc(title)}</b></div><div class="segmented"></div><div class="adding-preview"></div><button class="button primary">Add Widget</button>`;
+      const draw = () => {
+        const seg = el.querySelector(".segmented");
+        seg.hidden = sizes.length < 2;
+        seg.innerHTML = sizes.map((s) => `<button class="${s === size ? "on" : ""}" data-size="${s}">${NAMES[s]}</button>`).join("");
+        seg.querySelectorAll("button").forEach((b) => (b.onclick = () => { one.tap(); size = b.dataset.size; draw(); }));
+        // As big as on the page: its cells, four to a phone's width.
+        const room = el.clientWidth || 320, gap = 14, [cw, ch] = CELLS[size];
+        const cell = Math.min(90, (room - gap * (Math.max(4, cw) - 1)) / Math.max(4, cw));
+        const card = oneWidgets.card({ ...w, title }, quiet, home.tree(w, size));
+        card.classList.add("widget");
+        const box = el.querySelector(".adding-preview");
+        Object.assign(box.style, { height: `${ch * cell + (ch - 1) * gap}px` });
+        Object.assign(card.style, { width: `${cw * cell + (cw - 1) * gap}px` });
+        box.replaceChildren(card);
+      };
+      el.querySelector(".button").onclick = () => {
+        const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("");
+        one.tap("success");
+        close();
+        arrange(p, (item) => item, [{ app: w.app, widget: w.widget, id, size }]);
+      };
+      body.append(el);
+      draw();
+    }
+    if (!body.children.length) body.innerHTML = one.empty({ icon: "squares-four", title: "No Widgets", text: `No app on ${esc(p.title)} has a widget.` });
+  }
+
+  /// Keeps a page in its person's order with `edit` applied to each item (null takes it off) and `added` at its end,
+  /// then draws it again.
+  async function arrange(p, edit, added = []) {
     const state = home.data.state;
-    const kept = home.items(p).map((i) => (i.app ? { app: i.app.name } : i.kept)).map(edit).filter(Boolean);
+    const kept = home.items(p).map((i) => (i.app ? { app: i.app.name } : i.kept)).map(edit).filter(Boolean).concat(added);
     const hidden = state.arrangements?.[p.scope]?.hidden || [];
     state.arrangements = { ...(state.arrangements || {}), [p.scope]: { items: kept, hidden } };
     draw();
@@ -145,10 +203,19 @@
     const list = home.items(p).map((item) => {
       if (item.widget) return widget(item.widget, item.kept, p);
       const a = item.app;
-      return tile(home.label(a), one.appIcon(a, 60), home.badge(a.name, p), home.open(a, p), (e) => home.menu(home.actions(a, p), e));
+      return tile(home.label(a), one.appIcon(a, 60), home.badge(a.name, p), home.open(a, p), (e) => home.menu([...home.actions(a, p), ...addActions(p, a)], e));
     });
     list.push(tile("Services", folder(home.servicesOn(p)), 0, () => one.open("services", { scope: p.scope }, undefined, { sheet: true })));
     lay(el.querySelector(".grid"), list);
+    // The page itself, around what's on it.
+    el.oncontextmenu = (e) => {
+      if (e.defaultPrevented) return;
+      e.preventDefault();
+      const entries = addActions(p);
+      if (!entries.length) return;
+      one.tap("medium");
+      home.menu(entries, e);
+    };
   }
 
   /// Settings, as a page: its items' icons, you first, as your picture.
@@ -181,7 +248,8 @@
     const cell = narrow ? (width - gap * 3) / 4 : 104;
     const columns = narrow ? 4 : Math.max(4, Math.floor((width + gap) / (cell + gap)));
     Object.assign(grid.style, { gap: `${gap}px`, gridAutoRows: `${cell}px`, gridTemplateColumns: `repeat(${columns}, ${cell}px)` });
-    grid.style.setProperty("--icon", `${Math.round(Math.max(44, Math.min(68, cell - 24)))}px`);
+    // An icon and its name fit a cell, however large the text is.
+    grid.style.setProperty("--icon", `${Math.round(Math.max(32, Math.min(68, cell - 24)))}px`);
     const taken = [];
     for (const item of grid.__items) {
       let [w, h] = item.span;
