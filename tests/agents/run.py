@@ -183,8 +183,9 @@ class Install:
             out["repo_file"] = r.returncode == 0 and "error" not in r.stdout.lower()[:200]
         if "installed_in_group" in check:
             app, group = check["installed_in_group"]
-            apps = json.loads(self.run("apps", "list"))["apps"]
-            out["installed_in_group"] = any(a["name"] == app and group in a.get("installed_names", []) for a in apps)
+            # A line per app: "Repos (repos): added for Everyone, Family, a service. …"
+            m = re.search(rf"\({re.escape(app)}\): added for (.+?)(?:, a service|, an update waiting)*\.(?: |$)", self.run("apps", "list"), re.M)
+            out["installed_in_group"] = bool(m) and group in m.group(1).split(", ")
         if "vault_request" in check:
             out["vault_request"] = bool(self.run("vault", "requests").strip())
         if "no_vault_value" in check:
