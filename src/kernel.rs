@@ -700,6 +700,33 @@ impl Cloudflare {
         Ok(())
     }
 
+    /// Uploads `files` (path, bytes) as a Worker's static assets, those Cloudflare hasn't already: → the token its
+    /// upload takes them with.
+    fn assets(&self, name: &str, files: &[(String, Vec<u8>)]) -> Result<String> {
+        let hash = |path: &str, bytes: &[u8]| data_encoding::HEXLOWER.encode(&Sha256::new().chain_update(bytes).chain_update(path.as_bytes()).finalize())[..32].to_string();
+        let manifest: serde_json::Map<String, Value> = files.iter().map(|(path, bytes)| (format!("/{path}"), json!({ "hash": hash(path, bytes), "size": bytes.len() }))).collect();
+        let session = self.send("POST", &format!("/accounts/{}/workers/scripts/{name}/assets-upload-session", self.account), json!({ "manifest": manifest }))?;
+        let mut token = session["jwt"].as_str().context("Cloudflare gave no upload token")?.to_string();
+        let upload = Cloudflare { api: self.api.clone(), token: token.clone(), account: self.account.clone() };
+        for bucket in session["buckets"].as_array().into_iter().flatten() {
+            let boundary = format!("assets-{}", data_encoding::HEXLOWER.encode(&rand::random::<[u8; 12]>()));
+            let mut body = Vec::new();
+            for wanted in bucket.as_array().into_iter().flatten().filter_map(Value::as_str) {
+                let (path, bytes) = files.iter().find(|(path, bytes)| hash(path, bytes) == wanted).context("Cloudflare asked for a file it wasn't offered")?;
+                let kind = mime(path);
+                body.extend(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{wanted}\"; filename=\"{wanted}\"\r\nContent-Type: {kind}\r\n\r\n").as_bytes());
+                body.extend(data_encoding::BASE64.encode(bytes).as_bytes());
+                body.extend(b"\r\n");
+            }
+            body.extend(format!("--{boundary}--\r\n").as_bytes());
+            let done = upload.call("POST", &format!("/accounts/{}/workers/assets/upload?base64=true", self.account), Some((format!("multipart/form-data; boundary={boundary}"), body)))?;
+            if let Some(jwt) = done["jwt"].as_str() {
+                token = jwt.to_string();
+            }
+        }
+        Ok(token)
+    }
+
     /// Puts a Worker at `url`: its workers.dev address, or a host in one of the account's domains, with its
     /// workers.dev address off, so each service has one address.
     fn reach(&self, name: &str, url: &str) -> Result<()> {
@@ -730,6 +757,20 @@ pub fn invite(auth_url: &str, kernel_secret: &str, email: &str, user: Option<&st
     Ok(())
 }
 
+/// A web file's type, by its extension.
+fn mime(path: &str) -> &'static str {
+    match path.rsplit('.').next().unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "woff2" => "font/woff2",
+        _ => "application/octet-stream",
+    }
+}
+
 /// A kernel service's Worker's name on Cloudflare: `<cli>-<service>`, so white labels sharing an account don't clash.
 pub fn worker_name(service: &str) -> String {
     format!("{}-{service}", crate::config::CLI)
@@ -754,9 +795,10 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrate
     (meta, complete)
 }
 
-/// Deploys the kernel's services to Cloudflare, each a Worker with its Durable Object, built from this release. A
-/// service whose binding names one not deployed yet goes up without it, and again once that one is.
-pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>]) -> Result<()> {
+/// Deploys the kernel's services to Cloudflare, each a Worker with its Durable Object, built from this release, the
+/// gateway with the web client's files (`web`) as its static assets, which it serves itself. A service whose binding
+/// names one not deployed yet goes up without it, and again once that one is.
+pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[(String, Vec<u8>)]) -> Result<()> {
     let mut left: Vec<usize> = (0..SERVICES.len()).collect();
     for _ in 0..2 {
         let mut again = Vec::new();
@@ -764,7 +806,12 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>]) -> Resu
             let (service, _, class) = SERVICES[i];
             let scripts = cf.scripts()?;
             let migrated = scripts.get(&worker_name(service)).is_some_and(|tag| tag.as_deref() == Some("v1"));
-            let (meta, complete) = metadata(settings, service, class, migrated, |name| scripts.contains_key(name) || name == worker_name(service));
+            let (mut meta, complete) = metadata(settings, service, class, migrated, |name| scripts.contains_key(name) || name == worker_name(service));
+            if service == "gateway" {
+                let jwt = cf.assets(&worker_name(service), web)?;
+                meta["assets"] = json!({ "jwt": jwt, "config": { "html_handling": "none", "not_found_handling": "none", "run_worker_first": true } });
+                meta["bindings"].as_array_mut().unwrap().push(json!({ "type": "assets", "name": "ASSETS" }));
+            }
             cf.upload(&worker_name(service), &modules[i], &meta)?;
             cf.reach(&worker_name(service), [&settings.auth_url, &settings.vault_url, &settings.schedules_url, &settings.address][i])?;
             if !complete {

@@ -369,7 +369,8 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             };
             let modules = one::kernel::SERVICES.iter().map(|(_, entry, _)| one::kernel::module(entry)).collect::<Result<Vec<_>>>()?;
-            one::kernel::deploy(&cf, &settings, &modules)?;
+            let web: Vec<(String, Vec<u8>)> = one::kernel::web_files().map(|(path, bytes)| (path.to_string(), bytes.to_vec())).collect();
+            one::kernel::deploy(&cf, &settings, &modules, &web)?;
             print!("Deployed.\n{}", kernel_said(&settings));
         }
         ["kernel", "invite", email] => {

@@ -926,14 +926,18 @@ fn a_schedules_alarm_runs_each_slot_once() {
 
 type Scripts = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, (Value, Vec<u8>)>>>;
 type Addresses = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, Value>>>;
+/// Static assets uploaded, by path, with their type.
+type Assets = std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, (String, Vec<u8>)>>>;
 
 /// A stand-in for Cloudflare's Workers API, for an account with the domain andre.example: it keeps each upload
 /// (metadata and module) by Worker, as Cloudflare does, and where each is reached (its workers.dev address's
-/// setting, or the host it's on).
-fn cloudflare() -> (String, Scripts, Addresses) {
+/// setting, or the host it's on), and the static assets uploaded, asking only for those it doesn't have.
+fn cloudflare() -> (String, Scripts, Addresses, Assets) {
     use axum::routing::{get, post, put};
     let scripts: Scripts = Default::default();
     let addresses: Addresses = Default::default();
+    let assets: Assets = Default::default();
+    let offered: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, String>>> = Default::default();
     let ok = |result: Value| axum::Json(json!({ "success": true, "errors": [], "result": result }));
     let list = {
         let scripts = scripts.clone();
@@ -975,8 +979,46 @@ fn cloudflare() -> (String, Scripts, Addresses) {
     let zones = move |axum::extract::Query(q): axum::extract::Query<std::collections::BTreeMap<String, String>>| async move {
         ok(if q["name"] == "andre.example" { json!([{ "id": "zone", "name": "andre.example" }]) } else { json!([]) })
     };
+    let session = {
+        let (assets, offered) = (assets.clone(), offered.clone());
+        move |axum::Json(body): axum::Json<Value>| {
+            let have: BTreeSet<String> = assets.lock().unwrap().keys().cloned().collect();
+            let mut wanted = Vec::new();
+            for (path, file) in body["manifest"].as_object().unwrap() {
+                let hash = file["hash"].as_str().unwrap().to_string();
+                assert_eq!(hash.len(), 32, "a hash is 32 hex characters");
+                offered.lock().unwrap().insert(hash.clone(), path.clone());
+                if !have.contains(path) {
+                    wanted.push(hash);
+                }
+            }
+            let buckets = if wanted.is_empty() { json!([]) } else { json!([wanted]) };
+            async move { ok(json!({ "jwt": if buckets == json!([]) { "complete" } else { "session" }, "buckets": buckets })) }
+        }
+    };
+    let take = {
+        let (assets, offered) = (assets.clone(), offered.clone());
+        move |headers: axum::http::HeaderMap, body: axum::body::Bytes| {
+            assert_eq!(headers["authorization"], "Bearer session", "assets go up with the session's token");
+            let kind = headers["content-type"].to_str().unwrap().to_string();
+            let boundary = format!("--{}", kind.split("boundary=").nth(1).unwrap());
+            let text = body.to_vec();
+            for part in split(&text, boundary.as_bytes()).into_iter().filter(|p| find(p, b"name=\"").is_some()) {
+                let head = String::from_utf8_lossy(&part[..find(part, b"\r\n\r\n").unwrap()]).to_string();
+                let hash = head.split("name=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+                let kind = head.split("Content-Type: ").nth(1).unwrap().trim().to_string();
+                let at = find(part, b"\r\n\r\n").unwrap() + 4;
+                let bytes = data_encoding::BASE64.decode(&part[at..part.len() - 2]).unwrap();
+                let path = offered.lock().unwrap()[&hash].clone();
+                assets.lock().unwrap().insert(path, (kind, bytes));
+            }
+            async move { ok(json!({ "jwt": "complete" })) }
+        }
+    };
     let app = axum::Router::new()
         .route("/accounts", get(move || async move { ok(json!([{ "id": "acct" }])) }))
+        .route("/accounts/{a}/workers/scripts/{name}/assets-upload-session", post(session))
+        .route("/accounts/{a}/workers/assets/upload", post(take))
         .route("/zones", get(zones))
         .route("/accounts/{a}/workers/subdomain", get(move || async move { ok(json!({ "subdomain": "andre" })) }))
         .route("/accounts/{a}/workers/scripts", get(list))
@@ -990,7 +1032,7 @@ fn cloudflare() -> (String, Scripts, Addresses) {
     std::thread::spawn(move || {
         tokio::runtime::Runtime::new().unwrap().block_on(async move { axum::serve(tokio::net::TcpListener::from_std(listener).unwrap(), app).await.unwrap() })
     });
-    (format!("http://{addr}"), scripts, addresses)
+    (format!("http://{addr}"), scripts, addresses, assets)
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -1009,13 +1051,14 @@ fn split<'a>(mut hay: &'a [u8], by: &[u8]) -> Vec<&'a [u8]> {
 
 #[test]
 fn a_deploy_to_cloudflare_uploads_each_service_with_its_bindings_and_object() {
-    let (api, scripts, addresses) = cloudflare();
+    let (api, scripts, addresses, assets) = cloudflare();
     let cf = kernel::Cloudflare { api, token: "token".into(), account: "acct".into() };
     let at = |service: &str, domain: &str| format!("https://{}.{domain}", kernel::worker_name(service));
     let (mut settings, _) = kernel::Settings::new("Test", &at("gateway", "andre.workers.dev"));
     (settings.auth_url, settings.vault_url, settings.schedules_url) = (at("auth", "andre.workers.dev"), at("vault", "andre.workers.dev"), at("schedules", "andre.workers.dev"));
     let modules: Vec<Vec<u8>> = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();
-    kernel::deploy(&cf, &settings, &modules).unwrap();
+    let web = vec![("index.html".to_string(), b"<!doctype html><title>The web client</title>".to_vec()), ("screen/kit.css".to_string(), b":root{}".to_vec())];
+    kernel::deploy(&cf, &settings, &modules, &web).unwrap();
     for (service, _, _) in kernel::SERVICES {
         assert_eq!(addresses.lock().unwrap()[&format!("{}.workers.dev", kernel::worker_name(service))], true, "{service} is at its workers.dev address");
     }
@@ -1028,7 +1071,8 @@ fn a_deploy_to_cloudflare_uploads_each_service_with_its_bindings_and_object() {
         assert_eq!(meta["main_module"], "worker.js");
         assert!(!module.is_empty());
         let names: BTreeSet<String> = meta["bindings"].as_array().unwrap().iter().map(|b| b["name"].as_str().unwrap().to_string()).collect();
-        let want: BTreeSet<String> = settings.bindings(service).into_iter().map(|(n, _, _)| n).chain(class.map(str::to_uppercase)).collect();
+        let assets = (*service == "gateway").then(|| "ASSETS".to_string());
+        let want: BTreeSet<String> = settings.bindings(service).into_iter().map(|(n, _, _)| n).chain(class.map(str::to_uppercase)).chain(assets).collect();
         assert_eq!(names, want, "{service}'s bindings");
         for b in meta["bindings"].as_array().unwrap() {
             if b["name"] == "KERNEL_SECRET" || b["name"] == "AUTH_SECRET" || b["name"] == "SCHEDULES_KEY" {
@@ -1042,16 +1086,22 @@ fn a_deploy_to_cloudflare_uploads_each_service_with_its_bindings_and_object() {
     assert!(auth["migrations"].is_null(), "its Durable Object was made once, the first time");
     assert_eq!(deployed[&kernel::worker_name("vault")].0["migrations"]["new_sqlite_classes"], json!(["Vault"]));
 
+    // The gateway serves the web client's files itself, as they were uploaded.
+    let gateway = &deployed[&kernel::worker_name("gateway")].0;
+    assert_eq!(gateway["assets"], json!({ "jwt": "complete", "config": { "html_handling": "none", "not_found_handling": "none", "run_worker_first": true } }));
+    assert_eq!(assets.lock().unwrap()["/index.html"], ("text/html; charset=utf-8".to_string(), web[0].1.clone()));
+    assert_eq!(assets.lock().unwrap()["/screen/kit.css"].0, "text/css; charset=utf-8");
+
     // At one of the account's domains instead, each service is on its own host there, with workers.dev off.
     (settings.address, settings.auth_url, settings.vault_url, settings.schedules_url) = (at("gateway", "andre.example"), at("auth", "andre.example"), at("vault", "andre.example"), at("schedules", "andre.example"));
-    kernel::deploy(&cf, &settings, &modules).unwrap();
+    kernel::deploy(&cf, &settings, &modules, &web).unwrap();
     let addresses = addresses.lock().unwrap();
     for (service, _, _) in kernel::SERVICES {
         let name = kernel::worker_name(service);
         assert_eq!((&addresses[&format!("{name}.andre.example")], &addresses[&format!("{name}.workers.dev")]), (&json!(name), &json!(false)));
     }
     settings.auth_url = "https://one-auth.someone-else.example".into();
-    assert!(kernel::deploy(&cf, &settings, &modules).is_err(), "a host in none of the account's domains is refused");
+    assert!(kernel::deploy(&cf, &settings, &modules, &web).is_err(), "a host in none of the account's domains is refused");
 }
 
 /// Asks `url` as a browser's script would: → (status, headers, body).
