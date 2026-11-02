@@ -350,6 +350,10 @@ impl Bucket for Place {
         let (place, name, bytes, tag) = (self.clone(), name.to_string(), bytes.to_vec(), tag.map(str::to_string));
         tokio::task::spawn_blocking(move || Place::replace(&place, &name, &bytes, tag.as_deref())).await?
     }
+
+    async fn wait(&self, ms: u64) {
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+    }
 }
 
 /// A folder object's tag: a hash of its bytes.

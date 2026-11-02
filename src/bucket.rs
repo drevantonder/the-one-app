@@ -20,6 +20,8 @@ pub trait Bucket {
     fn create(&self, name: &str, bytes: &[u8]) -> impl Future<Output = Result<bool>>;
     /// Replaces an object only while it's the one `tag` names, or with none, only if there's none: false if not.
     fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> impl Future<Output = Result<bool>>;
+    /// Waits before asking again, on the clock of the runtime it's reached from.
+    fn wait(&self, ms: u64) -> impl Future<Output = ()>;
 }
 
 /// A scope's folder in the bucket: `user:<id>` is written `user-<id>`, which every disk takes.
@@ -76,6 +78,7 @@ impl Bucket for Memory {
         objects.insert(name.into(), bytes.to_vec());
         Ok(true)
     }
+    async fn wait(&self, _: u64) {}
     async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
         let mut objects = self.objects.lock().unwrap();
         let now = objects.get(name).map(|b| blake3::hash(b).to_hex().to_string());

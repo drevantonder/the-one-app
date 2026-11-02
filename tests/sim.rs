@@ -1,8 +1,9 @@
 //! Many servers writing one app's database in one bucket over bad links: every request is slow by a random amount, so
 //! they arrive out of order, and some fail, before or after the bucket did what they asked, or time out while still on
-//! their way and land later. Some writes are given up on part way, as a call that runs out of time is, and what they
-//! sent goes on. Every seed must end with every server reading the same database, holding every write it was told
-//! landed, once, and nothing one attempt wrote twice. A failing seed is a bug. `ONE_SIM_SEEDS=<from>..<to>` sweeps more.
+//! their way and land later; now and then the bucket is out of reach for up to a minute and a half. Some writes are
+//! given up on part way, as a call that runs out of time is, and what they sent goes on. Every seed must end with every
+//! server reading the same database, holding every write it was told landed, once, none it was told failed, and nothing
+//! one attempt wrote twice. A failing seed is a bug. `ONE_SIM_SEEDS=<from>..<to>` sweeps more.
 //!
 //! Then the same with each server keeping a copy on its disk, told of some of the others' writes as they're made, and
 //! fetching what it's told of from the bucket into its copy, and reading from its copy alone in between: what it reads
@@ -33,11 +34,16 @@ struct Link {
     going: Arc<std::sync::atomic::AtomicUsize>,
     /// Whether it fails nothing, to read what the bucket holds once every server is done.
     steady: bool,
+    /// Until when the bucket is out of reach.
+    down: Arc<Mutex<tokio::time::Instant>>,
+    /// The attempts at writing that were told they failed, and not that they may have landed.
+    failed: Arc<Mutex<Vec<i64>>>,
 }
 
 impl Link {
     fn new(seed: u64) -> Link {
-        Link { objects: Default::default(), rng: Arc::new(Mutex::new(StdRng::seed_from_u64(seed))), going: Default::default(), steady: false }
+        let rng = Arc::new(Mutex::new(StdRng::seed_from_u64(seed)));
+        Link { objects: Default::default(), rng, going: Default::default(), steady: false, down: Arc::new(Mutex::new(tokio::time::Instant::now())), failed: Default::default() }
     }
 
     /// The same bucket over a link that fails nothing: a new server's read of it, which on a server's own copy goes
@@ -47,18 +53,29 @@ impl Link {
     }
 
     /// Sends a request: it waits on the way there, may fail before it reaches the bucket, may fail after, and its
-    /// answer waits on the way back. Some time out while they're still on their way, and reach the bucket later.
+    /// answer waits on the way back. Some time out while they're still on their way, and reach the bucket later, often
+    /// as the bucket goes out of reach, which nothing else reaches until it's back.
     async fn send<T: 'static>(&self, does: impl FnOnce(&mut BTreeMap<String, Vec<u8>>) -> T + 'static) -> Result<T> {
-        let (there, before, after, back, late) = {
+        let (there, before, after, back, late, outage) = {
             let mut rng = self.rng.lock().unwrap();
             let fails = if self.steady { 0.0 } else { 1.0 };
-            (rng.gen_range(0..100), rng.gen_bool(0.05 * fails), rng.gen_bool(0.05 * fails), rng.gen_range(0..100), rng.gen_bool(0.03 * fails))
+            let (there, before, after, back, late) = (rng.gen_range(0..100), rng.gen_bool(0.05 * fails), rng.gen_bool(0.05 * fails), rng.gen_range(0..100), rng.gen_bool(0.03 * fails));
+            let outage = rng.gen_bool(if late { 0.05 } else { 0.0001 } * fails).then(|| rng.gen_range(1_000..90_000));
+            (there, before, after, back, late, outage)
         };
-        let (objects, going) = (self.objects.clone(), self.going.clone());
+        if let Some(ms) = outage {
+            let mut down = self.down.lock().unwrap();
+            let now = tokio::time::Instant::now();
+            if *down <= now {
+                *down = now + Duration::from_millis(ms);
+            }
+        }
+        let (objects, going, down, steady) = (self.objects.clone(), self.going.clone(), self.down.clone(), self.steady);
         going.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let request = tokio::task::spawn_local(async move {
             tokio::time::sleep(Duration::from_millis(there)).await;
-            let done = (!before).then(|| does(&mut objects.lock().unwrap()));
+            let reached = !before && (late || steady || tokio::time::Instant::now() >= *down.lock().unwrap());
+            let done = reached.then(|| does(&mut objects.lock().unwrap()));
             tokio::time::sleep(Duration::from_millis(back)).await;
             going.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
             match done {
@@ -72,6 +89,14 @@ impl Link {
             bail!("the link dropped it, or it's late");
         }
         request.await.unwrap()
+    }
+
+    /// Checks that no attempt told it failed was written after all.
+    fn none_failed_landed(&self, db: &Db, seed: u64) {
+        let landed: Vec<i64> = db.query("select attempt from attempts", &[]).unwrap().iter().map(|r| r["attempt"].as_i64().unwrap()).collect();
+        for attempt in self.failed.lock().unwrap().iter() {
+            assert!(!landed.contains(attempt), "seed {seed}: a write told it failed was written");
+        }
     }
 
     /// Waits until no request is on its way.
@@ -93,7 +118,11 @@ impl Link {
     async fn write<B: Bucket>(&self, db: &mut Db, bucket: &B, id: u64, server: usize) {
         retry(async || {
             let attempt = self.rng.lock().unwrap().r#gen::<i64>();
-            tokio::time::timeout(self.patience(), db.write(bucket, write(id, server, attempt))).await.unwrap_or_else(|_| bail!("given up on"))
+            let wrote = tokio::time::timeout(self.patience(), db.write(bucket, write(id, server, attempt))).await.unwrap_or_else(|_| bail!("given up on"));
+            if wrote.as_ref().is_err_and(|e| !format!("{e:#}").contains("given up on") && !format!("{e:#}").contains("may have been")) {
+                self.failed.lock().unwrap().push(attempt);
+            }
+            wrote
         })
         .await
     }
@@ -107,6 +136,10 @@ impl Bucket for Link {
     async fn get(&self, name: &str) -> Result<Option<Object>> {
         let name = name.to_string();
         self.send(move |objects| objects.get(&name).map(|b| Object { bytes: b.clone(), tag: tag(b) })).await
+    }
+
+    async fn wait(&self, ms: u64) {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
     }
 
     async fn create(&self, name: &str, bytes: &[u8]) -> Result<bool> {
@@ -144,15 +177,15 @@ fn write(id: u64, server: usize, attempt: i64) -> impl FnMut(&rusqlite::Connecti
 /// Retries what the link fails, as a server does when a person tries again, until a link this bad can't be to blame.
 async fn retry<T>(mut f: impl AsyncFnMut() -> Result<T>) -> T {
     let mut last = None;
-    for _ in 0..1000 {
+    for _ in 0..10_000 {
         match f().await {
             Ok(v) => return v,
-            Err(err) if !format!("{err:#}").contains("the link dropped") && !format!("{err:#}").contains("given up on") && !format!("{err:#}").contains("changed too often") => panic!("it failed, not the link: {err:#}"),
+            Err(err) if !format!("{err:#}").contains("the link dropped") && !format!("{err:#}").contains("given up on") && !format!("{err:#}").contains("changed too often") && !format!("{err:#}").contains("may have been") => panic!("it failed, not the link: {err:#}"),
             Err(err) => last = Some(err),
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    panic!("a thousand tries failed, the last with {:#}", last.unwrap())
+    panic!("ten thousand tries failed, the last with {:#}", last.unwrap())
 }
 
 fn state(db: &Db) -> (Vec<(u64, u64)>, u64) {
@@ -188,6 +221,7 @@ async fn run(seed: u64) {
         retry(async || db.catch_up(&link).await).await;
     }
     let fresh = Db::open(&link.steady(), "global/sim/main", key).await.unwrap();
+    link.none_failed_landed(&fresh, seed);
     let (rows, n) = state(&fresh);
     assert_eq!(rows.len(), SERVERS * WRITES, "seed {seed}: every write landed once");
     assert_eq!(n, rows.len() as u64, "seed {seed}: the count moved once for each write, however often the link lost an answer");
@@ -284,6 +318,7 @@ async fn run_copied(seed: u64) {
     }
     link.settle().await;
     let fresh = Db::open(&link.steady(), "global/sim/main", key).await.unwrap();
+    link.none_failed_landed(&fresh, seed);
     for (db, copy) in dbs.iter_mut().zip(&copies) {
         retry(async || db.catch_up(copy).await).await;
     }

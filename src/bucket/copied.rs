@@ -127,6 +127,10 @@ impl<B: Bucket> Bucket for Copied<B> {
         let moved = self.moved.read().await;
         Bucket::replace(moved.as_ref().unwrap_or(&self.place), name, bytes, tag).await
     }
+
+    async fn wait(&self, ms: u64) {
+        self.place.wait(ms).await
+    }
 }
 
 #[cfg(test)]

@@ -173,6 +173,10 @@ class Bucket {
     return this.put(out.create[name], { "if-none-match": "*" }, name, bytes);
   }
 
+  wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async replace(name, bytes, tag) {
     if (tag === null) return this.create(name, bytes);
     const out = await vault(this.env, this.token, "POST", "/urls", { replace: [{ name, etag: tag }] });

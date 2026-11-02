@@ -47,6 +47,10 @@ impl Bucket for Js {
     async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
         Ok(self.ask("replace", &[name.into(), Uint8Array::from(bytes).into(), tag.map(JsValue::from).unwrap_or(JsValue::NULL)]).await?.is_truthy())
     }
+
+    async fn wait(&self, ms: u64) {
+        let _ = self.ask("wait", &[(ms as f64).into()]).await;
+    }
 }
 
 fn said(err: JsValue) -> anyhow::Error {

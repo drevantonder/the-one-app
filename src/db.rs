@@ -219,21 +219,35 @@ impl Db {
     }
 }
 
+/// How long an object whose answer was lost is sent again for, waiting longer each time, before it may have been
+/// written: a call's own time runs out sooner.
+const ANSWERED_WITHIN_MS: u64 = 60_000;
+
 /// Creates an object that only this server would write with these bytes, such as a write's step: whether they're
-/// there now, rather than another's. When the answer is lost, the same is sent again rather than the bucket asked what's
-/// there, since the first may still be on its way and land after a read that found nothing: a write that took that for
-/// a lost race would run again on top of itself.
+/// there now, rather than another's. When the answer is lost, the same is sent again until the bucket says, rather than
+/// asked what's there, since the first may still be on its way and land after a read that found nothing: a write that
+/// took that for a lost race would run again on top of itself, and one told it failed would be there after all.
 pub async fn created(bucket: &impl Bucket, name: &str, bytes: &[u8]) -> Result<bool> {
-    let mut tries = 0;
+    let (mut sent, mut wait, mut waited) = (false, 100, 0);
     loop {
         match bucket.create(name, bytes).await {
             Ok(true) => return Ok(true),
-            Ok(false) if tries == 0 => return Ok(false),
+            Ok(false) if !sent => return Ok(false),
             // One sent before, whose answer was lost, may be what's there.
-            Ok(false) => return Ok(bucket.get(name).await?.with_context(|| format!("{name} went once written"))?.bytes == bytes),
-            Err(err) if tries == 3 => return Err(err),
-            Err(_) => tries += 1,
+            Ok(false) => {
+                if let Ok(o) = bucket.get(name).await {
+                    return Ok(o.with_context(|| format!("{name} went once written"))?.bytes == bytes);
+                }
+            }
+            Err(_) => {}
         }
+        sent = true;
+        if waited >= ANSWERED_WITHIN_MS {
+            bail!("the bucket didn't answer whether it was written, so it may have been: look before trying again");
+        }
+        bucket.wait(wait).await;
+        waited += wait;
+        wait = (wait * 2).min(5_000);
     }
 }
 
@@ -510,6 +524,7 @@ mod tests {
         async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
             self.0.replace(name, bytes, tag).await
         }
+        async fn wait(&self, _: u64) {}
     }
 
     #[test]
