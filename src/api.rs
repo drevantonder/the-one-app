@@ -89,10 +89,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/sidecars/{app}/calls", get(next_call))
         .route("/v1/sidecars/{app}/calls/{id}", post(reply))
         .route("/v1/sidecars/{app}/calls/{id}/vault", post(fill))
-        // Where sidecars registered before they were called that, as the ones installed then still do.
-        .route("/v1/providers/{app}", post(register))
-        .route("/v1/providers/{app}/calls", get(next_call))
-        .route("/v1/providers/{app}/calls/{id}", post(reply))
         .route("/{app}/{*path}", any(app_http).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
 }
 

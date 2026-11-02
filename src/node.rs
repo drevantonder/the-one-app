@@ -2990,8 +2990,7 @@ impl Node {
         });
         let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "accent": crate::config::ACCENT, "store": settings["store"], "push": settings["push"] });
         let mut state = json!({
-            // `brand` is the same, for shells built before it was `config`.
-            "config": config, "brand": config,
+            "config": config,
             "me": match sign_in {
                 None => json!({ "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user }),
                 Some(client) => json!({ "key": "", "name": client, "user": viewer.user }),

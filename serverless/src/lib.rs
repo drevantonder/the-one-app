@@ -324,7 +324,7 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
     let user = m.user(me).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role }));
     let user_name = m.user(me).map(|u| u.name.clone()).unwrap_or_default();
     let state = json!({
-        "config": config, "brand": config,
+        "config": config,
         "me": { "key": "", "name": client, "user": me },
         "server": { "key": "", "name": "", "ready": true, "guide": null },
         "user": user,
