@@ -48,7 +48,7 @@ struct PagesView: View {
                     ProgressView("Joining…").padding(24).background(.regularMaterial, in: .rect(cornerRadius: 18))
                 } else if store.state == nil, case .unreachable(let message) = store.phase {
                     ContentUnavailableView {
-                        Label("Can’t Reach Your Servers", systemImage: "bolt.horizontal.circle")
+                        Label("Can’t Reach Your Devices", systemImage: "bolt.horizontal.circle")
                     } description: {
                         Text(message)
                     } actions: {

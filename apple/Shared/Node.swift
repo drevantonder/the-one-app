@@ -250,7 +250,7 @@ struct HTTPNode: NodeTransport {
     var auth: Auth?
 
     var unreachable: String {
-        auth == nil ? "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." : String(localized: "Your servers aren’t answering.")
+        auth == nil ? "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." : String(localized: "Your devices aren’t answering.")
     }
 
     /// A request as the person signed in, if this goes through the address: a refused token is renewed once.
@@ -285,7 +285,7 @@ struct HTTPNode: NodeTransport {
             struct Failure: Decodable { var error: String? }
             let error = (try? JSONDecoder().decode(Failure.self, from: data))?.error
             if auth != nil, status == 401 { throw Auth.SignedOut(message: error ?? String(localized: "Sign in again.")) }
-            throw NodeError(error ?? (auth != nil && status >= 500 ? String(localized: "Your servers aren’t answering.") : "The node answered \(status)"))
+            throw NodeError(error ?? (auth != nil && status >= 500 ? String(localized: "Your devices aren’t answering.") : "The node answered \(status)"))
         }
         return data
     }
@@ -501,7 +501,7 @@ struct NodeClient: Sendable {
     /// request's do (a server that a phone asks matches bare paths). → its JSON reply.
     func api(_ method: String, _ path: String, body: Any?) async throws -> Any {
         var parts = URLComponents(string: path)
-        guard let bare = parts?.path, bare.hasPrefix("/v1/"), !bare.contains("..") else { throw NodeError("That isn't your server's.") }
+        guard let bare = parts?.path, bare.hasPrefix("/v1/"), !bare.contains("..") else { throw NodeError("That isn't your device's.") }
         var fields = body as? [String: Any] ?? [:]
         for item in parts?.queryItems ?? [] { fields[item.name] = item.value ?? "" }
         parts?.queryItems = nil

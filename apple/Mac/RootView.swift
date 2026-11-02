@@ -190,7 +190,7 @@ private struct RecoverySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Save Your Recovery Key").font(.title2.weight(.semibold))
-            Text("Put it in 1Password now. It’s shown only this once, and it’s the only way to restore from a backup if every server is lost.")
+            Text("Put it in 1Password now. It’s shown only this once, and it’s the only way to restore from a backup if every device is lost.")
                 .foregroundStyle(.secondary)
             Text(key)
                 .font(.system(.body, design: .monospaced))
