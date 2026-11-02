@@ -83,7 +83,9 @@ Usage:
                                        a link that lets someone join, once and for a few days, by making their
                                        passkey, as who they are in the install (--user, or this machine's person for
                                        the first), so nodes know them; nobody joins uninvited, the first person too.
-                                       For someone who lost every passkey, --user them and pipe the recovery key
+                                       For someone who lost every passkey, --user them and pipe the recovery key.
+                                       Where people sign in with Google, --user <id> --email <email> instead says
+                                       who someone who was in the install before is, when they first sign in
   {CLI} kernel keys                    give the kernel's vault the keys of the scopes this machine's node holds, made
                                        before the install had a kernel, so its serverless node opens the same data; only
                                        before the vault has given out keys under them
@@ -382,7 +384,11 @@ fn run(args: Vec<String>) -> Result<()> {
                     settings.save()?;
                     println!("Its recovery key, shown only this once; keep it in your admins' password manager:\n\n  {recovery}\n");
                     println!("Keep {} too: the kernel's secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an op(op://…) reference in its place.\n", one::kernel::Settings::path().with_file_name(".env.local").display());
-                    settings
+                    // People signing in with Google need its OAuth client, which is put beside the secrets first.
+                    match one::config::SIGN_IN {
+                        "google" => one::kernel::Settings::load()?,
+                        _ => settings,
+                    }
                 }
             };
             let modules = one::kernel::SERVICES.iter().map(|(_, entry, _)| one::kernel::module(entry)).collect::<Result<Vec<_>>>()?;
@@ -418,6 +424,13 @@ fn run(args: Vec<String>) -> Result<()> {
             // So Devices shows it, for its admins to say where it comes in the order things run in.
             post("/v1/settings", json!({ "name": "serverless", "value": "on" }))?;
             println!("The serverless node is in your Cloudflare account, and {} sends /v1/ and /mcp to it; what needs a machine goes on to {}.", settings.address, settings.node_url.as_deref().unwrap_or("no machine yet: kernel set node-url"));
+        }
+        ["kernel", "invite", name] if one::config::SIGN_IN == "google" => {
+            let settings = one::kernel::Settings::load()?;
+            let (user, email) = (flags.get("user").and_then(Value::as_str), flags.get("email").and_then(Value::as_str));
+            let (Some(user), Some(email)) = (user, email) else { bail!("people here join by signing in with Google: --user <id> --email <email> says who someone who was in the install before is, when they first sign in") };
+            one::kernel::known_as(&settings, name, user, email)?;
+            println!("When {email} first signs in with Google, they're {name} in the install.");
         }
         ["kernel", "invite", name] => {
             let settings = one::kernel::Settings::load()?;

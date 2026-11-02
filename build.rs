@@ -46,6 +46,11 @@ fn main() {
     };
     let out = format!("{out}pub const CONFIG_FILE: &str = {:?};\npub const CONFIG_REPO: &str = {repo:?};\n", file.to_string_lossy());
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\n", optional("release_key"), optional("release_signer"));
+    // How people sign in: with a passkey, or with Google at the install's domain.
+    let sign_in = config.get("sign_in").and_then(|v| v.as_str()).unwrap_or("passkey");
+    assert!(["passkey", "google"].contains(&sign_in), "sign_in is passkey or google");
+    assert!(sign_in != "google" || !optional("join_domain").is_empty(), "signing in with Google needs join_domain");
+    let out = format!("{out}pub const SIGN_IN: &str = {sign_in:?};\npub const JOIN_DOMAIN: &str = {:?};\n", optional("join_domain"));
     // The install settings an install has until its admins set them (`setting` entries).
     let mut settings = String::new();
     for (name, value) in config.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {

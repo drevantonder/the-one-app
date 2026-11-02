@@ -1,5 +1,4 @@
 import SwiftUI
-import AuthenticationServices
 
 struct RootView: View {
     @Environment(Store.self) private var store
@@ -113,12 +112,10 @@ private struct ServicesSheet: View {
 /// Creating an install, or joining one with a pairing code; or, for a white label with one install, signing in to it.
 private struct WelcomeView: View {
     @Environment(Store.self) private var store
-    @Environment(\.webAuthenticationSession) private var session
     @State private var name = ""
     @State private var you = NSFullUserName()
     @State private var error: String?
     @State private var recovery: String?
-    @State private var signingIn = false
     @State private var asking = false
 
     private var ready: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty && !you.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -131,58 +128,18 @@ private struct WelcomeView: View {
                     .frame(width: 112, height: 112)
                 Text(store.config?.name ?? appName)
                     .font(.largeTitle.weight(.semibold))
-                if SignIn.configured == nil {
-                    Text("Start it here, or join from another device.")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 520)
-                }
+                Text("Start it here, or join from another device.")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 520)
             }
-            if let signIn = SignIn.configured { signInForm(signIn) } else { createForm }
+            createForm
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(item: Binding(get: { recovery.map(RecoveryKey.init) }, set: { if $0 == nil { recovery = nil } })) { RecoverySheet(key: $0.key) }
         .sheet(isPresented: $asking) { AskYourAgentSheet(prompt: store.askYourAgent) }
-    }
-
-    private func signInForm(_ signIn: SignIn) -> some View {
-        VStack(spacing: 12) {
-            Button { start(signIn) } label: {
-                Text(signIn.title)
-                    .opacity(signingIn ? 0 : 1)
-                    .overlay { if signingIn { ProgressView().controlSize(.small) } }
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(signingIn)
-            if let error {
-                Label(error, systemImage: "exclamationmark.circle.fill")
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: 440)
-            }
-            Button("Have a pairing code? Join…") { store.sheet = .join }
-                .buttonStyle(.link)
-            Button("Or ask your agent to set it up…") { asking = true }
-                .buttonStyle(.link)
-        }
-    }
-
-    private func start(_ signIn: SignIn) {
-        Task {
-            signingIn = true
-            error = nil
-            defer { signingIn = false }
-            do {
-                guard let (code, _) = try await signIn.run(session) else { return }
-                try await store.join(code)
-            } catch let failure as SignInError {
-                error = failure.message
-            } catch {
-                self.error = joinFailure(error)
-            }
-        }
     }
 
     private var createForm: some View {

@@ -139,6 +139,9 @@ pub struct Claims {
     pub exp: u64,
     #[serde(default)]
     pub jti: String,
+    /// The person's name, as the auth service knows them.
+    #[serde(default)]
+    pub name: String,
 }
 
 impl Claims {

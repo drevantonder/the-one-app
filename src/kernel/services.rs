@@ -66,6 +66,17 @@ pub struct Settings {
     /// in the app (App Links) only if the address lists the app's package and one of them.
     #[serde(default)]
     pub android: Vec<String>,
+    /// For an install whose people sign in with Google (`config::SIGN_IN`): the vault's own key, which opens their
+    /// keys, and the Google OAuth client they sign in with, `(id, secret)`.
+    #[serde(default, skip_serializing)]
+    pub vault_key: String,
+    #[serde(default, skip_serializing)]
+    pub google: Option<(String, String)>,
+}
+
+/// Whether people sign in with Google, which the vault then opens their keys for itself.
+fn google() -> bool {
+    crate::config::SIGN_IN == "google"
 }
 
 /// What Varlock reads the kernel's secrets by, each named as the services' binding is; `.env.local` gives their values.
@@ -80,6 +91,13 @@ AUTH_SECRET=
 SCHEDULES_KEY=
 # @optional
 BUCKET=
+# For an install whose people sign in with Google: the vault's own key, and their Google OAuth client.
+# @optional
+VAULT_KEY=
+# @optional
+GOOGLE_CLIENT_ID=
+# @optional
+GOOGLE_CLIENT_SECRET=
 ";
 
 /// The Varlock `kernel` reads secrets with, and each platform's download of it with the download's sha256, as its
@@ -173,6 +191,11 @@ impl Settings {
         settings.auth_secret = get("AUTH_SECRET").context("no AUTH_SECRET")?;
         settings.schedules_key = serde_json::from_str(&get("SCHEDULES_KEY").context("no SCHEDULES_KEY")?).context("SCHEDULES_KEY isn't JSON")?;
         settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
+        if google() {
+            settings.vault_key = get("VAULT_KEY").context("no VAULT_KEY, which people signing in with Google need")?;
+            settings.google = get("GOOGLE_CLIENT_ID").zip(get("GOOGLE_CLIENT_SECRET"));
+            ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client people sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
+        }
         Ok(settings)
     }
 
@@ -199,6 +222,8 @@ impl Settings {
             resources: vec![],
             bucket: None,
             android: vec![],
+            vault_key: if google() { secret() } else { String::new() },
+            google: None,
         };
         (settings, data_encoding::HEXLOWER.encode(&seed))
     }
@@ -214,6 +239,9 @@ impl Settings {
             }
             if let Some(bucket) = &self.bucket {
                 text += &format!("BUCKET={}\n", quoted(&bucket.to_string()));
+            }
+            if !self.vault_key.is_empty() {
+                text += &format!("VAULT_KEY={}\n", quoted(&self.vault_key));
             }
             write_private(&local(), &text)?;
         }
@@ -261,6 +289,10 @@ impl Settings {
                 plain("VAULT", "service:vault".into());
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
+                if google() {
+                    plain("SIGN_IN", "google".into());
+                    plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN.into());
+                }
                 // Tokens are for the install's address unless a client asks for a node's own.
                 let resources: Vec<&String> = std::iter::once(&self.address).chain(&self.resources).collect();
                 plain("RESOURCES", json!(resources).to_string());
@@ -269,6 +301,9 @@ impl Settings {
                 plain("AUTH", "service:auth".into());
                 plain("ISSUER", issuer);
                 plain("RECOVERY_KEY", self.recovery_key.clone());
+                if google() {
+                    plain("SIGN_IN", "google".into());
+                }
             }
             _ => {
                 plain("VAULT", "service:vault".into());
@@ -277,10 +312,19 @@ impl Settings {
             }
         }
         match service {
-            "auth" => out.push(("AUTH_SECRET".into(), self.auth_secret.clone(), true)),
+            "auth" => {
+                out.push(("AUTH_SECRET".into(), self.auth_secret.clone(), true));
+                if let Some((id, secret)) = self.google.clone().filter(|_| google()) {
+                    out.push(("GOOGLE_CLIENT_ID".into(), id, false));
+                    out.push(("GOOGLE_CLIENT_SECRET".into(), secret, true));
+                }
+            }
             "vault" => {
                 if let Some(bucket) = &self.bucket {
                     out.push(("BUCKET".into(), bucket.to_string(), true));
+                }
+                if google() {
+                    out.push(("VAULT_KEY".into(), self.vault_key.clone(), true));
                 }
             }
             _ => out.push(("SCHEDULES_KEY".into(), self.schedules_key.to_string(), true)),
@@ -683,6 +727,7 @@ pub struct Invite {
 /// already lost every passkey: their link carries their keys, opened with the recovery key's secret (`recovery` gives
 /// it, asked only then), for their new passkey.
 pub fn invite(settings: &Settings, name: &str, user: Option<&str>, recovery: impl FnOnce() -> Option<String>) -> Result<Invite> {
+    ensure!(!google(), "people here sign in with Google, so they need no invite: {} kernel invite --email says who someone is in the install", crate::config::CLI);
     let held = match user {
         Some(user) => people(settings)?.into_iter().find(|p| p["user"] == user),
         None => None,
@@ -702,6 +747,14 @@ pub fn invite(settings: &Settings, name: &str, user: Option<&str>, recovery: imp
         internal(&settings.vault_url, "recover", &settings.kernel_secret, json!({ "user": user, "key": B64U.encode(&key), "secret": token, "until": until }))?;
     }
     Ok(Invite { link: format!("{}/invite#{token}", settings.address), until })
+}
+
+/// On an install whose people sign in with Google, says who `email` is in the install (`user`, who `name` is) when they
+/// first sign in, for someone who was in it before it had a kernel: → until when it holds.
+pub fn known_as(settings: &Settings, name: &str, user: &str, email: &str) -> Result<u64> {
+    ensure!(google(), "people here sign in with a passkey: an invite link lets someone in");
+    let out = internal(&settings.auth_url, "invite", &settings.kernel_secret, json!({ "name": name, "user": user, "email": email }))?;
+    Ok(out["until"].as_u64().unwrap_or(0))
 }
 
 /// A web file's type, by its extension.

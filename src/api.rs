@@ -358,12 +358,12 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     let (address, vault) = node.kernel()?;
     let issuer = node.issuer()?;
     let asked = token.clone();
-    let (user, until, session) = tokio::task::spawn_blocking(move || {
+    let (user, until, session, name) = tokio::task::spawn_blocking(move || {
         let vault = crate::kernel::Vault { url: vault };
         if asked.starts_with("run.") {
             let session = vault.session(&asked)?;
             anyhow::ensure!(session.client.as_deref() == Some("schedules"), "that token isn't a scheduled run's");
-            return Ok((session.user.clone(), session.until, session));
+            return Ok((session.user.clone(), session.until, session, String::new()));
         }
         let claims = issuer.verify(&asked, now)?;
         // MCP clients sign in for the address's MCP endpoint, as MCP names a server.
@@ -371,10 +371,12 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
         anyhow::ensure!(claims.for_resource(address) || claims.for_resource(&format!("{address}/mcp")), "that sign-in isn't for {address}");
         let session = vault.session(&asked)?;
         anyhow::ensure!(session.user == claims.sub, "that sign-in's session is someone else's");
-        Ok((claims.sub, (claims.exp * 1000).min(session.until), session))
+        Ok((claims.sub, (claims.exp * 1000).min(session.until), session, claims.name))
     })
     .await??;
-    anyhow::ensure!(node.is_user(&user), "you aren't a person of this install yet: an admin lets you in with {} kernel invite", crate::config::CLI);
+    if !node.is_user(&user) {
+        node.let_in(&user, &name).await?;
+    }
     let me = Me { caller: Caller { key: node.id(), user, agent: None, token: Some(token) }, sign_in: Some(session.name.clone().unwrap_or_default()) };
     let mut kept = SIGNED_INS.lock().unwrap();
     kept.retain(|_, (_, until)| now < *until);

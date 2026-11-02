@@ -31,8 +31,6 @@ targets:
         NodePort: "${CONFIG_PORT}"
         Accent: ${CONFIG_ACCENT}
         BuildCommit: ${BUILD_COMMIT}
-        SignIn: ${CONFIG_SIGN_IN}
-        SignInAccount: ${CONFIG_ACCOUNT}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         # <cli>://secret?id=…&scope=…: an agent's request that the person set a secret.

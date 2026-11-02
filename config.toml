@@ -16,6 +16,11 @@ apps = ["board", "repos", "apps", "devices"]
 # The apps every agent needs from the start: MCP's instructions carry their guide in full (the rest come with search),
 # and `one mcp --code` keeps their tools as tools, beside search and execute.
 always_on = ["board"]
+# How people sign in, which is also what opens their keys at the kernel's vault: "passkey", whose PRF output opens them,
+# or "google", for a workplace whose people sign in with their Google account at join_domain every time, and join by
+# doing so: the vault then opens their keys itself, so whoever controls the kernel can read the install's data.
+sign_in = "passkey"
+join_domain = ""
 # Artwork, relative to this file: the app icon (1024px), the menu bar template (18pt, with an @2x),
 # and the logo the apps show inside themselves.
 icon = "icons/AppIcon.png"
@@ -25,10 +30,8 @@ logo = "icons/Logo.png"
 # An install's settings until its admins change them in Settings (`setting` entries). Every install has:
 # store, the app the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.install);
 # push, the sidecar phones register their push tokens with and apps push through (sidecars/push), empty for off;
-# made_here, what the App Store calls the apps made in the install, beside the ones built in; and join_domain, the
-# email domain people may join with by signing in, where the work-email join sidecar runs (sidecars/workjoin).
+# and made_here, what the App Store calls the apps made in the install, beside the ones built in.
 [settings]
 store = "apps"
 push = "push"
 made_here = "Made here"
-join_domain = ""

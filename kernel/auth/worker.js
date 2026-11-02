@@ -1,5 +1,6 @@
 // The auth service: who you are. Better Auth, in a Durable Object: sign-in by passkey only, since only a passkey's PRF
-// output opens a person's keys, and an OAuth server (per MCP's authorization spec) that every client signs in through: the iPhone and Mac apps,
+// output opens a person's keys, or, on an install whose people sign in with their work Google account (`SIGN_IN`), by
+// Google only, every time, limited to the install's domain (`JOIN_DOMAIN`); and an OAuth server (per MCP's authorization spec) that every client signs in through: the iPhone and Mac apps,
 // and MCP clients like Claude Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at
 // /api/auth/jwks, so nodes and the vault check them offline.
 //
@@ -12,6 +13,10 @@
 // Nobody signs up uninvited, the install's first person too: `one kernel invite` makes a link that works once, for a
 // few days, and opening it lets its person make their first passkey, which makes their keys. A link for someone who
 // lost every passkey carries their keys, opened with the recovery key, for their new one.
+//
+// Signing in with Google, anyone at the domain joins by signing in, and the vault opens their keys itself once Google
+// says it's them. An invite there only says who someone with an email is in the install, for those who were in it
+// before it signed people in this way.
 
 import { DurableObject } from "cloudflare:workers";
 import { oauthProvider } from "@better-auth/oauth-provider";
@@ -33,6 +38,8 @@ const refuse = (status, message) => {
 const INVITE = 3 * 86_400_000;
 /// How long a sign-in code works.
 const CODE = 10 * 60_000;
+/// How lately someone signed in with Google for a client to be added as them.
+const FRESH = 5 * 60_000;
 /// A sign-in code's letters: no vowels, so it spells no word, and none that look alike.
 const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
 
@@ -62,6 +69,7 @@ export class Auth extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     ctx.storage.sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null, until integer not null, used integer)");
+    if (!ctx.storage.sql.exec("select name from pragma_table_info('invites') where name = 'email'").toArray().length) ctx.storage.sql.exec("alter table invites add column email text");
     ctx.storage.sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const options = this.options();
@@ -90,6 +98,7 @@ export class Auth extends DurableObject {
     const resources = JSON.parse(env.RESOURCES || "[]").flatMap((r) => [r, `${r}/mcp`]);
     const sql = this.ctx.storage.sql;
     const self = this;
+    const google = env.SIGN_IN === "google";
     return {
       appName: env.NAME || "The One App",
       baseURL: url.origin,
@@ -99,13 +108,21 @@ export class Auth extends DurableObject {
       trustedOrigins: [url.origin],
       telemetry: { enabled: false },
       advanced: { database: { generateId: hex16 } },
+      socialProviders: google ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET, hd: env.JOIN_DOMAIN, prompt: "select_account" } } : {},
       databaseHooks: {
         user: {
           create: {
             // Only someone invited signs up (their passkey's registration makes them), as who the invite says they
-            // are in the install, so nodes know them by the same id.
+            // are in the install, so nodes know them by the same id. Signing in with Google, anyone at the domain
+            // does, as who an invite for their email says, if there is one.
             async before(user) {
-              if (!self.admitting || user.id !== self.admitting) return false;
+              if (!google) return self.admitting && user.id === self.admitting ? undefined : false;
+              const email = String(user.email || "").toLowerCase();
+              if (!user.emailVerified || !email.endsWith(`@${env.JOIN_DOMAIN}`)) return false;
+              const [invite] = sql.exec("select id, name, user from invites where email = ? and used is null order by until desc", email).toArray();
+              if (!invite) return;
+              sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
+              return { data: { ...user, id: invite.user, name: invite.name } };
             },
           },
         },
@@ -134,7 +151,7 @@ export class Auth extends DurableObject {
       },
       plugins: [
         jwt({ jwks: { keyPairConfig: { alg: "EdDSA", crv: "Ed25519" } }, jwt: { issuer: `${url.origin}/api/auth`, expirationTime: "1h" } }),
-        passkey({
+        ...(google ? [] : [passkey({
           rpID: url.hostname,
           rpName: env.NAME || "The One App",
           origin: url.origin,
@@ -152,9 +169,10 @@ export class Auth extends DurableObject {
               return { name: passkeyName(verification.registrationInfo?.aaguid, clientData.response?.transports || [], ctx.headers?.get("user-agent") || "") };
             },
           },
-        }),
+        })]),
         oauthProvider({
-          // Signed in or not, a client's authorization is the sign-in page: its passkey is what gives the client keys.
+          // Signed in or not, a client's authorization is the sign-in page: its passkey (or Google) is what gives the
+          // client keys.
           loginPage: "/sign-in",
           consentPage: "/sign-in",
           scopes: ["openid", "profile", "offline_access"],
@@ -167,6 +185,8 @@ export class Auth extends DurableObject {
           accessTokenExpiresIn: 3600,
           refreshTokenReuseInterval: 0,
           storeTokens: "hashed",
+          // Who a token is for, by name, so a node lets someone new in as who they are.
+          customAccessTokenClaims: ({ user }) => (user ? { name: user.name } : {}),
         }),
       ],
     };
@@ -196,19 +216,22 @@ export class Auth extends DurableObject {
       }
       const name = this.auth.options.appName;
       if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp") return this.protectedResource(path, name);
-      if (path === "/sign-in" && request.method === "GET") return html(signInPage({ name }));
+      const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
+      if (path === "/sign-in" && request.method === "GET") return html(signInPage({ name, google }));
+      if (path === "/internal/invite" && request.method === "POST") return json(await this.invite(request, await request.json()));
+      if (path === "/sign-in/about") return json(await this.about(request, url.searchParams.get("client_id")));
+      if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
+      if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), name, google);
+      if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ name, google, done: await this.codeDone(url.searchParams) }));
+      if (path === "/sign-in/code/take" && request.method === "POST") return this.codeTaken(await request.json());
+      if (path === "/sign-in/accept" && request.method === "POST") return json(await (google ? this.acceptGoogle(request, await request.json()) : this.accept(request, await request.json())));
+      // Passkeys and invite links are only for an install whose people sign in with a passkey.
+      if (google) return new Response("not found", { status: 404 });
       if (path === "/invite" && request.method === "GET") return html(invitePage({ name }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
       if (path === "/invite/keys" && request.method === "POST") return json(await this.inviteKeys(request, await request.json()));
       if (path === "/passkeys" && request.method === "GET") return html(passkeysPage({ name }));
       if (path === "/passkeys/add" && request.method === "POST") return json(await this.addPasskey(request, await request.json()));
-      if (path === "/sign-in/about") return json(await this.about(request, url.searchParams.get("client_id")));
-      if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
-      if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), name);
-      if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ name, done: await this.codeDone(url.searchParams) }));
-      if (path === "/sign-in/code/take" && request.method === "POST") return this.codeTaken(await request.json());
-      if (path === "/sign-in/accept" && request.method === "POST") return json(await this.accept(request, await request.json()));
-      if (path === "/internal/invite" && request.method === "POST") return json(await this.invite(request, await request.json()));
       return new Response("not found", { status: 404 });
     } catch (err) {
       // Our own refusals have a numeric status; Better Auth's say theirs in statusCode.
@@ -244,15 +267,15 @@ export class Auth extends DurableObject {
     return client;
   }
 
-  /// What signing in to a client says: its name (the install's, for the web client, which is at its address), and
-  /// the person's, if they're signed in here already.
+  /// What signing in to a client says: its name (the install's, for the web client, which is at its address), the
+  /// person's, if they're signed in here already, and whether they just signed in with Google.
   async about(request, clientId) {
     const session = await this.auth.api.getSession({ headers: request.headers });
     const client = await this.client(clientId);
     const origin = new URL(this.env.ADDRESS).origin;
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const web = uris.length > 0 && uris.every((u) => u === `${origin}/callback`);
-    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, person: session?.user.name || null };
+    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, person: session?.user.name || null, fresh: !!session && fresh(session) };
   }
 
   // Signing in with a code, for a client with no browser of its own (the CLI on a server): it makes an authorization
@@ -279,11 +302,11 @@ export class Auth extends DurableObject {
   }
 
   /// The page a code is typed into, or with one (`c`), on to its sign-in.
-  codeOpened(typed, name) {
-    if (typed == null) return html(codePage({ name }));
+  codeOpened(typed, name, google) {
+    if (typed == null) return html(codePage({ name, google }));
     const code = String(typed).toUpperCase().replace(/[^A-Z]/g, "");
     const [row] = this.ctx.storage.sql.exec("select query from codes where code = ? and until > ? and back is null", code, Date.now()).toArray();
-    if (!row) return html(codePage({ name, error: "That code doesn't work: it may have expired. Start signing in again where you got it." }));
+    if (!row) return html(codePage({ name, google, error: "That code doesn't work: it may have expired. Start signing in again where you got it." }));
     return Response.redirect(`${new URL(this.env.ADDRESS).origin}/api/auth/oauth2/authorize?${row.query}`, 302);
   }
 
@@ -366,6 +389,32 @@ export class Auth extends DurableObject {
   async accept(request, { oauth_query, prf, credential }) {
     const { user } = await this.session(request);
     this.passkeyOf(user.id, credential);
+    return this.consent(request, user, oauth_query, async (client, code) => {
+      // A passkey that opens no keys gets the client nothing: its code, never handed over, is never used.
+      try {
+        await this.vault("grant", { user: user.id, from: prf, to: code, name: client.name || client.clientId, client: client.clientId });
+      } catch (err) {
+        if (err.status === 403) refuse(403, "This passkey doesn't open your keys yet: add it on your Passkeys page with one that does.");
+        throw err;
+      }
+    });
+  }
+
+  /// Signing in to a client with Google, just now: the client gets a code, and the vault opens the person's keys for
+  /// it. The sign-in here ends with it, so the next client asks Google again.
+  async acceptGoogle(request, { oauth_query }) {
+    const signedIn = await this.session(request);
+    const { user } = signedIn;
+    if (!fresh(signedIn)) refuse(403, "Sign in with Google again.");
+    const out = await this.consent(request, user, oauth_query, (client, code) =>
+      this.vault("google", { user: user.id, to: code, name: client.name || client.clientId, client: client.clientId }));
+    await (await this.auth.$context).internalAdapter.deleteSession(signedIn.session.token);
+    return out;
+  }
+
+  /// Lets a client's authorization (`oauth_query`) through as `user`, with `keys(client, code)` giving its code a copy of
+  /// their keys before it's handed over: → where the client goes on to.
+  async consent(request, user, oauth_query, keys) {
     const query = new URLSearchParams(oauth_query || "");
     const client = await this.client(query.get("client_id"));
     const headers = new Headers(request.headers);
@@ -374,32 +423,35 @@ export class Auth extends DurableObject {
     const resp = await this.auth.handler(new Request(new URL("/api/auth/oauth2/consent", request.url), { method: "POST", headers, body: JSON.stringify({ accept: true, oauth_query }) }));
     const out = await resp.json().catch(() => ({}));
     if (!resp.ok) throw Object.assign(new Error(out.error_description || out.message || "signing in didn't work"), { status: resp.status });
-    // Every authorization asks for the passkey, since that's what gives a client keys: none is kept for next time.
+    // Every authorization asks for the passkey (or Google), since that's what gives a client keys: none is kept for
+    // next time.
     this.ctx.storage.sql.exec("delete from oauthConsent where clientId = ? and userId = ?", client.clientId, user.id);
     const code = new URL(out.url).searchParams.get("code");
     if (!code) throw Object.assign(new Error("signing in gave no code"), { status: 500 });
-    // A passkey that opens no keys gets the client nothing: its code, never handed over, is never used.
-    try {
-      await this.vault("grant", { user: user.id, from: prf, to: code, name: client.name || client.clientId, client: client.clientId });
-    } catch (err) {
-      if (err.status === 403) refuse(403, "This passkey doesn't open your keys yet: add it on your Passkeys page with one that does.");
-      throw err;
-    }
+    await keys(client, code);
     return { url: out.url };
   }
 
   /// An invite for `name` (only a label), as `user` (their id in the install; a new one if not given): → the secret its
   /// link carries, kept here only as a hash, and until when it works. The kernel's own tools ask, with its secret.
-  async invite(request, { name, user }) {
+  /// Signing in with Google, it's for `email` instead: who they are when they first sign in, with no link.
+  async invite(request, { name, user, email }) {
     if (request.headers.get("x-kernel-secret") !== this.env.KERNEL_SECRET) refuse(403, "only the kernel asks that");
     if (typeof name !== "string" || !name.trim()) refuse(400, "give the person's name");
     if (user != null && !/^[0-9a-f]{16}$/.test(user)) refuse(400, "a user id is 16 hex characters");
+    const google = this.env.SIGN_IN === "google";
+    if (google && !String(email || "").toLowerCase().endsWith(`@${this.env.JOIN_DOMAIN}`)) refuse(400, `people here sign in with Google: give their email at ${this.env.JOIN_DOMAIN}`);
     const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
     const until = Date.now() + INVITE;
     this.ctx.storage.sql.exec("delete from invites where until <= ?", Date.now());
-    this.ctx.storage.sql.exec("insert into invites (id, name, user, until) values (?, ?, ?, ?)", await inviteId(token), name.trim(), user ?? hex16(), until);
-    return { token, until };
+    this.ctx.storage.sql.exec("insert into invites (id, name, user, until, email) values (?, ?, ?, ?, ?)", await inviteId(token), name.trim(), user ?? hex16(), until, google ? email.toLowerCase() : null);
+    return google ? { until } : { token, until };
   }
+}
+
+/// Whether a sign-in here was made just now: Google's, which a client is added with.
+function fresh(session) {
+  return Date.now() - new Date(session.session.createdAt).getTime() < FRESH;
 }
 
 function html(text) {

@@ -28,9 +28,7 @@
         <label class="row plain"><div class="main"><div class="title"><span>Push Notifications</span></div></div><input type="checkbox" class="switch" id="push"${push() ? " checked" : ""}></label>
         ${push() ? `<div class="row plain go" id="push-key"><div class="main"><div class="title"><span>Apple Push Key</span><span class="value">${one.esc(pushKey)}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>` : ""}
       </div>
-      <h2 class="section">Joining</h2>
-      <div class="list"><label class="row plain field"><span>Work Email Domain</span><input data-setting="join_domain" placeholder="example.org" autocapitalize="off" spellcheck="false" value="${one.esc(settings.join_domain || "")}"></label></div>
-      <p class="footer${error ? " error" : ""}">${one.esc(error || "People with an email at this domain join by signing in.")}</p>`;
+      ${error ? `<p class="footer error">${one.esc(error)}</p>` : ""}`;
   });
 
   async function set(name, value) {

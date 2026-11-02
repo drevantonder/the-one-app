@@ -91,8 +91,10 @@ const page = (title, body, script) => `<!doctype html><html><head><meta charset=
 const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system.";
 
 /// Signing in, to the install or, sent here by a client's authorization (\`oauth_query\`), to that client: the client
-/// is the person, with everything they can use, so the passkey is all it asks for.
-export function signInPage({ name }) {
+/// is the person, with everything they can use, so the passkey is all it asks for. With Google (\`google\`, the
+/// install's domain), it's signing in with Google, each time.
+export function signInPage({ name, google }) {
+  if (google) return googlePage({ name, google });
   const body = `
     <h1 id="title">Sign in to ${escape(name)}</h1>
     <p id="what">With your passkey: it's what opens your keys.</p>
@@ -117,6 +119,42 @@ export function signInPage({ name }) {
         const { prf, credential } = await withPasskey();
         location.href = client_id ? (await api("/sign-in/accept", { oauth_query, prf, credential })).url : "/";
       } catch (err) { quietly(err); }
+    };`;
+  return page(`Sign in to ${name}`, body, script);
+}
+
+function googlePage({ name, google }) {
+  const body = `
+    <h1 id="title">Sign in to ${escape(name)}</h1>
+    <p id="what">With your Google account at ${escape(google)}.</p>
+    <button class="primary" id="google">Sign In with Google</button>`;
+  const script = `
+    // Google's answer comes back here, with an error added to the query if it said no.
+    const raw = location.search.slice(1);
+    const failed = /(^|&)error=/.test(raw);
+    const oauth_query = raw.replace(/(^|&)error(_description)?=[^&]*/g, "").replace(/^&/, "");
+    const client_id = new URLSearchParams(oauth_query).get("client_id");
+    const install = ${JSON.stringify(name).replaceAll("<", "\\u003c")};
+    const domain = ${JSON.stringify(google).replaceAll("<", "\\u003c")};
+    const back = client_id ? "/sign-in?" + oauth_query : "/";
+    if (failed) say("That didn't sign you in. Use your Google account at " + domain + ".");
+    if (client_id) (async () => {
+      try {
+        const about = await api("/sign-in/about?client_id=" + encodeURIComponent(client_id));
+        const title = "Sign in to " + about.client;
+        document.title = title;
+        document.getElementById("title").textContent = title;
+        if (!about.web) document.getElementById("what").textContent = about.client + " will act as you, with everything you can use in " + install + ", until you sign it out.";
+        // Back from Google just now: on to the client.
+        if (about.fresh && !failed) location.replace((await api("/sign-in/accept", { oauth_query })).url);
+      } catch (err) { say(err.message); }
+    })();
+    document.getElementById("google").onclick = async () => {
+      say();
+      try {
+        const out = await api("/api/auth/sign-in/social", { provider: "google", callbackURL: back, errorCallbackURL: back });
+        location.href = out.url;
+      } catch (err) { say(err.message); }
     };`;
   return page(`Sign in to ${name}`, body, script);
 }
@@ -217,8 +255,8 @@ export function passkeysPage({ name }) {
 }
 
 /// Signing in with a code another device shows (the CLI on a server): typing it here goes on to signing in with a
-/// passkey; `done` says how that went, once it's back.
-export function codePage({ name, error = "", done }) {
+/// passkey (or Google); `done` says how that went, once it's back.
+export function codePage({ name, google, error = "", done }) {
   if (done !== undefined) {
     const body = done
       ? `<h1>You're signed in</h1><p>Go back to where you got the code: it carries on by itself.</p>`
@@ -227,7 +265,7 @@ export function codePage({ name, error = "", done }) {
   }
   const body = `
     <h1>Sign in with a code</h1>
-    <p>Type the code you were shown, then sign in with your passkey. Only use a code you got yourself, on your own device.</p>
+    <p>Type the code you were shown, then sign in with ${google ? "Google" : "your passkey"}. Only use a code you got yourself, on your own device.</p>
     <form id="form"><input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BCDF-GHJK" aria-label="Code">
     <button class="primary">Continue</button></form>`;
   const script = `

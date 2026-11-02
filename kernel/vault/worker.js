@@ -1,8 +1,11 @@
-// The vault: every scope's keys, sealed so it can open none of them alone.
+// The vault: every scope's keys, sealed so it can open none of them alone, on an install whose people sign in with a
+// passkey.
 //
 // Each person has an X25519 key pair. Its secret half is kept only in copies, each sealed under one client's secret
 // (a passkey's PRF output, an OAuth client's refresh token) and kept by a hash of that secret; a session is a copy
-// sealed under an access token, kept until the token expires or its client signs out. Each scope's key is sealed to the public half of every
+// sealed under an access token, kept until the token expires or its client signs out. On an install whose people sign
+// in with Google (`SIGN_IN`), a person's first copy is sealed under a secret only the vault has (`VAULT_KEY`), which it
+// opens itself once the auth service says Google signed them in: so the kernel can open everyone's keys there. Each scope's key is sealed to the public half of every
 // person who may open it, and to the install's recovery key. A request that brings an access token gets the keys it
 // names from its session.
 //
@@ -91,6 +94,7 @@ export class Vault extends DurableObject {
       switch (`${request.method} ${path}`) {
         case "POST /internal/passkey": return json(await this.passkey(body));
         case "POST /internal/grant": return json(await this.grant(body));
+        case "POST /internal/google": return json(await this.google(body));
         case "POST /internal/rekey": return json(await this.rekey(body));
         case "POST /internal/forget": return json(await this.forget(body));
         case "POST /internal/forget-passkeys": return json(this.forgetPasskeys(body));
@@ -180,22 +184,16 @@ export class Vault extends DurableObject {
     return id;
   }
 
-  /// A passkey's copy, for `user`. Their first makes their key pair and their scope's key (and the install's, for
-  /// the first person); a later one is opened from another of their passkeys, or an invite link made with the
-  /// recovery key.
+  /// A passkey's copy, for `user`. Their first makes their keys (`person`); a later one is opened from another of
+  /// their passkeys, or an invite link made with the recovery key.
   async passkey({ user, secret, name, from, client = null }) {
+    if (this.env.SIGN_IN === "google") refuse(403, "people here sign in with Google");
     if (!/^[0-9a-f]{16}$/.test(user || "")) refuse(400, "not a user id");
     secret = secretOf(secret);
     const known = this.sql.exec("select user from people where user = ?", user).toArray()[0];
     let held;
     if (!known) {
-      const pair = await keyPair();
-      const recovery = b64u.decode(this.env.RECOVERY_KEY || refuse(503, "the vault has no recovery key"));
-      this.sql.exec("insert into people (user, public, recovery, made) values (?, ?, ?, ?)", user, pair.public, await sealTo(recovery, pair.secret), Date.now());
-      const scopes = [`user:${user}`];
-      if (!this.sql.exec("select scope from scopes where scope = 'global'").toArray().length) scopes.push("global");
-      for (const scope of scopes) await this.makeScope(scope, user, pair.public);
-      held = { user, key: b64u.encode(pair.secret), public: b64u.encode(pair.public), scopes: null };
+      held = await this.person(user);
     } else {
       const opened = from && (await this.open(secretOf(from), ["passkey", "recovery"]));
       if (!opened || opened.held.user !== user) refuse(403, "a new passkey is added with one you have already");
@@ -203,6 +201,53 @@ export class Vault extends DurableObject {
       if (opened.row.kind === "recovery") this.sql.exec("delete from copies where id = ?", opened.row.id);
     }
     return { id: await this.seal(secret, { user, kind: "passkey", name: String(name || "Passkey"), client, held }) };
+  }
+
+  /// Makes `user`'s key pair and their scope's key (and the install's, for the first person): → what their copies hold.
+  async person(user) {
+    const pair = await keyPair();
+    const recovery = b64u.decode(this.env.RECOVERY_KEY || refuse(503, "the vault has no recovery key"));
+    this.sql.exec("insert into people (user, public, recovery, made) values (?, ?, ?, ?)", user, pair.public, await sealTo(recovery, pair.secret), Date.now());
+    const scopes = [`user:${user}`];
+    if (!this.sql.exec("select scope from scopes where scope = 'global'").toArray().length) scopes.push("global");
+    for (const scope of scopes) await this.makeScope(scope, user, pair.public);
+    return { user, key: b64u.encode(pair.secret), public: b64u.encode(pair.public), scopes: null };
+  }
+
+  /// The secret a person's own copy is sealed under on an install whose people sign in with Google: only the vault
+  /// can make it.
+  async own(user) {
+    const key = await crypto.subtle.importKey("raw", b64u.decode(this.env.VAULT_KEY || refuse(503, "the vault has no key of its own")), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    return new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`one/vault\0${user}`)));
+  }
+
+  /// A copy for a client being added, on an install whose people sign in with Google, once the auth service says
+  /// Google signed `user` in: opened with the vault's own key, and sealed under the client's authorization code
+  /// (`to`) as `grant` seals it. Their first sign-in makes their keys, and opens Everyone's to them.
+  async google({ user, to, name, client }) {
+    if (this.env.SIGN_IN !== "google") refuse(403, "people here open their keys with a passkey");
+    if (!/^[0-9a-f]{16}$/.test(user || "")) refuse(400, "not a user id");
+    const own = await this.own(user);
+    let held = (await this.open(own, ["own"]))?.held;
+    if (!held) {
+      if (this.sql.exec("select user from people where user = ?", user).toArray().length) refuse(409, "this person's keys were made with a passkey");
+      held = await this.person(user);
+      await this.everyone(held);
+      await this.seal(own, { user, kind: "own", name: "Google", held });
+    }
+    return { id: await this.seal(secretOf(to), { user, kind: "pending", name: String(name || "Client"), client, held, until: Date.now() + PENDING, line: b64u.encode(random(16)) }) };
+  }
+
+  /// Opens Everyone's scope to someone new, with the key of anyone the vault opens itself who has it.
+  async everyone(held) {
+    if (this.sql.exec("select user from grants where user = ? and scope = 'global'", held.user).toArray().length) return;
+    for (const { user } of this.sql.exec("select user from grants where scope = 'global'").toArray()) {
+      const other = (await this.open(await this.own(user), ["own"]))?.held;
+      if (!other) continue;
+      const key = await this.scopeKey(other, "global");
+      this.sql.exec("insert into grants (user, scope, sealed) values (?, 'global', ?)", held.user, await sealTo(b64u.decode(held.public), key));
+      return;
+    }
   }
 
   /// A copy of `user`'s key pair's secret half (`key`, opened with the recovery key, for someone who lost every

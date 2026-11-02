@@ -123,6 +123,11 @@ struct Vault {
 
 impl Vault {
     fn start() -> Vault {
+        Vault::start_with(vec![])
+    }
+
+    /// A vault with `more` bindings besides its own.
+    fn start_with(more: Vec<(String, String)>) -> Vault {
         let (vault, auth, sites) = (port(), port(), port());
         let (_, recovery_public) = kernel::twin(&rand::random());
         let secret = B64U.encode(&rand::random::<[u8; 32]>());
@@ -143,7 +148,10 @@ impl Vault {
                     ("KERNEL_SECRET".into(), secret.clone()),
                     ("RECOVERY_KEY".into(), B64U.encode(&recovery_public)),
                     ("BUCKET".into(), bucket),
-                ],
+                ]
+                .into_iter()
+                .chain(more)
+                .collect(),
                 assets: None,
                 outbound: Some("sites".into()),
             },
@@ -244,6 +252,35 @@ fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
     let andre = vault.keys_until(&token, &[("global", "board", None)]).map(|k| k.0).unwrap();
     assert_eq!(vault.keys_until(&sam, &[("global", "board", None)]).map(|k| k.0).unwrap(), andre);
     assert!(vault.keys_until(&sam, &[(&format!("user:{ANDRE}"), "board", None)]).is_err());
+}
+
+#[test]
+fn where_people_sign_in_with_google_the_vault_opens_their_keys_itself_and_only_there() {
+    let passkeys = Vault::start();
+    assert_eq!(passkeys.internal("google", json!({ "user": ANDRE, "to": "a code for andre", "client": "web" })).0, 403, "a passkey's install opens nobody's keys for them");
+
+    let v = Vault::start_with(vec![("SIGN_IN".into(), "google".into()), ("VAULT_KEY".into(), B64U.encode(&rand::random::<[u8; 32]>()))]);
+    let vault = kernel::Vault { url: v.url.clone() };
+    assert_eq!(v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" })).0, 403, "nor does a passkey open them here");
+    // Each time Google signs someone in, the vault gives their new client the same keys.
+    let signs_in = |user: &str, client: &str| {
+        let code = format!("{client}'s authorization code for {user}");
+        assert_eq!(v.internal("google", json!({ "user": user, "to": code, "client": client })).0, 200);
+        let (token, until) = v.token(user, client);
+        assert_eq!(v.internal("rekey", json!({ "from": code, "to": format!("{client}'s refresh token for {user}"), "token": token, "until": until })).1["moved"], true);
+        token
+    };
+    let mine = format!("user:{ANDRE}");
+    let (web, phone) = (signs_in(ANDRE, "web"), signs_in(ANDRE, "phone"));
+    let key = vault.keys_until(&web, &[(&mine, "board", None)]).unwrap().0;
+    assert_eq!(vault.keys_until(&phone, &[(&mine, "board", None)]).unwrap().0, key);
+    // Someone who joins after him opens Everyone's, and not his.
+    let sam = signs_in(SAM, "web");
+    assert_eq!(vault.keys_until(&sam, &[("global", "board", None)]).unwrap().0, vault.keys_until(&web, &[("global", "board", None)]).unwrap().0);
+    assert!(vault.keys_until(&sam, &[(&mine, "board", None)]).is_err());
+    // Only the auth service asks, once Google has said yes.
+    let (status, _) = post(&format!("{}/internal/google", v.url), &[("x-kernel-secret", "a guess")], json!({ "user": SAM, "to": "mallory's code", "client": "web" }));
+    assert_eq!(status, 403);
 }
 
 #[test]

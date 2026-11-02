@@ -850,6 +850,21 @@ impl Node {
         self.with(|i| Ok(i.r.members.user(user).is_some())).unwrap_or(false)
     }
 
+    /// Lets in someone the install's kernel signed in who isn't a person of it yet, as a member, `name` as the kernel
+    /// knows them: it signs in only those an admin invited, or people at the install's domain signing in with Google.
+    /// This server's own person writes it, so it must be an admin.
+    pub async fn let_in(&self, user: &str, name: &str) -> Result<()> {
+        let me = self.user()?;
+        let (admin, removed) = self.with(|i| Ok((i.r.members.is_admin(&me), i.r.members.removed_user(user))))?;
+        ensure!(!removed, "you were removed from this install: an admin adds you back");
+        ensure!(admin, "you aren't a person of this install yet, and {} can't let you in: its person isn't an admin", self.server_name());
+        ensure!(!name.trim().is_empty(), "your sign-in doesn't say your name: sign in again");
+        // A key no machine holds, the same on every server, so two letting the same person in at once add them once.
+        let key: Key = <sha2::Sha256 as sha2::Digest>::digest(format!("{}/sign-in\0{user}", crate::config::CLI)).into();
+        let admit = members::admit(&key, user, &format!("{name}'s sign-in"), false, Some((name.trim(), Role::Member)));
+        self.member_as(&Caller { key: self.0.id, user: me, agent: None, token: None }, "admit", admit.data).await
+    }
+
     /// Tries the servers that might run a call, nearest first, one at a time, the next only if one can't be reached
     /// or says to go elsewhere.
     async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {

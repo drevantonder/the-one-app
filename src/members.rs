@@ -179,6 +179,11 @@ impl Members {
         self.users.get(id).filter(|u| !u.removed)
     }
 
+    /// Whether `id` was a person of the install, and was removed.
+    pub fn removed_user(&self, id: &str) -> bool {
+        self.users.get(id).is_some_and(|u| u.removed)
+    }
+
     pub fn is_admin(&self, user: &str) -> bool {
         self.user(user).is_some_and(|u| u.role == Role::Admin)
     }
