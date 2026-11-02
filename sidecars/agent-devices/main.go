@@ -183,6 +183,8 @@ func ownOps() []map[string]any {
 			"input": object(map[string]any{"device": str("the device's name"), "app": str("the app")}, "device", "app")},
 		{"name": "run", "description": "Run a command on a device and give its output: PowerShell on Windows, the shell on Android and Linux, simctl spawn on an iPhone.",
 			"input": object(map[string]any{"device": str("the device's name"), "command": str("the command")}, "device", "command")},
+		{"name": "reach", "description": "Let a Windows, Android or iPhone device reach a port of this machine's 127.0.0.1 at the same port on its own, until it stops.",
+			"input": object(map[string]any{"device": str("the device's name"), "port": num("the port")}, "device", "port")},
 		{"name": "borrow", "description": "Borrow a device for as long as you need it. Linux (the default): one of your own whose browser starts with a copy of a browser profile, quick, as a spare is kept ready. Other kinds: the person's lasting device, one agent at a time, or a throwaway copy of it. Give it back with give_back when done; a throwaway one is deleted then, or after 15 minutes without a call, with anything in it.",
 			"input": object(map[string]any{"kind": kindArg, "device": str("a lasting device, by name"), "copy": map[string]any{"type": "boolean", "description": "a throwaway copy, not the lasting device"},
 				"for":     str("what you need it for, in a few words, e.g. Reading Messenger; the person sees it"),

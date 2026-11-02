@@ -277,6 +277,15 @@ func (w windowsQEMU) install(ctx context.Context, v *vm, app string) (string, er
 	return w.ssh(ctx, v, "Start-Process -Wait '"+dest+"' -ArgumentList '/S'; 'Ran its installer with /S.'")
 }
 
+// reach forwards the port inside Windows to QEMU's address for this machine's own 127.0.0.1 (10.0.2.2).
+func (w windowsQEMU) reach(ctx context.Context, v *vm, port int) (string, error) {
+	p := strconv.Itoa(port)
+	if _, err := w.ssh(ctx, v, "netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport="+p+" connectaddress=10.0.2.2 connectport="+p); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s reaches this machine's port %d at 127.0.0.1:%d.", v.Name, port, port), nil
+}
+
 func (w windowsQEMU) run(ctx context.Context, v *vm, command string) (string, error) {
 	return w.ssh(ctx, v, command)
 }

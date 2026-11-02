@@ -196,6 +196,10 @@ func (iosSimulator) install(ctx context.Context, v *vm, app string) (string, err
 	return fmt.Sprintf("Installed %s.", filepath.Base(app)), nil
 }
 
+func (iosSimulator) reach(ctx context.Context, v *vm, port int) (string, error) {
+	return fmt.Sprintf("%s shares this Mac's network, so it reaches 127.0.0.1:%d already.", v.Name, port), nil
+}
+
 func (iosSimulator) run(ctx context.Context, v *vm, command string) (string, error) {
 	// The simulator has no shell: the command's first word is a program in it, the rest its arguments.
 	args := strings.Fields(command)

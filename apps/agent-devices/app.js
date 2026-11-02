@@ -412,6 +412,11 @@ export default {
       input: { type: "object", required: ["device", "command"], properties: { device: deviceArg, command: { type: "string" } } },
       run: (ctx, input) => sidecar(ctx, "run", input),
     },
+    reach: {
+      description: "Let a Windows, Android or iPhone device reach a port on the device it's on, at the same port on its own 127.0.0.1, until it stops: for an app on it to reach a server you run there, like a try install.",
+      input: { type: "object", required: ["device", "port"], properties: { device: deviceArg, port: { type: "integer" } } },
+      run: (ctx, input) => sidecar(ctx, "reach", input),
+    },
     adopt: {
       description: "For the person: make something already on one of their devices a lasting device: a Windows VM's folder (its disk.qcow2, OVMF_VARS.fd, tpm and monitor.sock), an Android Virtual Device, or an iPhone simulator.",
       input: { type: "object", required: ["device", "kind", "on"], properties: {

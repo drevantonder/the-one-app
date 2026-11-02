@@ -58,6 +58,8 @@ type kind interface {
 	open(ctx context.Context, v *vm, url string) error
 	install(ctx context.Context, v *vm, app string) (string, error)
 	run(ctx context.Context, v *vm, command string) (string, error)
+	// reach lets v reach port on this machine's 127.0.0.1 at the same port on its own, until it's stopped.
+	reach(ctx context.Context, v *vm, port int) (string, error)
 }
 
 // runtimes are every kind but linux, as this machine might run them.
@@ -712,6 +714,16 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		return r, true, err
 	case "run":
 		r, err := ds.useVM(ctx, v, "run_command", in)
+		return r, true, err
+	case "reach":
+		port, _ := in["port"].(float64)
+		if port < 1 || port > 65535 {
+			return nil, true, errors.New("reach which port? a number from 1 to 65535")
+		}
+		if !k.running(ctx, v) {
+			return nil, true, fmt.Errorf("%s is stopped: start it first", v.Name)
+		}
+		r, err := k.reach(ctx, v, int(port))
 		return r, true, err
 	}
 	return nil, true, fmt.Errorf("%s is a %s device: %s works on Linux devices only, for now", v.Name, k.title(), op)

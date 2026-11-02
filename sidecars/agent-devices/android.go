@@ -301,6 +301,14 @@ func (androidEmulator) install(ctx context.Context, v *vm, app string) (string, 
 	return adb(ctx, v, "install", "-r", "-g", path)
 }
 
+func (androidEmulator) reach(ctx context.Context, v *vm, port int) (string, error) {
+	p := "tcp:" + strconv.Itoa(port)
+	if _, err := adb(ctx, v, "reverse", p, p); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s reaches this machine's port %d at 127.0.0.1:%d.", v.Name, port, port), nil
+}
+
 func (androidEmulator) run(ctx context.Context, v *vm, command string) (string, error) {
 	return adb(ctx, v, "shell", command)
 }
