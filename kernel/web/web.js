@@ -365,22 +365,27 @@ window.__one = {};
   // MARK: Where the window is
 
   /// The URL is the place: `/` (You), `/page/<scope>`, `/services/<scope>`, `/app/<app>/<screen>?params=&scope=`,
-  /// `/settings`, `/settings/<name>`; and `/vault?id=&scope=`, a request for an item, as a sheet over You.
+  /// `/settings`, `/settings/<item>?params=` (a Settings screen); and `/vault?id=&scope=`, a request for an item, as a
+  /// sheet over You.
   function route() {
     const path = location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
     const q = new URLSearchParams(location.search);
     if (path[0] === "page" && path[1]) return { kind: "page", scope: path[1] };
     if (path[0] === "services" && path[1]) return { kind: "services", scope: path[1] };
     if (path[0] === "app" && path[1]) return { kind: "screen", app: path[1], screen: path[2] || "main", params: q.get("params") || "{}", scope: q.get("scope") || undefined };
-    if (path[0] === "settings") return { kind: "settings", setting: path[1] };
+    if (path[0] === "settings") return path[1] ? { kind: "setting", name: path[1], params: q.get("params") || "{}" } : { kind: "settings" };
     return { kind: "page", scope: "user" };
   }
 
   function href(r) {
     if (r.kind === "page") return r.scope === "user" ? "/" : `/page/${encodeURIComponent(r.scope)}`;
     if (r.kind === "services") return `/services/${encodeURIComponent(r.scope)}`;
-    if (r.kind === "settings") return r.setting ? `/settings/${r.setting}` : "/settings";
+    if (r.kind === "settings") return "/settings";
     const q = new URLSearchParams();
+    if (r.kind === "setting") {
+      if (r.params && r.params !== "{}") q.set("params", r.params);
+      return `/settings/${encodeURIComponent(r.name)}${q.size ? `?${q}` : ""}`;
+    }
     if (r.params && r.params !== "{}") q.set("params", r.params);
     if (r.scope) q.set("scope", r.scope);
     return `/app/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen || "main")}${q.size ? `?${q}` : ""}`;
@@ -441,7 +446,7 @@ window.__one = {};
     return n > 0 ? `<span class="badge">${n > 99 ? "99+" : n}</span>` : "";
   }
 
-  /// One section per page, listing its apps and its Services; Settings at the foot.
+  /// One section per page, listing its apps and its Services; then Settings', listing its items.
   function drawSidebar() {
     const at = selection();
     const selected = (x) => (href(x) === at ? " selected" : "");
@@ -456,18 +461,11 @@ window.__one = {};
         `<a class="nav-row${selected(services)}" href="${esc(href(services))}" data-go='${esc(JSON.stringify(services))}'>${folder(servicesOn(p), 20)}<span class="nav-label">Services</span></a></section>`;
     }).join("");
     const settings = { kind: "settings" };
-    const nav = $(".sidebar", root);
-    nav.innerHTML = `<div class="nav-pages">${sections}</div>` +
-      `<a class="nav-row nav-settings${at.startsWith("/settings") ? " selected" : ""}" href="/settings" data-go='${esc(JSON.stringify(settings))}'>${gear}<span class="nav-label">Settings</span>${requests() ? `<span class="nav-count">${requests()}</span>` : ""}</a>`;
-  }
-
-  const gear = `<svg class="nav-symbol" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>`;
-
-  /// What waits for this person: invites, and requests for items.
-  function requests() {
-    const u = me();
-    const invites = (install()?.groups || []).filter((g) => (g.invited || []).some((m) => m.user === u?.id)).length;
-    return invites + (store.state?.vault_requests ?? store.state?.secret_requests ?? 0);
+    const items = settingsItems().map((item) => {
+      const to = { kind: "setting", name: item.name };
+      return `<a class="nav-row${selected(to)}" href="${esc(href(to))}" data-go='${esc(JSON.stringify(to))}'>${settingIcon(item, 20)}<span class="nav-label">${esc(item.title)}</span>${item.badge ? `<span class="nav-count">${item.badge}</span>` : ""}</a>`;
+    }).join("");
+    $(".sidebar", root).innerHTML = `<div class="nav-pages">${sections}<section><a class="nav-head${selected(settings)}" href="/settings" data-go='${esc(JSON.stringify(settings))}'>Settings</a>${items}</section></div>`;
   }
 
   // Links are real links, for a new tab or a copied address; a plain click goes in place.
@@ -486,7 +484,7 @@ window.__one = {};
     const detail = $(".detail", root);
     const key = JSON.stringify(r);
     // An open screen stays as it is while the rest of the window redraws around it.
-    if (r.kind === "screen" && shown === key && $(".screen-frame", detail)) return;
+    if ((r.kind === "screen" || r.kind === "setting") && shown === key && $(".screen-frame", detail)) return;
     const again = shown === key;
     shown = key;
     if (r.kind === "page") {
@@ -501,8 +499,8 @@ window.__one = {};
       if (there && p) return void drawServices(there, p);
       detail.innerHTML = bar("Services", p?.whose) + `<div class="scroll"><div class="services-view"></div></div>`;
       if (p) drawServices($(".services-view", detail), p);
-    } else if (r.kind === "settings") drawSettings(detail, r.setting);
-    else screen.show(detail, r);
+    } else if (r.kind === "settings") drawSettings(detail);
+    else screen.show(detail, settingsApp(r) || r);
   }
 
   /// The detail's bar: its title and subtitle, as a Mac window's toolbar, with Back when a screen was pushed.
@@ -923,15 +921,15 @@ window.__one = {};
 
   // MARK: App screens
 
-  /// An app's screen: the page its node serves, in a sandboxed frame whose bridge this page answers, acting only as
-  /// that app.
+  /// An app's screen, or a Settings screen: the page its node serves, in a sandboxed frame whose bridge this page
+  /// answers, an app's acting only as that app, and only Settings' as the person.
   const screen = {
     frame: null,
     route: null,
 
     async show(detail, r) {
       const a = app(r.app);
-      const title = a?.screens?.find((s) => s.name === r.screen)?.title || label(a) || r.app;
+      const title = r.kind === "setting" ? settingTitle(r.name) : a?.screens?.find((s) => s.name === r.screen)?.title || label(a) || r.app;
       document.title = title;
       detail.innerHTML = bar(title) + `<div class="screen"><div class="screen-status">${one.loading()}</div></div>`;
       const frame = document.createElement("iframe");
@@ -944,7 +942,8 @@ window.__one = {};
       this.route = r;
       let html;
       try {
-        html = await api(`/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`, { query: { params: r.params || "{}", scope: r.scope }, raw: true }).then((resp) => resp.text());
+        const path = r.kind === "setting" ? `/v1/settings-screens/${encodeURIComponent(r.name)}` : `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
+        html = await api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true }).then((resp) => resp.text());
       } catch (err) {
         if (this.frame === frame) $(".screen", detail).innerHTML = message("Can’t Open This", esc(err.message));
         return;
@@ -965,37 +964,62 @@ window.__one = {};
   /// and on a computer the Mac app's size of text.
   function look(html) {
     const accent = /^#[0-9a-f]{3,8}$/i.test(config().accent || "") ? config().accent : "";
+    // This window's appearance, kept in step (see `scheme`).
+    const looks = `<script>(() => { const scheme = (${scheme})(); let now = ${JSON.stringify(appearance())}; const apply = () => scheme(document, now);
+      addEventListener("DOMContentLoaded", apply); addEventListener("load", apply);
+      addEventListener("message", (e) => { if (e.source === parent && e.data?.oneScheme) apply(now = e.data.oneScheme); }); })()</script>`;
     const style = `<style>html, body { background: transparent !important; }${accent ? ` :root:root { --accent: ${accent}; }` : ""}
       @media (pointer: fine) and (min-width: 600px) { html { zoom: calc(13 / 17); } :root:root { --bg: transparent; --card: rgba(0, 0, 0, 0.04); } }
       @media (pointer: fine) and (min-width: 600px) and (prefers-color-scheme: dark) { :root:root { --card: rgba(255, 255, 255, 0.05); } }</style>`;
-    return html.includes("</head>") ? html.replace("</head>", `${style}</head>`) : style + html;
+    return html.includes("</head>") ? html.replace("</head>", `${style}${looks}</head>`) : style + looks + html;
   }
 
-  /// The bridge's messages, from the screen's frame only, each acting as that screen's app.
+  /// The bridge's messages, from the screen's frame only, each acting as that screen's app; and a Settings screen's,
+  /// as the person, which no app's may.
   addEventListener("message", async (e) => {
     const frame = screen.frame;
     if (!frame || e.source !== frame.contentWindow) return;
     const r = screen.route;
+    const own = r.kind === "setting";
     if (e.data?.oneFrame) return void frame.contentWindow.postMessage({ oneScreen: frame.__html }, "*");
     const { one: m, id } = e.data || {};
     if (!m || typeof m !== "object") return;
     const reply = (ok) => frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*");
     const fail = (err) => frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err) }, "*");
     try {
+      if (["api", "signOut", "appearance", "device", "request"].includes(m.type) && !own) return fail("Only Settings can do that.");
       switch (m.type) {
         case "call":
+          if (own) return fail("Settings has no app to call.");
           return reply(await call(r.app, String(m.op || ""), m.input ?? {}));
         case "open": {
-          const to = { kind: "screen", app: typeof m.app === "string" && m.app ? m.app : r.app, screen: String(m.screen || "main"), params: JSON.stringify(m.params || {}), scope: r.scope };
+          const to = typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params: JSON.stringify(m.params || {}), scope: r.scope }
+            : own ? { kind: "setting", name: String(m.screen || ""), params: JSON.stringify(m.params || {}) }
+            : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params: JSON.stringify(m.params || {}), scope: r.scope };
           reply(null);
           return go(to, { pushed: true });
+        }
+        case "api":
+          return reply(await settingsApi(m));
+        case "signOut":
+          reply(null);
+          return auth.signOut();
+        case "appearance":
+          if (m.value != null) setAppearance(String(m.value));
+          return reply(appearance());
+        case "device":
+          return reply({ name: browserName(), build: serverBuild(), signOut: true });
+        case "request": {
+          const scope = String(m.scope || ""), id = String(m.id || "");
+          await new Promise((done) => vault.open({ scope, id, done }));
+          return reply((await vault.state(scope, id)) === "set");
         }
         case "title": {
           // Empty while the screen shows its own large title, as the Mac app's bar is.
           const title = String(m.text ?? "");
           const el = $(".detail .bar-title", root);
           if (el) el.textContent = title;
-          document.title = title || label(app(r.app));
+          document.title = title || (own ? settingTitle(r.name) : label(app(r.app)));
           return reply(null);
         }
         case "save": case "preview":
@@ -1057,33 +1081,89 @@ window.__one = {};
 
   // MARK: Settings
 
-  /// The cog's page: who you are, then what this window has of the Mac app's Settings, and signing out.
+  /// What Settings shows this person, in order, as the node says (`settings_items`).
+  const settingsItems = () => store.state?.settings_items || [];
+  const settingTitle = (name) => settingsItems().find((i) => i.name === name)?.title || "Settings";
+
+  /// An item's icon: theirs is their avatar; the rest, its symbol on its colour, as an app's tile.
+  function settingIcon(item, size) {
+    const u = me();
+    if (item.name === "account" && u) return one.avatar(u.id, u.name).replace('class="avatar"', `class="avatar tile-avatar" data-size="${size}"`).replace('style="', `style="--size:${size}px;`);
+    return one.appIcon({ name: item.name, title: item.title, icon: item.icon, color: item.color }, size);
+  }
+
+  /// An item that opens an app (the App Store) opens that app's screen.
+  function settingsApp(r) {
+    const a = r.kind === "setting" && settingsItems().find((i) => i.name === r.name)?.app;
+    return a ? { kind: "screen", app: a, screen: "main", params: "{}" } : null;
+  }
+
+  /// Settings, as a page: its title and the install's name, then its items' icons in a page's grid.
   function drawSettings(detail) {
     document.title = "Settings";
-    const u = me(), i = install();
-    const shop = storeApp();
-    const waiting = store.state?.vault_requests ?? store.state?.secret_requests ?? 0;
-    detail.innerHTML = bar("") + `<div class="scroll"><div class="settings"><div class="page-header"><h1>Settings</h1><div class="page-subtitle">${esc(i?.name || "")}</div></div>` +
-      `<div class="list profile"><div class="row plain">${one.avatar(u.id, u.name).replace('class="avatar"', 'class="avatar big"')}<div class="main"><div class="profile-name">${esc(u.name)}</div><div class="sub">${esc(u.role === "admin" ? `Admin of ${i.name}` : `Member of ${i.name}`)}</div><div class="sub">${esc(browserName())}</div></div><button class="button" data-signout>Sign Out</button></div></div>` +
-      `<div class="list"><a class="row plain" href="/passkeys"><span class="setting-icon" style="--tile:#34c759">${keyGlyph}</span><div class="main"><div class="title"><span>Passkeys</span></div></div><span class="chev">›</span></a></div>` +
-      (waiting ? `<div class="list"><button class="row plain" data-requests><span class="setting-icon" style="--tile:#ff9500">${trayGlyph}</span><div class="main"><div class="title"><span>Requests</span></div></div><span class="nav-count">${waiting}</span><span class="chev">›</span></button></div>` : "") +
-      (shop ? `<div class="list"><a class="row plain" href="${esc(href({ kind: "screen", app: shop.name, screen: "main", params: "{}" }))}" data-go='${esc(JSON.stringify({ kind: "screen", app: shop.name, screen: "main", params: "{}" }))}'>${one.appIcon(shop, 29)}<div class="main"><div class="title"><span>App Store</span></div></div><span class="chev">›</span></a></div>` : "") +
-      `</div></div>`;
-    $("[data-signout]", detail).onclick = () => auth.signOut();
-    $("[data-requests]", detail)?.addEventListener("click", () => requestsSheet());
+    detail.innerHTML = bar("") + `<div class="scroll"><div class="page"><div class="page-header"><h1>Settings</h1><div class="page-subtitle">${esc(install()?.name || "")}</div></div><div class="grid"></div></div></div>`;
+    const grid = $(".grid", detail);
+    grid.__items = settingsItems().map((item) => {
+      const to = { kind: "setting", name: item.name };
+      const el = document.createElement("a");
+      el.className = "tile";
+      el.href = href(to);
+      el.dataset.go = JSON.stringify(to);
+      el.innerHTML = `<span class="tile-icon">${settingIcon(item, 60)}${badge(item.badge || 0)}</span><span class="tile-name">${esc(item.title)}</span>`;
+      return { el, span: [1, 1] };
+    });
+    grid.append(...grid.__items.map((i) => i.el));
+    layoutGrid();
   }
 
-  const keyGlyph = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3M16 7l3 3M14 9l2 2"/></svg>`;
-  const trayGlyph = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></svg>`;
-
-  /// The requests for items waiting for this person: each opens in the Vault's sheet.
-  async function requestsSheet() {
-    const { body, close } = one.sheet({ title: "Requests" });
-    body.innerHTML = one.loading();
-    const list = (await api("/v1/vault/requests").catch(() => [])).filter((x) => x.state === "waiting");
-    body.innerHTML = list.length ? `<div class="list">${list.map((x) => `<button class="row" data-req="${esc(x.id)}" data-scope="${esc(x.scope)}">${one.appIcon(app(x.app) || { name: x.app }, 30)}<div class="main"><div class="title"><span>${esc(`${label(app(x.app)) || x.app} wants ${x.title || x.name || ""}`)}</span></div><div class="sub">${esc(x.agent || x.by)} · ${esc(x.scope_name)}</div></div><span class="chev">›</span></button>`).join("")}</div>` : `<div class="muted none">Nothing waits for you.</div>`;
-    body.querySelectorAll("[data-req]").forEach((b) => (b.onclick = () => { close(); openSheet({ kind: "vault", scope: b.dataset.scope, id: b.dataset.req }); }));
+  /// `one.api` for a Settings screen: the node's /v1 at this origin, as this person; nothing else here.
+  async function settingsApi(m) {
+    const url = new URL(String(m.path || ""), location.origin);
+    if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn't your server's.");
+    const method = String(m.method || "GET").toUpperCase();
+    return api(url.pathname + url.search, { method, body: method === "GET" ? undefined : m.body ?? {} });
   }
+
+  /// "linux runs 3157ba4": what the server that answers runs, for telling builds apart.
+  function serverBuild() {
+    const s = install()?.servers.find((x) => x.key === store.state?.server?.key);
+    return s?.build ? `${s.name} runs ${s.build}` : null;
+  }
+
+  // MARK: Appearance
+
+  const LOOK = "one.appearance";
+  const appearance = () => (["light", "dark"].includes(localStorage.getItem(LOOK)) ? localStorage.getItem(LOOK) : "automatic");
+
+  function setAppearance(value) {
+    if (value === "automatic") localStorage.removeItem(LOOK);
+    else if (["light", "dark"].includes(value)) localStorage.setItem(LOOK, value);
+    schemed(document, appearance());
+    screen.frame?.contentWindow?.postMessage({ oneScheme: appearance() }, "*");
+  }
+
+  /// Light or dark whatever the system says: a document's rules for the other are switched off and its own on, and
+  /// "automatic" puts them back. Its source also runs in screens' frames (`look`), so it keeps to itself.
+  function scheme() {
+    const kept = new Map();
+    return (doc, value) => {
+      doc.documentElement.style.colorScheme = value === "automatic" ? "" : value;
+      const walk = (rules) => {
+        for (const rule of rules) {
+          if (rule.media && /prefers-color-scheme/.test(kept.get(rule) ?? rule.media.mediaText)) {
+            if (!kept.has(rule)) kept.set(rule, rule.media.mediaText);
+            rule.media.mediaText = value === "automatic" ? kept.get(rule)
+              : kept.get(rule).replace(/\(\s*prefers-color-scheme\s*:\s*(light|dark)\s*\)/g, (_, s) => (s === value ? "(min-width: 0px)" : "(max-width: 0px) and (min-width: 1px)"));
+          }
+          if (rule.cssRules) walk(rule.cssRules);
+        }
+      };
+      for (const sheet of doc.styleSheets) {
+        try { walk(sheet.cssRules); } catch {}
+      }
+    };
+  }
+  const schemed = scheme();
 
   // MARK: Starting
 
@@ -1108,6 +1188,7 @@ window.__one = {};
   }
 
   async function start() {
+    schemed(document, appearance());
     if (location.pathname === "/callback") {
       try {
         history.replaceState(null, "", await auth.finish());

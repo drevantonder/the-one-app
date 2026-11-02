@@ -4161,7 +4161,9 @@ impl ProtocolHandler for CallHandler {
 
 /// The Settings screens, by name: each client's own (src/screen/settings/<name>.html), the same on every one.
 const SETTINGS_SCREENS: &[(&str, &str)] = &[
+    ("account", include_str!("screen/settings/account.html")),
     ("access", include_str!("screen/settings/access.html")),
+    ("appearance", include_str!("screen/settings/appearance.html")),
     ("vault", include_str!("screen/settings/vault.html")),
     ("requests", include_str!("screen/settings/requests.html")),
     ("groups", include_str!("screen/settings/groups.html")),
