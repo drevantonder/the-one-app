@@ -42,24 +42,27 @@ object Links {
 
     private fun query(uri: Uri, name: String) = uri.getQueryParameter(name)?.ifEmpty { null }
 
-    private fun go(store: Store, uri: Uri) {
+    private suspend fun go(store: Store, uri: Uri) {
         val path = uri.pathSegments
         val scope = query(uri, "scope")
-        store.path.clear()
+        val params = query(uri, "params") ?: "{}"
         when (path[0]) {
-            "vault" -> store.sheet = VaultSheet(scope!!, query(uri, "id")!!)
-            "page" -> store.current = path[1]
+            "vault" -> {
+                store.path.clear()
+                store.present(Route.Own("request", obj("scope" to scope, "id" to query(uri, "id")).toString()))
+            }
+            "page" -> store.openPage(path[1])
             "services" -> {
-                store.current = path[1]
-                store.path.add(Route.Services(path[1]))
+                store.openPage(path[1])
+                store.present(Route.Own("services", obj("scope" to path[1]).toString()))
             }
             "app" -> {
-                if (scope != null && store.pages.any { it.scope == scope }) store.current = scope
-                store.path.add(Route.Screen(path[1], path.getOrNull(2) ?: "main", query(uri, "params") ?: "{}", scope))
+                if (scope != null && store.pages.any { it.scope == scope }) store.openPage(scope) else store.path.clear()
+                store.push(Route.App(path[1], path.getOrNull(2) ?: "main", params, scope))
             }
             "settings" -> {
-                store.current = Store.SETTINGS
-                path.getOrNull(1)?.let { store.path.add(Route.Setting(it, query(uri, "params") ?: "{}")) }
+                store.openPage("settings")
+                path.getOrNull(1)?.let { store.push(Route.Own(it, params)) }
             }
         }
     }

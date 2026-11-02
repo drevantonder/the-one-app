@@ -318,7 +318,7 @@ async fn the_apps_decode_what_the_node_sends() {
     assert!(structs["VaultItem"].iter().any(|f| f.key == "scope_name" && !f.required) && structs["VaultItem"].iter().any(|f| f.key == "title" && f.required));
     assert!(structs["NodeState"].iter().any(|f| f.key == "me" && f.required), "CodingKeys rename fields");
     let classes = kotlin_classes(&read("android/app/src/main/kotlin/app/client/Node.kt"));
-    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "WidgetNode", "VaultItem", "VaultRequest", "ArrangementItem"] {
+    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "WidgetNode"] {
         assert!(classes.get(name).is_some_and(|f| !f.is_empty()), "the test reads Kotlin's {name}: {:?}", classes.keys());
     }
     assert!(classes["NodeState"].iter().any(|f| f.key == "me" && f.required), "@SerialName renames fields");
@@ -365,7 +365,7 @@ async fn the_apps_decode_what_the_node_sends() {
         check(&structs, "", ty, &sent, path, &mut problems);
     }
     let mut android = vec![];
-    for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]"), ("/v1/badges?scope=user", "[String: Int]"), ("/v1/vault", "[VaultItem]"), ("/v1/vault/requests", "[VaultRequest]")] {
+    for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]")] {
         check(&classes, "", ty, &api(&addr, "GET", path, Value::Null).await, path, &mut android);
     }
     let mut windows = vec![];
@@ -563,7 +563,7 @@ fn every_host_answers_each_message_of_the_bridge() {
         }
         out
     };
-    for path in ["kernel/web/web.js", "src/mcp_view.html"] {
+    for path in ["kernel/web/web.js", "src/mcp_view.html", "android/app/src/main/kotlin/app/client/Screens.kt"] {
         let names = named(&read(path));
         let missing: Vec<_> = messages.iter().filter(|m| !names.contains(**m)).collect();
         assert!(missing.is_empty(), "{path} doesn't answer the bridge's {missing:?}");

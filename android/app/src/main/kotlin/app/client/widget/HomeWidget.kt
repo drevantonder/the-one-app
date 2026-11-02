@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.text.format.DateUtils
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -61,12 +62,10 @@ import app.client.Glyphs
 import app.client.MainActivity
 import app.client.Palette
 import app.client.WidgetNode
-import app.client.ago
 import app.client.json
 import app.client.number
 import app.client.palette
 import app.client.text
-import app.client.time
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
@@ -136,7 +135,10 @@ class RunOperation : ActionCallback {
             withContext(Dispatchers.Main) { Toast.makeText(context, "Couldn’t do that. ${e.message ?: ""}".trim(), Toast.LENGTH_LONG).show() }
             HomeWidgets.redraw()
         }
-        runCatching { if (store.state == null) store.refreshState() else store.refreshWidgets() }
+        runCatching {
+            if (store.state == null) store.refreshState()
+            store.refreshWidgets(always = true)
+        }
     }
 }
 
@@ -583,5 +585,28 @@ private fun Toggle(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
                 Mask(c.masks.circle(20f), c.color { Color.White }, GlanceModifier.size(20.dp))
             }
         }
+    }
+}
+
+/** "now", "5 min", "3 h", then the weekday, then the date; or as the node's `style` asks, as src/screen/widgets.js does. */
+private fun time(node: WidgetNode, now: Long): String {
+    val at = (node.at ?: 0.0).toLong()
+    return when (node.style) {
+        "relative" -> DateUtils.getRelativeTimeSpanString(at, now, DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString()
+        "timer" -> DateUtils.formatElapsedTime(kotlin.math.abs(now - at) / 1000)
+        "date" -> DateUtils.formatDateTime(null, at, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_NO_YEAR or DateUtils.FORMAT_ABBREV_MONTH)
+        "clock" -> java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(at))
+        else -> ago(at, now)
+    }
+}
+
+private fun ago(at: Long, now: Long): String {
+    val s = (now - at) / 1000
+    return when {
+        s < 60 -> "now"
+        s < 3600 -> "${s / 60} min"
+        s < 86400 -> "${s / 3600} h"
+        s < 7 * 86400 -> android.text.format.DateFormat.format("EEE", at).toString()
+        else -> DateUtils.formatDateTime(null, at, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_NO_YEAR or DateUtils.FORMAT_ABBREV_MONTH)
     }
 }

@@ -30,8 +30,6 @@ data class Config(
     val name: String,
     val cli: String,
     val accent: String,
-    /** The app the App Store opens: the install's `store` setting. */
-    val store: String? = null,
 )
 
 /** `GET /v1/state`: who this is, and the install. */
@@ -42,34 +40,6 @@ data class NodeState(
     @SerialName("server") val host: Machine? = null,
     val user: Person? = null,
     val install: Install? = null,
-    @SerialName("vault_requests") val vaultRequests: Int? = null,
-    /** How this person arranged each page, by scope. */
-    val arrangements: Map<String, Arrangement>? = null,
-    /** What Settings shows this person, in order. */
-    @SerialName("settings_items") val settingsItems: List<SettingsItem> = emptyList(),
-) {
-    val waitingRequests get() = vaultRequests ?: 0
-}
-
-/** One of Settings' items: it opens the Settings screen it names, or with `app`, that app's main screen. `icon` is a
- *  Phosphor icon's name, on `color`. */
-@Serializable
-data class SettingsItem(val name: String, val title: String, val icon: String, val color: String, val badge: Int? = null, val app: String? = null)
-
-@Serializable
-data class Arrangement(
-    val items: List<ArrangementItem> = emptyList(),
-    val hidden: List<String>? = null,
-)
-
-/** An app's icon on a page, or with `widget` a copy of one of its widgets, with its id, size and options. */
-@Serializable
-data class ArrangementItem(
-    val app: String,
-    val widget: String? = null,
-    val id: String? = null,
-    val size: String? = null,
-    val options: Map<String, JsonElement>? = null,
 )
 
 @Serializable
@@ -82,114 +52,50 @@ data class Machine(
 data class Person(
     val id: String,
     val name: String,
-    val role: String,
-) {
-    val admin get() = role == "admin"
-}
+)
 
 @Serializable
 data class Install(
     val name: String,
-    val users: List<Person>,
     val groups: List<GroupInfo>,
     val servers: List<Server>,
-    val clients: List<ClientInfo>,
-) {
-    fun user(id: String) = users.firstOrNull { it.id == id }
-    fun group(id: String) = groups.firstOrNull { it.id == id }
-}
+)
 
 @Serializable
 data class GroupInfo(
     val id: String,
     val name: String,
     val members: List<GroupMember>,
-    val invited: List<GroupMember>? = null,
-) {
-    fun role(of: String) = members.firstOrNull { it.user == of }?.role
-    val admins get() = members.filter { it.role == "admin" }.map { it.user }
-}
+)
 
 @Serializable
 data class GroupMember(
     val user: String,
-    val role: String,
 )
 
 @Serializable
 data class Server(
     val key: String,
     val name: String,
-    val user: String,
-    val online: Boolean? = null,
-    /** `user:<id>`, `group:<id>` or `install`. */
-    val owners: List<String>,
-    val users: List<String>,
-    val privileged: Boolean? = null,
-    @SerialName("trusted_by") val trustedBy: List<String>? = null,
     val build: String? = null,
-    val load: Load? = null,
 )
 
-@Serializable
-data class Load(
-    val memory: LoadSpace? = null,
-    /** Percent busy, oldest first. */
-    val cpu: List<Int>? = null,
-) {
-    /** "Memory 12.2 of 32 GB · CPU 12%". */
-    val summary: String?
-        get() {
-            val parts = mutableListOf<String>()
-            memory?.takeIf { it.total > 0 }?.let { parts += "Memory %.1f of %.1f GB".format(it.used / 1_073_741_824, it.total / 1_073_741_824) }
-            cpu?.lastOrNull()?.let { parts += "CPU $it%" }
-            return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
-        }
-}
-
-@Serializable
-data class LoadSpace(
-    val used: Double,
-    val total: Double,
-)
-
-@Serializable
-data class ClientInfo(
-    val key: String,
-    val name: String,
-    val user: String,
-)
-
-/** An app as `GET /v1/apps` describes it: only what the app needs to show it. */
+/** An app as `GET /v1/apps` describes it: what names its screens and draws its icon on the home screen's widgets. */
 @Serializable
 data class AppInfo(
     val name: String,
     val title: String? = null,
-    val description: String? = null,
     val icon: String? = null,
     val color: String? = null,
-    /** Its own picture, as a data URL; `image_kind` "icon" when it's a finished app icon, else a logo. */
-    val image: String? = null,
-    @SerialName("image_kind") val imageKind: String? = null,
-    val owner: String? = null,
     val screens: List<AppScreenInfo>? = null,
-    val ops: List<AppOp>? = null,
-    val widgets: List<AppWidget>? = null,
     /** The scopes it's installed in that this person may use: `user:<id>`, `group:<id>`, `global`. */
     val installed: List<String>? = null,
-    val deploys: Int? = null,
-    val vault: Map<String, VaultNeed>? = null,
 ) {
     val label get() = title ?: name
-    fun has(screen: String) = screens?.any { it.name == screen } == true
-    fun hasOp(op: String) = ops?.any { it.name == op } == true
-    /** Only apps with a `main` screen get an icon; the rest still give widgets and tools. */
-    val hasScreens get() = has("main")
-    /** Nothing to open and no widget: it goes in a page's Services. */
-    val isService get() = !hasScreens && widgets.isNullOrEmpty()
+    /** Only apps with a `main` screen open; the rest still give widgets and tools. */
+    val hasScreens get() = screens?.any { it.name == "main" } == true
     /** Its pages: this person's own scope is the page `user`. */
     val scopes get() = installed.orEmpty().map { if (it.startsWith("user:")) "user" else it }
-    val keepsAccounts get() = vault?.values?.any { it.accounts == true } == true
 }
 
 @Serializable
@@ -199,72 +105,9 @@ data class AppScreenInfo(
 )
 
 @Serializable
-data class AppOp(
-    val name: String,
-)
-
-@Serializable
-data class AppWidget(
-    val name: String,
-)
-
-@Serializable
-data class VaultNeed(
-    val title: String? = null,
-    val accounts: Boolean? = null,
-)
-
-@Serializable
 data class NodeEvent(
     val type: String,
     val apps: List<String>? = null,
-)
-
-/** An item of the Vault as `GET /v1/vault` lists it: a secret field never with its value. */
-@Serializable
-data class VaultItem(
-    val id: String,
-    val scope: String,
-    val title: String,
-    val type: String? = null,
-    val apps: List<String> = emptyList(),
-    @SerialName("wanted_by") val wantedBy: List<String>? = null,
-)
-
-/** A request for an item an app may use: the person picks one of theirs or makes one. */
-@Serializable
-data class VaultRequest(
-    val id: String,
-    val scope: String,
-    /** The scope's owner: a person's name, a group's, or the install's. */
-    @SerialName("scope_name") val scopeName: String,
-    val app: String,
-    val title: String? = null,
-    val fields: List<VaultField>? = null,
-    val hosts: List<String>,
-    val why: String? = null,
-    val by: String,
-    val agent: String? = null,
-    /** `waiting`, `set`, `declined` or `expired`. */
-    val state: String,
-    val matches: List<VaultMatch>? = null,
-) {
-    val label get() = title ?: ""
-    val asker get() = agent?.ifEmpty { null } ?: by
-    val wanted get() = fields ?: emptyList()
-}
-
-@Serializable
-data class VaultField(
-    val name: String,
-    val secret: Boolean,
-)
-
-@Serializable
-data class VaultMatch(
-    val id: String,
-    val title: String,
-    val type: String? = null,
 )
 
 /** A widget as `GET /v1/widgets` gives it: its tree at each size it draws. */
@@ -273,29 +116,15 @@ data class WidgetInfo(
     val app: String,
     val widget: String,
     val title: String? = null,
-    /** The size a page starts it at: `small`, `medium`, `large` or `xl`. */
-    val size: String? = null,
     val sizes: Map<String, WidgetNode>? = null,
     /** Why its render failed, if it did. */
     val error: String? = null,
     val root: WidgetNode,
-    /** Each copy this person put on a page with options of their own, by its id. */
-    val placed: Map<String, WidgetPlaced>? = null,
 ) {
-    /** The sizes it draws, smallest first. */
-    val supported get() = WIDGET_SIZES.filter { sizes == null || sizes.containsKey(it) }
     fun tree(size: String) = sizes?.get(size) ?: root
 }
 
-@Serializable
-data class WidgetPlaced(
-    val sizes: Map<String, WidgetNode>? = null,
-    val error: String? = null,
-)
-
-val WIDGET_SIZES = listOf("small", "medium", "large", "xl")
-
-/** A node of a widget's tree, `t` saying what it is (WidgetTree.kt draws each). Decoded leniently: a field of the
+/** A node of a widget's tree, `t` saying what it is (widget/HomeWidget.kt draws each). Decoded leniently: a field of the
  *  wrong shape is left out, and so is a child that isn't a node. */
 @Serializable(with = WidgetNodeSerializer::class)
 data class WidgetNode(

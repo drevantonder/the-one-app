@@ -16,6 +16,18 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asComposePath
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,11 +43,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -160,8 +170,6 @@ object Glyphs {
 /** What an app's tile shows: its icon on its colour, or its own picture. */
 data class TileLook(val icon: String?, val seed: String, val color: String? = null, val image: String? = null, val imageKind: String? = null)
 
-fun AppInfo.look() = TileLook(icon, name, color, image, imageKind)
-
 private val colors = listOf("#007aff", "#34c759", "#ff9500", "#ff3b30", "#af52de", "#5856d6", "#30b0c7", "#ff2d55", "#a2845e", "#32ade6", "#00c7be", "#8e8e93")
 
 /** A steady number for a name, the same on every device. */
@@ -231,19 +239,36 @@ fun AppTile(look: TileLook, size: Dp, title: String = look.seed) {
     Image(bitmap, contentDescription = null, modifier = Modifier.size(size).shadow(size * 0.06f, RoundedCornerShape(size * 0.225f), clip = false))
 }
 
+/** A Phosphor icon by name, filled in `color`; a dot if there's none by that name. */
 @Composable
-fun AppTile(app: AppInfo?, seed: String, size: Dp) = AppTile(app?.look() ?: TileLook(null, seed), size, app?.label ?: seed)
-
-/** A person: their initials on a colour picked by their id, the same one app screens draw (`one.avatar`). */
-@Composable
-fun Avatar(id: String, name: String, size: Dp = 32.dp) {
-    val colors = listOf(0x5e5ce6, 0xff9f0a, 0x30b0c7, 0xff375f, 0x34c759, 0xaf52de, 0x0a84ff, 0xa2845e)
-    val h = id.fold(0L) { h, c -> (h * 31 + c.code) and 0xFFFFFFFF }
-    val color = Color(0xFF000000 or colors[(h % colors.size).toInt()].toLong())
-    val initials = name.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").uppercase()
-    Box(Modifier.size(size).background(Brush.verticalGradient(listOf(color.copy(alpha = 0.85f), color)), CircleShape), contentAlignment = Alignment.Center) {
-        Text(initials.ifEmpty { "?" }, color = Color.White, style = TextStyle(fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.SemiBold))
+fun Symbol(name: String, color: Color, size: Dp, modifier: Modifier = Modifier) {
+    Glyphs.load(LocalContext.current)
+    val path = remember(name) { Glyphs.path(name)?.asComposePath() }
+    if (path != null) {
+        androidx.compose.foundation.Canvas(modifier.size(size)) {
+            scale(this.size.width / 256f, pivot = Offset.Zero) { drawPath(path, color) }
+        }
+    } else {
+        Box(modifier.size(size), contentAlignment = Alignment.Center) { Box(Modifier.size(size / 3).background(color, CircleShape)) }
     }
 }
 
-fun displayName(name: String) = name.removeSuffix(".local")
+/** A large accent button, as the iPhone's prominent ones. */
+@Composable
+fun Prominent(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Button(onClick, modifier, enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = Color.White), shape = CircleShape) {
+        Text(text, style = Type.body, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** Nothing to show, and why. */
+@Composable
+fun Unavailable(title: String, text: String) {
+    val p = LocalPalette.current
+    Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text(title, style = Type.title2, color = p.label, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
+        Text(text, style = Type.subheadline, color = p.secondary, textAlign = TextAlign.Center)
+    }
+}

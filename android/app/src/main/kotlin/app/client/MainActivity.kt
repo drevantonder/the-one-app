@@ -31,7 +31,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,7 +62,7 @@ class MainActivity : ComponentActivity() {
         if (store.phase != Store.Phase.SignedOut) store.run()
         setContent {
             Theme(store.config?.accent ?: BuildConfig.ACCENT, store.appearance) {
-                CompositionLocalProvider(LocalStore provides store) { Root(store) }
+                Root(store)
             }
         }
         if (savedInstanceState == null) intent?.data?.let(::open)
@@ -102,8 +101,17 @@ class ClientApp : android.app.Application() {
 @Composable
 private fun Root(store: Store) {
     val p = LocalPalette.current
+    // The status and gesture bars in this app's light or dark, which Settings may choose apart from the phone's.
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+        androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !p.dark
+            isAppearanceLightNavigationBars = !p.dark
+        }
+    }
     Box(Modifier.fillMaxSize().background(p.background)) {
-        if (store.phase == Store.Phase.SignedOut) Welcome(store) else PagesView(store)
+        if (store.phase == Store.Phase.SignedOut) Welcome(store) else Shell(store)
     }
 }
 

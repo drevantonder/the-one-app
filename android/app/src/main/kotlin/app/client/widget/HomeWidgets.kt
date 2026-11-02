@@ -1,6 +1,8 @@
 package app.client.widget
 
 import android.app.Application
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.util.Base64
@@ -152,6 +154,7 @@ object HomeWidgets {
             val first = store.state == null
             store.refreshState()
             if (!first) store.refreshApps()
+            store.refreshWidgets(always = true)
         } catch (e: NodeError) {
             if (e.signedOut) signedOut()
         } catch (_: Exception) {
@@ -171,11 +174,14 @@ object HomeWidgets {
     fun open(store: Store, uri: Uri) {
         val scope = uri.getQueryParameter("scope") ?: return
         val app = uri.getQueryParameter("app") ?: return
-        store.current = scope
-        store.path.clear()
+        store.openPage(scope)
         val screen = uri.getQueryParameter("screen") ?: return
-        store.path.add(Route.Screen(app, screen, uri.getQueryParameter("params") ?: "{}", scope))
+        store.push(Route.App(app, screen, uri.getQueryParameter("params") ?: "{}", scope))
     }
+
+    /** Whether any is on the home screen, so the app keeps them up to date. */
+    fun placed(): Boolean = ::app.isInitialized &&
+        AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, HomeWidgetReceiver::class.java)).isNotEmpty()
 
     // MARK: Images
 
