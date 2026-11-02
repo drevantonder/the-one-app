@@ -1,4 +1,4 @@
-//! Every log of every scope this server holds, kept in SQLite exactly as the entries arrived, and how far it has read
+//! Every log of every scope this device holds, kept in SQLite exactly as the entries arrived, and how far it has read
 //! each scope's entries in the bucket.
 
 use std::path::Path;
@@ -36,10 +36,10 @@ impl Store {
                time integer not null, header blob not null, body blob not null,
                primary key (author, log, seq));
              create index if not exists entries_order on entries (log, time, author, seq);
-             -- The end of each of this server's own logs, kept when a scope is deleted, so a log it holds again
+             -- The end of each of this device's own logs, kept when a scope is deleted, so a log it holds again
              -- goes on from where it was and never has two entries with one seq.
              create table if not exists heads (log text primary key, seq integer not null, hash blob not null, time integer not null);
-             -- The last position of each scope's entries in the bucket this server has read.
+             -- The last position of each scope's entries in the bucket this device has read.
              create table if not exists positions (log text primary key, at integer not null);",
         )?;
         Ok(Store { db })
@@ -59,7 +59,7 @@ impl Store {
         Ok(true)
     }
 
-    /// Adds an entry this server just wrote after `head`, the end of its log, which it may no longer hold.
+    /// Adds an entry this device just wrote after `head`, the end of its log, which it may no longer hold.
     pub fn insert_own(&self, entry: &Entry, head: Option<Head>) -> Result<()> {
         entry.follows(head)?;
         self.put(entry)?;
@@ -79,7 +79,7 @@ impl Store {
         Ok(())
     }
 
-    /// The end of this server's own log for `log`, whether or not it holds the entries.
+    /// The end of this device's own log for `log`, whether or not it holds the entries.
     pub fn own_head(&self, author: &Key, log: &str) -> Result<Option<Head>> {
         let held = self.last(author, log)?.map(|e| e.head());
         let row = self
@@ -125,7 +125,7 @@ impl Store {
         }
     }
 
-    /// For each log, the first seq this server lacks (a log it holds again may lack its start).
+    /// For each log, the first seq this device lacks (a log it holds again may lack its start).
     pub fn frontier(&self) -> Result<Frontier> {
         let mut stmt = self.db.prepare("select author, log, count(*), max(seq) from entries group by author, log")?;
         let rows: Vec<(Key, String, u32, u32)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<Result<_, _>>()?;
@@ -165,7 +165,7 @@ impl Store {
         self.query("select header, body from entries order by time, author, log, seq", [])
     }
 
-    /// The scopes this server has entries in.
+    /// The scopes this device has entries in.
     pub fn logs(&self) -> Result<Vec<String>> {
         let mut stmt = self.db.prepare("select distinct log from entries order by log")?;
         Ok(stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
@@ -179,7 +179,7 @@ impl Store {
         Ok(())
     }
 
-    /// The last position of a scope's entries in the bucket this server has read.
+    /// The last position of a scope's entries in the bucket this device has read.
     pub fn position(&self, log: &str) -> Result<u64> {
         Ok(self.db.query_row("select at from positions where log = ?", [log], |r| r.get::<_, i64>(0)).optional()?.unwrap_or(0) as u64)
     }

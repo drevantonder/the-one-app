@@ -1,4 +1,4 @@
-//! A node: this server's install (a white label holds one), its replica and views, its socket to the relay, and where
+//! A node: this device's install (a white label holds one), its replica and views, its socket to the relay, and where
 //! calls run.
 
 use std::collections::{BTreeMap, HashMap};
@@ -50,26 +50,26 @@ const CALL_LIMIT: Duration = Duration::from_secs(30);
 const SIDECAR_LIMIT: Duration = Duration::from_secs(600);
 /// How many app-to-app calls deep a call may be: a person's call of A, A's of B, B's of C, C's of D.
 pub const MAX_DEPTH: u32 = 3;
-/// How many calls an app may make of other apps, or runs of its schedules, a minute on one server.
+/// How many calls an app may make of other apps, or runs of its schedules, a minute on one device.
 pub const RATE_LIMIT: u32 = 600;
-/// How long an app that looped stays stopped on a server, unless it's deployed again sooner.
-/// A server whose round trip is longer than this is far: a nearer one runs what it would have, whatever their order.
+/// How long an app that looped stays stopped on a device, unless it's deployed again sooner.
+/// A device whose round trip is longer than this is far: a nearer one runs what it would have, whatever their order.
 const FAR: Duration = Duration::from_millis(250);
 
-/// Whether a server has no room for more: its memory, or its CPU of late, over 90% used.
+/// Whether a device has no room for more: its memory, or its CPU of late, over 90% used.
 fn full(load: &crate::load::Load) -> bool {
     let busy = load.cpu.iter().rev().take(3).map(|c| *c as u32).sum::<u32>() / 3;
     load.memory.is_some_and(|m| m.total > 0 && m.used * 10 > m.total * 9) || busy > 90
 }
 
 const STOPPED_FOR: u64 = 15 * 60_000;
-/// How often a server reads what other servers wrote and said.
+/// How often a device reads what other devices wrote and said.
 const TICK: Duration = Duration::from_secs(10);
-/// How long a read waits for the bucket, when a ping said its database changed, before it reads this server's copy.
+/// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
 /// How long a call's work may carry on after it returns (`ctx.waitUntil`).
 const LATER_LIMIT: Duration = Duration::from_secs(600);
-/// How many of an app's failures a server records an hour; the rest are only counted on the next hour's.
+/// How many of an app's failures a device records an hour; the rest are only counted on the next hour's.
 const FAILURES_KEPT: u32 = 30;
 /// How long a request for an item waits for its answer.
 const REQUEST_LIFE: u64 = 86_400_000;
@@ -77,7 +77,7 @@ const REQUEST_LIFE: u64 = 86_400_000;
 const CHANGED_SHOWN: u64 = 14 * 86_400_000;
 /// The object in an install's bucket that says whose it is: the install's genesis.
 const INSTALL_OBJECT: &str = "install";
-/// How often a server says hello to the others: which sidecars serve there, and how loaded it is.
+/// How often a device says hello to the others: which sidecars serve there, and how loaded it is.
 const PRESENCE_EVERY: Duration = Duration::from_secs(15);
 /// What an app's own database is called: SQLite's name for a connection's first.
 const DATABASE: &str = "main";
@@ -89,7 +89,7 @@ pub fn now_ms() -> u64 {
 }
 
 #[derive(Serialize, Deserialize)]
-struct ServerFile {
+struct DeviceFile {
     secret: String,
     name: String,
 }
@@ -98,18 +98,18 @@ struct ServerFile {
 struct InstallFile {
     /// The hash of the install's genesis.
     root: String,
-    /// This server's local user.
+    /// This device's local user.
     user: String,
-    /// The install's bucket, as a place's fields: a folder's `path`, or S3's. None if this server can't reach it.
+    /// The install's bucket, as a place's fields: a folder's `path`, or S3's. None if this device can't reach it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bucket: Option<BTreeMap<String, String>>,
 }
 
-/// A sidecar serving on a server: its name, the users it serves, and what it does (its operations), which callers
+/// A sidecar serving on a device: its name, the users it serves, and what it does (its operations), which callers
 /// list until apps wrap sidecars.
 pub type Sidecar = (String, Vec<String>, Value);
 
-/// Another server, as it last said hello: the sidecars serving there, and how loaded it is.
+/// Another device, as it last said hello: the sidecars serving there, and how loaded it is.
 struct Peer {
     sidecars: Vec<Sidecar>,
     load: Option<crate::load::Load>,
@@ -119,28 +119,28 @@ struct Peer {
 struct Install {
     r: Replica,
     user: String,
-    /// The install's bucket, and its fields, which a server joining is given.
+    /// The install's bucket, and its fields, which a device joining is given.
     bucket: Option<(Place, BTreeMap<String, String>)>,
-    /// Each other server, as it last said hello.
+    /// Each other device, as it last said hello.
     peers: HashMap<Key, Peer>,
-    /// The build each server last said it runs.
+    /// The build each device last said it runs.
     builds: HashMap<Key, release::Running>,
-    /// Each scope's rows of how things went, as this server last read them.
+    /// Each scope's rows of how things went, as this device last read them.
     status: HashMap<String, status::Status>,
     /// Each scope's views: how far they've replayed, and what the scope's node entries add up to.
     views: HashMap<String, (Order, ScopeState)>,
-    /// How long each server took to answer a call lately.
+    /// How long each device took to answer a call lately.
     nearest: HashMap<Key, Duration>,
-    /// How far each server is: how long it took to answer this server's last hello.
+    /// How far each device is: how long it took to answer this device's last hello.
     far: HashMap<Key, Duration>,
-    /// Whether this server has read every scope it holds from the bucket since it woke.
+    /// Whether this device has read every scope it holds from the bucket since it woke.
     read: bool,
 }
 
 impl Install {
-    /// Whether another server said hello lately.
-    fn online(&self, server: &Key) -> bool {
-        self.peers.get(server).is_some_and(|p| p.seen.elapsed() < 3 * PRESENCE_EVERY)
+    /// Whether another device said hello lately.
+    fn online(&self, device: &Key) -> bool {
+        self.peers.get(device).is_some_and(|p| p.seen.elapsed() < 3 * PRESENCE_EVERY)
     }
 }
 
@@ -148,8 +148,8 @@ impl Install {
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Event {
     Changed { apps: Vec<String> },
-    Servers,
-    /// This server created or joined an install.
+    Devices,
+    /// This device created or joined an install.
     Install,
 }
 
@@ -171,7 +171,7 @@ const PAIRING_LIFE: u64 = 7 * 86_400_000;
 
 #[derive(Serialize, Deserialize)]
 struct PairingCode {
-    /// The install's address, whose relay reaches the server that made it.
+    /// The install's address, whose relay reaches the device that made it.
     address: String,
     from: Key,
     secret: [u8; 16],
@@ -189,12 +189,12 @@ struct JoinRequest {
 struct JoinReply {
     root: String,
     user: String,
-    /// For a server: the install's bucket, as a place's fields.
+    /// For a device: the install's bucket, as a place's fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bucket: Option<BTreeMap<String, String>>,
 }
 
-/// Who asked for something: this server or another, or a client, as one user.
+/// Who asked for something: this device or another, or a client, as one user.
 #[derive(Clone, Debug)]
 pub struct Caller {
     pub key: Key,
@@ -202,14 +202,14 @@ pub struct Caller {
     /// The agent that asked through it, by name ("Claude Code"), when one did.
     pub agent: Option<String>,
     /// The kernel access token it came with, when it's a sign-in's (or a run the schedules service handed in): a call
-    /// gets its keys and bucket URLs from the vault with it, and passes it on with the call to another server.
+    /// gets its keys and bucket URLs from the vault with it, and passes it on with the call to another device.
     pub token: Option<String>,
 }
 
 /// An operation to run: of an app, or of a sidecar.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct CallRequest {
-    /// Names this call wherever it's tried, so a call that writes runs on one server only: the first to take its lease.
+    /// Names this call wherever it's tried, so a call that writes runs on one device only: the first to take its lease.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     /// The app, or for a sidecar's call, the sidecar (older machines name a sidecar here).
@@ -218,18 +218,17 @@ pub struct CallRequest {
     /// The sidecar whose operation this is, when it is one: an app and the sidecar it wraps may share a name.
     #[serde(default)]
     pub sidecar: Option<String>,
-    /// What `sidecar` was called first, which machines built before send; a call takes it as `sidecar`.
-    #[serde(default)]
-    pub driver: Option<String>,
     pub op: String,
     #[serde(default)]
     pub input: Value,
     /// The scopes the call touches, named before it runs; by default every scope it may reach.
     #[serde(default)]
     pub scopes: Option<Vec<String>>,
-    /// The server to run it on, by name or key prefix; by default the nearest that can.
+    /// The device to run it on, by name or key prefix; by default the nearest that can.
     #[serde(default)]
-    pub server: Option<String>,
+    // Until 2026-11-02's rename reaches every device and sidecar: what they send before.
+    #[serde(alias = "server")]
+    pub device: Option<String>,
     /// The agent that asked (an MCP client's name), credited on the call.
     #[serde(default)]
     pub agent: Option<String>,
@@ -244,11 +243,11 @@ pub struct CallRequest {
     pub client: Option<String>,
 }
 
-/// What a server says to a call.
+/// What a device says to a call.
 enum Reply {
     Ok(Value),
     Error(String),
-    /// It can't run here; try another server.
+    /// It can't run here; try another device.
     Elsewhere(String),
 }
 
@@ -287,7 +286,7 @@ pub struct Inner {
     events: broadcast::Sender<Event>,
     /// Held while writing or replaying, so views replay in order.
     writes: tokio::sync::Mutex<()>,
-    /// Wakes the task that loads deploys and announces this server.
+    /// Wakes the task that loads deploys and announces this device.
     changed: tokio::sync::Notify,
     /// Wakes the task that updates this node to a newer release.
     released: tokio::sync::Notify,
@@ -316,44 +315,44 @@ pub struct Inner {
     /// Wakes the backups to run now, and whether they run whether or not an hour passed.
     backup_now: tokio::sync::Notify,
     backup_forced: Mutex<bool>,
-    /// The newest snapshot this server knows of each (place, scope), with its key's id.
+    /// The newest snapshot this device knows of each (place, scope), with its key's id.
     backed: Mutex<HashMap<(String, String), (crate::backups::Snapshot, String)>>,
     /// When each place's last run here failed, so it's tried again an hour later, not every minute.
     backup_failed: Mutex<HashMap<String, u64>>,
-    /// When this server last pruned each place, by its id.
+    /// When this device last pruned each place, by its id.
     pruned: Mutex<HashMap<String, u64>>,
-    /// When this server last copied each (place, scope)'s databases from the bucket.
+    /// When this device last copied each (place, scope)'s databases from the bucket.
     backup_looked: Mutex<HashMap<(String, String), u64>>,
-    /// Each database of each scope, by its app and name (`board/main`), as this server last read it.
+    /// Each database of each scope, by its app and name (`board/main`), as this device last read it.
     dbs: Mutex<HashMap<(Scope, String), Arc<tokio::sync::Mutex<Db>>>>,
-    /// The databases another server said it wrote without sending the step, which a read catches up from the bucket.
+    /// The databases another device said it wrote without sending the step, which a read catches up from the bucket.
     behind: Mutex<std::collections::HashSet<(Scope, String)>>,
-    /// Each scope's key, once this server has it.
+    /// Each scope's key, once this device has it.
     scope_keys: Mutex<HashMap<Scope, [u8; 32]>>,
-    /// Whether this server is moving to the install's new storage now.
+    /// Whether this device is moving to the install's new storage now.
     moving: Mutex<bool>,
-    /// Where the install's data went: every bucket this server has used writes there, after a move (`Copied`).
+    /// Where the install's data went: every bucket this device has used writes there, after a move (`Copied`).
     moved: Arc<tokio::sync::RwLock<Option<Place>>>,
-    /// This server's connector for the install's tunnel, with the token it runs with.
+    /// This device's connector for the install's tunnel, with the token it runs with.
     tunnel: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
-    /// Held while this server makes or finds a scope's key.
+    /// Held while this device makes or finds a scope's key.
     making_keys: tokio::sync::Mutex<()>,
-    /// The last position this server wrote an entry of each scope at.
+    /// The last position this device wrote an entry of each scope at.
     written: Mutex<HashMap<Scope, u64>>,
-    /// The step of each scope's entries this server last moved their newest hint on to, by scope.
+    /// The step of each scope's entries this device last moved their newest hint on to, by scope.
     hinted: Mutex<HashMap<String, u64>>,
-    /// The blobs this server has put in the bucket, as `<scope> <hash>`, kept in `install/shared` too.
+    /// The blobs this device has put in the bucket, as `<scope> <hash>`, kept in `install/shared` too.
     shared: Mutex<std::collections::HashSet<String>>,
-    /// The blobs of entries this server wrote that the bucket didn't take then, tried again each minute.
+    /// The blobs of entries this device wrote that the bucket didn't take then, tried again each minute.
     unshared: Mutex<Vec<(Scope, String)>>,
-    /// What the vault gave this server for the sign-ins its calls came with.
+    /// What the vault gave this device for the sign-ins its calls came with.
     sessions: sessions::Sessions,
-    /// This server's socket to the relay.
+    /// This device's socket to the relay.
     relay: relay::Relay,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
-/// server is stopped here for `STOPPED_FOR`, or until it's deployed again.
+/// device is stopped here for `STOPPED_FOR`, or until it's deployed again.
 #[derive(Default)]
 struct Guard {
     /// Each app's calls or runs since the minute it started counting (milliseconds): a minute from its first, not
@@ -399,11 +398,11 @@ impl std::fmt::Debug for Node {
 }
 
 impl Node {
-    /// Starts this server's node, with the built-in sidecars this build has.
+    /// Starts this device's node, with the built-in sidecars this build has.
     pub async fn start(dir: &Path, built_in_sidecars: Vec<crate::sidecars::BuiltIn>) -> Result<Node> {
         std::fs::create_dir_all(dir)?;
-        let server = load_server(dir)?;
-        let secret = unhex(&server.secret)?;
+        let device = load_device(dir)?;
+        let secret = unhex(&device.secret)?;
         let key = SigningKey::from(secret);
         let id = *key.verifying_key().as_bytes();
         let outbound = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -418,7 +417,7 @@ impl Node {
             local_token: load_local_token(dir)?,
             key,
             id,
-            name: Mutex::new(server.name),
+            name: Mutex::new(device.name),
             apps,
             built_in_sidecars,
             sidecars: Default::default(),
@@ -468,7 +467,7 @@ impl Node {
         if dir.join("install").join("install.json").exists() {
             node.open_install().context("open the install")?;
             if let Err(err) = node.bucket().and_then(|b| b.forget_sent()) {
-                tracing::warn!("forgetting steps other servers sent: {err:#}");
+                tracing::warn!("forgetting steps other devices sent: {err:#}");
             }
             node.replay_all().await?;
             node.keep_alone_here()?;
@@ -514,7 +513,7 @@ impl Node {
         &self.0.local_token
     }
 
-    /// Runs `f` on this server's install.
+    /// Runs `f` on this device's install.
     fn with<R>(&self, f: impl FnOnce(&mut Install) -> Result<R>) -> Result<R> {
         let mut install = self.0.install.lock().unwrap();
         f(install.as_mut().context("this device is in no install yet: create one, or join with a pairing code")?)
@@ -524,7 +523,7 @@ impl Node {
         self.0.install.lock().unwrap().is_some()
     }
 
-    /// This server's local user.
+    /// This device's local user.
     pub fn user(&self) -> Result<String> {
         self.with(|i| Ok(i.user.clone()))
     }
@@ -561,9 +560,9 @@ impl Node {
         Ok(())
     }
 
-    /// An install made before it kept its data in a bucket, with no server but this one: it keeps it in a folder here.
+    /// An install made before it kept its data in a bucket, with no device but this one: it keeps it in a folder here.
     fn keep_alone_here(&self) -> Result<()> {
-        let alone = self.with(|i| Ok(i.bucket.is_none() && i.r.members.servers().all(|s| s.key == self.0.id)))?;
+        let alone = self.with(|i| Ok(i.bucket.is_none() && i.r.members.devices().all(|s| s.key == self.0.id)))?;
         if !alone {
             return Ok(());
         }
@@ -587,11 +586,11 @@ impl Node {
         Ok(())
     }
 
-    pub fn server_name(&self) -> String {
+    pub fn device_name(&self) -> String {
         self.0.name.lock().unwrap().clone()
     }
 
-    /// Creates this server's install, with its local user as the first admin, and deploys the config's apps in
+    /// Creates this device's install, with its local user as the first admin, and deploys the config's apps in
     /// `global`. Returns the recovery key's secret, given only this once.
     pub async fn create(&self, name: &str, user_name: &str) -> Result<String> {
         self.create_with(name, user_name, crate::config::STARTERS).await
@@ -603,7 +602,7 @@ impl Node {
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the install a name, and yourself one");
         let user = new_id();
         let recovery = SigningKey::generate();
-        let genesis = members::genesis(name.trim(), &user, user_name.trim(), &self.server_name(), recovery.verifying_key().as_bytes());
+        let genesis = members::genesis(name.trim(), &user, user_name.trim(), &self.device_name(), recovery.verifying_key().as_bytes());
         let time = now_ms();
         let entry = Entry::create(&self.0.key, crate::entry::Ext { log: "global".into(), time, user: user.clone(), by: None }, None, genesis);
         // Until it's moved to S3-compatible storage, the install's bucket is a folder here.
@@ -628,18 +627,18 @@ impl Node {
         Ok(hex(recovery.as_bytes()))
     }
 
-    /// Writes an entry as this server's local user.
+    /// Writes an entry as this device's local user.
     pub async fn append(&self, scope: &Scope, content: Content) -> Result<Entry> {
         let user = self.user()?;
         self.append_as(scope, &user, None, content).await
     }
 
-    /// Writes an entry to this server's log of `scope`, as `user`, for `by` if it ran for someone else.
+    /// Writes an entry to this device's log of `scope`, as `user`, for `by` if it ran for someone else.
     async fn append_as(&self, scope: &Scope, user: &str, by: Option<Key>, content: Content) -> Result<Entry> {
         let _write = self.0.writes.lock().await;
         // What's in the bucket first, so the entry comes after all of it.
         self.read_log_now(scope).await?;
-        // Its blobs first, so a server that reads the entry finds them; one the bucket doesn't take now is tried again
+        // Its blobs first, so a device that reads the entry finds them; one the bucket doesn't take now is tried again
         // each minute.
         for blob in &content.blobs {
             if let Err(err) = self.share_blob(scope, blob).await {
@@ -667,19 +666,19 @@ impl Node {
         self.with(|i| {
             if handled.members {
                 let m = &i.r.members;
-                i.peers.retain(|peer, _| m.server(peer).is_some());
+                i.peers.retain(|peer, _| m.device(peer).is_some());
             }
             for log in &handled.dropped {
                 i.views.remove(log);
             }
             update_views(i, &handled.new)
         })?;
-        // A scope this server no longer holds: it forgets what it read of it.
+        // A scope this device no longer holds: it forgets what it read of it.
         self.0.dbs.lock().unwrap().retain(|(scope, _), _| !handled.dropped.contains(&scope.to_string()));
         if let Ok(bucket) = self.bucket() {
             for log in &handled.dropped {
                 if let Err(err) = bucket.forget(&crate::bucket::folder(log)) {
-                    tracing::warn!("forgetting this server's copy of {log}: {err:#}");
+                    tracing::warn!("forgetting this device's copy of {log}: {err:#}");
                 }
             }
         }
@@ -691,7 +690,7 @@ impl Node {
         }
         if handled.members {
             self.0.changed.notify_one();
-            self.emit(Event::Servers);
+            self.emit(Event::Devices);
             self.give_keys();
         }
         if handled.members || handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
@@ -717,12 +716,12 @@ impl Node {
         })
     }
 
-    /// Brings this server in line with the members: runs each app's latest deploy, fetching bundles it lacks, and
+    /// Brings this device in line with the members: runs each app's latest deploy, fetching bundles it lacks, and
     /// says which build it runs.
     async fn settle(&self) -> Result<()> {
         let Ok((wanted, author)) = self.with(|i| {
             let wanted: BTreeMap<String, String> = i.r.members.apps.values().filter(|a| !a.erased).filter_map(|a| Some((a.name.clone(), a.bundle.clone()?))).collect();
-            Ok((wanted, i.r.members.server(&self.0.id).is_some()))
+            Ok((wanted, i.r.members.device(&self.0.id).is_some()))
         }) else {
             return Ok(());
         };
@@ -751,26 +750,26 @@ impl Node {
         }
         let running = self.with(|i| Ok(i.builds.get(&self.0.id).map(|r| r.commit.clone())))?;
         if running.as_deref() != Some(crate::config::BUILD) {
-            self.say(&Scope::Global, status::Said::Build { server: self.0.id, build: crate::config::BUILD.into(), target: crate::config::TARGET.into() }).await?;
+            self.say(&Scope::Global, status::Said::Build { device: self.0.id, build: crate::config::BUILD.into(), target: crate::config::TARGET.into() }).await?;
         }
         Ok(())
     }
 
-    /// Whether this server is ready to run calls: it's a server of the install, and has read every scope it holds
+    /// Whether this device is ready to run calls: it's a device of the install, and has read every scope it holds
     /// from the bucket since it woke.
     pub fn ready(&self) -> bool {
         self.with(|i| {
-            let alone = i.r.members.servers().all(|s| s.key == self.0.id);
-            Ok(i.r.members.server(&self.0.id).is_some() && (i.read || alone))
+            let alone = i.r.members.devices().all(|s| s.key == self.0.id);
+            Ok(i.r.members.device(&self.0.id).is_some() && (i.read || alone))
         })
         .unwrap_or(false)
     }
 
-    /// Now and then, reads what other servers wrote and said, and syncs built-in sidecars' records.
+    /// Now and then, reads what other devices wrote and said, and syncs built-in sidecars' records.
     async fn tick_loop(self) {
         for tick in 1u64.. {
             tokio::time::sleep(TICK).await;
-            // What other servers wrote and said, every tick; and wrote of a built-in sidecar's records, every minute.
+            // What other devices wrote and said, every tick; and wrote of a built-in sidecar's records, every minute.
             if self.has_install() {
                 if let Err(err) = self.read_logs().await {
                     tracing::debug!("reading the bucket: {err:#}");
@@ -836,7 +835,7 @@ fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
 }
 
 /// The scopes a call of `app` as `user` may reach: their own if it's installed for them at all, each of their groups
-/// it's installed for (in the group or in `global`; a group whose installs this server can't see counts), and `global`
+/// it's installed for (in the group or in `global`; a group whose installs this device can't see counts), and `global`
 /// if it's installed there.
 fn reachable(i: &Install, app: &str, user: &str) -> Vec<Scope> {
     let m = &i.r.members;
@@ -874,7 +873,7 @@ fn handles(m: &Members, scopes: &[Scope], user: &str) -> Vec<ScopeHandle> {
 }
 
 fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
-    let name = if caller.key == node.0.id { node.server_name() } else { m.machine(&caller.key).map(|k| k.name.clone()).unwrap_or_default() };
+    let name = if caller.key == node.0.id { node.device_name() } else { m.machine(&caller.key).map(|k| k.name.clone()).unwrap_or_default() };
     let user = m.user(&caller.user);
     Me {
         key: hex(&caller.key),
@@ -920,19 +919,19 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
             let link = members::source_link(&json!(link))?;
             (Scope::Global, members::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
         }
-        Append::Sidecar { server, name, installed } => (Scope::Global, sidecar_entry(&i.r.members, &me.user, &server, &name, installed)?),
+        Append::Sidecar { device, name, installed } => (Scope::Global, sidecar_entry(&i.r.members, &me.user, &device, &name, installed)?),
         Append::Vault { id, scope, data, same, release } => vault_entry(i, app, me, scopes, &id, scope, data, same, release)?,
         Append::Install { .. } | Append::Cost { .. } | Append::Exec { .. } => bail!("installs, costs and statements are written on their own"),
     })
 }
 
-/// The `sidecar` entry that removes a sidecar from a server, found by name or key prefix, or with `installed` lets it
-/// register there again; for someone acting for one of the server's owners.
-fn sidecar_entry(m: &Members, user: &str, server: &str, name: &str, installed: bool) -> Result<Content> {
-    let found: Vec<&members::Machine> = m.servers().filter(|s| s.name.eq_ignore_ascii_case(server) || (!server.is_empty() && hex(&s.key).starts_with(server))).collect();
-    let [s] = found.as_slice() else { bail!("no one device called {server}") };
+/// The `sidecar` entry that removes a sidecar from a device, found by name or key prefix, or with `installed` lets it
+/// register there again; for someone acting for one of the device's owners.
+fn sidecar_entry(m: &Members, user: &str, device: &str, name: &str, installed: bool) -> Result<Content> {
+    let found: Vec<&members::Machine> = m.devices().filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
+    let [s] = found.as_slice() else { bail!("no one device called {device}") };
     ensure!(m.owners(&s.key).iter().any(|o| m.acts_for(user, o)), "only someone acting for one of {}'s owners installs or removes its sidecars", s.name);
-    Ok(members::node("sidecar", json!({ "server": hex(&s.key), "name": name, "blob": null, "local": installed })))
+    Ok(members::node("sidecar", json!({ "device": hex(&s.key), "name": name, "blob": null, "local": installed })))
 }
 
 /// A `schedule` entry `user` may write in `scope`, switching a schedule of `app` there on or off.
@@ -1017,7 +1016,7 @@ pub fn deploy(app: &str, bundle: &str) -> Content {
     Content { blobs: vec![bundle.into()], ..members::node("deploy", json!({ "app": app, "bundle": bundle })) }
 }
 
-/// Writes a file only this account can read: server keys, pairing secrets.
+/// Writes a file only this account can read: device keys, pairing secrets.
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     std::fs::write(path, bytes)?;
     #[cfg(unix)]
@@ -1035,12 +1034,17 @@ fn load_pairings(dir: &Path) -> HashMap<[u8; 16], Pairing> {
         .collect()
 }
 
-fn load_server(dir: &Path) -> Result<ServerFile> {
-    let path = dir.join("server.json");
+fn load_device(dir: &Path) -> Result<DeviceFile> {
+    let path = dir.join("device.json");
+    // Called server.json until 2026-11-02: moved once, on each device's first start since.
+    let was = dir.join("server.json");
+    if !path.exists() && was.exists() {
+        std::fs::rename(&was, &path)?;
+    }
     if let Ok(bytes) = std::fs::read(&path) {
         return Ok(serde_json::from_slice(&bytes)?);
     }
-    let file = ServerFile { secret: hex(&rand::random::<[u8; 32]>()), name: hostname() };
+    let file = DeviceFile { secret: hex(&rand::random::<[u8; 32]>()), name: hostname() };
     write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
     Ok(file)
 }
@@ -1065,5 +1069,5 @@ fn hostname() -> String {
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "server".into())
+        .unwrap_or_else(|| "device".into())
 }

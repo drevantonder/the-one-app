@@ -1,6 +1,6 @@
 //! The kernel services (`kernel/`: auth, vault, schedules) as nodes meet them: the formats they agree on
 //! (`kernel/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
-//! asking the vault for keys and bucket URLs, and building and running the servers in workerd.
+//! asking the vault for keys and bucket URLs, and building and running the services in workerd.
 
 #[cfg(not(target_family = "wasm"))]
 use std::time::Duration;

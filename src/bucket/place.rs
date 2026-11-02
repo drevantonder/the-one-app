@@ -76,7 +76,7 @@ fn disk(dir: &std::path::Path, err: std::io::Error) -> anyhow::Error {
 /// Where a bucket is.
 #[derive(Clone, Debug)]
 pub enum Place {
-    /// A folder on this server's disk, like a USB disk's.
+    /// A folder on this device's disk, like a USB disk's.
     Folder(PathBuf),
     S3(S3),
 }
@@ -97,7 +97,7 @@ pub enum Auth {
     Signed(Sign),
 }
 
-/// Signs a request as a presigned URL, its headers included, for a server that holds no keys.
+/// Signs a request as a presigned URL, its headers included, for a device that holds no keys.
 pub type Sign = Arc<dyn Fn(&Ask) -> Result<String> + Send + Sync>;
 
 /// A request to sign: its method, the object's name ("" for the bucket), its query, and the headers it must carry.
@@ -454,7 +454,7 @@ impl S3 {
         Ok(out)
     }
 
-    /// The URL a request goes to, signed: here with the keys, or by whoever signs for this server.
+    /// The URL a request goes to, signed: here with the keys, or by whoever signs for this device.
     fn url(&self, ask: &Ask) -> Result<String> {
         match &self.auth {
             Auth::Signed(sign) => sign(ask),

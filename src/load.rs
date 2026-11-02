@@ -1,5 +1,5 @@
 //! How loaded this machine is: memory, CPU, GPU, disk, and the containers it hosts. A thread samples it; sync carries
-//! it to peers in `Hello`. Server info, like `build`: never an entry.
+//! it to peers in `Hello`. Device info, like `build`: never an entry.
 
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;

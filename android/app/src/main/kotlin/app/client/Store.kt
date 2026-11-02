@@ -284,7 +284,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     }
 
     private suspend fun handle(e: NodeEvent) {
-        if (e.type == "servers" || e.type == "install") refreshState()
+        if (e.type == "devices" || e.type == "install") refreshState()
         if (e.type == "changed") {
             if (e.apps.isNullOrEmpty()) refreshState()
             refreshApps()

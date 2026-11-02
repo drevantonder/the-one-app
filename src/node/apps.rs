@@ -137,7 +137,7 @@ impl Node {
         Ok(out)
     }
 
-    /// The logo of `domain`, the site `app` connects to, as a data URL, once this server has fetched it. Fetches it
+    /// The logo of `domain`, the site `app` connects to, as a data URL, once this device has fetched it. Fetches it
     /// in the background when it hasn't, or did a week ago, then tells shells `app` changed.
     pub(super) fn logo(&self, domain: &str, app: &str) -> Option<(String, String)> {
         let (url, due) = self.0.logos.get(&self.0.dir, domain, now_ms());
@@ -162,7 +162,7 @@ impl Node {
     }
 
     /// The picture a bundle's app shows on its tile instead of its symbol: `icon.png` in its folder, as a data URL.
-    /// Only from bundles this server has.
+    /// Only from bundles this device has.
     pub(super) fn image(&self, bundle: &str) -> Option<String> {
         if let Some(image) = self.0.images.lock().unwrap().get(bundle) {
             return image.clone();
@@ -191,7 +191,7 @@ impl Node {
         self.member_content(caller, deploy(app, bundle)).await
     }
 
-    /// What an app's latest deploy says it uses: (apps, sidecars). Waits a while for this server to run that deploy.
+    /// What an app's latest deploy says it uses: (apps, sidecars). Waits a while for this device to run that deploy.
     pub(super) async fn uses(&self, app: &str) -> (Vec<String>, Vec<String>) {
         let started = Instant::now();
         while started.elapsed() < CALL_LIMIT {
@@ -204,7 +204,7 @@ impl Node {
         self.uses_here(app).await
     }
 
-    /// What the deploy of `app` this server runs says it uses: (apps, sidecars).
+    /// What the deploy of `app` this device runs says it uses: (apps, sidecars).
     pub(super) async fn uses_here(&self, app: &str) -> (Vec<String>, Vec<String>) {
         let d = if self.0.apps.has(app) { self.0.apps.describe(app).await.unwrap_or_default() } else { Value::Null };
         let list = |k: &str| d["uses"][k].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();

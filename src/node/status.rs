@@ -1,6 +1,6 @@
-//! How things went, as servers say it: who used each app, its errors and its AI cost; schedules' runs; the build each
-//! server runs; backups' runs. Rows each scope's node database changes in place, not entries: written often, and
-//! needed only as they are now. Each server reads them back into `Status`, which the rest of the node looks at.
+//! How things went, as devices say it: who used each app, its errors and its AI cost; schedules' runs; the build each
+//! device runs; backups' runs. Rows each scope's node database changes in place, not entries: written often, and
+//! needed only as they are now. Each device reads them back into `Status`, which the rest of the node looks at.
 
 use super::*;
 
@@ -21,6 +21,10 @@ create table builds (server text primary key, build text not null, target text n
 create table backups (place text, server text, time integer, error text, trouble text, snapshots text not null,
                       primary key (place, server, time));
 create table alerts (place text primary key, time integer not null);
+", "
+alter table runs rename column server to device;
+alter table builds rename column server to device;
+alter table backups rename column server to device;
 "];
 
 /// How many runs of each schedule a scope keeps.
@@ -28,7 +32,7 @@ pub const RUNS_KEPT: usize = 20;
 /// How many backup runs to each place `global` keeps.
 pub const BACKUP_RUNS_KEPT: usize = 100;
 
-/// A scope's rows, as this server last read them.
+/// A scope's rows, as this device last read them.
 #[derive(Clone, Debug, Default)]
 pub struct Status {
     /// What each app's owners see of it here: who used it, its errors, its AI cost.
@@ -37,7 +41,7 @@ pub struct Status {
     pub runs: BTreeMap<(String, String), Vec<Run>>,
     /// When a schedule's runs first followed a different definition, by (app, schedule): (was, is, when).
     pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
-    /// In `global`: the build each server runs.
+    /// In `global`: the build each device runs.
     pub builds: HashMap<Key, release::Running>,
     /// In `global`: the latest backup runs, oldest first.
     pub backups: Vec<BackupRun>,
@@ -81,13 +85,13 @@ pub struct Cost {
     pub calls: u64,
 }
 
-/// One run of a schedule: the slot it ran for, when, on which server, as whom, how it went, and the definition it
+/// One run of a schedule: the slot it ran for, when, on which device, as whom, how it went, and the definition it
 /// followed.
 #[derive(Clone, Debug)]
 pub struct Run {
     pub slot: u64,
     pub time: u64,
-    pub server: Key,
+    pub device: Key,
     pub user: String,
     pub ok: bool,
     pub error: Option<String>,
@@ -95,12 +99,12 @@ pub struct Run {
     pub spec: Value,
 }
 
-/// One server's backup run to one place: the snapshots it wrote, or what went wrong.
+/// One device's backup run to one place: the snapshots it wrote, or what went wrong.
 #[derive(Clone, Debug)]
 pub struct BackupRun {
     /// The place's Vault item.
     pub place: String,
-    pub server: Key,
+    pub device: Key,
     pub time: u64,
     pub error: Option<String>,
     /// What kind of trouble the error is, for its fix: `crate::bucket::Trouble`'s name.
@@ -125,7 +129,7 @@ pub enum Said {
     Failed { app: String, op: String, error: String, user: String },
     Cost { app: String, model: String, usd: f64, input: u64, output: u64 },
     Ran { app: String, schedule: String, run: Run },
-    Build { server: Key, build: String, target: String },
+    Build { device: Key, build: String, target: String },
     BackedUp(BackupRun),
     Alerted { place: String },
 }
@@ -158,18 +162,18 @@ impl Node {
                     Said::Ran { app, schedule, run } => {
                         ex(
                             "insert or replace into runs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            &[json!(app), json!(schedule), json!(run.slot), json!(run.time), json!(hex(&run.server)), json!(run.user), json!(run.ok), json!(run.error), json!(run.ms), json!(run.spec.to_string())],
+                            &[json!(app), json!(schedule), json!(run.slot), json!(run.time), json!(hex(&run.device)), json!(run.user), json!(run.ok), json!(run.error), json!(run.ms), json!(run.spec.to_string())],
                         )?;
                         ex(
                             "delete from runs where app = ? and schedule = ? and slot not in (select slot from runs where app = ? and schedule = ? order by slot desc limit ?)",
                             &[json!(app), json!(schedule), json!(app), json!(schedule), json!(RUNS_KEPT)],
                         )
                     }
-                    Said::Build { server, build, target } => ex("insert or replace into builds values (?, ?, ?, ?)", &[json!(hex(server)), json!(build), json!(target), json!(now)]),
+                    Said::Build { device, build, target } => ex("insert or replace into builds values (?, ?, ?, ?)", &[json!(hex(device)), json!(build), json!(target), json!(now)]),
                     Said::BackedUp(r) => {
                         ex(
                             "insert or replace into backups values (?, ?, ?, ?, ?, ?)",
-                            &[json!(r.place), json!(hex(&r.server)), json!(r.time), json!(r.error), json!(r.trouble), json!(serde_json::to_string(&r.snapshots)?)],
+                            &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.trouble), json!(serde_json::to_string(&r.snapshots)?)],
                         )?;
                         ex("delete from backups where place = ? and time not in (select time from backups where place = ? order by time desc limit ?)", &[json!(r.place), json!(r.place), json!(BACKUP_RUNS_KEPT)])
                     }
@@ -206,7 +210,7 @@ impl Node {
             let run = Run {
                 slot: n(&r["slot"]),
                 time: n(&r["time"]),
-                server: unhex(r["server"].as_str().unwrap_or("")).unwrap_or_default(),
+                device: unhex(r["device"].as_str().unwrap_or("")).unwrap_or_default(),
                 user: text(&r["user"]),
                 ok: r["ok"] == 1,
                 error: r["error"].as_str().map(str::to_string),
@@ -220,15 +224,15 @@ impl Node {
             runs.push(run);
         }
         for r in rows("select * from builds")? {
-            if let Ok(server) = unhex(r["server"].as_str().unwrap_or("")) {
-                s.builds.insert(server, release::Running { commit: text(&r["build"]), target: text(&r["target"]) });
+            if let Ok(device) = unhex(r["device"].as_str().unwrap_or("")) {
+                s.builds.insert(device, release::Running { commit: text(&r["build"]), target: text(&r["target"]) });
             }
         }
         for r in rows("select * from backups order by time")? {
             let snapshots: Vec<BackedUp> = serde_json::from_str(r["snapshots"].as_str().unwrap_or("[]")).unwrap_or_default();
             let run = BackupRun {
                 place: text(&r["place"]),
-                server: unhex(r["server"].as_str().unwrap_or("")).unwrap_or_default(),
+                device: unhex(r["device"].as_str().unwrap_or("")).unwrap_or_default(),
                 time: n(&r["time"]),
                 error: r["error"].as_str().map(str::to_string),
                 trouble: r["trouble"].as_str().map(str::to_string),
@@ -255,7 +259,7 @@ impl Node {
         })
     }
 
-    /// Reads every scope's rows this server holds again, for what other servers said: in the background.
+    /// Reads every scope's rows this device holds again, for what other devices said: in the background.
     pub(super) fn read_all_status(&self) {
         let node = self.clone();
         tokio::spawn(async move {

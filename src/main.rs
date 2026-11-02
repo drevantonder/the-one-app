@@ -128,7 +128,7 @@ Usage:
   {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
   {CLI} sidecars                       the sidecars on each of your devices: version, and who installed them
-  {CLI} sidecars remove|add <name> [--server <name>]
+  {CLI} sidecars remove|add <name> [--device <name>]
                                        remove a sidecar from a device you own (here by default), or allow it there
                                        again; sidecars/install.sh <name> [device] installs one and allows it
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
@@ -139,7 +139,7 @@ Usage:
                                        it takes. Words fill its main inputs in order (--help shows which), lists
                                        repeat a flag, inputs not given are read as JSON from stdin, --file
                                        <input>=<path> gives a file and --out <path> saves what it gives back.
-                                       --server <name> runs it on that device
+                                       --device <name> runs it on that device
   {CLI} try [<command>]                a new install for this checkout, on this machine beside yours, with only what
                                        every new install starts with: to look around and test in. {CLI} try <command>
                                        runs a command in it ({CLI} try mcp for an agent), {CLI} try client web, android
@@ -310,17 +310,17 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/member", json!({ "group": group, "user": user, "role": null }))?;
             println!("{user} is no longer in {group}.");
         }
-        ["acl", server] => {
+        ["acl", device] => {
             let list = |key: &str| flags.get(key).and_then(Value::as_str).map(|s| s.split(',').map(str::trim).collect::<Vec<_>>());
             let owners = list("owners").context("give --owners")?;
             let users = list("users").unwrap_or_else(|| owners.clone());
-            post("/v1/acl", json!({ "server": server, "owners": owners, "users": users }))?;
-            println!("{server}'s ACL is set.");
+            post("/v1/acl", json!({ "device": device, "owners": owners, "users": users }))?;
+            println!("{device}'s ACL is set.");
         }
-        ["trust", server] | ["untrust", server] => {
+        ["trust", device] | ["untrust", device] => {
             let trust = positional[0] == "trust";
-            post("/v1/trust", json!({ "server": server, "trust": trust }))?;
-            println!("You {} {server}.", if trust { "trust" } else { "no longer trust" });
+            post("/v1/trust", json!({ "device": device, "trust": trust }))?;
+            println!("You {} {device}.", if trust { "trust" } else { "no longer trust" });
         }
         ["deploy", app] if flags.contains_key("version") => {
             let version = flags["version"].as_str().context("give --version <hash>")?;
@@ -517,8 +517,8 @@ fn run(args: Vec<String>) -> Result<()> {
                 let t = get("/v1/tunnel")?;
                 match (t["set"] == true, t["running"] == true) {
                     (false, _) => println!("This install has no tunnel: pipe its token into {CLI} kernel tunnel, and every device runs a connector for it."),
-                    (true, true) => println!("{} runs a connector for the install's tunnel, as every device does.", t["server"].as_str().unwrap_or("")),
-                    (true, false) => println!("{} runs no connector for the install's tunnel now: cloudflared.log in its folder says why.", t["server"].as_str().unwrap_or("")),
+                    (true, true) => println!("{} runs a connector for the install's tunnel, as every device does.", t["device"].as_str().unwrap_or("")),
+                    (true, false) => println!("{} runs no connector for the install's tunnel now: cloudflared.log in its folder says why.", t["device"].as_str().unwrap_or("")),
                 }
                 return Ok(());
             }
@@ -528,7 +528,7 @@ fn run(args: Vec<String>) -> Result<()> {
         ["storage"] => {
             let s = get("/v1/storage")?;
             match s["kind"].as_str() {
-                Some("folder") => println!("The install's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other devices join: {CLI} storage move --endpoint <url>.", s["server"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
+                Some("folder") => println!("The install's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other devices join: {CLI} storage move --endpoint <url>.", s["device"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
                 Some(_) => println!("The install's data is kept in {} at {}.", s["where"].as_str().unwrap_or(""), s["endpoint"].as_str().unwrap_or("")),
                 None => println!("This device can't reach the install's data: an admin moves it to S3-compatible storage with {CLI} storage move."),
             }
@@ -682,7 +682,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["sidecars"] => {
             let state = get("/v1/state")?;
-            for s in state["install"]["servers"].as_array().into_iter().flatten() {
+            for s in state["install"]["devices"].as_array().into_iter().flatten() {
                 let installed = s["installed_sidecars"].as_array().cloned().unwrap_or_default();
                 let removed = s["removed_sidecars"].as_array().cloned().unwrap_or_default();
                 if installed.is_empty() && removed.is_empty() {
@@ -704,9 +704,9 @@ fn run(args: Vec<String>) -> Result<()> {
             }
         }
         ["sidecars", how @ ("remove" | "add"), name] => {
-            let server = flags.get("server").and_then(Value::as_str);
-            post("/v1/sidecar", json!({ "name": name, "server": server, "installed": *how == "add" }))?;
-            let on = server.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
+            let device = flags.get("device").and_then(Value::as_str);
+            post("/v1/sidecar", json!({ "name": name, "device": device, "installed": *how == "add" }))?;
+            let on = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
             match *how {
                 "remove" => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} sidecars add {name})."),
                 _ => println!("{name} is installed {on}: it serves there while it runs."),
@@ -813,7 +813,7 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
 }
 
 /// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the install hasn't one by that
-/// name, and deploys it. Every server runs it now.
+/// name, and deploys it. Every device runs it now.
 fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     let name = match flags.get("name").and_then(Value::as_str) {
         Some(name) => name.to_string(),
@@ -887,18 +887,18 @@ fn parse(args: &[String]) -> (Vec<String>, Map<String, Value>) {
     (positional, flags)
 }
 
-/// Whether a server runs here, and which install it's in, for the bare command.
+/// Whether a device runs here, and which install it's in, for the bare command.
 fn connection() -> String {
     let Ok(state) = get("/v1/state") else { return format!("{NAME} isn't running here: start it with {CLI} serve.") };
-    let server = state["server"]["name"].as_str().unwrap_or("this device");
+    let device = state["device"]["name"].as_str().unwrap_or("this device");
     let i = &state["install"];
     if i.is_null() {
-        return format!("{server} is in no install yet: {CLI} create <name> --as <your name>, or {CLI} join <code>.");
+        return format!("{device} is in no install yet: {CLI} create <name> --as <your name>, or {CLI} join <code>.");
     }
     let install = i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("an install (still joining)");
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("");
-    let ready = if state["server"]["ready"] == true { "" } else { ", catching up" };
-    format!("Connected to {install} as {me}, on {server}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.")
+    let ready = if state["device"]["ready"] == true { "" } else { ", catching up" };
+    format!("Connected to {install} as {me}, on {device}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.")
 }
 
 fn agent() -> ureq::Agent {
@@ -976,8 +976,8 @@ fn post(path: &str, body: Value) -> Result<Value> {
 }
 
 fn status(state: &Value) {
-    let server = &state["server"];
-    println!("{} ({}){}", server["name"].as_str().unwrap_or(""), &server["key"].as_str().unwrap_or("")[..8], if server["ready"] == true { "" } else { ", not ready yet" });
+    let device = &state["device"];
+    println!("{} ({}){}", device["name"].as_str().unwrap_or(""), &device["key"].as_str().unwrap_or("")[..8], if device["ready"] == true { "" } else { ", not ready yet" });
     let i = &state["install"];
     if i.is_null() {
         println!("\nIn no install yet. Create one with {CLI} create <name> --as <your name>, or join with a pairing code.");
@@ -1000,7 +1000,7 @@ fn status(state: &Value) {
         }
     }
     println!("\nDevices");
-    for s in i["servers"].as_array().into_iter().flatten() {
+    for s in i["devices"].as_array().into_iter().flatten() {
         let dot = if s["online"] == true { "●" } else { "○" };
         let here = if s["here"] == true { " (this one)" } else { "" };
         let owners: Vec<String> = s["owners"].as_array().into_iter().flatten().filter_map(|o| o.as_str()).map(|o| o.strip_prefix("user:").map(name).unwrap_or(o.into())).collect();
@@ -1013,7 +1013,7 @@ fn status(state: &Value) {
     if !clients.is_empty() {
         println!("\nPhones");
         for c in &clients {
-            // A phone keeps no log and holds no sessions: say when it last asked this server, not that it's offline.
+            // A phone keeps no log and holds no sessions: say when it last asked this device, not that it's offline.
             let asked = c["asked"].as_u64().map(|t| format!(", asked here {}", ago(t))).unwrap_or_default();
             println!("  ▯ {}  {}{asked}", c["name"].as_str().unwrap_or(""), name(c["user"].as_str().unwrap_or("")));
         }
@@ -1338,7 +1338,7 @@ fn agent_name(raw: &str) -> String {
     known.iter().find(|(names, _)| names.contains(&lower.as_str())).map(|(_, n)| n.to_string()).unwrap_or_else(|| raw.trim().to_string())
 }
 
-/// The server's instructions (src/guide.rs): the rules first, short enough that every harness keeps all of them.
+/// The MCP server's instructions (src/guide.rs): the rules first, short enough that every harness keeps all of them.
 fn instructions(mode: Mode) -> String {
     let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
     one::skills::instructions(mode, &apps)
@@ -1473,7 +1473,7 @@ fn backups_said(r: &Value) -> String {
         let when = |t: &Value| t.as_u64().map(|t| say_time(t)).unwrap_or_default();
         let last = match &p["last"] {
             Value::Null => "not backed up yet".to_string(),
-            l => format!("backed up {} by {}", when(&l["time"]), l["server"].as_str().unwrap_or("")),
+            l => format!("backed up {} by {}", when(&l["time"]), l["device"].as_str().unwrap_or("")),
         };
         out.push_str(&format!("{} ({}): {last}\n", p["title"].as_str().unwrap_or(""), p["where"].as_str().unwrap_or("")));
         if let Some(problem) = p["problem"].as_object() {
@@ -1518,7 +1518,7 @@ fn checked_said(r: &Value) -> String {
     )
 }
 
-/// Checks a backup on a disk with the recovery key alone, here, without a server: every install it holds.
+/// Checks a backup on a disk with the recovery key alone, here, without a device: every install it holds.
 fn check_folder(folder: &str) -> Result<Value> {
     let mut key = String::new();
     std::io::stdin().read_line(&mut key)?;
@@ -1657,11 +1657,11 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     if name == "groups_list" {
         return Ok(json!(groups_said(&get("/v1/state")?)));
     }
-    let server = input.remove("server");
+    let device = input.remove("device");
     let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = spec.or_else(|| ops::find(app, op).map(|(_, spec)| spec)) {
         anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
         ops::mcp_files(&spec, &mut input)?;
     }
-    Ok(post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input, "agent": agent, "client": client }))?["ok"].take())
+    Ok(post("/v1/call", json!({ "device": device, "app": app, "op": op, "input": input, "agent": agent, "client": client }))?["ok"].take())
 }

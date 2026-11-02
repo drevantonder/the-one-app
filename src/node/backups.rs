@@ -1,4 +1,4 @@
-//! Backups, as a server runs them: which scopes it backs up to which places, hourly when anything changed, and how
+//! Backups, as a device runs them: which scopes it backs up to which places, hourly when anything changed, and how
 //! each run went, written in `global` so every device shows it. The format and the places are `crate::backups`.
 
 use super::*;
@@ -10,11 +10,11 @@ use crate::bucket::Place;
 
 /// How often the node looks for backups that are due.
 const TICK: Duration = Duration::from_secs(60);
-/// How often a server prunes each place it backs up to: after its first run, then daily.
+/// How often a device prunes each place it backs up to: after its first run, then daily.
 const PRUNE_EVERY: u64 = 24 * 3_600_000;
-/// How long changes may wait for a place before admins hear of it, which catches a server that's gone.
+/// How long changes may wait for a place before admins hear of it, which catches a device that's gone.
 const LATE: u64 = 24 * 3_600_000;
-/// How long each server after the first in line waits before telling admins itself, in case those before it are down.
+/// How long each device after the first in line waits before telling admins itself, in case those before it are down.
 const STAGGER: u64 = 10 * 60_000;
 
 /// What's wrong with a place, for admins: what, its fix, since when, and from when it's worth a push.
@@ -33,8 +33,8 @@ impl Problem {
     }
 }
 
-/// Each place's problem, as this server sees it: its runs failing (worth a push from the second failure in a row),
-/// or a scope this server holds with changes that have waited a day for it, whoever should have backed them up.
+/// Each place's problem, as this device sees it: its runs failing (worth a push from the second failure in a row),
+/// or a scope this device holds with changes that have waited a day for it, whoever should have backed them up.
 /// Both end by themselves once a run works.
 fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
     let m = &i.r.members;
@@ -52,14 +52,14 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
                 Some(_) => format!("{} {error}.", p.title),
                 None => format!("{}: {error}.", p.title),
             };
-            let server = name(&last.server);
+            let device = name(&last.device);
             let fix = match (trouble, &p.place) {
                 (_, Err(_)) => "Fix it in the Vault.".to_string(),
                 (Some(crate::bucket::Trouble::Key), _) => "Change its key in the Vault.".to_string(),
                 (Some(crate::bucket::Trouble::Bucket), _) => "Check the bucket's name in the Vault.".to_string(),
                 (Some(crate::bucket::Trouble::Refused), _) => "Give the key permission to write there, or change it in the Vault.".to_string(),
-                (Some(crate::bucket::Trouble::Unreachable), _) => format!("Check {server} is online. It tries again every hour."),
-                (Some(crate::bucket::Trouble::Disk), _) => format!("Check the disk on {server} is plugged in and has room."),
+                (Some(crate::bucket::Trouble::Unreachable), _) => format!("Check {device} is online. It tries again every hour."),
+                (Some(crate::bucket::Trouble::Disk), _) => format!("Check the disk on {device} is plugged in and has room."),
                 (None, _) => "It tries again every hour.".to_string(),
             };
             let since = failing.last().map_or(last.time, |r| r.time);
@@ -70,7 +70,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
         for log in i.r.store.logs()? {
             let Ok(scope) = Scope::parse(&log) else { continue };
             let backer = match &p.place {
-                Ok(Place::Folder(_)) => p.server.filter(|k| m.holds(k, &scope)),
+                Ok(Place::Folder(_)) => p.device.filter(|k| m.holds(k, &scope)),
                 _ => line(m, &scope, &p.id).first().copied(),
             };
             let Some(backer) = backer.filter(|_| i.r.holds(&scope)) else { continue };
@@ -97,8 +97,8 @@ struct PlaceItem {
     id: String,
     title: String,
     place: Result<Place>,
-    /// For a folder: the server whose disk it's on.
-    server: Option<Key>,
+    /// For a folder: the device whose disk it's on.
+    device: Option<Key>,
     /// When it was added.
     made: u64,
 }
@@ -120,20 +120,20 @@ fn places(state: &ScopeState) -> Vec<PlaceItem> {
                 }
                 Place::Folder(_) => Ok(p),
             });
-            PlaceItem { id: id.clone(), title: it.title.clone(), place, server: fields.get("server").and_then(|s| unhex(s).ok()), made: it.made }
+            PlaceItem { id: id.clone(), title: it.title.clone(), place, device: fields.get("device").or(fields.get("server")).and_then(|s| unhex(s).ok()), made: it.made }
         })
         .collect()
 }
 
-/// The servers that back up a scope to an S3 place, in the order they take it: privileged servers first, then the
-/// scope's user's own, then the rest, each group in an order the place and scope pick. Every server works it out alike.
+/// The devices that back up a scope to an S3 place, in the order they take it: privileged devices first, then the
+/// scope's user's own, then the rest, each group in an order the place and scope pick. Every device works it out alike.
 fn line(m: &Members, scope: &Scope, place: &str) -> Vec<Key> {
     let user = match scope {
         Scope::User(u) => Some(Principal::User(u.clone())),
         _ => None,
     };
-    let mut servers: Vec<(bool, bool, [u8; 32], Key)> = m
-        .servers()
+    let mut devices: Vec<(bool, bool, [u8; 32], Key)> = m
+        .devices()
         .filter(|s| m.holds(&s.key, scope))
         .map(|s| {
             let own = user.as_ref().is_some_and(|u| m.owners(&s.key).contains(u));
@@ -143,8 +143,8 @@ fn line(m: &Members, scope: &Scope, place: &str) -> Vec<Key> {
             (!m.privileged(&s.key), !own, *h.finalize().as_bytes(), s.key)
         })
         .collect();
-    servers.sort();
-    servers.into_iter().map(|s| s.3).collect()
+    devices.sort();
+    devices.into_iter().map(|s| s.3).collect()
 }
 
 /// One scope to back up to one place in a run.
@@ -173,8 +173,8 @@ impl Node {
         }
     }
 
-    /// Pushes a place's problem to the install's admins once it's worth it, through the install's push. Every server
-    /// watches, so a server that's gone is noticed too; the first in line tells them, each after it only once the
+    /// Pushes a place's problem to the install's admins once it's worth it, through the install's push. Every device
+    /// watches, so a device that's gone is noticed too; the first in line tells them, each after it only once the
     /// ones before have had time to, and the `backup-alert` it writes keeps the rest quiet until the next problem.
     async fn tell_admins(&self) -> Result<()> {
         let now = now_ms();
@@ -215,13 +215,13 @@ impl Node {
         problems(i, now_ms()).ok()?.into_iter().min_by_key(|p| p.since).map(|p| p.json())
     }
 
-    /// Backs up now, everything this server backs up, whether or not an hour has passed.
+    /// Backs up now, everything this device backs up, whether or not an hour has passed.
     pub fn back_up_now(&self) {
         *self.0.backup_forced.lock().unwrap() = true;
         self.0.backup_now.notify_one();
     }
 
-    /// Backs up each scope to each place this server backs it up to, if an hour passed and anything changed (or
+    /// Backs up each scope to each place this device backs it up to, if an hour passed and anything changed (or
     /// `force`), and writes how each place's run went.
     async fn back_up(&self, force: bool) -> Result<()> {
         let now = now_ms();
@@ -242,10 +242,10 @@ impl Node {
                     continue;
                 }
                 let folder = matches!(p.place, Ok(Place::Folder(_)));
-                if folder && p.server != Some(me) {
+                if folder && p.device != Some(me) {
                     continue;
                 }
-                // Every server prunes each scope it holds the key of, so pruning needs no one server.
+                // Every device prunes each scope it holds the key of, so pruning needs no one device.
                 let prune = (force || pruned.get(&p.id).is_none_or(|t| now - t >= PRUNE_EVERY)).then(|| -> Result<_> {
                     Ok((keys.clone(), releases(&i.r.store.scope("global")?)))
                 });
@@ -263,8 +263,8 @@ impl Node {
                     if !folder {
                         let line = line(m, &scope, &p.id);
                         let Some(at) = line.iter().position(|k| *k == me) else { continue };
-                        // A server further down the line takes a scope's changes only once they've waited for each
-                        // server before it.
+                        // A device further down the line takes a scope's changes only once they've waited for each
+                        // device before it.
                         if at > 0 {
                             let covered = i.status.get("global").and_then(|s| s.covered.get(&(p.id.clone(), log.clone()))).map_or(0, |c| c.0);
                             if !b::takes_over(at, i.r.store.first_change(&log, covered)?, p.made, now) {
@@ -342,7 +342,7 @@ impl Node {
         Ok(())
     }
 
-    /// The key of each scope this server holds, by its name, of those it can have.
+    /// The key of each scope this device holds, by its name, of those it can have.
     async fn held_keys(&self) -> BTreeMap<String, [u8; 32]> {
         let scopes = self.with(|i| Ok(i.r.members.scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
         let mut out = BTreeMap::new();
@@ -369,16 +369,16 @@ impl Node {
         })?;
         let dir = self.0.dir.clone();
         let bucket = self.bucket().ok().map(|b| b.place);
-        let (place, install, scope_name, server) = (place.clone(), install.to_string(), d.scope.clone(), self.0.id);
+        let (place, install, scope_name, device) = (place.clone(), install.to_string(), d.scope.clone(), self.0.id);
         let snap = tokio::task::spawn_blocking(move || -> Result<(Option<Snapshot>, Option<Snapshot>)> {
-            // What the place holds: the newest snapshot there, which another server may have written since.
+            // What the place holds: the newest snapshot there, which another device may have written since.
             let newest = b::snapshots(&place, &install, &scope_name)?.into_iter().next();
             let previous = match (cached, newest) {
                 (Some(c), Some((t, _))) if c.time >= t => Some(c),
                 (_, None) => None,
                 _ => b::latest(&place, &install, &scope_name, &[key])?.map(|(s, _)| s),
             };
-            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, recovery, server, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
+            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, recovery, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
             let written = b::back_up(job, |hash| std::fs::read(release::blob_path(&dir, hash).ok()?).ok())?;
             Ok((written.clone(), written.or(previous)))
         })
@@ -396,7 +396,7 @@ impl Node {
         let snapshots = snapshots.iter().map(|s| BackedUp { scope: s.scope.clone(), upto: s.upto, entries: s.entries, blobs: s.blobs.len() as u64, bytes: s.bytes }).collect();
         let trouble = error.as_ref().and_then(crate::bucket::Trouble::of).map(|t| t.name().to_string());
         let error = error.map(|e| format!("{e:#}").chars().take(500).collect::<String>());
-        self.say(&Scope::Global, Said::BackedUp(BackupRun { place: place.into(), server: self.0.id, time: now, error, trouble, snapshots })).await
+        self.say(&Scope::Global, Said::BackedUp(BackupRun { place: place.into(), device: self.0.id, time: now, error, trouble, snapshots })).await
     }
 
     /// Backups as a person sees them: each place, how its last run went, the recent snapshots, and the disks here.
@@ -423,13 +423,13 @@ impl Node {
                     "kind": kind,
                     "where": place_where,
                     "endpoint": endpoint,
-                    "server": p.server.map(|k| name(&k)),
+                    "device": p.device.map(|k| name(&k)),
                     "problem": problems.iter().find(|q| q.place == p.id).map(Problem::json),
-                    "last": last_ok.map(|r| json!({ "time": r.time, "server": name(&r.server) })),
+                    "last": last_ok.map(|r| json!({ "time": r.time, "device": name(&r.device) })),
                 }));
             }
             let titles: BTreeMap<String, String> = places(global).into_iter().map(|p| (p.id, p.title)).collect();
-            // The install's snapshots, newest first: the runs of each minute, whichever servers and places, as one.
+            // The install's snapshots, newest first: the runs of each minute, whichever devices and places, as one.
             let mut moments: Vec<(u64, BTreeSet<String>, BTreeSet<String>, BTreeSet<String>)> = Vec::new();
             for r in runs.iter().rev().filter(|r| !r.snapshots.is_empty() && titles.contains_key(&r.place)) {
                 let minute = r.time / 60_000;
@@ -440,19 +440,19 @@ impl Node {
                     moments.push((r.time, BTreeSet::new(), BTreeSet::new(), BTreeSet::new()));
                 }
                 let m = moments.last_mut().expect("just pushed");
-                m.1.insert(name(&r.server));
+                m.1.insert(name(&r.device));
                 m.2.insert(titles[&r.place].clone());
                 m.3.extend(r.snapshots.iter().map(|s| scope_name(i, &s.scope)));
             }
             let snapshots: Vec<Value> = moments
                 .into_iter()
-                .map(|(time, servers, places, scopes)| {
-                    let (servers, places): (Vec<String>, Vec<String>) = (servers.into_iter().collect(), places.into_iter().collect());
-                    // `server` and `place`, one each, for apps built before a snapshot was the install's.
-                    json!({ "time": time, "server": servers.join(", "), "place": places.join(", "), "servers": servers, "places": places, "scopes": scopes })
+                .map(|(time, devices, places, scopes)| {
+                    let (devices, places): (Vec<String>, Vec<String>) = (devices.into_iter().collect(), places.into_iter().collect());
+                    // `device` and `place`, one each, for apps built before a snapshot was the install's.
+                    json!({ "time": time, "device": devices.join(", "), "place": places.join(", "), "devices": devices, "places": places, "scopes": scopes })
                 })
                 .collect();
-            Ok(json!({ "places": out, "snapshots": snapshots, "here": self.server_name(), "disks": disks() }))
+            Ok(json!({ "places": out, "snapshots": snapshots, "here": self.device_name(), "disks": disks() }))
         })
     }
 
@@ -482,7 +482,7 @@ impl Node {
         let (title, item_fields, hosts) = match &place {
             Place::Folder(path) => {
                 let title = text("title").unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.display().to_string()));
-                (title, json!({ "path": { "value": path.display().to_string() }, "server": { "value": hex(&self.0.id) } }), json!([]))
+                (title, json!({ "path": { "value": path.display().to_string() }, "device": { "value": hex(&self.0.id) } }), json!([]))
             }
             Place::S3(s3) => {
                 let host = s3.endpoint.split("://").nth(1).unwrap_or("").split(['/', ':']).next().unwrap_or("").to_string();

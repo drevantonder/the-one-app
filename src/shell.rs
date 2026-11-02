@@ -1,4 +1,4 @@
-//! Shell: run a command on one of your servers.
+//! Shell: run a command on one of your devices.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,7 +14,7 @@ use crate::sidecars::{Answer, Record, Reply};
 pub fn describe() -> Value {
     json!({
         "name": "shell", "title": "Shell", "icon": "terminal-window", "color": "#3a3a3c", "runs": "here", "prefer": "here", "description": "Runs commands on your own devices",
-        "instructions": "Run a shell command on one of your own devices with shell_run; give server (a device's name) to choose which. Every command is logged where only you can read it.",
+        "instructions": "Run a shell command on one of your own devices with shell_run; give device (a device's name) to choose which. Every command is logged where only you can read it.",
         "ops": [{
             "name": "run",
             "description": "Run a shell command on this device (or the device given) and return its exit code and output. Every command is logged.",

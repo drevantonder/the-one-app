@@ -1,6 +1,6 @@
-//! Server sidecars: native code a server runs beside its node, for what apps can't reach from workerd (a shell, local
-//! models, WhatsApp's linked phone, a Mac's own apps). A sidecar serves its server's users, and the node says so in its
-//! hello to the other servers; an app over it calls it with `ctx.sidecars`. Some are built into the node (Shell, AGENTS.md, Models: `built_in`);
+//! Device sidecars: native code a device runs beside its node, for what apps can't reach from workerd (a shell, local
+//! models, WhatsApp's linked phone, a Mac's own apps). A sidecar serves its device's users, and the node says so in its
+//! hello to the other devices; an app over it calls it with `ctx.sidecars`. Some are built into the node (Shell, AGENTS.md, Models: `built_in`);
 //! the rest are programs that register over the local API, in whatever language the platform needs (Go for WhatsApp,
 //! Swift in the Mac app), and long-poll for calls. The core never names one: only `built_in` does, for the binary.
 
@@ -34,7 +34,7 @@ impl Answer {
     }
 }
 
-/// What a built-in sidecar kept, in its own database of its server's local user: one thing it did or was told.
+/// What a built-in sidecar kept, in its own database of its device's local user: one thing it did or was told.
 #[derive(Clone, Debug)]
 pub struct Record {
     pub id: String,
@@ -49,7 +49,7 @@ pub struct Record {
 /// The schema of a built-in sidecar's database.
 pub const RECORDS: &str = "create table records (n integer primary key, kind text not null, data text not null, time integer not null, by text not null, device text not null)";
 
-/// A sidecar's answer that it can't serve this call here (a model it lacks), so the call goes on to the next server.
+/// A sidecar's answer that it can't serve this call here (a model it lacks), so the call goes on to the next device.
 #[derive(Debug)]
 pub struct Elsewhere(pub String);
 
@@ -73,7 +73,7 @@ pub struct BuiltIn {
     pub sync: Option<fn(records: &[Record])>,
 }
 
-/// The sidecars built into this binary: they run on every server, for its local user.
+/// The sidecars built into this binary: they run on every device, for its local user.
 pub fn built_in() -> Vec<BuiltIn> {
     vec![
         BuiltIn { name: "shell", describe: crate::shell::describe, records: false, call: crate::shell::call, sync: None },
@@ -132,8 +132,8 @@ impl Sidecars {
         self.get(app).is_some()
     }
 
-    /// Whether a registered sidecar serves every user its server serves (`serves: "everyone"` in its description), not only
-    /// its server's local user: a push sender on a privileged server, say.
+    /// Whether a registered sidecar serves every user its device serves (`serves: "everyone"` in its description), not only
+    /// its device's local user: a push sender on a privileged device, say.
     pub fn serves_everyone(&self, app: &str) -> bool {
         self.get(app).is_some_and(|p| p.describe["serves"] == "everyone")
     }
@@ -144,7 +144,7 @@ impl Sidecars {
     }
 
     /// Hands a call to the sidecar and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
-    /// caller's scope keeps, so the servers that hold the scope can fetch it.
+    /// caller's scope keeps, so the devices that hold the scope can fetch it.
     pub async fn call(&self, app: &str, op: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
         let p = self.get(app).ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

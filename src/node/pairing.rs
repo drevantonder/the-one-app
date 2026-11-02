@@ -1,9 +1,9 @@
-//! Pairing: a code that lets a new server join the install, and admitting it.
+//! Pairing: a code that lets a new device join the install, and admitting it.
 
 use super::*;
 
 impl Node {
-    /// Makes a one-time pairing code for another of the local user's machines, which joins as a server.
+    /// Makes a one-time pairing code for another of the local user's machines, which joins as a device.
     pub fn pair(&self) -> Result<String> {
         Ok(self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None, token: None }, None)?.0)
     }
@@ -14,9 +14,9 @@ impl Node {
         let user = user.map(|u| self.find_user(u)).transpose()?;
         self.with(|i| {
             let m = &i.r.members;
-            ensure!(m.server(&self.0.id).is_some(), "this device isn't in the install yet");
+            ensure!(m.device(&self.0.id).is_some(), "this device isn't in the install yet");
             ensure!(user.as_ref().is_none_or(|u| *u == asker.user) || m.is_admin(&asker.user), "only admins pair other people's machines");
-            ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.server_name());
+            ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.device_name());
             Ok(())
         })?;
         let address = self.with(|i| Ok(i.r.members.settings.get("address").cloned()))?.context("a computer joins through your One App's address, and it has none yet: an admin sets it with kernel use")?;
@@ -30,7 +30,7 @@ impl Node {
         Ok((data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase(), joins_as))
     }
 
-    /// Pairing codes are kept in a file, so one still works after the server that made it restarts.
+    /// Pairing codes are kept in a file, so one still works after the device that made it restarts.
     pub(super) fn add_pairing(&self, secret: [u8; 16], pairing: Pairing) -> Result<()> {
         let mut pairings = self.0.pairings.lock().unwrap();
         pairings.retain(|_, p| p.until > now_ms());
@@ -51,12 +51,12 @@ impl Node {
         Ok(())
     }
 
-    /// Joins the install a pairing code is for, as a server.
+    /// Joins the install a pairing code is for, as a device.
     pub async fn join(&self, code: &str) -> Result<()> {
         let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).context("that isn't a pairing code")?;
         let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
         self.ensure_no_install()?;
-        let request = JoinRequest { secret: code.secret, name: self.server_name(), as_: "server".into() };
+        let request = JoinRequest { secret: code.secret, name: self.device_name(), as_: "device".into() };
         let reply = self.ask_relay_once(&code.address, code.from, json!({ "join": request })).await.context("couldn't reach the device that made the pairing code")?;
         if let Some(err) = reply.get("error") {
             bail!("{}", err.as_str().unwrap_or("the pairing code was refused"));
@@ -65,7 +65,7 @@ impl Node {
         // A folder on another machine isn't here: the bucket is this install's only if it says so.
         let bucket = reply.bucket.filter(|f| Place::from_fields(f).ok().and_then(|p| p.get(INSTALL_OBJECT).ok().flatten()).is_some_and(|r| r == reply.root.as_bytes()));
         if bucket.is_none() {
-            tracing::warn!("this server can't reach the install's bucket: it keeps no app's data until the install moves to S3-compatible storage");
+            tracing::warn!("this device can't reach the install's bucket: it keeps no app's data until the install moves to S3-compatible storage");
         }
         self.save_install(&InstallFile { root: reply.root, user: reply.user, bucket })?;
         self.open_install()?;
@@ -81,8 +81,8 @@ impl Node {
 
     pub(super) async fn admit(&self, key: Key, request: JoinRequest) -> Result<JoinReply> {
         let pairing = self.take_pairing(&request.secret)?.filter(|p| p.until > now_ms()).context("this pairing code was already used or has expired")?;
-        // Phones joined as clients before they signed in at your One App's address: only servers join now.
-        ensure!(request.as_ == "server", "only computers join with a pairing code: sign in at your One App's address instead");
+        // Phones joined as clients before they signed in at your One App's address: only devices join now.
+        ensure!(request.as_ == "device", "only computers join with a pairing code: sign in at your One App's address instead");
         let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
         let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no install")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;

@@ -1,5 +1,5 @@
 //! `GET /v1/state`: the install as one person sees it, from its members, the same from a node on a machine and from
-//! the serverless node. What only the node answering knows (which servers are online and how loaded, who is looking)
+//! the serverless node. What only the node answering knows (which devices are online and how loaded, who is looking)
 //! it says in `Here`.
 
 use serde_json::{Map, Value, json};
@@ -15,8 +15,8 @@ pub struct Here<'a> {
     /// The client looking, if it's a device and not this one.
     pub client: Option<Value>,
     /// The node answering: `{ key, name, ready, guide }`.
-    pub server: Value,
-    /// Whether that node is one of the install's servers.
+    pub device: Value,
+    /// Whether that node is one of the install's devices.
     pub member: bool,
     /// How many entries it holds.
     pub entries: u64,
@@ -28,8 +28,8 @@ pub struct Here<'a> {
     pub backups: Option<Value>,
     /// Where an agent reads how to connect itself, when the install has no address.
     pub guide: Option<String>,
-    /// What it knows of each server now: `kind` (as it last said), and whatever else it says of it.
-    pub server_now: &'a dyn Fn(&Machine) -> Map<String, Value>,
+    /// What it knows of each device now: `kind` (as it last said), and whatever else it says of it.
+    pub device_now: &'a dyn Fn(&Machine) -> Map<String, Value>,
     /// What it knows of each client now.
     pub client_now: &'a dyn Fn(&Machine) -> Map<String, Value>,
 }
@@ -44,7 +44,9 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
     let mut state = json!({
         "config": config,
         "me": here.me,
-        "server": here.server,
+        "device": here.device,
+        // Until 2026-11-02's rename reaches every device and sidecar: what they read before.
+        "server": here.device,
         "user": m.and_then(|m| m.user(user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role })),
         "install": install,
         // Requests for an item waiting for this user to answer (see GET /v1/vault/requests).
@@ -67,13 +69,13 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
 fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) -> Value {
     let list = |ps: Vec<Principal>| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
     let set = rank::set(&m.settings);
-    let mut servers: Vec<Value> = m
-        .servers()
+    let mut devices: Vec<Value> = m
+        .devices()
         .map(|s| {
-            let mut now = (here.server_now)(s);
-            // A server that hasn't said what it is, as one that's always on.
+            let mut now = (here.device_now)(s);
+            // A device that hasn't said what it is, as one that's always on.
             let kind = now.remove("kind").and_then(|k| k.as_str().filter(|k| !k.is_empty()).map(str::to_string)).unwrap_or_else(|| "always_on".into());
-            let mut server = json!({
+            let mut device = json!({
                 "kind": kind, "use": rank::place(&set, &hex(&s.key), &kind), "far": false,
                 "key": hex(&s.key), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
                 "owners": list(m.owners(&s.key)), "users": list(m.users_of(&s.key)), "privileged": m.privileged(&s.key),
@@ -83,18 +85,18 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
                 "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
                 "load": null,
             });
-            server.as_object_mut().unwrap().extend(now);
-            server
+            device.as_object_mut().unwrap().extend(now);
+            device
         })
         .collect();
-    // Each server's place in where things run first, 0 first, for sidecars that pick one themselves.
-    let mut by_order: Vec<usize> = (0..servers.len()).collect();
+    // Each device's place in where things run first, 0 first, for sidecars that pick one themselves.
+    let mut by_order: Vec<usize> = (0..devices.len()).collect();
     by_order.sort_by_cached_key(|&n| {
-        let s = &servers[n];
+        let s = &devices[n];
         (rank::order(&set, s["key"].as_str().unwrap_or(""), s["kind"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase())
     });
     for (place, n) in by_order.into_iter().enumerate() {
-        servers[n]["order"] = json!(place);
+        devices[n]["order"] = json!(place);
     }
     let clients: Vec<Value> = m
         .clients()
@@ -117,7 +119,9 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
     json!({
         "name": m.name, "root": m.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
         "member": here.member,
-        "users": users, "groups": groups, "servers": servers, "clients": clients,
+        "users": users, "groups": groups, "devices": devices, "clients": clients,
+        // Until 2026-11-02's rename reaches every device and sidecar: what they read before.
+        "servers": devices,
         "entries": here.entries, "settings": settings,
         // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
         "serverless": settings.contains_key("serverless").then(|| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE) })),
@@ -135,7 +139,7 @@ pub fn settings(m: &Members) -> Map<String, Value> {
 }
 
 /// What to paste into an agent so it connects itself: the MCP server at the install's address, where it has one; else
-/// the skills a server serves on its tailnet (`guide`), or, where it serves none, the command line's guide.
+/// the skills a device serves on its tailnet (`guide`), or, where it serves none, the command line's guide.
 pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
     let (name, cli) = (crate::config::NAME, crate::config::CLI);
     match (address.filter(|a| !a.is_empty()), guide) {
@@ -156,7 +160,7 @@ fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, st
     };
     let invites = m.groups.values().filter(|g| g.invited.contains_key(user)).count();
     let offers = m
-        .servers()
+        .devices()
         .filter(|s| !m.privileged(&s.key) && !m.owners(&s.key).contains(&Principal::User(user.into())) && !m.trusts(user, &s.key))
         .filter(|s| m.users_of(&s.key).iter().any(|p| matches!(p, Principal::User(u) if u == user) || matches!(p, Principal::Group(g) if m.group_role(user, g).is_some())))
         .count();

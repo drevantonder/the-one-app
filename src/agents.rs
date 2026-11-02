@@ -217,7 +217,7 @@ pub fn sync(records: &[Record]) {
     set_up(records);
 }
 
-/// The apps installed for this server's person, as the local API last listed them.
+/// The apps installed for this device's person, as the local API last listed them.
 static APPS: Mutex<Option<Vec<Value>>> = Mutex::new(None);
 
 fn set_up(records: &[Record]) {

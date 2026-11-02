@@ -1,6 +1,6 @@
 //! The bucket: where an install keeps what it holds, as objects by name, in a place: a folder on one machine's disk,
 //! or S3-compatible storage. The install's own bucket must write an object only if none has its name, and replace one
-//! only while it's unchanged, so two servers writing at once never both win; backups' places only need to keep what
+//! only while it's unchanged, so two devices writing at once never both win; backups' places only need to keep what
 //! they're sent.
 
 use anyhow::Result;
@@ -56,7 +56,7 @@ pub use place::*;
 #[derive(Default)]
 pub struct Memory {
     pub objects: std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
-    /// Names another server takes just before this one writes them.
+    /// Names another device takes just before this one writes them.
     pub taken: std::sync::Mutex<Vec<(String, Vec<u8>)>>,
 }
 

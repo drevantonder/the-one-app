@@ -1,4 +1,4 @@
-//! Logos from the sites apps and sidecars connect to. A server fetches a `domain`'s logo itself,
+//! Logos from the sites apps and sidecars connect to. A device fetches a `domain`'s logo itself,
 //! keeps it as a blob, and gives it as an app's `image`, so shells draw it offline and devices never ask the site.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -17,7 +17,7 @@ const FRESH: u64 = 7 * 86_400_000;
 const RETRY: u64 = 86_400_000;
 const LARGEST: u64 = 1 << 20;
 
-/// The logos this server has fetched, by domain, kept in `logos.json` beside its blobs.
+/// The logos this device has fetched, by domain, kept in `logos.json` beside its blobs.
 pub struct Logos {
     path: PathBuf,
     known: Mutex<BTreeMap<String, Known>>,
@@ -45,7 +45,7 @@ impl Logos {
         Logos { path, known: Mutex::new(known), fetching: Mutex::default(), urls: Mutex::default() }
     }
 
-    /// `domain`'s logo as a data URL and its kind (`icon` or `logo`), if this server has it, and whether it's time to
+    /// `domain`'s logo as a data URL and its kind (`icon` or `logo`), if this device has it, and whether it's time to
     /// fetch it (again).
     pub fn get(&self, dir: &Path, domain: &str, now: u64) -> (Option<(String, String)>, bool) {
         if !valid(domain) {
@@ -94,7 +94,7 @@ impl Logos {
     }
 }
 
-/// A site's name, like `messenger.com`: no scheme, path, port or address, so a server only ever asks public sites.
+/// A site's name, like `messenger.com`: no scheme, path, port or address, so a device only ever asks public sites.
 pub fn valid(domain: &str) -> bool {
     let labels: Vec<&str> = domain.split('.').collect();
     domain.len() <= 253

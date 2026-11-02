@@ -104,14 +104,14 @@ function context(ask, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ scope: s.id, exec: String(q), params, check: String(message) });
     },
-    /// Says this scope no longer needs a blob it kept: once no scope does, servers delete it.
+    /// Says this scope no longer needs a blob it kept: once no scope does, devices delete it.
     forget: (hash) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ forget: String(hash), scope: s.id });
     },
   });
   const scopes = body.scopes.map(handle);
-  // `ctx.apps.<name>.<op>(input, { server })`, for exactly the apps (or sidecars) the app says it uses; `server` (a
+  // `ctx.apps.<name>.<op>(input, { device })`, for exactly the apps (or sidecars) the app says it uses; `device` (a
   // name) runs it there, like a sidecar on the machine that has what it needs.
   const uses = { apps: app.uses?.apps || [], sidecars: app.uses?.sidecars || [] };
   const used = (kind) => new Proxy({}, {
@@ -121,7 +121,7 @@ function context(ask, body, appends, later) {
       return new Proxy({}, {
         get(_, op) {
           if (typeof op !== "string" || op === "then") return undefined;
-          return async (input = {}, { server } = {}) => (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, sidecar: kind === "sidecars", op, input, server }) })).json()).ok;
+          return async (input = {}, { device } = {}) => (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, sidecar: kind === "sidecars", op, input, device }) })).json()).ok;
         },
       });
     },
@@ -194,16 +194,16 @@ function context(ask, body, appends, later) {
     },
     /// Every app in the install, as `GET /v1/apps` gives them to the caller.
     catalog: async () => (await ask("catalog")).json(),
-    /// The install's servers, as `GET /v1/state` gives them to the caller: online or not, and each one's load.
-    servers: async () => (await ask("servers")).json(),
-    /// Where things run first (src/rank.rs): `{ order, admin }`, every server and the serverless node (key "cloudflare")
+    /// The install's devices, as `GET /v1/state` gives them to the caller: online or not, and each one's load.
+    devices: async () => (await ask("devices")).json(),
+    /// Where things run first (src/rank.rs): `{ order, admin }`, every device and the serverless node (key "cloudflare")
     /// in the order things go to them, each with its `kind` and its place, `use` ("first", "needed" or "last"), and
-    /// whether the caller is an admin. Given a server (its name or key, or "cloudflare") and a place, puts it there
+    /// whether the caller is an admin. Given a device (its name or key, or "cloudflare") and a place, puts it there
     /// first, for an admin.
-    order: async (server, place) => {
-      if (server !== undefined) {
+    order: async (device, place) => {
+      if (device !== undefined) {
         if (body.read_only) throw new Error("this call only reads: it can't change where things run");
-        await ask("use", { method: "POST", body: JSON.stringify({ server, use: place }) });
+        await ask("use", { method: "POST", body: JSON.stringify({ device, use: place }) });
       }
       return (await ask("use")).json();
     },
@@ -224,16 +224,11 @@ function context(ask, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ app_source: name, link: String(link ?? "") });
     },
-    /// Removes a sidecar from a server (by name), or with installed lets it run there again, for someone acting for one
-    /// of the server's owners.
-    sidecar: (name, server, installed = false) => {
+    /// Removes a sidecar from a device (by name), or with installed lets it run there again, for someone acting for one
+    /// of the device's owners.
+    sidecar: (name, device, installed = false) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ sidecar: name, server, installed });
-    },
-    /// What `sidecar` was called first.
-    driver: (name, server, installed = false) => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ sidecar: name, server, installed });
+      appends.push({ sidecar: name, device, installed });
     },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     schedule: (name, schedule, scope, on = true) => {

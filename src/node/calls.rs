@@ -1,52 +1,52 @@
-//! Calls: where each runs, running it here or on another server, what it wrote, and what its app asks the node while it runs.
+//! Calls: where each runs, running it here or on another device, what it wrote, and what its app asks the node while it runs.
 
 use super::*;
 
 impl Node {
-    /// Runs an operation for this server's local user: here, or on the nearest server that can.
+    /// Runs an operation for this device's local user: here, or on the nearest device that can.
     pub async fn call(&self, req: CallRequest) -> Result<Value> {
         self.call_as(req, Caller { key: self.0.id, user: self.user()?, agent: None, token: None }).await
     }
 
-    /// Runs an operation for `me`, whom this server acts for: here, or on the nearest server that can.
+    /// Runs an operation for `me`, whom this device acts for: here, or on the nearest device that can.
     pub async fn call_as(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let me = Caller { agent: req.agent.clone().or(me.agent), ..me };
         self.route(req, me).await
     }
 
     /// A call from a kernel sign-in, which is its person's in every way but one: the node's own operations are its
-    /// servers' to ask, and a sign-in's caller has this server's key.
+    /// devices' to ask, and a sign-in's caller has this device's key.
     pub fn for_sign_in(&self, req: CallRequest) -> Result<CallRequest> {
         let req = self.resolve(req);
         ensure!(req.app != members::APP, "a sign-in can't ask that");
         Ok(req)
     }
 
-    /// Tries the servers that might run a call, nearest first, one at a time, the next only if one can't be reached
+    /// Tries the devices that might run a call, nearest first, one at a time, the next only if one can't be reached
     /// or says to go elsewhere.
     pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let mut req = self.resolve(req);
         req.id.get_or_insert_with(new_id);
-        if req.server.as_deref() == Some("all") {
+        if req.device.as_deref() == Some("all") {
             return self.everywhere(req, me).await;
         }
         let mut why = Vec::new();
-        for server in self.candidates(&req, &me)? {
+        for device in self.candidates(&req, &me)? {
             let started = Instant::now();
-            let reply = match server == self.0.id {
+            let reply = match device == self.0.id {
                 true => Ok(self.run(&req, &me).await),
-                false => self.ask_server(server, &req, &me).await,
+                false => self.ask_device(device, &req, &me).await,
             };
-            let name = self.name_of(&server);
+            let name = self.name_of(&device);
             match reply {
                 Ok(Reply::Ok(v)) => {
-                    let _ = self.with(|i| Ok(i.nearest.insert(server, started.elapsed())));
+                    let _ = self.with(|i| Ok(i.nearest.insert(device, started.elapsed())));
                     return Ok(v);
                 }
                 Ok(Reply::Error(e)) => bail!("{e}"),
                 Ok(Reply::Elsewhere(w)) => why.push(format!("{name}: {w}")),
                 Err(err) => {
-                    let _ = self.with(|i| Ok(i.nearest.insert(server, Duration::MAX)));
+                    let _ = self.with(|i| Ok(i.nearest.insert(device, Duration::MAX)));
                     why.push(format!("{name}: {err:#}"));
                 }
             }
@@ -57,34 +57,34 @@ impl Node {
         bail!("no device could run it ({})", why.join("; "))
     }
 
-    /// Runs a sidecar's call on every server that runs it for the caller, one at a time: `{ <server>: answer }`, or
+    /// Runs a sidecar's call on every device that runs it for the caller, one at a time: `{ <device>: answer }`, or
     /// `{ error }` for one that failed. Only for sidecars: an app's call runs once.
     pub(super) async fn everywhere(&self, req: CallRequest, me: Caller) -> Result<Value> {
         ensure!(req.sidecar.is_some(), "{} is an app: its calls run once, on one device", req.app);
-        let req = CallRequest { server: None, ..req };
+        let req = CallRequest { device: None, ..req };
         let mut out = serde_json::Map::new();
-        for server in self.candidates(&req, &me)? {
-            let reply = match server == self.0.id {
+        for device in self.candidates(&req, &me)? {
+            let reply = match device == self.0.id {
                 true => Ok(self.run(&req, &me).await),
-                false => self.ask_server(server, &req, &me).await,
+                false => self.ask_device(device, &req, &me).await,
             };
             let answer = match reply {
                 Ok(Reply::Ok(v)) => v,
                 Ok(Reply::Error(e) | Reply::Elsewhere(e)) => json!({ "error": e }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             };
-            out.insert(self.name_of(&server), answer);
+            out.insert(self.name_of(&device), answer);
         }
         ensure!(!out.is_empty(), "no device runs {} for you", req.app);
         Ok(Value::Object(out))
     }
 
-    /// The servers that might run a call, in the order it tries them: those that are up with room first; then the
-    /// near before the far (FAR); then by the install's order (src/rank.rs); this server before another as good; then
+    /// The devices that might run a call, in the order it tries them: those that are up with room first; then the
+    /// near before the far (FAR); then by the install's order (src/rank.rs); this device before another as good; then
     /// the nearest. A sidecar about its own machine runs here first.
     pub(super) fn candidates(&self, req: &CallRequest, me: &Caller) -> Result<Vec<Key>> {
-        if let Some(server) = &req.server {
-            return Ok(vec![self.find_server(server)?]);
+        if let Some(device) = &req.device {
+            return Ok(vec![self.find_device(device)?]);
         }
         let here = self.runs_sidecar_here(&req.app);
         // A sidecar, or one of its operations, that's about its own machine (`"prefer": "here"`: Shell, models_here) runs
@@ -93,8 +93,8 @@ impl Node {
         let here_first = here && req.sidecar.is_some() && self.with(|i| Ok(self.sidecars_here(i).iter().any(|d| d.0 == req.app && about_here(&d.2))))?;
         self.with(|i| {
             let m = &i.r.members;
-            let mut servers: Vec<Key> = if req.sidecar.is_none() {
-                m.servers().map(|s| s.key).filter(|s| m.serves(s, &me.user)).collect()
+            let mut devices: Vec<Key> = if req.sidecar.is_none() {
+                m.devices().map(|s| s.key).filter(|s| m.serves(s, &me.user)).collect()
             } else {
                 let mut s: Vec<Key> = i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.sidecars.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
                 if here && (me.user == i.user || (self.0.sidecars.serves_everyone(&req.app) && i.r.members.serves(&self.0.id, &me.user))) {
@@ -111,29 +111,26 @@ impl Node {
                 let far = !here && i.far.get(k).is_some_and(|d| *d > FAR);
                 (!here && !i.online(k), here_first && !here, load.is_some_and(full), far, rank::order(&set, &hex(k), kind), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
             };
-            servers.sort_by_cached_key(rank);
-            Ok(servers)
+            devices.sort_by_cached_key(rank);
+            Ok(devices)
         })
     }
 
     /// A call as the node runs it: one that names a sidecar is that sidecar's, whatever app shares its name. As older
-    /// machines ask for a sidecar, so is one that names an app with no deploy, or that runs on every server.
+    /// machines ask for a sidecar, so is one that names an app with no deploy, or that runs on every device.
     pub(super) fn resolve(&self, mut req: CallRequest) -> CallRequest {
-        if req.sidecar.is_none() {
-            req.sidecar = req.driver.take();
-        }
         if let Some(sidecar) = &req.sidecar {
             req.app = sidecar.clone();
-        } else if req.app != members::APP && (!self.deployed(&req.app) || req.server.as_deref() == Some("all")) {
+        } else if req.app != members::APP && (!self.deployed(&req.app) || req.device.as_deref() == Some("all")) {
             req.sidecar = Some(req.app.clone());
         }
         req
     }
 
-    /// Asks another server to run a call, through the relay.
-    pub(super) async fn ask_server(&self, server: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
-        let request = json!({ "app": req.app, "sidecar": req.sidecar, "driver": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": me.token } });
-        let reply = self.ask_relay(server, json!({ "call": request }), self.limit(req).await + Duration::from_secs(5)).await?;
+    /// Asks another device to run a call, through the relay.
+    pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
+        let request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": me.token } });
+        let reply = self.ask_relay(device, json!({ "call": request }), self.limit(req).await + Duration::from_secs(5)).await?;
         Ok(Reply::from_json(reply))
     }
 
@@ -197,7 +194,7 @@ impl Node {
         if let Err(err) = self.session_keys(me, &want).await {
             tracing::debug!("{}'s keys for {}: {err:#}", me.user, req.app);
         }
-        // A call that writes, tried on another server before this one, ran there if it took the lease first.
+        // A call that writes, tried on another device before this one, ran there if it took the lease first.
         if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);
             let lease = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
@@ -231,8 +228,8 @@ impl Node {
     }
 
     /// Records, for an app's owners, a call that ran here: the first each day by each user from each client
-    /// (`used`), and every failure (`failed`), at most `FAILURES_KEPT` an hour per app on this server. They go in the
-    /// owner's scope when the caller may use it and this server holds it, else in `global`; in the background.
+    /// (`used`), and every failure (`failed`), at most `FAILURES_KEPT` an hour per app on this device. They go in the
+    /// owner's scope when the caller may use it and this device holds it, else in `global`; in the background.
     pub(super) fn record(&self, app: &str, req: &CallRequest, me: &Caller, error: Option<&str>) {
         let now = now_ms();
         let client = req.client.clone().unwrap_or_else(|| "api".into());
@@ -259,7 +256,7 @@ impl Node {
         self.write_insight(app, me, said);
     }
 
-    /// Writes an insight about `app` for `me`'s call: in the app owner's scope when `me` may use it and this server
+    /// Writes an insight about `app` for `me`'s call: in the app owner's scope when `me` may use it and this device
     /// holds it, else in `global`; in the background.
     pub(super) fn write_insight(&self, app: &str, me: &Caller, said: status::Said) {
         let Ok(scope) = self.with(|i| {
@@ -420,11 +417,11 @@ impl Node {
         });
     }
 
-    /// Runs a built-in sidecar or sidecar here, for this server's local user.
+    /// Runs a built-in sidecar or sidecar here, for this device's local user.
     pub(super) async fn run_sidecar(&self, app: &str, op: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
         let everyone = self.0.sidecars.serves_everyone(app) && self.with(|i| Ok(i.r.members.serves(&self.0.id, &me.user)))?;
         let user = if everyone { me.user.clone() } else { self.user()? };
-        ensure!(me.user == user, "{app} runs only for {}'s own user", self.server_name());
+        ensure!(me.user == user, "{app} runs only for {}'s own user", self.device_name());
         let caller = self.me_for(me)?;
         // An app's call has the fields of the items it's switched on for filled in, a secret one only for a sidecar
         // named among its item's hosts, and blotted out of the answer.
@@ -473,11 +470,11 @@ impl Node {
         Ok(answer.ok)
     }
 
-    /// The node's own operations, which other servers ask for.
+    /// The node's own operations, which other devices ask for.
     pub(super) async fn node_op(&self, op: &str, input: &Value, me: &Caller) -> Result<Value> {
         match op {
-            // Another server's hints, which only a server of the install gives.
-            "hello" | "changed" if self.with(|i| Ok(i.r.members.server(&me.key).is_some()))? => {
+            // Another device's hints, which only a device of the install gives.
+            "hello" | "changed" if self.with(|i| Ok(i.r.members.device(&me.key).is_some()))? => {
                 if op == "hello" {
                     let sidecars: Vec<Sidecar> = serde_json::from_value(input["sidecars"].clone()).unwrap_or_default();
                     let load = serde_json::from_value(input["load"].clone()).ok();
@@ -494,7 +491,7 @@ impl Node {
                         Ok((before.is_none(), changed))
                     })?;
                     if new || !changed.is_empty() {
-                        self.emit(Event::Servers);
+                        self.emit(Event::Devices);
                     }
                     if !changed.is_empty() {
                         self.emit(Event::Changed { apps: changed });
@@ -535,7 +532,7 @@ impl Node {
         };
         if tripped {
             let what = if kind == "call" { "called other apps" } else { "ran its schedules" };
-            let why = format!("{app} {what} more than {RATE_LIMIT} times in a minute on {}, so it was stopped there: is it looping? It runs again once it's deployed again, or in {} minutes.", self.server_name(), STOPPED_FOR / 60_000);
+            let why = format!("{app} {what} more than {RATE_LIMIT} times in a minute on {}, so it was stopped there: is it looping? It runs again once it's deployed again, or in {} minutes.", self.device_name(), STOPPED_FOR / 60_000);
             let bundle = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone()))).ok().flatten();
             self.0.guard.lock().unwrap().stopped.insert(app.to_string(), (why.clone(), now_ms() + STOPPED_FOR, bundle));
             tracing::warn!("{why}");
@@ -591,7 +588,7 @@ impl Node {
 
     /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs an
     /// operation of an app or sidecar the calling app uses, as its caller; `POST /blob` keeps a blob, `GET
-    /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the install's apps, `GET /servers` its servers.
+    /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the install's apps, `GET /devices` its devices.
     pub async fn internal(&self, token: &str, method: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
         use axum::response::IntoResponse;
         let grant = &self.grant_of(token).context("only a running call asks the node")?;
@@ -602,15 +599,15 @@ impl Node {
                 let req: Value = serde_json::from_slice(&body)?;
                 let (app, op) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
                 // `ctx.sidecars` says it's a sidecar's; `ctx.apps`, an app's (or, from older shims, either).
-                let sidecar = req["sidecar"] == true || req["driver"] == true;
+                let sidecar = req["sidecar"] == true;
                 let (apps, sidecars) = self.uses(&grant.app).await;
                 let used = if sidecar { sidecars.iter().any(|u| u == app) } else { apps.iter().chain(&sidecars).any(|u| u == app) };
                 ensure!(used, "{} doesn't use {app}", grant.app);
                 ensure!(grant.depth < MAX_DEPTH, "{} called {app} {} calls deep, and apps call each other at most {MAX_DEPTH} deep: is it looping?", grant.app, grant.depth + 1);
                 self.count(&grant.app, "call").await?;
-                // An app may say which server runs it, like the one with a local model.
-                let server = req["server"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
-                let call = CallRequest { app: app.into(), sidecar: sidecar.then(|| app.into()), op: op.into(), input: req["input"].clone(), server, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
+                // An app may say which device runs it, like the one with a local model.
+                let device = req["device"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
+                let call = CallRequest { app: app.into(), sidecar: sidecar.then(|| app.into()), op: op.into(), input: req["input"].clone(), device, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
             ("POST", "/query") => {
@@ -681,7 +678,7 @@ impl Node {
             }
             ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
             // A push to the caller's phones, from this app: the install delivers it through the sidecar its `push`
-            // setting names, wherever that runs (the server with Apple's push key); with push off, it isn't sent.
+            // setting names, wherever that runs (the device with Apple's push key); with push off, it isn't sent.
             ("POST", "/notify") => {
                 ensure!(!grant.read_only, "this call only reads: it can't push");
                 let push = self.with(|i| Ok(crate::state::settings(&i.r.members).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()))?;
@@ -692,11 +689,11 @@ impl Node {
                 let call = CallRequest { app: push.clone(), sidecar: Some(push), op: "send".into(), input, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
-            ("GET", "/servers") => ok(self.state_for(&grant.caller)["install"]["servers"].take()),
+            ("GET", "/devices") => ok(self.state_for(&grant.caller)["install"]["devices"].take()),
             // Where things run first, as the person the call is for: only an admin changes it.
             ("GET", "/use") => {
                 let install = self.state_for(&grant.caller)["install"].take();
-                let mut order: Vec<Value> = install["servers"].as_array().cloned().unwrap_or_default().into_iter().map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "use": s["use"], "online": s["online"], "here": s["me"] })).collect();
+                let mut order: Vec<Value> = install["devices"].as_array().cloned().unwrap_or_default().into_iter().map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "use": s["use"], "online": s["online"], "here": s["me"] })).collect();
                 if let Some(use_) = install["serverless"]["use"].as_str() {
                     order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "use": use_, "online": true, "here": false }));
                 }
@@ -707,14 +704,14 @@ impl Node {
             ("POST", "/use") => {
                 ensure!(!grant.read_only, "this call only reads: it can't change where things run");
                 let req: Value = serde_json::from_slice(&body)?;
-                self.set_use(&grant.caller, req["server"].as_str().unwrap_or(""), req["use"].as_str().unwrap_or("")).await?;
+                self.set_use(&grant.caller, req["device"].as_str().unwrap_or(""), req["use"].as_str().unwrap_or("")).await?;
                 ok(json!({}))
             }
             _ => bail!("the node has no {method} {path}"),
         })
     }
 
-    /// Runs a call another server, `remote`, asked for.
+    /// Runs a call another device, `remote`, asked for.
     pub(super) async fn accept_call(&self, remote: Key, request: &Value) -> Reply {
         let mut me = match self.check_caller(remote, request) {
             Ok(me) => me,
@@ -728,14 +725,14 @@ impl Node {
             Ok(req) => req,
             Err(err) => return Reply::Error(format!("{err:#}")),
         };
-        // Only a server says an app made a call (whose items fill it in), and how deep it is.
+        // Only a device says an app made a call (whose items fill it in), and how deep it is.
         if !self.with(|i| Ok(i.r.members.trusts(&me.user, &remote))).unwrap_or(false) {
             (req.from, req.depth) = (None, 0);
         }
         self.run(&req, &me).await
     }
 
-    /// A call is taken only as a user from one of their clients or a server they trust.
+    /// A call is taken only as a user from one of their clients or a device they trust.
     pub(super) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
         let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
@@ -755,7 +752,7 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
     let m = &i.r.members;
     let here = node.0.id;
     if !m.serves(&here, &me.user) {
-        return Ok(Err(format!("{} doesn't serve you", node.server_name())));
+        return Ok(Err(format!("{} doesn't serve you", node.device_name())));
     }
     let reach = reachable(i, &req.app, &me.user);
     let scopes: Vec<Scope> = match &req.scopes {
@@ -774,7 +771,7 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
         bail!("{} isn't installed for you", req.app);
     }
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
-        return Ok(Err(format!("{} doesn't hold {s}", node.server_name())));
+        return Ok(Err(format!("{} doesn't hold {s}", node.device_name())));
     }
     let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None };
     Ok(Ok((ctx, scopes)))

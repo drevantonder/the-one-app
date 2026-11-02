@@ -39,7 +39,7 @@ pub fn metadata(settings: &Settings) -> Value {
         json!({ "type": "worker_loader", "name": "LOADER" }),
         json!({ "type": "plain_text", "name": "ADDRESS", "text": settings.address }),
         json!({ "type": "plain_text", "name": "NAME", "text": settings.name }),
-        // The gateway's relay, which tells servers what this node wrote.
+        // The gateway's relay, which tells devices what this node wrote.
         json!({ "type": "durable_object_namespace", "name": "RELAY", "class_name": "Relay", "script_name": worker_name("gateway") }),
     ];
     if settings.node_url.is_some() {

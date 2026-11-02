@@ -2,7 +2,7 @@
 <div id="requests"></div>
 <div id="error" class="footer error"></div>
 <script>
-  // What waits for this person: items apps and agents asked them for, group invites, and servers offered to them to
+  // What waits for this person: items apps and agents asked them for, group invites, and devices offered to them to
   // trust.
   const esc = one.esc;
   const section = (title, rows) => (rows.length ? `<h2 class="section">${title}</h2><div class="list">${rows.join("")}</div>` : "");
@@ -18,10 +18,10 @@
       [r.agent || r.by, r.why].filter(Boolean).join(" · "), `<button class="button capsule filled" data-request="${esc(r.id)}" data-scope="${esc(r.scope)}">Choose</button>`));
     const invites = (i.groups || []).filter((g) => g.invited.some((x) => x.user === me)).map((g) => row(one.avatar(g.id, g.name), g.name,
       new Intl.ListFormat(undefined, { type: "conjunction" }).format(g.members.map((m) => userName(m.user))), `<button class="button capsule filled" data-join="${esc(g.id)}">Join</button>`));
-    const servers = (i.servers || []).filter((s) => !s.privileged && !s.owners.includes(`user:${me}`) && s.users.some((u) => mine.includes(u)) && !s.trusted_by.includes(me))
+    const devices = (i.devices || []).filter((s) => !s.privileged && !s.owners.includes(`user:${me}`) && s.users.some((u) => mine.includes(u)) && !s.trusted_by.includes(me))
       .map((s) => row(`<div class="icon grey">${one.icon("hard-drives")}</div>`, s.name.replace(/\.local$/, ""), "Lets it keep your own data", `<button class="button capsule" data-trust="${esc(s.key)}">Trust</button>`));
-    if (!vault.length && !invites.length && !servers.length) return one.empty({ icon: "tray", title: "No Requests" });
-    return section("Vault", vault) + section("Invites", invites) + section("Devices", servers);
+    if (!vault.length && !invites.length && !devices.length) return one.empty({ icon: "tray", title: "No Requests" });
+    return section("Vault", vault) + section("Invites", invites) + section("Devices", devices);
   });
 
   // Each button does its one thing, and the list shows what's left.
@@ -34,7 +34,7 @@
     try {
       if (b.dataset.request) await one.request(b.dataset.scope, b.dataset.request);
       if (b.dataset.join) await one.api("POST", "/v1/accept", { group: b.dataset.join });
-      if (b.dataset.trust) await one.api("POST", "/v1/trust", { server: b.dataset.trust, trust: true });
+      if (b.dataset.trust) await one.api("POST", "/v1/trust", { device: b.dataset.trust, trust: true });
     } catch (err) {
       error.textContent = one.plain(err).title;
     }

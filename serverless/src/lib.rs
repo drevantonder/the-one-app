@@ -293,7 +293,7 @@ pub fn scopes_of(user: &str) -> Result<String, JsError> {
 }
 
 /// The install as `user` sees it, from the entries of `scopes` (JSON) this isolate read: `{ state, apps, me }`.
-/// `state` is `GET /v1/state`'s, for a node that knows of no server being on; `apps` is `GET /v1/apps`'s from the
+/// `state` is `GET /v1/state`'s, for a node that knows of no device being on; `apps` is `GET /v1/apps`'s from the
 /// members alone, each with `reach`, the scopes it reaches for `user` (what its widgets and calls are given), for
 /// `worker.js` to add what each app says it does; `me` is what an app is told of who it runs for. `client` names the
 /// sign-in's client.
@@ -309,21 +309,21 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
     // Requests for an item waiting for `me` to answer, as src/node.rs's `item_requests` counts them.
     let manages = |s: &String| Scope::parse(s).is_ok_and(|s| members::manages_scope(m, me, &s));
     let waiting = states.iter().filter(|(s, _)| manages(s)).flat_map(|(_, s)| s.requests.values()).filter(|r| r.answer.is_none() && now < r.time + 86_400_000).count();
-    // It knows of no server being on, nor of who else is looking.
+    // It knows of no device being on, nor of who else is looking.
     let state = one::state::state(
         Some(m),
         me,
         one::state::Here {
             me: json!({ "key": "", "name": client, "user": me }),
             client: Some(json!({ "key": "", "name": client })),
-            server: json!({ "key": "", "name": "", "ready": true, "guide": null }),
+            device: json!({ "key": "", "name": "", "ready": true, "guide": null }),
             member: false,
             entries: 0,
             waiting,
             arrangements: json!(mine.map(|s| s.arrangements.clone()).unwrap_or_default()),
             backups: None,
             guide: None,
-            server_now: &|_| Default::default(),
+            device_now: &|_| Default::default(),
             client_now: &|_| Default::default(),
         },
     );

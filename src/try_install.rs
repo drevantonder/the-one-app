@@ -409,13 +409,13 @@ fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &
         _ => bail!("which client? {CLI} try client web, android or windows, with --as <name> for someone else"),
     }
     if let Some(name) = &person {
-        // As in any new install, its one server is its first person's, which keeps only their data.
+        // As in any new install, its one device is its first person's, which keeps only their data.
         let addr = std::fs::read_to_string(dir.join("addr"))?;
         let state = crate::request(try_agent(dir).get(format!("http://{}/v1/state", addr.trim())).call())?;
-        let servers = state["install"]["servers"].as_array().cloned().unwrap_or_default();
-        if !servers.iter().any(|s| s["privileged"] == true) {
-            let server = servers.first().and_then(|s| s["name"].as_str()).unwrap_or("<server>");
-            println!("  As in a new install, no server keeps everyone's data, so what {name} writes (joining a group, say) won't count until one does: {CLI} try acl {server} --owners install");
+        let devices = state["install"]["devices"].as_array().cloned().unwrap_or_default();
+        if !devices.iter().any(|s| s["privileged"] == true) {
+            let device = devices.first().and_then(|s| s["name"].as_str()).unwrap_or("<device>");
+            println!("  As in a new install, no device keeps everyone's data, so what {name} writes (joining a group, say) won't count until one does: {CLI} try acl {device} --owners install");
         }
     }
     println!("Ready in {}s.", started.elapsed().as_secs());

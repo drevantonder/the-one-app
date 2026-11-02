@@ -8,7 +8,7 @@ impl Node {
         release::put_blob(&self.0.dir, bytes)
     }
 
-    /// A blob from this server, else from the bucket, in a scope whose entries name it.
+    /// A blob from this device, else from the bucket, in a scope whose entries name it.
     pub async fn blob(&self, hash: &str) -> Result<Vec<u8>> {
         if let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) {
             return Ok(bytes);
@@ -27,7 +27,7 @@ impl Node {
         bail!("no device has put that blob in the bucket")
     }
 
-    /// Puts a blob this server has in the bucket, in `scope`, sealed with that scope's key, unless it has already.
+    /// Puts a blob this device has in the bucket, in `scope`, sealed with that scope's key, unless it has already.
     pub(super) async fn share_blob(&self, scope: &Scope, hash: &str) -> Result<()> {
         use crate::bucket::Bucket;
         let marker = format!("{scope} {hash}");
@@ -60,7 +60,7 @@ impl Node {
         }
     }
 
-    /// Puts in the bucket each blob this server has that an entry it holds names, and it hasn't put there yet: those
+    /// Puts in the bucket each blob this device has that an entry it holds names, and it hasn't put there yet: those
     /// from before blobs were kept in the bucket.
     pub(super) async fn share_blobs(self) {
         let noted = std::fs::read_to_string(self.install_dir().join("shared")).unwrap_or_default();
@@ -92,7 +92,7 @@ impl Node {
         }
     }
 
-    /// The scopes this server holds whose entries name a blob.
+    /// The scopes this device holds whose entries name a blob.
     fn scopes_naming(&self, hash: &str) -> Result<Vec<Scope>> {
         self.with(|i| {
             let mut out = Vec::new();
@@ -139,7 +139,7 @@ impl Node {
     }
 
     /// Takes from the bucket each blob a scope forgot that no entry of that scope still needs, and deletes the blobs
-    /// here that no entry this server holds still needs: `(scope, hash)`s.
+    /// here that no entry this device holds still needs: `(scope, hash)`s.
     pub(super) fn delete_forgotten(&self, forgotten: Vec<(String, String)>) {
         for (log, hash) in forgotten {
             if self.0.built_in.values().any(|b| *b == hash) {

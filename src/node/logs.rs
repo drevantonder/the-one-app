@@ -1,9 +1,9 @@
-//! Each scope's log in the bucket, reading and writing its entries, and what servers tell each other: pings and presence.
+//! Each scope's log in the bucket, reading and writing its entries, and what devices tell each other: pings and presence.
 
 use super::*;
 
 impl Node {
-    /// Reads what each scope this server holds has in the bucket after what it last read, `global` first, until it
+    /// Reads what each scope this device holds has in the bucket after what it last read, `global` first, until it
     /// gains no scope by what it read.
     pub(super) async fn read_logs(&self) -> Result<()> {
         loop {
@@ -26,13 +26,13 @@ impl Node {
         })
     }
 
-    /// Reads a scope's entries in the bucket after the last this server read: whether it now holds a scope it didn't.
+    /// Reads a scope's entries in the bucket after the last this device read: whether it now holds a scope it didn't.
     pub(super) async fn read_log(&self, scope: &Scope) -> Result<bool> {
         let _write = self.0.writes.lock().await;
         self.read_log_now(scope).await
     }
 
-    /// `read_log`, while this server holds its writes. A server that has read none of a scope's entries starts from
+    /// `read_log`, while this device holds its writes. A device that has read none of a scope's entries starts from
     /// their newest copy.
     pub(super) async fn read_log_now(&self, scope: &Scope) -> Result<bool> {
         let (bucket, key, log) = (self.bucket()?, self.log_key(scope).await?, scope.to_string());
@@ -57,7 +57,7 @@ impl Node {
         Ok(gained)
     }
 
-    /// Once this server has read a scope's entries up to step `at`, and hasn't said so since it started: a copy of them
+    /// Once this device has read a scope's entries up to step `at`, and hasn't said so since it started: a copy of them
     /// in the bucket if it's due, and their newest hint moved on (`src/log.rs`).
     pub(super) async fn hint_log(&self, scope: &Scope, bucket: &impl crate::bucket::Bucket, key: &[u8; 32], at: u64) {
         let log = scope.to_string();
@@ -71,7 +71,7 @@ impl Node {
         }
     }
 
-    /// Writes an entry this server made to its scope's entries in the bucket, at the first position free.
+    /// Writes an entry this device made to its scope's entries in the bucket, at the first position free.
     pub(super) async fn put_entry(&self, scope: &Scope, entry: &Entry) -> Result<()> {
         use crate::bucket::Bucket;
         let (bucket, key, prefix) = (self.bucket()?, self.log_key(scope).await?, crate::log::prefix(&scope.to_string()));
@@ -94,13 +94,13 @@ impl Node {
         self.database_key(scope, members::APP, crate::log::NAME).await
     }
 
-    /// Tells the servers that hold `scope` it changed, so they read it now rather than at their next look: its entries,
+    /// Tells the devices that hold `scope` it changed, so they read it now rather than at their next look: its entries,
     /// or with `wrote`, step `at` of an app's database, through the relay. Only a hint: each reads what changed from the
     /// bucket.
     pub(super) fn ping(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
-        let Ok(servers) = self.with(|i| {
+        let Ok(devices) = self.with(|i| {
             let m = &i.r.members;
-            Ok(m.servers().filter(|s| s.key != self.0.id && m.holds(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>())
+            Ok(m.devices().filter(|s| s.key != self.0.id && m.holds(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>())
         }) else {
             return;
         };
@@ -108,10 +108,10 @@ impl Node {
         if let Some((app, database, at)) = wrote {
             input = json!({ "scope": scope.to_string(), "app": app, "database": database, "at": at });
         }
-        self.notify(&servers, &input);
+        self.notify(&devices, &input);
     }
 
-    /// What another server said changed in `scope`, which this server holds: its entries, which it reads now, or with
+    /// What another device said changed in `scope`, which this device holds: its entries, which it reads now, or with
     /// `wrote`, step `at` of a database, which it fetches into its copy now if it has the database open, and until then
     /// reads from the bucket first.
     pub(super) fn changed_there(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
@@ -145,7 +145,7 @@ impl Node {
         });
     }
 
-    /// Tells every other server which sidecars serve its local user here and how loaded it is, now and then.
+    /// Tells every other device which sidecars serve its local user here and how loaded it is, now and then.
     pub(super) async fn presence_loop(self) {
         loop {
             if self.has_install() {
@@ -155,22 +155,22 @@ impl Node {
         }
     }
 
-    /// Says hello to every other server: as now and then, and when this server's sidecars change. How long each takes
+    /// Says hello to every other device: as now and then, and when this device's sidecars change. How long each takes
     /// to answer is how far it is.
     pub(super) fn say_hello(&self) {
-        let Ok((servers, me, sidecars)) = self.with(|i| {
-            let servers: Vec<Key> = i.r.members.servers().map(|s| s.key).filter(|k| *k != self.0.id).collect();
-            Ok((servers, Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }, self.sidecars_here(i)))
+        let Ok((devices, me, sidecars)) = self.with(|i| {
+            let devices: Vec<Key> = i.r.members.devices().map(|s| s.key).filter(|k| *k != self.0.id).collect();
+            Ok((devices, Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }, self.sidecars_here(i)))
         }) else {
             return;
         };
         let req = CallRequest { app: members::APP.into(), op: "hello".into(), input: json!({ "sidecars": sidecars, "load": crate::load::current() }), ..Default::default() };
-        for server in servers {
+        for device in devices {
             let (node, req, me) = (self.clone(), req.clone(), me.clone());
             tokio::spawn(async move {
                 let asked = Instant::now();
-                if node.ask_server(server, &req, &me).await.is_ok() {
-                    let _ = node.with(|i| Ok(i.far.insert(server, asked.elapsed())));
+                if node.ask_device(device, &req, &me).await.is_ok() {
+                    let _ = node.with(|i| Ok(i.far.insert(device, asked.elapsed())));
                 }
             });
         }

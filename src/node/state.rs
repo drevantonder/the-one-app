@@ -13,7 +13,7 @@ impl Node {
     }
 
     /// A link that lets someone new, called `name`, join: it works once, for a few days. Made at the install's vault as
-    /// `caller`, an admin signed in, since the kernel checks who's asking, not this server: → (the link, until when).
+    /// `caller`, an admin signed in, since the kernel checks who's asking, not this device: → (the link, until when).
     pub async fn invite_link(&self, caller: &Caller, name: &str) -> Result<(String, u64)> {
         ensure!(crate::config::SIGN_IN != "google", "people join by signing in with Google, so they need no invite link");
         ensure!(!name.trim().is_empty(), "give their name");
@@ -26,7 +26,7 @@ impl Node {
         Ok((format!("{}/invite#{secret}", address.trim_end_matches('/')), until))
     }
 
-    /// The key of each scope this server holds, with the people who may open it and its admins (Everyone's and groups'),
+    /// The key of each scope this device holds, with the people who may open it and its admins (Everyone's and groups'),
     /// for an admin handing them to the install's kernel (`kernel keys`), so a serverless node opens what this one does
     /// and the vault knows who may say who no longer does.
     pub async fn keys_for_kernel(&self, caller: &Caller) -> Result<Vec<Value>> {
@@ -57,14 +57,14 @@ impl Node {
 
     /// Lets in someone the install's kernel signed in who isn't a person of it yet, as a member, `name` as the kernel
     /// knows them: it signs in only those an admin invited, or people at the install's domain signing in with Google.
-    /// This server's own person writes it, so it must be an admin.
+    /// This device's own person writes it, so it must be an admin.
     pub async fn let_in(&self, user: &str, name: &str) -> Result<()> {
         let me = self.user()?;
         let (admin, removed) = self.with(|i| Ok((i.r.members.is_admin(&me), i.r.members.removed_user(user))))?;
         ensure!(!removed, "you were removed from this install: an admin adds you back");
-        ensure!(admin, "you aren't a person of this install yet, and {} can't let you in: its person isn't an admin", self.server_name());
+        ensure!(admin, "you aren't a person of this install yet, and {} can't let you in: its person isn't an admin", self.device_name());
         ensure!(!name.trim().is_empty(), "your sign-in doesn't say your name: sign in again");
-        // A key no machine holds, the same on every server, so two letting the same person in at once add them once.
+        // A key no machine holds, the same on every device, so two letting the same person in at once add them once.
         let key: Key = <sha2::Sha256 as sha2::Digest>::digest(format!("{}/sign-in\0{user}", crate::config::CLI)).into();
         let admit = members::admit(&key, user, &format!("{name}'s sign-in"), false, Some((name.trim(), Role::Member)));
         self.member_as(&Caller { key: self.0.id, user: me, agent: None, token: None }, "admit", admit.data).await
@@ -75,16 +75,16 @@ impl Node {
         self.member_as(caller, "setting", json!({ "name": name, "value": value })).await
     }
 
-    /// Puts a server, or the serverless node (`cloudflare`), first, when needed or last in the install's order of where
-    /// things run, for an admin: the `use` setting, every other server's place written down as it is now.
-    pub async fn set_use(&self, caller: &Caller, server: &str, place: &str) -> Result<()> {
+    /// Puts a device, or the serverless node (`cloudflare`), first, when needed or last in the install's order of where
+    /// things run, for an admin: the `use` setting, every other device's place written down as it is now.
+    pub async fn set_use(&self, caller: &Caller, device: &str, place: &str) -> Result<()> {
         let place = rank::Use::parse(place).context("a place is first, needed or last")?;
-        let id = if server.eq_ignore_ascii_case(rank::CLOUDFLARE) { rank::CLOUDFLARE.to_string() } else { hex(&self.find_server(server)?) };
+        let id = if device.eq_ignore_ascii_case(rank::CLOUDFLARE) { rank::CLOUDFLARE.to_string() } else { hex(&self.find_device(device)?) };
         let here = crate::load::current().kind;
         let value = self.with(|i| {
             let m = &i.r.members;
             let kind = |k: &Key| if *k == self.0.id { here.clone() } else { i.peers.get(k).and_then(|p| p.load.as_ref()).map(|l| l.kind.clone()).unwrap_or_default() };
-            let mut now: Vec<(String, String)> = m.servers().map(|s| (hex(&s.key), kind(&s.key))).collect();
+            let mut now: Vec<(String, String)> = m.devices().map(|s| (hex(&s.key), kind(&s.key))).collect();
             if m.settings.contains_key("serverless") {
                 now.push((rank::CLOUDFLARE.into(), rank::CLOUDFLARE.into()));
             }
@@ -93,19 +93,19 @@ impl Node {
         self.set_setting(caller, rank::SETTING, Some(&value)).await
     }
 
-    /// Everything a shell needs to draw this server and its install, for this server's local user.
+    /// Everything a shell needs to draw this device and its install, for this device's local user.
     pub fn state(&self) -> Value {
         let user = self.user().unwrap_or_default();
         self.state_for(&Caller { key: self.0.id, user, agent: None, token: None })
     }
 
-    /// The state as `viewer`, this server or a client it serves, sees it.
+    /// The state as `viewer`, this device or a client it serves, sees it.
     pub fn state_for(&self, viewer: &Caller) -> Value {
         self.state_as(viewer, None)
     }
 
     /// The same for someone signed in with the kernel through `client` (its name), which is no device: not the
-    /// server it reached, as the serverless node says too.
+    /// device it reached, as the serverless node says too.
     pub fn state_for_sign_in(&self, viewer: &Caller, client: &str) -> Value {
         self.state_as(viewer, Some(client))
     }
@@ -117,15 +117,15 @@ impl Node {
         let waiting = self.item_requests(viewer, None, None).map(|r| r.iter().filter(|r| r["state"] == "waiting").count()).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
         let install = self.0.install.lock().unwrap();
-        let viewer_name = if viewer.key == self.0.id { self.server_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
+        let viewer_name = if viewer.key == self.0.id { self.device_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
         let backups = install.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
         let here_sidecars = install.as_ref().map(|i| self.sidecars_here(i)).unwrap_or_default();
         let me = &viewer.user;
-        let server_now = |s: &members::Machine| {
+        let device_now = |s: &members::Machine| {
             let Some(i) = install.as_ref() else { return serde_json::Map::new() };
             let m = &i.r.members;
             let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
-            // The containers on a server are its owners' business.
+            // The containers on a device are its owners' business.
             let load = if s.key == self.0.id { Some(crate::load::current()) } else { session.and_then(|s| s.load.clone()) }.map(|mut l| {
                 if !m.owners(&s.key).iter().any(|o| m.acts_for(me, o)) {
                     l.containers.clear();
@@ -158,14 +158,14 @@ impl Node {
                 Some(client) => json!({ "key": "", "name": client, "user": viewer.user }),
             },
             client: (sign_in.is_none() && viewer.key != self.0.id).then(|| json!({ "key": hex(&viewer.key), "name": viewer_name })),
-            server: json!({ "key": hex(&self.0.id), "name": self.server_name(), "ready": ready, "guide": crate::skills::address() }),
-            member: install.as_ref().is_some_and(|i| i.r.members.server(&self.0.id).is_some()),
+            device: json!({ "key": hex(&self.0.id), "name": self.device_name(), "ready": ready, "guide": crate::skills::address() }),
+            member: install.as_ref().is_some_and(|i| i.r.members.device(&self.0.id).is_some()),
             entries: install.as_ref().map(|i| i.r.store.count().unwrap_or(0) as u64).unwrap_or(0),
             waiting,
             arrangements: json!(arrangements),
             backups,
             guide: crate::skills::address(),
-            server_now: &server_now,
+            device_now: &device_now,
             client_now: &client_now,
         };
         crate::state::state(install.as_ref().map(|i| &i.r.members), me, here)
@@ -243,11 +243,11 @@ impl Node {
         Ok(())
     }
 
-    pub async fn rename_server(&self, name: &str) -> Result<()> {
+    pub async fn rename_device(&self, name: &str) -> Result<()> {
         ensure!(!name.trim().is_empty(), "give a name");
         *self.0.name.lock().unwrap() = name.to_string();
-        let path = self.0.dir.join("server.json");
-        let mut file: ServerFile = serde_json::from_slice(&std::fs::read(&path)?)?;
+        let path = self.0.dir.join("device.json");
+        let mut file: DeviceFile = serde_json::from_slice(&std::fs::read(&path)?)?;
         file.name = name.to_string();
         write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
         if self.has_install() {
@@ -256,9 +256,9 @@ impl Node {
         Ok(())
     }
 
-    /// Finds a server of the install by name or key prefix.
-    pub fn find_server(&self, name: &str) -> Result<Key> {
-        let found: Vec<Key> = self.with(|i| Ok(i.r.members.servers().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
+    /// Finds a device of the install by name or key prefix.
+    pub fn find_device(&self, name: &str) -> Result<Key> {
+        let found: Vec<Key> = self.with(|i| Ok(i.r.members.devices().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
         match found.as_slice() {
             [one] => Ok(*one),
             [] => bail!("no device called {name}"),
@@ -266,7 +266,7 @@ impl Node {
         }
     }
 
-    /// Finds a server or client of the install by name or key prefix.
+    /// Finds a device or client of the install by name or key prefix.
     pub fn find_machine(&self, name: &str) -> Result<Key> {
         let found: Vec<Key> = self.with(|i| Ok(i.r.members.machines.values().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).map(|m| m.key).collect()))?;
         match found.as_slice() {
@@ -309,20 +309,20 @@ impl Node {
     }
 }
 
-/// What a server says of each sidecar serving there, as `GET /v1/state` lists it: what it is, its version (a
+/// What a device says of each sidecar serving there, as `GET /v1/state` lists it: what it is, its version (a
 /// sidecar's own, or for one built into the node, the node's build), whom it serves, and who installed it.
-fn installed_sidecars(m: &Members, server: &members::Machine, sidecars: &[Sidecar], build: Option<&str>) -> Vec<Value> {
+fn installed_sidecars(m: &Members, device: &members::Machine, sidecars: &[Sidecar], build: Option<&str>) -> Vec<Value> {
     let name_of = |u: &String| m.users.get(u).map(|u| u.name.clone());
     sidecars
         .iter()
         .map(|(name, users, d)| {
             let built_in = d["built_in"] == true;
-            let installed = m.sidecars.get(&(server.key, name.clone())).filter(|i| i.local);
-            // Registered over the local API, a sidecar counts as installed by the server's local user.
+            let installed = m.sidecars.get(&(device.key, name.clone())).filter(|i| i.local);
+            // Registered over the local API, a sidecar counts as installed by the device's local user.
             let by = match installed {
                 Some(i) => name_of(&i.by),
                 None if built_in => None,
-                None => name_of(&server.user),
+                None => name_of(&device.user),
             };
             json!({
                 "name": name, "title": d["title"].as_str().unwrap_or(name), "icon": d["icon"], "color": d["color"], "domain": d["domain"], "image": d["image"], "image_kind": d["image_kind"], "local_app": d["local_app"],

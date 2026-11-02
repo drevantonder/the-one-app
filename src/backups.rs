@@ -1,5 +1,5 @@
 //! Backups: each scope's signed entries and the blobs they name, encrypted with the scope's own key and sent to a
-//! place that can't read them: a folder on one server's disk, or S3-compatible storage. A backup is what sync moves,
+//! place that can't read them: a folder on one device's disk, or S3-compatible storage. A backup is what sync moves,
 //! sent to a peer that can't think; a restore is an import. Each scope's key is sealed to the install's recovery key,
 //! so a backup and that key are all a recovery needs.
 //!
@@ -8,7 +8,7 @@
 //! ```text
 //! <install>/keys/<scope>/<key id>              the scope's key, sealed to the recovery key
 //! <install>/objects/<name>                     a pack of entries, or a blob, encrypted
-//! <install>/snapshots/<scope>/<time>-<server>  what the scope's backup held then
+//! <install>/snapshots/<scope>/<time>-<device>  what the scope's backup held then
 //! ```
 //!
 //! A scope's folder names write `user:<id>` as `user-<id>`, which every disk takes.
@@ -27,16 +27,16 @@ use crate::bucket::{Place, folder, scope_of};
 use crate::entry::{Entry, Key, hex, pack, unpack};
 
 /// The object in a scope's folder in the bucket that names its key, by its id, and the folder of the key sealed to each
-/// server that holds the scope (by its key) and to the recovery key (`recovery`). No app has these names.
+/// device that holds the scope (by its key) and to the recovery key (`recovery`). No app has these names.
 pub const KEY_OBJECT: &str = "_key";
 pub const KEYS: &str = "_keys";
 
-/// The Vault item kind a place is: an item in Everyone, with a folder's `server` and `path`, or S3's `endpoint`,
+/// The Vault item kind a place is: an item in Everyone, with a folder's `device` and `path`, or S3's `endpoint`,
 /// `bucket`, `region`, `key_id` and `secret`.
 pub const KIND: &str = "Backup place";
 /// A snapshot every hour, if anything changed.
 pub const EVERY: u64 = 3_600_000;
-/// How long a scope's changes may wait for the servers before this one in line, each, before it backs them up itself.
+/// How long a scope's changes may wait for the devices before this one in line, each, before it backs them up itself.
 pub const TAKE_OVER: u64 = 2 * 3_600_000;
 
 const SEAL: &str = "the one app 2026-11-01 backups: a scope key sealed to the recovery key";
@@ -90,7 +90,7 @@ pub fn key_id(key: &[u8; 32]) -> String {
 // Objects and snapshots.
 
 /// An object's name: a keyed hash of its content, so the place sees neither, and the same content is the same object
-/// whichever server sends it.
+/// whichever device sends it.
 fn name_of(key: &[u8; 32], bytes: &[u8]) -> String {
     blake3::keyed_hash(key, bytes).to_hex().to_string()
 }
@@ -111,8 +111,6 @@ fn open_object(key: &[u8; 32], name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
 pub struct Snapshot {
     pub scope: String,
     pub time: u64,
-    /// The server that wrote it, by its key.
-    pub server: String,
     /// Each author's next seq the backup lacks, by their key.
     pub frontier: BTreeMap<String, u32>,
     pub packs: Vec<String>,
@@ -149,7 +147,7 @@ fn open_snapshot(keys: &[[u8; 32]], bytes: &[u8]) -> Result<Option<(Snapshot, [u
 
 // Backing up.
 
-/// One scope's backup to one place, as a server does it.
+/// One scope's backup to one place, as a device does it.
 pub struct Job<'a> {
     pub place: &'a Place,
     /// The install's folder in the place.
@@ -158,7 +156,7 @@ pub struct Job<'a> {
     pub key: [u8; 32],
     /// The recovery key's public half, which the scope's key is sealed to.
     pub recovery: Key,
-    pub server: Key,
+    pub device: Key,
     pub now: u64,
     /// The latest snapshot of the scope in the place with this key, if any.
     pub previous: Option<Snapshot>,
@@ -173,7 +171,7 @@ pub struct Job<'a> {
 /// Sends a scope what its backup lacks: its key, sealed, the first time; a pack of its new entries, its new blobs,
 /// and a snapshot. Returns the snapshot, or None when nothing new would be in it. `blob` reads a blob here.
 pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Option<Snapshot>> {
-    let Job { place, install, scope, key, recovery, server, now, previous, entries, blobs, bucket } = job;
+    let Job { place, install, scope, key, recovery, device, now, previous, entries, blobs, bucket } = job;
     let mut snap = previous.clone().unwrap_or_else(|| Snapshot { scope: scope.to_string(), ..Default::default() });
     if let Some(bucket) = bucket {
         copy_bucket(bucket, place, install, scope, &mut snap)?;
@@ -205,7 +203,7 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
         }
     }
     for hash in new_blobs {
-        // A blob this server lacks waits for a run on one that has it, or for it to arrive here.
+        // A blob this device lacks waits for a run on one that has it, or for it to arrive here.
         let Some(bytes) = blob(hash) else { continue };
         let name = name_of(&key, &bytes);
         let locked = lock_object(&key, &name, &bytes);
@@ -217,13 +215,12 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
         return Ok(None);
     }
     snap.time = now;
-    snap.server = hex(&server);
-    place.put(&format!("{install}/snapshots/{}/{}", folder(scope), snapshot_name(now, &server)), &lock_snapshot(&key, &snap))?;
+    place.put(&format!("{install}/snapshots/{}/{}", folder(scope), snapshot_name(now, &device)), &lock_snapshot(&key, &snap))?;
     Ok(Some(snap))
 }
 
 /// Copies what a scope's folder in the install's bucket has that the place lacks, into `<install>/bucket/`, laid out
-/// as the bucket is: its key's id and the key sealed to each server and the recovery key, each app's key (sealed under
+/// as the bucket is: its key's id and the key sealed to each device and the recovery key, each app's key (sealed under
 /// the scope's), and each database's new steps and newest copy (sealed as they are), past what `snap` says it has.
 fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: &mut Snapshot) -> Result<()> {
     let folder = folder(scope);
@@ -261,15 +258,15 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
     Ok(())
 }
 
-/// Whether the server `at` places down a scope's line backs it up itself: the scope's first change the place lacks
-/// (`waiting`) has waited `TAKE_OVER` for each server before it, counting from when the place was added at the earliest.
+/// Whether the device `at` places down a scope's line backs it up itself: the scope's first change the place lacks
+/// (`waiting`) has waited `TAKE_OVER` for each device before it, counting from when the place was added at the earliest.
 pub fn takes_over(at: usize, waiting: Option<u64>, added: u64, now: u64) -> bool {
     at == 0 || waiting.is_some_and(|t| now.saturating_sub(t.max(added)) >= TAKE_OVER * at as u64)
 }
 
-/// A snapshot's file name: its time, so names sort by it, and its server.
-fn snapshot_name(time: u64, server: &Key) -> String {
-    format!("{time:013}-{}", crate::entry::short(server))
+/// A snapshot's file name: its time, so names sort by it, and its device.
+fn snapshot_name(time: u64, device: &Key) -> String {
+    format!("{time:013}-{}", crate::entry::short(device))
 }
 
 /// The newest snapshot of a scope in a place that one of `keys` opens, with its key.
@@ -284,7 +281,7 @@ pub fn latest(place: &Place, install: &str, scope: &str, keys: &[[u8; 32]]) -> R
     Ok(None)
 }
 
-/// The snapshots of a scope in a place, newest first, by their times and servers' short keys, without opening them.
+/// The snapshots of a scope in a place, newest first, by their times and devices' short keys, without opening them.
 pub fn snapshots(place: &Place, install: &str, scope: &str) -> Result<Vec<(u64, String)>> {
     let names = place.list(&format!("{install}/snapshots/{}", folder(scope)))?;
     Ok(names.iter().rev().filter_map(|n| n.split_once('-').and_then(|(t, s)| Some((t.parse().ok()?, s.to_string())))).collect())
@@ -301,7 +298,7 @@ const SETTLE: u64 = HOUR;
 const STRAY: u64 = DAY;
 
 /// Which snapshots to keep, by time: every one for 2 days, the last of each day for 30 days, the last of each month
-/// for 12 months, and always the newest. Days and months are UTC's, so every server keeps the same ones.
+/// for 12 months, and always the newest. Days and months are UTC's, so every device keeps the same ones.
 pub fn kept(times: &[u64], now: u64) -> BTreeSet<u64> {
     let mut out: BTreeSet<u64> = times.iter().copied().filter(|t| *t + 2 * DAY > now).collect();
     out.extend(times.iter().max());
@@ -534,11 +531,11 @@ mod tests {
         let place = Place::Folder(dir.clone());
         let install = "0123456789abcdef";
         let recovery = SigningKey::generate();
-        let server = SigningKey::generate();
+        let device = SigningKey::generate();
         let key: [u8; 32] = rand::random();
         let blob = |b: &[u8]| (blake3::hash(b).to_hex().to_string(), b.to_vec());
         let (release1, release2, repo) = (blob(b"release 1"), blob(b"release 2"), blob(b"a repo's pack"));
-        let all = entries(&server, "global", 8, None);
+        let all = entries(&device, "global", 8, None);
         let real = jiff::Timestamp::now().as_millisecond() as u64;
         let ten_days_ago = (real / DAY - 10) * DAY;
         let mut previous = None;
@@ -552,7 +549,7 @@ mod tests {
                 scope: "global",
                 key,
                 recovery: *recovery.verifying_key().as_bytes(),
-                server: *server.verifying_key().as_bytes(),
+                device: *device.verifying_key().as_bytes(),
                 now,
                 previous: previous.clone(),
                 entries: all[..n].to_vec(),

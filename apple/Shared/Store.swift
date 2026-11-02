@@ -566,7 +566,7 @@ final class Store {
         if let json = try? JSONEncoder().encode(event) {
             NotificationCenter.default.post(name: .nodeEvent, object: String(decoding: json, as: UTF8.self))
         }
-        if ["servers", "install"].contains(event.type) { try? await refreshState() }
+        if ["devices", "install"].contains(event.type) { try? await refreshState() }
         // Installs, deploys and data all arrive as changes; the node's own entries (a request for an item) change no app.
         if event.type == "changed" {
             let apps = event.apps ?? []

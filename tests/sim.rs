@@ -1,13 +1,13 @@
-//! Many servers writing one app's database in one bucket over bad links: every request is slow by a random amount, so
+//! Many devices writing one app's database in one bucket over bad links: every request is slow by a random amount, so
 //! they arrive out of order, and some fail, before or after the bucket did what they asked, or time out while still on
 //! their way and land later; now and then the bucket is out of reach for up to a minute and a half. Some writes are
 //! given up on part way, as a call that runs out of time is, and what they sent goes on. Every seed must end with every
-//! server reading the same database, holding every write it was told landed, once, none it was told failed, and nothing
+//! device reading the same database, holding every write it was told landed, once, none it was told failed, and nothing
 //! one attempt wrote twice. A failing seed is a bug. `ONE_SIM_SEEDS=<from>..<to>` sweeps more.
 //!
-//! Then the same with each server keeping a copy on its disk, told of some of the others' writes as they're made, and
+//! Then the same with each device keeping a copy on its disk, told of some of the others' writes as they're made, and
 //! fetching what it's told of from the bucket into its copy, and reading from its copy alone in between: what it reads
-//! may be behind, but never anything no server read at the same step, and the copy opens nothing without the key.
+//! may be behind, but never anything no device read at the same step, and the copy opens nothing without the key.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -20,7 +20,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::json;
 
-const SERVERS: usize = 8;
+const DEVICES: usize = 8;
 const WRITES: usize = 30;
 /// Seeds every `cargo test` runs: enough to catch what fails often, few enough that the many runs on one machine stay
 /// quick. What fails rarely, a sweep of `ONE_SIM_SEEDS` finds.
@@ -31,10 +31,10 @@ const SEEDS: u64 = 16;
 struct Link {
     objects: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
     rng: Arc<Mutex<StdRng>>,
-    /// Requests on their way, which go on when whoever made them stops waiting, as a server's do on the thread that
+    /// Requests on their way, which go on when whoever made them stops waiting, as a device's do on the thread that
     /// makes them.
     going: Arc<std::sync::atomic::AtomicUsize>,
-    /// Whether it fails nothing, to read what the bucket holds once every server is done.
+    /// Whether it fails nothing, to read what the bucket holds once every device is done.
     steady: bool,
     /// Until when the bucket is out of reach.
     down: Arc<Mutex<tokio::time::Instant>>,
@@ -48,7 +48,7 @@ impl Link {
         Link { objects: Default::default(), rng, going: Default::default(), steady: false, down: Arc::new(Mutex::new(tokio::time::Instant::now())), failed: Default::default() }
     }
 
-    /// The same bucket over a link that fails nothing: a new server's read of it, which on a server's own copy goes
+    /// The same bucket over a link that fails nothing: a new device's read of it, which on a device's own copy goes
     /// on from what it read before when the link fails it.
     fn steady(&self) -> Link {
         Link { steady: true, ..self.clone() }
@@ -117,10 +117,10 @@ impl Link {
 
     /// Writes, retried as `retry` does, each try a new attempt, given up on when the link's patience runs out: what it
     /// wrote may still land.
-    async fn write<B: Bucket>(&self, db: &mut Db, bucket: &B, id: u64, server: usize) {
+    async fn write<B: Bucket>(&self, db: &mut Db, bucket: &B, id: u64, device: usize) {
         retry(async || {
             let attempt = self.rng.lock().unwrap().r#gen::<i64>();
-            let wrote = tokio::time::timeout(self.patience(), db.write(bucket, write(id, server, attempt))).await.unwrap_or_else(|_| bail!("given up on"));
+            let wrote = tokio::time::timeout(self.patience(), db.write(bucket, write(id, device, attempt))).await.unwrap_or_else(|_| bail!("given up on"));
             if wrote.as_ref().is_err_and(|e| !format!("{e:#}").contains("given up on") && !format!("{e:#}").contains("may have been")) {
                 self.failed.lock().unwrap().push(attempt);
             }
@@ -162,21 +162,21 @@ impl Bucket for Link {
     }
 }
 
-const SCHEMA: &str = "create table writes (id integer primary key, server integer not null); create table count (one integer primary key, n integer not null); insert into count values (1, 0); create table attempts (attempt integer primary key)";
+const SCHEMA: &str = "create table writes (id integer primary key, device integer not null); create table count (one integer primary key, n integer not null); insert into count values (1, 0); create table attempts (attempt integer primary key)";
 
 /// One write: a row of its own, and the count moved by it, in one transaction. Written again after a failure it
 /// changes nothing, so a write the link lost the answer to can be tried again; but each attempt lands at most once, or
 /// its own row clashes.
-fn write(id: u64, server: usize, attempt: i64) -> impl FnMut(&rusqlite::Connection) -> Result<()> {
+fn write(id: u64, device: usize, attempt: i64) -> impl FnMut(&rusqlite::Connection) -> Result<()> {
     move |c| {
         execute(c, "insert into attempts values (?)", &[json!(attempt)])?;
-        execute(c, "insert or ignore into writes values (?, ?)", &[json!(id), json!(server)])?;
+        execute(c, "insert or ignore into writes values (?, ?)", &[json!(id), json!(device)])?;
         execute(c, "update count set n = n + changes()", &[])?;
         Ok(())
     }
 }
 
-/// Retries what the link fails, as a server does when a person tries again, until a link this bad can't be to blame.
+/// Retries what the link fails, as a device does when a person tries again, until a link this bad can't be to blame.
 async fn retry<T>(mut f: impl AsyncFnMut() -> Result<T>) -> T {
     let mut last = None;
     for _ in 0..10_000 {
@@ -191,7 +191,7 @@ async fn retry<T>(mut f: impl AsyncFnMut() -> Result<T>) -> T {
 }
 
 fn state(db: &Db) -> (Vec<(u64, u64)>, u64) {
-    let rows = db.query("select id, server from writes order by id", &[]).unwrap().iter().map(|r| (r["id"].as_u64().unwrap(), r["server"].as_u64().unwrap())).collect();
+    let rows = db.query("select id, device from writes order by id", &[]).unwrap().iter().map(|r| (r["id"].as_u64().unwrap(), r["device"].as_u64().unwrap())).collect();
     let n = db.query("select n from count", &[]).unwrap()[0]["n"].as_u64().unwrap();
     (rows, n)
 }
@@ -199,36 +199,36 @@ fn state(db: &Db) -> (Vec<(u64, u64)>, u64) {
 async fn run(seed: u64) {
     let link = Link::new(seed);
     let key = one::kernel::database_key(&[seed as u8; 32], "main");
-    let mut servers = Vec::new();
-    for server in 0..SERVERS {
+    let mut devices = Vec::new();
+    for device in 0..DEVICES {
         let link = link.clone();
-        servers.push(tokio::task::spawn_local(async move {
+        devices.push(tokio::task::spawn_local(async move {
             let mut db = retry(async || Db::open(&link, "global/sim/main", key).await).await;
             retry(async || db.migrate(&link, &[SCHEMA.to_string()]).await).await;
             for i in 0..WRITES {
-                let id = (server * WRITES + i) as u64;
-                link.write(&mut db, &link, id, server).await;
+                let id = (device * WRITES + i) as u64;
+                link.write(&mut db, &link, id, device).await;
             }
             retry(async || db.catch_up(&link).await).await;
             db
         }));
     }
     let mut dbs = Vec::new();
-    for s in servers {
+    for s in devices {
         dbs.push(s.await.unwrap());
     }
     link.settle().await;
-    // Each reads to the end, as a new server does from nothing.
+    // Each reads to the end, as a new device does from nothing.
     for db in &mut dbs {
         retry(async || db.catch_up(&link).await).await;
     }
     let fresh = Db::open(&link.steady(), "global/sim/main", key).await.unwrap();
     link.none_failed_landed(&fresh, seed);
     let (rows, n) = state(&fresh);
-    assert_eq!(rows.len(), SERVERS * WRITES, "seed {seed}: every write landed once");
+    assert_eq!(rows.len(), DEVICES * WRITES, "seed {seed}: every write landed once");
     assert_eq!(n, rows.len() as u64, "seed {seed}: the count moved once for each write, however often the link lost an answer");
     for (i, db) in dbs.iter().enumerate() {
-        assert_eq!(state(db), (rows.clone(), n), "seed {seed}: server {i} reads what a new server does");
+        assert_eq!(state(db), (rows.clone(), n), "seed {seed}: device {i} reads what a new device does");
     }
     assert!(link.objects.lock().unwrap().keys().any(|k| k.contains("/copy/")), "seed {seed}: copies were written as steps piled up");
 }
@@ -266,13 +266,13 @@ fn seeds<F: Future<Output = ()>>(count: u64, run: fn(u64) -> F) {
 }
 
 #[test]
-fn many_servers_write_one_database_over_bad_links() {
+fn many_devices_write_one_database_over_bad_links() {
     seeds(SEEDS, run);
 }
 
 const COPYING: usize = 4;
 
-/// What servers read at each step, which every read at that step must match.
+/// What devices read at each step, which every read at that step must match.
 type Seen = Arc<Mutex<BTreeMap<u64, (Vec<(u64, u64)>, u64)>>>;
 
 fn saw(seen: &Seen, db: &Db, seed: u64) {
@@ -288,34 +288,34 @@ async fn run_copied(seed: u64) {
     let root = crate::temp(&format!("sim-{seed}"));
     let copies: Vec<Copied<Link>> = (0..COPYING).map(|s| Copied::new(link.clone(), root.join(s.to_string()))).collect();
     let seen = Seen::default();
-    let mut servers = Vec::new();
-    for server in 0..COPYING {
+    let mut devices = Vec::new();
+    for device in 0..COPYING {
         let (link, copies, seen) = (link.clone(), copies.clone(), seen.clone());
-        servers.push(tokio::task::spawn_local(async move {
-            let here = &copies[server];
+        devices.push(tokio::task::spawn_local(async move {
+            let here = &copies[device];
             let mut db = retry(async || Db::open(here, "global/sim/main", key).await).await;
             retry(async || db.migrate(here, &[SCHEMA.to_string()]).await).await;
             for i in 0..WRITES {
-                let id = (server * WRITES + i) as u64;
+                let id = (device * WRITES + i) as u64;
                 let at = db.at();
-                link.write(&mut db, here, id, server).await;
+                link.write(&mut db, here, id, device).await;
                 // Its notice reaches some of the others, which fetch what's new into their copies, if the link lets them.
                 if db.at() > at {
-                    for (_, copy) in copies.iter().enumerate().filter(|(o, _)| *o != server) {
+                    for (_, copy) in copies.iter().enumerate().filter(|(o, _)| *o != device) {
                         if link.rng.lock().unwrap().gen_bool(0.6) {
                             let _ = copy.fill("global/sim/main", 0).await;
                         }
                     }
                 }
                 // A read from its copy alone, as when the bucket is out of reach.
-                db.catch_up(&here.here_only()).await.unwrap_or_else(|e| panic!("seed {seed}: server {server}'s copy failed it: {e:#}"));
+                db.catch_up(&here.here_only()).await.unwrap_or_else(|e| panic!("seed {seed}: device {device}'s copy failed it: {e:#}"));
                 saw(&seen, &db, seed);
             }
             db
         }));
     }
     let mut dbs = Vec::new();
-    for s in servers {
+    for s in devices {
         dbs.push(s.await.unwrap());
     }
     link.settle().await;
@@ -325,15 +325,15 @@ async fn run_copied(seed: u64) {
         retry(async || db.catch_up(copy).await).await;
     }
     for (i, (db, copy)) in dbs.iter().zip(&copies).enumerate() {
-        assert_eq!(state(db), state(&fresh), "seed {seed}: server {i} caught up with the bucket");
-        // Its copy alone opens to a step some server read, with the key and only with it.
-        let alone = Db::open(&copy.here_only(), "global/sim/main", key).await.unwrap_or_else(|e| panic!("seed {seed}: server {i}'s copy didn't open: {e:#}"));
+        assert_eq!(state(db), state(&fresh), "seed {seed}: device {i} caught up with the bucket");
+        // Its copy alone opens to a step some device read, with the key and only with it.
+        let alone = Db::open(&copy.here_only(), "global/sim/main", key).await.unwrap_or_else(|e| panic!("seed {seed}: device {i}'s copy didn't open: {e:#}"));
         saw(&seen, &alone, seed);
-        assert!(Db::open(&copy.here_only(), "global/sim/main", one::kernel::database_key(&[!(seed as u8); 32], "main")).await.is_err(), "seed {seed}: another key opened server {i}'s copy");
+        assert!(Db::open(&copy.here_only(), "global/sim/main", one::kernel::database_key(&[!(seed as u8); 32], "main")).await.is_err(), "seed {seed}: another key opened device {i}'s copy");
     }
     for (i, copy) in copies.iter().enumerate() {
         for name in walk(&root.join(i.to_string())).iter().filter_map(|f| f.strip_prefix(root.join(i.to_string())).ok()?.to_str().map(str::to_string)) {
-            assert_eq!(copy.kept(&name).unwrap(), link.objects.lock().unwrap().get(&name).cloned(), "seed {seed}: server {i}'s {name} is the bucket's");
+            assert_eq!(copy.kept(&name).unwrap(), link.objects.lock().unwrap().get(&name).cloned(), "seed {seed}: device {i}'s {name} is the bucket's");
         }
     }
     for file in walk(&root) {
@@ -352,6 +352,6 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 }
 
 #[test]
-fn copies_on_servers_are_behind_never_wrong() {
+fn copies_on_devices_are_behind_never_wrong() {
     seeds(SEEDS / 2, run_copied);
 }

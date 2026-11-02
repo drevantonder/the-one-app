@@ -1,4 +1,4 @@
-//! The install's bucket as a server on a machine reads it: every database step and copy it reads or writes is kept on
+//! The install's bucket as a device on a machine reads it: every database step and copy it reads or writes is kept on
 //! its own disk too, sealed as it is in the bucket, so it reads each from the bucket once. Each is written once, at a
 //! name its seal binds it to, so what's kept here can only be behind the bucket, never different from it; holding it
 //! opens nothing without the key. Everything else (keys, hints, leases) is read from the bucket each time.
@@ -14,9 +14,9 @@ use super::{Bucket, Object, Place};
 pub struct Copied<B = Place> {
     /// The install's bucket.
     pub place: B,
-    /// This server's copy: a folder of the same names.
+    /// This device's copy: a folder of the same names.
     here: Place,
-    /// Whether a name this server's copy lacks is looked for in the bucket.
+    /// Whether a name this device's copy lacks is looked for in the bucket.
     reach: bool,
     /// Where the install's data went, if it moved since `place` was taken: held to write, and taken whole while it
     /// moves, so a write waits for the move and then goes where the data is, never only to where it was.
@@ -28,17 +28,17 @@ impl<B: Bucket + Clone> Copied<B> {
         Copied::moving(place, dir, Arc::default())
     }
 
-    /// The bucket `place` and this server's copy in `dir`, following each move of the install's data in `moved`.
+    /// The bucket `place` and this device's copy in `dir`, following each move of the install's data in `moved`.
     pub fn moving(place: B, dir: PathBuf, moved: Arc<tokio::sync::RwLock<Option<B>>>) -> Copied<B> {
         Copied { place, here: Place::Folder(dir), reach: true, moved }
     }
 
-    /// Only this server's copy: what it lacks isn't there, and nothing is written.
+    /// Only this device's copy: what it lacks isn't there, and nothing is written.
     pub fn here_only(&self) -> Copied<B> {
         Copied { reach: false, ..self.clone() }
     }
 
-    /// Forgets the steps other servers sent before they stopped sending them, whose notes `.sent/` keeps, unchecked
+    /// Forgets the steps other devices sent before they stopped sending them, whose notes `.sent/` keeps, unchecked
     /// against the bucket: each is read from it again when it's next needed.
     pub fn forget_sent(&self) -> Result<()> {
         let Place::Folder(dir) = &self.here else { unreachable!("a copy is a folder") };
@@ -61,7 +61,7 @@ impl<B: Bucket + Clone> Copied<B> {
         self.here.get(name)
     }
 
-    /// Forgets what's kept of a folder: a scope this server no longer holds, or an app erased.
+    /// Forgets what's kept of a folder: a scope this device no longer holds, or an app erased.
     pub fn forget(&self, folder: &str) -> Result<()> {
         ensure!(!folder.is_empty() && folder.split('/').all(segment), "{folder} isn't a folder of the bucket");
         let Place::Folder(dir) = &self.here else { unreachable!("a copy is a folder") };
@@ -171,7 +171,7 @@ mod tests {
         drop(moving);
         assert!(write.await.unwrap().unwrap());
         assert!(new.get(name).unwrap().is_some() && old.get(name).unwrap().is_none(), "it went to the new bucket only");
-        assert!(Bucket::get(&copied.here_only(), name).await.unwrap().is_some(), "and is kept in this server's copy");
+        assert!(Bucket::get(&copied.here_only(), name).await.unwrap().is_some(), "and is kept in this device's copy");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

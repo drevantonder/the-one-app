@@ -1,4 +1,4 @@
-//! Releases of the node: publishing one, and each server taking the newest it trusts.
+//! Releases of the node: publishing one, and each device taking the newest it trusts.
 
 use super::*;
 

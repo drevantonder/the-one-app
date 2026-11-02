@@ -1,6 +1,6 @@
-//! Where the install keeps its data: its bucket. It starts as a folder on the server that made the install, which no
+//! Where the install keeps its data: its bucket. It starts as a folder on the device that made the install, which no
 //! other machine reaches; an admin moves it to S3-compatible storage with a Storage item in Everyone's Vault, and each
-//! server follows: it tries the place, copies there what it reaches of the old one, and keeps its data there from then on.
+//! device follows: it tries the place, copies there what it reaches of the old one, and keeps its data there from then on.
 
 use super::*;
 
@@ -8,11 +8,11 @@ use super::*;
 pub const STORAGE: &str = "Storage";
 
 impl Node {
-    /// Where this server keeps the install's data, as a person sees it.
+    /// Where this device keeps the install's data, as a person sees it.
     pub fn storage(&self) -> Result<Value> {
         self.with(|i| {
             Ok(match &i.bucket {
-                Some((Place::Folder(path), _)) => json!({ "kind": "folder", "where": path.display().to_string(), "server": self.server_name() }),
+                Some((Place::Folder(path), _)) => json!({ "kind": "folder", "where": path.display().to_string(), "device": self.device_name() }),
                 Some((Place::S3(s3), _)) => json!({ "kind": "s3", "where": s3.bucket, "endpoint": s3.endpoint }),
                 None => json!({ "kind": null }),
             })
@@ -57,7 +57,7 @@ impl Node {
         }
         let item_fields: serde_json::Map<String, Value> = fields.iter().map(|(k, v)| (k.clone(), json!({ "value": v, "secret": k == "secret" }))).collect();
         let data = json!({ "title": "Storage", "type": STORAGE, "fields": item_fields, "hosts": [host], "apps": [members::APP] });
-        // A server of an install made before its data was in a bucket keeps it there now, with its entries, which
+        // A device of an install made before its data was in a bucket keeps it there now, with its entries, which
         // takes a while: it runs no calls until it's done.
         if self.bucket().is_err() {
             let (node, caller) = (self.clone(), caller.clone());
@@ -73,7 +73,7 @@ impl Node {
         Ok(json!({ "tried": steps, "id": id }))
     }
 
-    /// Follows the install's newest Storage item, when this server keeps its data anywhere else: in the background.
+    /// Follows the install's newest Storage item, when this device keeps its data anywhere else: in the background.
     pub(super) fn follow_storage(&self) {
         let wanted = self.with(|i| {
             let Some((_, global)) = i.views.get("global") else { return Ok(None) };
@@ -103,7 +103,7 @@ impl Node {
         });
     }
 
-    /// Moves this server to the bucket `fields` says, once it works as an install's bucket must: copies there each
+    /// Moves this device to the bucket `fields` says, once it works as an install's bucket must: copies there each
     /// object of the bucket it had that the new one lacks, then keeps the install's data there.
     async fn move_to(&self, fields: BTreeMap<String, String>) -> Result<()> {
         let to = Place::from_fields(&fields)?;
@@ -155,8 +155,8 @@ impl Node {
         Ok(())
     }
 
-    /// Takes the bucket `fields` say as this server's own, for an install whose servers had none: puts every entry
-    /// it holds there (another server may have put some already), so every server reads them from then on.
+    /// Takes the bucket `fields` say as this device's own, for an install whose devices had none: puts every entry
+    /// it holds there (another device may have put some already), so every device reads them from then on.
     async fn adopt(&self, fields: BTreeMap<String, String>) -> Result<()> {
         let place = Place::from_fields(&fields)?;
         let root = self.with(|i| i.r.root.map(|r| r.to_hex()).context("no install"))?;

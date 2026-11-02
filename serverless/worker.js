@@ -457,7 +457,7 @@ class ForCall extends RpcTarget {
         case "POST call": {
           // A sidecar, or an app this node can't run, goes to a node on a machine, when one answers.
           const callee = deployed(view, q.app);
-          const d = callee && !q.sidecar && !q.server ? await describe(env, who, callee) : null;
+          const d = callee && !q.sidecar && !q.device ? await describe(env, who, callee) : null;
           if (!d || d.uses?.sidecars?.length) return Response.json(await machineCall(env, who, q, d));
           return Response.json(await this.run.call({ app: q.app, op: q.op, input: q.input }, this.app.name, this.depth + 1));
         }
@@ -470,8 +470,8 @@ class ForCall extends RpcTarget {
           return Response.json(await vault(env, who.token, "POST", "/fetch", { ...q, app: this.app.name }));
         case "GET catalog":
           return Response.json(await this.run.apps());
-        case "GET servers":
-          return Response.json(view.state.install.servers);
+        case "GET devices":
+          return Response.json(view.state.install.devices);
       }
       return new Response(`a serverless node doesn't do ${path} for apps yet, and ${OFF}`, { status: 501 });
     } catch (err) {
@@ -482,7 +482,7 @@ class ForCall extends RpcTarget {
 
 /// An app's call that needs a node on a machine (a sidecar's, or one of an app that uses one), as this person.
 async function machineCall(env, who, q, d) {
-  const request = new Request(`${env.ADDRESS}/v1/call`, { method: "POST", headers: { authorization: `Bearer ${who.token}`, "content-type": "application/json" }, body: JSON.stringify({ app: q.app, op: q.op, input: q.input ?? {}, sidecar: q.sidecar ? q.app : undefined, server: q.server }) });
+  const request = new Request(`${env.ADDRESS}/v1/call`, { method: "POST", headers: { authorization: `Bearer ${who.token}`, "content-type": "application/json" }, body: JSON.stringify({ app: q.app, op: q.op, input: q.input ?? {}, sidecar: q.sidecar ? q.app : undefined, device: q.device }) });
   const r = await fromMachine(request, env);
   if (!r) refuse(503, needsDevice(d, q.app));
   const out = await r.json().catch(() => ({}));
@@ -527,7 +527,7 @@ function machineFirst(view, env, ctx) {
   measure(env, ctx);
   if (Date.now() < machineOffUntil || machineRtt > FAR) return false;
   const mine = PLACES[view.state.install.serverless?.use] ?? PLACES.needed;
-  return view.state.install.servers.some((s) => (PLACES[s.use] ?? PLACES.first) <= mine);
+  return view.state.install.devices.some((s) => (PLACES[s.use] ?? PLACES.first) <= mine);
 }
 
 /// Sends a request on to the install's node on a machine, as the gateway sent it here: its answer, or null when none
@@ -553,11 +553,11 @@ async function fromMachine(request, env, wait = 15_000) {
   }
 }
 
-/// Tells the servers of the install, through the gateway's relay, that this node wrote step `at` of a database, so
+/// Tells the devices of the install, through the gateway's relay, that this node wrote step `at` of a database, so
 /// those that hold the scope read it from the bucket now, not at their next look. Only a hint.
 async function changed(env, view, wrote) {
   if (!env.RELAY) return;
-  const to = view.state.install.servers.map((s) => s.key);
+  const to = view.state.install.devices.map((s) => s.key);
   try {
     await env.RELAY.get(env.RELAY.idFromName("relay")).fetch("http://relay/notice", { method: "POST", body: JSON.stringify({ to, notice: { changed: wrote } }) });
   } catch (err) {
@@ -586,7 +586,8 @@ async function route(request, env, ctx) {
   if (request.method === "GET" && path === "/v1/icons") return new Response(icons, { headers: { "content-type": "application/json", "cache-control": "max-age=86400" } });
   if (request.method === "POST" && path === "/v1/call") {
     const req = await request.clone().json().catch(() => refuse(400, "the body isn't JSON"));
-    if (req.sidecar || req.server) return (await fromMachine(request, env, 120_000)) || refuse(503, needsDevice(null, req.app));
+    // `server`: until 2026-11-02's rename reaches every device and sidecar, what they send before.
+    if (req.sidecar || req.device || req.server) return (await fromMachine(request, env, 120_000)) || refuse(503, needsDevice(null, req.app));
     const who = await whom(request, env);
     const run = new Run(env, ctx, who, await installFor(env, who));
     const app = deployed(run.view, req.app);

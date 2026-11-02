@@ -1,4 +1,4 @@
-//! What one server holds and knows: the entries of each scope it holds, as the install's bucket has them, and the
+//! What one device holds and knows: the entries of each scope it holds, as the install's bucket has them, and the
 //! members `global`'s add up to. No clock or I/O: `node.rs` reads and writes the bucket.
 
 use anyhow::{Result, ensure};
@@ -11,12 +11,12 @@ use crate::store::Store;
 /// Entries timed further ahead than this are refused: a wrong clock mustn't drag everyone's forward.
 pub const FUTURE: u64 = 3_600_000;
 
-/// What one server holds and knows: its store, and the members its `global` adds up to.
+/// What one device holds and knows: its store, and the members its `global` adds up to.
 pub struct Replica {
     pub key: SigningKey,
     pub id: Key,
     pub store: Store,
-    /// The install's genesis, once this server created or joined it.
+    /// The install's genesis, once this device created or joined it.
     pub root: Option<Hash>,
     pub members: Members,
     /// `global`'s node entries, in replay order.
@@ -28,15 +28,15 @@ pub struct Replica {
 /// What taking new entries did.
 #[derive(Default)]
 pub struct Handled {
-    /// Entries new to this server.
+    /// Entries new to this device.
     pub new: Vec<Entry>,
     /// Whether the members changed.
     pub members: bool,
-    /// Scopes this server stopped holding, and deleted.
+    /// Scopes this device stopped holding, and deleted.
     pub dropped: Vec<String>,
-    /// Whether this server now holds a scope it didn't, whose entries it should read.
+    /// Whether this device now holds a scope it didn't, whose entries it should read.
     pub gained: bool,
-    /// People who may no longer use a scope they could, whose sessions this server forgets.
+    /// People who may no longer use a scope they could, whose sessions this device forgets.
     pub lost: Vec<String>,
 }
 
@@ -49,7 +49,7 @@ impl Replica {
         Ok(Replica { key, id, store, root, members, member_entries, stale: false })
     }
 
-    /// Whether this server holds `scope`. Until it sees itself admitted it holds only `global`.
+    /// Whether this device holds `scope`. Until it sees itself admitted it holds only `global`.
     pub fn holds(&self, scope: &Scope) -> bool {
         *scope == Scope::Global || self.members.holds(&self.id, scope)
     }
@@ -58,19 +58,19 @@ impl Replica {
         Scope::parse(log).is_ok_and(|s| self.holds(&s))
     }
 
-    /// Makes an entry for this server's log of `scope`, timed after everything it has seen, to write to the bucket.
+    /// Makes an entry for this device's log of `scope`, timed after everything it has seen, to write to the bucket.
     pub fn make(&self, scope: &Scope, user: &str, by: Option<Key>, content: Content, now: u64) -> Result<Entry> {
         ensure!(self.holds(scope), "this device doesn't hold {scope}");
         let log = scope.to_string();
         let head = self.store.own_head(&self.id, &log)?;
         let held = self.store.last(&self.id, &log)?.map(|e| e.seq());
-        // A server that holds a scope again writes there only once it has its own log back, so no seq is written twice.
+        // A device that holds a scope again writes there only once it has its own log back, so no seq is written twice.
         ensure!(head.map(|h| h.0) == held, "this device is still getting its own entries in {scope} back");
         let time = now.max(self.store.max_time()? + 1);
         Ok(Entry::create(&self.key, Ext { log, time, user: user.into(), by }, head, content))
     }
 
-    /// Keeps an entry this server made, once the bucket has it.
+    /// Keeps an entry this device made, once the bucket has it.
     pub fn add_own(&mut self, entry: &Entry) -> Result<Handled> {
         let head = self.store.own_head(&self.id, entry.log())?;
         self.store.insert_own(entry, head)?;
@@ -85,7 +85,7 @@ impl Replica {
     }
 
     /// Adds one of `global`'s node entries: replayed onto the members if it's the newest, else replayed with all.
-    /// Whether one of `global`'s node entries would count if this server wrote it now.
+    /// Whether one of `global`'s node entries would count if this device wrote it now.
     pub fn would_count(&self, user: &str, by: Option<Key>, content: Content, now: u64) -> Result<bool> {
         let head = self.store.own_head(&self.id, "global")?;
         let time = now.max(self.store.max_time()? + 1);
@@ -104,7 +104,7 @@ impl Replica {
         self.member_entries.insert(at, entry);
     }
 
-    /// Replays the members again, deletes every scope this server no longer holds, and says what changed since `before`.
+    /// Replays the members again, deletes every scope this device no longer holds, and says what changed since `before`.
     pub fn refresh(&mut self, before: &Members, handled: &mut Handled) -> Result<()> {
         if std::mem::take(&mut self.stale) {
             self.members = Members::replay(self.root, &self.member_entries);
@@ -129,7 +129,7 @@ impl Replica {
     }
 
     /// Takes entries as the bucket gives them, at time `now`: each checked (signature, body, chain), in scopes this
-    /// server holds; `global`'s first, since they decide which other scopes it holds.
+    /// device holds; `global`'s first, since they decide which other scopes it holds.
     pub fn receive(&mut self, mut entries: Vec<Entry>, now: u64) -> Result<Handled> {
         let mut handled = Handled::default();
         entries.retain(|e| e.time() <= now.saturating_add(FUTURE));

@@ -1,4 +1,4 @@
-//! Members: users, groups, servers and clients, ACLs and trust, apps and deploys, made by replaying `global`'s
+//! Members: users, groups, devices and clients, ACLs and trust, apps and deploys, made by replaying `global`'s
 //! node entries; and which entries count. Pure: entries in, members out.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,14 +22,14 @@ pub enum Role {
     Member,
 }
 
-/// Who may own or use a server, or own an app.
+/// Who may own or use a device, or own an app.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Principal {
     User(String),
     Group(String),
     /// The install's admins, as an app's owner.
     Admins,
-    /// The install itself, as a server's owner or user: every user.
+    /// The install itself, as a device's owner or user: every user.
     Install,
 }
 
@@ -69,8 +69,8 @@ pub struct Machine {
     pub key: Key,
     pub user: String,
     pub name: String,
-    /// A server runs the node; a client (a phone) only asks one.
-    pub server: bool,
+    /// A device runs the node; a client (a phone) only asks one.
+    pub device: bool,
     pub removed: bool,
 }
 
@@ -107,10 +107,10 @@ pub struct App {
     pub source: Option<String>,
 }
 
-/// The latest `sidecar` entry for a sidecar on a server: removed there, or let register there again.
+/// The latest `sidecar` entry for a sidecar on a device: removed there, or let register there again.
 #[derive(Clone, Debug)]
 pub struct SidecarInstall {
-    /// Its executable, for its server's node to start *(not built yet)*.
+    /// Its executable, for its device's node to start *(not built yet)*.
     pub blob: Option<String>,
     /// Installed by registering over the local API, as `sidecars/install.sh` does.
     pub local: bool,
@@ -119,7 +119,7 @@ pub struct SidecarInstall {
 }
 
 impl SidecarInstall {
-    /// Removed from its server: it isn't served there until it's installed again.
+    /// Removed from its device: it isn't served there until it's installed again.
     pub fn removed(&self) -> bool {
         self.blob.is_none() && !self.local
     }
@@ -134,13 +134,13 @@ pub struct Members {
     pub machines: BTreeMap<Key, Machine>,
     pub groups: BTreeMap<String, Group>,
     pub acls: BTreeMap<Key, Acl>,
-    /// (user, server) for each `trust` not since undone by `untrust`.
+    /// (user, device) for each `trust` not since undone by `untrust`.
     pub trusted: BTreeSet<(String, Key)>,
     pub relays: Vec<String>,
     /// The install's settings its admins set: each name's latest value. The rest are the white label's defaults.
     pub settings: BTreeMap<String, String>,
     pub apps: BTreeMap<String, App>,
-    /// The latest `sidecar` entry of each sidecar on each server: (server, sidecar).
+    /// The latest `sidecar` entry of each sidecar on each device: (device, sidecar).
     pub sidecars: BTreeMap<(Key, String), SidecarInstall>,
 }
 
@@ -194,20 +194,20 @@ impl Members {
         self.machines.get(key).filter(|m| !m.removed && self.user(&m.user).is_some())
     }
 
-    pub fn server(&self, key: &Key) -> Option<&Machine> {
-        self.machine(key).filter(|m| m.server)
+    pub fn device(&self, key: &Key) -> Option<&Machine> {
+        self.machine(key).filter(|m| m.device)
     }
 
     pub fn client(&self, key: &Key) -> Option<&Machine> {
-        self.machine(key).filter(|m| !m.server)
+        self.machine(key).filter(|m| !m.device)
     }
 
-    pub fn servers(&self) -> impl Iterator<Item = &Machine> {
-        self.machines.values().filter(|m| m.server && self.machine(&m.key).is_some())
+    pub fn devices(&self) -> impl Iterator<Item = &Machine> {
+        self.machines.values().filter(|m| m.device && self.machine(&m.key).is_some())
     }
 
     pub fn clients(&self) -> impl Iterator<Item = &Machine> {
-        self.machines.values().filter(|m| !m.server && self.machine(&m.key).is_some())
+        self.machines.values().filter(|m| !m.device && self.machine(&m.key).is_some())
     }
 
     /// A user's role in a group, if they're in it.
@@ -267,22 +267,22 @@ impl Members {
         self.groups.contains_key(group) && (self.group_role(user, group) == Some(Role::Admin) || self.is_admin(user))
     }
 
-    // Servers.
+    // Devices.
 
-    pub fn owners(&self, server: &Key) -> Vec<Principal> {
-        match self.acls.get(server) {
+    pub fn owners(&self, device: &Key) -> Vec<Principal> {
+        match self.acls.get(device) {
             Some(acl) => acl.owners.clone(),
-            None => self.machines.get(server).map(|m| vec![Principal::User(m.user.clone())]).unwrap_or_default(),
+            None => self.machines.get(device).map(|m| vec![Principal::User(m.user.clone())]).unwrap_or_default(),
         }
     }
 
-    /// A server's users, its owners among them.
-    pub fn users_of(&self, server: &Key) -> Vec<Principal> {
-        let mut users = match self.acls.get(server) {
+    /// A device's users, its owners among them.
+    pub fn users_of(&self, device: &Key) -> Vec<Principal> {
+        let mut users = match self.acls.get(device) {
             Some(acl) => acl.users.clone(),
-            None => self.owners(server),
+            None => self.owners(device),
         };
-        for o in self.owners(server) {
+        for o in self.owners(device) {
             if !users.contains(&o) {
                 users.push(o);
             }
@@ -301,29 +301,29 @@ impl Members {
     }
 
     /// Owned by `install`: holds everything and serves everyone in its users.
-    pub fn privileged(&self, server: &Key) -> bool {
-        self.server(server).is_some() && self.owners(server).contains(&Principal::Install)
+    pub fn privileged(&self, device: &Key) -> bool {
+        self.device(device).is_some() && self.owners(device).contains(&Principal::Install)
     }
 
-    /// Whether `user` trusts `server`: everyone trusts a privileged server; otherwise a user of it trusts it if they're
+    /// Whether `user` trusts `device`: everyone trusts a privileged device; otherwise a user of it trusts it if they're
     /// directly one of its owners or wrote `trust`.
-    pub fn trusts(&self, user: &str, server: &Key) -> bool {
-        if self.server(server).is_none() || self.user(user).is_none() {
+    pub fn trusts(&self, user: &str, device: &Key) -> bool {
+        if self.device(device).is_none() || self.user(user).is_none() {
             return false;
         }
-        self.privileged(server)
-            || (self.includes(&self.users_of(server), user)
-                && (self.owners(server).contains(&Principal::User(user.into())) || self.trusted.contains(&(user.to_string(), *server))))
+        self.privileged(device)
+            || (self.includes(&self.users_of(device), user)
+                && (self.owners(device).contains(&Principal::User(user.into())) || self.trusted.contains(&(user.to_string(), *device))))
     }
 
-    /// Whether `server` runs calls as `user`: a server that user trusts and is a user of.
-    pub fn serves(&self, server: &Key, user: &str) -> bool {
-        self.trusts(user, server) && self.includes(&self.users_of(server), user)
+    /// Whether `device` runs calls as `user`: a device that user trusts and is a user of.
+    pub fn serves(&self, device: &Key, user: &str) -> bool {
+        self.trusts(user, device) && self.includes(&self.users_of(device), user)
     }
 
-    /// Whether `server` holds `scope`: `global`, every scope its owners can read, and the scope of each user who trusts it.
-    pub fn holds(&self, server: &Key, scope: &Scope) -> bool {
-        if self.server(server).is_none() {
+    /// Whether `device` holds `scope`: `global`, every scope its owners can read, and the scope of each user who trusts it.
+    pub fn holds(&self, device: &Key, scope: &Scope) -> bool {
+        if self.device(device).is_none() {
             return false;
         }
         let reads = |owner: &Principal| match (owner, scope) {
@@ -333,7 +333,7 @@ impl Members {
             (Principal::Group(g), Scope::Group(h)) => g == h,
             _ => false,
         };
-        self.owners(server).iter().any(reads) || matches!(scope, Scope::User(u) if self.trusts(u, server))
+        self.owners(device).iter().any(reads) || matches!(scope, Scope::User(u) if self.trusts(u, device))
     }
 
     /// Every scope there is: `global`, each user's (removed ones too: removing deletes nothing) and each group's.
@@ -366,7 +366,7 @@ impl Members {
         ensure!(e.content.app == APP && e.log() == "global", "not a member entry");
         let w = e.user().to_string();
         let author = e.author();
-        let data = &e.content.data;
+        let data = &signed_before_devices(&e.content.kind, &e.content.data);
         let text = |key: &str| data[key].as_str().map(str::to_string).with_context(|| format!("no {key}"));
         let key_of = |key: &str| -> Result<Key> { unhex(&text(key)?) };
         let id_of = |key: &str| -> Result<String> {
@@ -383,13 +383,13 @@ impl Members {
                 self.name = text("name")?;
                 self.recovery = data["recovery"].as_str().and_then(|k| unhex(k).ok());
                 self.users.insert(user.clone(), User { id: user.clone(), name: text("user_name")?, role: Role::Admin, removed: false });
-                self.machines.insert(author, Machine { key: author, user, name: text("server_name")?, server: true, removed: false });
+                self.machines.insert(author, Machine { key: author, user, name: text("device_name")?, device: true, removed: false });
             }
             "admit" => {
                 let key = key_of("key")?;
                 let user = id_of("user")?;
-                let server = match text("as")?.as_str() {
-                    "server" => true,
+                let device = match text("as")?.as_str() {
+                    "device" => true,
                     "client" => false,
                     other => bail!("can't admit as {other}"),
                 };
@@ -402,12 +402,12 @@ impl Members {
                         self.users.insert(user.clone(), User { id: user.clone(), name: text("user_name")?, role, removed: false });
                     }
                 }
-                self.machines.insert(key, Machine { key, user, name: text("name")?, server, removed: false });
+                self.machines.insert(key, Machine { key, user, name: text("name")?, device, removed: false });
             }
             "acl" => {
-                let server = key_of("server")?;
-                ensure!(self.server(&server).is_some(), "no such device");
-                ensure!(self.owners(&server).iter().any(|o| self.acts_for(&w, o)), "only someone acting for an owner changes a device's ACL");
+                let device = key_of("device")?;
+                ensure!(self.device(&device).is_some(), "no such device");
+                ensure!(self.owners(&device).iter().any(|o| self.acts_for(&w, o)), "only someone acting for an owner changes a device's ACL");
                 let list = |key: &str| -> Result<Vec<Principal>> {
                     data[key].as_array().context("no list")?.iter().map(|p| Principal::parse(p.as_str().unwrap_or(""))).collect()
                 };
@@ -415,17 +415,17 @@ impl Members {
                 ensure!(!owners.is_empty(), "a device needs an owner");
                 ensure!(!owners.contains(&Principal::Admins) && !users.contains(&Principal::Admins), "devices are owned by users, groups or the install");
                 ensure!(!owners.contains(&Principal::Install) || self.is_admin(&w), "only admins make the install an owner");
-                self.acls.insert(server, Acl { owners, users });
+                self.acls.insert(device, Acl { owners, users });
             }
             "trust" => {
-                let server = key_of("server")?;
-                ensure!(self.server(&server).is_some(), "no such device");
-                self.trusted.insert((w, server));
+                let device = key_of("device")?;
+                ensure!(self.device(&device).is_some(), "no such device");
+                self.trusted.insert((w, device));
             }
             "untrust" => {
-                let server = key_of("server")?;
-                ensure!(!self.privileged(&server), "nobody untrusts a privileged device");
-                self.trusted.remove(&(w, server));
+                let device = key_of("device")?;
+                ensure!(!self.privileged(&device), "nobody untrusts a privileged device");
+                self.trusted.remove(&(w, device));
             }
             "role" => {
                 ensure!(self.is_admin(&w), "admins only");
@@ -441,8 +441,8 @@ impl Members {
                     let key = key_of("key")?;
                     let m = self.machine(&key).context("no such key")?;
                     let allowed = self.is_admin(&w)
-                        || (m.server && self.owners(&key).iter().any(|o| self.acts_for(&w, o)))
-                        || (!m.server && m.user == w);
+                        || (m.device && self.owners(&key).iter().any(|o| self.acts_for(&w, o)))
+                        || (!m.device && m.user == w);
                     ensure!(allowed, "not allowed to remove that key");
                     self.machines.get_mut(&key).unwrap().removed = true;
                 }
@@ -557,22 +557,45 @@ impl Members {
                 app.deploys += 1;
                 app.history.push((bundle, e.time(), w.clone()));
             }
-            // `driver`: what `sidecar` was called first.
-            "sidecar" | "driver" => {
-                let server = key_of("server")?;
+            "sidecar" => {
+                let device = key_of("device")?;
                 let name = text("name")?;
                 ensure!(valid_app_name(&name), "sidecar names are lowercase words joined by -");
-                ensure!(self.server(&server).is_some(), "no such device");
-                ensure!(self.owners(&server).iter().any(|o| self.acts_for(&w, o)), "only someone acting for one of a device's owners installs or removes its sidecars");
+                ensure!(self.device(&device).is_some(), "no such device");
+                ensure!(self.owners(&device).iter().any(|o| self.acts_for(&w, o)), "only someone acting for one of a device's owners installs or removes its sidecars");
                 let blob = data["blob"].as_str().map(str::to_string);
                 ensure!(blob.as_ref().is_none_or(|b| e.content.blobs.contains(b)), "a sidecar names its executable among its blobs");
-                self.sidecars.insert((server, name), SidecarInstall { blob, local: data["local"] == true, by: w, time: e.time() });
+                self.sidecars.insert((device, name), SidecarInstall { blob, local: data["local"] == true, by: w, time: e.time() });
             }
             "install" | "uninstall" | "node-release" => {}
             other => bail!("unknown kind {other}"),
         }
         Ok(())
     }
+}
+
+/// An entry's data as its kind says it now. Entries signed before devices were called devices say `server` where they
+/// now say `device` (`server_name`, `as: "server"`), and a signed entry can't be rewritten, so they're read this way.
+fn signed_before_devices(kind: &str, data: &Value) -> Value {
+    let mut data = data.clone();
+    let Some(map) = data.as_object_mut() else { return data };
+    match kind {
+        "genesis" => {
+            if let Some(name) = map.remove("server_name") {
+                map.entry("device_name").or_insert(name);
+            }
+        }
+        "admit" if map.get("as").and_then(Value::as_str) == Some("server") => {
+            map.insert("as".into(), "device".into());
+        }
+        "acl" | "trust" | "untrust" | "sidecar" => {
+            if let Some(key) = map.remove("server") {
+                map.entry("device").or_insert(key);
+            }
+        }
+        _ => {}
+    }
+    data
 }
 
 /// An app's source link as an `app` entry gives it: a web address, or empty (or null) for none.
@@ -736,7 +759,7 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             // An item the node itself uses (a backup place's) is asked for as the node's, and one agents use (vault_fetch)
             // as theirs.
             ensure!(m.apps.contains_key(&app) || app == APP || app == AGENTS, "no such app");
-            // An earlier server's asks for one secret field, `name`.
+            // An earlier device's asks for one secret field, `name`.
             let (title, fields) = match data["name"].as_str() {
                 Some(name) => (name.to_string(), vec![(name.to_string(), true)]),
                 None => {
@@ -862,12 +885,12 @@ pub fn node(kind: &str, data: Value) -> Content {
     Content::new(APP, kind, data)
 }
 
-pub fn genesis(name: &str, user: &str, user_name: &str, server_name: &str, recovery: &Key) -> Content {
-    node("genesis", json!({ "name": name, "user": user, "user_name": user_name, "server_name": server_name, "recovery": hex(recovery) }))
+pub fn genesis(name: &str, user: &str, user_name: &str, device_name: &str, recovery: &Key) -> Content {
+    node("genesis", json!({ "name": name, "user": user, "user_name": user_name, "device_name": device_name, "recovery": hex(recovery) }))
 }
 
-pub fn admit(key: &Key, user: &str, name: &str, server: bool, new_user: Option<(&str, Role)>) -> Content {
-    let mut data = json!({ "key": hex(key), "user": user, "name": name, "as": if server { "server" } else { "client" } });
+pub fn admit(key: &Key, user: &str, name: &str, device: bool, new_user: Option<(&str, Role)>) -> Content {
+    let mut data = json!({ "key": hex(key), "user": user, "name": name, "as": if device { "device" } else { "client" } });
     if let Some((user_name, role)) = new_user {
         data["user_name"] = json!(user_name);
         data["role"] = json!(role);
@@ -875,13 +898,13 @@ pub fn admit(key: &Key, user: &str, name: &str, server: bool, new_user: Option<(
     node("admit", data)
 }
 
-pub fn acl(server: &Key, owners: &[Principal], users: &[Principal]) -> Content {
+pub fn acl(device: &Key, owners: &[Principal], users: &[Principal]) -> Content {
     let list = |ps: &[Principal]| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
-    node("acl", json!({ "server": hex(server), "owners": list(owners), "users": list(users) }))
+    node("acl", json!({ "device": hex(device), "owners": list(owners), "users": list(users) }))
 }
 
-pub fn trust(server: &Key, trust: bool) -> Content {
-    node(if trust { "trust" } else { "untrust" }, json!({ "server": hex(server) }))
+pub fn trust(device: &Key, trust: bool) -> Content {
+    node(if trust { "trust" } else { "untrust" }, json!({ "device": hex(device) }))
 }
 
 #[cfg(test)]
@@ -960,5 +983,22 @@ mod tests {
         let late = bobs.write("global", BOB, Content::new("board", "post", json!({})));
         assert_eq!(count(&entries, &early), 1, "what it wrote before removal still counts");
         assert_eq!(count(&entries, &late), 0);
+    }
+
+    #[test]
+    fn entries_signed_before_devices_were_called_devices_still_say_who_holds_what() {
+        let mut mac = Srv::new(1);
+        let g = mac.write("global", ANDRE, node("genesis", json!({ "name": "Home", "user": ANDRE, "user_name": "Andre", "server_name": "mac", "recovery": hex(&[7; 32]) })));
+        let linux = Srv::new(2);
+        let mut entries = vec![g];
+        let old = |kind: &str, data: Value| node(kind, data);
+        entries.push(mac.write("global", ANDRE, old("admit", json!({ "key": hex(&linux.id()), "user": ANDRE, "name": "linux", "as": "server" }))));
+        entries.push(mac.write("global", ANDRE, old("acl", json!({ "server": hex(&linux.id()), "owners": ["install"], "users": ["install"] }))));
+        entries.push(mac.write("global", ANDRE, old("sidecar", json!({ "server": hex(&linux.id()), "name": "whatsapp" }))));
+        let m = members(&entries);
+        assert_eq!(m.device(&mac.id()).map(|d| d.name.as_str()), Some("mac"));
+        assert_eq!(m.device(&linux.id()).map(|d| d.name.as_str()), Some("linux"));
+        assert!(m.privileged(&linux.id()));
+        assert!(m.sidecars.contains_key(&(linux.id(), "whatsapp".to_string())));
     }
 }

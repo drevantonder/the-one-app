@@ -94,8 +94,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/arrange", post(arrange))
         .route("/v1/retire", post(retire))
         .route("/v1/sidecar", post(sidecar))
-        // What /v1/sidecar was called first.
-        .route("/v1/driver", post(sidecar))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
         .route("/v1/kernel/keys", post(kernel_keys))
@@ -185,7 +183,7 @@ fn markdown(text: String) -> Response {
     ([(axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8")], text).into_response()
 }
 
-/// The root skill's body, each skill under it linked at this server, as whoever asked reached it.
+/// The root skill's body, each skill under it linked at this device, as whoever asked reached it.
 async fn llms(State(node): State<Node>, headers: axum::http::HeaderMap) -> Response {
     let host = headers.get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("127.0.0.1").to_string();
     let deeper = skills(&node).await.split_off(1);
@@ -368,7 +366,7 @@ fn local(node: &Node) -> Result<Caller, Error> {
     Ok(Caller { key: node.id(), user: node.user()?, agent: None, token: None })
 }
 
-/// Who asked: this machine's own user, or someone signed in with the kernel, whom this server acts for.
+/// Who asked: this machine's own user, or someone signed in with the kernel, whom this device acts for.
 #[derive(Clone)]
 struct Me {
     caller: Caller,
@@ -441,7 +439,7 @@ async fn kernel_run(State(node): State<Node>, me: Me, Json(run): Json<crate::ker
     Ok(Json(node.kernel_run(&me.caller, &run).await?))
 }
 
-/// The keys of the scopes this server holds, for this machine's admin to hand to the install's kernel.
+/// The keys of the scopes this device holds, for this machine's admin to hand to the install's kernel.
 async fn kernel_keys(State(node): State<Node>) -> Reply {
     Ok(Json(json!(node.keys_for_kernel(&local(&node)?).await?)))
 }
@@ -457,10 +455,17 @@ async fn apps(State(node): State<Node>, me: Me) -> Reply {
     Ok(Json(json!(node.apps(&me.caller).await?)))
 }
 
-/// `{ name, server?, installed? }`: removes a sidecar from a server (this one by default), or with `installed` lets it
+/// Until 2026-11-02's rename reaches every device and screen: a body that says `server` where it now says `device`.
+fn was_server(body: &mut Value) {
+    if let Some(server) = body.get("server").cloned() {
+        body["device"] = server;
+    }
+}
+
+/// `{ name, device?, installed? }`: removes a sidecar from a device (this one by default), or with `installed` lets it
 /// register there again.
 async fn sidecar(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.set_sidecar(&local(&node)?, body["server"].as_str(), text(&body, "name")?, body["installed"] == true).await?;
+    node.set_sidecar(&local(&node)?, body["device"].as_str().or(body["server"].as_str()), text(&body, "name")?, body["installed"] == true).await?;
     done()
 }
 
@@ -522,11 +527,11 @@ async fn join(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 }
 
 async fn name(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.rename_server(text(&body, "name")?).await?;
+    node.rename_device(text(&body, "name")?).await?;
     done()
 }
 
-/// `{ key }` (a server or client, by name or key) or `{ user }`.
+/// `{ key }` (a device or client, by name or key) or `{ user }`.
 async fn remove(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     match body["user"].as_str() {
         Some(user) => node.member_as(&me.caller, "remove", json!({ "user": node.find_user(user)? })).await?,
@@ -552,9 +557,10 @@ async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> 
     done()
 }
 
-/// `{ server, owners, users }`: owners and users are `user:<id>`, `group:<id>`, `install`, or a user's or group's name.
-async fn acl(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let server = node.find_server(text(&body, "server")?)?;
+/// `{ device, owners, users }`: owners and users are `user:<id>`, `group:<id>`, `install`, or a user's or group's name.
+async fn acl(State(node): State<Node>, Json(mut body): Json<Value>) -> Reply {
+    was_server(&mut body);
+    let device = node.find_device(text(&body, "device")?)?;
     let principals = |key: &str| -> Result<Vec<String>, Error> {
         body[key]
             .as_array()
@@ -572,19 +578,21 @@ async fn acl(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
             })
             .collect()
     };
-    node.member("acl", json!({ "server": hex(&server), "owners": principals("owners")?, "users": principals("users")? })).await?;
+    node.member("acl", json!({ "device": hex(&device), "owners": principals("owners")?, "users": principals("users")? })).await?;
     done()
 }
 
-async fn trust(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let server = node.find_server(text(&body, "server")?)?;
-    node.member_as(&me.caller, if body["trust"] == false { "untrust" } else { "trust" }, json!({ "server": hex(&server) })).await?;
+async fn trust(State(node): State<Node>, me: Me, Json(mut body): Json<Value>) -> Reply {
+    was_server(&mut body);
+    let device = node.find_device(text(&body, "device")?)?;
+    node.member_as(&me.caller, if body["trust"] == false { "untrust" } else { "trust" }, json!({ "device": hex(&device) })).await?;
     done()
 }
 
-/// `{ server, use }`: puts a server (its name or key, or `cloudflare`) first, needed or last, for an admin.
-async fn use_(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    node.set_use(&me.caller, text(&body, "server")?, text(&body, "use")?).await?;
+/// `{ device, use }`: puts a device (its name or key, or `cloudflare`) first, needed or last, for an admin.
+async fn use_(State(node): State<Node>, me: Me, Json(mut body): Json<Value>) -> Reply {
+    was_server(&mut body);
+    node.set_use(&me.caller, text(&body, "device")?, text(&body, "use")?).await?;
     done()
 }
 

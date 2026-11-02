@@ -1,5 +1,5 @@
 //! What a call that came with a kernel access token gets from the vault: the keys of the databases it reaches, and URLs
-//! to read and create its objects in the bucket, so this server opens a person's data only while a session of theirs
+//! to read and create its objects in the bucket, so this device opens a person's data only while a session of theirs
 //! runs here. Keys are asked for once per token for each app, kept in memory until the token expires (or its person
 //! may no longer use a scope they could), then forgotten with the databases they opened (ARCHITECTURE.md, "Keys").
 
@@ -9,7 +9,7 @@ use crate::bucket::{Ask, Auth, S3, Sign};
 
 use super::*;
 
-/// What the vault gave this server for one token, until it expires.
+/// What the vault gave this device for one token, until it expires.
 #[derive(Default)]
 pub(super) struct Session {
     /// Whose it is.
@@ -27,9 +27,9 @@ pub(super) struct Session {
 pub(super) struct Sessions {
     /// By a hash of the token.
     pub kept: Mutex<HashMap<[u8; 32], Session>>,
-    /// Held while this server asks the vault for keys, so calls at once with one token ask once.
+    /// Held while this device asks the vault for keys, so calls at once with one token ask once.
     asking: tokio::sync::Mutex<()>,
-    /// How many times this server asked the vault for keys since it started.
+    /// How many times this device asked the vault for keys since it started.
     pub asked: AtomicU64,
     /// The auth service at the install's address, whose keys check the tokens calls come with.
     issuer: Mutex<Option<Arc<crate::kernel::Issuer>>>,
@@ -50,7 +50,7 @@ fn hash(token: &str) -> [u8; 32] {
 }
 
 impl Node {
-    /// The auth service at the install's address, as this server checks the tokens it's given.
+    /// The auth service at the install's address, as this device checks the tokens it's given.
     pub fn issuer(&self) -> Result<Arc<crate::kernel::Issuer>> {
         let (address, _) = self.kernel()?;
         let iss = crate::kernel::Issuer::new(&address).iss;
@@ -61,7 +61,7 @@ impl Node {
         })
     }
 
-    /// A token another server passed on with a call as `user`'s, if it is theirs: an access token the install's auth
+    /// A token another device passed on with a call as `user`'s, if it is theirs: an access token the install's auth
     /// service signed for them, or a scheduled run's, which only the vault can say whose it is (and it opens nothing
     /// but that person's).
     pub(super) async fn token_of(&self, token: &str, user: &str) -> Option<String> {
@@ -82,8 +82,8 @@ impl Node {
     }
 
     /// The keys of `want`'s databases, (scope, app, database) each, for a call that came with a token: from what the
-    /// vault gave this server for it, asking for those it lacks at once. None for a call with no token, or with no
-    /// kernel to ask yet: this server's own programs open data with this server's keys.
+    /// vault gave this device for it, asking for those it lacks at once. None for a call with no token, or with no
+    /// kernel to ask yet: this device's own programs open data with this device's keys.
     pub(super) async fn session_keys(&self, me: &Caller, want: &[(Scope, &str, &str)]) -> Result<Option<Vec<[u8; 32]>>> {
         let Some((token, vault)) = self.kernel_vault(me) else { return Ok(None) };
         let id = hash(&token);
@@ -110,7 +110,7 @@ impl Node {
         })
         .await??;
         let n = self.0.sessions.asked.fetch_add(1, Ordering::Relaxed) + 1;
-        tracing::info!("asked the vault for {} key(s) for {}'s session ({n} asks since this server started)", asked.0.len(), me.user);
+        tracing::info!("asked the vault for {} key(s) for {}'s session ({n} asks since this device started)", asked.0.len(), me.user);
         let mut sessions = self.0.sessions.kept.lock().unwrap();
         let now = now_ms();
         sessions.retain(|_, s| s.live(now));
@@ -124,7 +124,7 @@ impl Node {
     }
 
     /// The bucket as a call reaches it: for one that came with a token, through URLs the vault signs for that
-    /// session, which can read and create but never delete or overwrite; otherwise as this server does.
+    /// session, which can read and create but never delete or overwrite; otherwise as this device does.
     pub(super) fn call_bucket(&self, me: &Caller) -> Result<Copied> {
         let bucket = self.bucket()?;
         let Some((token, vault)) = self.kernel_vault(me) else { return Ok(bucket) };
@@ -141,10 +141,10 @@ impl Node {
         let bucket = self.call_bucket(me)?;
         let key = match self.session_keys(me, &[(scope.clone(), app, database)]).await {
             Ok(keys) => keys.map(|k| k[0]),
-            // A scope made since an admin last gave the kernel the install's keys (`kernel keys`): its servers open it
+            // A scope made since an admin last gave the kernel the install's keys (`kernel keys`): its devices open it
             // with their own key until then.
             Err(err) if format!("{err:#}").contains("isn't open to this person") && self.with(|i| Ok(i.r.members.may_use(&me.user, scope)))? => {
-                tracing::warn!("the vault has no key for {scope} yet, so this server opens it with its own: an admin gives the kernel its keys with {} kernel keys", crate::config::CLI);
+                tracing::warn!("the vault has no key for {scope} yet, so this device opens it with its own: an admin gives the kernel its keys with {} kernel keys", crate::config::CLI);
                 None
             }
             Err(err) => return Err(err),
@@ -159,7 +159,7 @@ impl Node {
         Ok((db, bucket))
     }
 
-    /// Forgets the sessions of people who may no longer use a scope they could, as soon as this server reads that they
+    /// Forgets the sessions of people who may no longer use a scope they could, as soon as this device reads that they
     /// can't: what they may still use, their next call asks the vault for again.
     pub(super) fn forget_sessions_of(&self, users: &[String]) {
         let mut kept = self.0.sessions.kept.lock().unwrap();

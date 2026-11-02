@@ -283,7 +283,7 @@ fn check(structs: &BTreeMap<String, Vec<Field>>, within: &str, ty: &str, value: 
 
 async fn start(name: &str) -> one::node::Node {
     let dir = crate::temp(name);
-    std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
     one::node::Node::start(&dir, one::sidecars::built_in()).await.unwrap()
 }
 
@@ -305,7 +305,7 @@ async fn api(addr: &str, token: &str, method: &str, path: &str, body: Value) -> 
 
 /// Every payload the Mac, iPhone, Android and Windows apps decode from a node decodes with the structs (Kotlin's data
 /// classes, in android/…/Node.kt; C#'s, in windows/Models.cs) they decode it into: each field they need is there, and
-/// each field they read has the type they read it as. A shell built before still decodes what a newer server sends,
+/// each field they read has the type they read it as. A shell built before still decodes what a newer device sends,
 /// so a field leaves the payload only once no shell needs it.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_apps_decode_what_the_node_sends() {

@@ -1,6 +1,6 @@
-//! The relay, how servers reach each other with no address of their own: each keeps one WebSocket to the install's
-//! address (`/relay`, kernel/gateway/worker.js), proving its key there, and what it sends another server's key is passed
-//! to that server's. The relay is blind: each message is sealed to the key of the server it's for and signed by the one
+//! The relay, how devices reach each other with no address of their own: each keeps one WebSocket to the install's
+//! address (`/relay`, kernel/gateway/worker.js), proving its key there, and what it sends another device's key is passed
+//! to that device's. The relay is blind: each message is sealed to the key of the device it's for and signed by the one
 //! that sent it, bound to both, its id and when, so the gateway passing it on can read, change or pass off none of it.
 //! Asks (a call, a hello, joining) each get an answer, sealed the same way; notices (something changed) get none.
 
@@ -12,7 +12,7 @@ use super::*;
 
 /// How long a socket may go without a word from the relay before it's taken as gone: it's pinged twice as often.
 const SILENT: Duration = Duration::from_secs(60);
-/// How far a message's time may be from this server's clock; one seen within it isn't taken twice.
+/// How far a message's time may be from this device's clock; one seen within it isn't taken twice.
 const FRESH: u64 = 5 * 60_000;
 /// The most a call or its answer may carry: an email of a claim's receipts, base64, fits.
 const MESSAGE_LIMIT: usize = 64 << 20;
@@ -21,15 +21,15 @@ const PIECE: usize = 512 << 10;
 
 type Socket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
-/// This server's socket to the relay, and the asks it's waiting on.
+/// This device's socket to the relay, and the asks it's waiting on.
 pub(super) struct Relay {
-    /// When this server started: a message sent before then may have been taken already, so it isn't.
+    /// When this device started: a message sent before then may have been taken already, so it isn't.
     started: u64,
     /// The task keeping the socket, with the address it's to.
     task: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
     /// What's sent on the socket open now.
     out: Mutex<Option<mpsc::UnboundedSender<String>>>,
-    /// Each ask waiting on its answer: the server asked, and where its answer goes.
+    /// Each ask waiting on its answer: the device asked, and where its answer goes.
     asks: Mutex<HashMap<u64, (Key, oneshot::Sender<Result<Value>>)>>,
     /// The messages taken lately, by who sent them and their id, with when they were sent.
     seen: Mutex<HashMap<(Key, u64), u64>>,
@@ -43,7 +43,7 @@ impl Relay {
     }
 }
 
-/// Why an ask never reached the server: it isn't connected to the relay, or this one isn't.
+/// Why an ask never reached the device: it isn't connected to the relay, or this one isn't.
 #[derive(Debug)]
 pub(super) struct NotThere(String);
 
@@ -56,9 +56,9 @@ impl std::fmt::Display for NotThere {
 impl std::error::Error for NotThere {}
 
 impl Node {
-    /// Keeps this server's socket to the relay at the install's address, once it has one and is a server of it.
+    /// Keeps this device's socket to the relay at the install's address, once it has one and is a device of it.
     pub(super) fn follow_relay(&self) {
-        let wanted = self.with(|i| Ok(i.r.members.server(&self.0.id).and(i.r.members.settings.get("address").cloned()))).ok().flatten();
+        let wanted = self.with(|i| Ok(i.r.members.device(&self.0.id).and(i.r.members.settings.get("address").cloned()))).ok().flatten();
         let mut task = self.0.relay.task.lock().unwrap();
         if task.as_ref().map(|(a, _)| a) == wanted.as_ref() {
             return;
@@ -91,7 +91,7 @@ impl Node {
         }
     }
 
-    /// Opens a socket to the relay as this server, and proves its key there.
+    /// Opens a socket to the relay as this device, and proves its key there.
     async fn open_relay(&self, address: &str) -> Result<Socket> {
         let base = address.trim_end_matches('/').replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
         let (mut ws, _) = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(format!("{base}/relay?key={}", hex(&self.0.id)))).await.context("timed out")??;
@@ -99,16 +99,16 @@ impl Node {
         let challenge = challenge["challenge"].as_str().context("the relay sent no challenge")?;
         let signature = self.0.key.sign(format!("relay:{challenge}").as_bytes()).to_hex();
         ws.send(Message::text(json!({ "signature": signature }).to_string())).await?;
-        ensure!(next_said(&mut ws).await?["ready"] == true, "the relay didn't take this server's key");
+        ensure!(next_said(&mut ws).await?["ready"] == true, "the relay didn't take this device's key");
         Ok(ws)
     }
 
-    /// Runs one socket to the relay until it closes: passing on what this server sends, and taking what it's sent.
+    /// Runs one socket to the relay until it closes: passing on what this device sends, and taking what it's sent.
     async fn use_relay(&self, address: &str) -> Result<()> {
         let mut ws = self.open_relay(address).await?;
         let (tx, mut rx) = mpsc::unbounded_channel();
         *self.0.relay.out.lock().unwrap() = Some(tx);
-        tracing::info!("this server is reached through the relay at {address}");
+        tracing::info!("this device is reached through the relay at {address}");
         let mut ping = tokio::time::interval(SILENT / 2);
         let mut heard = Instant::now();
         loop {
@@ -133,8 +133,8 @@ impl Node {
         }
     }
 
-    /// What the relay passed on: another server's ask (answered in the background), an answer to this server's, word
-    /// that a server asked isn't there, or a notice.
+    /// What the relay passed on: another device's ask (answered in the background), an answer to this device's, word
+    /// that a device asked isn't there, or a notice.
     fn from_relay(&self, msg: Value) {
         let from = msg["from"].as_str().unwrap_or("").to_string();
         let msg = match msg.get("piece") {
@@ -165,14 +165,14 @@ impl Node {
         match kind.as_str() {
             "answer" => {
                 let mut asks = self.0.relay.asks.lock().unwrap();
-                // Only the server asked answers.
+                // Only the device asked answers.
                 if asks.get(&id).is_some_and(|(to, _)| *to == sender) {
                     let (_, ask) = asks.remove(&id).unwrap();
                     let _ = ask.send(Ok(body));
                 }
             }
             "notice" => {
-                if self.with(|i| Ok(i.r.members.server(&sender).is_some())).unwrap_or(false) {
+                if self.with(|i| Ok(i.r.members.device(&sender).is_some())).unwrap_or(false) {
                     self.changed_from(&body["changed"]);
                 }
             }
@@ -219,7 +219,7 @@ impl Node {
         self.changed_there(&scope, wrote);
     }
 
-    /// Answers another server's ask: a call (a hello among them), or joining the install.
+    /// Answers another device's ask: a call (a hello among them), or joining the install.
     async fn answer(&self, remote: Key, ask: &Value) -> Value {
         if let Some(join) = ask.get("join") {
             let joined = match serde_json::from_value(join.clone()) {
@@ -231,7 +231,7 @@ impl Node {
         self.accept_call(remote, &ask["call"]).await.json()
     }
 
-    /// A message for `to`, sealed to its key and signed by this server: of `kind` (`ask`, `answer` or `notice`), with
+    /// A message for `to`, sealed to its key and signed by this device: of `kind` (`ask`, `answer` or `notice`), with
     /// `id`.
     fn sealed_for(&self, to: &Key, kind: &str, id: u64, body: &Value) -> Result<Value> {
         let body = body.to_string();
@@ -246,15 +246,15 @@ impl Node {
         Ok(json!({ "to": hex(to), "kind": kind, "id": id, "time": time, "key": b64(&wrapped), "sealed": b64(&sealed), "signature": signature }))
     }
 
-    /// Opens a message sealed for this server, checking who signed it and that it's new: → (who sent it, its kind, its
+    /// Opens a message sealed for this device, checking who signed it and that it's new: → (who sent it, its kind, its
     /// id, what it says).
     fn open_from(&self, msg: &Value) -> Result<(Key, String, u64, Value)> {
         let sender = unhex(msg["from"].as_str().context("from whom?")?)?;
         let (kind, id, time) = (msg["kind"].as_str().context("of what kind?")?.to_string(), msg["id"].as_u64().context("no id")?, msg["time"].as_u64().context("no time")?);
         let now = now_ms();
-        ensure!(now.abs_diff(time) < FRESH, "it was sent too long ago, or this server's clock is wrong");
-        // One sent before this server started may have been taken before then, which it no longer knows.
-        ensure!(time >= self.0.relay.started, "it was sent before this server started");
+        ensure!(now.abs_diff(time) < FRESH, "it was sent too long ago, or this device's clock is wrong");
+        // One sent before this device started may have been taken before then, which it no longer knows.
+        ensure!(time >= self.0.relay.started, "it was sent before this device started");
         let b64 = |f: &str| data_encoding::BASE64.decode(msg[f].as_str().unwrap_or("").as_bytes()).context("not base64");
         let (wrapped, sealed) = (b64("key")?, b64("sealed")?);
         let bound = bound(&kind, &sender, &self.0.id, id, time);
@@ -270,7 +270,7 @@ impl Node {
     }
 
     /// Sends a message sealed for `to`: a big one in pieces, the first of its kind, so the relay says at once when an
-    /// ask's server isn't there.
+    /// ask's device isn't there.
     fn send_sealed(&self, to: &Key, kind: &str, id: u64, body: &Value) -> Result<()> {
         let msg = self.sealed_for(to, kind, id, body)?.to_string();
         let out = self.0.relay.out.lock().unwrap().clone().ok_or_else(|| NotThere("this device isn't connected to your One App's relay".into()))?;
@@ -288,8 +288,8 @@ impl Node {
         Ok(())
     }
 
-    /// Asks another server through the relay, waiting `limit` for its answer. An error that's a `NotThere` means it
-    /// never reached that server.
+    /// Asks another device through the relay, waiting `limit` for its answer. An error that's a `NotThere` means it
+    /// never reached that device.
     pub(super) async fn ask_relay(&self, to: Key, ask: Value, limit: Duration) -> Result<Value> {
         let id = new_message_id();
         let (tx, rx) = oneshot::channel();
@@ -309,15 +309,15 @@ impl Node {
 
     /// Tells each of `to` that something changed, expecting no answer.
     pub(super) fn notify(&self, to: &[Key], changed: &Value) {
-        for server in to {
+        for device in to {
             let id = new_message_id();
-            if let Err(err) = self.send_sealed(server, "notice", id, &json!({ "changed": changed })) {
-                tracing::debug!("telling {}: {err:#}", short(server));
+            if let Err(err) = self.send_sealed(device, "notice", id, &json!({ "changed": changed })) {
+                tracing::debug!("telling {}: {err:#}", short(device));
             }
         }
     }
 
-    /// Asks a server at `address` once, on a socket of its own, as a server not yet in the install does to join.
+    /// Asks a device at `address` once, on a socket of its own, as a device not yet in the install does to join.
     pub(super) async fn ask_relay_once(&self, address: &str, to: Key, ask: Value) -> Result<Value> {
         let mut ws = self.open_relay(address).await?;
         let id = new_message_id();

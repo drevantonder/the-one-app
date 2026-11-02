@@ -17,7 +17,7 @@ pub struct Ext {
     pub time: u64,
     /// The user it was written as.
     pub user: String,
-    /// The client or server it ran for, when that isn't the author.
+    /// The client or device it ran for, when that isn't the author.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub by: Option<Key>,
 }
@@ -114,7 +114,7 @@ impl Entry {
         Ok(Entry { header, body: body.to_vec(), content })
     }
 
-    /// Decodes an entry this server already checked when it arrived.
+    /// Decodes an entry this device already checked when it arrived.
     pub fn decode_trusted(header: &[u8], body: &[u8]) -> Result<Self> {
         let header = Header::<Ext>::decode(header).context("decode header")?;
         let content: Content = serde_json::from_slice(body).context("decode body")?;
@@ -207,7 +207,7 @@ pub fn pack(entries: &[&Entry]) -> Vec<u8> {
     out
 }
 
-/// A pack's entries, each checked as if it came from another server: signature, body and content.
+/// A pack's entries, each checked as if it came from another device: signature, body and content.
 pub fn unpack(bytes: &[u8]) -> Result<Vec<Entry>> {
     let ciborium::Value::Array(list) = ciborium::from_reader(bytes)? else { bail!("not a pack") };
     list.into_iter()

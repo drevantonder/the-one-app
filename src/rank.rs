@@ -1,6 +1,6 @@
-//! Where things run first. Each server, and the serverless node, is Use First, When Needed or Last Resort: what the
-//! install's admins set (the `use` setting, a JSON object of each server's key, or `cloudflare`, to its place), or by
-//! default what that kind of server is. Calls, sidecars' operations and new agent devices go to the first in that
+//! Where things run first. Each device, and the serverless node, is Use First, When Needed or Last Resort: what the
+//! install's admins set (the `use` setting, a JSON object of each device's key, or `cloudflare`, to its place), or by
+//! default what that kind of device is. Calls, sidecars' operations and new agent devices go to the first in that
 //! order that can run them, is up and has room, a nearer one only when every one before it is far. Pure: settings and
 //! kinds in, places out; `src/node.rs` and `serverless/` both order by it.
 
@@ -13,7 +13,7 @@ pub const SETTING: &str = "use";
 /// The serverless node's name in it.
 pub const CLOUDFLARE: &str = "cloudflare";
 
-/// A server's place, first first.
+/// A device's place, first first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Use {
@@ -28,7 +28,7 @@ impl Use {
     }
 }
 
-/// What a server is, as `src/load.rs` tells: `always_on`, `laptop` (it sleeps), `cloud` (rented by the hour) or
+/// What a device is, as `src/load.rs` tells: `always_on`, `laptop` (it sleeps), `cloud` (rented by the hour) or
 /// `cloudflare` (the serverless node, which costs a little each time it wakes). Anything else counts as `always_on`.
 pub fn default_use(kind: &str) -> Use {
     match kind {
@@ -48,24 +48,24 @@ fn cost(kind: &str) -> u8 {
     }
 }
 
-/// What the admins set, by server key (hex) or `cloudflare`; what isn't a place is skipped.
+/// What the admins set, by device key (hex) or `cloudflare`; what isn't a place is skipped.
 pub fn set(settings: &BTreeMap<String, String>) -> BTreeMap<String, Use> {
     let parsed: BTreeMap<String, String> = settings.get(SETTING).and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default();
     parsed.into_iter().filter_map(|(k, v)| Some((k, Use::parse(&v)?))).collect()
 }
 
-/// A server's place: what was set for it, or its kind's.
+/// A device's place: what was set for it, or its kind's.
 pub fn place(set: &BTreeMap<String, Use>, id: &str, kind: &str) -> Use {
     set.get(id).copied().unwrap_or_else(|| default_use(kind))
 }
 
-/// What servers sort by: place, then cost.
+/// What devices sort by: place, then cost.
 pub fn order(set: &BTreeMap<String, Use>, id: &str, kind: &str) -> (Use, u8) {
     (place(set, id, kind), cost(kind))
 }
 
-/// The setting's value after one server's place changes, every other server's kept as it is now (`now`, each
-/// server's key and kind, its place written down too, so a node that can't see its kind still knows it).
+/// The setting's value after one device's place changes, every other device's kept as it is now (`now`, each
+/// device's key and kind, its place written down too, so a node that can't see its kind still knows it).
 pub fn with(settings: &BTreeMap<String, String>, now: &[(String, String)], id: &str, place_: Use) -> String {
     let had = set(settings);
     let mut out: BTreeMap<String, Use> = now.iter().map(|(k, kind)| (k.clone(), place(&had, k, kind))).collect();

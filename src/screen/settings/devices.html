@@ -17,8 +17,8 @@
   .code span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
 </style>
 <script>
-  // This person's devices, the servers they may use, and which hold their data: naming this device, trusting a
-  // server, removing a device, and pairing another with a code.
+  // This person's devices, the shared ones they may use, and which hold their data: naming this device, trusting one,
+  // removing one, and pairing another with a code.
   let state;
   let error = "";
 
@@ -62,20 +62,20 @@
       <div class="tile${online ? "" : " off"}">${one.icon(icon(name || "phone"))}</div>
       <div class="main"><div class="title"><span>${one.esc(shown(name) || "Phone")}</span></div>${subs(...lines)}</div>${trailing}</${removable ? "a" : "div"}>`;
 
-  const serverRow = (s) => {
+  const deviceRow = (s) => {
     const online = !!s.online;
     const trailing = mayTrust(s)
       ? `<input type="checkbox" class="switch" aria-label="Trust ${one.esc(shown(s.name))} to keep your data"${(s.trusted_by || []).includes(me()) ? " checked" : ""} data-trust="${one.esc(s.key)}">`
       : status(online);
     return row({ key: s.key, name: s.name, online, lines: [s.me ? "This device" : runBy(s), online && load(s.load)], trailing, removable: s.user === me() && !s.me });
   };
-  // Where things run first: every server, and Cloudflare, Use First, When Needed or Last Resort, cheaper kinds first
+  // Where things run first: every device, and Cloudflare, Use First, When Needed or Last Resort, cheaper kinds first
   // within each (src/rank.rs); an admin moves one with its menu.
   const PLACES = { first: "Use First", needed: "When Needed", last: "Last Resort" };
   const KINDS = { always_on: "Always on", laptop: "Laptop, sleeps", cloud: "Cloud server, paid by the hour", cloudflare: "On the web, costs a little each time it wakes" };
   const COST = { laptop: 1, cloudflare: 2, cloud: 3 };
   const places = () => {
-    const all = (state.install?.servers || []).filter((s) => s.use).map((s) => ({ name: shown(s.name), key: s.key, kind: s.kind, use: s.use, online: !!s.online, here: s.me }));
+    const all = (state.install?.devices || []).filter((s) => s.use).map((s) => ({ name: shown(s.name), key: s.key, kind: s.kind, use: s.use, online: !!s.online, here: s.me }));
     if (state.install?.serverless?.use) all.push({ name: "Cloudflare", key: "cloudflare", kind: "cloudflare", use: state.install.serverless.use, online: true });
     return all;
   };
@@ -99,20 +99,20 @@
 
   function page() {
     one.largeTitle("Devices");
-    const servers = state.install?.servers || [], clients = state.install?.clients || [];
-    const mine = servers.filter((s) => s.user === me()), others = servers.filter((s) => s.user !== me());
-    const here = [...servers, ...clients].find((m) => m.me);
+    const devices = state.install?.devices || [], clients = state.install?.clients || [];
+    const mine = devices.filter((s) => s.user === me()), others = devices.filter((s) => s.user !== me());
+    const here = [...devices, ...clients].find((m) => m.me);
     let html = '<div class="large-title">Devices</div>';
     if (here) {
       html += `<h2 class="section">This Device</h2><div class="list"><label class="row plain"><input class="field" id="name" aria-label="This device’s name" value="${one.esc(here.name)}" autocomplete="off" spellcheck="false" enterkeyhint="done"></label></div>`;
     }
-    html += '<h2 class="section">Your Devices</h2><div class="list">' + mine.map(serverRow).join("") + clients.filter((c) => c.user === me()).map(clientRow).join("") +
+    html += '<h2 class="section">Your Devices</h2><div class="list">' + mine.map(deviceRow).join("") + clients.filter((c) => c.user === me()).map(clientRow).join("") +
       `<a class="row plain action-row" data-pair>${one.icon("desktop")}<span>Pair a Computer</span></a></div><div id="ask"></div>`;
-    if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(serverRow).join("") + "</div>";
+    if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(deviceRow).join("") + "</div>";
     html += orderSection();
-    const holding = servers.filter(holds).map((s) => shown(s.name));
+    const holding = devices.filter(holds).map((s) => shown(s.name));
     // Said only where it isn't every device there is.
-    if (servers.length > 1 || holding.length !== servers.length) {
+    if (devices.length > 1 || holding.length !== devices.length) {
       html += `<h2 class="section">Where Your Data Lives</h2><div class="list"><div class="row plain"><div class="main">${one.esc(list(holding))}</div></div></div>`;
       html += error ? "" : '<p class="footer">Only these keep your own data.</p>';
     }
@@ -153,24 +153,24 @@
   document.addEventListener("keydown", (e) => e.target.id === "name" && e.key === "Enter" && e.target.blur());
   function rename(input) {
     const name = input.value.trim();
-    const here = [...(state.install?.servers || []), ...(state.install?.clients || [])].find((m) => m.me);
+    const here = [...(state.install?.devices || []), ...(state.install?.clients || [])].find((m) => m.me);
     if (!name || name === here?.name) return void (input.value = here?.name || "");
     act(() => one.api("POST", "/v1/name", { name }));
   }
 
-  function trust(server, input) {
+  function trust(device, input) {
     one.tap();
-    act(() => one.api("POST", "/v1/trust", { server, trust: input.checked }));
+    act(() => one.api("POST", "/v1/trust", { device, trust: input.checked }));
   }
 
-  function place(server, use, select) {
+  function place(device, use, select) {
     one.tap();
     select.disabled = true;
-    act(() => one.api("POST", "/v1/use", { server, use }));
+    act(() => one.api("POST", "/v1/use", { device, use }));
   }
 
   function remove(key) {
-    const m = [...state.install.servers, ...state.install.clients].find((x) => x.key === key);
+    const m = [...state.install.devices, ...state.install.clients].find((x) => x.key === key);
     one.confirm("#ask", {
       title: `Remove ${shown(m.name) || "this device"}?`,
       detail: "It stops being one of your devices, and can’t reach your data. To use it again, pair it again.",

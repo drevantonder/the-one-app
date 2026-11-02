@@ -66,11 +66,11 @@ impl Drop for Running {
     }
 }
 
-fn run(servers: Vec<Served>) -> Running {
+fn run(services: Vec<Served>) -> Running {
     let dir = crate::temp("workerd");
     let listening = {
         let mut held = LISTENING.lock().unwrap();
-        servers
+        services
             .iter()
             .map(|s| {
                 let at = held.iter().position(|l| l.local_addr().unwrap().to_string() == s.listen).expect("a service listens on a port from port()");
@@ -78,7 +78,7 @@ fn run(servers: Vec<Served>) -> Running {
             })
             .collect()
     };
-    let config = kernel::write_config(&dir, &servers).unwrap();
+    let config = kernel::write_config(&dir, &services).unwrap();
     let child = kernel::start(&config, listening).unwrap();
     Running { child, dir }
 }
@@ -902,7 +902,7 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let v = Vault::start();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let dir = crate::temp("node");
-    std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "node" }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "node" }).to_string()).unwrap();
     let (node, api) = rt.block_on(async {
         let node = one::node::Node::start(&dir, one::sidecars::built_in()).await.unwrap();
         node.create("Test", "Andre").await.unwrap();
@@ -912,12 +912,12 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
         tokio::spawn(one::api::serve(listener, app));
         (node, api)
     });
-    // Andre made the install; Sam is a member. The server is the install's, so both use it; it takes sign-ins made
+    // Andre made the install; Sam is a member. The device is the install's, so both use it; it takes sign-ins made
     // at the install's address.
     let (andre, sam) = (node.user().unwrap(), one::entry::new_id());
     rt.block_on(async {
         node.member("admit", json!({ "key": one::entry::hex(&rand::random()), "user": sam, "as": "client", "name": "Sam's phone", "user_name": "Sam", "role": "member" })).await.unwrap();
-        node.member("acl", json!({ "server": one::entry::hex(&node.id()), "owners": ["install"], "users": ["install"] })).await.unwrap();
+        node.member("acl", json!({ "device": one::entry::hex(&node.id()), "owners": ["install"], "users": ["install"] })).await.unwrap();
         node.member("setting", json!({ "name": "address", "value": v.auth })).await.unwrap();
         node.member("setting", json!({ "name": "kernel_vault", "value": v.url })).await.unwrap();
     });
@@ -949,7 +949,7 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert_eq!(ask(&andres, "POST", "/v1/settings", setting).0, 200);
     assert_eq!(state(&andres)["install"]["settings"]["made_here"], "Ours");
 
-    // A group Sam makes is his, not this server's person's; its members change only as its admins and invitees say.
+    // A group Sam makes is his, not this device's person's; its members change only as its admins and invitees say.
     let (status, made) = ask(&sams, "POST", "/v1/group", json!({ "name": "Sam's" }));
     assert_eq!(status, 200, "{made}");
     let group = made["group"].as_str().unwrap().to_string();
@@ -962,13 +962,13 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert_eq!(members().as_array().unwrap().len(), 2);
 
     // What only this machine's own programs do, no sign-in from elsewhere (through the gateway) does: renaming the
-    // server, say.
+    // device, say.
     let renamed = agent.post(format!("{api}/v1/name")).header("authorization", format!("Bearer {andres}")).header("forwarded", "host=\"one.example\"").send_json(json!({ "name": "elsewhere" })).unwrap();
     assert_eq!(renamed.status(), 403);
-    // A sign-in is no device: not the server it reached, so nothing offers it that server's name to change.
+    // A sign-in is no device: not the device it reached, so nothing offers it that device's name to change.
     let seen = state(&andres);
     assert_eq!(seen["me"]["key"], "", "{}", seen["me"]);
-    assert!(seen["install"]["servers"].as_array().unwrap().iter().all(|s| s["me"] == false), "{}", seen["install"]["servers"]);
+    assert!(seen["install"]["devices"].as_array().unwrap().iter().all(|s| s["me"] == false), "{}", seen["install"]["devices"]);
     assert!(seen.get("client").is_none());
 
     // A file is read only by whoever put it or may use a scope that names it: knowing its hash isn't enough. Only
@@ -1035,7 +1035,7 @@ fn a_client_is_shown_by_where_it_goes_and_none_is_named_as_the_install() {
     assert_eq!(goes("Claude", "https://claude.ai/api/mcp/auth_callback"), ("Claude".into(), json!("claude.ai")));
     assert_eq!(goes("Claude Code", "http://localhost:33418/callback").1, "an app on this device");
     assert_eq!(goes("Test on Andre's iPhone", "one://signed-in/").1, "an app on this device");
-    assert_eq!(goes("Test on a server", &format!("{}/sign-in/code/done", k.address)).1, "where you got your code");
+    assert_eq!(goes("Test on a device", &format!("{}/sign-in/code/done", k.address)).1, "where you got your code");
 }
 
 /// A client registers itself (anyone may) and its authorization goes to the sign-in page: → the page's query.

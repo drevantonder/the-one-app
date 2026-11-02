@@ -1,4 +1,4 @@
-//! Server sidecars, as the node knows them: which run on which server, registering them, and the built-in ones' records.
+//! Device sidecars, as the node knows them: which run on which device, registering them, and the built-in ones' records.
 
 use super::*;
 
@@ -7,7 +7,7 @@ impl Node {
         &self.0.sidecars
     }
 
-    /// Registers a sidecar; the node says so in its hello to the other servers, and to shells when that changes it:
+    /// Registers a sidecar; the node says so in its hello to the other devices, and to shells when that changes it:
     /// an app of its name shows its picture (a Mac app's icon).
     pub async fn register_sidecar(&self, app: &str, describe: Value) -> Result<()> {
         if let Some(why) = self.removed_here(app) {
@@ -23,18 +23,18 @@ impl Node {
         Ok(())
     }
 
-    /// Removes a sidecar from a server (this one if none is named), or with `installed` lets it register there again,
-    /// for someone acting for one of the server's owners.
-    pub async fn set_sidecar(&self, caller: &Caller, server: Option<&str>, name: &str, installed: bool) -> Result<()> {
-        let server = server.map(str::to_string).unwrap_or_else(|| self.server_name());
-        let content = self.with(|i| sidecar_entry(&i.r.members, &caller.user, &server, name, installed))?;
+    /// Removes a sidecar from a device (this one if none is named), or with `installed` lets it register there again,
+    /// for someone acting for one of the device's owners.
+    pub async fn set_sidecar(&self, caller: &Caller, device: Option<&str>, name: &str, installed: bool) -> Result<()> {
+        let device = device.map(str::to_string).unwrap_or_else(|| self.device_name());
+        let content = self.with(|i| sidecar_entry(&i.r.members, &caller.user, &device, name, installed))?;
         self.member_content(caller, content).await?;
         self.say_hello();
         Ok(())
     }
 
-    /// The sidecars serving on this server, whom each serves, and what each says it is: those built into the node,
-    /// then those registered. A sidecar one of its owners removed from this server isn't served here.
+    /// The sidecars serving on this device, whom each serves, and what each says it is: those built into the node,
+    /// then those registered. A sidecar one of its owners removed from this device isn't served here.
     pub(super) fn sidecars_here(&self, i: &Install) -> Vec<Sidecar> {
         let m = &i.r.members;
         let everyone: Vec<String> = m.users.keys().filter(|u| m.serves(&self.0.id, u)).cloned().collect();
@@ -53,13 +53,13 @@ impl Node {
         sidecars
     }
 
-    /// Why a sidecar isn't served here, if one of this server's owners removed it.
+    /// Why a sidecar isn't served here, if one of this device's owners removed it.
     pub(super) fn removed_here(&self, name: &str) -> Option<String> {
         self.with(|i| {
             let m = &i.r.members;
             Ok(m.sidecars.get(&(self.0.id, name.to_string())).filter(|d| d.removed()).map(|d| {
                 let by = m.users.get(&d.by).map(|u| u.name.as_str()).unwrap_or("an owner");
-                format!("{name} was removed from {} by {by}; an owner of it installs it again", self.server_name())
+                format!("{name} was removed from {} by {by}; an owner of it installs it again", self.device_name())
             }))
         })
         .ok()
@@ -70,7 +70,7 @@ impl Node {
         (self.0.built_in_sidecars.iter().any(|n| n.name == app) || self.0.sidecars.has(app)) && self.removed_here(app).is_none()
     }
 
-    /// The picture a sidecar called `name` gives, here or on a server this one is connected to, and its kind.
+    /// The picture a sidecar called `name` gives, here or on a device this one is connected to, and its kind.
     pub(super) fn sidecar_image(&self, name: &str) -> Option<(Value, Value)> {
         self.with(|i| {
             let here = self.sidecars_here(i).into_iter().map(|d| d.2);
@@ -82,7 +82,7 @@ impl Node {
     }
 
     /// Every entry a built-in sidecar has in the local user's scope, oldest first.
-    /// A built-in sidecar's records, in its database of this server's local user, oldest first.
+    /// A built-in sidecar's records, in its database of this device's local user, oldest first.
     pub(super) async fn records(&self, app: &str) -> Result<Vec<crate::sidecars::Record>> {
         let user = self.user()?;
         let scope = Scope::User(user);

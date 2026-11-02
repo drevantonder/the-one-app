@@ -2,14 +2,14 @@
 //! loaded when needed: one for each app with a guide (its instructions and operations, from the same declarations its
 //! tools come from), the Vault's, and a few areas of their own (`skills/`). One source, every way out: the agents
 //! sidecar writes them into each harness's skills folder, `<cli> mcp` serves them (Skills over MCP, SEP-2640), a
-//! server serves the root's body as `/llms.txt` and each skill's files at `/skills/<name>/<path>`, and `<cli> skills`
+//! device serves the root's body as `/llms.txt` and each skill's files at `/skills/<name>/<path>`, and `<cli> skills`
 //! prints them. MCP's instructions are the root's short version.
 
 use serde_json::{Value, json};
 
 use crate::config::{CLI, NAME, REPO};
 
-/// Claude Code keeps only the first 4,096 characters (UTF-16 units) of a server's instructions; stay under them.
+/// Claude Code keeps only the first 4,096 characters (UTF-16 units) of an MCP server's instructions; stay under them.
 pub const INSTRUCTIONS_LIMIT: usize = 4000;
 
 /// What it is, in two plain lines.
@@ -314,10 +314,10 @@ fn len(s: &str) -> usize {
     s.encode_utf16().count()
 }
 
-/// Where this server serves the guide to the other devices on its tailnet, once it does.
+/// Where this device serves the guide to the other devices on its tailnet, once it does.
 static ADDRESS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-/// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, if this server serves it there.
+/// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, if this device serves it there.
 pub fn address() -> Option<String> {
     ADDRESS.lock().unwrap().clone()
 }

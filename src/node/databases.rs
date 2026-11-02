@@ -1,33 +1,33 @@
-//! Databases: each scope's keys, and each app's databases in a scope, as this server reads and writes them in the bucket.
+//! Databases: each scope's keys, and each app's databases in a scope, as this device reads and writes them in the bucket.
 
 use super::*;
 
 impl Node {
-    /// The install's bucket, as this server reaches it, with its copy of the databases' steps.
+    /// The install's bucket, as this device reaches it, with its copy of the databases' steps.
     pub(super) fn bucket(&self) -> Result<Copied> {
         let place = self.with(|i| i.bucket.as_ref().map(|(p, _)| p.clone()).context("this device can't reach the install's bucket, where apps keep their data: use another device"))?;
         Ok(Copied::moving(place, self.install_dir().join("copy"), self.0.moved.clone()))
     }
 
-    /// A database's key, `app`'s `database` in `scope`, as this server opens it with its own keys: from the app's key,
+    /// A database's key, `app`'s `database` in `scope`, as this device opens it with its own keys: from the app's key,
     /// in the bucket sealed under the scope's. A call that came with a token gets its keys from the vault instead
-    /// (`sessions`); this is for this server's own work.
+    /// (`sessions`); this is for this device's own work.
     pub(super) async fn database_key(&self, scope: &Scope, app: &str, database: &str) -> Result<[u8; 32]> {
-        tracing::debug!("opening {scope}'s {app}/{database} with this server's own key");
+        tracing::debug!("opening {scope}'s {app}/{database} with this device's own key");
         let scope_key = self.scope_key(scope).await?;
         let app_key = crate::db::app_key(&self.bucket()?, &scope_key, &scope.to_string(), app, database).await?;
         Ok(crate::kernel::database_key(&app_key, database))
     }
 
-    /// A scope's key, which its databases and backups are sealed with. The first server to need one makes it, and the
-    /// bucket says whose is the scope's (its id), so two made at once can't both seal its data. Each server that
+    /// A scope's key, which its databases and backups are sealed with. The first device to need one makes it, and the
+    /// bucket says whose is the scope's (its id), so two made at once can't both seal its data. Each device that
     /// holds the scope finds it in the bucket sealed to its own key, as the recovery key does.
     pub(crate) async fn scope_key(&self, scope: &Scope) -> Result<[u8; 32]> {
         use crate::bucket::Bucket;
         if let Some(key) = self.0.scope_keys.lock().unwrap().get(scope) {
             return Ok(*key);
         }
-        // One at a time here, so this server never makes two keys for a scope.
+        // One at a time here, so this device never makes two keys for a scope.
         let _making = self.0.making_keys.lock().await;
         if let Some(key) = self.0.scope_keys.lock().unwrap().get(scope) {
             return Ok(*key);
@@ -44,7 +44,7 @@ impl Node {
                 let id = crate::backups::key_id(&key);
                 let name = format!("{folder}/{KEY_OBJECT}");
                 if !crate::db::created(&bucket, &name, id.as_bytes()).await? {
-                    // Another server made it just now: it gives it to this one next, once it's sealed it.
+                    // Another device made it just now: it gives it to this one next, once it's sealed it.
                     let mut found = None;
                     for _ in 0..50 {
                         found = Bucket::get(&bucket, &given).await?;
@@ -55,7 +55,7 @@ impl Node {
                     }
                     match found {
                         Some(o) => crate::backups::unseal(self.0.key.as_bytes(), &o.bytes)?,
-                        None => bail!("{} doesn't have {scope}'s key yet: a device that has it gives it when it's next on", self.server_name()),
+                        None => bail!("{} doesn't have {scope}'s key yet: a device that has it gives it when it's next on", self.device_name()),
                     }
                 } else {
                     key
@@ -67,7 +67,7 @@ impl Node {
         Ok(key)
     }
 
-    /// Seals a scope's key, in the bucket, to each server that holds the scope and to the recovery key, where it isn't
+    /// Seals a scope's key, in the bucket, to each device that holds the scope and to the recovery key, where it isn't
     /// yet.
     pub(super) async fn give_key(&self, scope: &Scope, key: &[u8; 32]) -> Result<()> {
         use crate::bucket::Bucket;
@@ -75,7 +75,7 @@ impl Node {
         let folder = crate::bucket::folder(&scope.to_string());
         let to = self.with(|i| {
             let m = &i.r.members;
-            let mut to: Vec<(String, Key)> = m.servers().filter(|s| m.holds(&s.key, scope)).map(|s| (hex(&s.key), s.key)).collect();
+            let mut to: Vec<(String, Key)> = m.devices().filter(|s| m.holds(&s.key, scope)).map(|s| (hex(&s.key), s.key)).collect();
             to.extend(m.recovery.map(|r| ("recovery".to_string(), r)));
             Ok(to)
         })?;
@@ -88,7 +88,7 @@ impl Node {
         Ok(())
     }
 
-    /// Gives each scope's key this server has to the servers that hold the scope now.
+    /// Gives each scope's key this device has to the devices that hold the scope now.
     pub(super) fn give_keys(&self) {
         let node = self.clone();
         tokio::spawn(async move {
@@ -101,23 +101,23 @@ impl Node {
         });
     }
 
-    /// Brings a database up to date for a call that reads it, as far as this server's copy goes: a notice of another
-    /// server's write fetches its step into the copy, and `fill_copies` keeps up with the bucket. Only while a notice's
+    /// Brings a database up to date for a call that reads it, as far as this device's copy goes: a notice of another
+    /// device's write fetches its step into the copy, and `fill_copies` keeps up with the bucket. Only while a notice's
     /// step isn't here yet is the bucket asked first, and if it doesn't answer, the copy is read as it is: behind,
     /// never wrong.
     pub(super) async fn read_ready(&self, id: &(Scope, String), db: &mut Db, bucket: &Copied) -> Result<()> {
         if self.0.behind.lock().unwrap().remove(id) {
             match tokio::time::timeout(BUCKET_WAIT, db.catch_up(bucket)).await {
                 Ok(Ok(_)) => return Ok(()),
-                Ok(Err(err)) => tracing::debug!("{}: reading this server's copy, as the bucket said {err:#}", db.prefix()),
-                Err(_) => tracing::debug!("{}: reading this server's copy, as the bucket didn't answer", db.prefix()),
+                Ok(Err(err)) => tracing::debug!("{}: reading this device's copy, as the bucket said {err:#}", db.prefix()),
+                Err(_) => tracing::debug!("{}: reading this device's copy, as the bucket didn't answer", db.prefix()),
             }
         }
         db.catch_up(&bucket.here_only()).await?;
         Ok(())
     }
 
-    /// Fetches into this server's copy what the bucket has of each database open here that it lacks, every tick: what
+    /// Fetches into this device's copy what the bucket has of each database open here that it lacks, every tick: what
     /// a lost notice would have said. A database a call is using is left for the next.
     pub(super) async fn fill_copies(&self) {
         let Ok(bucket) = self.bucket() else { return };
@@ -137,7 +137,7 @@ impl Node {
     }
 
     /// `app`'s `database` of `scope`, opened from the bucket the first time and brought to `schema`, or else to the
-    /// app's deploy's: with this server's own key, or `given`, a key the vault gave a call's session, with the bucket
+    /// app's deploy's: with this device's own key, or `given`, a key the vault gave a call's session, with the bucket
     /// as that call reaches it.
     pub(super) async fn database(&self, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>, given: Option<([u8; 32], &Copied)>) -> Result<Arc<tokio::sync::Mutex<Db>>> {
         let id = (scope.clone(), format!("{app}/{database}"));

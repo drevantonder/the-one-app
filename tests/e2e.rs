@@ -9,11 +9,11 @@ use crate::temp;
 
 async fn start(name: &str) -> Node {
     let dir = temp(name);
-    std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
     Node::start(&dir, one::sidecars::built_in()).await.unwrap()
 }
 
-/// A kernel whose gateway's relay the servers of `a`'s install reach each other through: `a` says it's the install's.
+/// A kernel whose gateway's relay the devices of `a`'s install reach each other through: `a` says it's the install's.
 async fn relay(a: &Node) -> crate::kernel::Kernel {
     let k = tokio::task::block_in_place(|| crate::kernel::Kernel::start(None));
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
@@ -36,7 +36,7 @@ fn board(op: &str, input: Value) -> CallRequest {
     CallRequest { app: "board".into(), op: op.into(), input, ..Default::default() }
 }
 
-/// The texts of the posts on a server's board of `scope`.
+/// The texts of the posts on a device's board of `scope`.
 async fn texts(node: &Node, scope: &str) -> Vec<String> {
     match node.call(board("news", json!({ "format": "json", "since": 0, "scope": scope }))).await {
         Ok(posts) => posts.as_array().unwrap().iter().map(|p| p["text"].as_str().unwrap().to_string()).collect(),
@@ -49,7 +49,7 @@ async fn sees(node: &Node, scope: &str, text: &str) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn servers_share_a_deployed_board() {
+async fn devices_share_a_deployed_board() {
     let a = start("a").await;
     let b = start("b").await;
 
@@ -65,10 +65,10 @@ async fn servers_share_a_deployed_board() {
     assert!(a.pair().is_err(), "a computer joins through the install's address, which it has none of yet");
     let _relay = relay(&a).await;
     b.join(&a.pair().unwrap()).await.unwrap();
-    assert_eq!(b.user().unwrap(), a.user().unwrap(), "a pairing code from a's user makes another of their servers");
+    assert_eq!(b.user().unwrap(), a.user().unwrap(), "a pairing code from a's user makes another of their devices");
     eventually("b to run the board and see a's post", async || sees(&b, "global", "from a").await).await;
     b.call(board("post", json!({ "text": "from b" }))).await.unwrap();
-    assert!(b.join(&a.pair().unwrap()).await.is_err(), "a server in an install joins no other");
+    assert!(b.join(&a.pair().unwrap()).await.is_err(), "a device in an install joins no other");
     eventually("a to see b's post", async || sees(&a, "global", "from b").await).await;
     let read = a.call(board("read", json!({}))).await.unwrap();
     let read = read.as_str().unwrap();
@@ -87,7 +87,7 @@ fn call(app: &str, op: &str, input: Value) -> CallRequest {
     CallRequest { app: app.into(), op: op.into(), input, ..Default::default() }
 }
 
-/// Deploys a plain module as `app`, made by this server's user if it's new, and installs it in their scope.
+/// Deploys a plain module as `app`, made by this device's user if it's new, and installs it in their scope.
 async fn deploy_module(node: &Node, app: &str, source: &str) {
     let bundle = one::bundle::pack(&[("app.js".into(), source.as_bytes().to_vec()), ("src/app.js".into(), source.as_bytes().to_vec())]).unwrap();
     let blob = node.put_blob(&bundle).unwrap();
@@ -98,7 +98,7 @@ async fn deploy_module(node: &Node, app: &str, source: &str) {
     node.deploy(&me, app, &blob).await.unwrap();
 }
 
-/// A server that answers every request with what it got: `{ host, authorization, body }`.
+/// A device that answers every request with what it got: `{ host, authorization, body }`.
 async fn echo() -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -300,7 +300,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     eventually("the first backup", async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
     let shown = a.backups().unwrap();
     assert_eq!(shown["places"][0]["title"], "T7 Shield");
-    assert_eq!(shown["places"][0]["last"]["server"], "backup-a", "the folder's own server backs it up: {shown}");
+    assert_eq!(shown["places"][0]["last"]["device"], "backup-a", "the folder's own device backs it up: {shown}");
     let first = shown["places"][0]["last"]["time"].clone();
     eventually("b to see it", async || !b.backups().unwrap()["places"][0]["last"].is_null()).await;
 

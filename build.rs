@@ -79,7 +79,7 @@ fn main() {
         starters.push_str(&format!("{name:?},"));
     }
     let out = format!("{out}pub const BUILT_IN: &[(&str, &[(&str, &[u8])])] = &[{apps}];\npub const STARTERS: &[&str] = &[{starters}];\n");
-    // The kernel servers' sources, built with the pinned Bun when they're run or deployed (src/kernel.rs), so a
+    // The kernel services' sources, built with the pinned Bun when they're run or deployed (src/kernel.rs), so a
     // release deploys exactly the kernel it was signed with. Their tests stay in the repo.
     let kernel = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("kernel");
     println!("cargo:rerun-if-changed={}", kernel.display());

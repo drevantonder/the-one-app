@@ -94,7 +94,7 @@ impl Node {
     }
 
     /// Runs a slot the schedules service handed in, as the person who let it run, with the run's token (its keys
-    /// reach only that scope and app): once, whichever server takes its slot first, and only while it still runs as
+    /// reach only that scope and app): once, whichever device takes its slot first, and only while it still runs as
     /// them here. How it went is written as every run's is.
     pub async fn kernel_run(&self, me: &Caller, run: &crate::kernel::Run) -> Result<Value> {
         let scope = Scope::parse(&run.scope)?;
@@ -118,7 +118,7 @@ impl Node {
             Ok(()) => Box::pin(self.route(req, me.clone())).await,
         };
         let error = ran.as_ref().err().map(|e| format!("{e:#}").chars().take(500).collect::<String>());
-        let said = status::Run { slot, time: now_ms(), server: self.0.id, user: me.user.clone(), ok: error.is_none(), error, ms: started.elapsed().as_millis() as u64, spec: schedule.spec() };
+        let said = status::Run { slot, time: now_ms(), device: self.0.id, user: me.user.clone(), ok: error.is_none(), error, ms: started.elapsed().as_millis() as u64, spec: schedule.spec() };
         self.say(&scope, status::Said::Ran { app: run.app.clone(), schedule: schedule.name.clone(), run: said }).await?;
         Ok(json!({ "ran": ran.is_ok() }))
     }
@@ -147,7 +147,7 @@ impl Node {
         out
     }
 
-    /// An app's schedules where it's installed for `viewer` and this server holds the scope: what each runs and when,
+    /// An app's schedules where it's installed for `viewer` and this device holds the scope: what each runs and when,
     /// whether it's on, whom it runs as, when it runs next, its last run, and whether a deploy changed or removed it;
     /// and its runs, newest first.
     pub(super) fn schedules_of(&self, viewer: &Caller, app: &str, declared: &[std::result::Result<Schedule, (String, String)>]) -> Result<(Vec<Value>, Vec<Value>)> {
@@ -210,7 +210,7 @@ impl Node {
                 for ((a, name), runs) in status.runs.iter().filter(|((a, _), _)| a == app) {
                     let _ = a;
                     for r in runs {
-                        activity.push(json!({ "schedule": name, "scope": scope.to_string(), "scope_name": scope_name, "time": r.time, "ok": r.ok, "error": r.error, "ms": r.ms, "server": m.machines.get(&r.server).map(|s| s.name.clone()), "user": user_name(&r.user) }));
+                        activity.push(json!({ "schedule": name, "scope": scope.to_string(), "scope_name": scope_name, "time": r.time, "ok": r.ok, "error": r.error, "ms": r.ms, "device": m.machines.get(&r.device).map(|s| s.name.clone()), "user": user_name(&r.user) }));
                     }
                 }
             }

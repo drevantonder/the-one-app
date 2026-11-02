@@ -41,7 +41,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
         return Ok(());
     }
     let mut take = |k: &str| flags.remove(k).and_then(|v| v.into_iter().last().flatten());
-    let server = take("server");
+    let device = take("device");
     let scopes = take("scopes").map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     let out = take("out");
     let confirmed = flags.remove("confirm").is_some() || flags.remove("yes").is_some();
@@ -65,7 +65,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     }
     let call = match node_apps().iter().any(|n| n["name"] == app) {
         true => crate::dispatch(&format!("{app}_{op}"), input, agent_from_env().as_deref(), "cli", Some(o.clone())).map(|ok| json!({ "ok": ok })),
-        false => post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })),
+        false => post("/v1/call", json!({ "device": device, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })),
     };
     let mut r = match call {
         Ok(r) => r,
@@ -515,9 +515,9 @@ pub fn help(app: &Value, op: &Value) -> String {
         rows.push((flag, about.join("; ")));
     }
     if app["runs"] == "here" {
-        rows.push(("--server <name>".into(), "which of your devices runs it, by name; all for every one; default is this one".into()));
+        rows.push(("--device <name>".into(), "which of your devices runs it, by name; all for every one; default is this one".into()));
     } else {
-        rows.push(("--server <name>".into(), "run it on that device (by name)".into()));
+        rows.push(("--device <name>".into(), "run it on that device (by name)".into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
     if op["confirm"] == true {
@@ -595,7 +595,7 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
         }
     }
     if app["runs"] == "here" {
-        schema["properties"]["server"] = json!({ "type": "string", "description": "which of your devices, by name, or all for every one; default is this one" });
+        schema["properties"]["device"] = json!({ "type": "string", "description": "which of your devices, by name, or all for every one; default is this one" });
     }
     if op["confirm"] == true {
         schema["properties"]["confirm"] = json!({ "type": "boolean", "description": "true once the person has agreed: this can't be undone" });
@@ -665,7 +665,7 @@ pub fn mcp_annotations(op: &Value) -> Value {
 }
 
 /// Brings an agent's file inputs to what apps take, `{ name, type, size, base64 }`: from base64, a file id (a blob
-/// this server can get) or a public URL.
+/// this device can get) or a public URL.
 pub fn mcp_files(op: &Value, input: &mut Map<String, Value>) -> Result<()> {
     let props = op["input"]["properties"].as_object().cloned().unwrap_or_default();
     for (name, prop) in props {
@@ -708,7 +708,7 @@ fn mcp_file(v: &Value) -> Result<Value> {
 }
 
 /// Gets a file an agent gave as a URL. For someone signed in elsewhere, only from the internet, each redirect too: this
-/// machine's addresses (its local API, which takes this server for its own programs), its network's and its tailnet's
+/// machine's addresses (its local API, which takes this device for its own programs), its network's and its tailnet's
 /// are its person's, not theirs.
 fn fetch_file(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
     if !crate::signed_in() {
@@ -751,7 +751,7 @@ fn on_the_internet(ip: std::net::IpAddr) -> bool {
     }
 }
 
-/// A result as MCP content: text, or JSON with each file in it kept as a file this server serves, given back as a
+/// A result as MCP content: text, or JSON with each file in it kept as a file this device serves, given back as a
 /// reference (name, type, size, its id and a link), with images also shown.
 pub fn mcp_content(ok: &Value) -> Value {
     if ok["content"].is_array() {
@@ -800,7 +800,7 @@ fn keep_files(v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
 mod tests {
     use super::*;
 
-    /// Someone signed in elsewhere can't have this server fetch a file from its own addresses, which would reach its
+    /// Someone signed in elsewhere can't have this device fetch a file from its own addresses, which would reach its
     /// local API as this machine (the Vault, apps' code, sidecars' calls), or from its networks.
     #[test]
     fn a_sign_in_gets_files_only_from_the_internet() {

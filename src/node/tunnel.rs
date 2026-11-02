@@ -1,6 +1,6 @@
 //! The install's Cloudflare Tunnel, which the kernel's gateway reaches nodes through with no public address
 //! (`kernel set node-url cloudflare:<id>`): an admin keeps its token as a Tunnel item in Everyone's Vault, and every
-//! server of the install runs a connector for it, so Cloudflare sends each request to whichever is up.
+//! device of the install runs a connector for it, so Cloudflare sends each request to whichever is up.
 
 use sha2::Digest;
 
@@ -12,7 +12,7 @@ pub const TUNNEL: &str = "Tunnel";
 /// Where a connector takes the token: Cloudflare's tunnel servers, `region1.v2.argotunnel.com` and the like.
 const EDGE: &str = "argotunnel.com";
 
-/// The cloudflared every server runs, and each platform's download of it with its binary's sha256, as Cloudflare
+/// The cloudflared every device runs, and each platform's download of it with its binary's sha256, as Cloudflare
 /// publishes them.
 const CLOUDFLARED: &str = "2026.10.7";
 const DOWNLOADS: &[(&str, &str, &str)] = &[
@@ -23,11 +23,11 @@ const DOWNLOADS: &[(&str, &str, &str)] = &[
 ];
 
 impl Node {
-    /// Keeps this server's connector running for the install's newest Tunnel item, or stops it when there's none or
-    /// this server has left the install.
+    /// Keeps this device's connector running for the install's newest Tunnel item, or stops it when there's none or
+    /// this device has left the install.
     pub(super) fn follow_tunnel(&self) {
         let wanted = self.with(|i| {
-            if i.r.members.server(&self.0.id).is_none() {
+            if i.r.members.device(&self.0.id).is_none() {
                 return Ok(None);
             }
             let Some((_, global)) = i.views.get("global") else { return Ok(None) };
@@ -47,14 +47,14 @@ impl Node {
         // Its connector dies with the task.
         if let Some((_, task)) = running.take() {
             task.abort();
-            tracing::info!("this server's tunnel connector stopped");
+            tracing::info!("this device's tunnel connector stopped");
         }
         if let Some(token) = wanted {
             *running = Some((token.clone(), tokio::spawn(connect(token, self.0.dir.clone()))));
         }
     }
 
-    /// Keeps the install's tunnel's token, for an admin: every server runs a connector for it from then on.
+    /// Keeps the install's tunnel's token, for an admin: every device runs a connector for it from then on.
     pub async fn set_tunnel(&self, caller: &Caller, token: &str) -> Result<Value> {
         self.with(|i| {
             ensure!(members::manages_scope(&i.r.members, &caller.user, &Scope::Global), "only admins set the install's tunnel");
@@ -74,7 +74,7 @@ impl Node {
             "GET" => {
                 let set = self.with(|i| Ok(i.views.get("global").is_some_and(|(_, g)| g.items.values().any(|it| it.kind == TUNNEL))))?;
                 let running = self.0.tunnel.lock().unwrap().is_some() && running(&self.0.dir.join("cloudflared.pid")).is_some();
-                Ok(json!({ "set": set, "running": running, "server": self.server_name() }))
+                Ok(json!({ "set": set, "running": running, "device": self.device_name() }))
             }
             _ => {
                 ensure!(body["agent"].is_null(), "agents never handle the tunnel's token: the person pipes it in");
@@ -105,7 +105,7 @@ async fn connect(token: String, dir: PathBuf) {
             if let Some(id) = child.id() {
                 std::fs::write(&pid, id.to_string())?;
             }
-            tracing::info!("this server runs a connector for the install's tunnel");
+            tracing::info!("this device runs a connector for the install's tunnel");
             let started = Instant::now();
             let status = child.wait().await?;
             if started.elapsed() > Duration::from_secs(60) {
@@ -114,8 +114,8 @@ async fn connect(token: String, dir: PathBuf) {
             Ok::<_, anyhow::Error>(status.to_string())
         };
         match run.await {
-            Ok(status) => tracing::warn!("this server's tunnel connector stopped ({status}): starting it again"),
-            Err(err) => tracing::warn!("this server's tunnel connector: {err:#}"),
+            Ok(status) => tracing::warn!("this device's tunnel connector stopped ({status}): starting it again"),
+            Err(err) => tracing::warn!("this device's tunnel connector: {err:#}"),
         }
         tokio::time::sleep(wait).await;
         wait = (wait * 2).min(Duration::from_secs(600));

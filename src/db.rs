@@ -1,7 +1,7 @@
 //! App databases: an app's data in a scope is one SQLite database, the truth, kept in the bucket as steps at numbered
 //! positions, each sealed: the changeset of one write (SQLite's session extension), or one of the app's schema
 //! changes. Reading it is its newest copy and the steps after; writing it is a step created only if its position is
-//! free, so when two servers write at once, one wins and the other catches up and runs its write again.
+//! free, so when two devices write at once, one wins and the other catches up and runs its write again.
 //!
 //! ```text
 //! <prefix>/newest            {"at": n, "copy": m}, replaced while unchanged: a hint, so readers needn't list
@@ -69,7 +69,7 @@ pub struct Db {
     conn: Connection,
     /// The last step applied.
     at: u64,
-    /// The newest copy this server knows of.
+    /// The newest copy this device knows of.
     copy: u64,
 }
 
@@ -106,7 +106,7 @@ impl Db {
         &self.prefix
     }
 
-    /// Applies the steps written since this server last read: whether there were any.
+    /// Applies the steps written since this device last read: whether there were any.
     pub async fn catch_up(&mut self, bucket: &impl Bucket) -> Result<bool> {
         let from = self.at;
         loop {
@@ -144,7 +144,7 @@ impl Db {
         Ok(self.conn.query_row("pragma user_version", [], |r| r.get::<_, i64>(0))? as usize)
     }
 
-    /// Runs a write in one transaction, which is the step written after this server's newest: when another server
+    /// Runs a write in one transaction, which is the step written after this device's newest: when another device
     /// wrote that first, it catches up and runs `f` again, so `f` must do only database work.
     pub async fn write<R>(&mut self, bucket: &impl Bucket, mut f: impl FnMut(&Connection) -> Result<R>) -> Result<R> {
         for _ in 0..TRIES {
@@ -213,7 +213,7 @@ impl Db {
                 }
                 Ok(())
             }
-            // A kind of step a newer server writes.
+            // A kind of step a newer device writes.
             _ => Ok(()),
         }
     }
@@ -223,7 +223,7 @@ impl Db {
 /// written: a call's own time runs out sooner.
 const ANSWERED_WITHIN_MS: u64 = 60_000;
 
-/// Creates an object that only this server would write with these bytes, such as a write's step: whether they're
+/// Creates an object that only this device would write with these bytes, such as a write's step: whether they're
 /// there now, rather than another's. When the answer is lost, the same is sent again until the bucket says, rather than
 /// asked what's there, since the first may still be on its way and land after a read that found nothing: a write that
 /// took that for a lost race would run again on top of itself, and one told it failed would be there after all.
@@ -435,7 +435,7 @@ impl Drop for Open<'_> {
 }
 
 /// Applies a changeset written from the state this database is in, so nothing should clash; if something does, the
-/// change wins where it can, the same way on every server.
+/// change wins where it can, the same way on every device.
 fn apply_changes(conn: &Connection, changes: &[u8]) -> Result<()> {
     unsafe extern "C" fn conflict(_: *mut c_void, kind: c_int, _: *mut Iter) -> c_int {
         match kind {

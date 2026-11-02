@@ -160,7 +160,7 @@ public sealed class Store
         var type = e["type"]?.GetValue<string>();
         try
         {
-            if (type is "servers" or "install") await RefreshState();
+            if (type is "devices" or "install") await RefreshState();
             if (type == "changed")
             {
                 if ((e["apps"] as JsonArray)?.Count is null or 0) await RefreshState();

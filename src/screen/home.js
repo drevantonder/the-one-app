@@ -219,7 +219,7 @@ window.home = (() => {
       if (nexts.length) redraw = setTimeout(() => again(loadWidgets), Math.min(15 * 60_000, Math.max(60_000, Math.min(...nexts) - Date.now())));
     };
     one.on("changed", (e) => {
-      if (["changed", "servers", "install"].includes(e.type)) again(load);
+      if (["changed", "devices", "install"].includes(e.type)) again(load);
     });
     schedule();
     h.redrawn = schedule;

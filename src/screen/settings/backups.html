@@ -24,7 +24,7 @@
   let error = "";
   let asked = 0;
 
-  const name = (server) => String(server || "").replace(/\.local$/, "");
+  const name = (device) => String(device || "").replace(/\.local$/, "");
   // A time for people: "14:00" (today) or "3 Nov, 14:00"; with `day`, "Today, 14:00", "Yesterday, 14:00" or
   // "Monday 3 November, 14:00".
   function when(ms, day) {
@@ -59,7 +59,7 @@
       <h2 class="section">Places</h2>
       <div class="list">${places.map((p, n) => `<div class="row go" data-place="${n}">${placeIcon(p.kind)}<div class="main">
           <div class="title" style="font-weight:400"><span>${one.esc(p.title)}</span>${p.last && !p.problem ? `<span class="when">${one.esc(when(p.last.time))}</span>` : ""}</div>
-          ${p.problem ? `<div class="sub error">${one.esc(p.problem.text)}</div>` : `<div class="sub">${one.esc(p.kind === "folder" ? `Disk on ${name(p.server)}` : `Off-site · ${p.where}`)}</div>`}
+          ${p.problem ? `<div class="sub error">${one.esc(p.problem.text)}</div>` : `<div class="sub">${one.esc(p.kind === "folder" ? `Disk on ${name(p.device)}` : `Off-site · ${p.where}`)}</div>`}
         </div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}
         <div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--accent)">Add Place…</span></div></div></div></div>
       <p class="footer">Encrypted before it leaves. The recovery key opens every backup, everyone's.</p>
@@ -91,9 +91,9 @@
   async function openPlace(p) {
     const sheet = one.sheet({ title: p.title, onClose: draw });
     const item = await one.api("GET", "/v1/vault?scope=global").then((items) => items.find((it) => it.id === p.id)).catch(() => null);
-    const where = p.kind === "folder" ? [["Folder", p.where], ["Disk on", name(p.server)]] : [["Bucket", p.where], ["Endpoint", p.endpoint]];
+    const where = p.kind === "folder" ? [["Folder", p.where], ["Disk on", name(p.device)]] : [["Bucket", p.where], ["Endpoint", p.endpoint]];
     sheet.body.innerHTML = `${p.problem ? `<div class="list"><div class="row plain"><div class="main"><div class="sub wrap error">${one.esc(p.problem.text)}</div><div class="sub wrap" style="color:var(--text)">${one.esc(p.problem.fix)}</div></div></div></div>` : ""}
-      <div style="margin-top:18px">${one.info([...where, ["Last backup", p.last && `${when(p.last.time, true)}, ${name(p.last.server)}`]])}</div>
+      <div style="margin-top:18px">${one.info([...where, ["Last backup", p.last && `${when(p.last.time, true)}, ${name(p.last.device)}`]])}</div>
       ${item ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="vault"><div class="main"><div class="title"><span>Edit in Vault</span></div></div><span class="chev">${one.icon("caret-right")}</span></div></div>` : ""}
       <div class="list" style="margin-top:18px"><div class="row plain go" id="stop"><div class="main"><div class="title"><span class="error">Stop Backing Up Here</span></div></div></div></div>
       <div id="confirm"></div>`;
@@ -107,14 +107,14 @@
     });
   }
 
-  // A snapshot of the install: when, where it went, whose data it holds, and which servers wrote it.
+  // A snapshot of the install: when, where it went, whose data it holds, and which devices wrote it.
   function openSnapshot(s) {
     const sheet = one.sheet({ title: when(s.time, true) });
     const taken = new Date(s.time).toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
-    sheet.body.innerHTML = one.info([["Taken", taken], ["Kept in", list(s.places)], ["Holds", list(s.scopes)], ["Written by", list(s.servers.map(name))]]);
+    sheet.body.innerHTML = one.info([["Taken", taken], ["Kept in", list(s.places)], ["Holds", list(s.scopes)], ["Written by", list(s.devices.map(name))]]);
   }
 
-  // Adds a place: S3-compatible storage by its endpoint, bucket and key, or a disk plugged into the server. Each is
+  // Adds a place: S3-compatible storage by its endpoint, bucket and key, or a disk plugged into the device. Each is
   // tried (a test file written, read back and deleted) before it's added, so a typo shows here, not in a failed backup.
   function addPlace() {
     let cloud = true, tried = [], added = false, busy = false, problem = "";

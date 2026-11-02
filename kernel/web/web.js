@@ -251,7 +251,7 @@ window.__one = {};
 
   async function handle(event) {
     for (const f of frames) f.frame.contentWindow?.postMessage({ oneEvent: event }, "*");
-    if (["servers", "install"].includes(event.type)) await refreshState();
+    if (["devices", "install"].includes(event.type)) await refreshState();
     if (event.type === "changed") {
       if (!(event.apps || []).length) await refreshState();
       await refreshApps();

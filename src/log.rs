@@ -71,7 +71,7 @@ fn step(key: &[u8; 32], name: &str, sealed: &[u8], log: &str) -> Vec<Entry> {
     }
 }
 
-/// Once a server has read the steps up to `at`: a copy of `entries` (every entry in them) if steps have piled up since
+/// Once a device has read the steps up to `at`: a copy of `entries` (every entry in them) if steps have piled up since
 /// the newest, and the newest hint moved on. Both only save readers work.
 pub async fn hint(bucket: &impl Bucket, key: &[u8; 32], prefix: &str, at: u64, entries: impl FnOnce() -> Result<Vec<Entry>>) -> Result<()> {
     let copy = match bucket.get(&newest_name(prefix)).await? {
@@ -99,18 +99,18 @@ mod tests {
     #[test]
     fn a_reader_from_the_newest_copy_gets_every_entry_once() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
-            let (bucket, key, server) = (Memory::default(), [7u8; 32], SigningKey::from([1u8; 32]));
+            let (bucket, key, device) = (Memory::default(), [7u8; 32], SigningKey::from([1u8; 32]));
             let prefix = prefix("global");
             let (mut written, mut head) = (Vec::new(), None);
             for n in 1..=COPY_EVERY + 20 {
                 let ext = Ext { log: "global".into(), time: n, user: "a000000000000001".into(), by: None };
-                let entry = Entry::create(&server, ext, head, Content::new("node", "setting", serde_json::json!({ "name": "n", "value": n.to_string() })));
+                let entry = Entry::create(&device, ext, head, Content::new("node", "setting", serde_json::json!({ "name": "n", "value": n.to_string() })));
                 head = Some(entry.head());
                 let name = step_name(&prefix, n);
                 assert!(bucket.create(&name, &seal(&key, &name, &pack(&[&entry]))).await.unwrap());
                 written.push(entry);
                 if n == COPY_EVERY + 5 {
-                    // A server that has read the step before, and holds this one's entry, which it just wrote.
+                    // A device that has read the step before, and holds this one's entry, which it just wrote.
                     let held = written.clone();
                     hint(&bucket, &key, &prefix, n - 1, || Ok(held)).await.unwrap();
                 }

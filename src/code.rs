@@ -21,7 +21,7 @@ pub enum For {
 }
 
 /// Every app installed for this user that has operations, as `GET /v1/apps` gives them, with each operation's input as
-/// MCP takes it (files explained, `server` and `confirm` where they apply), and the Vault's tools as an app.
+/// MCP takes it (files explained, `device` and `confirm` where they apply), and the Vault's tools as an app.
 pub fn catalog() -> Result<Vec<Value>> {
     let mut apps = vec![one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app()];
     for mut app in get("/v1/apps")?.as_array().cloned().unwrap_or_default() {
