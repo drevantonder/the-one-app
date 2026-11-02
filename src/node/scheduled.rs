@@ -131,3 +131,116 @@ fn when(spec: &Value) -> Value {
         None => json!({ "at": spec["at"], "tz": spec["tz"].as_str().unwrap_or("UTC"), "days": spec["days"].as_array().cloned().unwrap_or_default() }),
     }
 }
+
+impl Node {
+    /// Each loaded app's schedules, as its latest deploy declares them, with why any don't make sense.
+    pub(super) async fn declared(&self) -> Vec<(String, Vec<std::result::Result<Schedule, (String, String)>>)> {
+        let mut out = Vec::new();
+        for app in self.0.apps.names().into_iter().filter(|a| !self.deleted(a)) {
+            if let Ok(d) = self.0.apps.describe(&app).await {
+                let list = Schedule::all(&d);
+                if !list.is_empty() {
+                    out.push((app, list));
+                }
+            }
+        }
+        out
+    }
+
+    /// An app's schedules where it's installed for `viewer` and this server holds the scope: what each runs and when,
+    /// whether it's on, whom it runs as, when it runs next, its last run, and whether a deploy changed or removed it;
+    /// and its runs, newest first.
+    pub(super) fn schedules_of(&self, viewer: &Caller, app: &str, declared: &[std::result::Result<Schedule, (String, String)>]) -> Result<(Vec<Value>, Vec<Value>)> {
+        let now = now_ms();
+        self.with(|i| {
+            let m = &i.r.members;
+            let user_name = |u: &str| m.users.get(u).map(|u| u.name.clone()).unwrap_or_default();
+            let (mut list, mut activity) = (Vec::new(), Vec::new());
+            for scope in reachable(i, app, &viewer.user) {
+                let Some((_, state)) = i.views.get(&scope.to_string()) else { continue };
+                if !state.installed.contains(app) {
+                    continue;
+                }
+                let status = i.status.get(&scope.to_string()).cloned().unwrap_or_default();
+                let scope_name = handles(m, std::slice::from_ref(&scope), &viewer.user).remove(0).name;
+                let base = |name: &str| {
+                    let key = (app.to_string(), name.to_string());
+                    let runs = status.runs.get(&key);
+                    let last = runs.and_then(|r| r.last()).map(|r| json!({ "time": r.time, "ok": r.ok, "error": r.error }));
+                    let changed = status.changed.get(&key).filter(|(.., t)| now.saturating_sub(*t) < CHANGED_SHOWN).map(|(was, is, t)| json!({ "was": schedules::say(was), "is": schedules::say(is), "time": t }));
+                    json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": members::manages_scope(m, &viewer.user, &scope), "last": last, "changed": changed })
+                };
+                for s in declared {
+                    let mut v = match s {
+                        Ok(s) => {
+                            let mut v = base(&s.name);
+                            let user = runs_as(m, state, &scope, app, &s.name);
+                            let switched = state.switches.get(&(app.to_string(), s.name.clone()));
+                            v["description"] = json!(s.description);
+                            v["when"] = json!(s.say());
+                            v["op"] = json!(s.op);
+                            v["on"] = json!(switched.is_none_or(|(on, ..)| *on));
+                            v["switched"] = json!(switched.map(|(on, by, t)| json!({ "on": on, "by": user_name(by), "time": t })));
+                            v["runs_as"] = json!(user.as_deref().map(user_name));
+                            v["next"] = json!(user.and(s.next(now)));
+                            v
+                        }
+                        Err((name, why)) => {
+                            let mut v = base(name);
+                            v["invalid"] = json!(why);
+                            v
+                        }
+                    };
+                    v["removed"] = json!(false);
+                    list.push(v);
+                }
+                // Schedules a deploy removed that ran lately.
+                for ((a, name), runs) in &status.runs {
+                    let gone = a == app && !declared.iter().any(|s| match s {
+                        Ok(s) => &s.name == name,
+                        Err((n, _)) => n == name,
+                    });
+                    if gone && runs.last().is_some_and(|r| now.saturating_sub(r.time) < CHANGED_SHOWN) {
+                        let mut v = base(name);
+                        v["removed"] = json!(true);
+                        v["was"] = json!(runs.last().map(|r| schedules::say(&r.spec)));
+                        list.push(v);
+                    }
+                }
+                for ((a, name), runs) in status.runs.iter().filter(|((a, _), _)| a == app) {
+                    let _ = a;
+                    for r in runs {
+                        activity.push(json!({ "schedule": name, "scope": scope.to_string(), "scope_name": scope_name, "time": r.time, "ok": r.ok, "error": r.error, "ms": r.ms, "server": m.machines.get(&r.server).map(|s| s.name.clone()), "user": user_name(&r.user) }));
+                    }
+                }
+            }
+            activity.sort_by_key(|r| std::cmp::Reverse(r["time"].as_u64().unwrap_or(0)));
+            activity.truncate(50);
+            Ok((list, activity))
+        })
+    }
+
+    /// Switches one of an app's schedules on or off in `scope`, for `caller`; switching one on makes it run as them.
+    pub async fn switch_schedule(&self, caller: &Caller, app: &str, schedule: &str, scope: &Scope, on: bool) -> Result<()> {
+        let content = self.with(|i| switch_entry(i, &caller.user, scope, app, schedule, on))?;
+        let kernel = self.schedules_service().is_some();
+        ensure!(!kernel || caller.token.is_some(), "sign in first ({} sign-in): schedules here run from your One App's kernel, with what your sign-in lets them use", crate::config::CLI);
+        let by = (caller.key != self.0.id).then_some(caller.key);
+        self.append_as(scope, &caller.user, by, content).await?;
+        if kernel {
+            self.sync_schedules(caller).await.context("it's switched, but the schedules service didn't take it")?;
+        }
+        Ok(())
+    }
+}
+
+/// Whom a schedule of `app` in a scope runs as: whoever switched it on last, or else installed the app there, while
+/// they still manage the scope; nobody if it's switched off.
+fn runs_as(m: &Members, state: &ScopeState, scope: &Scope, app: &str, schedule: &str) -> Option<String> {
+    let manages = |u: &String| members::manages_scope(m, u, scope);
+    match state.switches.get(&(app.to_string(), schedule.to_string())) {
+        Some((false, ..)) => None,
+        Some((true, user, _)) if manages(user) => Some(user.clone()),
+        _ => state.installers.get(app).map(|(u, _)| u.clone()).filter(manages),
+    }
+}
