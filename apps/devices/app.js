@@ -216,8 +216,8 @@ const spark = (values, tone, w, h) => ({ t: "spark", values, max: 100, tone, w, 
 
 /// The widths of each size's columns, shared by its header and every row so they line up.
 const COLUMNS = {
-  medium: { ram: 26, cpu: 32, gpu: 32, disk: 30, gap: 6, icon: 22, ring: 18, spark: 16 },
-  large: { ram: 26, cpu: 32, gpu: 32, disk: 30, gap: 6, icon: 22, ring: 18, spark: 16 },
+  medium: { ram: 30, cpu: 32, gpu: 32, disk: 30, gap: 6, icon: 22, ring: 18, spark: 16 },
+  large: { ram: 30, cpu: 32, gpu: 32, disk: 30, gap: 6, icon: 22, ring: 18, spark: 16 },
   xl: { ram: 32, cpu: 90, gpu: 90, disk: 70, gap: 14, icon: 22, ring: 20, spark: 18 },
 };
 
