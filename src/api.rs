@@ -427,6 +427,15 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     Ok(me)
 }
 
+/// Refuses a body with anything but `keys`, so a word a route doesn't take (one renamed, say) fails rather than being
+/// passed over: a call or sidecar meant for one device running on another.
+fn only(body: &Value, keys: &[&str]) -> Result<(), Error> {
+    match body.as_object().and_then(|o| o.keys().find(|k| !keys.contains(&k.as_str()))) {
+        Some(other) => Err(anyhow::anyhow!("{other} isn't something this takes: {}", keys.join(", ")).into()),
+        None => Ok(()),
+    }
+}
+
 fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
     body[key].as_str().filter(|s| !s.trim().is_empty()).map(str::trim).ok_or_else(|| anyhow::anyhow!("give {key}").into())
 }
@@ -455,17 +464,11 @@ async fn apps(State(node): State<Node>, me: Me) -> Reply {
     Ok(Json(json!(node.apps(&me.caller).await?)))
 }
 
-/// Until 2026-11-02's rename reaches every device and screen: a body that says `server` where it now says `device`.
-fn was_server(body: &mut Value) {
-    if let Some(server) = body.get("server").cloned() {
-        body["device"] = server;
-    }
-}
-
 /// `{ name, device?, installed? }`: removes a sidecar from a device (this one by default), or with `installed` lets it
 /// register there again.
 async fn sidecar(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.set_sidecar(&local(&node)?, body["device"].as_str().or(body["server"].as_str()), text(&body, "name")?, body["installed"] == true).await?;
+    only(&body, &["name", "device", "installed"])?;
+    node.set_sidecar(&local(&node)?, body["device"].as_str(), text(&body, "name")?, body["installed"] == true).await?;
     done()
 }
 
@@ -489,7 +492,9 @@ async fn schedule(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-async fn call(State(node): State<Node>, me: Me, Json(mut req): Json<CallRequest>) -> Reply {
+async fn call(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    only(&body, &["id", "app", "sidecar", "op", "input", "scopes", "device", "agent", "depth", "from", "client"])?;
+    let mut req: CallRequest = serde_json::from_value(body).map_err(anyhow::Error::from)?;
     // Only the node says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);
     if me.sign_in.is_some() {
@@ -558,8 +563,7 @@ async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> 
 }
 
 /// `{ device, owners, users }`: owners and users are `user:<id>`, `group:<id>`, `install`, or a user's or group's name.
-async fn acl(State(node): State<Node>, Json(mut body): Json<Value>) -> Reply {
-    was_server(&mut body);
+async fn acl(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     let device = node.find_device(text(&body, "device")?)?;
     let principals = |key: &str| -> Result<Vec<String>, Error> {
         body[key]
@@ -582,16 +586,14 @@ async fn acl(State(node): State<Node>, Json(mut body): Json<Value>) -> Reply {
     done()
 }
 
-async fn trust(State(node): State<Node>, me: Me, Json(mut body): Json<Value>) -> Reply {
-    was_server(&mut body);
+async fn trust(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let device = node.find_device(text(&body, "device")?)?;
     node.member_as(&me.caller, if body["trust"] == false { "untrust" } else { "trust" }, json!({ "device": hex(&device) })).await?;
     done()
 }
 
 /// `{ device, use }`: puts a device (its name or key, or `cloudflare`) first, needed or last, for an admin.
-async fn use_(State(node): State<Node>, me: Me, Json(mut body): Json<Value>) -> Reply {
-    was_server(&mut body);
+async fn use_(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     node.set_use(&me.caller, text(&body, "device")?, text(&body, "use")?).await?;
     done()
 }

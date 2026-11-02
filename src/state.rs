@@ -45,8 +45,6 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
         "config": config,
         "me": here.me,
         "device": here.device,
-        // Until 2026-11-02's rename reaches every device and sidecar: what they read before.
-        "server": here.device,
         "user": m.and_then(|m| m.user(user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role })),
         "install": install,
         // Requests for an item waiting for this user to answer (see GET /v1/vault/requests).
@@ -120,8 +118,6 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "name": m.name, "root": m.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
         "member": here.member,
         "users": users, "groups": groups, "devices": devices, "clients": clients,
-        // Until 2026-11-02's rename reaches every device and sidecar: what they read before.
-        "servers": devices,
         "entries": here.entries, "settings": settings,
         // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
         "serverless": settings.contains_key("serverless").then(|| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE) })),

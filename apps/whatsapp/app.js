@@ -35,8 +35,7 @@ async function keep(ctx, listed, devices) {
   for (const a of listed) {
     const item = items.find((i) => i.fields.phone?.value === a.account);
     if (!item) await ctx.vault.create({ title: a.account, type: TYPE, domain: "whatsapp.com", hosts: [], same: "phone", fields: { phone: { value: a.account }, device: { value: a.device } } });
-    // `server: null`: until 2026-11-02's rename has reached every account's item, which said server.
-    else if (item.fields.device?.value !== a.device) ctx.vault.update(item.id, { fields: { device: { value: a.device }, server: null } });
+    else if (item.fields.device?.value !== a.device) ctx.vault.update(item.id, { fields: { device: { value: a.device } } });
   }
   for (const item of items) {
     if (devices.includes(item.fields.device?.value) && !listed.some((a) => a.account === item.fields.phone?.value)) ctx.vault.release(item.id);

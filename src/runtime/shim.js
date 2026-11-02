@@ -121,7 +121,12 @@ function context(ask, body, appends, later) {
       return new Proxy({}, {
         get(_, op) {
           if (typeof op !== "string" || op === "then") return undefined;
-          return async (input = {}, { device } = {}) => (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, sidecar: kind === "sidecars", op, input, device }) })).json()).ok;
+          return async (input = {}, { device, ...other } = {}) => {
+            // An option it doesn't know (one renamed, say) fails, rather than running the call somewhere else.
+            const [unknown] = Object.keys(other);
+            if (unknown) throw new Error(`${unknown} isn't an option of ctx.${kind} calls: give device`);
+            return (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, sidecar: kind === "sidecars", op, input, device }) })).json()).ok;
+          };
         },
       });
     },

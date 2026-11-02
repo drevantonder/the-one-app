@@ -120,7 +120,7 @@ fn places(state: &ScopeState) -> Vec<PlaceItem> {
                 }
                 Place::Folder(_) => Ok(p),
             });
-            PlaceItem { id: id.clone(), title: it.title.clone(), place, device: fields.get("device").or(fields.get("server")).and_then(|s| unhex(s).ok()), made: it.made }
+            PlaceItem { id: id.clone(), title: it.title.clone(), place, device: fields.get("device").and_then(|s| unhex(s).ok()), made: it.made }
         })
         .collect()
 }

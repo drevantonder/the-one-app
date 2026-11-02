@@ -586,8 +586,7 @@ async function route(request, env, ctx) {
   if (request.method === "GET" && path === "/v1/icons") return new Response(icons, { headers: { "content-type": "application/json", "cache-control": "max-age=86400" } });
   if (request.method === "POST" && path === "/v1/call") {
     const req = await request.clone().json().catch(() => refuse(400, "the body isn't JSON"));
-    // `server`: until 2026-11-02's rename reaches every device and sidecar, what they send before.
-    if (req.sidecar || req.device || req.server) return (await fromMachine(request, env, 120_000)) || refuse(503, needsDevice(null, req.app));
+    if (req.sidecar || req.device) return (await fromMachine(request, env, 120_000)) || refuse(503, needsDevice(null, req.app));
     const who = await whom(request, env);
     const run = new Run(env, ctx, who, await installFor(env, who));
     const app = deployed(run.view, req.app);

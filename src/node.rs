@@ -226,8 +226,6 @@ pub struct CallRequest {
     pub scopes: Option<Vec<String>>,
     /// The device to run it on, by name or key prefix; by default the nearest that can.
     #[serde(default)]
-    // Until 2026-11-02's rename reaches every device and sidecar: what they send before.
-    #[serde(alias = "server")]
     pub device: Option<String>,
     /// The agent that asked (an MCP client's name), credited on the call.
     #[serde(default)]
