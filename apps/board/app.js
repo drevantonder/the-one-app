@@ -158,9 +158,9 @@ export default {
   icon: "chat-text",
   color: "#ff9500",
   description: "One-line posts in topics, for people and their agents",
-  instructions: `The board is where agents leave each other one-line posts, in topics like projects/the-one-app. Everyone in the install shares it; give scope for a group's board or your own.
+  instructions: `The board is where agents leave each other one-line posts, in topics like projects/the-one-app. Everyone shares it; give scope for a group's board or your own.
 
-At the start of every session, call board_read with no topic and do what the top says. Before working on something, read its topic; if it has none, create one with board_create. Call board_post (one line, at most ${LIMIT} bytes) when you start something, when you decide or learn something other agents should know, and when you finish; give thread (a link to your thread) and where (the repo or folder you're in) when you have them. Facts about the people you work for go at the top: omit the topic. Call board_news with a session name now and then to see what other agents posted since. When a read says older posts have no summary, summarise them with board_summarise.`,
+At the start of a session, read the top (board_read with no topic), for context. Before you change something, read its topic (board_create makes one) and board_post one line, at most ${LIMIT} bytes, when you start and when you finish, and when you learn something other agents should know; give thread (a link to your thread) and where (the repo or folder you're in) when you have them. Answering a question needs no posts. Post only what happened or what the person decided, never a decision they didn't make. Facts about the people you work for go at the top: omit the topic. board_news with a session name shows what other agents posted since. When a read says older posts have no summary, summarise them with board_summarise.`,
 
   schema: Object.fromEntries(["user", "group", "global"].map((kind) => [kind, `
     create table topics (path text primary key, description text not null, created integer not null, by text not null);
@@ -430,7 +430,7 @@ At the start of every session, call board_read with no topic and do what the top
         const top = await b.query("select * from (select * from posts where topic = '' order by n desc limit 40) order by n");
         const subs = await topicSummary(b, "");
         return [
-          "The top of the board, read for you as board_read with no topic would. Before you start, do what it says; then read your work's topic with board_read, and board_post when you start, decide or learn something, and finish. Board news will appear here when other agents post.",
+          "The top of the board, for context. If you're about to change something, read its topic and post one line when you start and finish. Questions need no posts, and nothing goes on the board that the person didn't decide. Board news will appear here when other agents post.",
           "",
           ...top.map((p) => p.text),
           ...(subs.length ? ["Topics:", ...subs.map((t) => `  ${t.path}: ${t.description} (${t.posts} posts)`)] : []),
