@@ -151,12 +151,21 @@ async fn run(seed: u64) {
     assert!(link.objects.lock().unwrap().keys().any(|k| k.contains("/copy/")), "seed {seed}: copies were written as steps piled up");
 }
 
+/// Runs each seed on a paused clock of its own, every seed at once: each is its own run, so the order doesn't matter.
+fn seeds<F: Future<Output = ()>>(seeds: u64, run: fn(u64) -> F) {
+    std::thread::scope(|s| {
+        for seed in 0..seeds {
+            s.spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread().enable_time().start_paused(true).build().unwrap();
+                runtime.block_on(tokio::task::LocalSet::new().run_until(run(seed)));
+            });
+        }
+    });
+}
+
 #[test]
 fn many_servers_write_one_database_over_bad_links() {
-    for seed in 0..SEEDS {
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_time().start_paused(true).build().unwrap();
-        runtime.block_on(tokio::task::LocalSet::new().run_until(run(seed)));
-    }
+    seeds(SEEDS, run);
 }
 
 const COPYING: usize = 4;
@@ -235,8 +244,5 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 
 #[test]
 fn copies_on_servers_are_behind_never_wrong() {
-    for seed in 0..SEEDS / 4 {
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_time().start_paused(true).build().unwrap();
-        runtime.block_on(tokio::task::LocalSet::new().run_until(run_copied(seed)));
-    }
+    seeds(SEEDS / 4, run_copied);
 }
