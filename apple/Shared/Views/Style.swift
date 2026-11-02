@@ -35,16 +35,6 @@ extension Color {
     }
 }
 
-/// A device's symbol, guessed from its name.
-func deviceSymbol(_ name: String) -> String {
-    let n = name.lowercased()
-    if n.contains("iphone") || n.contains("phone") { return "iphone" }
-    if n.contains("ipad") { return "ipad" }
-    if n.contains("macbook") || n.contains("laptop") { return "laptopcomputer" }
-    if n.contains("imac") || n.contains("mac") { return "desktopcomputer" }
-    return "server.rack"
-}
-
 /// Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every shell draws the
 /// same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled.
 enum Icons {
@@ -197,21 +187,6 @@ extension View {
         #else
         background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24, style: .continuous))
         #endif
-    }
-}
-
-/// A shell icon, as Settings draws one: a white symbol on a system colour.
-struct SymbolTile: View {
-    var symbol: String
-    var color: Color
-    var size: CGFloat
-
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size * 0.46, weight: .medium))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(color.gradient, in: .rect(cornerRadius: size * 0.225, style: .continuous))
     }
 }
 

@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// One section per page, listing its apps; a section's name shows the page, and its apps stay listed. Settings sit
-/// at the bottom.
-/// Folded (⌘\), it shows only the apps' icons, each where it was, with a page's dot standing for its name.
+/// One section per page, listing its apps; a section's name shows the page, and its apps stay listed. Then Settings',
+/// its name showing Settings, listing its items.
+/// Folded (⌘\), it shows only the icons, each where it was, with a section's initials standing for its name.
 struct Sidebar: View {
     @Environment(Store.self) private var store
 
@@ -40,8 +40,27 @@ struct Sidebar: View {
                     .accessibilityLabel(page.title)
                 }
             }
+            Section {
+                ForEach(store.settingsItems) { item in
+                    SettingIcon(item: item, size: 24)
+                        .frame(maxWidth: .infinity)
+                        .help(item.title)
+                        .accessibilityLabel(item.title)
+                        .tag(Route.setting(item.name))
+                }
+            } header: {
+                Button { store.selection = .settings } label: {
+                    Text(initials(String(localized: "Settings")))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(store.selection == .settings ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .frame(maxWidth: .infinity)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
+                .accessibilityLabel("Settings")
+            }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { SettingsRow(folded: true) }
     }
 
     /// A page's initials, for its folded header: "You", "PT", "Ev".
@@ -92,29 +111,26 @@ struct Sidebar: View {
                 }
                 .collapsible(false)
             }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) { SettingsRow() }
-    }
-}
-
-/// The cog, kept at the sidebar's foot as a row of its own, counting waiting requests and backups' problem.
-private struct SettingsRow: View {
-    @Environment(Store.self) private var store
-    var folded = false
-
-    var body: some View {
-        @Bindable var store = store
-        List(selection: $store.selection) {
-            Label {
-                if !folded { Text("Settings") }
-            } icon: {
-                Image(systemName: "gearshape")
+            Section(isExpanded: Binding(get: { true }, set: { _ in })) {
+                ForEach(store.settingsItems) { item in
+                    Label {
+                        Text(item.title)
+                    } icon: {
+                        SettingIcon(item: item, size: 20)
+                    }
+                    .badge(item.badge ?? 0)
+                    .tag(Route.setting(item.name))
+                }
+            } header: {
+                Button { store.selection = .settings } label: {
+                    Text("Settings")
+                        .foregroundStyle(store.selection == .settings ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
             }
-            .badge(store.badge)
-            .tag(Route.settings)
+            .collapsible(false)
         }
-        .scrollDisabled(true)
-        .scrollContentBackground(.hidden)
-        .frame(height: 44)
     }
 }

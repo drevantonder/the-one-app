@@ -157,7 +157,7 @@ private struct BottomBar: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Settings")
-                .accessibilityValue(store.backupProblem.map { Text($0.text) } ?? (store.requests > 0 ? Text("Requests waiting") : Text("")))
+                .accessibilityValue(store.settingsItems.filter { ($0.badge ?? 0) > 0 }.map(\.title).formatted(.list(type: .and)))
             }
             .glassEffect(.regular.interactive(), in: .capsule)
         }

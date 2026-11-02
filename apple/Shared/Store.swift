@@ -41,13 +41,13 @@ enum PageItem: Identifiable, Equatable {
     }
 }
 
-/// Where a shell's navigation goes: a page, an app's screen, or one of the shell's own views.
+/// Where a shell's navigation goes: a page, an app's screen, Settings, one of its screens, or a page's Services.
 enum Route: Hashable, Codable {
     case page(String)
     case screen(ScreenRoute)
     case settings
-    case setting(Setting)
-    case group(String)
+    /// A Settings screen, by its item's name, with its params as JSON.
+    case setting(String, params: String = "{}")
     /// A page's Services folder, opened: its scope.
     case services(String)
 }
@@ -59,48 +59,6 @@ struct ScreenRoute: Hashable, Codable {
     var params = "{}"
     /// The page it was opened from.
     var scope: String?
-}
-
-/// The settings page's icons.
-enum Setting: String, Hashable, Codable, CaseIterable, Identifiable {
-    case store, groups, devices, agents, vault, access, users, install, backups, requests, appearance
-
-    var id: Self { self }
-
-    /// A setting by the name a link gives it, `secrets` being the Vault's before it was.
-    static func named(_ name: String) -> Setting? { name == "secrets" ? .vault : Setting(rawValue: name) }
-
-    var title: String {
-        switch self {
-        case .store: String(localized: "App Store")
-        case .groups: String(localized: "Groups")
-        case .devices: String(localized: "Devices")
-        case .agents: String(localized: "Agents")
-        case .vault: String(localized: "Vault")
-        case .access: String(localized: "Access Log")
-        case .users: String(localized: "Users")
-        case .install: String(localized: "Install")
-        case .backups: String(localized: "Backups")
-        case .requests: String(localized: "Requests")
-        case .appearance: String(localized: "Appearance")
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .store: "square.grid.2x2.fill"
-        case .groups: "person.3.fill"
-        case .devices: "laptopcomputer.and.iphone"
-        case .agents: "sparkles"
-        case .vault: "lock.fill"
-        case .access: "eye.fill"
-        case .users: "person.2.badge.gearshape.fill"
-        case .install: "slider.horizontal.3"
-        case .backups: "externaldrive.fill.badge.timemachine"
-        case .requests: "tray.full.fill"
-        case .appearance: "circle.lefthalf.filled"
-        }
-    }
 }
 
 enum Sheet: Hashable, Identifiable {
@@ -270,12 +228,6 @@ final class Store {
     func storeRoute(for app: AppInfo) -> Route? {
         guard let name = config?.store, let store = self.app(name), store.has(screen: "app"), (app.deploys ?? 0) > 0 else { return nil }
         return .screen(ScreenRoute(app: name, screen: "app", params: Self.params(["app": app.name])))
-    }
-
-    /// The app a setting opens, if it opens one: the App Store is the install's store app, once it's here.
-    func app(for setting: Setting) -> AppInfo? {
-        guard setting == .store, let name = config?.store, let app = app(name), app.hasScreens else { return nil }
-        return app
     }
 
     /// The App Store's Services tab, if the install's store app is here.
@@ -513,40 +465,19 @@ final class Store {
 
     // MARK: Settings
 
-    /// Icons by role: Users, Install and Backups only for admins, Requests first, only while something waits.
-    var settings: [Setting] {
-        var items: [Setting] = [.store, .groups, .devices, .vault, .access]
-        if isAdmin { items += [.users, .install, .backups] }
-        if requests > 0 { items.insert(.requests, at: 0) }
-        return items
-    }
+    /// What Settings shows this user, in order, as the node says.
+    var settingsItems: [SettingsItem] { state?.settingsItems ?? [] }
+
+    func settingsItem(_ name: String) -> SettingsItem? { settingsItems.first { $0.name == name } }
 
     /// What waits for this user: invites, servers to trust and items asked for.
-    var requests: Int { invites.count + trustOffers.count + (state?.waitingRequests ?? 0) }
+    var requests: Int { settingsItem("requests")?.badge ?? 0 }
 
-    /// The count on Settings' icon: the requests waiting, and backups' problem.
-    var badge: Int { requests + (backupProblem == nil ? 0 : 1) }
-    /// What's wrong with backups, for an admin, until a run works again.
-    var backupProblem: Backups.Problem? { state?.backups }
+    /// The count on Settings' icon: every item's, the requests waiting and backups' problem.
+    var badge: Int { settingsItems.reduce(0) { $0 + ($1.badge ?? 0) } }
 
     /// The count on the app's own icon, as iOS adds up a folder's: every app's badge on every page, and the requests.
     var iconBadge: Int { requests + badges.values.flatMap(\.values).reduce(0) { $0 + max($1, 0) } }
-
-    /// Groups that invited this user.
-    var invites: [GroupInfo] {
-        guard let me else { return [] }
-        return install?.groups.filter { $0.invited?.contains { $0.user == me.id } == true } ?? []
-    }
-
-    /// Servers this user may use, through a group or by name, but doesn't trust yet.
-    var trustOffers: [Server] {
-        guard let me, let install else { return [] }
-        let mine = ["user:\(me.id)"] + install.groups.filter { $0.role(of: me.id) != nil }.map { "group:\($0.id)" }
-        return install.servers.filter { s in
-            !s.isPrivileged && !s.owners.contains("user:\(me.id)") && s.users.contains { mine.contains($0) }
-                && s.trusted_by?.contains(me.id) != true
-        }
-    }
 
     /// Whether Settings has something to see: requests waiting, or backups' problem.
     var needsAttention: Bool { badge > 0 }
@@ -694,7 +625,6 @@ final class Store {
         case .page(let scope): pages.contains { $0.scope == scope } ? route : nil
         // A screen the app no longer has (Gmail's main, once it was a service) isn't; one not described yet may be.
         case .screen(let screen): app(screen.app).map { $0.screens == nil || $0.has(screen: screen.screen) } == true ? route : nil
-        case .group(let id): install?.group(id) != nil ? route : nil
         case .services(let scope): page(scope) != nil ? route : nil
         case .settings, .setting: route
         }

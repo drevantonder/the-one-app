@@ -137,7 +137,7 @@ final class Phone {
         }
         if url.host() == "settings" {
             store.current = "settings"
-            store.path = url.pathComponents.dropFirst().first.flatMap(Setting.named).map { [.setting($0)] } ?? []
+            store.path = url.pathComponents.dropFirst().first.map { [.setting($0)] } ?? []
             return
         }
         if url.host() == "open", let app = value("app") {
@@ -180,6 +180,11 @@ struct PhoneNode: NodeTransport {
     func page(app: String, screen: String, params: String, scope: String?) async throws -> (html: String, base: URL?) {
         guard let node else { throw Auth.SignedOut(message: String(localized: "Sign in again.")) }
         return try await signedOut { try await node.page(app: app, screen: screen, params: params, scope: scope) }
+    }
+
+    func settingsPage(_ name: String, params: String) async throws -> (html: String, base: URL?) {
+        guard let node else { throw Auth.SignedOut(message: String(localized: "Sign in again.")) }
+        return try await signedOut { try await node.settingsPage(name, params: params) }
     }
 
     func events() -> AsyncThrowingStream<NodeEvent, Error> {

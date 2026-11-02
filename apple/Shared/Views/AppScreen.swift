@@ -3,10 +3,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
 
-/// An app's screen: the page the node serves for it, in a web view that answers its bridge.
+/// An app's screen, or a Settings screen (`settings`, its name as `route`'s screen and no app): the page the node
+/// serves for it, in a web view that answers its bridge, a Settings screen's alone as the person.
 struct AppScreen: View {
     @Environment(Store.self) private var store
     var route: ScreenRoute
+    var settings = false
     @State private var title: String?
     @State private var loaded = false
     @State private var slow = false
@@ -17,7 +19,7 @@ struct AppScreen: View {
     @State private var tries = 0
 
     var body: some View {
-        ScreenWebView(route: route, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline, tries: tries)
+        ScreenWebView(route: route, settings: settings, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline, tries: tries)
             .opacity(loaded ? 1 : 0)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let offline {
@@ -69,6 +71,7 @@ struct AppScreen: View {
     }
 
     private var defaultTitle: String {
+        if settings { return store.settingsItem(route.screen)?.title ?? String(localized: "Settings") }
         let app = store.app(route.app)
         return app?.screens?.first { $0.name == route.screen }?.title ?? app?.label ?? ""
     }
@@ -83,6 +86,7 @@ private typealias Representable = UIViewRepresentable
 
 private struct ScreenWebView: Representable {
     var route: ScreenRoute
+    var settings: Bool
     var store: Store
     @Binding var title: String?
     @Binding var loaded: Bool
@@ -213,11 +217,11 @@ private struct ScreenWebView: Representable {
 
         func load(into web: WKWebView) {
             self.web = web
-            let route = view.route, node = view.store.node
+            let route = view.route, settings = view.settings, node = view.store.node
             loading?.cancel()
             loading = Task { [weak self] in
                 do {
-                    let page = try await node.page(app: route.app, screen: route.screen, params: route.params, scope: route.scope)
+                    let page = try await settings ? node.settingsPage(route.screen, params: route.params) : node.page(app: route.app, screen: route.screen, params: route.params, scope: route.scope)
                     guard let self, !Task.isCancelled else { return }
                     web.loadHTMLString(page.html, baseURL: page.base)
                     ScreenCache.keep(page.html, for: route)
@@ -261,12 +265,49 @@ private struct ScreenWebView: Representable {
         private var host: NSView? { web }
         #endif
 
-        /// The bridge: `{ type: "call" | "open" | "title" | "icons" | "icon" | "copy" | "haptic" | "save" | "preview" | "scan" | "vault", … }`.
-        /// A page only ever calls its own app, but may open another's screens.
+        /// The bridge: `{ type: "call" | "open" | "title" | "icons" | "icon" | "copy" | "haptic" | "save" | "preview" | "scan" | "vault", … }`,
+        /// and for Settings screens alone, `"api" | "signOut" | "appearance" | "device" | "request"`. A page only ever
+        /// calls its own app, but may open another's screens.
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
             guard let body = message.body as? [String: Any] else { return (nil, "Not a message") }
-            let route = view.route
-            switch body["type"] as? String {
+            let route = view.route, store = view.store
+            let type = body["type"] as? String ?? ""
+            if ["api", "signOut", "appearance", "device", "request"].contains(type) && !view.settings { return (nil, "Only Settings can do that.") }
+            switch type {
+            case "api":
+                do {
+                    return (try await store.node.api(body["method"] as? String ?? "GET", body["path"] as? String ?? "", body: body["body"]), nil)
+                } catch {
+                    return (nil, error.localizedDescription)
+                }
+            case "signOut":
+                #if os(iOS)
+                await Phone.shared.signOut()
+                return (nil, nil)
+                #else
+                return (nil, String(localized: "This device stays signed in. Remove it in Devices."))
+                #endif
+            case "appearance":
+                if let value = (body["value"] as? String).flatMap(Appearance.init(rawValue:)) { UserDefaults.standard.set(value.rawValue, forKey: "appearance") }
+                return (UserDefaults.standard.string(forKey: "appearance").flatMap(Appearance.init(rawValue:))?.rawValue ?? Appearance.automatic.rawValue, nil)
+            case "device":
+                #if os(iOS)
+                return (["name": UIDevice.current.name, "build": store.build, "signOut": true], nil)
+                #else
+                return (["name": displayName(store.state?.machine.name ?? ""), "build": store.build, "signOut": false], nil)
+                #endif
+            case "request":
+                do {
+                    return (try await store.ask(scope: body["scope"] as? String ?? "", id: body["id"] as? String ?? ""), nil)
+                } catch {
+                    return (nil, error.localizedDescription)
+                }
+            case "call" where view.settings:
+                return (nil, "Settings has no app to call.")
+            case "open" where view.settings && (body["app"] as? String ?? "").isEmpty:
+                let params = (try? JSONSerialization.data(withJSONObject: body["params"] ?? [:])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+                store.path.append(.setting(body["screen"] as? String ?? "", params: params))
+                return (nil, nil)
             case "call":
                 do {
                     let input = try JSONSerialization.data(withJSONObject: body["input"] ?? [:], options: .fragmentsAllowed)
@@ -299,25 +340,13 @@ private struct ScreenWebView: Representable {
                     return (nil, error.localizedDescription)
                 }
             case "vault":
-                // Asks for what the app declares, in the Vault's sheet, and answers once the sheet is gone, or once the
-                // request is answered somewhere else (another device, an agent's CLI), which closes the sheet.
-                let store = view.store, scope = route.scope ?? "user"
+                // Asks for what the app declares, in the Vault's sheet.
+                let scope = route.scope ?? "user"
                 do {
                     guard let id = try await store.node.requestItem(scope: scope, app: route.app, need: body["need"] as? String ?? "") else {
                         return (nil, "The Vault didn’t take the request")
                     }
-                    let sheet = Sheet.vault(scope: scope, id: id)
-                    store.sheet = sheet
-                    var waited = 0
-                    while store.sheet == sheet {
-                        try? await Task.sleep(for: .milliseconds(300))
-                        waited += 1
-                        if waited % 7 == 0, let state = try? await store.node.vaultRequests(scope: scope, id: id).first?.state, state != "waiting", store.sheet == sheet {
-                            store.sheet = nil
-                        }
-                    }
-                    let state = try await store.node.vaultRequests(scope: scope, id: id).first?.state
-                    return (state == "set", nil)
+                    return (try await store.ask(scope: scope, id: id), nil)
                 } catch {
                     return (nil, error.localizedDescription)
                 }
@@ -460,7 +489,7 @@ private struct ScreenWebView: Representable {
     }
 }
 
-/// What a shell shows for a route: a page, an app's screen, or one of its own views.
+/// What a shell shows for a route: a page, an app's screen, Settings or one of its screens, or a page's Services.
 struct RouteView: View {
     @Environment(Store.self) private var store
     var route: Route
@@ -474,31 +503,45 @@ struct RouteView: View {
             AppScreen(route: screen).id(screen)
         case .settings:
             SettingsPage(open: open)
-        case .group(let id):
-            GroupView(id: id)
+        case .setting(let name, let params):
+            // An item with an app (the App Store) opens that app.
+            if let app = store.settingsItem(name)?.app {
+                AppScreen(route: ScreenRoute(app: app)).id(app)
+            } else {
+                let screen = ScreenRoute(app: "", screen: name, params: params)
+                AppScreen(route: screen, settings: true).id(screen)
+            }
         case .services(let scope):
             if let page = store.page(scope) { ServicesView(page: page, open: open) }
-        case .setting(let setting):
-            switch setting {
-            case .store:
-                // The install's store app, once it exists; until then, a list of every app.
-                if let app = store.app(for: .store) {
-                    AppScreen(route: ScreenRoute(app: app.name)).id(app.name)
-                } else {
-                    AppStoreView()
-                }
-            case .groups: GroupsView(open: open)
-            case .devices: DevicesView()
-            case .agents: AgentsView()
-            case .vault: VaultView()
-            case .access: AccessLogView()
-            case .users: UsersView()
-            case .install: InstallSettingsView()
-            case .backups: BackupsView()
-            case .requests: RequestsView()
-            case .appearance: AppearanceView()
+        }
+    }
+}
+
+extension Store {
+    /// A request for a Vault item, in the Vault's sheet: whether it was allowed, once the sheet is gone, or once it's
+    /// answered somewhere else (another device, an agent's CLI), which closes the sheet.
+    func ask(scope: String, id: String) async throws -> Bool {
+        let sheet = Sheet.vault(scope: scope, id: id)
+        self.sheet = sheet
+        var waited = 0
+        while self.sheet == sheet {
+            try? await Task.sleep(for: .milliseconds(300))
+            waited += 1
+            if waited % 7 == 0, let state = try? await node.vaultRequests(scope: scope, id: id).first?.state, state != "waiting", self.sheet == sheet {
+                self.sheet = nil
             }
         }
+        return try await node.vaultRequests(scope: scope, id: id).first?.state == "set"
+    }
+
+    /// This app's build and the node's, for telling which build a device runs.
+    var build: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let app = "\(config?.name ?? appName), app \(info["BuildCommit"] as? String ?? "")"
+        let host = state?.host ?? state?.machine
+        let server = install?.servers.first { $0.key == host?.key }
+        guard let build = server?.build else { return app }
+        return "\(app)\n\(displayName(server?.name ?? "")) runs \(build)"
     }
 }
 

@@ -312,7 +312,7 @@ async fn api(addr: &str, method: &str, path: &str, body: Value) -> Value {
 async fn the_apps_decode_what_the_node_sends() {
     let swift = read("apple/Shared/Node.swift") + &read("apple/Shared/Views/WidgetTree.swift");
     let structs = swift_structs(&swift);
-    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "WidgetNode", "VaultItem", "VaultRequest", "Arrangement.Item", "Backups", "Backups.Place", "Backups.Snapshot"] {
+    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "WidgetNode", "VaultItem", "VaultRequest", "Arrangement.Item", "SettingsItem"] {
         assert!(structs.get(name).is_some_and(|f| !f.is_empty()), "the test reads Swift's {name}: {:?}", structs.keys());
     }
     assert!(structs["VaultItem"].iter().any(|f| f.key == "scope_name" && !f.required) && structs["VaultItem"].iter().any(|f| f.key == "title" && f.required));
@@ -357,18 +357,9 @@ async fn the_apps_decode_what_the_node_sends() {
     api(&addr, "POST", "/v1/group", json!({ "name": "Home" })).await;
     api(&addr, "POST", "/v1/vault", json!({ "scope": "user", "title": "Hub", "fields": { "user": { "value": "andre" }, "token": { "value": "s3cret", "secret": true } }, "hosts": ["hub.example.com"], "apps": ["lamps"] })).await;
     api(&addr, "POST", "/v1/vault/request", json!({ "scope": "user", "app": "lamps", "need": "hub", "why": "To reach the hub" })).await;
-    // Backups to a disk, once they've run.
-    let disk = std::env::temp_dir().join(format!("contracts-backups-{}", std::process::id()));
-    api(&addr, "POST", "/v1/backups/place", json!({ "path": disk.join("One Backups"), "title": "Disk" })).await;
-    for _ in 0..100 {
-        if !api(&addr, "GET", "/v1/backups", Value::Null).await["snapshots"].as_array().is_none_or(|s| s.is_empty()) {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
 
     let mut problems = vec![];
-    for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]"), ("/v1/vault", "[VaultItem]"), ("/v1/vault/requests", "[VaultRequest]"), ("/v1/backups", "Backups")] {
+    for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]"), ("/v1/vault", "[VaultItem]"), ("/v1/vault/requests", "[VaultRequest]")] {
         let sent = api(&addr, "GET", path, Value::Null).await;
         assert!(sent.as_array().is_none_or(|l| !l.is_empty()), "{path} sent nothing to check");
         check(&structs, "", ty, &sent, path, &mut problems);
@@ -386,7 +377,6 @@ async fn the_apps_decode_what_the_node_sends() {
     assert!(problems.is_empty(), "the Apple apps can't decode what the node sends:\n{}", problems.join("\n"));
     assert!(android.is_empty(), "the Android app can't decode what the node sends:\n{}", android.join("\n"));
     assert!(windows.is_empty(), "the Windows app can't decode what the node sends:\n{}", windows.join("\n"));
-    let _ = std::fs::remove_dir_all(disk);
 }
 
 /// The kernel's services (JavaScript, `kernel/shared/crypto.js`) and nodes (`src/kernel.rs`) each open what the

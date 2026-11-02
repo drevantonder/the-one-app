@@ -38,21 +38,6 @@ struct AskYourAgent: View {
     }
 }
 
-/// Settings → Agents.
-struct AgentsView: View {
-    @Environment(Store.self) private var store
-
-    var body: some View {
-        Form {
-            Section("Ask Your Agent") {
-                AskYourAgent(prompt: store.askYourAgent)
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Agents")
-    }
-}
-
 /// Ask Your Agent, on its own, for the first screen.
 struct AskYourAgentSheet: View {
     var prompt: String

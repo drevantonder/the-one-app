@@ -217,3 +217,43 @@ struct VaultRequestSheet: View {
         }
     }
 }
+
+/// An item's icon: the logo of the site it's for, else the icon of the app that made or uses it, else a key.
+struct ItemIcon: View {
+    @Environment(Store.self) private var store
+    var title: String
+    var image: String?
+    var app: String?
+    var size: CGFloat
+
+    init(item: VaultItem, size: CGFloat) {
+        self.init(title: item.title, image: item.image, app: item.app ?? item.apps.first, size: size)
+    }
+
+    init(title: String, image: String? = nil, app: String?, size: CGFloat) {
+        self.title = title
+        self.image = image
+        self.app = app
+        self.size = size
+    }
+
+    var body: some View {
+        if let image {
+            AppTile(icon: nil, seed: title, image: image, size: size)
+        } else if let app, let info = store.app(app) {
+            AppTile(app: info, seed: app, size: size)
+        } else {
+            AppTile(icon: "key", seed: title, color: "#8e8e93", size: size)
+        }
+    }
+}
+
+/// A field's name as a person reads it: `client_id` is "Client ID".
+func fieldLabel(_ name: String) -> String {
+    let words = name.split(whereSeparator: { "_-.".contains($0) }).map { word -> String in
+        let w = word.lowercased()
+        return ["id", "url", "api", "pin", "otp"].contains(w) ? w.uppercased() : w
+    }
+    guard let first = words.first else { return name }
+    return ([first.prefix(1).uppercased() + first.dropFirst()] + words.dropFirst()).joined(separator: " ")
+}

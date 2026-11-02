@@ -77,11 +77,11 @@ private struct MainView: View {
         }
     }
 
-    /// An app opens in place of the page, selected in the sidebar; a page's Services, as a sheet over it; the
-    /// shell's own views push.
+    /// An app, or a Settings screen, opens in place of the page, selected in the sidebar; a page's Services, as a
+    /// sheet over it.
     private func open(_ route: Route) {
         switch route {
-        case .screen: store.selection = route
+        case .screen, .setting: store.selection = route
         case .services(let scope): store.sheet = .services(scope)
         default: store.path.append(route)
         }

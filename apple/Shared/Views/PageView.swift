@@ -546,7 +546,7 @@ private struct EmptyPage: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             if store.canArrange(page.scope) {
-                Button("Open the App Store") { open(.setting(.store)) }
+                Button("Open the App Store") { open(.setting("store")) }
                     .buttonStyle(.borderedProminent)
                     .padding(.top, 4)
             }
@@ -557,268 +557,55 @@ private struct EmptyPage: View {
     }
 }
 
-/// The cog's page: who you are, then the shell's own views in groups, each with its count or value, then this
-/// build. A phone and an iPad show it as the last page.
+/// Settings, as a page: its title and the install's name (on a Mac; a phone's bar names it), then its items' icons in a
+/// page's grid, you first, as your picture. A phone and an iPad show it as the last page.
 struct SettingsPage: View {
     @Environment(Store.self) private var store
     var open: (Route) -> Void
-    @AppStorage("appearance") private var appearance = Appearance.automatic.rawValue
+    @State private var width: CGFloat = 0
 
     var body: some View {
+        let grid = GridMetrics(width: width)
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 20) {
                 #if os(macOS)
                 PageHeader(title: String(localized: "Settings"), subtitle: store.install?.name ?? "")
                 #endif
-                Profile()
-                if store.requests > 0 {
-                    SettingsSection {
-                        row(.requests, value: "\(store.requests)", badge: true)
+                if width > 0 {
+                    HomeGrid(grid: grid) {
+                        ForEach(store.settingsItems) { item in
+                            IconButton(title: item.title, badge: item.badge ?? 0) { open(.setting(item.name)) } icon: {
+                                SettingIcon(item: item, size: grid.icon)
+                            }
+                        }
                     }
                 }
-                SettingsSection {
-                    row(.store, value: "")
-                    row(.groups, value: "")
-                    row(.devices, value: "")
-                    row(.agents, value: "")
-                }
-                SettingsSection {
-                    row(.vault, value: "")
-                    row(.access, value: "")
-                    row(.appearance, value: (Appearance(rawValue: appearance) ?? .automatic).title)
-                }
-                if store.isAdmin {
-                    SettingsSection {
-                        row(.users, value: "")
-                        row(.install, value: "")
-                        let problem = store.backupProblem
-                        SettingsRow(item: .backups, value: problem == nil ? "" : "1", badge: problem != nil, detail: problem.map { "\($0.text) \($0.fix)" }) { open(.setting(.backups)) }
-                    }
-                }
-                Text(version)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .padding(.horizontal, 20)
             #if os(iOS)
             .padding(.top, 20) // where the Home Screen's first row starts
             #endif
             .padding(.bottom, 96)
-            .frame(maxWidth: 700, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: 1100, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
         .groupedBackground()
     }
-
-    private func row(_ item: Setting, value: String, badge: Bool = false) -> some View {
-        SettingsRow(item: item, value: value, badge: badge) { open(.setting(item)) }
-    }
-
-    /// The app's version and build, and the node's, for telling which build a device runs.
-    private var version: String {
-        let info = Bundle.main.infoDictionary ?? [:]
-        let app = "\(store.config?.name ?? appName), app \(info["BuildCommit"] as? String ?? "")"
-        let host = store.state?.host ?? store.state?.machine
-        let server = store.install?.servers.first { $0.key == host?.key }
-        guard let build = server?.build else { return app }
-        return "\(app)\n\(displayName(server?.name ?? "")) runs \(build)"
-    }
 }
 
-/// Who you are, at the top of Settings: your initials, name, role and install, and this device.
-private struct Profile: View {
+/// A Settings item's icon: yours is your picture; the rest, its symbol on its colour, as an app's tile.
+struct SettingIcon: View {
     @Environment(Store.self) private var store
+    var item: SettingsItem
+    var size: CGFloat
 
     var body: some View {
-        if let me = store.me {
-            HStack(spacing: 14) {
-                Avatar(id: me.id, name: me.name, size: 60)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(me.name)
-                        .font(.title2.weight(.semibold))
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
-                    Text(me.admin ? "Admin of \(store.install?.name ?? "")" : "Member of \(store.install?.name ?? "")")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if let machine = store.state?.machine.name {
-                        Label(displayName(machine), systemImage: deviceSymbol(machine))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .textSelection(.enabled)
-                Spacer(minLength: 0)
-            }
-            .padding(16)
-            .groupedContainer()
-            .accessibilityElement(children: .combine)
-        }
-    }
-}
-
-/// Rows in a grouped container, as an inset list's section draws them, with dividers between.
-struct SettingsSection<Content: View>: View {
-    var footer: String?
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            VStack(spacing: 0) {
-                Group(subviews: content) { rows in
-                    ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                        if i > 0 { Divider().padding(.leading, 58) }
-                        row
-                    }
-                }
-            }
-            .groupedContainer()
-            if let footer {
-                Text(footer).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16)
-            }
-        }
-    }
-}
-
-/// A row of Settings: its icon, its name, its value, and a chevron.
-private struct SettingsRow: View {
-    @Environment(Store.self) private var store
-    var item: Setting
-    var value: String
-    var badge = false
-    /// What needs doing, in red under the title.
-    var detail: String?
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                // A row that opens an app shows that app's tile, as its page does.
-                if let app = store.app(for: item) {
-                    AppTile(app: app, seed: app.name, size: 30)
-                } else {
-                    SymbolTile(symbol: item.symbol, color: item.color, size: 30)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title)
-                        .foregroundStyle(.primary)
-                    if let detail {
-                        Text(detail)
-                            .font(.callout)
-                            .foregroundStyle(.red)
-                            .multilineTextAlignment(.leading)
-                    }
-                }
-                .padding(.vertical, detail == nil ? 0 : 8)
-                Spacer(minLength: 8)
-                if badge {
-                    Text(value)
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(.red, in: .capsule)
-                } else {
-                    Text(value)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 50)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityValue(value)
-    }
-}
-
-/// Light, Dark or Automatic, as small pictures of a screen with a check under each, as iOS's Display settings has.
-struct AppearanceView: View {
-    @AppStorage("appearance") private var appearance = Appearance.automatic.rawValue
-
-    var body: some View {
-        Form {
-            Section {
-                HStack(spacing: 0) {
-                    ForEach(Appearance.allCases) { option in
-                        Button { appearance = option.rawValue } label: {
-                            VStack(spacing: 10) {
-                                Thumbnail(option: option)
-                                Text(option.title).font(.subheadline).foregroundStyle(.primary)
-                                Image(systemName: appearance == option.rawValue ? "checkmark.circle.fill" : "circle")
-                                    .font(.title3)
-                                    .foregroundStyle(appearance == option.rawValue ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .contentShape(.rect)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(appearance == option.rawValue ? .isSelected : [])
-                    }
-                }
-                .padding(.vertical, 10)
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Appearance")
-    }
-
-    private struct Thumbnail: View {
-        var option: Appearance
-
-        var body: some View {
-            let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
-            ZStack {
-                switch option {
-                case .light: screen(dark: false)
-                case .dark: screen(dark: true)
-                case .automatic:
-                    screen(dark: false).overlay(alignment: .trailing) { screen(dark: true).frame(width: 33).clipped() }
-                }
-            }
-            .frame(width: 66, height: 120)
-            .clipShape(shape)
-            .overlay(shape.strokeBorder(.separator))
-        }
-
-        private func screen(dark: Bool) -> some View {
-            let fg = dark ? Color.white : Color.black
-            return (dark ? Color.black : Color.white).overlay(alignment: .topLeading) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Capsule().fill(fg.opacity(0.7)).frame(width: 30, height: 5)
-                    ForEach(0..<4, id: \.self) { _ in
-                        RoundedRectangle(cornerRadius: 3).fill(fg.opacity(0.12)).frame(width: 50, height: 14)
-                    }
-                }
-                .padding(8)
-            }
-            .frame(width: 66, height: 120, alignment: .leading)
-        }
-    }
-}
-
-extension Setting {
-    /// Its icon's colour, as Settings colours its own.
-    var color: Color {
-        switch self {
-        case .store: .blue
-        case .groups: .green
-        case .devices: .gray
-        case .agents: .pink
-        case .vault: .indigo
-        case .access: .purple
-        case .users: .teal
-        case .install: .gray
-        case .backups: .orange
-        case .requests: .pink
-        case .appearance: .blue
+        if item.name == "account", let me = store.me {
+            Avatar(id: me.id, name: me.name, size: size)
+        } else {
+            AppTile(icon: item.icon, seed: item.name, color: item.color, size: size)
         }
     }
 }

@@ -29,12 +29,28 @@ struct NodeState: Decodable, Sendable, Equatable {
     var arrangements: [String: Arrangement]?
     /// What's wrong with backups, for an admin; nil while they work.
     var backups: Backups.Problem?
+    /// What Settings shows this user, in order; nil from a server too old to say.
+    var settingsItems: [SettingsItem]?
 
     var waitingRequests: Int { vaultRequests ?? secretRequests ?? 0 }
 
     enum CodingKeys: String, CodingKey {
         case config, machine = "me", host = "server", user, install, opens, vaultRequests = "vault_requests", secretRequests = "secret_requests", arrangements, backups
+        case settingsItems = "settings_items"
     }
+}
+
+/// One of Settings' items: it opens the Settings screen it names, or with `app`, that app's main screen.
+struct SettingsItem: Decodable, Sendable, Equatable, Identifiable {
+    var name: String
+    var title: String
+    /// A Phosphor icon's name, on `color`.
+    var icon: String
+    var color: String
+    var badge: Int?
+    var app: String?
+
+    var id: String { name }
 }
 
 /// How one person arranged a page: its apps and the widgets they put there, in order, and the
@@ -237,6 +253,8 @@ protocol NodeTransport: Sendable {
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data
     /// An app screen's page, and the address it may call back to.
     func page(app: String, screen: String, params: String, scope: String?) async throws -> (html: String, base: URL?)
+    /// A Settings screen's page.
+    func settingsPage(_ name: String, params: String) async throws -> (html: String, base: URL?)
     /// The node's events, until the connection drops.
     func events() -> AsyncThrowingStream<NodeEvent, Error>
     /// What to say when nothing answers.
@@ -293,6 +311,11 @@ struct HTTPNode: NodeTransport {
         var query = ["params": params]
         query["scope"] = scope
         let html = try await send("GET", "v1/screens/\(app)/\(screen)", body: try JSONEncoder().encode(query), timeout: 10)
+        return (String(decoding: html, as: UTF8.self), base)
+    }
+
+    func settingsPage(_ name: String, params: String) async throws -> (html: String, base: URL?) {
+        let html = try await send("GET", "v1/settings-screens/\(name)", body: try JSONEncoder().encode(["params": params]), timeout: 10)
         return (String(decoding: html, as: UTF8.self), base)
     }
 
@@ -430,32 +453,9 @@ struct VaultRequest: Decodable, Sendable, Hashable, Identifiable {
 }
 
 /// Backups, as the node says how they're going.
-struct Backups: Decodable, Equatable {
+enum Backups {
     /// What's wrong with a place, and its fix, in words; since when.
     struct Problem: Decodable, Sendable, Equatable, Hashable { var place: String; var text: String; var fix: String; var since: Double }
-    struct Place: Decodable, Equatable, Hashable, Identifiable {
-        struct Last: Decodable, Equatable, Hashable { var time: Double; var server: String }
-        var id: String
-        var title: String
-        /// `folder` or `s3`.
-        var kind: String
-        /// A folder's path, or a bucket.
-        var `where`: String
-        /// S3's endpoint.
-        var endpoint: String?
-        var server: String?
-        var last: Last?
-        var problem: Problem?
-    }
-    /// A snapshot of the install: whichever servers wrote it, to which places, of whose data.
-    struct Snapshot: Decodable, Equatable, Hashable { var time: Double; var servers: [String]; var places: [String]; var scopes: [String] }
-    struct Disk: Decodable, Equatable, Identifiable { var name: String; var path: String; var free: Double; var id: String { path } }
-    struct Step: Decodable, Equatable, Identifiable { var step: String; var error: String?; var id: String { step } }
-    var places: [Place]
-    var snapshots: [Snapshot]
-    /// The server that answered, whose disks these are.
-    var here: String
-    var disks: [Disk]
 }
 
 /// The local API, typed, over whichever transport reaches a node.
@@ -512,6 +512,26 @@ struct NodeClient: Sendable {
         try await transport.page(app: app, screen: screen, params: params, scope: scope)
     }
 
+    func settingsPage(_ name: String, params: String) async throws -> (html: String, base: URL?) {
+        try await transport.settingsPage(name, params: params)
+    }
+
+    /// A Settings screen's `one.api`: `path` is the node's /v1 API's, its query's fields going in the body as every
+    /// request's do (a server that a phone asks matches bare paths). → its JSON reply.
+    func api(_ method: String, _ path: String, body: Any?) async throws -> Any {
+        var parts = URLComponents(string: path)
+        guard let bare = parts?.path, bare.hasPrefix("/v1/"), !bare.contains("..") else { throw NodeError("That isn't your server's.") }
+        var fields = body as? [String: Any] ?? [:]
+        for item in parts?.queryItems ?? [] { fields[item.name] = item.value ?? "" }
+        parts?.queryItems = nil
+        let method = method.uppercased()
+        let sent: Any? = method == "GET" ? (fields.isEmpty ? nil : fields) : (body is [String: Any] || body == nil ? fields : body)
+        let data = try sent.map { try JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed) }
+        let reply = try JSONSerialization.jsonObject(with: try await transport.send(method, String(bare.dropFirst()), body: data, timeout: 30), options: .fragmentsAllowed)
+        if let error = (reply as? [String: Any])?["error"] as? String { throw NodeError(error) }
+        return reply
+    }
+
     func events() -> AsyncThrowingStream<NodeEvent, Error> { transport.events() }
 
     // MARK: The install
@@ -531,22 +551,7 @@ struct NodeClient: Sendable {
 
     func rename(_ name: String) async throws { try await post("v1/name", ["name": name]) }
 
-    func remove(machine key: String) async throws { try await post("v1/remove", ["key": key]) }
-    func remove(user: String) async throws { try await post("v1/remove", ["user": user]) }
-    func setRole(user: String, role: String) async throws { try await post("v1/role", ["user": user, "role": role]) }
-    /// Sets one of the install's settings (admins); nil puts back the white label's default.
-    func setSetting(_ name: String, _ value: String?) async throws { try await post("v1/settings", ["name": name, "value": value]) }
-    func trust(server: String, _ trust: Bool) async throws { try await post("v1/trust", ["server": server, "trust": trust]) }
-
-    // MARK: Groups
-
-    func createGroup(_ name: String) async throws -> String? { try await post("v1/group", ["name": name])["group"] as? String }
-    func invite(group: String, user: String, role: String) async throws { try await post("v1/invite", ["group": group, "user": user, "role": role]) }
-    func accept(group: String) async throws { try await post("v1/accept", ["group": group]) }
-    /// Changes a member's role, or with no role removes them.
-    func setMember(group: String, user: String, role: String?) async throws { try await post("v1/member", ["group": group, "user": user, "role": role]) }
-
-    // MARK: Apps, the Vault, backups
+    // MARK: Apps and the Vault
 
     func install(app: String, scope: String, _ installed: Bool) async throws {
         try await post("v1/install", ["app": app, "scope": scope, "installed": installed])
@@ -598,19 +603,6 @@ struct NodeClient: Sendable {
         try await post("v1/vault/answer", body)
     }
 
-    /// Each place backups go to, how its last run went, the recent snapshots, and the disks of the server answering.
-    func backups() async throws -> Backups { try await get("v1/backups") }
-    /// Backs up now, without waiting for the hour.
-    func backUpNow() async throws { try await post("v1/backups/now", [:]) }
-    /// Tries a place (writes, reads and deletes a test file) and, if that works, adds it: a folder's `path`, or S3's
-    /// `endpoint`, `bucket`, `key_id` and `secret`. → each step tried, and whether it was added.
-    func addPlace(_ fields: [String: String]) async throws -> (tried: [Backups.Step], added: Bool) {
-        let data = try await transport.send("POST", "v1/backups/place", body: try json(fields), timeout: 60)
-        struct Reply: Decodable { var tried: [Backups.Step]; var id: String? }
-        let reply = try JSONDecoder().decode(Reply.self, from: data)
-        return (reply.tried, reply.id != nil)
-    }
-    func removePlace(_ id: String) async throws { try await post("v1/backups/place", ["id": id, "deleted": true]) }
 }
 
 /// A failed join, said as what went wrong and what to do next, with the node's own words for whoever needs them.
