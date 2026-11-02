@@ -12,6 +12,8 @@ use crate::entry::{Content, Entry, Key, Order, Scope, hex, is_id, unhex};
 
 /// The node's own entries. Apps never see them.
 pub const APP: &str = "node";
+/// Agents' built-in sidecar (`src/agents.rs`), whose Vault requests are theirs: here too for the serverless node.
+pub const AGENTS: &str = "agents";
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
@@ -724,7 +726,7 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let app = data["app"].as_str().context("no app")?.to_string();
             // An item the node itself uses (a backup place's) is asked for as the node's, and one agents use (vault_fetch)
             // as theirs.
-            ensure!(m.apps.contains_key(&app) || app == APP || app == crate::agents::NAME, "no such app");
+            ensure!(m.apps.contains_key(&app) || app == APP || app == AGENTS, "no such app");
             // An earlier server's asks for one secret field, `name`.
             let (title, fields) = match data["name"].as_str() {
                 Some(name) => (name.to_string(), vec![(name.to_string(), true)]),

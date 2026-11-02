@@ -15,7 +15,7 @@ use crate::apps::Me;
 use crate::sidecars::{Answer, Record, Reply};
 
 /// The built-in sidecar's name, which agents act as when the Vault fills their requests (`vault_fetch`).
-pub const NAME: &str = "agents";
+pub const NAME: &str = crate::members::AGENTS;
 
 /// Marks a skill folder as this white label's to replace, so the nodes of two white labels on one machine leave each other's alone.
 fn marker() -> String {
