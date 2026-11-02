@@ -427,6 +427,49 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     let opened = js(json!({ "op": "openUnder", "secret": "a code from the recovery key", "sealed": B64U.encode(&sealed) }));
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens a copy Rust sealed");
 
+    // Devices' keys (src/keys.rs): canonical JSON, signed requests both ways, objects sealed under an epoch, a call's
+    // handoff, join codes, invite proofs and passkeys' device keys.
+    {
+        use one::keys;
+        let seed: [u8; 32] = rand::random();
+        let signer = ed25519_dalek::SigningKey::from_bytes(&seed);
+        let fields = json!({ "read": ["user-0123456789abcdef/notes/main/1"], "n": 3, "z": { "b": "é\n\"", "a": [] } });
+        let request = keys::signed_request(&signer, "one/urls", fields.clone(), 1_000_000);
+        let node = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+        let to = keys::Endpoint::of(&node).seal;
+        let handoff = keys::Handoff { for_: keys::token_id("a token"), until: 9, keys: vec![keys::Handed { scope: "global".into(), epoch: 2, app: "board".into(), database: "main".into(), key: rand::random() }] };
+        let epoch_key: [u8; 32] = rand::random();
+        let sealed = keys::seal(3, &epoch_key, "global/board/main/1", b"a step");
+        let device: [u8; 32] = rand::random();
+        let prf: [u8; 32] = rand::random();
+        let (my_secret, my_public) = kernel::twin(&rand::random());
+        let out = js(json!({
+            "op": "keys", "seed": B64U.encode(&seed), "domain": "one/urls", "fields": fields, "at": 1_000_000,
+            "request": request, "now": 1_000_000 + keys::FRESH, "epoch": 4, "key": B64U.encode(&epoch_key),
+            "name": "global/board/main/1", "plain": B64U.encode(b"from js"), "sealed": B64U.encode(&sealed),
+            "to": B64U.encode(&kernel::twin_public(&node.verifying_key().to_bytes()).unwrap()), "handoff": handoff,
+            "pair": { "secret": B64U.encode(&my_secret), "public": B64U.encode(&my_public), "sealed": keys::seal_handoff(&my_public, &handoff).unwrap(), "key": data_encoding::HEXLOWER.encode(&device) },
+            "token": "a token", "secret": B64U.encode(b"an invite's secret"), "prf": B64U.encode(&prf),
+        }));
+        assert_eq!(out["canonical"].as_str().unwrap().as_bytes(), keys::canonical(&fields), "canonical JSON");
+        assert_eq!(out["signed"], request, "the same request signed the same, Ed25519 being deterministic");
+        assert_eq!(out["checked"], json!(data_encoding::HEXLOWER.encode(signer.verifying_key().as_bytes())), "JavaScript checks a request Rust signed");
+        assert!(keys::check_request("one/urls", &out["signed"], 1_000_000).is_ok(), "Rust checks one JavaScript signed");
+        assert_eq!(keys::open(&epoch_key, "global/board/main/1", &b(&out["sealed"])).unwrap(), b"from js", "Rust opens an object JavaScript sealed");
+        assert_eq!(keys::epoch_of(&b(&out["sealed"])).unwrap(), 4);
+        assert_eq!(b(&out["opened"]), b"a step", "JavaScript opens one Rust sealed");
+        assert_eq!(out["epoch"], 3);
+        assert_eq!(keys::open_handoff(&keys::seal_secret(&node), out["handoff"].as_str().unwrap()).unwrap(), handoff, "Rust opens a handoff JavaScript sealed");
+        assert_eq!(out["handedBack"], serde_json::to_value(&handoff).unwrap(), "JavaScript opens one Rust sealed");
+        assert_eq!(out["tokenId"], keys::token_id("a token"));
+        assert_eq!(out["joinCode"], keys::join_code(&device));
+        assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &device));
+        let (passkey, seal_secret) = keys::passkey_keys(&prf);
+        assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
+        assert_eq!(b(&out["passkey"]["seal"]), seal_secret, "and the secret sealed to");
+        assert_eq!(to, kernel::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
+    }
+
     // The schedules service and the node agree when a schedule runs next, across daylight saving's changes too.
     let specs = [
         json!({ "op": "x", "at": "09:00", "tz": "Australia/Melbourne" }),
