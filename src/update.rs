@@ -25,10 +25,19 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         ensure!(quiet(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     }
     let key = release_key()?;
+    // Updates here take turns: they share one checkout, and each would test one commit and send out another.
+    let _turn = turn()?;
     let src = checkout()?;
     let (config, config_commit) = config(&src)?;
     let commit = git(&src, &["rev-parse", "HEAD"])?;
     let short = &commit[..12];
+    // Whoever pushed since another update began is in what it sent out, if it got to their commit.
+    let this = format!("{commit} {}", config_commit.as_deref().unwrap_or(""));
+    let done = cache().join("updated");
+    if tag.is_none() && std::fs::read_to_string(&done).is_ok_and(|d| d == this) {
+        println!("Every device already runs {short}, main's tip: the last update here sent it out.");
+        return Ok(());
+    }
     if let Some(tag) = tag {
         ensure!(!quiet(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
     }
@@ -42,10 +51,13 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     // The Macs build their app themselves, which takes longest, so they start first.
     let macs: Vec<Value> = devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect();
     let mut started = Vec::new();
+    // A Mac this missed doesn't update itself, so running this again mustn't be skipped as done.
+    let mut missed = false;
     for mac in &macs {
         let name = mac["name"].as_str().unwrap_or("");
         if mac["online"] != true {
             println!("  {name}: offline; run this again when it's back");
+            missed = true;
             continue;
         }
         match shell(mac, &mac_job(&commit, config_commit.as_deref(), tag.is_some()), 60) {
@@ -54,6 +66,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
             Err(err) => println!("  {name}: couldn't start its build: {err:#}"),
         }
     }
+    missed |= started.len() < macs.iter().filter(|m| m["online"] == true).count();
 
     println!("Building {short}");
     step(Command::new(cargo()).current_dir(&src).env("CONFIG", &config).args(["build", "--release"]))?;
@@ -106,6 +119,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
 
     let Some(tag) = tag else {
         ensure!(!failed, "not every device runs {short}");
+        if !missed {
+            std::fs::write(&done, &this)?;
+        }
         return Ok(());
     };
     for p in PLATFORMS {
@@ -125,6 +141,19 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     step(&mut gh)?;
     ensure!(!failed, "released {tag}, but not every device runs it");
     Ok(())
+}
+
+/// This device's turn to update, held until it's dropped: other updates wait for it.
+fn turn() -> Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    std::fs::create_dir_all(cache())?;
+    let file = std::fs::File::create(cache().join("update.lock"))?;
+    // SAFETY: flock on a descriptor this function owns; the lock goes when the file closes.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        println!("Another update is running here; this one goes next, with main's tip then.");
+        ensure!(unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0, "couldn't wait for the other update: {}", std::io::Error::last_os_error());
+    }
+    Ok(file)
 }
 
 /// Deploys this device's release's version of each built-in app the install has, where it runs another.
