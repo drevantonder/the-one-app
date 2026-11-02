@@ -333,11 +333,15 @@ func (ds *devices) tend(ctx context.Context) {
 		log.Print(err)
 		return
 	}
+	ds.tendVMs(ctx)
 	here := map[string]bool{}
 	for _, d := range all {
 		here[d.Name] = true
 	}
 	for name, l := range ds.loans() {
+		if ds.vmNamed(name) != nil {
+			continue
+		}
 		why := ""
 		switch {
 		case !here[name]:

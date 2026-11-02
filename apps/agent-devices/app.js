@@ -1,5 +1,6 @@
-// Agent Devices: the devices agents use, each a Linux device with a browser on the person's servers, with a
-// screen or without one, which the agent-devices sidecar runs (Incus, or a Mac's containers). Its page shows them;
+// Agent Devices: the devices agents use, on the person's servers, which the agent-devices sidecar runs: Linux with a
+// browser (Podman, or a Mac's containers), with a screen or without one, and Windows, Android and iPhones where a
+// server can run them (the sidecar says which kinds each one can). Its page shows them;
 // Computer Use (apps/computer) is what agents use them with. A browser profile a device starts with is a Vault item
 // of type Browser profile: the sidecar keeps it as an encrypted blob, and only it, never this app, holds its key,
 // which the node fills into the calls this app makes ({{<item id>:_profile_key}}).
@@ -15,7 +16,7 @@ async function sidecar(ctx, op, input) {
   }
 }
 
-const NEEDS = "Agent Devices needs a Linux server with Incus, or a Mac, and none of yours runs it.";
+const NEEDS = "Agent Devices needs a server with Podman, or a Mac, and none of yours runs it.";
 const TYPE = "Browser profile";
 
 /// The caller's online servers that run the sidecar, by name.
@@ -42,6 +43,9 @@ async function profile(ctx, name) {
 /// A profile as the sidecar takes it: its key is a placeholder the node fills in, for the sidecar only.
 const given = (p) => ({ item: p.id, name: p.title, key: `{{${p.id}:_profile_key}}`, blob: p.fields._blob?.value || "", salt: p.fields._salt?.value || "" });
 
+const kindArg = { type: "string", enum: ["linux", "windows", "android", "iphone"], description: "linux (with a browser; the default), windows, android or iphone: kinds says which servers run each" };
+const deviceArg = { type: "string", description: "the device's name" };
+
 const named = { type: "string", description: "a browser profile's name, like Personal or PTC: a Browser profile in the person's Vault" };
 
 // The page: every agent device as a picture, those in use first, each with its name and one short line.
@@ -53,6 +57,7 @@ const PAGE = `
   .tile.opens { cursor: pointer; }
   .pic { aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: var(--card); border: 0.5px solid var(--line); display: grid; place-items: center; color: var(--faint); }
   .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pic img.tall { object-fit: contain; background: #000; }
   .tile.paused .pic img { filter: grayscale(0.9) brightness(0.5); }
   .tile.opens:hover .pic { border-color: var(--accent); }
   .name { font-weight: 600; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -71,7 +76,10 @@ const PAGE = `
   const paused = (c) => c.state !== "running";
   const screenless = (c) => c.borrowed?.no_screen;
   const capital = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-  const glyph = (browser) => browser
+  const phone = (c) => c.kind === "android" || c.kind === "iphone";
+  const glyph = (browser, c) => phone(c)
+    ? '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>'
+    : browser
     ? '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M3 8.5h18"/></svg>'
     : '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>';
 
@@ -82,7 +90,7 @@ const PAGE = `
     const name = b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : capital(c.name);
     const line = [b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : paused(c) ? "Paused" : "", servers > 1 ? host(c.server) : ""].filter(Boolean).join(" · ");
     const k = key(c);
-    const pic = pics[k] ? \`<img src="\${pics[k]}" alt="">\` : glyph(screenless(c));
+    const pic = pics[k] ? \`<img src="\${pics[k]}" alt=""\${phone(c) ? ' class="tall"' : ""}>\` : glyph(screenless(c), c);
     const opens = !paused(c) && !screenless(c);
     return \`<div class="tile\${paused(c) ? " paused" : ""}\${opens ? " opens" : ""}" data-k="\${one.esc(k)}"><div class="pic">\${pic}</div><div class="name">\${one.esc(name)}</div><div class="sub">\${one.esc(line)}</div></div>\`;
   }
@@ -109,7 +117,7 @@ const PAGE = `
     await Promise.all(devices.filter((c) => !paused(c) && !screenless(c)).map(async (c) => {
       const k = key(c);
       try {
-        const r = await one.call("_screen", { ...at(c), width: 480 });
+        const r = await one.call("_screen", { ...at(c), width: phone(c) ? 240 : 480 });
         const img = (r.content || []).find((x) => x.type === "image");
         if (img) pics[k] = \`data:\${img.mimeType};base64,\${img.data}\`;
       } catch {}
@@ -237,8 +245,8 @@ export default {
   title: "Agent Devices",
   icon: "browsers",
   color: "#a2845e",
-  description: "Devices your agents use, each with a browser",
-  instructions: "Agent Devices are Linux devices on the person's servers, each with a browser, that agents borrow through Computer Use (computer_borrow, computer_*). Browser profiles (like Personal or PTC) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
+  description: "Devices your agents use: Linux with a browser, Windows, Android and iPhones",
+  instructions: "Agent Devices are devices on the person's servers that agents borrow through Computer Use (computer_borrow, computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where a server can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or PTC) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
   uses: { sidecars: ["agent-devices"] },
   // Browser profiles live in the Vault: the person adds one there (add_profile), signs in to sites in it (sign_in, then
   // save_profile), renames and deletes it there.
@@ -252,20 +260,25 @@ export default {
 
   ops: {
     borrow: {
-      description: "Borrow a device of your own for as long as you need a browser, its browser starting with a copy of a browser profile (the one called default, unless you name one; \"\" for none). Quick: a spare is kept ready. Give it back with give_back when done; it's deleted then, or after 15 minutes without a call, with anything in it.",
+      description: "Borrow a device for as long as you need it. Linux (the default kind): one of your own, quick, its browser starting with a copy of a browser profile (the one called default, unless you name one; \"\" for none). Windows, Android or iPhone: the person's lasting device, one agent at a time (others see who has it and what for), or with copy, a throwaway copy of it, made too when the lasting one is busy and its server has room. Give it back with give_back when done; a throwaway one is deleted then, or after 15 minutes without a call, with anything in it.",
       input: { type: "object", required: ["for"], properties: {
         for: { type: "string", description: "what you need it for, in a few words, e.g. Reading Messenger; the person sees it" },
+        kind: kindArg,
+        device: { type: "string", description: "a lasting device, by name, like windows" },
+        copy: { type: "boolean", description: "a throwaway copy, not the lasting device: for anything that changes or might break it" },
         profile: named,
         screen: { type: "boolean", description: "false for a device with no screen to watch, only a browser" },
         by: { type: "string", description: "who's borrowing, e.g. your app's name; default the device you call from" },
       } },
       run: async (ctx, input) => {
-        const p = await profile(ctx, input.profile);
-        return sidecar(ctx, "borrow", { for: input.for, ...(input.by ? { by: input.by } : {}), ...(input.screen === false ? { screen: false } : {}), ...(p ? { profile: given(p) } : {}) });
+        const other = (input.kind && input.kind !== "linux") || input.device;
+        const p = other ? null : await profile(ctx, input.profile);
+        const pass = Object.fromEntries(["kind", "device", "copy", "by"].filter((k) => input[k] !== undefined).map((k) => [k, input[k]]));
+        return sidecar(ctx, "borrow", { for: input.for, ...pass, ...(input.screen === false ? { screen: false } : {}), ...(p ? { profile: given(p) } : {}) });
       },
     },
     give_back: {
-      description: "Give back a borrowed device: it's deleted with everything in it, its browser's changes to the profile too. A device signing in to a profile saves it first.",
+      description: "Give back a borrowed device: a Linux or throwaway one is deleted with everything in it, its browser's changes to the profile too; a lasting one stays as it is, for the next agent. A device signing in to a profile saves it first.",
       input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the device's name" } } },
       run: (ctx, input) => sidecar(ctx, "give_back", input),
     },
@@ -329,8 +342,8 @@ export default {
       },
     },
     create: {
-      description: "Create a lasting device and start it, for the person: Linux, with a browser of its own. Takes a minute. Agents borrow instead.",
-      input: {"properties": {"device": {"description": "its name: lowercase letters, digits and dashes", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "required": ["device"], "type": "object"},
+      description: "Create a lasting device and start it, for the person, on a server that runs its kind: Linux with a browser of its own (the default), or Android or an iPhone, a new one. Takes a minute or two. Agents borrow instead.",
+      input: {"properties": {"device": {"description": "its name: lowercase letters, digits and dashes", "type": "string"}, "kind": kindArg, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "required": ["device"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "create", input),
     },
     resize: {
@@ -373,9 +386,40 @@ export default {
       input: {"properties": {"device": {"description": "the device's name", "type": "string"}, "to": {"description": "the server to move it to", "type": "string"}}, "required": ["device", "to"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "move", input),
     },
+    kinds: {
+      reads: true,
+      description: "The kinds of device each of your servers runs (linux, windows, android, iphone), with what input each kind takes, and how much memory each server has to spare, in GB.",
+      input: { type: "object", properties: {} },
+      run: (ctx, input) => sidecar(ctx, "kinds", input),
+    },
+    open: {
+      description: "Open a URL in a device's browser: Chrome on Linux, Edge on Windows, the default browser on Android and an iPhone.",
+      input: { type: "object", required: ["device", "url"], properties: { device: deviceArg, url: { type: "string" } } },
+      run: (ctx, input) => sidecar(ctx, "open", input),
+    },
+    install: {
+      description: "Install an app on a device: a file on its server or a URL (an .apk on Android, an .msi, .msix or .exe on Windows, a simulator .app on an iPhone, a .deb on Linux), or a package's name (a winget id on Windows, an apt package on Linux; on Android it opens the Play Store page).",
+      input: { type: "object", required: ["device", "app"], properties: { device: deviceArg, app: { type: "string" } } },
+      run: (ctx, input) => sidecar(ctx, "install", input),
+    },
+    run: {
+      description: "Run a command on a device and give its output: PowerShell on Windows, the shell on Android and Linux (as root), simctl spawn on an iPhone.",
+      input: { type: "object", required: ["device", "command"], properties: { device: deviceArg, command: { type: "string" } } },
+      run: (ctx, input) => sidecar(ctx, "run", input),
+    },
+    adopt: {
+      description: "For the person: make something already on one of their servers a lasting device: a Windows VM's folder (its disk.qcow2, OVMF_VARS.fd, tpm and monitor.sock), an Android Virtual Device, or an iPhone simulator.",
+      input: { type: "object", required: ["device", "kind", "on"], properties: {
+        device: { type: "string", description: "its name: lowercase letters, digits and dashes" }, kind: kindArg, on: { type: "string", description: "the server it's on" },
+        dir: { type: "string", description: "windows: its folder" }, id: { type: "string", description: "android: its AVD's name; iphone: its simulator's UDID" },
+        port: { type: "integer", description: "windows: its SSH port on the server; android: its console port, like 5554" }, display: { type: "integer", description: "windows: its VNC display" },
+        cpus: { type: "integer", description: "windows: CPUs it starts with" }, gb: { type: "integer", description: "windows: memory it starts with, in GB" },
+      } },
+      run: (ctx, { on, ...input }) => ctx.sidecars["agent-devices"].adopt({ ...input, here: true }, { server: on }),
+    },
     list: {
       reads: true,
-      description: "Every server's agent devices: each one's server, whether it's running, paused or stopped, its size, the memory and CPU it uses now, and who has borrowed it and what for.",
+      description: "Every server's agent devices: each one's server and kind, whether it's running, paused or stopped, its size, the memory and CPU it uses now, who has borrowed it and what for, and of, for a throwaway copy, the lasting device it's a copy of.",
       input: { type: "object", properties: { here: { type: "boolean", description: "only this server's" } } },
       run: (ctx, input) => sidecar(ctx, "list", input),
     },

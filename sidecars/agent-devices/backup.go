@@ -24,11 +24,11 @@ import (
 
 type backupRecord struct {
 	Device string    `json:"device"`
-	Server   string    `json:"server"`
-	Blob     string    `json:"blob"`
-	Bytes    int64     `json:"bytes"`
-	Size     string    `json:"size"` // the device's
-	At       time.Time `json:"at"`
+	Server string    `json:"server"`
+	Blob   string    `json:"blob"`
+	Bytes  int64     `json:"bytes"`
+	Size   string    `json:"size"` // the device's
+	At     time.Time `json:"at"`
 }
 
 const keepBackups = 5

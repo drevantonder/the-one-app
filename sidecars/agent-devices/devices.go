@@ -60,7 +60,7 @@ func (ds *devices) describe() map[string]any {
 			ops = append(ops, map[string]any{"name": t.Name, "description": t.Description, "input": withDevice(t.InputSchema)})
 		}
 	}
-	return map[string]any{"title": "Agent Devices", "description": "Devices your agents use, each with a browser", "version": built, "icon": "browsers", "color": "#a2845e", "instructions": instructions, "ops": ops, "widgets": []any{}}
+	return map[string]any{"title": "Agent Devices", "description": "Devices your agents use: Linux with a browser, Windows, Android and iPhones", "version": built, "icon": "browsers", "color": "#a2845e", "instructions": instructions, "ops": ops, "widgets": []any{}}
 }
 
 // withDevice adds the device argument to a tool's input.
@@ -287,7 +287,7 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 	text := func(k string) string { s, _ := in[k].(string); return strings.TrimSpace(s) }
 	here, _ := in["here"].(bool)
 	delete(in, "here")
-	if name != "" && !here && !slices.Contains(local, op) {
+	if name != "" && !here && (!slices.Contains(local, op) || op == "borrow") && ds.vmNamed(name) == nil {
 		// A device on another server: pass the call on to it.
 		if _, err := find(ctx, name); err != nil {
 			if s := ds.located(ctx, name); s != "" {
@@ -295,6 +295,9 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 				return ds.callNode(ctx, s, op, in)
 			}
 		}
+	}
+	if r, done, err := ds.runKinds(ctx, op, name, here, in); done {
+		return r, err
 	}
 	switch op {
 	case "list":
@@ -307,6 +310,9 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		sz, err := sizeNamed(text("size"))
 		if err != nil {
 			return nil, err
+		}
+		if ds.vmNamed(name) != nil {
+			return nil, fmt.Errorf("there's already a device named %s", name)
 		}
 		d, err := create(ctx, name, sz, false, true)
 		if err != nil {
@@ -715,7 +721,7 @@ func viewURL(ctx context.Context, d device, minutes int) (string, error) {
 
 // local are the operations that act on this server even when given a
 // device it doesn't have.
-var local = []string{"list", "create", "borrow", "sign_in", "signing_in", "backups", "restore", "refresh_tools"}
+var local = []string{"list", "kinds", "adopt", "create", "borrow", "sign_in", "signing_in", "backups", "restore", "refresh_tools"}
 
 // reply is a result with blobs the caller's scope keeps, so its servers can fetch them.
 type reply struct {

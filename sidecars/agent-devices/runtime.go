@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os/exec"
 	"regexp"
@@ -74,25 +75,42 @@ type containers interface {
 	removeImage(ctx context.Context, image string) error
 }
 
-// rt is this server's.
 var rt containers
 
-func setup(dir string) error {
+// rt is this server's, or nil where it has none: then it runs no Linux devices, only devices of other kinds.
+func setup(dir string) {
+	userSystemd()
 	var err error
 	if runtime.GOOS == "darwin" {
 		rt, err = newApple(dir)
 	} else {
 		rt, err = newPodman()
 	}
-	return err
+	if err != nil {
+		rt = nil
+		log.Printf("no Linux devices here: %v", err)
+	}
 }
 
-func list(ctx context.Context) ([]device, error)          { return rt.list(ctx) }
+func list(ctx context.Context) ([]device, error) {
+	if rt == nil {
+		return nil, nil
+	}
+	return rt.list(ctx)
+}
 func pause(ctx context.Context, d device) error           { return rt.pause(ctx, d) }
 func unpause(ctx context.Context, d device) error         { return rt.unpause(ctx, d) }
 func resize(ctx context.Context, d device, sz size) error { return rt.resize(ctx, d, sz) }
-func stats(ctx context.Context) (map[string]usage, error)   { return rt.stats(ctx) }
+func stats(ctx context.Context) (map[string]usage, error) {
+	if rt == nil {
+		return nil, nil
+	}
+	return rt.stats(ctx)
+}
 func limits(ctx context.Context, all []device) (map[string]limit, error) {
+	if rt == nil {
+		return map[string]limit{}, nil
+	}
 	return rt.limits(ctx, all)
 }
 
@@ -145,6 +163,9 @@ var creating sync.Mutex
 func create(ctx context.Context, name string, sz size, pool, wait bool) (device, error) {
 	if !validName.MatchString(name) {
 		return device{}, fmt.Errorf("a device's name is lowercase letters, digits and dashes")
+	}
+	if rt == nil {
+		return device{}, errors.New("this server runs no Linux devices: it has no Podman (or, on a Mac, Apple's container)")
 	}
 	img, err := ensureImage(ctx)
 	if err != nil {

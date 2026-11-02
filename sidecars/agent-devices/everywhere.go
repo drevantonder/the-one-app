@@ -137,7 +137,9 @@ func (ds *devices) everywhere(ctx context.Context, op string, input map[string]a
 type listed struct {
 	Name        string    `json:"name"`
 	Server      string    `json:"server"`
-	State       string    `json:"state"` // running, paused or stopped
+	Kind        string    `json:"kind"`
+	Of          string    `json:"of,omitempty"` // the lasting device it's a throwaway copy of
+	State       string    `json:"state"`        // running, paused or stopped
 	Started     time.Time `json:"started,omitzero"`
 	Size        string    `json:"size"`
 	CPUs        float64   `json:"cpus,omitempty"`         // at most; none: no limit
@@ -170,7 +172,7 @@ func (ds *devices) listHere(ctx context.Context) ([]listed, error) {
 	ds.poolMu.Unlock()
 	out := []listed{}
 	for _, d := range all {
-		l := listed{Name: d.Name, Server: me, State: d.State, Started: d.Started, Size: lims[d.Name].sizeOf(),
+		l := listed{Name: d.Name, Server: me, Kind: linuxKind, State: d.State, Started: d.Started, Size: lims[d.Name].sizeOf(),
 			CPUs: lims[d.Name].CPUs, MemoryLimit: lims[d.Name].Memory, Memory: use[d.Name].Memory, CPU: use[d.Name].CPU, LastCall: used[d.Name]}
 		if b, ok := lent[d.Name]; ok {
 			l.Borrowed = &b
@@ -179,7 +181,7 @@ func (ds *devices) listHere(ctx context.Context) ([]listed, error) {
 		}
 		out = append(out, l)
 	}
-	return out, nil
+	return append(out, ds.listVMs(ctx, me, lent)...), nil
 }
 
 // listAll is every server's devices, this one's first.

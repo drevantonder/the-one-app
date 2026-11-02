@@ -1,4 +1,4 @@
-// The Agent Devices sidecar: Linux devices for agents, each a Podman container
+// The Agent Devices sidecar: devices for agents. Linux ones (kind linux) are each a Podman container
 // running Cua's desktop image (github.com/trycua/cua) with Google Chrome, which
 // keeps its sign-ins, offered to the person's devices through this device's
 // node. The server inside each device speaks MCP; its
@@ -24,6 +24,9 @@ import (
 
 const app = "agent-devices"
 
+// dataDir is this sidecar's folder.
+var dataDir string
+
 type call struct {
 	ID     uint64          `json:"id"`
 	Op     string          `json:"op"`
@@ -36,16 +39,16 @@ type call struct {
 func main() {
 	home, _ := os.UserHomeDir()
 	dir := cmp.Or(os.Getenv("AGENT_DEVICES_DATA"), filepath.Join(home, ".local", "share", "one", "agent-devices"))
+	dataDir = dir
 	node := "http://" + cmp.Or(os.Getenv("ONE_ADDR"), "127.0.0.1:4747")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	if err := setup(dir); err != nil {
-		log.Fatal(err)
-	}
+	setup(dir)
 	d := newDevices(dir, node)
 	go d.refresh(context.Background())
 	go d.keep(context.Background())
+	go d.serveViewer()
 	serve(node, d)
 }
 
@@ -155,7 +158,9 @@ func num(description string) map[string]any {
 
 var deviceArg = str("which device, by name; default the only one")
 
-const instructions = "Linux devices for agents, each with a browser, on this server. Agents use them through Computer Use (computer_*), and the person sees them on the Agent Devices page."
+var kindArg = str("linux (with a browser; the default), windows, android or iphone: kinds lists what each server runs")
+
+const instructions = "Devices for agents on this server: Linux with a browser, and Windows, Android and iPhones where this machine runs them (kinds). Agents use them through Computer Use (computer_*), and the person sees them on the Agent Devices page."
 
 // browsing are the device's tools offered as operations of their own; the
 // rest are reached through use.
@@ -168,8 +173,19 @@ func ownOps() []map[string]any {
 	return []map[string]any{
 		{"name": "list", "description": "Every server's devices: each one's server, whether it's running, paused or stopped, its size, the memory and CPU it uses now, and who has borrowed it and what for (or that it's the spare kept for borrowing).",
 			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only this server's"}})},
-		{"name": "borrow", "description": "Borrow a device of your own for as long as you need a browser, starting its browser with a copy of a browser profile. Quick: a spare is kept ready. Give it back with give_back when done; it's deleted then, or after 15 minutes without a call, with anything in it.",
-			"input": object(map[string]any{"for": str("what you need it for, in a few words, e.g. Reading Messenger; the person sees it"),
+		{"name": "kinds", "description": "The kinds of device each server runs (linux, windows, android, iphone), with what input each takes, and its memory to spare in GB.",
+			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only this server's"}})},
+		{"name": "adopt", "description": "Make something already on this server a lasting device: a Windows VM's folder, an Android Virtual Device, or a simulator.",
+			"input": object(map[string]any{"device": str("its name"), "kind": kindArg, "dir": str("windows: its folder"), "id": str("android: its AVD; iphone: its simulator's UDID"),
+				"port": num("windows: its SSH port here; android: its console port"), "display": num("windows: its VNC display"), "cpus": num("windows: its CPUs"), "gb": num("windows: its memory")}, "device", "kind")},
+		{"name": "open", "description": "Open a URL in a device's browser.", "input": object(map[string]any{"device": str("the device's name"), "url": str("the URL")}, "device", "url")},
+		{"name": "install", "description": "Install an app on a device: a file here or a URL (.apk, .msi, .msix, .exe, .app, .deb), or a package's name (winget id, Android package, apt package).",
+			"input": object(map[string]any{"device": str("the device's name"), "app": str("the app")}, "device", "app")},
+		{"name": "run", "description": "Run a command on a device and give its output: PowerShell on Windows, the shell on Android and Linux, simctl spawn on an iPhone.",
+			"input": object(map[string]any{"device": str("the device's name"), "command": str("the command")}, "device", "command")},
+		{"name": "borrow", "description": "Borrow a device for as long as you need it. Linux (the default): one of your own whose browser starts with a copy of a browser profile, quick, as a spare is kept ready. Other kinds: the person's lasting device, one agent at a time, or a throwaway copy of it. Give it back with give_back when done; a throwaway one is deleted then, or after 15 minutes without a call, with anything in it.",
+			"input": object(map[string]any{"kind": kindArg, "device": str("a lasting device, by name"), "copy": map[string]any{"type": "boolean", "description": "a throwaway copy, not the lasting device"},
+				"for":     str("what you need it for, in a few words, e.g. Reading Messenger; the person sees it"),
 				"profile": prof, "screen": map[string]any{"type": "boolean", "description": "false for a device nobody watches: no view link"},
 				"by": str("who's borrowing, e.g. your app's name; default the device you call from")}, "for")},
 		{"name": "give_back", "description": "Give back a borrowed device: it's deleted with everything in it, its browser's changes to the profile too. A sign_in device's profile is saved first.", "input": name},
@@ -178,8 +194,8 @@ func ownOps() []map[string]any {
 		{"name": "save_profile", "description": "Save a browser profile from the device signing in to it (closing that device), or from the device named.",
 			"input": object(map[string]any{"device": str("the device's name"), "profile": prof})},
 		{"name": "signing_in", "description": "The browser profiles being signed in to on each server: item, profile, device, server and until.", "input": object(map[string]any{})},
-		{"name": "create", "description": "Create a lasting device and start it, for the person: Linux, with a browser of its own. Takes a minute. Agents borrow instead.",
-			"input": object(map[string]any{"device": str("its name: lowercase letters, digits and dashes"), "size": sizeArg}, "device")},
+		{"name": "create", "description": "Create a lasting device and start it, for the person: Linux with a browser of its own unless kind says another. Takes a minute. Agents borrow instead.",
+			"input": object(map[string]any{"device": str("its name: lowercase letters, digits and dashes"), "kind": kindArg, "size": sizeArg}, "device")},
 		{"name": "resize", "description": "Change how much CPU and memory a device may use, at once, without restarting it.",
 			"input": object(map[string]any{"device": str("the device's name"), "size": sizeArg}, "device", "size")},
 		{"name": "start", "description": "Start a stopped (or paused) device. It starts again after the server restarts.", "input": name},
