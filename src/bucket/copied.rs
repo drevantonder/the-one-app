@@ -1,7 +1,9 @@
 //! The install's bucket as a server on a machine reads it: every database step and copy it reads or writes is kept on
 //! its own disk too, sealed as it is in the bucket, so it reads each from the bucket once. Each is written once, at a
 //! name its seal binds it to, so what's kept here can only be behind the bucket, never different from it; holding it
-//! opens nothing without the key. Everything else (keys, hints, leases) is read from the bucket each time.
+//! opens nothing without the key. A step another server sent is kept at once, with a note of who sent it in `.sent/`,
+//! and checked against the bucket's at the next fill, so a server that sends different servers different steps is
+//! caught. Everything else (keys, hints, leases) is read from the bucket each time.
 
 use std::path::PathBuf;
 
@@ -29,11 +31,45 @@ impl<B: Bucket + Clone> Copied<B> {
         Copied { reach: false, ..self.clone() }
     }
 
-    /// Keeps an object another server read or wrote, unless one with its name is kept already.
-    pub fn keep(&self, name: &str, bytes: &[u8]) -> Result<()> {
+    /// Keeps a step another server, `from`, sent, unless one with its name is kept already, until `check` finds it's
+    /// the bucket's.
+    pub fn keep(&self, name: &str, bytes: &[u8], from: &str) -> Result<()> {
         ensure!(kept(name), "{name} isn't a step or copy of a database");
-        self.here.create(name, bytes)?;
+        // The note first, so a step is never kept unchecked.
+        if self.here.get(name)?.is_none() {
+            self.sent().put(name, from.as_bytes())?;
+            self.here.create(name, bytes)?;
+        }
         Ok(())
+    }
+
+    /// The notes of who sent which steps not yet checked.
+    fn sent(&self) -> Place {
+        let Place::Folder(dir) = &self.here else { unreachable!("a copy is a folder") };
+        Place::Folder(dir.join(".sent"))
+    }
+
+    /// Checks each step other servers sent against the bucket's at its name, replacing any that differs with the
+    /// bucket's: → the names of those, with who sent each. One the bucket doesn't have yet, or didn't answer for, is
+    /// checked next time.
+    pub async fn check(&self) -> Result<Vec<(String, String)>> {
+        let (sent, mut wrong) = (self.sent(), Vec::new());
+        for name in sent.names()? {
+            let theirs = match Bucket::get(&self.place, &name).await {
+                Ok(Some(o)) => o.bytes,
+                Ok(None) => continue,
+                Err(err) => {
+                    tracing::debug!("checking {name}: {err:#}");
+                    continue;
+                }
+            };
+            if self.here.get(&name)?.as_deref() != Some(&theirs[..]) {
+                self.here.put(&name, &theirs)?;
+                wrong.push((name.clone(), String::from_utf8_lossy(&sent.get(&name)?.unwrap_or_default()).into_owned()));
+            }
+            sent.delete(&name)?;
+        }
+        Ok(wrong)
     }
 
     /// A kept object, without asking the bucket.
@@ -48,10 +84,13 @@ impl<B: Bucket + Clone> Copied<B> {
     pub fn forget(&self, folder: &str) -> Result<()> {
         ensure!(!folder.is_empty() && folder.split('/').all(segment), "{folder} isn't a folder of the bucket");
         let Place::Folder(dir) = &self.here else { unreachable!("a copy is a folder") };
-        match std::fs::remove_dir_all(dir.join(folder)) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-            _ => Ok(()),
+        for dir in [dir.join(folder), dir.join(".sent").join(folder)] {
+            match std::fs::remove_dir_all(dir) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                _ => {}
+            }
         }
+        Ok(())
     }
 
     /// The folders of scopes kept here.
@@ -59,7 +98,8 @@ impl<B: Bucket + Clone> Copied<B> {
         self.here.list("")
     }
 
-    /// Fetches into this copy a database's steps after `at` that the bucket has: how many.
+    /// Fetches into this copy a database's steps after `at` that the bucket has: how many. Steps other servers sent
+    /// are read as kept, so `check` them first.
     pub async fn fill(&self, prefix: &str, at: u64) -> Result<u64> {
         let mut n = at;
         while Bucket::get(self, &crate::db::step_name(prefix, n + 1)).await?.is_some() {

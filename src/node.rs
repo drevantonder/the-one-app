@@ -1171,7 +1171,7 @@ impl Node {
         let prefix = format!("{}/{}", crate::bucket::folder(&scope.to_string()), id.1);
         let kept = match step.map(|s| data_encoding::BASE64.decode(s.as_bytes())) {
             Some(Ok(bytes)) if holds && at > 0 => {
-                bucket.keep(&crate::db::step_name(&prefix, at), &bytes)?;
+                bucket.keep(&crate::db::step_name(&prefix, at), &bytes, &hex(by))?;
                 // A step whose one before isn't here may follow one this server wasn't sent.
                 at == 1 || bucket.kept(&crate::db::step_name(&prefix, at - 1))?.is_some()
             }
@@ -1202,11 +1202,30 @@ impl Node {
 
     /// Fetches into this server's copy what the bucket has of each database open here that it lacks, every tick: a
     /// ping that was lost, or a write by a node that sends none (the serverless one). A database a call is using is
-    /// left for the next.
+    /// left for the next. First, the steps other servers sent are checked against the bucket's: a database that read
+    /// one that differs is read again from the bucket's, and the server that sent it is recorded, for Devices.
     async fn fill_copies(&self) {
         let Ok(bucket) = self.bucket() else { return };
-        let open: Vec<_> = self.0.dbs.lock().unwrap().iter().map(|(id, db)| (id.clone(), db.clone())).collect();
         let mut changed = Vec::new();
+        match bucket.check().await {
+            Ok(wrong) => {
+                for (name, from) in wrong {
+                    let Some((folder, id)) = name.rsplit_once('/').and_then(|(prefix, _)| prefix.split_once('/')) else { continue };
+                    let Ok(scope) = Scope::parse(&crate::bucket::scope_of(folder)) else { continue };
+                    tracing::warn!("{from} sent {name}, which isn't the bucket's: reading it again");
+                    self.0.dbs.lock().unwrap().remove(&(scope, id.to_string()));
+                    changed.extend(id.split('/').next().filter(|app| *app != members::APP).map(str::to_string));
+                    let Ok(server) = unhex(&from) else { continue };
+                    let name = self.with(|i| Ok(i.r.members.server(&server).map(|s| s.name.clone()))).ok().flatten().unwrap_or_else(|| short(&server));
+                    let said = status::Said::Failed { app: members::APP.into(), op: "changed".into(), error: format!("{name} sent a step that isn't the bucket's"), user: from };
+                    if let Err(err) = self.say(&Scope::Global, said).await {
+                        tracing::warn!("recording that {name} sent a wrong step: {err:#}");
+                    }
+                }
+            }
+            Err(err) => tracing::warn!("checking the steps other servers sent: {err:#}"),
+        }
+        let open: Vec<_> = self.0.dbs.lock().unwrap().iter().map(|(id, db)| (id.clone(), db.clone())).collect();
         for ((_, name), db) in open {
             let Ok((prefix, at)) = db.try_lock().map(|db| (db.prefix().to_string(), db.at())) else { continue };
             match bucket.fill(&prefix, at).await {
@@ -2864,6 +2883,8 @@ impl Node {
                         "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(),
                         "serves_me": m.serves(&s.key, me),
                         "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
+                        // When it last sent another server a step that wasn't the bucket's.
+                        "sent_wrong": i.status.get(&Scope::Global.to_string()).and_then(|st| st.insights.get(members::APP)).and_then(|ins| ins.errors.iter().filter(|((op, _), f)| op == "changed" && f.user == hex(&s.key)).map(|(_, f)| f.last).max()),
                         // `drivers` too: sidecars' name before, which shells and sidecars built before still read.
                         "drivers": if s.key == self.0.id { here_sidecars.iter().map(|d| d.0.clone()).collect() } else { session.map(|s| s.sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },
                         "sidecars": if s.key == self.0.id { here_sidecars.iter().map(|d| d.0.clone()).collect() } else { session.map(|s| s.sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },

@@ -4,7 +4,8 @@
 //!
 //! Then the same with each server keeping a copy on its disk, sent some of the others' steps as they're written, and
 //! reading from its copy alone in between: what it reads may be behind, but never anything no server read at the same
-//! step, and the copy opens nothing without the key.
+//! step, and the copy opens nothing without the key. A hacked server that sends some of them steps of its own making,
+//! sealed with the key, at positions their copies lack, is caught: each copy ends matching the bucket.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -202,7 +203,7 @@ async fn run_copied(seed: u64) {
                 if let Some(step) = here.kept(&name).unwrap().filter(|_| db.at() > at) {
                     for (other, copy) in copies.iter().enumerate().filter(|(o, _)| *o != server) {
                         if link.rng.lock().unwrap().gen_bool(0.6) {
-                            copy.keep(&name, &step).unwrap_or_else(|e| panic!("seed {seed}: server {other} kept no step: {e:#}"));
+                            copy.keep(&name, &step, &server.to_string()).unwrap_or_else(|e| panic!("seed {seed}: server {other} kept no step: {e:#}"));
                         }
                     }
                 }
@@ -217,16 +218,44 @@ async fn run_copied(seed: u64) {
     for s in servers {
         dbs.push(s.await.unwrap());
     }
-    for (db, copy) in dbs.iter_mut().zip(&copies) {
-        retry(async || db.catch_up(copy).await).await;
-    }
     let fresh = retry(async || Db::open(&link, "global/sim/main", key).await).await;
+    // Server 0 is hacked: it sends the others, at each position their copies lack, a step of a kind that writes nothing.
+    let mut forged = vec![Vec::new(); COPYING];
+    for (i, copy) in copies.iter().enumerate().skip(1) {
+        for n in 1..=fresh.at() {
+            let name = one::db::step_name("global/sim/main", n);
+            if copy.kept(&name).unwrap().is_none() {
+                copy.keep(&name, &one::db::seal(&key, &name, b"x"), "0").unwrap();
+                forged[i].push((name, "0".to_string()));
+            }
+        }
+    }
+    for (i, (db, copy)) in dbs.iter_mut().zip(&copies).enumerate() {
+        // Read before the check: the forged steps are read as they are.
+        retry(async || db.catch_up(copy).await).await;
+        let mut wrong = Vec::new();
+        while !walk(&root.join(i.to_string()).join(".sent")).is_empty() {
+            wrong.extend(copy.check().await.unwrap());
+        }
+        // One the link failed is checked again later.
+        wrong.sort();
+        assert_eq!(wrong, forged[i], "seed {seed}: server {i} found each step server 0 forged, and only those");
+        if !wrong.is_empty() {
+            // As a node does: the database is read again, from its copy, now the bucket's.
+            *db = retry(async || Db::open(copy, "global/sim/main", key).await).await;
+        }
+    }
     for (i, (db, copy)) in dbs.iter().zip(&copies).enumerate() {
         assert_eq!(state(db), state(&fresh), "seed {seed}: server {i} caught up with the bucket");
         // Its copy alone opens to a step some server read, with the key and only with it.
         let alone = Db::open(&copy.here_only(), "global/sim/main", key).await.unwrap_or_else(|e| panic!("seed {seed}: server {i}'s copy didn't open: {e:#}"));
         saw(&seen, &alone, seed);
         assert!(Db::open(&copy.here_only(), "global/sim/main", one::kernel::database_key(&[!(seed as u8); 32], "main")).await.is_err(), "seed {seed}: another key opened server {i}'s copy");
+    }
+    for (i, copy) in copies.iter().enumerate() {
+        for name in walk(&root.join(i.to_string())).iter().filter_map(|f| f.strip_prefix(root.join(i.to_string())).ok()?.to_str().map(str::to_string)).filter(|n| !n.starts_with(".sent")) {
+            assert_eq!(copy.kept(&name).unwrap(), link.objects.lock().unwrap().get(&name).cloned(), "seed {seed}: server {i}'s {name} is the bucket's");
+        }
     }
     for file in walk(&root) {
         let bytes = std::fs::read(&file).unwrap();
@@ -236,7 +265,8 @@ async fn run_copied(seed: u64) {
 }
 
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-    std::fs::read_dir(dir).unwrap().flat_map(|e| {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    entries.flat_map(|e| {
         let path = e.unwrap().path();
         if path.is_dir() { walk(&path) } else { vec![path] }
     }).collect()
