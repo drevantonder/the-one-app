@@ -303,8 +303,7 @@ public sealed class MainWindow : Window
         listening?.Cancel();
         Sheet.CloseAll();
         nav = null;
-        Store.Shared.Clear();
-        ScreenCopies.Forget();
+        Forget();
         Taskbar(0);
         var panel = new StackPanel { Spacing = 14, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var logo = new Image { Source = new BitmapImage(new Uri(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Logo.png"))), Width = 112, Height = 112, HorizontalAlignment = HorizontalAlignment.Center };
@@ -397,11 +396,38 @@ public sealed class MainWindow : Window
         body.Content = new ScrollViewer { Content = new Grid { Padding = new Thickness(40), Children = { panel } }, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
 
+    /// Signed out: nothing of the person's is left on this computer, and the Widgets board's widgets say to sign in.
+    void Forget()
+    {
+        Store.Shared.Clear();
+        AppScreen.Forget();
+        _ = ForgetWebData();
+        _ = Task.Run(Widgets.SignedOut);
+    }
+
+    /// What screens' web views kept (their cache, storage and service workers), cleared by a web view of the same
+    /// folder, out of sight.
+    async Task ForgetWebData()
+    {
+        var web = new WebView2 { Width = 0, Height = 0, Visibility = Visibility.Collapsed };
+        root.Children.Add(web);
+        try
+        {
+            await web.EnsureCoreWebView2Async();
+            await web.CoreWebView2.Profile.ClearBrowsingDataAsync();
+        }
+        catch (Exception e)
+        {
+            App.Problem(e);
+        }
+        root.Children.Remove(web);
+        web.Close();
+    }
+
     public async Task SignOut()
     {
         listening?.Cancel();
         await Auth.Shared.SignOut();
-        try { System.IO.Directory.Delete(AppScreen.Kept, true); } catch { }
         pushed.Clear();
         selection = Route.PageOf("user");
         Welcome(null);

@@ -333,7 +333,8 @@ public sealed class AppScreen : Grid
                             Reply(id, kept);
                             return;
                         }
-                        if (file != null)
+                        // A screen still open as the person signs out keeps nothing after.
+                        if (file != null && Auth.Shared.SignedIn)
                         {
                             Directory.CreateDirectory(Path.GetDirectoryName(file)!);
                             await System.IO.File.WriteAllTextAsync(file, m["value"]?.ToJsonString() ?? "null");
@@ -578,11 +579,21 @@ public sealed class AppScreen : Grid
         if (file != null) await Windows.Storage.FileIO.WriteBytesAsync(file, bytes);
     }
 
+    static string Previewed => Path.Combine(Path.GetTempPath(), Brand.Cli);
+
+    /// What screens kept on this computer, gone: their copies, what they asked to keep and the files they showed.
+    public static void Forget()
+    {
+        ScreenCopies.Forget();
+        foreach (var dir in new[] { Kept, Previewed })
+            try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
+    }
+
     /// `one.preview`: in the app Windows opens its kind of file with.
     static async Task Preview(JsonObject f)
     {
         var (name, bytes) = await File(f);
-        var dir = Path.Combine(Path.GetTempPath(), Brand.Cli, Guid.NewGuid().ToString("N"));
+        var dir = Path.Combine(Previewed, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, Path.GetFileName(name));
         await System.IO.File.WriteAllBytesAsync(path, bytes);

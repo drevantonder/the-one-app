@@ -250,12 +250,12 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
         await reading.WaitAsync();
         try
         {
-            if (items != null && away == null && DateTime.UtcNow - readAt < fresh) return;
             if (Auth.Shared.Address == null || !Auth.Shared.SignedIn)
             {
-                away = "signed out";
+                (items, away) = (null, "signed out");
                 return;
             }
+            if (items != null && away == null && DateTime.UtcNow - readAt < fresh) return;
             await Store.Shared.RefreshAll();
             items = WidgetCache.Of(Store.Shared);
             readAt = DateTime.UtcNow;
@@ -280,7 +280,12 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
         foreach (var (id, p) in pinned) Draw(id, p);
     }
 
-    static void Draw(string id, Pinned p) => Send(id, p, items, Store.Shared.Config?.Accent ?? Brand.Accent, away);
+    static void Draw(string id, Pinned p)
+    {
+        // Signed out in the window since they were read: none of the person's widgets are drawn again.
+        if (!Auth.Shared.SignedIn) (items, away) = (null, "signed out");
+        Send(id, p, items, Store.Shared.Config?.Accent ?? Brand.Accent, away);
+    }
 
     /// What a pinned widget shows, sent to the board.
     static void Send(string id, Pinned p, List<WidgetCache.Item>? list, string accent, string? why)
@@ -325,13 +330,20 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
     /// From the window, once it has read its widgets again: the pinned ones drawn with them, as the board has them.
     public static void Changed(List<WidgetCache.Item> list, string accent)
     {
-        if (list.Count == 0) return;
+        if (list.Count > 0) Each(p => !p.Choosing, (id, p) => Send(id, p, list, accent, null));
+    }
+
+    /// From the window, as the person signs out: every pinned widget says to sign in, at once.
+    public static void SignedOut() => Each(_ => true, (id, p) => Send(id, p, null, Brand.Accent, "signed out"));
+
+    static void Each(Func<Pinned, bool> which, Action<string, Pinned> send)
+    {
         try
         {
             foreach (var info in WidgetManager.GetDefault().GetWidgetInfos())
             {
                 var p = Pinned.Of(info.WidgetContext, info.CustomState);
-                if (!p.Choosing) Send(info.WidgetContext.Id, p, list, accent, null);
+                if (which(p)) send(info.WidgetContext.Id, p);
             }
         }
         catch
