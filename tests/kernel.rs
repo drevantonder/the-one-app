@@ -1185,10 +1185,12 @@ fn the_gateway_sends_each_path_where_it_belongs_and_nothing_a_node_says_runs_at_
         assert_eq!((status, headers["content-type"].as_str()), (200, "text/html; charset=utf-8"), "{path}");
         assert!(body.contains("The web client"), "{path}: {body}");
         assert_eq!(headers["x-content-type-options"], "nosniff");
+        assert_eq!(headers["x-frame-options"], "SAMEORIGIN", "no other site frames the web client");
     }
     let (status, headers, body) = ask("GET", &at("/frame.html"), &[], None);
     assert!(status == 200 && body.contains("A screen's frame"));
-    assert!(!headers.contains_key("content-security-policy") && !headers.contains_key("x-frame-options"), "a screen's frame carries its own policy: {headers:?}");
+    assert!(!headers.contains_key("content-security-policy"), "a screen's frame carries its own policy: {headers:?}");
+    assert_eq!(headers["x-frame-options"], "SAMEORIGIN", "only the web client's own page frames it");
     let (status, headers, _) = ask("GET", &at("/screen/kit.css"), &[], None);
     assert_eq!((status, headers["content-type"].as_str()), (200, "text/css; charset=utf-8"));
     assert_eq!(ask("GET", &at("/nothing.js"), &[], None).0, 404, "a missing file isn't the page");

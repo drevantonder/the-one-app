@@ -65,6 +65,8 @@ async function toWeb(request, env, url) {
   if (resp.status === 404 && !/\.[a-z0-9]+$/i.test(url.pathname)) resp = await ask((path = "/index.html"));
   const headers = new Headers(resp.headers);
   headers.set("x-content-type-options", "nosniff");
+  // No other site frames the web client; its own page frames frame.html. Each page carries its own CSP.
+  headers.set("x-frame-options", "SAMEORIGIN");
   const type = TYPES[path.split(".").pop().toLowerCase()];
   if (resp.ok && type) headers.set("content-type", type);
   return new Response(resp.body, { status: resp.status, headers });
