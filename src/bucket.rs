@@ -635,6 +635,26 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Tries real S3-compatible storage as an install's bucket: `ONE_TEST_S3` names a JSON file of a place's fields.
+    #[test]
+    #[ignore = "needs real storage: ONE_TEST_S3=<fields.json> cargo test -- --ignored real_storage"]
+    fn real_storage_writes_only_if_absent_and_replaces_only_while_unchanged() {
+        let fields: BTreeMap<String, String> = serde_json::from_slice(&std::fs::read(std::env::var("ONE_TEST_S3").unwrap()).unwrap()).unwrap();
+        let place = Place::from_fields(&fields).unwrap();
+        let steps = place.try_it(true);
+        assert!(steps.iter().all(|(_, err)| err.is_none()), "{steps:?}");
+        let name = format!("test-{}", hex(&rand::random::<[u8; 32]>()));
+        let won: usize = std::thread::scope(|s| {
+            let runs: Vec<_> = (0..8).map(|i| {
+                let (place, name) = (&place, &name);
+                s.spawn(move || place.create(name, format!("{i}").as_bytes()).unwrap() as usize)
+            }).collect();
+            runs.into_iter().map(|r| r.join().unwrap()).sum()
+        });
+        place.delete(&name).unwrap();
+        assert_eq!(won, 1, "eight at once, one wins");
+    }
+
     #[test]
     fn storage_that_cant_write_conditionally_cant_hold_an_install() {
         let fields = |endpoint: &str| -> BTreeMap<String, String> {
