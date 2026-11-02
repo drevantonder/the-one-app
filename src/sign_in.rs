@@ -1,5 +1,5 @@
 //! This machine's CLI and MCP signed in to the install's kernel, as every other client is: an OAuth client of its auth
-//! service, registered the first time it signs in. The person approves a short code with their passkey on any device
+//! service, registered the first time it signs in. The person approves a short code by signing in on any device
 //! (`kernel/auth`'s `/sign-in/code`), here in the browser if this machine has a screen. The refresh token is kept in a
 //! file only this machine's user reads, outside the node's data: the node is only ever sent access tokens.
 

@@ -66,7 +66,7 @@ fn install() -> String {
 /// Connecting for a person: by the install's address, or with the command line on one of their devices.
 pub fn connecting() -> String {
     format!(
-        "When someone asks you to connect to {NAME}, do as much as you can yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- If you can add an MCP server by its address (Claude Code, Codex, ChatGPT and Claude can), add their {NAME}'s web address followed by `/mcp`, like `https://{CLI}.example.com/mcp`. They sign in with their passkey when it asks, and you act as them.\n- With a terminal, if `{CLI} status` answers, you're on one of their devices already: use the command line, and add MCP as below. If there's no `{CLI}`, {}, then ask them for a pairing code (Settings, then Devices) and run `{CLI} join <code>`.",
+        "When someone asks you to connect to {NAME}, do as much as you can yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- If you can add an MCP server by its address (Claude Code, Codex, ChatGPT and Claude can), add their {NAME}'s web address followed by `/mcp`, like `https://{CLI}.example.com/mcp`. They sign in when it asks, and you act as them.\n- With a terminal, if `{CLI} status` answers, you're on one of their devices already: use the command line, and add MCP as below. If there's no `{CLI}`, {}, then ask them for a pairing code (Settings, then Devices) and run `{CLI} join <code>`.",
         install()
     )
 }

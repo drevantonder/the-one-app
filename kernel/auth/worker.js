@@ -400,16 +400,15 @@ export class Auth extends DurableObject {
     });
   }
 
-  /// Signing in to a client with Google, just now: the client gets a code, and the vault opens the person's keys for
-  /// it. The sign-in here ends with it, so the next client asks Google again.
+  /// Signing in to a client with Google, just now (a client's code is swapped for tokens only while that sign-in
+  /// lasts, so it isn't ended here; a later client asks Google again): the client gets a code, and the vault opens
+  /// the person's keys for it.
   async acceptGoogle(request, { oauth_query }) {
     const signedIn = await this.session(request);
-    const { user } = signedIn;
     if (!fresh(signedIn)) refuse(403, "Sign in with Google again.");
-    const out = await this.consent(request, user, oauth_query, (client, code) =>
+    const { user } = signedIn;
+    return this.consent(request, user, oauth_query, (client, code) =>
       this.vault("google", { user: user.id, to: code, name: client.name || client.clientId, client: client.clientId }));
-    await (await this.auth.$context).internalAdapter.deleteSession(signedIn.session.token);
-    return out;
   }
 
   /// Lets a client's authorization (`oauth_query`) through as `user`, with `keys(client, code)` giving its code a copy of

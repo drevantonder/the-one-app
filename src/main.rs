@@ -19,7 +19,7 @@ fn help() -> String {
 Usage:
   {CLI} serve                          run this machine's server
   {CLI} status                         this server, its install, its users, groups and servers
-  {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code with your passkey on any of
+  {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
                                        your devices; {CLI} and {CLI} mcp here then act as you
   {CLI} sign-out                       sign this machine out
   {CLI} create <name> --as <your name> create an install, with you as its first admin
@@ -408,7 +408,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let keys = keys.as_array().map(Vec::as_slice).unwrap_or_default();
             for ((_, people), given) in one::kernel::give_keys(&settings, keys)?.into_iter().zip(keys) {
                 let names: Vec<&str> = people.iter().map(|u| given["names"][u].as_str().unwrap_or(u)).collect();
-                println!("{}: {}", given["title"].as_str().unwrap_or(""), if names.is_empty() { "no one with it has a passkey yet".to_string() } else { format!("opens for {}", names.join(", ")) });
+                println!("{}: {}", given["title"].as_str().unwrap_or(""), if names.is_empty() { "no one with it has signed in yet".to_string() } else { format!("opens for {}", names.join(", ")) });
             }
         }
         ["serverless", "deploy"] => {
@@ -896,7 +896,8 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
         }
     };
     let started = one::sign_in::start(&address)?;
-    println!("To sign in this machine, open this link on any of your devices and sign in with your passkey:\n\n  {}\n\nor go to {}/sign-in/code and type {}.", started.url, address.trim_end_matches('/'), started.code);
+    let with = if one::config::SIGN_IN == "google" { "Google" } else { "your passkey" };
+    println!("To sign in this machine, open this link on any of your devices and sign in with {with}:\n\n  {}\n\nor go to {}/sign-in/code and type {}.", started.url, address.trim_end_matches('/'), started.code);
     if one::sign_in::has_screen() && one::sign_in::open(&started.url) {
         println!("It's open in your browser here.");
     }
