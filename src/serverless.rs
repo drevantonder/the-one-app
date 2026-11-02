@@ -62,11 +62,11 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
     what.extend(modules.iter().flat_map(|(n, k, b)| [n.as_bytes().to_vec(), k.as_bytes().to_vec(), b.clone()]));
     let what = Uploaded::hash(&what);
     let uploaded = Uploaded::load();
-    if uploaded.same(&cf.scripts()?, &name, &what) {
-        return Ok(());
+    if !uploaded.same(cf, &name, &what) {
+        let modules: Vec<(&str, &str, &[u8])> = modules.iter().map(|(n, k, b)| (n.as_str(), *k, b.as_slice())).collect();
+        let version = cf.upload(&name, &modules, &meta)?;
+        uploaded.record(vec![(name.clone(), what, version)])?;
     }
-    let modules: Vec<(&str, &str, &[u8])> = modules.iter().map(|(n, k, b)| (n.as_str(), *k, b.as_slice())).collect();
-    cf.upload(&name, &modules, &meta)?;
-    cf.hide(&name)?;
-    uploaded.record(cf, vec![(name, what)])
+    // Its address may have been turned on by hand.
+    cf.hide(&name)
 }

@@ -747,13 +747,20 @@ impl Cloudflare {
     /// The account's Workers, by name.
     pub fn scripts(&self) -> Result<std::collections::BTreeMap<String, Script>> {
         let list = self.call("GET", &format!("/accounts/{}/workers/scripts", self.account), None)?;
-        let script = |s: &Value| Script { migration: s["migration_tag"].as_str().map(str::to_string), modified: s["modified_on"].as_str().map(str::to_string) };
+        let script = |s: &Value| Script { migration: s["migration_tag"].as_str().map(str::to_string) };
         Ok(list.as_array().into_iter().flatten().filter_map(|s| Some((s["id"].as_str()?.to_string(), script(s)))).collect())
     }
 
+    /// The versions a Worker's active deployment runs, as one string, if it has one.
+    pub(crate) fn active(&self, name: &str) -> Result<Option<String>> {
+        let list = self.call("GET", &format!("/accounts/{}/workers/scripts/{name}/deployments", self.account), None)?;
+        let versions = list["deployments"][0]["versions"].as_array().into_iter().flatten().filter_map(|v| v["version_id"].as_str()).collect::<Vec<_>>();
+        Ok((!versions.is_empty()).then(|| versions.join(",")))
+    }
+
     /// Uploads a Worker: its modules (name, type, bytes), the first its main one, and its bindings and Durable Object
-    /// class.
-    pub(crate) fn upload(&self, name: &str, modules: &[(&str, &str, &[u8])], metadata: &Value) -> Result<()> {
+    /// class: → the version it deployed, if Cloudflare says.
+    pub(crate) fn upload(&self, name: &str, modules: &[(&str, &str, &[u8])], metadata: &Value) -> Result<Option<String>> {
         let boundary = format!("kernel-{}", data_encoding::HEXLOWER.encode(&rand::random::<[u8; 12]>()));
         let mut body = Vec::new();
         body.extend(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n").as_bytes());
@@ -763,8 +770,8 @@ impl Cloudflare {
             body.extend(b"\r\n");
         }
         body.extend(format!("--{boundary}--\r\n").as_bytes());
-        self.call("PUT", &format!("/accounts/{}/workers/scripts/{name}", self.account), Some((format!("multipart/form-data; boundary={boundary}"), body)))?;
-        Ok(())
+        let done = self.call("PUT", &format!("/accounts/{}/workers/scripts/{name}", self.account), Some((format!("multipart/form-data; boundary={boundary}"), body)))?;
+        Ok(done["deployment_id"].as_str().map(str::to_string))
     }
 
     /// Uploads `files` (path, bytes) as a Worker's static assets, those Cloudflare hasn't already: → the token its
@@ -960,7 +967,9 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
                 what.extend(web.iter().flat_map(|(path, bytes)| [path.as_bytes().to_vec(), bytes.clone()]));
             }
             let what = Uploaded::hash(&what);
-            if complete && uploaded.same(&scripts, &name, &what) {
+            if complete && uploaded.same(cf, &name, &what) {
+                // Its address may have been changed by hand.
+                cf.reach(&name, url)?;
                 continue;
             }
             if service == "gateway" {
@@ -968,19 +977,19 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
                 meta["assets"] = json!({ "jwt": jwt, "config": { "html_handling": "none", "not_found_handling": "none", "run_worker_first": true } });
                 meta["bindings"].as_array_mut().unwrap().push(json!({ "type": "assets", "name": "ASSETS" }));
             }
-            cf.upload(&name, &[("worker.js", "application/javascript+module", &modules[i])], &meta)?;
+            let version = cf.upload(&name, &[("worker.js", "application/javascript+module", &modules[i])], &meta)?;
             cf.reach(&name, url)?;
             // Later services' bindings to it resolve in this pass, and its class has had its migration.
-            scripts.insert(name.clone(), Script { migration: class.map(|_| "v1".to_string()), modified: None });
+            scripts.insert(name.clone(), Script { migration: class.map(|_| "v1".to_string()) });
             if complete {
-                sent.push((name, what));
+                sent.push((name, what, version));
             } else {
                 again.push(i);
             }
         }
         left = again;
         if left.is_empty() {
-            return uploaded.record(cf, sent);
+            return uploaded.record(sent);
         }
     }
     bail!("some services' bindings never resolved")
@@ -990,13 +999,11 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
 pub struct Script {
     /// The Durable Object migration it has had.
     pub migration: Option<String>,
-    /// When it last changed, by whatever means.
-    pub modified: Option<String>,
 }
 
 /// What this machine last uploaded to each of the kernel's Workers: a hash of everything it sent (the secrets in its
-/// bindings too), and when Cloudflare then said the Worker last changed. A Worker that would get the same, and that
-/// nothing has changed since, isn't uploaded again: an update deploys the kernel each time the node changes, and most of
+/// bindings too), and the version Cloudflare made of it. A Worker that would get the same, and still runs that
+/// version (no other upload, edit or rollback since), isn't uploaded again: an update deploys the kernel each time the node changes, and most of
 /// its changes leave every Worker as it was.
 pub(crate) struct Uploaded(serde_json::Map<String, Value>);
 
@@ -1019,21 +1026,20 @@ impl Uploaded {
         data_encoding::HEXLOWER.encode(&hash.finalize())
     }
 
-    /// Whether `name` holds `what`, as this machine uploaded it, and has had nothing done to it since.
-    pub(crate) fn same(&self, scripts: &std::collections::BTreeMap<String, Script>, name: &str, what: &str) -> bool {
-        let modified = scripts.get(name).and_then(|s| s.modified.as_deref());
-        self.0.get(name).is_some_and(|was| was["hash"] == what && modified.is_some() && was["modified"].as_str() == modified)
+    /// Whether `name` runs `what`, as this machine uploaded it, and nothing has deployed it since.
+    pub(crate) fn same(&self, cf: &Cloudflare, name: &str, what: &str) -> bool {
+        let Some(was) = self.0.get(name).filter(|was| was["hash"] == what) else { return false };
+        cf.active(name).ok().flatten().is_some_and(|active| was["version"].as_str() == Some(active.as_str()))
     }
 
-    /// Keeps what was uploaded to each of `sent` (name, hash), with when Cloudflare says it changed once it's all done.
-    pub(crate) fn record(mut self, cf: &Cloudflare, sent: Vec<(String, String)>) -> Result<()> {
+    /// Keeps what was uploaded to each of `sent` (name, hash, the version Cloudflare made of it).
+    pub(crate) fn record(mut self, sent: Vec<(String, String, Option<String>)>) -> Result<()> {
         if sent.is_empty() {
             return Ok(());
         }
-        let scripts = cf.scripts()?;
-        for (name, what) in sent {
-            match scripts.get(&name).and_then(|s| s.modified.clone()) {
-                Some(modified) => self.0.insert(name, json!({ "hash": what, "modified": modified })),
+        for (name, what, version) in sent {
+            match version {
+                Some(version) => self.0.insert(name, json!({ "hash": what, "version": version })),
                 None => self.0.remove(&name),
             };
         }
