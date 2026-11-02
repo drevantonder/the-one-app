@@ -58,7 +58,33 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
         ask(&format!("{CLI} {app} {op} can't be undone. Go ahead?"), &format!("{app} {op} can't be undone: run it again with --confirm"))?;
     }
     let r = post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" }))?;
+    if let Some(none) = spec.as_ref().and_then(|(a, _)| none_said(a, op, &r["ok"], true)) {
+        println!("{none}");
+        return Ok(());
+    }
     show(app, op, &r["ok"], out.as_deref())
+}
+
+/// An operation as the caller names it: `one gmail sign_in` on the command line, `gmail_sign_in` to MCP.
+pub fn named(app: &str, op: &str, cli: bool) -> String {
+    match cli {
+        true => format!("{CLI} {app} {op}"),
+        false => format!("{app}_{op}"),
+    }
+}
+
+/// An empty list of accounts in words, with what to do: screens want the list, a person or agent reading wants this.
+pub fn none_said(app: &Value, op: &str, ok: &Value, cli: bool) -> Option<String> {
+    if op != "accounts" || ok.as_array().is_none_or(|a| !a.is_empty()) {
+        return None;
+    }
+    let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
+    let signs_in = app["ops"].as_array().into_iter().flatten().any(|o| o["name"] == "sign_in");
+    Some(match (signs_in, app["needs"].as_str()) {
+        (true, _) => format!("No account is signed in to {title} yet: {} signs one in.", named(name, "sign_in", cli)),
+        (false, Some(needs)) => format!("None: {title} isn't on any of your devices yet. {needs}."),
+        (false, None) => format!("None: {title} has no accounts yet."),
+    })
 }
 
 /// What to say for an app or operation nobody here lists.

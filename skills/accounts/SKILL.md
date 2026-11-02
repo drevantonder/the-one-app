@@ -9,7 +9,7 @@ A service is an app with no screen of its own, for agents and other apps. Those 
 
 Every service with accounts has the same operations:
 
-- `<app>_accounts` lists its accounts, the default first, each `{ account, ok }`, with `why` when `ok` is false and it needs signing in again.
+- `<app>_accounts` lists its accounts, the default first, each `{ account, ok }`, with `why` when `ok` is false and it needs signing in again. With none, it says so, and what signs one in (a script gets an empty list).
 - `<app>_sign_in` starts signing in another one. It gives a link for the person to open (in a browser, or on the device a chat app's phone is linked from). Give them the link; never sign in for them, and never ask for their password.
 - `<app>_finish_sign_in`, where an app has one, takes the address the browser ended up on, if the person pastes it back.
 - `<app>_sign_out` signs one out. It can't be undone, so it takes `confirm: true` once the person asked for it.

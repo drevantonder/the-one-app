@@ -1636,7 +1636,11 @@ fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
             Err(e) => failed(format!("{e:#}")),
         },
         _ => match dispatch(name, input, agent, "mcp", None) {
-            Ok(ok) => json!({ "content": ops::mcp_content(&ok) }),
+            // A script gets an empty list as it is; an agent reading gets it in words.
+            Ok(ok) => match name.strip_suffix("_accounts").filter(|_| ok == json!([])).and_then(|app| ops::find(app, "accounts")).and_then(|(a, _)| ops::none_said(&a, "accounts", &ok, false)) {
+                Some(none) => json!({ "content": [{ "type": "text", "text": none }] }),
+                None => json!({ "content": ops::mcp_content(&ok) }),
+            },
             Err(e) => failed(format!("{e:#}")),
         },
     }
