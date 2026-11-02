@@ -1067,7 +1067,7 @@ fn only_a_try_installs_kernel_signs_its_person_in_with_nothing_to_show() {
     let mut tried = k.settings.clone();
     tried.try_person = Some(("0123456789abcdef".into(), "Andre".into()));
     let cf = kernel::Cloudflare { api: "http://127.0.0.1:9".into(), token: "a token".into(), account: "an account".into() };
-    for refused in [kernel::deploy(&cf, &tried, &[], &[]), one::serverless::deploy(&cf, &tried)] {
+    for refused in [kernel::deploy(&cf, &tried, &[], &[]), one::serverless::deploy(&cf, &tried), kernel::serve(&tried)] {
         assert!(refused.unwrap_err().to_string().contains("try install"));
     }
 }

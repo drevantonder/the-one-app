@@ -475,6 +475,9 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let dir = Settings::path().parent().unwrap().to_path_buf();
     let modules = SERVICES.iter().map(|(_, entry, _)| module(entry)).collect::<Result<Vec<_>>>()?;
     let web = dir.join("web");
+    let served = served(settings, modules, &web);
+    let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
+    ensure!(settings.try_person.is_none() || here(&settings.address) && served.iter().all(|s| here(&s.listen)), "a try install's kernel signs in anyone who reaches it, so it runs only beside its try install, at 127.0.0.1");
     let _ = std::fs::remove_dir_all(&web);
     let files = settings.web();
     parses(&files)?;
@@ -483,7 +486,7 @@ pub fn serve(settings: &Settings) -> Result<()> {
         std::fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(path, bytes)?;
     }
-    let config = write_config(&dir, &served(settings, modules, &web))?;
+    let config = write_config(&dir, &served)?;
     let mut child = start(&config, Vec::new())?;
     let status = child.wait()?;
     bail!("the kernel's workerd stopped: {status}")
