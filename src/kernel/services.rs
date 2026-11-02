@@ -345,7 +345,18 @@ pub fn write_config(dir: &Path, servers: &[Served]) -> Result<PathBuf> {
 
 /// Starts workerd on a config: → the running process.
 pub fn start(config: &Path) -> Result<std::process::Child> {
-    Ok(std::process::Command::new(crate::apps::workerd()?).arg("serve").arg(config).arg("--experimental").stdin(std::process::Stdio::null()).spawn()?)
+    let mut command = std::process::Command::new(crate::apps::workerd()?);
+    command.arg("serve").arg(config).arg("--experimental").stdin(std::process::Stdio::null());
+    // On Linux it dies with what started it, as apps' runtime does.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        command.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+            Ok(())
+        });
+    }
+    Ok(command.spawn()?)
 }
 
 // Cloudflare.

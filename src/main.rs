@@ -182,7 +182,7 @@ fn run(args: Vec<String>) -> Result<()> {
         ["serve"] => {
             usual_path();
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
-            serve()?
+            serve(flags.contains_key("try"))?
         }
         ["sign-in"] => sign_in(&flags)?,
         ["sign-out"] => match one::sign_in::sign_out()? {
@@ -1047,6 +1047,17 @@ fn try_install(rest: &[String]) -> Result<()> {
         Some(cmd @ ("serve" | "update" | "release" | "publish" | "try")) => bail!("{CLI} {cmd} isn't for the try install"),
         _ => {}
     }
+    if rest == ["kernel", "serve"] {
+        // A kernel beside the try install stops with it (its workerd with it: kernel::start).
+        let addr = running.clone().with_context(|| format!("start the try install first: {CLI} try"))?;
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            // Not asked over HTTP, which would keep it running (serve).
+            if std::net::TcpStream::connect(&addr).is_err() {
+                std::process::exit(0);
+            }
+        });
+    }
     let addr = match running {
         Some(addr) => addr,
         None => {
@@ -1091,7 +1102,7 @@ fn start_try(dir: &std::path::Path) -> Result<String> {
     let addr = free(one::config::PORT + 100).or_else(|| free(0)).context("no free port for the try install")?.to_string();
     let log = std::fs::File::create(dir.join("node.log"))?;
     let child = std::process::Command::new(std::env::current_exe()?)
-        .arg("serve")
+        .args(["serve", "--try"])
         .env(format!("{}_HOME", CLI.to_uppercase()), dir)
         .env(format!("{}_ADDR", CLI.to_uppercase()), &addr)
         .stdin(std::process::Stdio::null())
@@ -1131,8 +1142,14 @@ fn stop_try(dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// How long a try install's node runs with nobody asking it anything.
+const TRY_IDLE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// When a try install's node was last asked something, in seconds since it started.
+static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[tokio::main]
-async fn serve() -> Result<()> {
+async fn serve(is_try: bool) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn,iroh=error,noq_proto=error".into()))
         .init();
@@ -1142,7 +1159,26 @@ async fn serve() -> Result<()> {
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
     let routes = api::routes().route("/mcp", axum::routing::post(mcp_http));
-    let http = axum::serve(listener, api::guarded(routes, node));
+    let mut routes = api::guarded(routes, node);
+    if is_try {
+        // Left running, a try install stops by itself; `try` starts it again.
+        let started = std::time::Instant::now();
+        routes = routes.layer(axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
+            ASKED.store(started.elapsed().as_secs(), std::sync::atomic::Ordering::Relaxed);
+            next.run(req)
+        }));
+        let dir = dir.clone();
+        tokio::spawn(async move {
+            while started.elapsed().as_secs().saturating_sub(ASKED.load(std::sync::atomic::Ordering::Relaxed)) < TRY_IDLE.as_secs() {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+            tracing::info!("nobody asked the try install anything for {} minutes: stopping", TRY_IDLE.as_secs() / 60);
+            let _ = std::fs::remove_file(dir.join("pid"));
+            // It leads its group (start_try): this stops what it started too.
+            unsafe { libc::kill(0, libc::SIGTERM) };
+        });
+    }
+    let http = axum::serve(listener, routes);
     tokio::select! {
         r = http => r?,
         _ = tokio::signal::ctrl_c() => {}
