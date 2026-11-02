@@ -402,6 +402,12 @@ func connected(ctx context.Context, ports ...int) bool {
 	return false
 }
 
+// screenWatched reports whether something other than this sidecar is connected to a device's screen at socket.
+func screenWatched(ctx context.Context, socket string) bool {
+	out, err := exec.CommandContext(ctx, "ss", "-Hx", "state", "established").Output()
+	return err == nil && strings.Contains(string(out), socket+" ")
+}
+
 // listVMs is this machine's devices of other kinds, as list shows them.
 func (ds *devices) listVMs(ctx context.Context, me string, lent map[string]loan) []listed {
 	var out []listed
@@ -532,11 +538,23 @@ func runIn(ctx context.Context, stdin io.Reader, name string, args ...string) (s
 	return out.String(), nil
 }
 
-// localOnly says whose port is, of what only this machine's own programs use on its 127.0.0.1: its node's local API,
-// Agent Devices' viewer, and each device's controls, screen and shell. "" if it's none of those.
+// localOnly says whose port is, of what only this machine's own programs use on its 127.0.0.1: its node's (its local
+// API, and its apps' runtime and their requests out), adb's server, which drives every phone here, Agent Devices'
+// viewer, and each device's controls, screen and shell. "" if it's none of those.
 func (ds *devices) localOnly(ctx context.Context, port int) string {
-	if u, err := url.Parse(ds.node); err == nil && u.Port() == strconv.Itoa(port) {
-		return "this machine's node's"
+	if u, err := url.Parse(ds.node); err == nil {
+		if np, _ := strconv.Atoi(u.Port()); np == port {
+			return "this machine's node's"
+		} else if node := listeners(ctx, np); len(node) > 0 {
+			for _, pid := range listeners(ctx, port) {
+				if slices.Contains(node, pid) || slices.Contains(node, parent(ctx, pid)) {
+					return "this machine's node's"
+				}
+			}
+		}
+	}
+	if port == adbPort {
+		return "adb's"
 	}
 	if port == viewerPort {
 		return "Agent Devices' viewer's"
@@ -554,6 +572,38 @@ func (ds *devices) localOnly(ctx context.Context, port int) string {
 		}
 	}
 	return ""
+}
+
+// adbPort is where adb's server listens, which any program reaching it can drive every phone here with.
+const adbPort = 5037
+
+// listeners are the processes listening on port on this machine.
+func listeners(ctx context.Context, port int) []int {
+	var out []byte
+	if runtime.GOOS == "linux" {
+		out, _ = exec.CommandContext(ctx, "ss", "-Htlnp", fmt.Sprintf("( sport = :%d )", port)).Output()
+	} else {
+		out, _ = exec.CommandContext(ctx, "lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-Fp").Output()
+	}
+	// ss says users:(("one",pid=1,fd=9)), lsof -Fp a line p1 for each.
+	var pids []int
+	for _, f := range strings.FieldsFunc(string(out), func(r rune) bool { return r == ',' || r == '\n' || r == '(' || r == ')' }) {
+		f, ok := strings.CutPrefix(f, "pid=")
+		if !ok && runtime.GOOS != "linux" {
+			f, ok = strings.CutPrefix(f, "p")
+		}
+		if pid, err := strconv.Atoi(f); ok && err == nil && pid > 0 && !slices.Contains(pids, pid) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+// parent is a process's parent.
+func parent(ctx context.Context, pid int) int {
+	out, _ := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
+	ppid, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+	return ppid
 }
 
 // usedPorts are the ports this machine's devices of other kinds use.
@@ -898,7 +948,7 @@ var traffic = map[string]int64{} // each device's bytes through adb at the last 
 func (ds *devices) inUse(ctx context.Context, v *vm) bool {
 	switch v.Kind {
 	case "windows":
-		return connected(ctx, v.Port, 5900+v.Display)
+		return connected(ctx, v.Port) || screenWatched(ctx, filepath.Join(v.Dir, "vnc.sock"))
 	case "android":
 		out, err := exec.CommandContext(ctx, "ss", "-tinH", "state", "established", fmt.Sprintf("( dport = :%d )", v.Port+1)).Output()
 		if err != nil {

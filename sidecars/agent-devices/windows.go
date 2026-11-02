@@ -184,7 +184,7 @@ func (w windowsQEMU) start(ctx context.Context, v *vm) error {
 		"-drive", "file="+winFile(v, "disk.qcow2")+",if=none,id=d0,discard=unmap", "-device", "nvme,drive=d0,serial=one,bootindex=0",
 		"-netdev", "stream,id=n0,server=off,addr.type=unix,addr.path="+sock, "-device", "e1000e,netdev=n0",
 		"-device", "qemu-xhci", "-device", "usb-tablet", "-vga", "std", "-rtc", "base=utc,clock=host",
-		"-audio", "none", "-display", "none", "-vnc", fmt.Sprintf("127.0.0.1:%d", v.Display), "-monitor", "unix:"+winFile(v, "monitor.sock")+",server,nowait")
+		"-audio", "none", "-display", "none", "-vnc", "unix:"+winFile(v, "vnc.sock"), "-monitor", "unix:"+winFile(v, "monitor.sock")+",server,nowait")
 	if err != nil {
 		return err
 	}
@@ -257,7 +257,7 @@ func (windowsQEMU) screen(ctx context.Context, v *vm) (image.Image, error) {
 }
 
 func (w windowsQEMU) act(ctx context.Context, v *vm, a action) error {
-	return vncAct(5900+v.Display, a)
+	return vncAct(winFile(v, "vnc.sock"), a)
 }
 
 func (w windowsQEMU) open(ctx context.Context, v *vm, url string) error {

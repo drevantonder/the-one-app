@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -168,8 +169,22 @@ func (a androidEmulator) start(ctx context.Context, v *vm) error {
 		return err
 	}
 	defer log.Close()
-	name, args := outliving(filepath.Join(sdk(), "emulator", "emulator"), "-avd", v.ID, "-port", strconv.Itoa(v.Port), "-no-window",
-		"-gpu", "swiftshader_indirect", "-accel", "on", "-no-audio", "-no-boot-anim", "-no-snapshot")
+	emulator := []string{filepath.Join(sdk(), "emulator", "emulator"), "-avd", v.ID, "-port", strconv.Itoa(v.Port), "-no-window",
+		"-gpu", "swiftshader_indirect", "-accel", "on", "-no-audio", "-no-boot-anim", "-no-snapshot"}
+	// The emulator's own network puts this machine's 127.0.0.1 at 10.0.2.2 for any app in the phone, and has no way not
+	// to. On Linux it runs in a network of its own (pasta), reaching the internet as this machine does but none of its
+	// 127.0.0.1, which takes only its console and adb's port in; and asks this machine's resolvers, not its stub. A Mac
+	// has nothing like it, so there a phone's apps reach the Mac's 127.0.0.1 (ARCHITECTURE.md).
+	_, err = exec.LookPath("pasta")
+	apart := err == nil && runtime.GOOS == "linux"
+	if apart {
+		ports := fmt.Sprintf("127.0.0.1/%d-%d", v.Port, v.Port+1)
+		emulator = append([]string{"pasta", "--config-net", "--no-map-gw", "-T", "none", "-U", "none", "-u", "none", "-t", ports, "--quiet", "--"}, emulator...)
+		if dns := upstreamDNS(); len(dns) > 0 {
+			emulator = append(emulator, "-dns-server", strings.Join(dns, ","))
+		}
+	}
+	name, args := outliving(emulator[0], emulator[1:]...)
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), "ANDROID_HOME="+sdk(), "ANDROID_SDK_ROOT="+sdk())
 	cmd.Stdout, cmd.Stderr = log, log
@@ -181,6 +196,9 @@ func (a androidEmulator) start(ctx context.Context, v *vm) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	for {
+		if apart {
+			announce(ctx, v.Port+1)
+		}
 		if out, err := adb(ctx, v, "shell", "getprop", "sys.boot_completed"); err == nil && strings.TrimSpace(out) == "1" {
 			break
 		}
@@ -194,6 +212,19 @@ func (a androidEmulator) start(ctx context.Context, v *vm) error {
 	adb(ctx, v, "shell", "input", "keyevent", "KEYCODE_WAKEUP")
 	adb(ctx, v, "shell", "wm", "dismiss-keyguard")
 	return nil
+}
+
+// announce tells adb's server of an emulator with adb at port, as the emulator itself would if it could reach the
+// server: in a network of its own it can't. The server takes an emulator it knows already as told once.
+func announce(ctx context.Context, port int) {
+	run(ctx, filepath.Join(sdk(), "platform-tools", "adb"), "start-server")
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", adbPort), time.Second)
+	if err != nil {
+		return
+	}
+	defer c.Close()
+	msg := fmt.Sprintf("host:emulator:%d", port)
+	fmt.Fprintf(c, "%04x%s", len(msg), msg)
 }
 
 func (a androidEmulator) stop(ctx context.Context, v *vm) error {

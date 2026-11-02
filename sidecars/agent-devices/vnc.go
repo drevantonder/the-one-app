@@ -7,16 +7,16 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 )
 
 // vncAct gives a device input through its VNC server, as a person watching it would: the pointer goes exactly
 // where it's sent, in the screen's pixels, and keys go as X keysyms. The connection is shared, leaving anyone
-// else watching connected.
-func vncAct(port int, a action) error {
-	c, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 5*time.Second)
+// else watching connected. Its server is a socket in the device's folder, which only this machine's user can open: on
+// a port, any program reaching this machine's 127.0.0.1, one in another device among them, could drive it.
+func vncAct(socket string, a action) error {
+	c, err := net.DialTimeout("unix", socket, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("its screen: %w", err)
 	}
