@@ -1,4 +1,4 @@
-//! `update` and `release`: the tip of main, tested and built on your own devices, and run on every one of them.
+//! `update` and `release`: the tip of main, built on your own devices (and tested, for a release), and run on every one of them.
 //! What runs anywhere is only ever what's on main.
 
 use std::path::{Path, PathBuf};
@@ -17,7 +17,7 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 
 /// Builds the tip of main and has every device run it; with a tag, also signs it off and publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
-/// it in the background, and the node by testing and building it at once, which every Linux device then takes.
+/// it in the background, and the node by building it, which every Linux device then takes.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this white label names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
@@ -53,10 +53,6 @@ pub fn run(tag: Option<&str>) -> Result<()> {
 
     if !parts.node {
         deploy_apps(&src, &parts.apps)?;
-        if parts.test {
-            println!("Testing {short}");
-            test(&src, &config)?;
-        }
         let missed = follow(&macs, &commit, config_commit.as_deref());
         if parts.apps.is_empty() && !parts.mac {
             println!("Nothing to send out: what changed since the last update here isn't in any build.");
@@ -68,8 +64,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
 
     let key = release_key()?;
-    // Testing and building at once: neither waits for the other, and nothing goes out unless both work.
-    println!("Testing and building {short}");
+    // A release is tested, alongside its build, and goes out only if both work; an update's commits were tested
+    // before they were pushed.
+    println!("{} {short}", if tag.is_some() { "Testing and building" } else { "Building" });
     let built = std::thread::scope(|s| {
         let build = s.spawn(|| {
             let mut build = Command::new(cargo());
@@ -83,7 +80,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
             }
             run_quiet(&mut build)
         });
-        let tested = test(&src, &config);
+        let tested = if tag.is_some() { test(&src, &config) } else { Ok(()) };
         let built = build.join().map_err(|_| anyhow::anyhow!("the build panicked"))?;
         tested.and(built)
     });
@@ -187,19 +184,17 @@ pub fn run(tag: Option<&str>) -> Result<()> {
 /// What a change to the repo has to send out.
 #[derive(Debug, Default, PartialEq)]
 struct Parts {
-    /// The node: tested, built, and taken by every device.
+    /// The node: built, and taken by every device.
     node: bool,
     /// The Mac app, which each Mac builds.
     mac: bool,
-    /// Tests, for code that's only in the Mac app.
-    test: bool,
     /// Built-in apps, by name, each deployed on its own.
     apps: Vec<String>,
 }
 
 impl Parts {
     fn everything() -> Parts {
-        Parts { node: true, mac: true, test: true, apps: Vec::new() }
+        Parts { node: true, mac: true, apps: Vec::new() }
     }
 
     /// What changed from the commit `last` says (and its config's) to `this`'s.
@@ -226,12 +221,10 @@ impl Parts {
                         parts.apps.push(app);
                     }
                 }
-                Some("apple" | "icons") => parts.mac = true,
-                // The Mac app's client, which the tests check against the node.
-                Some("client") => (parts.mac, parts.test) = (true, true),
+                Some("apple" | "icons" | "client") => parts.mac = true,
                 Some("docs" | "tests" | "android" | "sidecars") => {}
                 None if file.ends_with(".md") || file == "LICENSE" => {}
-                _ => (parts.node, parts.mac, parts.test) = (true, true, true),
+                _ => (parts.node, parts.mac) = (true, true),
             }
         }
         parts
@@ -641,6 +634,6 @@ fn a_change_sends_out_only_what_it_touched() {
     assert_eq!(Parts::of(["README.md", "docs/a.md", "tests/e2e.rs", "android/x"]), Parts::default());
     assert_eq!(Parts::of(["apps/board/app.js", "apps/board/screen.html", "apps/vault/app.js"]), Parts { apps: vec!["board".into(), "vault".into()], ..Default::default() });
     assert_eq!(Parts::of(["apple/Mac/App.swift"]), Parts { mac: true, ..Default::default() });
-    assert_eq!(Parts::of(["src/node.rs", "apps/board/app.js"]), Parts { node: true, mac: true, test: true, apps: vec!["board".into()] });
+    assert_eq!(Parts::of(["src/node.rs", "apps/board/app.js"]), Parts { node: true, mac: true, apps: vec!["board".into()] });
     assert_eq!(Parts::of(["Cargo.lock"]), Parts::everything());
 }

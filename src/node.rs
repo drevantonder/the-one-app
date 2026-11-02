@@ -3891,6 +3891,10 @@ impl Node {
             };
             match self.apply(&r, author).await {
                 Ok(exe) => {
+                    // The servers taking a release take it from the one that published it first: it gives them a moment.
+                    if author == self.0.id {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
                     let _ = std::fs::write(self.0.dir.join("release"), &r.blob);
                     tracing::info!("updated {} to {}; restarting", exe.display(), r.commit);
                     // Closing says so to every server connected, which would otherwise wait half a minute to notice:
