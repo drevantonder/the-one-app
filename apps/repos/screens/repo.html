@@ -3,7 +3,7 @@
 const at = P.path || "";
 one.title(at ? at.split("/").pop() : P.repo);
 
-const icons = { tree: "folder", blob: "file", commit: "submodule" };
+const icons = { tree: "folder", blob: "file", commit: "folder-dashed" };
 
 function entry(d, e) {
   const path = (at ? at + "/" : "") + e.name;
@@ -51,9 +51,9 @@ const few = (names) => (names.length <= 3 ? esc(names.join(", ")) : "");
 function more(d) {
   if (at || d.empty) return "";
   return `<div class="list repo-links">
-      <a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("branch", "row-icon")}<div class="main"><div class="title"><span>Branches</span><span class="when">${few(d.branches)}</span></div></div><div class="chev">›</div></a>
-      ${(d.forks || []).map((f) => `<a class="row plain" onclick="${go("repo", { repo: f })}">${one.icon("branch", "row-icon")}<div class="main"><div class="title"><span>Fork</span><span class="when">${esc(f)}</span></div></div><div class="chev">›</div></a>`).join("")}
-      <a class="row plain" onclick="${go("history", { repo: d.repo, ref: refOf(d) })}">${one.icon("history", "row-icon")}<div class="main"><div class="title"><span>Commits</span></div></div><div class="chev">›</div></a>
+      <a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("git-branch", "row-icon")}<div class="main"><div class="title"><span>Branches</span><span class="when">${few(d.branches)}</span></div></div><div class="chev">›</div></a>
+      ${(d.forks || []).map((f) => `<a class="row plain" onclick="${go("repo", { repo: f })}">${one.icon("git-branch", "row-icon")}<div class="main"><div class="title"><span>Fork</span><span class="when">${esc(f)}</span></div></div><div class="chev">›</div></a>`).join("")}
+      <a class="row plain" onclick="${go("history", { repo: d.repo, ref: refOf(d) })}">${one.icon("clock-counter-clockwise", "row-icon")}<div class="main"><div class="title"><span>Commits</span></div></div><div class="chev">›</div></a>
     </div>`;
 }
 

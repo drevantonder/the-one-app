@@ -128,7 +128,7 @@ var describe = map[string]any{
 	"title":        "Push",
 	"description":  "Sends notifications to your phone",
 	"version":      built,
-	"icon":         "bell.badge",
+	"icon":         "bell-ringing",
 	"serves":       "everyone",
 	"instructions": "Push sends a notification to your own phones through Apple's push service: push_send with a title and a body. An app pushes with ctx.sidecars.push.send, and tapping its push opens its screen. It says whether APNs accepted it, never whether anyone saw it.",
 	"ops": []map[string]any{

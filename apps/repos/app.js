@@ -86,7 +86,7 @@ const asWriter = (ctx) => ({
 export default {
   name: "repos",
   title: "Repos",
-  icon: "arrow.triangle.branch",
+  icon: "git-branch",
   color: "#5856d6",
   description: "Git hosting in the install: clone, push and suggest changes",
   instructions: `Repos is git hosting in this install. On any computer in it, \`git clone http://localhost:<port>/repos/<repo>.git\` (the address its page shows), \`git push\` and \`git fetch\` work as with any git host; pushing to a name that isn't a repo yet makes it, yours. Only a repo's owner pushes to it: to suggest changes, fork it (repos fork), push to your fork, and tell its owner, who fetches from it.`,

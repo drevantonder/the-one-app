@@ -166,7 +166,7 @@ struct ItemIcon: View {
         } else if let app, let info = store.app(app) {
             AppTile(app: info, seed: app, size: size)
         } else {
-            AppTile(icon: "key.fill", seed: title, color: "#8e8e93", size: size)
+            AppTile(icon: "key", seed: title, color: "#8e8e93", size: size)
         }
     }
 }

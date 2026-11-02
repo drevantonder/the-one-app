@@ -53,7 +53,7 @@ function line(d) {
 export default {
   name: "devices",
   title: "Devices",
-  icon: "desktopcomputer",
+  icon: "monitor",
   color: "#30b0c7",
   description: "How loaded each server is: memory, CPU, GPU and disk, with its containers",
   instructions: "devices_list shows every server in the install, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU and GPU (percent busy, a sample every 5 seconds over the last two minutes, oldest first) and disk, and the containers each hosts under it. Use it to pick a server with room for a desktop, a model or a build.",
@@ -255,10 +255,10 @@ function warning(list) {
     }
   }
   worst.sort((a, b) => b[0] - a[0]);
-  if (!worst.length) return { t: "row", gap: 6, c: [{ t: "icon", name: "checkmark.circle.fill", tone: "good", size: "xs" }, { t: "text", text: "All devices are fine", size: "xs", tone: "muted", lines: 1 }] };
+  if (!worst.length) return { t: "row", gap: 6, c: [{ t: "icon", name: "check-circle-fill", tone: "good", size: "xs" }, { t: "text", text: "All devices are fine", size: "xs", tone: "muted", lines: 1 }] };
   // Nearly full is red, as its bar is; only offline, orange.
   const tone = worst[0][0] === 1 && worst.every((w) => w[0] === 1) ? "warn" : "bad";
-  return { t: "row", gap: 6, c: [{ t: "icon", name: "exclamationmark.triangle.fill", tone, size: "xs" }, { t: "text", text: worst.map((w) => w[1]).join(" · "), size: "xs", tone, lines: 1 }] };
+  return { t: "row", gap: 6, c: [{ t: "icon", name: "warning-fill", tone, size: "xs" }, { t: "text", text: worst.map((w) => w[1]).join(" · "), size: "xs", tone, lines: 1 }] };
 }
 
 /// A small widget: each server's name cut short, its memory ring, CPU and disk.

@@ -6,7 +6,7 @@ struct ContactsApp: Sidecar {
     private static let store = Unshared(CNContactStore())
 
     var description: [String: Any] {
-        describe(title: "Contacts", icon: "contact", localApp: "com.apple.AddressBook", summary: "Lets your apps and agents look up your contacts", instructions:
+        describe(title: "Contacts", icon: "user-circle", localApp: "com.apple.AddressBook", summary: "Lets your apps and agents look up your contacts", instructions:
             "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; " +
             "contacts_me is the person's own card.", ops: [
             op("search", "Find contacts by name, email address or phone number.", [

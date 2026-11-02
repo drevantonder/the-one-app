@@ -60,7 +60,7 @@ func (ds *computers) describe() map[string]any {
 			ops = append(ops, map[string]any{"name": t.Name, "description": t.Description, "input": withComputer(t.InputSchema)})
 		}
 	}
-	return map[string]any{"title": "Agent Computers", "description": "Computers your agents use, each with a browser", "version": built, "icon": "macwindow.on.rectangle", "color": "#a2845e", "instructions": instructions, "ops": ops, "widgets": []any{}}
+	return map[string]any{"title": "Agent Computers", "description": "Computers your agents use, each with a browser", "version": built, "icon": "browsers", "color": "#a2845e", "instructions": instructions, "ops": ops, "widgets": []any{}}
 }
 
 // withComputer adds the computer argument to a tool's input.

@@ -18,8 +18,8 @@ function pathBar(d, { file = false } = {}) {
   const parts = (d.path || "").split("/").filter(Boolean);
   const ref = refOf(d);
   const chip = d.branch
-    ? `<button class="chip" onclick="${go("branches", { repo: d.repo, path: d.path || "" })}">${one.icon("branch")}<span>${esc(d.branch)}</span>${one.icon("down", "chev")}</button>`
-    : `<button class="chip" onclick="${go("branches", { repo: d.repo, path: d.path || "" })}">${one.icon("commit")}<span>${short(d.sha)}</span>${one.icon("down", "chev")}</button>` +
+    ? `<button class="chip" onclick="${go("branches", { repo: d.repo, path: d.path || "" })}">${one.icon("git-branch")}<span>${esc(d.branch)}</span>${one.icon("caret-down", "chev")}</button>`
+    : `<button class="chip" onclick="${go("branches", { repo: d.repo, path: d.path || "" })}">${one.icon("git-commit")}<span>${short(d.sha)}</span>${one.icon("caret-down", "chev")}</button>` +
       `<button class="button small-button" onclick="${go("repo", { repo: d.repo })}">Back to main</button>`;
   const crumbs = [`<a onclick="${go("repo", { repo: d.repo, ref })}">${esc(d.repo)}</a>`];
   parts.forEach((p, k) => {
@@ -39,6 +39,6 @@ function commitCard(c, d) {
       <span class="latest-subject">${esc(c.subject)}</span>
       <span class="latest-meta"><code>${short(c.sha)}</code> · ${one.ago(c.time, { long: true })}</span>
     </a>
-    <a class="latest-history" onclick="${history}">${one.icon("history")}<span>History</span><span class="chev-row">${one.icon("chevron")}</span></a>
+    <a class="latest-history" onclick="${history}">${one.icon("clock-counter-clockwise")}<span>History</span><span class="chev-row">${one.icon("caret-right")}</span></a>
   </div>`;
 }

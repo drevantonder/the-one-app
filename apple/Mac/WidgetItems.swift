@@ -142,7 +142,7 @@ private struct WidgetPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label(shown.widget?.title ?? shown.app?.label ?? "", systemImage: symbol(shown.app?.icon))
+                Label { Text(shown.widget?.title ?? shown.app?.label ?? "") } icon: { Glyph(name: shown.app?.icon) }
                     .font(.headline)
                 Spacer()
                 if let app = shown.app, app.hasScreens {

@@ -186,7 +186,7 @@ extension Store {
         let items = pages.flatMap { page in
             widgets(on: page).map { w in
                 WidgetCache.Item(app: w.app, widget: w.widget, scope: page.scope, page: page.title, title: w.title ?? app(w.app)?.label ?? w.widget,
-                                 icon: symbol(app(w.app)?.icon), error: w.error, root: w.root, sizes: w.sizes)
+                                 icon: app(w.app)?.icon ?? "", error: w.error, root: w.root, sizes: w.sizes)
             }
         }
         guard !items.isEmpty else { return }

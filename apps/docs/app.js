@@ -294,7 +294,7 @@ function render(doc, md) {
 export default {
   name: APP,
   title: TITLE,
-  icon: "doc.text",
+  icon: "file-text",
   color: "#4285f4",
   description: "Your Google Docs: read them as markdown or text, make them, and add or replace text.",
   instructions: `Docs is the person's Google Docs. ${APP}_read reads a document as markdown (or text). ${APP}_create makes one, ${APP}_append adds text at its end, and ${APP}_replace replaces every match of some text: change only what the person asked. Documents are given by id or address. With several accounts, each operation takes account.`,

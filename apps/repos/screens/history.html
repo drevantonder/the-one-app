@@ -16,7 +16,7 @@ function row(d, c) {
 
 async function show() {
   const d = await one.call("log", { repo: P.repo, ref: P.ref, path: P.path || "", page });
-  if (!d.commits.length) return pathBar(d) + one.empty({ icon: "history", title: page ? "No older commits." : "No commits yet." });
+  if (!d.commits.length) return pathBar(d) + one.empty({ icon: "clock-counter-clockwise", title: page ? "No older commits." : "No commits yet." });
   const groups = [];
   for (const c of d.commits) {
     const k = day(c.time);
@@ -24,7 +24,7 @@ async function show() {
     groups[groups.length - 1].commits.push(c);
   }
   const at = { repo: d.repo, ref: P.ref, path: P.path || "" };
-  return `${pathBar(d)}${groups.map((g) => `<h2 class="section day-head">${one.icon("commit")} Commits on ${esc(g.day)}</h2><div class="list">${g.commits.map((c) => row(d, c)).join("")}</div>`).join("")}
+  return `${pathBar(d)}${groups.map((g) => `<h2 class="section day-head">${one.icon("git-commit")} Commits on ${esc(g.day)}</h2><div class="list">${g.commits.map((c) => row(d, c)).join("")}</div>`).join("")}
     <div class="pager">
       <button class="button" ${page ? `onclick="${go("history", { ...at, page: page - 1 })}"` : "disabled"}>Newer</button>
       <button class="button" ${d.more ? `onclick="${go("history", { ...at, page: page + 1 })}"` : "disabled"}>Older</button>

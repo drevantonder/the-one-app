@@ -138,7 +138,7 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .search input::-webkit-search-cancel-button { display: none; }
 .search .clear { border: 0; background: var(--faint); color: var(--card); width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; padding: 0; cursor: pointer; }
 .search .clear[hidden] { display: none; }
-.search .clear .i { width: 11px; height: 11px; stroke-width: 3; }
+.search .clear .i { width: 11px; height: 11px; }
 
 /* Markdown, the way GitHub draws it. */
 .md { overflow-wrap: break-word; font-size: 16px; line-height: 1.5; }

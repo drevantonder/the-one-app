@@ -43,7 +43,7 @@ async function gemini(ctx, s, body) {
 export default {
   name: "ai",
   title: "AI",
-  icon: "sparkles",
+  icon: "sparkle",
   color: "#af52de",
   description: "Reads photos and PDFs and answers questions, for your apps",
   instructions: "AI for apps: ai_read reads photos and PDFs with a prompt, ai_decide asks a decision model typed questions. ai_settings shows which models answer (local models on one of your servers, or Gemini once the person's Vault has a Gemini key for it: ask with vault_request, app ai, need gemini); ai_set changes them.",

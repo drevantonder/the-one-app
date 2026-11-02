@@ -163,7 +163,7 @@ function onAPage(a, places) {
 export default {
   name: "apps",
   title: "App Store",
-  icon: "square.grid.2x2",
+  icon: "squares-four",
   color: "#007aff",
   description: "Every app you can add, and its code",
   instructions: "The App Store lists every app in this install, where each is installed and its code. apps_add installs one for you, a group you're an admin of, or everyone (admins).",
@@ -364,7 +364,7 @@ const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(
 
 function html() {
   const found = data.apps.filter((a) => !!a.service === (tab === "services") && (!query || [a.title, a.name, a.tagline || "", a.description || ""].some((t) => t.toLowerCase().includes(query))));
-  if (!found.length) return one.empty({ icon: "search", title: "No Results", text: query ? one.esc("Nothing matches “" + query + "”.") : "" });
+  if (!found.length) return one.empty({ icon: "magnifying-glass", title: "No Results", text: query ? one.esc("Nothing matches “" + query + "”.") : "" });
   return section("Built In", found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted));
 }
 function draw() {
@@ -612,7 +612,7 @@ const sections = [
 one.render("#activity", async () => {
   const h = await one.call("health", { app: one.params.app });
   const html = sections.map((s) => s(h)).join("");
-  return html || one.empty({ icon: "history", title: "Nothing yet" });
+  return html || one.empty({ icon: "clock-counter-clockwise", title: "Nothing yet" });
 });
 </script>`,
     },

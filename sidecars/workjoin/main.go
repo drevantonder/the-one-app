@@ -142,7 +142,7 @@ var describe = map[string]any{
 	"title":        "Work email join",
 	"description":  "Lets people join by signing in with their work email",
 	"version":      built,
-	"icon":         "person.badge.key",
+	"icon":         "identification-badge",
 	"instructions": "Lets people join this install by signing in with Google on the workplace's domain. workjoin_status says whether it's on, for which domain, and who joined through it.",
 	"ops": []map[string]any{
 		{"name": "status", "reads": true, "description": "Whether joining with a work email is on here, for which domain and at which address, and who has joined through it.",

@@ -232,7 +232,7 @@ async function rangeOr(ctx, email, spreadsheet, range) {
 export default {
   name: APP,
   title: TITLE,
-  icon: "tablecells",
+  icon: "table",
   color: "#34a853",
   description: "Your Google Sheets: read ranges, add rows, change cells and make spreadsheets.",
   instructions: `Sheets is the person's Google Sheets. ${APP}_spreadsheet lists a spreadsheet's tabs; ${APP}_read reads a range (A1 notation, like Budget!A1:F20; the first tab when left out). ${APP}_append adds rows after a table, ${APP}_update writes over a range and ${APP}_create makes a spreadsheet: change only what the person asked. Spreadsheets are given by id or address. With several accounts, each operation takes account.`,

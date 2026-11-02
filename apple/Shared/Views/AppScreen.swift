@@ -208,7 +208,7 @@ private struct ScreenWebView: Representable {
         private var host: NSView? { web }
         #endif
 
-        /// The bridge: `{ type: "call" | "open" | "title" | "icon" | "copy" | "haptic" | "save" | "preview" | "scan" | "vault", … }`.
+        /// The bridge: `{ type: "call" | "open" | "title" | "icons" | "icon" | "copy" | "haptic" | "save" | "preview" | "scan" | "vault", … }`.
         /// A page only ever calls its own app, but may open another's screens.
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
             guard let body = message.body as? [String: Any] else { return (nil, "Not a message") }
@@ -271,8 +271,11 @@ private struct ScreenWebView: Representable {
             case "title":
                 view.title = body["text"] as? String
                 return (nil, nil)
+            case "icons":
+                let names = body["names"] as? [String] ?? []
+                return (Dictionary(names.compactMap { name in Icons.paths[name].map { (name, $0) } }) { a, _ in a }, nil)
             case "icon":
-                let tile = AppTile(icon: body["symbol"] as? String, seed: body["seed"] as? String ?? "", color: (body["color"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                let tile = AppTile(icon: body["icon"] as? String, seed: body["seed"] as? String ?? "", color: (body["color"] as? String).flatMap { $0.isEmpty ? nil : $0 },
                                    image: (body["image"] as? String).flatMap { $0.isEmpty ? nil : $0 },
                                    imageKind: body["kind"] as? String, size: body["size"] as? Double ?? 36)
                 return (Self.png(tile), nil)

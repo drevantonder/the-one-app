@@ -13,7 +13,7 @@ use crate::sidecars::{Answer, Record, Reply};
 
 pub fn describe() -> Value {
     json!({
-        "name": "shell", "title": "Shell", "icon": "terminal", "color": "#3a3a3c", "runs": "here", "description": "Runs commands on your own devices",
+        "name": "shell", "title": "Shell", "icon": "terminal-window", "color": "#3a3a3c", "runs": "here", "description": "Runs commands on your own devices",
         "instructions": "Run a shell command on one of your own servers with shell_run; give server to choose which. Every command is logged where only you can read it.",
         "ops": [{
             "name": "run",

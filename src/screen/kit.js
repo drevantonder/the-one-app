@@ -3,32 +3,6 @@
 (() => {
   const esc = one.esc;
 
-  // Icons, drawn on a 24-point grid in the text's colour.
-  const paths = {
-    alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/>',
-    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
-    copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
-    search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
-    x: '<path d="M6 6l12 12M18 6L6 18"/>',
-    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
-    file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
-    submodule: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h6M13 11l2 2-2 2"/>',
-    book: '<path d="M4 19V5a2 2 0 0 1 2-2h14v14H6a2 2 0 0 0-2 2zm0 0a2 2 0 0 0 2 2h14"/>',
-    history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 4v4.5H8M12 7.5V12l3 2"/>',
-    branch: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9v1a4 4 0 0 1-4 4h-4a4 4 0 0 0-4 4"/>',
-    commit: '<circle cx="12" cy="12" r="3.5"/><path d="M3 12h5.5M15.5 12H21"/>',
-    tray: '<path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/>',
-    chevron: '<path d="M9 6l6 6-6 6"/>',
-    down: '<path d="M6 9l6 6 6-6"/>',
-    question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/>',
-    wrap: '<path d="M4 6h16M4 12h13a3 3 0 0 1 0 6h-4M4 18h5"/><path d="M15 16l-2 2 2 2"/>',
-    code: '<path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/>',
-    diff: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 10v6M9 13h6"/>',
-    up: '<path d="M18 15l-6-6-6 6"/>',
-  };
-  one.icon = (name, cls = "") =>
-    `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.file}</svg>`;
-
   // A spinner that says what it waits for, to people and to screen readers.
   one.loading = (label = "Loading") =>
     `<div class="loading" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span>${esc(label)}</span></div>`;
@@ -59,7 +33,7 @@
   // A failure as a banner, with Try again unless `retry` is false (one.render wires the button).
   one.banner = (err, { safe, next, retry = true } = {}) => {
     const p = one.plain(err);
-    return `<div class="banner" role="alert">${one.icon("alert", "banner-icon")}<div class="banner-text"><strong>${esc(p.title)}</strong>` +
+    return `<div class="banner" role="alert">${one.icon("warning-circle", "banner-icon")}<div class="banner-text"><strong>${esc(p.title)}</strong>` +
       `<span>${esc(safe ?? p.safe)} ${esc(next ?? p.next)}</span></div>` +
       (retry ? '<button class="button" data-retry>Try again</button>' : "") + "</div>";
   };
@@ -145,7 +119,7 @@
   // A search field in `el`: a magnifier, a clear button, and `onSearch(query)` once typing stops for `delay` ms.
   one.search = (el, { placeholder = "Search", value = "", delay = 180, onSearch }) => {
     if (typeof el === "string") el = document.querySelector(el);
-    el.innerHTML = `<label class="search">${one.icon("search")}<input type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}" value="${esc(value)}"><button type="button" class="clear" aria-label="Clear" hidden>${one.icon("x")}</button></label>`;
+    el.innerHTML = `<label class="search">${one.icon("magnifying-glass")}<input type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}" value="${esc(value)}"><button type="button" class="clear" aria-label="Clear" hidden>${one.icon("x")}</button></label>`;
     const input = el.querySelector("input"), clear = el.querySelector(".clear");
     let timer, last = value;
     const fire = () => {

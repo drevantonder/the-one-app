@@ -146,7 +146,7 @@ const PAGE = `
 export default {
   name: "agent-computers",
   title: "Agent Computers",
-  icon: "macwindow.on.rectangle",
+  icon: "browsers",
   color: "#a2845e",
   description: "Computers your agents use, each with a browser",
   instructions: "Agent Computers are Linux computers on the person's servers, each with a browser, that agents borrow through Computer Use (computer_borrow, computer_*). Browser profiles (like Personal or PTC) are Vault items of type Browser profile: a borrowed computer's browser starts signed in to the sites its profile was signed in to. agent-computers_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-computers_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-computers_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting computers the person keeps.",

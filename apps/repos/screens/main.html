@@ -23,7 +23,7 @@ function list() {
   document.getElementById("find").hidden = false;
   const q = query.toLowerCase();
   const shown = repos.filter((r) => !q || r.name.includes(q) || (r.from || "").includes(q));
-  if (!shown.length) return one.empty({ icon: "search", title: "No repos match." });
+  if (!shown.length) return one.empty({ icon: "magnifying-glass", title: "No repos match." });
   const here = shown.filter((r) => !r.deleted), gone = shown.filter((r) => r.deleted);
   return (here.length ? `<div class="list">${here.map(row).join("")}</div>` : "")
     + (gone.length ? `<h2 class="section">Recently Deleted</h2><div class="list">${gone.map(row).join("")}</div>` : "");

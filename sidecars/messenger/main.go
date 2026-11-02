@@ -77,7 +77,7 @@ func describe() map[string]any {
 		"title":       "Messenger",
 		"description": "Reads and sends your Messenger chats in an agent computer's browser",
 		"version":     built,
-		"icon":        "message.fill",
+		"icon":        "messenger-logo",
 		"color":       "#0866ff",
 		"domain":      "messenger.com",
 		"instructions": "Messenger is the person's Facebook Messenger, read through messenger.com in an agent computer's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. " +

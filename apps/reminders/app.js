@@ -17,7 +17,7 @@ const NEEDS = "Reminders runs on a Mac with The One App open, and none of yours 
 export default {
   name: "reminders",
   title: "Reminders",
-  icon: "checklist",
+  icon: "list-checks",
   color: "#007aff",
   description: "Reminders on your Mac, for your apps and agents",
   connector: true,

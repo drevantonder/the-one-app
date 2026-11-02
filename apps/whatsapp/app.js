@@ -45,7 +45,7 @@ async function keep(ctx, listed, servers) {
 export default {
   name: "whatsapp",
   title: "WhatsApp",
-  icon: "phone.bubble.fill",
+  icon: "whatsapp-logo",
   color: "#25d366",
   domain: "whatsapp.com",
   description: "Your WhatsApp chats, for your agents: read, search and send",

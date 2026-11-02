@@ -176,7 +176,7 @@ var describe = map[string]any{
 	"title":       "WhatsApp",
 	"description": "Keeps your phone's WhatsApp linked, as WhatsApp Desktop does",
 	"version":     built,
-	"icon":        "phone.bubble.fill",
+	"icon":        "whatsapp-logo",
 	"color":       "#25d366",
 	"domain":      "whatsapp.com",
 	"instructions": "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their servers, as WhatsApp Desktop is linked; calls find the server. whatsapp_accounts lists them; the others take account, the first by default. " +

@@ -10,7 +10,7 @@ struct ComputerApp: Sidecar {
     let app = "computer"
 
     var description: [String: Any] {
-        ["title": "Computer Use", "icon": "cursorarrow.rays", "color": "#ff9500",
+        ["title": "Computer Use", "icon": "cursor-click", "color": "#ff9500",
          "description": "Lets your own agents use this Mac's apps, keyboard and pointer, once you turn it on",
          "instructions": "Agents use this Mac through Computer Use, as a computer named after this device.",
          "ops": [

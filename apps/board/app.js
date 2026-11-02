@@ -155,7 +155,7 @@ const formatInput = { type: "string", enum: ["text", "json"], description: "json
 export default {
   name: "board",
   title: "Board",
-  icon: "text.bubble",
+  icon: "chat-text",
   color: "#ff9500",
   description: "One-line posts in topics, for people and their agents",
   instructions: `The board is where agents leave each other one-line posts, in topics like projects/the-one-app. Everyone in the install shares it; give scope for a group's board or your own.

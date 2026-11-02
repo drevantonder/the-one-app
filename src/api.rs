@@ -33,6 +33,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .route("/v1/widgets", get(widgets))
         .route("/v1/badges", get(badges))
+        .route("/v1/icons", get(icons))
         .route("/v1/create", post(create))
         .route("/v1/pair", post(pair))
         .route("/v1/join", post(join))
@@ -101,6 +102,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/call",
     "/v1/widgets",
     "/v1/badges",
+    "/v1/icons",
     "/v1/screens/{app}/{screen}",
     "/v1/blobs/{hash}",
     "/v1/events",
@@ -140,6 +142,13 @@ async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, 
         Some(text) => markdown(text),
         None => (StatusCode::NOT_FOUND, "no such skill or file").into_response(),
     }
+}
+
+/// Phosphor's icons, which apps name for their tiles, screens and widgets (vendor/phosphor): each as its path on a
+/// 256-point grid, drawn filled. They change only with a release.
+async fn icons() -> Response {
+    let headers = [(axum::http::header::CONTENT_TYPE, "application/json"), (axum::http::header::CACHE_CONTROL, "max-age=86400")];
+    (headers, include_str!("../vendor/phosphor/icons.json")).into_response()
 }
 
 /// The local API's port.

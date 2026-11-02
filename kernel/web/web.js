@@ -3,8 +3,8 @@
 // own origin with the access token; the gateway sends each on. App screens are untrusted: each runs in a sandboxed
 // frame, and this page answers its bridge as the Mac app's web view does, making each call itself. Nothing is cached.
 
-// The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use.
-window.__one = { host: async (message) => (message.type === "copy" ? navigator.clipboard.writeText(message.text) : null) };
+// The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use (`__one.host`).
+window.__one = {};
 
 (() => {
   const $ = (sel, el = document) => el.querySelector(sel);
@@ -152,6 +152,15 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
       return out;
     }
   }
+
+  /// Phosphor's icons, from the node once, for those the bridge asks for: on this page, and in screens' frames.
+  let icons;
+  async function iconPaths(names = []) {
+    icons ||= api("/v1/icons").catch((err) => ((icons = null), Promise.reject(err)));
+    const all = await icons;
+    return Object.fromEntries(names.map((n) => [n, all[n]]));
+  }
+  window.__one.host = async (m) => (m.type === "copy" ? navigator.clipboard.writeText(m.text) : m.type === "icons" ? iconPaths(m.names) : null);
 
   /// Runs an app's operation as this person → its result.
   async function call(app, op, input = {}) {
@@ -1004,6 +1013,8 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
           return reply(await askVault(r, String(m.need || "")));
         case "scan":
           return fail("Scanning documents needs the iPhone or iPad app. Choose the files instead.");
+        case "icons":
+          return reply(await iconPaths(Array.isArray(m.names) ? m.names.map(String) : []));
         case "icon": case "haptic":
           return reply(null);
         default:

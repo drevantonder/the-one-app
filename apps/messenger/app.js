@@ -42,7 +42,7 @@ async function keep(ctx, listed) {
 export default {
   name: "messenger",
   title: "Messenger",
-  icon: "message.fill",
+  icon: "messenger-logo",
   color: "#0866ff",
   domain: "messenger.com",
   description: "Your Messenger chats, for your agents: read, search and send",

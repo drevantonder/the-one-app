@@ -146,7 +146,7 @@ const PAGE = `
 export default {
   name: "computer",
   title: "Computer Use",
-  icon: "cursorarrow.rays",
+  icon: "cursor-click",
   color: "#5e5ce6",
   description: "Computers your agents can use: agent computers with a browser, and your own devices when you let them",
   connector: true,

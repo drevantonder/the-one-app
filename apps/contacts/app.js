@@ -17,7 +17,7 @@ const NEEDS = "Contacts runs on a Mac with The One App open, and none of yours i
 export default {
   name: "contacts",
   title: "Contacts",
-  icon: "person.crop.circle",
+  icon: "user-circle",
   color: "#8e8e93",
   description: "Contacts on your Mac, for your apps and agents",
   connector: true,

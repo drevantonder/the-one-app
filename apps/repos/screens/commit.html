@@ -59,7 +59,7 @@ function file(d, f, k) {
   const mode = f.old_mode && f.new_mode && f.old_mode !== f.new_mode ? `<span class="mode">${f.old_mode} → ${f.new_mode}</span>` : "";
   return `<section class="diff-file" id="f${k}">
     <header>
-      <button class="tool fold" aria-label="Collapse" onclick="this.closest('section').classList.toggle('folded')">${one.icon("down")}</button>
+      <button class="tool fold" aria-label="Collapse" onclick="this.closest('section').classList.toggle('folded')">${one.icon("caret-down")}</button>
       <span class="diff-path">${f.old_path ? `${esc(f.old_path)} → ` : ""}${esc(f.path)}</span>
       ${badge[f.status] ? `<span class="badge ${f.status}">${badge[f.status]}</span>` : ""}${mode}
       ${counts(f)}
@@ -117,7 +117,7 @@ async function show() {
       <div class="segmented narrow" role="group" aria-label="Diff layout"><button data-split="0" class="${split ? "" : "on"}">Unified</button><button data-split="1" class="${split ? "on" : ""}">Split</button></div>
     </div>
     ${d.files.length ? `<div class="list changed">${d.files.map((f, k) => `<a class="row plain" onclick="document.getElementById('f${k}').scrollIntoView({ behavior: 'smooth' })">
-        ${one.icon(f.status === "added" ? "file" : f.status === "deleted" ? "x" : "diff", `row-icon ${f.status}`)}<div class="main"><div class="title"><span class="changed-path">${esc(f.path)}</span>${counts(f)}</div></div></a>`).join("")}</div>` : one.empty({ icon: "diff", title: "This commit changes no files." })}
+        ${one.icon(f.status === "added" ? "file" : f.status === "deleted" ? "x" : "git-diff", `row-icon ${f.status}`)}<div class="main"><div class="title"><span class="changed-path">${esc(f.path)}</span>${counts(f)}</div></div></a>`).join("")}</div>` : one.empty({ icon: "git-diff", title: "This commit changes no files." })}
     ${d.files.map((f, k) => file(d, f, k)).join("")}`;
 }
 

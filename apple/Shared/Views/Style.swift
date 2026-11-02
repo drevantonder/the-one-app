@@ -45,14 +45,28 @@ func deviceSymbol(_ name: String) -> String {
     return "server.rack"
 }
 
-/// An app's icon: its SF Symbol, or a generic one when it names something else.
-func symbol(_ name: String?) -> String {
-    #if canImport(AppKit)
-    let exists = name.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) } != nil
-    #else
-    let exists = name.flatMap { UIImage(systemName: $0) } != nil
-    #endif
-    return exists ? name! : "app"
+/// Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every shell draws the
+/// same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled.
+enum Icons {
+    static let paths: [String: String] = Bundle.main.url(forResource: "icons", withExtension: "json")
+        .flatMap { try? Data(contentsOf: $0) }
+        .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+
+    static func shape(_ name: String?) -> SVGShape? {
+        name.flatMap { paths[$0] }.map { SVGShape($0, box: 256) }
+    }
+}
+
+/// A named icon, in the foreground style, `size` points square; nothing if there's none by that name.
+struct Glyph: View {
+    var name: String?
+    var size: CGFloat = 17
+
+    var body: some View {
+        if let shape = Icons.shape(name) {
+            shape.fill(.foreground).frame(width: size, height: size)
+        }
+    }
 }
 
 func displayName(_ name: String) -> String {
@@ -70,8 +84,8 @@ func steadyHash(_ text: String) -> Int {
 }
 
 /// An app's icon tile, as a phone's Home Screen draws one: a finished app icon edge to edge in its own shape, a logo
-/// (`icon.png` in its folder, a site's favicon) on white, or its symbol in white on its colour, the one it declares or
-/// else one picked by its name, so apps side by side differ.
+/// (`icon.png` in its folder, a site's favicon) on white, or its icon filled (else its first letter) in white on its
+/// colour, the one it declares or else one picked by its name, so apps side by side differ.
 struct AppTile: View {
     var icon: String?
     var seed: String
@@ -105,10 +119,16 @@ struct AppTile: View {
                 let (r, g, b) = accentRGB(color ?? Self.colors[steadyHash(seed) % Self.colors.count], dark: false)
                 shape.fill(Color(red: r, green: g, blue: b).gradient)
                     .overlay {
-                        Image(systemName: symbol(icon))
-                            .font(.system(size: size * 0.44, weight: .medium))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+                        Group {
+                            if let glyph = Icons.shape(icon.map { "\($0)-fill" }) {
+                                glyph.fill(.white).frame(width: size * 0.5, height: size * 0.5)
+                            } else {
+                                Text(String(seed.prefix(1)).uppercased())
+                                    .font(.system(size: size * 0.42, weight: .semibold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                        .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
                     }
                     .overlay { shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.5) }
             }

@@ -1,13 +1,17 @@
 import SwiftUI
 
-/// A shape from SVG path data in a 24-point box, scaled to fit its frame.
+/// A shape from SVG path data in a square box (24 points unless said), scaled to fit its frame.
 struct SVGShape: Shape {
     let path: Path
+    var box: CGFloat = 24
 
-    init(_ data: String) { path = parseSVGPath(data) }
+    init(_ data: String, box: CGFloat = 24) {
+        path = parseSVGPath(data)
+        self.box = box
+    }
 
     func path(in rect: CGRect) -> Path {
-        path.applying(CGAffineTransform(scaleX: rect.width / 24, y: rect.height / 24).translatedBy(x: rect.minX, y: rect.minY))
+        path.applying(CGAffineTransform(scaleX: rect.width / box, y: rect.height / box).translatedBy(x: rect.minX, y: rect.minY))
     }
 }
 

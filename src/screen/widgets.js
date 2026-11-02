@@ -166,8 +166,15 @@ window.oneWidgets = (() => {
         break;
       case "dot": el = tone(node("span", "w-dot")); break;
       case "icon": {
-        // Named icons are the Apple shells' symbols; here only a path and a badge (SVG paths) can be drawn.
         const size = n.w || 16;
+        // A named icon is Phosphor's, drawn where the bridge is (the web client); a chat draws only paths and badges.
+        if (n.name && window.one?.icon) {
+          el = node("span");
+          el.innerHTML = one.icon(n.name);
+          el.style.cssText = `display:flex;flex:none;width:${size}px;height:${size}px;color:${tones[n.tone] || "currentColor"}`;
+          el.firstChild.style.cssText = "width:100%;height:100%";
+          break;
+        }
         el = svg({ viewBox: "0 0 24 24", width: size, height: size });
         el.style.flex = "none";
         el.style.color = tones[n.tone] || "currentColor";

@@ -17,7 +17,7 @@ const NEEDS = "Shell runs on your servers, and none of them is online.";
 export default {
   name: "shell",
   title: "Shell",
-  icon: "terminal",
+  icon: "terminal-window",
   color: "#3a3a3c",
   description: "Run commands on your own devices",
   connector: true,

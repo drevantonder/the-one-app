@@ -14,7 +14,7 @@ targets:
   Mac:
     type: application
     platform: macOS
-    sources: [Shared, Mac, build/Artwork.xcassets]
+    sources: [Shared, Mac, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
     settings:
       base:
         PRODUCT_NAME: ${CONFIG_NAME}
@@ -50,7 +50,7 @@ targets:
   Phone:
     type: application
     platform: iOS
-    sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Phone.xcassets, build/Artwork.xcassets]
+    sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Phone.xcassets, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
     dependencies:
       - framework: build/OneClient.xcframework
         embed: false
@@ -94,7 +94,7 @@ targets:
   Widgets:
     type: app-extension
     platform: iOS
-    sources: [Widget, Shared/Views/Style.swift, Shared/Views/WidgetTree.swift, Shared/Views/SVGPath.swift, build/Artwork.xcassets]
+    sources: [Widget, Shared/Views/Style.swift, Shared/Views/WidgetTree.swift, Shared/Views/SVGPath.swift, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
     settings:
       base:
         PRODUCT_NAME: Widgets

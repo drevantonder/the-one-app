@@ -189,7 +189,7 @@ const tools = Object.fromEntries(listed.tools.map((tool) => {
 export default {
   name: NAME,
   title: server.title || listed.title || NAME,
-  icon: "puzzlepiece.extension",
+  icon: "puzzle-piece",
   instructions: [
     `${server.title || NAME} is the remote MCP server at ${server.url}: its tools are this app's operations.`,
     listed.oauth ? "It needs a sign-in: accounts lists who's signed in, sign_in signs in (another account adds one), and with several each operation takes account." : "",

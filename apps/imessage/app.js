@@ -17,7 +17,7 @@ const NEEDS = "iMessage runs on a Mac with The One App open, and none of yours i
 export default {
   name: "imessage",
   title: "iMessage",
-  icon: "message.fill",
+  icon: "chat-circle",
   color: "#34c759",
   description: "Messages on your Mac, for your apps and agents",
   connector: true,

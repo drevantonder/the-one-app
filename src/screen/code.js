@@ -155,7 +155,7 @@
     el.innerHTML = `<div class="viewer${wrap ? " wrap" : ""}">
       <div class="viewer-bar">${header ? `<span class="viewer-info">${lines.length.toLocaleString()} line${lines.length === 1 ? "" : "s"} · ${size(bytes)}</span>` : ""}
         <span class="viewer-tools"><span class="viewer-find"></span>
-        <button class="tool" data-wrap aria-pressed="${wrap}" title="Wrap lines">${one.icon("wrap")}<span>Wrap</span></button>${one.copyButton(String(text ?? ""), { cls: "tool" })}</span></div>
+        <button class="tool" data-wrap aria-pressed="${wrap}" title="Wrap lines">${one.icon("arrow-u-down-left")}<span>Wrap</span></button>${one.copyButton(String(text ?? ""), { cls: "tool" })}</span></div>
       <div class="viewer-body"><table class="lines"><tbody>${lines.map((l, n) => `<tr><td class="ln" data-n="${n + 1}"></td><td class="lc">${l || " "}</td></tr>`).join("")}</tbody></table></div></div>`;
     const viewer = el.firstElementChild;
     viewer.querySelector("[data-wrap]").onclick = (e) => {

@@ -444,6 +444,16 @@ func widgetFont(_ size: String?) -> Font? {
     }
 }
 
+/// The same sizes in points, for icons drawn beside text of that size.
+func widgetPoints(_ size: String?) -> CGFloat {
+    switch size {
+    case "xl": 22
+    case "sm": 13
+    case "xs": 11
+    default: 17
+    }
+}
+
 /// A tone's colour: `muted` is secondary, and with no tone, `otherwise` (the primary colour by default).
 func toned(_ tone: String?, otherwise: some ShapeStyle = .primary) -> AnyShapeStyle {
     switch tone {
@@ -609,7 +619,7 @@ private struct Icon: View {
                     if let path = node.path {
                         SVGShape(path).stroke(style, style: StrokeStyle(lineWidth: 1.5 * w / 24, lineJoin: .round))
                     } else {
-                        Image(systemName: symbol(node.name)).resizable().scaledToFit().foregroundStyle(style)
+                        Glyph(name: node.name, size: w).foregroundStyle(style)
                     }
                 }
                     .mask {
@@ -629,9 +639,7 @@ private struct Icon: View {
             }
             .frame(width: w, height: w)
         } else {
-            Image(systemName: symbol(node.name))
-                .font(node.size.map { _ in font } ?? nil)
-                .foregroundStyle(style)
+            Glyph(name: node.name, size: widgetPoints(node.size)).foregroundStyle(style)
         }
     }
 }
@@ -696,7 +704,7 @@ private struct WidgetItem: View {
     var body: some View {
         let row = HStack(spacing: 10) {
             if let icon = node.icon {
-                Image(systemName: symbol(icon)).foregroundStyle(toned(node.tone, otherwise: .tint)).frame(width: 20)
+                Glyph(name: icon, size: 18).foregroundStyle(toned(node.tone, otherwise: .tint)).frame(width: 20)
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(node.title ?? "").lineLimit(1).foregroundStyle(.primary)
@@ -775,7 +783,7 @@ private struct ActionButton: View {
         let label = Label {
             Text(node.label ?? node.text ?? "")
         } icon: {
-            if let icon = node.icon { Image(systemName: symbol(icon)) }
+            if let icon = node.icon { Glyph(name: icon, size: 16) }
         }
         #if WIDGET
         Button(intent: RunOperation(app: host.app, op: node.op ?? "", input: node.input ?? .object([:]), scope: host.scope)) { label }
