@@ -1,7 +1,7 @@
-// The auth server: who you are. Better Auth, in a Durable Object: sign-in by passkey, email and password, or Google,
+// The auth service: who you are. Better Auth, in a Durable Object: sign-in by passkey, email and password, or Google,
 // and an OAuth server (per MCP's authorization spec) that every client signs in through: the iPhone and Mac apps,
 // and MCP clients like Claude Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at
-// /api/auth/jwks, so compute servers and the vault check them offline.
+// /api/auth/jwks, so nodes and the vault check them offline.
 //
 // Keys open only with a passkey. A client is added at its consent screen: the person's passkey (its PRF output)
 // opens their keys at the vault, which seals a copy for the client under its authorization code; each time the
@@ -33,7 +33,7 @@ export class Auth extends DurableObject {
     });
   }
 
-  /// Asks the vault, as only the auth server may.
+  /// Asks the vault, as only the auth service may.
   async vault(path, body) {
     const resp = await this.env.VAULT.fetch(new Request(`https://vault/internal/${path}`, {
       method: "POST",
@@ -146,7 +146,7 @@ export class Auth extends DurableObject {
       const status = typeof err.status === "number" ? err.status : err.statusCode;
       if (status >= 400 && status < 500) return json({ error: err.body?.error_description || err.body?.message || err.message }, status);
       console.error(err.stack || err);
-      return json({ error: "the auth server failed" }, 500);
+      return json({ error: "the auth service failed" }, 500);
     }
   }
 

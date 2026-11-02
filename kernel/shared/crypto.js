@@ -1,9 +1,9 @@
-// The kernel's formats, which compute servers read too (src/kernel.rs; tests/contracts.rs checks they agree).
+// The kernel's formats, which nodes read too (src/kernel.rs; tests/contracts.rs checks they agree).
 //
 // Keys are a tree per scope: a scope's key is 32 random bytes; an app's key in it, and a database's in that app, are
 // derived from the one above with HKDF-SHA256, so whoever holds a key can derive what's under it and nothing beside.
 //
-// Sealed to a public key (an X25519 key: a person's, the recovery key's twin, the schedule server's), bytes are
+// Sealed to a public key (an X25519 key: a person's, the recovery key's twin, the schedules service's), bytes are
 // share ‖ AES-256-GCM(key, zero nonce, plain), where share is a fresh X25519 public key and key is HKDF-SHA256 of the
 // shared secret, salted with share ‖ the recipient's public key. Each key seals once, so the zero nonce is safe.
 //

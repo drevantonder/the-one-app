@@ -356,15 +356,15 @@ fn go_sidecars_read_the_calls_the_node_hands_them() {
     assert!(read >= 10, "the test read the Go sidecars' calls ({read} fields)");
 }
 
-/// The kernel's servers (JavaScript, `kernel/shared/crypto.js`) and compute servers (`src/kernel.rs`) derive the same
+/// The kernel's services (JavaScript, `kernel/shared/crypto.js`) and nodes (`src/kernel.rs`) derive the same
 /// keys from a scope's key, and each opens what the other seals.
 #[test]
-fn the_kernel_and_compute_servers_agree_on_keys_and_seals() {
+fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     use data_encoding::BASE64URL_NOPAD as B64U;
     use one::kernel;
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
-    let files = ["shared/crypto.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
+    let files = ["shared/crypto.js", "shared/token.js", "schedules/worker.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
     let dir = std::env::temp_dir().join(format!("one-formats-{}", rand::random::<u64>()));
     std::fs::create_dir_all(&dir).unwrap();
     let addr = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
@@ -404,6 +404,24 @@ fn the_kernel_and_compute_servers_agree_on_keys_and_seals() {
     let sealed = kernel::seal_under(b"a code from the recovery key", &scope);
     let opened = js(json!({ "op": "openUnder", "secret": "a code from the recovery key", "sealed": B64U.encode(&sealed) }));
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens a copy Rust sealed");
+
+    // The schedules service and the node agree when a schedule runs next, across daylight saving's changes too.
+    let specs = [
+        json!({ "op": "x", "at": "09:00", "tz": "Australia/Melbourne" }),
+        json!({ "op": "x", "at": "02:30", "tz": "America/New_York", "days": ["sun"] }),
+        json!({ "op": "x", "at": "23:59", "tz": "Europe/London", "days": ["mon", "fri"] }),
+        json!({ "op": "x", "every": "15m" }),
+        json!({ "op": "x", "every": "1d" }),
+    ];
+    // Around Melbourne's change in April and October 2026, New York's in March and November, and an ordinary day.
+    let instants: [u64; 5] = [1_775_318_400_000, 1_791_043_200_000, 1_772_928_000_000, 1_793_491_200_000, 1_793_600_000_000];
+    for spec in &specs {
+        let rust = one::schedules::Schedule::parse("s", spec).unwrap();
+        for at in instants.iter().flat_map(|t| (0..48).map(move |h| t + h * 1_800_000)) {
+            let js = js(json!({ "op": "next", "spec": spec, "now": at }));
+            assert_eq!(js["next"].as_u64(), rust.next(at), "{spec} after {at}");
+        }
+    }
 
     let _ = child.kill();
     let _ = child.wait();

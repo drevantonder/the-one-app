@@ -1,7 +1,11 @@
 // The kernel's formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
+import { next, when } from "../schedules/worker.js";
 import { appKey, b64u, databaseKey, idOf, keyPair, openSealed, openUnder, sealTo, sealUnder } from "../shared/crypto.js";
 
 const ops = {
+  async next({ spec, now }) {
+    return { next: next(when(spec), now) };
+  },
   async derive({ scopeKey, app, database }) {
     const a = await appKey(b64u.decode(scopeKey), app);
     return { app: b64u.encode(a), database: b64u.encode(await databaseKey(a, database)) };

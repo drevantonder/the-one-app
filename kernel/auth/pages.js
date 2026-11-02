@@ -1,5 +1,5 @@
-// The auth server's two screens: signing in, and letting a client in with a passkey. Plain HTML with a little script,
-// served from the auth server itself, so passkeys belong to its name.
+// The auth service's two screens: signing in, and letting a client in with a passkey. Plain HTML with a little script,
+// served from the auth service itself, so passkeys belong to its name.
 
 const escape = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 

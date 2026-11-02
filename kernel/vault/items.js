@@ -2,7 +2,7 @@
 // fields go to, and the apps switched on for it. Secret fields are sealed under a key derived from the scope's key,
 // so they open only for a session that opens the scope. Apps write `{{<item id>:field}}` (or `{{field}}`, or
 // `{{<group id>/field}}`) where a field goes, and the vault fills it in on the way out: it makes the request to one
-// of the item's hosts itself, so a secret never reaches a compute server. Sign-ins are items too: an app swaps a
+// of the item's hosts itself, so a secret never reaches a node. Sign-ins are items too: an app swaps a
 // refresh token it never sees for an hour's access token, through the vault.
 
 import { b64u, hkdf, random } from "../shared/crypto.js";
@@ -53,7 +53,8 @@ export class Items {
   /// Every item in the scopes a session opens (or just `scope`), oldest first.
   list(held, scope) {
     const scopes = this.vault.held(held).filter((s) => !scope || s === scope);
-    const rows = scopes.flatMap((s) => this.sql.exec("select * from items where scope = ? order by made, rowid", s).toArray());
+    let rows = scopes.flatMap((s) => this.sql.exec("select * from items where scope = ? order by made, rowid", s).toArray());
+    if (held.apps) rows = rows.filter((r) => JSON.parse(r.data).apps.some((a) => held.apps.includes(a)));
     return { items: rows.map(shown) };
   }
 

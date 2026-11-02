@@ -1,4 +1,4 @@
-//! The kernel servers (`kernel/`: auth, vault, schedules) as compute servers meet them: the formats they agree on
+//! The kernel services (`kernel/`: auth, vault, schedules) as nodes meet them: the formats they agree on
 //! (`kernel/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
 //! asking the vault for keys and bucket URLs, and building and running the servers in workerd.
 
@@ -127,7 +127,7 @@ impl Claims {
     }
 }
 
-/// An access token's claims, if a key in `jwks` (the auth server's) signed it, `iss` issued it, and it hasn't expired
+/// An access token's claims, if a key in `jwks` (the auth service's) signed it, `iss` issued it, and it hasn't expired
 /// at `now` (milliseconds).
 pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> {
     let parts: Vec<&str> = token.split('.').collect();
@@ -139,7 +139,7 @@ pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> 
         .into_iter()
         .flatten()
         .find(|k| k["kid"] == header["kid"] && k["kty"] == "OKP" && k["crv"] == "Ed25519")
-        .context("signed by a key the auth server doesn't publish")?;
+        .context("signed by a key the auth service doesn't publish")?;
     let public: [u8; 32] = B64U.decode(jwk["x"].as_str().unwrap_or("").as_bytes())?.try_into().map_err(|_| anyhow!("not an Ed25519 key"))?;
     let key = ed25519_dalek::VerifyingKey::from_bytes(&public)?;
     let signature = ed25519_dalek::Signature::from_slice(&B64U.decode(parts[2].as_bytes())?)?;
@@ -150,7 +150,7 @@ pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> 
     Ok(claims)
 }
 
-// The vault, as compute servers ask it.
+// The vault, as nodes ask it.
 
 /// A key a call names, and (from the vault) the key itself.
 #[derive(Debug, Clone, PartialEq)]
@@ -172,7 +172,31 @@ pub struct Urls {
     pub until: u64,
 }
 
-/// The vault server at `url`, asked with a caller's access token.
+/// What a token's session at the vault opens.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Session {
+    pub user: String,
+    /// The client it's for: an OAuth client's id, or `schedules` for a scheduled run.
+    pub client: Option<String>,
+    pub scopes: Vec<String>,
+    /// The apps it may use, if it's limited to some (as a scheduled run is).
+    pub apps: Option<Vec<String>>,
+    pub until: u64,
+}
+
+/// A run the schedules service hands a node: `POST <node>/kernel/run`, its token as the bearer. `run` names
+/// it, the same each time it's sent, so a node that leases by it runs it once.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Run {
+    pub run: String,
+    pub app: String,
+    pub schedule: String,
+    pub op: String,
+    pub input: Value,
+    pub scope: String,
+}
+
+/// The vault at `url`, asked with a caller's access token.
 pub struct Vault {
     pub url: String,
 }
@@ -187,6 +211,15 @@ impl Vault {
             bail!("the vault said: {}", out["error"].as_str().unwrap_or("nothing"));
         }
         Ok(out)
+    }
+
+    /// What a token opens: a node asks before it runs a scheduled run as its person.
+    pub fn session(&self, token: &str) -> Result<Session> {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
+        let mut resp = agent.get(format!("{}/session", self.url.trim_end_matches('/'))).header("authorization", format!("Bearer {token}")).call()?;
+        let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
+        ensure!(resp.status() == 200, "the vault said: {}", out["error"].as_str().unwrap_or("nothing"));
+        Ok(serde_json::from_value(out)?)
     }
 
     /// The keys a call names: (scope, app, database?) each.
@@ -223,16 +256,16 @@ pub fn folder_of(scope: &str) -> String {
 
 // Building and running.
 
-/// The kernel's servers: each one's name, its module, and its Durable Object's class.
-pub const SERVERS: &[(&str, &str, Option<&str>)] = &[("vault", "vault/worker.js", Some("Vault")), ("auth", "auth/worker.js", Some("Auth"))];
+/// The kernel's services: each one's name, its module, and its Durable Object's class.
+pub const SERVERS: &[(&str, &str, Option<&str>)] = &[("vault", "vault/worker.js", Some("Vault")), ("auth", "auth/worker.js", Some("Auth")), ("schedules", "schedules/worker.js", Some("Schedules"))];
 
-/// A kernel server's module, built from the sources this release was signed with by the pinned Bun, once per
+/// A kernel service's module, built from the sources this release was signed with by the pinned Bun, once per
 /// version of them.
 pub fn module(entry: &str) -> Result<Vec<u8>> {
     module_from(crate::config::KERNEL.iter().map(|(p, b)| (p.to_string(), b.to_vec())).collect(), entry)
 }
 
-/// A kernel server's module, built from `files` (paths in `kernel/`).
+/// A kernel service's module, built from `files` (paths in `kernel/`).
 pub fn module_from(files: Vec<(String, Vec<u8>)>, entry: &str) -> Result<Vec<u8>> {
     let mut hash = Sha256::new();
     for (path, bytes) in &files {
@@ -279,7 +312,7 @@ pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
     Ok(std::fs::read(out)?)
 }
 
-/// A kernel server as one workerd runs it: its name, module, Durable Object class, the address it listens on, and its
+/// A kernel service as one workerd runs it: its name, module, Durable Object class, the address it listens on, and its
 /// bindings: (name, a text, or `service:<name>` for another server).
 pub struct Served {
     pub name: String,
@@ -299,7 +332,7 @@ pub fn write_config(dir: &Path, servers: &[Served]) -> Result<PathBuf> {
     let mut sockets = Vec::new();
     let mut workers = Vec::new();
     for (i, s) in servers.iter().enumerate() {
-        ensure!(s.name.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "a kernel server's name is lowercase");
+        ensure!(s.name.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "a kernel service's name is lowercase");
         std::fs::write(dir.join(format!("{}.js", s.name)), &s.module)?;
         let data = dir.join("data").join(&s.name);
         std::fs::create_dir_all(&data)?;

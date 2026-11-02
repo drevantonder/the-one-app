@@ -1,7 +1,7 @@
-// Presigned URLs for the install's S3-compatible bucket (AWS Signature Version 4, in the query), so compute servers
+// Presigned URLs for the install's S3-compatible bucket (AWS Signature Version 4, in the query), so nodes
 // read and create objects without holding the bucket's credentials. A create URL signs `If-None-Match: *` in, so the
 // request must send it and can only make an object that isn't there; a replace URL signs `If-Match: <ETag>` in, so it
-// changes only the version it names. Nothing a compute server does deletes data.
+// changes only the version it names. Nothing a node does deletes data.
 
 const text = new TextEncoder();
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");

@@ -1,5 +1,5 @@
-// A stand-in auth server for tests: it publishes its keys at /jwks and signs whatever claims it's sent at /sign, as
-// the auth server signs access tokens (EdDSA, with a kid).
+// A stand-in auth service for tests: it publishes its keys at /jwks and signs whatever claims it's sent at /sign, as
+// the auth service signs access tokens (EdDSA, with a kid).
 import { b64u } from "../shared/crypto.js";
 
 let pair;

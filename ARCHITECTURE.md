@@ -46,7 +46,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/git.rs`: `git-remote-one`, for the Repos app.
 - `src/load.rs`, `src/logos.rs`: how loaded a machine is, and the logos of the sites apps connect to.
 - `src/update.rs`, `src/release.rs`: building, signing and publishing the node; tooling, not protocol.
-- `kernel/`: the kernel's services, JavaScript for workerd, each one Worker with one Durable Object: `auth/` (Better Auth: passkeys, email, Google, and the OAuth server every client signs in through), `vault/` (every scope's keys and the Vault's items, sealed; keys, filled-in requests and bucket URLs for what a call names). `shared/crypto.js` is the formats nodes read too.
+- `kernel/`: the kernel's services, JavaScript for workerd, each one Worker with one Durable Object: `auth/` (Better Auth: passkeys, email, Google, and the OAuth server every client signs in through), `vault/` (every scope's keys and the Vault's items, sealed; keys, filled-in requests and bucket URLs for what a call names), `schedules/` (fires the schedules people let run while they're away, each run once, with only the keys it was let use). `shared/crypto.js` is the formats nodes read too.
 - `src/kernel.rs`: the kernel as nodes meet it: the same formats, checking access tokens, asking the vault, and building the services with the pinned Bun and running them in workerd.
 - `client/`: the library phones link. `apple/`: the Mac app (a server's node inside, and the Apple sidecars) and the iPhone app and widget (a client).
 - `apps/`: the built-in apps, which every release ships and any install's admins may add. Everything else is deployed by an install's own people.

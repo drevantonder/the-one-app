@@ -1,4 +1,4 @@
-// The vault server: every scope's keys, sealed so it can open none of them alone.
+// The vault: every scope's keys, sealed so it can open none of them alone.
 //
 // Each person has an X25519 key pair. Its secret half is kept only in copies, each sealed under one client's secret
 // (a passkey's PRF output, an OAuth client's refresh token) and kept by a hash of that secret; a session is a copy
@@ -6,14 +6,14 @@
 // person who may open it, and to the install's recovery key. A request that brings an access token gets the keys it
 // names from its session, and each one is recorded where its person can see it.
 //
-// The auth server is the only one that sees clients' secrets (it issues them), so it alone calls the routes under
+// The auth service is the only one that sees clients' secrets (it issues them), so it alone calls the routes under
 // /internal/, with the kernel's shared secret. Everyone else brings an access token.
 
 import { DurableObject } from "cloudflare:workers";
 import { appKey, b64u, databaseKey, idOf, keyPair, openSealed, openUnder, random, sealTo, sealUnder } from "../shared/crypto.js";
 import { bucketUrls } from "../shared/s3.js";
 import { Items, schema } from "./items.js";
-import { bearer, verify } from "../shared/token.js";
+import { bearer, Issuer } from "../shared/token.js";
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SCOPE = /^(global|user:[0-9a-f]{16}|group:[0-9a-f]{16})$/;
@@ -76,7 +76,7 @@ export class Vault extends DurableObject {
     const path = url.pathname;
     const body = request.method === "POST" ? await request.json().catch(() => refuse(400, "the body isn't JSON")) : {};
     if (path.startsWith("/internal/")) {
-      if (!this.env.KERNEL_SECRET || request.headers.get("x-kernel-secret") !== this.env.KERNEL_SECRET) refuse(403, "only the auth server asks that");
+      if (!this.env.KERNEL_SECRET || request.headers.get("x-kernel-secret") !== this.env.KERNEL_SECRET) refuse(403, "only the auth service asks that");
       switch (`${request.method} ${path}`) {
         case "POST /internal/passkey": return json(await this.passkey(body));
         case "POST /internal/grant": return json(await this.grant(body));
@@ -85,12 +85,15 @@ export class Vault extends DurableObject {
         case "POST /internal/forget": return json(await this.forget(body));
         case "POST /internal/forget-passkeys": return json(this.forgetPasskeys(body));
         case "POST /internal/recovery": return json(this.recovery());
+        case "POST /internal/standing": return json(await this.standing(body));
+        case "POST /internal/run": return json(await this.run(body));
       }
       refuse(404, "no such route");
     }
     const token = bearer(request) || refuse(401, "bring an access token");
-    const claims = await this.verify(token);
+    const claims = token.startsWith("run.") ? await this.runClaims(token) : await this.verify(token);
     switch (`${request.method} ${path}`) {
+      case "GET /session": return json(await this.sessionAbout(token));
       case "POST /keys": return json(await this.keys(token, claims, body));
       case "POST /urls": return json(await this.urls(token, claims, body));
       case "POST /share": return json(await this.share(token, claims, body));
@@ -109,20 +112,42 @@ export class Vault extends DurableObject {
   // Tokens.
 
   async verify(token) {
-    const now = Date.now();
-    for (const fresh of [false, true]) {
-      if (fresh || !this.jwks || this.jwksAt < now - 300_000) {
-        const resp = await this.env.AUTH.fetch(new Request(`${this.env.ISSUER}/jwks`));
-        if (!resp.ok) refuse(503, "the auth server didn't give its keys");
-        this.jwks = await resp.json();
-        this.jwksAt = now;
-      }
-      try {
-        return await verify(token, this.jwks, this.env.ISSUER, now);
-      } catch (err) {
-        if (fresh || !/key the auth server/.test(err.message)) refuse(401, `that access token won't do: ${err.message}`);
-      }
-    }
+    this.issuer ||= new Issuer(this.env.ISSUER, () => this.env.AUTH.fetch(new Request(`${this.env.ISSUER}/jwks`)));
+    return this.issuer.verify(token).catch((err) => refuse(401, `that access token won't do: ${err.message}`));
+  }
+
+  /// A run's token isn't a JWT: it's the secret its session is sealed under, so only having it opens anything.
+  async runClaims(token) {
+    const { row } = await this.sessionOf(token);
+    return { sub: row.user, azp: row.client };
+  }
+
+  /// What a token's session opens: who it's for, the client, the scopes and apps it may use, and until when.
+  async sessionAbout(token) {
+    const { row, held } = await this.sessionOf(token);
+    return { user: row.user, client: row.client, name: row.name, scopes: this.held(held), apps: held.apps || null, until: row.until };
+  }
+
+  /// Work a person lets run while they're away: a copy of what their session opens, limited to `scopes` and `apps`,
+  /// sealed under a new secret that only the schedules service keeps. → `{ secret }`.
+  async standing({ token, scopes, apps, name }) {
+    await this.verify(token);
+    const { row, held } = await this.sessionOf(token);
+    if (!Array.isArray(apps) || !apps.length || !apps.every((a) => NAME.test(a))) refuse(400, "name the apps it may use");
+    const limited = { ...held, scopes: narrow(held.scopes, scopes), apps: held.apps ? apps.filter((a) => held.apps.includes(a)) : apps };
+    if (!limited.scopes?.length || !limited.apps.length) refuse(403, "this session can't let that run");
+    const secret = b64u.encode(random(32));
+    await this.seal(secretOf(secret), { user: row.user, kind: "standing", name: String(name || "Schedule"), client: "schedules", held: limited });
+    return { secret };
+  }
+
+  /// A run of standing work: a session for it, under a new token, until `until` (an hour at most). → `{ token }`.
+  async run({ secret, until }) {
+    const opened = await this.open(secretOf(secret), ["standing"]);
+    if (!opened) refuse(404, "that work isn't let run any more");
+    const token = `run.${b64u.encode(random(32))}`;
+    await this.session(token, opened.row, opened.held, Math.min(Number(until) || 0, Date.now() + 3_600_000));
+    return { token, user: opened.row.user };
   }
 
   // Copies.
@@ -276,6 +301,7 @@ export class Vault extends DurableObject {
     const out = [];
     for (const want of keys) {
       if (!NAME.test(want.app || "")) refuse(400, `${want.app} isn't an app's name`);
+      mayUse(held, want.app);
       if (want.database !== undefined && !NAME.test(want.database)) refuse(400, `${want.database} isn't a database's name`);
       let key = await appKey(await this.scopeKey(held, want.scope), want.app);
       if (want.database !== undefined) key = await databaseKey(key, want.database);
@@ -289,6 +315,7 @@ export class Vault extends DurableObject {
   async fetchFor(token, claims, body) {
     const { row, held } = await this.sessionOf(token);
     if (!NAME.test(body.app || "")) refuse(400, "name the app whose request it is");
+    mayUse(held, body.app);
     const used = new Set();
     const out = await this.items.fetch(held, body, used).catch((err) => refuse(400, err.message));
     if (used.size) this.record(held.user, row.client || claims.azp, [...used].map((id) => `${body.app} used ${id}`));
@@ -299,6 +326,7 @@ export class Vault extends DurableObject {
   async fillFor(token, claims, { app, host, text }) {
     const { row, held } = await this.sessionOf(token);
     if (!NAME.test(app || "") || typeof host !== "string" || typeof text !== "string") refuse(400, "give app, host and text");
+    mayUse(held, app);
     const used = new Set();
     const filled = await this.items.fill(held, app, text, host.toLowerCase(), used).catch((err) => refuse(400, err.message));
     if (used.size) this.record(held.user, row.client || claims.azp, [...used].map((id) => `${app} used ${id}`));
@@ -327,8 +355,8 @@ export class Vault extends DurableObject {
     const reachable = (name) => {
       const parts = String(name).split("/");
       if (parts.some((p) => !p || p === "." || p === "..")) return false;
-      if (parts[0] === "log") return scopes.includes("global") && parts.length > 1;
-      return open.has(parts[0]) && NAME.test(parts[1] || "") && parts.length > 2;
+      if (parts[0] === "log") return scopes.includes("global") && !held.apps && parts.length > 1;
+      return open.has(parts[0]) && NAME.test(parts[1] || "") && (!held.apps || held.apps.includes(parts[1])) && parts.length > 2;
     };
     for (const name of [...read, ...create, ...replace.map((r) => r?.name)]) {
       if (!reachable(name)) refuse(403, `${name} isn't an object this session may reach`);
@@ -347,6 +375,11 @@ export class Vault extends DurableObject {
     this.sql.exec("insert or replace into grants (user, scope, sealed) values (?, ?, ?)", user, scope, await sealTo(person.public, key));
     return {};
   }
+}
+
+/// Refuses unless a session may use `app` (standing work may use only the apps it was let run).
+function mayUse(held, app) {
+  if (held.apps && !held.apps.includes(app)) refuse(403, `this may not use ${app}`);
 }
 
 /// A client's scopes: those asked for, within what the passkey allows.
