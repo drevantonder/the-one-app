@@ -3697,7 +3697,7 @@ fn vault_entry(i: &Install, app: &str, me: &Caller, scopes: &[Scope], id: &str, 
 /// A deploy of `app`: the bundle at blob `bundle`.
 /// A built-in app's bundle: its `app.js` as the module, and every file of its folder as its source. One with npm
 /// packages (a `package.json`) is built as `<cli> deploy` builds any app.
-fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+pub fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
     if files.iter().any(|(p, _)| *p == "package.json") {
         return crate::deploy::build_files(files);
     }

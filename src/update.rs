@@ -16,6 +16,8 @@ use crate::{get, post};
 const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin"];
 
 /// Builds the tip of main and has every device run it; with a tag, also signs it off and publishes it on GitHub.
+/// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
+/// it in the background, and the node by testing and building it at once, which every Linux device then takes.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this white label names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
@@ -30,55 +32,87 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let src = checkout()?;
     let (config, config_commit) = config(&src)?;
     let commit = git(&src, &["rev-parse", "HEAD"])?;
-    let short = &commit[..12];
+    let short = commit[..12].to_string();
+    let short = short.as_str();
     // Whoever pushed since another update began is in what it sent out, if it got to their commit.
     let this = format!("{commit} {}", config_commit.as_deref().unwrap_or(""));
     let done = cache().join("updated");
-    if tag.is_none() && std::fs::read_to_string(&done).is_ok_and(|d| d == this) {
+    let last = std::fs::read_to_string(&done).ok();
+    if tag.is_none() && last.as_deref() == Some(this.as_str()) {
         println!("Every device already runs {short}, main's tip: the last update here sent it out.");
         return Ok(());
     }
     if let Some(tag) = tag {
         ensure!(!quiet(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
     }
-    println!("Testing {short}");
-    step(Command::new(cargo()).current_dir(&src).env("CONFIG", &config).arg("test"))?;
+    let parts = match (tag, last) {
+        (None, Some(last)) => Parts::since(&src, &last, &this),
+        _ => Parts::everything(),
+    };
+    let macs: Vec<Value> =
+        if parts.mac { devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect() } else { Vec::new() };
+
+    if !parts.node {
+        deploy_apps(&src, &parts.apps)?;
+        if parts.test {
+            println!("Testing {short}");
+            test(&src, &config)?;
+        }
+        let missed = follow(&macs, &commit, config_commit.as_deref());
+        if parts.apps.is_empty() && !parts.mac {
+            println!("Nothing to send out: what changed since the last update here isn't in any build.");
+        }
+        if !missed {
+            std::fs::write(&done, &this)?;
+        }
+        return Ok(());
+    }
+
+    // Testing and building at once: neither waits for the other, and nothing goes out unless both work.
+    println!("Testing and building {short}");
+    let built = std::thread::scope(|s| {
+        let build = s.spawn(|| {
+            let mut build = Command::new(cargo());
+            build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
+            // A device that can't build it makes a release with no serverless node, which can't deploy one.
+            match serverless(&src, &config) {
+                Ok(dir) => {
+                    build.env("SERVERLESS", dir);
+                }
+                Err(err) => println!("  no serverless node in this build: {err:#}"),
+            }
+            run_quiet(&mut build)
+        });
+        let tested = test(&src, &config);
+        let built = build.join().map_err(|_| anyhow::anyhow!("the build panicked"))?;
+        tested.and(built)
+    });
+    built?;
     if tag.is_some() {
         step(Command::new("gh").current_dir(&src).args(["signoff", "create", "--commit", &commit]))
             .context("sign off (gh extension install basecamp/gh-signoff)")?;
     }
 
-    // The Macs build their app themselves, which takes longest, so they start first.
-    let macs: Vec<Value> = devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect();
-    let mut started = Vec::new();
-    // A Mac this missed doesn't update itself, so running this again mustn't be skipped as done.
+    // An update's Macs build in the background, and a release's build it with what it publishes, which it waits for.
     let mut missed = false;
-    for mac in &macs {
-        let name = mac["name"].as_str().unwrap_or("");
-        if mac["online"] != true {
-            println!("  {name}: offline; run this again when it's back");
-            missed = true;
-            continue;
+    let mut started = Vec::new();
+    if tag.is_some() {
+        for mac in &macs {
+            let name = mac["name"].as_str().unwrap_or("");
+            if mac["online"] != true {
+                println!("  {name}: offline; run this again when it's back");
+                continue;
+            }
+            match shell(mac, &mac_job(&commit, config_commit.as_deref()), 60) {
+                Ok(r) if r["exit"] == 0 => started.push((mac.clone(), Instant::now())),
+                Ok(r) => println!("  {name}: couldn't start its build: {}", r["stderr"].as_str().unwrap_or("").trim()),
+                Err(err) => println!("  {name}: couldn't start its build: {err:#}"),
+            }
         }
-        match shell(mac, &mac_job(&commit, config_commit.as_deref(), tag.is_some()), 60) {
-            Ok(r) if r["exit"] == 0 => started.push((mac.clone(), Instant::now())),
-            Ok(r) => println!("  {name}: couldn't start its build: {}", r["stderr"].as_str().unwrap_or("").trim()),
-            Err(err) => println!("  {name}: couldn't start its build: {err:#}"),
-        }
+    } else {
+        missed = follow(&macs, &commit, config_commit.as_deref());
     }
-    missed |= started.len() < macs.iter().filter(|m| m["online"] == true).count();
 
-    println!("Building {short}");
-    let mut build = Command::new(cargo());
-    build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
-    // A device that can't build it makes a release with no serverless node, which can't deploy one.
-    match serverless(&src, &config) {
-        Ok(dir) => {
-            build.env("SERVERLESS", dir);
-        }
-        Err(err) => println!("  no serverless node in this build: {err:#}"),
-    }
-    step(&mut build)?;
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     // The build devices say they run: main's commit, and a white label's config's.
     let version: Value = serde_json::from_slice(&Command::new(&binary).args(["version", "--json"]).output()?.stdout).context("ask the new build what it is")?;
@@ -86,44 +120,16 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let short = short.as_str();
     // Which devices to wait for, asked before this device's own node restarts on the new build.
     let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
-    crate::publish(&binary, &Default::default(), &key)?;
+    if !linux.is_empty() && linux.iter().all(|d| d["build"] == short) {
+        println!("  every Linux device already runs {short}");
+    } else {
+        crate::publish(&binary, &Default::default(), &key)?;
+    }
     let started_at = Instant::now();
     let mut failed = await_builds(&linux, short, started_at, Duration::from_secs(180));
     if let Err(err) = deploy_built_in() {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
-    }
-
-    let mut assets = Vec::new();
-    if let Some(tag) = tag {
-        let dir = cache().join("release").join(tag);
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir)?;
-        let name = format!("{CLI}-{TARGET}");
-        std::fs::copy(&binary, dir.join(&name))?;
-        assets.push(name);
-    }
-    for (mac, since) in &started {
-        let name = mac["name"].as_str().unwrap_or("");
-        match await_mac(mac) {
-            Ok((made, warnings)) => {
-                for w in warnings {
-                    println!("  {name}: {w}");
-                }
-                failed |= await_builds(std::slice::from_ref(mac), short, *since, Duration::from_secs(120));
-                if let Some(tag) = tag {
-                    for (hash, asset) in made {
-                        let bytes = blob(&hash).with_context(|| format!("get {asset} from {name}"))?;
-                        std::fs::write(cache().join("release").join(tag).join(&asset), bytes)?;
-                        assets.push(asset);
-                    }
-                }
-            }
-            Err(err) => {
-                failed = true;
-                println!("  {name}: {err:#}");
-            }
-        }
     }
 
     let Some(tag) = tag else {
@@ -133,12 +139,38 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         }
         return Ok(());
     };
+    let mut assets = Vec::new();
+    let dir = cache().join("release").join(tag);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    let name = format!("{CLI}-{TARGET}");
+    std::fs::copy(&binary, dir.join(&name))?;
+    assets.push(name);
+    for (mac, since) in &started {
+        let name = mac["name"].as_str().unwrap_or("");
+        match await_mac(mac) {
+            Ok((made, warnings)) => {
+                for w in warnings {
+                    println!("  {name}: {w}");
+                }
+                failed |= await_builds(std::slice::from_ref(mac), short, *since, Duration::from_secs(120));
+                for (hash, asset) in made {
+                    let bytes = blob(&hash).with_context(|| format!("get {asset} from {name}"))?;
+                    std::fs::write(dir.join(&asset), bytes)?;
+                    assets.push(asset);
+                }
+            }
+            Err(err) => {
+                failed = true;
+                println!("  {name}: {err:#}");
+            }
+        }
+    }
     for p in PLATFORMS {
         if !assets.iter().any(|a| a.ends_with(p)) && !(p.ends_with("-apple-darwin") && assets.iter().any(|a| a == &app_zip())) {
             println!("No device here builds {p}, so {tag} has nothing for it.");
         }
     }
-    let dir = cache().join("release").join(tag);
     // Each file comes with its signature, which the installer checks.
     for asset in std::mem::take(&mut assets) {
         std::fs::write(dir.join(format!("{asset}.sig")), release::sign(&key, &std::fs::read(dir.join(&asset))?)?)?;
@@ -150,6 +182,151 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     step(&mut gh)?;
     ensure!(!failed, "released {tag}, but not every device runs it");
     Ok(())
+}
+
+/// What a change to the repo has to send out.
+#[derive(Debug, Default, PartialEq)]
+struct Parts {
+    /// The node: tested, built, and taken by every device.
+    node: bool,
+    /// The Mac app, which each Mac builds.
+    mac: bool,
+    /// Tests, for code that's only in the Mac app.
+    test: bool,
+    /// Built-in apps, by name, each deployed on its own.
+    apps: Vec<String>,
+}
+
+impl Parts {
+    fn everything() -> Parts {
+        Parts { node: true, mac: true, test: true, apps: Vec::new() }
+    }
+
+    /// What changed from the commit `last` says (and its config's) to `this`'s.
+    fn since(src: &Path, last: &str, this: &str) -> Parts {
+        let (Some((was, was_config)), Some((now, now_config))) = (last.split_once(' '), this.split_once(' ')) else { return Parts::everything() };
+        if was_config != now_config {
+            return Parts::everything();
+        }
+        match git(src, &["diff", "--name-only", was, now]) {
+            Ok(files) => Parts::of(files.lines()),
+            Err(_) => Parts::everything(),
+        }
+    }
+
+    /// What changing `files` (paths in the repo) has to send out. Anything not known to be outside the node is in it.
+    fn of<'a>(files: impl IntoIterator<Item = &'a str>) -> Parts {
+        let mut parts = Parts::default();
+        for file in files {
+            let top = file.split_once('/').map(|(top, _)| top);
+            match top {
+                Some("apps") => {
+                    let app = file.split('/').nth(1).unwrap_or("").to_string();
+                    if !parts.apps.contains(&app) {
+                        parts.apps.push(app);
+                    }
+                }
+                Some("apple" | "icons") => parts.mac = true,
+                // The Mac app's client, which the tests check against the node.
+                Some("client") => (parts.mac, parts.test) = (true, true),
+                Some("docs" | "tests" | "android" | "sidecars") => {}
+                None if file.ends_with(".md") || file == "LICENSE" => {}
+                _ => (parts.node, parts.mac, parts.test) = (true, true, true),
+            }
+        }
+        parts
+    }
+}
+
+/// Runs the tests, each file of them at once, showing only what failed.
+fn test(src: &Path, config: &Path) -> Result<()> {
+    let cargo = || {
+        let mut cmd = Command::new(cargo());
+        cmd.current_dir(src).env("CONFIG", config).args(["test", "-q"]);
+        cmd
+    };
+    run_quiet(cargo().arg("--no-run"))?;
+    let mut groups: Vec<Vec<String>> = vec![vec!["--lib".into(), "--bins".into()], vec!["--doc".into()]];
+    for entry in std::fs::read_dir(src.join("tests"))?.flatten() {
+        if let Some(name) = entry.file_name().to_str().and_then(|n| n.strip_suffix(".rs")) {
+            groups.push(vec!["--test".into(), name.into()]);
+        }
+    }
+    std::thread::scope(|s| {
+        let runs: Vec<_> = groups.iter().map(|args| s.spawn(move || run_quiet(cargo().args(args)))).collect();
+        runs.into_iter().map(|r| r.join().map_err(|_| anyhow::anyhow!("a test run panicked"))?).collect::<Result<Vec<_>>>()
+    })?;
+    Ok(())
+}
+
+/// Runs a command, showing its output only if it fails.
+fn run_quiet(cmd: &mut Command) -> Result<()> {
+    let out = cmd.output().with_context(|| format!("run {:?}", cmd.get_program()))?;
+    if !out.status.success() {
+        bail!(
+            "{:?} {} failed:\n{}{}",
+            cmd.get_program(),
+            cmd.get_args().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "),
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+/// Deploys the built-in apps named, as they are in `src`, where the install has them.
+fn deploy_apps(src: &Path, names: &[String]) -> Result<()> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+        let Some(name) = app["name"].as_str().filter(|n| app["built_in"].is_string() && names.iter().any(|m| m == n)) else { continue };
+        let dir = src.join("apps").join(name);
+        if !dir.join("app.js").is_file() {
+            continue;
+        }
+        let files = one::bundle::sources(&dir)?;
+        let files: Vec<(&str, &[u8])> = files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect();
+        let bundle = one::node::built_in_bundle(&files)?;
+        let blob = crate::request(crate::agent().post(format!("http://{}/v1/blobs", crate::addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
+        if app["bundle"].as_str() != Some(blob.as_str()) {
+            post("/v1/deploy", json!({ "app": name, "bundle": blob }))?;
+            println!("Deployed {name}'s new version ({})", &blob[..12]);
+        }
+    }
+    Ok(())
+}
+
+/// Has each Mac build `commit`'s app in the background, after what it's building now. True if a Mac was missed.
+fn follow(macs: &[Value], commit: &str, config_commit: Option<&str>) -> bool {
+    let mut missed = false;
+    for mac in macs {
+        let name = mac["name"].as_str().unwrap_or("");
+        if mac["online"] != true {
+            println!("  {name}: offline; run this again when it's back");
+            missed = true;
+            continue;
+        }
+        match shell(mac, &mac_follow(commit, config_commit), 60) {
+            Ok(r) if r["exit"] == 0 => {
+                let out = r["stdout"].as_str().unwrap_or("");
+                if let Some((was, log)) = out.split_once("failed ").and_then(|(_, rest)| rest.split_once('\n')) {
+                    println!("  {name}: its last build, of {}, failed:\n{}", &was[..was.len().min(12)], log.trim_end());
+                }
+                let now = if out.contains("building") { "after the build it's on" } else { "now" };
+                println!("  {name}: builds {} {now}, and runs it a few minutes later", &commit[..12]);
+            }
+            Ok(r) => {
+                missed = true;
+                println!("  {name}: couldn't start its build: {}", r["stderr"].as_str().unwrap_or("").trim());
+            }
+            Err(err) => {
+                missed = true;
+                println!("  {name}: couldn't start its build: {err:#}");
+            }
+        }
+    }
+    missed
 }
 
 /// This device's turn to update, held until it's dropped: other updates wait for it.
@@ -241,19 +418,19 @@ fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
     Ok((dir.join(CONFIG_FILE), Some(git(&dir, &["rev-parse", "HEAD"])?)))
 }
 
-/// Cargo, also where rustup puts it, for a shell that doesn't have it on its PATH.
 /// Builds the serverless node (`serverless/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
 /// folder they're in. It needs Rust's wasm32-unknown-unknown target, a clang that builds for it (SQLite is C), and the
 /// wasm-bindgen of the version it's built with.
 fn serverless(src: &Path, config: &Path) -> Result<PathBuf> {
-    step(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["build", "--release", "-p", "one-serverless", "--target", "wasm32-unknown-unknown"]))
+    run_quiet(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["build", "--release", "-p", "one-serverless", "--target", "wasm32-unknown-unknown"]))
         .context("build the serverless node (rustup target add wasm32-unknown-unknown)")?;
     let out = src.join("target/serverless");
     let wasm = src.join("target/wasm32-unknown-unknown/release/one_serverless.wasm");
-    step(Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm)).context("make its glue (cargo install wasm-bindgen-cli, the version in Cargo.lock)")?;
+    run_quiet(Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm)).context("make its glue (cargo install wasm-bindgen-cli, the version in Cargo.lock)")?;
     Ok(out)
 }
 
+/// Cargo, also where rustup puts it, for a shell that doesn't have it on its PATH.
 fn cargo() -> PathBuf {
     let rustup = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cargo/bin/cargo");
     if quiet(Command::new("cargo").arg("--version")) || !rustup.exists() { "cargo".into() } else { rustup }
@@ -327,34 +504,20 @@ fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
 }
 
 /// Shell for a Mac: start a job in its logged-in session (codesign needs the keychain, and the job outlives the node,
-/// which the new app replaces) that builds `commit`'s app in a clean clone and installs it. For a release it also
-/// leaves the app, zipped, and the node binary as blobs, listed in assets.txt.
-fn mac_job(commit: &str, config_commit: Option<&str>, assets: bool) -> String {
-    // A white label whose config is in its own repo gets that repo too, at the commit this server builds with.
-    let config = match config_commit {
-        None => format!(r#"config="$c/src/{CONFIG_FILE}""#),
-        Some(at) => format!(
-            r#"[ -d "$c/config/.git" ] || git clone -q {CONFIG_REPO} "$c/config"
-git -C "$c/config" fetch -q origin
-git -C "$c/config" checkout -q --detach --force {at}
-config="$c/config/{CONFIG_FILE}""#
-        ),
-    };
-    let assets = if assets {
-        format!(
-            r#"a="$c/assets"; rm -rf "$a"; mkdir "$a"
+/// which the new app replaces) that builds `commit`'s app in a clean clone and installs it, then leaves the app, zipped,
+/// and the node binary as blobs, listed in assets.txt, for a release.
+fn mac_job(commit: &str, config_commit: Option<&str>) -> String {
+    let assets = format!(
+        r#"a="$c/assets"; rm -rf "$a"; mkdir "$a"
 cp target/release/{bin} "$a/{CLI}-$(rustc -vV | sed -n 's/^host: //p')"
 ditto -c -k --keepParent "$HOME/Applications/{NAME}.app" "$a/{zip}"
 for f in "$a"/*; do
 	n=0; until h=$(target/release/{bin} file put "$f"); do n=$((n + 1)); [ $n -lt 30 ]; sleep 2; done
 	echo "$h $(basename "$f")" >> "$c/assets.txt"
 done"#,
-            zip = app_zip(),
-            bin = env!("CARGO_BIN_NAME")
-        )
-    } else {
-        String::new()
-    };
+        zip = app_zip(),
+        bin = env!("CARGO_BIN_NAME")
+    );
     format!(
         r#"set -e
 c="$HOME/Library/Caches/{CLI}"; label=app.{CLI}.update
@@ -364,24 +527,81 @@ c="$HOME/Library/Caches/{CLI}"
 exec > "$c/update.log" 2>&1
 trap 'echo $? > "$c/update.status"' EXIT
 set -e
-[ -d "$c/src/.git" ] || git clone -q https://github.com/{REPO}.git "$c/src"
-cd "$c/src"
-git fetch -q --tags --force origin
-git checkout -q --detach --force {commit}
-git clean -qfdx -e /target -e /apple/build
-{config}
-CONFIG="$config" apple/build.sh{release}
+{checkout}
+CONFIG="$config" apple/build.sh --release
 {assets}
 JOB
-cat > update.plist <<PLIST
+{start}"#,
+        checkout = mac_checkout(commit, config_commit.unwrap_or("")),
+        start = mac_start("update.sh")
+    )
+}
+
+/// Shell for a Mac: has it build `commit`'s app next, and install it, in a job in its logged-in session that keeps
+/// building what it's wanted to until it's built the last; says "building" if that job was already running, and how
+/// its last build failed if it did, once.
+fn mac_follow(commit: &str, config_commit: Option<&str>) -> String {
+    format!(
+        r#"set -e
+c="$HOME/Library/Caches/{CLI}"; label=app.{CLI}.update
+mkdir -p "$c"; cd "$c"
+echo "{commit} {config}" > want
+if [ -f failed ]; then printf 'failed %s\n' "$(cat failed)"; tail -n 25 update.log; rm -f failed; fi
+pid=$(launchctl list | awk -v l="$label" '$3 == l {{ print $1 }}')
+if [ -n "$pid" ] && [ "$pid" != "-" ]; then echo building; exit 0; fi
+cat > build.sh <<'JOB'
+set -e
+c="$HOME/Library/Caches/{CLI}"
+{checkout}
+CONFIG="$config" apple/build.sh
+JOB
+cat > follow.sh <<'JOB'
+c="$HOME/Library/Caches/{CLI}"
+while want=$(cat "$c/want") && [ "$want" != "$(cat "$c/built" 2>/dev/null)" ]; do
+	if /bin/sh "$c/build.sh" $(cat "$c/want") > "$c/update.log" 2>&1; then echo "$want" > "$c/built"; else echo "$want" > "$c/failed"; exit 1; fi
+done
+JOB
+{start}"#,
+        config = config_commit.unwrap_or(""),
+        checkout = mac_checkout("$1", "${2:-}"),
+        start = mac_start("follow.sh")
+    )
+}
+
+/// Shell that puts the Mac's clean clone at `commit` and sets `config` to the config to build with: the clone's own, or
+/// for a white label whose config is in its own repo, that repo at `config_commit`.
+fn mac_checkout(commit: &str, config_commit: &str) -> String {
+    let config = if CONFIG_REPO.is_empty() {
+        format!(r#"config="$c/src/{CONFIG_FILE}""#)
+    } else {
+        format!(
+            r#"[ -d "$c/config/.git" ] || git clone -q {CONFIG_REPO} "$c/config"
+git -C "$c/config" fetch -q origin
+git -C "$c/config" checkout -q --detach --force "{config_commit}"
+config="$c/config/{CONFIG_FILE}""#
+        )
+    };
+    format!(
+        r#"[ -d "$c/src/.git" ] || git clone -q https://github.com/{REPO}.git "$c/src"
+cd "$c/src"
+git fetch -q --tags --force origin
+git checkout -q --detach --force "{commit}"
+git clean -qfdx -e /target -e /apple/build
+{config}"#
+    )
+}
+
+/// Shell that runs `script` (in the Mac's cache) as a job of its logged-in session, from a login shell.
+fn mac_start(script: &str) -> String {
+    format!(
+        r#"cat > update.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict><key>Label</key><string>$label</string><key>RunAtLoad</key><true/>
-<key>ProgramArguments</key><array><string>${{SHELL:-/bin/zsh}}</string><string>-l</string><string>$c/update.sh</string></array>
+<key>ProgramArguments</key><array><string>${{SHELL:-/bin/zsh}}</string><string>-l</string><string>$c/{script}</string></array>
 </dict></plist>
 PLIST
 launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" update.plist"#,
-        release = if assets.is_empty() { "" } else { " --release" }
+launchctl bootstrap "gui/$(id -u)" update.plist"#
     )
 }
 
@@ -414,4 +634,13 @@ fn await_mac(mac: &Value) -> Result<(Vec<(String, String)>, Vec<String>)> {
 fn blob(hash: &str) -> Result<Vec<u8>> {
     let mut resp = ureq::get(format!("http://{}/v1/blobs/{hash}", crate::addr())).call()?;
     Ok(resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)
+}
+
+#[test]
+fn a_change_sends_out_only_what_it_touched() {
+    assert_eq!(Parts::of(["README.md", "docs/a.md", "tests/e2e.rs", "android/x"]), Parts::default());
+    assert_eq!(Parts::of(["apps/board/app.js", "apps/board/screen.html", "apps/vault/app.js"]), Parts { apps: vec!["board".into(), "vault".into()], ..Default::default() });
+    assert_eq!(Parts::of(["apple/Mac/App.swift"]), Parts { mac: true, ..Default::default() });
+    assert_eq!(Parts::of(["src/node.rs", "apps/board/app.js"]), Parts { node: true, mac: true, test: true, apps: vec!["board".into()] });
+    assert_eq!(Parts::of(["Cargo.lock"]), Parts::everything());
 }

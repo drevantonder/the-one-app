@@ -158,8 +158,10 @@ impl Client {
     }
 
     async fn ask(&self, peer: EndpointAddr, request: &[u8]) -> Result<Value> {
-        // Dial by id: saved addresses go stale when a server restarts, discovery finds the current one.
-        let conn = self.endpoint.connect(EndpointAddr::new(peer.id), CLIENT_ALPN).await?;
+        // Dial by id: saved addresses go stale when a server restarts, discovery finds the current one. A server that's
+        // gone never answers the dial, so the next one is asked after a few seconds, not when the request times out.
+        let dial = self.endpoint.connect(EndpointAddr::new(peer.id), CLIENT_ALPN);
+        let conn = tokio::time::timeout(Duration::from_secs(4), dial).await.map_err(|_| anyhow::anyhow!("it didn't answer"))??;
         let (mut send, mut recv) = conn.open_bi().await?;
         send.write_all(request).await?;
         send.finish()?;

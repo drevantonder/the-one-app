@@ -68,8 +68,14 @@ toml = "0.9"
 [profile.dev.package."*"]
 opt-level = 3
 
+# Line numbers are all a failing test needs, and full debug info is most of what linking the tests takes.
+[profile.dev]
+debug = "line-tables-only"
+
+# Rebuilding only what a change touched makes an update's build seconds, not minutes, for a node no slower to use.
 [profile.release]
 strip = true
+incremental = true
 
 # wasm-bindgen reads which WebAssembly features the serverless node's build uses from what stripping would remove.
 [profile.release.package.one-serverless]
