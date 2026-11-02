@@ -6,7 +6,7 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 
 - Six primitives: key, log, view, blob, call, app. Scopes, servers, deploys, sidecars, the Vault and backups are made of them. A feature that needs a seventh is designed wrong until proven otherwise.
 - The core never names an app. The starter apps use exactly what anyone's app can.
-- Three kinds of machine: kernel servers (small, locked down, trusted with everything), compute servers (run calls, hold nothing open) and clients. A hacked compute server gets only the calls that ran on it while it was hacked; a hacked kernel server is everyone's loss, which is why it stays small. ARCHITECTURE.md's "Being built" is the design, and it wins over the rules above it until they're rewritten.
+- The kernel, nodes and clients. The kernel is a few services (small, locked down, trusted with everything), nodes (run calls, hold nothing open) and clients. A hacked node gets only the calls that ran on it while it was hacked; a hacked kernel service is everyone's loss, which is why it stays small. ARCHITECTURE.md's "Being built" is the design, and it wins over the rules above it until they're rewritten.
 - Each app's database for a scope is the truth, kept sealed in the install's bucket; who can do what is a signed log kept forever.
 - Dumb beats clever. Delete before adding. No dependency without a reason written in its commit.
 - One name per thing. A rename reaches everything in the same change: code, files, docs, screens, CLI and MCP text, every caller and the data, rolled out to every device together. No aliases or fallbacks for old names, and no internal words (module names, "provider") where a person reads.
