@@ -99,7 +99,7 @@
     const found = items.filter(matches);
     el.innerHTML = found.length ? `<div class="list">${found.map(row).join("")}</div>`
       : query ? one.empty({ icon: "magnifying-glass", title: "No Results", text: esc(`Nothing matches “${query}”.`) })
-      : one.empty({ icon: "lock", title: "Nothing here yet." });
+      : one.empty({ icon: "lock", title: "No Items", text: "Keys, sign-ins and accounts, for your apps and agents to use without seeing them." });
     el.querySelectorAll("[data-item]").forEach((r) => (r.onclick = () => showItem(items.find((i) => i.id === r.dataset.item))));
   }
 

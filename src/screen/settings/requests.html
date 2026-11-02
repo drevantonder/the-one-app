@@ -20,7 +20,7 @@
       new Intl.ListFormat(undefined, { type: "conjunction" }).format(g.members.map((m) => userName(m.user))), `<button class="button capsule filled" data-join="${esc(g.id)}">Join</button>`));
     const servers = (i.servers || []).filter((s) => !s.privileged && !s.owners.includes(`user:${me}`) && s.users.some((u) => mine.includes(u)) && !s.trusted_by.includes(me))
       .map((s) => row(`<div class="icon grey">${one.icon("hard-drives")}</div>`, s.name.replace(/\.local$/, ""), "Lets it keep your own data", `<button class="button capsule" data-trust="${esc(s.key)}">Trust</button>`));
-    if (!vault.length && !invites.length && !servers.length) return one.empty({ icon: "tray", title: "Nothing waits for you." });
+    if (!vault.length && !invites.length && !servers.length) return one.empty({ icon: "tray", title: "No Requests" });
     return section("Vault", vault) + section("Invites", invites) + section("Devices", servers);
   });
 

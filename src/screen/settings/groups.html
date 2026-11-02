@@ -46,7 +46,7 @@
         <button class="button capsule filled" data-accept="${one.esc(g.id)}">Join</button></div>`).join("") + "</div>";
     }
     if (!mine.length && !invited.length) {
-      return html + one.empty({ icon: "users-three", title: "No groups yet", text: "A group shares its apps and data, on a page of its own.", action: { label: "New Group", run: () => create() } }) + footer(error, true);
+      return html + one.empty({ icon: "users-three", title: "No Groups", text: "A group shares its apps and data, on a page of its own.", action: { label: "New Group", run: () => create() } }) + footer(error, true);
     }
     if (mine.length) {
       html += (invited.length ? '<h2 class="section">Yours</h2>' : "") + '<div class="list">' + mine.map((g) => `<a class="row" data-group="${one.esc(g.id)}"><div class="tile">${one.icon("users-three-fill")}</div>
