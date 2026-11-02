@@ -9,7 +9,7 @@ repo = "drevantonder/the-one-app"
 # Nodes and the installer take only releases signed by this key (OpenSSH, Ed25519). Its private half stays with the
 # publisher: `one update` and `one release` run release_signer to get it, and keep it only in memory.
 release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNLdOHtbsAnmUTljCM"
-release_signer = "ssh mac \"op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'\""
+release_signer = "op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'"
 # Every folder in apps/ ships built into each release, for any install to add. These are the ones a new install
 # deploys and installs in global; each `one update` deploys the release's version of every one an install has.
 apps = ["board", "repos", "apps", "devices"]
