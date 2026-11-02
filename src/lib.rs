@@ -25,6 +25,7 @@ fn user_home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| ".".into())
 }
 pub mod backups;
+pub mod bucket;
 pub mod entry;
 pub mod git;
 pub mod skills;

@@ -1233,7 +1233,7 @@ fn check_folder(folder: &str) -> Result<Value> {
     let mut key = String::new();
     std::io::stdin().read_line(&mut key)?;
     let secret = one::entry::unhex(key.trim()).context("give the recovery key on stdin: 64 hex characters")?;
-    let place = one::backups::Place::Folder(folder.into());
+    let place = one::bucket::Place::Folder(folder.into());
     let mut out = Vec::new();
     for install in one::backups::installs(&place)? {
         let keys = one::backups::open_keys(&place, &install, &secret)?;

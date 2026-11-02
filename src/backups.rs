@@ -14,8 +14,6 @@
 //! A scope's folder names write `user:<id>` as `user-<id>`, which every disk takes.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
-use std::time::Duration;
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
@@ -23,8 +21,9 @@ use anyhow::{Context, Result, anyhow, bail, ensure};
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256, Sha512};
+use sha2::{Digest, Sha512};
 
+use crate::bucket::Place;
 use crate::entry::{Entry, Key, hex};
 
 /// The Vault item kind a place is: an item in Everyone, with a folder's `server` and `path`, or S3's `endpoint`,
@@ -177,346 +176,6 @@ fn unpack(bytes: &[u8]) -> Result<Vec<Entry>> {
 }
 
 // Places.
-
-/// What went wrong at a place, so a person can be told how to fix it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Trouble {
-    /// The place rejected the key.
-    Key,
-    /// It has no such bucket.
-    Bucket,
-    /// The key may not write there.
-    Refused,
-    /// The place couldn't be reached.
-    Unreachable,
-    /// A folder's disk couldn't be written or read.
-    Disk,
-}
-
-impl Trouble {
-    pub fn name(self) -> &'static str {
-        match self {
-            Trouble::Key => "key",
-            Trouble::Bucket => "bucket",
-            Trouble::Refused => "refused",
-            Trouble::Unreachable => "unreachable",
-            Trouble::Disk => "disk",
-        }
-    }
-
-    pub fn parse(name: &str) -> Option<Trouble> {
-        [Trouble::Key, Trouble::Bucket, Trouble::Refused, Trouble::Unreachable, Trouble::Disk].into_iter().find(|t| t.name() == name)
-    }
-
-    /// The trouble behind an error, if a place said what it was.
-    pub fn of(err: &anyhow::Error) -> Option<Trouble> {
-        err.chain().find_map(|e| e.downcast_ref::<Failed>()).map(|f| f.0)
-    }
-}
-
-/// A place's failure, in words that follow the place's name ("rejected the key"), and what kind it is.
-#[derive(Debug)]
-pub struct Failed(pub Trouble, pub String);
-
-impl std::fmt::Display for Failed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.1)
-    }
-}
-
-impl std::error::Error for Failed {}
-
-/// A folder's I/O error, as a disk's trouble, in words.
-fn disk(dir: &std::path::Path, err: std::io::Error) -> anyhow::Error {
-    use std::io::ErrorKind::*;
-    let said = match err.kind() {
-        ReadOnlyFilesystem => "is read-only".to_string(),
-        StorageFull | QuotaExceeded => "is full".to_string(),
-        PermissionDenied => format!("won't let this server write to {}", dir.display()),
-        _ => format!("couldn't be used: {}", err.to_string().split(" (os error").next().unwrap_or_default().to_lowercase()),
-    };
-    Failed(Trouble::Disk, said).into()
-}
-
-/// Where backups go.
-#[derive(Clone, Debug)]
-pub enum Place {
-    /// A folder on this server's disk, like a USB disk's.
-    Folder(PathBuf),
-    S3(S3),
-}
-
-/// An S3-compatible bucket: `endpoint` like `https://<account>.r2.cloudflarestorage.com`, path-style.
-#[derive(Clone)]
-pub struct S3 {
-    pub endpoint: String,
-    pub bucket: String,
-    pub region: String,
-    pub key_id: String,
-    pub secret: String,
-}
-
-impl std::fmt::Debug for S3 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "S3 {{ {}/{}, key {} }}", self.endpoint, self.bucket, self.key_id)
-    }
-}
-
-impl Place {
-    /// A place from its item's fields.
-    pub fn from_fields(fields: &BTreeMap<String, String>) -> Result<Place> {
-        let get = |k: &str| fields.get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-        if let Some(path) = get("path") {
-            return Ok(Place::Folder(path.into()));
-        }
-        let endpoint = get("endpoint").context("a place has a folder's path, or S3's endpoint")?;
-        ensure!(endpoint.starts_with("https://") || endpoint.starts_with("http://"), "an endpoint is a URL, like https://s3.example.com");
-        Ok(Place::S3(S3 {
-            endpoint: endpoint.trim_end_matches('/').to_string(),
-            bucket: get("bucket").context("which bucket?")?,
-            region: get("region").unwrap_or_else(|| "auto".into()),
-            key_id: get("key_id").context("which key ID?")?,
-            secret: get("secret").context("the secret key?")?,
-        }))
-    }
-
-    pub fn put(&self, path: &str, bytes: &[u8]) -> Result<()> {
-        match self {
-            Place::Folder(dir) => {
-                let file = dir.join(path);
-                std::fs::create_dir_all(file.parent().context("no folder")?).map_err(|e| disk(dir, e))?;
-                let tmp = file.with_extension("partial");
-                std::fs::write(&tmp, bytes).map_err(|e| disk(dir, e))?;
-                std::fs::rename(&tmp, &file).map_err(|e| disk(dir, e))?;
-                Ok(())
-            }
-            Place::S3(s3) => match s3.request("PUT", path, &[], bytes)? {
-                (200, _) => Ok(()),
-                (status, body) => Err(s3.failed(status, &body)),
-            },
-        }
-    }
-
-    pub fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
-        match self {
-            Place::Folder(dir) => match std::fs::read(dir.join(path)) {
-                Ok(bytes) => Ok(Some(bytes)),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                Err(e) => Err(disk(dir, e)),
-            },
-            Place::S3(s3) => match s3.request("GET", path, &[], &[])? {
-                (200, body) => Ok(Some(body)),
-                (404, _) => Ok(None),
-                (status, body) => Err(s3.failed(status, &body)),
-            },
-        }
-    }
-
-    pub fn delete(&self, path: &str) -> Result<()> {
-        match self {
-            Place::Folder(dir) => match std::fs::remove_file(dir.join(path)) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(disk(dir, e)),
-                _ => Ok(()),
-            },
-            Place::S3(s3) => match s3.request("DELETE", path, &[], &[])? {
-                (200 | 204 | 404, _) => Ok(()),
-                (status, body) => Err(s3.failed(status, &body)),
-            },
-        }
-    }
-
-    /// The names directly in a folder of the place, sorted.
-    pub fn list(&self, folder: &str) -> Result<Vec<String>> {
-        let mut out = match self {
-            Place::Folder(dir) => match std::fs::read_dir(dir.join(folder)) {
-                Ok(entries) => entries.filter_map(|e| e.ok()?.file_name().into_string().ok()).filter(|n| !n.ends_with(".partial") && !n.starts_with('.')).collect(),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-                Err(e) => return Err(disk(dir, e)),
-            },
-            Place::S3(s3) => s3.list(&format!("{}/", folder.trim_end_matches('/')))?.into_iter().map(|(name, _)| name).collect(),
-        };
-        out.sort();
-        out.dedup();
-        Ok(out)
-    }
-
-    /// The objects in an install's backup: each one's name, when it was last written (ms), and its size.
-    pub fn objects(&self, install: &str) -> Result<Vec<(String, u64, u64)>> {
-        let folder = format!("{install}/objects");
-        match self {
-            Place::Folder(dir) => {
-                let mut out = Vec::new();
-                for name in self.list(&folder)? {
-                    let meta = std::fs::metadata(dir.join(&folder).join(&name)).map_err(|e| disk(dir, e))?;
-                    let written = meta.modified().map_err(|e| disk(dir, e))?.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                    out.push((name, written, meta.len()));
-                }
-                Ok(out)
-            }
-            Place::S3(s3) => Ok(s3.list(&format!("{folder}/"))?.into_iter().filter_map(|(name, about)| Some((name, about?.0, about?.1))).collect()),
-        }
-    }
-
-    /// Writes a test file, reads it back and deletes it: each step, and what went wrong if it did.
-    pub fn try_it(&self) -> Vec<(&'static str, Option<String>)> {
-        let path = format!("test-{}", hex(&rand::random::<[u8; 32]>()));
-        let bytes = format!("{} tried this place", crate::config::NAME).into_bytes();
-        let wrote = self.put(&path, &bytes);
-        let read = wrote.as_ref().map_err(|_| anyhow!("not written")).and_then(|_| match self.get(&path)? {
-            Some(b) if b == bytes => Ok(()),
-            Some(_) => bail!("it read back different"),
-            None => bail!("it wasn't there"),
-        });
-        let deleted = wrote.as_ref().map_err(|_| anyhow!("not written")).and_then(|_| self.delete(&path));
-        let say = |r: Result<()>| r.err().map(|e| format!("{e:#}"));
-        vec![("Wrote a test file", say(wrote)), ("Read it back", say(read)), ("Deleted it", say(deleted))]
-    }
-
-    /// For a folder: whether its disk is there now. A disk that's unplugged waits, rather than fails.
-    pub fn present(&self) -> bool {
-        match self {
-            Place::Folder(dir) => dir.parent().is_none_or(|p| p.exists()),
-            Place::S3(_) => true,
-        }
-    }
-}
-
-impl S3 {
-    fn host(&self) -> &str {
-        self.endpoint.split("://").nth(1).unwrap_or(&self.endpoint)
-    }
-
-    /// Says what a refused request means, in words, from S3's error code.
-    fn failed(&self, status: u16, body: &[u8]) -> anyhow::Error {
-        let text = String::from_utf8_lossy(body);
-        let code = between(&text, "<Code>", "</Code>").unwrap_or_default();
-        let (trouble, said) = match (status, code.as_str()) {
-            (_, "InvalidAccessKeyId" | "SignatureDoesNotMatch") | (401, _) => (Trouble::Key, "rejected the key".to_string()),
-            (_, "NoSuchBucket") => (Trouble::Bucket, format!("has no bucket {}", self.bucket)),
-            (403, _) | (_, "AccessDenied") => (Trouble::Refused, format!("won't let the key write to {}", self.bucket)),
-            (500.., _) => (Trouble::Unreachable, format!("said {status}{}", if code.is_empty() { String::new() } else { format!(" ({code})") })),
-            _ => return anyhow!("{} said {status}{}", self.host(), if code.is_empty() { String::new() } else { format!(" ({code})") }),
-        };
-        Failed(trouble, said).into()
-    }
-
-    /// The names under `prefix`, one level down: objects', with when each was last written (ms) and its size, and
-    /// folders'.
-    fn list(&self, prefix: &str) -> Result<Vec<(String, Option<(u64, u64)>)>> {
-        let mut out = Vec::new();
-        let mut token: Option<String> = None;
-        loop {
-            let mut query = vec![("list-type", "2".to_string()), ("prefix", prefix.to_string()), ("delimiter", "/".to_string())];
-            if let Some(t) = &token {
-                query.push(("continuation-token", t.clone()));
-            }
-            let q: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
-            let (status, body) = self.request("GET", "", &q, &[])?;
-            if status != 200 {
-                return Err(self.failed(status, &body));
-            }
-            let text = String::from_utf8_lossy(&body);
-            // Each object is a <Contents> with its <Key> and <LastModified>; each folder a <CommonPrefixes><Prefix>.
-            for (tag, block) in [("Key", "Contents"), ("Prefix", "CommonPrefixes")] {
-                let (open, close) = (format!("<{block}>"), format!("</{block}>"));
-                let mut rest = text.as_ref();
-                while let Some(start) = rest.find(&open) {
-                    rest = &rest[start + open.len()..];
-                    let Some(end) = rest.find(&close) else { break };
-                    let item = &rest[..end];
-                    rest = &rest[end..];
-                    let Some(name) = between(item, &format!("<{tag}>"), &format!("</{tag}>")).map(|n| unescape(&n)) else { continue };
-                    let written = between(item, "<LastModified>", "</LastModified>").and_then(|t| t.parse::<jiff::Timestamp>().ok()).map(|t| t.as_millisecond() as u64);
-                    let size = between(item, "<Size>", "</Size>").and_then(|n| n.parse().ok());
-                    if let Some(name) = name.strip_prefix(prefix).map(|n| n.trim_end_matches('/')).filter(|n| !n.is_empty()) {
-                        out.push((name.to_string(), written.zip(size)));
-                    }
-                }
-            }
-            match between(&text, "<NextContinuationToken>", "</NextContinuationToken>") {
-                Some(t) if text.contains("<IsTruncated>true</IsTruncated>") => token = Some(unescape(&t)),
-                _ => break,
-            }
-        }
-        Ok(out)
-    }
-
-    /// A request signed with AWS Signature Version 4, path-style: → its status and body.
-    fn request(&self, method: &str, key: &str, query: &[(&str, &str)], body: &[u8]) -> Result<(u16, Vec<u8>)> {
-        let path = match key {
-            "" => format!("/{}", encode(&self.bucket, true)),
-            key => format!("/{}/{}", encode(&self.bucket, true), encode(key, false)),
-        };
-        let mut q: Vec<(String, String)> = query.iter().map(|(k, v)| (encode(k, true), encode(v, true))).collect();
-        q.sort();
-        let query = q.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&");
-        let now = jiff::Timestamp::now();
-        let stamp = now.strftime("%Y%m%dT%H%M%SZ").to_string();
-        let date = &stamp[..8];
-        let payload = hex(&Sha256::digest(body).into());
-        let host = self.host();
-        let headers = format!("host:{host}\nx-amz-content-sha256:{payload}\nx-amz-date:{stamp}\n");
-        let signed = "host;x-amz-content-sha256;x-amz-date";
-        let request = format!("{method}\n{path}\n{query}\n{headers}\n{signed}\n{payload}");
-        let scope = format!("{date}/{}/s3/aws4_request", self.region);
-        let to_sign = format!("AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{}", hex(&Sha256::digest(request.as_bytes()).into()));
-        let mut k = hmac(format!("AWS4{}", self.secret).as_bytes(), date.as_bytes());
-        for part in [self.region.as_str(), "s3", "aws4_request"] {
-            k = hmac(&k, part.as_bytes());
-        }
-        let signature = hex(&hmac(&k, to_sign.as_bytes()));
-        let auth = format!("AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed}, Signature={signature}", self.key_id);
-        let url = if query.is_empty() { format!("{}{path}", self.endpoint) } else { format!("{}{path}?{query}", self.endpoint) };
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(300))).build().into();
-        let builder = ureq::http::Request::builder().method(method).uri(&url).header("x-amz-content-sha256", &payload).header("x-amz-date", &stamp).header("authorization", auth);
-        let mut resp = match method {
-            "PUT" => agent.run(builder.body(body.to_vec())?),
-            _ => agent.run(builder.body(())?),
-        }
-        .map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({host}: {e})")))?;
-        let bytes = resp.body_mut().with_config().limit(4 << 30).read_to_vec()?;
-        Ok((resp.status().as_u16(), bytes))
-    }
-}
-
-/// HMAC-SHA256 (RFC 2104).
-fn hmac(key: &[u8], message: &[u8]) -> [u8; 32] {
-    let mut k = [0u8; 64];
-    match key.len() > 64 {
-        true => k[..32].copy_from_slice(&Sha256::digest(key)),
-        false => k[..key.len()].copy_from_slice(key),
-    }
-    let mut inner = Sha256::new();
-    inner.update(k.map(|b| b ^ 0x36));
-    inner.update(message);
-    let mut outer = Sha256::new();
-    outer.update(k.map(|b| b ^ 0x5c));
-    outer.update(inner.finalize());
-    outer.finalize().into()
-}
-
-/// URI-encodes as SigV4 wants: everything but unreserved characters, and `/` too unless it's a path.
-fn encode(s: &str, slash: bool) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            b'/' if !slash => out.push('/'),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-fn between(text: &str, open: &str, close: &str) -> Option<String> {
-    let start = text.find(open)? + open.len();
-    let end = text[start..].find(close)? + start;
-    Some(text[start..end].to_string())
-}
-
-fn unescape(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
-}
 
 // Backing up.
 
@@ -673,7 +332,7 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
     let mut opened_all = true;
     let names = |s: &Snapshot| s.packs.iter().chain(s.blobs.values()).cloned().collect::<Vec<_>>();
     // A release leaves a snapshot only once its object has settled, so it leaves the place in the same prune.
-    let unsettled: BTreeSet<String> = place.objects(install)?.into_iter().filter(|o| o.1 + SETTLE > now).map(|o| o.0).collect();
+    let unsettled: BTreeSet<String> = place.objects(&format!("{install}/objects"))?.into_iter().filter(|o| o.1 + SETTLE > now).map(|o| o.0).collect();
     let folders = place.list(&format!("{install}/snapshots"))?;
     for dir in &folders {
         let scope = scope_of(dir);
@@ -714,7 +373,7 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
         }
     }
     // Listed again: an object a run sent since the first listing has just been written.
-    for (name, written, size) in place.objects(install)? {
+    for (name, written, size) in place.objects(&format!("{install}/objects"))? {
         let settled = |wait: u64| written + wait <= now;
         if keep.contains(&name) || !(drop.contains(&name) && settled(SETTLE) || opened_all && settled(STRAY)) {
             continue;
@@ -824,7 +483,7 @@ pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>
         let (_, state) = crate::members::replay(root, &member_entries, &entries, |_, _, _| {});
         vault.extend(state.items.values().map(|it| it.title.clone()));
     }
-    let bytes: u64 = place.objects(install)?.iter().map(|o| o.2).sum();
+    let bytes: u64 = place.objects(&format!("{install}/objects"))?.iter().map(|o| o.2).sum();
     Ok(serde_json::json!({
         "install": m.name,
         "bytes": bytes,
@@ -863,21 +522,6 @@ mod tests {
         assert_eq!(unseal(recovery.as_bytes(), &sealed).unwrap(), key);
         assert!(unseal(SigningKey::generate().as_bytes(), &sealed).is_err());
         assert_ne!(sealed, seal(recovery.verifying_key().as_bytes(), &key).unwrap(), "a new share each time");
-    }
-
-    #[test]
-    fn sigv4_signs_as_aws_does() {
-        // AWS's own example: GET /test.txt, with the example key, on 2013-05-24 (the S3 SigV4 docs' header example).
-        let k = {
-            let mut k = hmac(b"AWS4wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", b"20130524");
-            for part in ["us-east-1", "s3", "aws4_request"] {
-                k = hmac(&k, part.as_bytes());
-            }
-            k
-        };
-        let request = "GET\n/test.txt\n\nhost:examplebucket.s3.amazonaws.com\nrange:bytes=0-9\nx-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nx-amz-date:20130524T000000Z\n\nhost;range;x-amz-content-sha256;x-amz-date\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-        let to_sign = format!("AWS4-HMAC-SHA256\n20130524T000000Z\n20130524/us-east-1/s3/aws4_request\n{}", hex(&Sha256::digest(request.as_bytes()).into()));
-        assert_eq!(hex(&hmac(&k, to_sign.as_bytes())), "f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41");
     }
 
     #[test]
@@ -933,7 +577,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
+    fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
         let mut out = Vec::new();
         for e in std::fs::read_dir(dir).unwrap().flatten() {
             match e.path().is_dir() {
@@ -1008,7 +652,7 @@ mod tests {
             previous = Some(s);
         }
         assert!(!written[2].blobs.contains_key(&release1.0), "a new snapshot leaves out the release it no longer keeps");
-        let objects = |place: &Place| place.objects(install).unwrap().into_iter().map(|o| o.0).collect::<BTreeSet<_>>();
+        let objects = |place: &Place| place.objects(&format!("{install}/objects")).unwrap().into_iter().map(|o| o.0).collect::<BTreeSet<_>>();
         let release1_object = written[0].blobs[&release1.0].clone();
         let scopes: BTreeMap<String, [u8; 32]> = [("global".to_string(), key)].into();
         let fetchable: BTreeSet<String> = [release1.0.clone(), release2.0.clone()].into();
@@ -1043,17 +687,6 @@ mod tests {
         let restored = restore(&place, install, "global", &[key]).unwrap();
         assert_eq!(restored.entries.len(), 8);
         assert_eq!(restored.blobs.iter().map(|b| &b.0).collect::<BTreeSet<_>>(), [&release2.0, &repo.0].into());
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn a_place_is_tried_before_its_added() {
-        let dir = std::env::temp_dir().join(format!("backups-try-{}", hex(&rand::random())));
-        let steps = Place::Folder(dir.clone()).try_it();
-        assert!(steps.iter().all(|(_, err)| err.is_none()), "{steps:?}");
-        assert!(std::fs::read_dir(&dir).unwrap().next().is_none(), "the test file is gone");
-        let steps = Place::Folder("/proc/no/such/place".into()).try_it();
-        assert!(steps[0].1.is_some() && steps[1].1.is_some());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

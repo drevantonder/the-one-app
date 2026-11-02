@@ -4,7 +4,8 @@
 use super::*;
 use std::collections::BTreeSet;
 
-use crate::backups::{self as b, Place, Snapshot};
+use crate::backups::{self as b, Snapshot};
+use crate::bucket::Place;
 
 /// How often the node looks for backups that are due.
 const TICK: Duration = Duration::from_secs(60);
@@ -44,7 +45,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
         let failing: Vec<&&members::BackupRun> = runs.iter().rev().take_while(|r| r.error.is_some()).collect();
         if let Some(last) = failing.first() {
             let error = last.error.clone().unwrap_or_default();
-            let trouble = last.trouble.as_deref().and_then(b::Trouble::parse);
+            let trouble = last.trouble.as_deref().and_then(crate::bucket::Trouble::parse);
             let text = match trouble {
                 Some(_) => format!("{} {error}.", p.title),
                 None => format!("{}: {error}.", p.title),
@@ -52,11 +53,11 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
             let server = name(&last.server);
             let fix = match (trouble, &p.place) {
                 (_, Err(_)) => "Fix it in the Vault.".to_string(),
-                (Some(b::Trouble::Key), _) => "Change its key in the Vault.".to_string(),
-                (Some(b::Trouble::Bucket), _) => "Check the bucket's name in the Vault.".to_string(),
-                (Some(b::Trouble::Refused), _) => "Give the key permission to write there, or change it in the Vault.".to_string(),
-                (Some(b::Trouble::Unreachable), _) => format!("Check {server} is online. It tries again every hour."),
-                (Some(b::Trouble::Disk), _) => format!("Check the disk on {server} is plugged in and has room."),
+                (Some(crate::bucket::Trouble::Key), _) => "Change its key in the Vault.".to_string(),
+                (Some(crate::bucket::Trouble::Bucket), _) => "Check the bucket's name in the Vault.".to_string(),
+                (Some(crate::bucket::Trouble::Refused), _) => "Give the key permission to write there, or change it in the Vault.".to_string(),
+                (Some(crate::bucket::Trouble::Unreachable), _) => format!("Check {server} is online. It tries again every hour."),
+                (Some(crate::bucket::Trouble::Disk), _) => format!("Check the disk on {server} is plugged in and has room."),
                 (None, _) => "It tries again every hour.".to_string(),
             };
             let since = failing.last().map_or(last.time, |r| r.time);
@@ -398,7 +399,7 @@ impl Node {
         let mut data = json!({ "place": place, "time": now, "snapshots": snapshots });
         if let Some(error) = error {
             data["error"] = json!(format!("{error:#}").chars().take(500).collect::<String>());
-            if let Some(trouble) = b::Trouble::of(&error) {
+            if let Some(trouble) = crate::bucket::Trouble::of(&error) {
                 data["trouble"] = json!(trouble.name());
             }
         }
@@ -480,7 +481,7 @@ impl Node {
         let place = Place::from_fields(&fields)?;
         let tried = {
             let place = place.clone();
-            tokio::task::spawn_blocking(move || place.try_it()).await?
+            tokio::task::spawn_blocking(move || place.try_it(false)).await?
         };
         let steps: Vec<Value> = tried.iter().map(|(step, error)| json!({ "step": step, "error": error })).collect();
         if tried.iter().any(|(_, e)| e.is_some()) || body["test"] == true {
@@ -493,10 +494,11 @@ impl Node {
             }
             Place::S3(s3) => {
                 let host = s3.endpoint.split("://").nth(1).unwrap_or("").split(['/', ':']).next().unwrap_or("").to_string();
+                let crate::bucket::Auth::Keys { key_id, secret } = &s3.auth else { bail!("a place is added with its keys") };
                 let title = text("title").unwrap_or_else(|| format!("{} on {host}", s3.bucket));
                 let fields = json!({
                     "endpoint": { "value": s3.endpoint }, "bucket": { "value": s3.bucket }, "region": { "value": s3.region },
-                    "key_id": { "value": s3.key_id }, "secret": { "value": s3.secret, "secret": true },
+                    "key_id": { "value": key_id }, "secret": { "value": secret, "secret": true },
                 });
                 (title, fields, json!([host]))
             }

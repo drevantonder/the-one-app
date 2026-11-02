@@ -37,6 +37,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/apps.rs`, `src/runtime/`: workerd, which runs every app; `src/runtime/shim.js` is what an app's `ctx` is.
 - `src/sidecars.rs`: server sidecars: the ones built in (`src/shell.rs`, `src/agents.rs`, `src/models.rs`), and those that register over the local API (`sidecars/`, in Go, and the Mac app's, `apple/Mac/Sidecars`).
 - `src/vault.rs`, `src/outbound.rs`: the Vault's items, and filling them into apps' and sidecars' requests on the way out.
+- `src/bucket.rs`: objects by name in a place, a folder or S3-compatible storage: created only if absent and replaced only while unchanged, for an install's own bucket; S3's requests go by presigned URL.
 - `src/backups.rs`, `src/node/backups.rs`: backups, each scope's entries and blobs encrypted with its own key (sealed to the recovery key) and sent to a place, a folder or S3-compatible storage, that's a Vault item; and which server backs up what, when.
 - `src/schedules.rs`: apps' schedules, and which server runs each.
 - `src/deploy.rs`, `src/bundle.rs`: `one deploy`, building an app with a pinned Bun into a bundle that keeps its source.

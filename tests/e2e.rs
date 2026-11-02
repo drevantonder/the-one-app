@@ -1481,7 +1481,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     eventually("b to see it", async || !b.backups().unwrap()["places"][0]["last"].is_null()).await;
 
     // From nothing but the disk and the recovery key.
-    let place = one::backups::Place::Folder(dir.clone());
+    let place = one::bucket::Place::Folder(dir.clone());
     let install = one::backups::installs(&place).unwrap().remove(0);
     let keys = one::backups::open_keys(&place, &install, &one::entry::unhex(&recovery).unwrap()).unwrap();
     assert!(keys.contains_key("global") && keys.contains_key(&format!("user:{}", me.user)), "{:?}", keys.keys());
