@@ -1039,3 +1039,17 @@ fn the_address_serves_only_scripts_that_parse() {
     let inline = vec![("index.html".to_string(), b"<p>hi</p><script>let a = ;</script>".to_vec())];
     assert!(kernel::parses(&inline).is_err(), "so is an HTML page's inline script");
 }
+
+/// The serverless node is the node's Rust as WebAssembly: what doesn't build for it, `one update` can't send out.
+/// Checked in a target folder of its own, kept between runs, so this test's cargo never waits on the one running it.
+#[test]
+fn the_serverless_node_builds_for_webassembly() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let out = std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+        .args(["check", "-q", "-p", "one-serverless", "--target", "wasm32-unknown-unknown", "--target-dir"])
+        .arg(root.join("target/serverless-check"))
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "the serverless node doesn't build (it needs rustup target add wasm32-unknown-unknown, and clang):\n{}", String::from_utf8_lossy(&out.stderr));
+}
