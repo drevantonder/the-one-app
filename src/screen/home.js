@@ -12,11 +12,16 @@ window.home = (() => {
   const isService = (a) => !hasScreens(a) && !(a.widgets || []).length;
   const scopes = (a) => (a.installed || []).map((s) => (s.startsWith("user:") ? "user" : s));
   const userName = (id) => (id === me()?.id ? "You" : install()?.users.find((u) => u.id === id)?.name || String(id).slice(0, 6));
-  const people = (n) => (n === 1 ? "1 person" : `${n} people`);
+  // People by name, you last, as "you".
+  const named = (ids) => ids.slice().sort((a, b) => (a === me()?.id) - (b === me()?.id) || userName(a).localeCompare(userName(b)))
+    .map((id) => (id === me()?.id ? "you" : userName(id)));
+  const and = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
+  // Who a page is for, and who chooses its apps: a few people by name, more as how many; with only you, just you.
+  const whose = (ids, admins) =>
+    ids.length === 1 && ids[0] === me()?.id ? "Just you" : `${ids.length <= 3 ? and(named(ids)).replace(/^y/, "Y") : `${ids.length} people`} · ${chosenBy(admins)}`;
 
   function chosenBy(admins) {
-    const names = admins.slice().sort((a, b) => (a === me()?.id) - (b === me()?.id) || userName(a).localeCompare(userName(b)))
-      .map((id) => (id === me()?.id ? "you" : userName(id)));
+    const names = named(admins);
     if (!names.length) return "apps chosen by admins";
     if (names.length === 1) return `apps chosen by ${names[0]}`;
     if (names.length === 2) return `apps chosen by ${names[0]} and ${names[1]}`;
@@ -27,13 +32,12 @@ window.home = (() => {
   function allPages() {
     const i = install(), u = me();
     if (!i || !u) return [];
-    const devices = i.servers.filter((s) => s.user === u.id).length + i.clients.filter((c) => c.user === u.id).length;
-    const out = [{ scope: "user", title: "You", subtitle: devices === 1 ? "Just you · 1 device" : `Just you · ${devices} devices`, whose: "For you only" }];
+    const out = [{ scope: "user", title: "You", subtitle: "Just you", whose: "For you only" }];
     for (const g of i.groups.filter((g) => g.members.some((m) => m.user === u.id)).sort((a, b) => a.name.localeCompare(b.name))) {
       const admins = g.members.filter((m) => m.role === "admin").map((m) => m.user);
-      out.push({ scope: `group:${g.id}`, title: g.name, subtitle: `${people(g.members.length)} · ${chosenBy(admins)}`, whose: `For ${g.name}` });
+      out.push({ scope: `group:${g.id}`, title: g.name, subtitle: whose(g.members.map((m) => m.user), admins), whose: `For ${g.name}` });
     }
-    out.push({ scope: "global", title: "Everyone", subtitle: `${people(i.users.length)} · ${chosenBy(i.users.filter((x) => x.role === "admin").map((x) => x.id))}`, whose: "For everyone" });
+    out.push({ scope: "global", title: "Everyone", subtitle: whose(i.users.map((x) => x.id), i.users.filter((x) => x.role === "admin").map((x) => x.id)), whose: "For everyone" });
     return out;
   }
   /// How this person ordered their groups' pages and which they hid (Edit Pages…), kept with their own page's arrangement.

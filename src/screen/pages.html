@@ -283,7 +283,8 @@
     const hidden = hiddenOf(p).map(home.app).filter((a) => a && home.appsOn(p).includes(a));
     const out = addActions(p);
     hidden.forEach((a, i) => out.push({ title: `Put Back ${home.label(a)}`, icon: "plus-circle", section: i === 0 && out.length > 0, run: () => save(p, [...keptOf(p), { app: a.name }], hiddenOf(p).filter((n) => n !== a.name)) }));
-    if (!out.length) out.push({ title: "Nothing to Add", run: () => {} });
+    // With nothing of its own to add, where apps come from.
+    if (!out.length) out.push(home.store() ? { title: "App Store", icon: "squares-four", run: home.openStore } : { title: "Nothing to Add", run: () => {} });
     home.menu(out, at);
   }
 
@@ -689,7 +690,7 @@
     // In a window, the header has Edit Home Page; while arranging, Edit's menu and Done, as a Mac's toolbar does.
     el.innerHTML = (swipe ? "" : `<div class="header"><div><h1>${esc(p.title)}</h1><div class="subtitle">${esc(p.subtitle)}</div></div>` +
         `<button class="edit" data-menu>Edit</button><button class="edit" data-done>Edit Home Page</button></div>`) +
-      (empty ? `<div class="empty-page"><b>Nothing here yet</b><div class="muted">${arrange ? `Apps you add to ${esc(p.title)} show up here.` : `When its admins add apps to ${esc(p.title)}, they show up here.`}</div>` +
+      (empty ? `<div class="empty-page"><b>Nothing here yet</b><div class="muted">${arrange ? `Apps you add ${p.scope === "user" ? "for yourself" : `to ${esc(p.title)}`} show up here.` : `When its admins add apps to ${esc(p.title)}, they show up here.`}</div>` +
         `${arrange && home.store() ? `<button class="button primary" data-store>Open the App Store</button>` : ""}</div>` : "") +
       `<div class="grid"></div>`;
     el.querySelector("[data-store]")?.addEventListener("click", home.openStore);
