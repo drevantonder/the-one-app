@@ -361,6 +361,19 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     a.call(board("post", json!({ "text": "fixed" }))).await.unwrap();
     a.back_up_now();
     eventually("the badge to clear", async || a.state()["backups"].is_null()).await;
+
+    // A folder's item made before devices were called devices names its device `server`, and is still backed up to;
+    // the node's other items aren't places.
+    let global = one::entry::Scope::Global;
+    let old = temp("backup-old-disk").join("One Backups");
+    let fields = json!({ "path": { "value": old }, "server": { "value": one::entry::hex(&a.id()) } });
+    a.set_item(&me, &global, json!({ "title": "Old disk", "type": one::backups::KIND, "fields": fields, "apps": ["node"] })).await.unwrap();
+    let token = json!({ "token": { "value": "t", "secret": true } });
+    a.set_item(&me, &global, json!({ "title": "Cloudflare Tunnel", "type": "Tunnel", "fields": token, "hosts": ["example.com"], "apps": ["node"] })).await.unwrap();
+    a.back_up_now();
+    let place = |title: &str| a.backups().unwrap()["places"].as_array().unwrap().iter().find(|p| p["title"] == title).cloned();
+    eventually("the old disk's backup", async || place("Old disk").is_some_and(|p| p["last"]["device"] == "backup-a")).await;
+    assert!(place("Cloudflare Tunnel").is_none(), "{}", a.backups().unwrap());
 }
 
 /// The board's posts in `global` as a place's copy of the install's bucket holds them, opened with the scope's key.

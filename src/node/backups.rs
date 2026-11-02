@@ -108,7 +108,7 @@ fn places(state: &ScopeState) -> Vec<PlaceItem> {
     state
         .items
         .iter()
-        .filter(|(_, it)| it.apps.contains(members::APP) && it.kind != super::storage::STORAGE)
+        .filter(|(_, it)| it.apps.contains(members::APP) && it.kind == b::KIND)
         .map(|(id, it)| {
             let fields: BTreeMap<String, String> = it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect();
             let place = Place::from_fields(&fields).and_then(|p| match &p {
@@ -120,7 +120,9 @@ fn places(state: &ScopeState) -> Vec<PlaceItem> {
                 }
                 Place::Folder(_) => Ok(p),
             });
-            PlaceItem { id: id.clone(), title: it.title.clone(), place, device: fields.get("device").and_then(|s| unhex(s).ok()), made: it.made }
+            // A folder's item made before devices were called devices names its device `server`.
+            let device = fields.get("device").or(fields.get("server")).and_then(|s| unhex(s).ok());
+            PlaceItem { id: id.clone(), title: it.title.clone(), place, device, made: it.made }
         })
         .collect()
 }
