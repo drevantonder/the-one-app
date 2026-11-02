@@ -21,7 +21,12 @@
       ${address ? `<a class="row plain" href="${one.esc(address.replace(/\/$/, ""))}/passkeys"><div class="main"><div class="title"><span>Passkeys</span></div></div><span class="chev">›</span></a>` : ""}</div>
       ${device.signOut ? `<div class="list"><button class="row plain out" data-out>Sign Out</button></div>` : ""}</div>`;
   });
-  document.addEventListener("click", (e) => e.target.closest("[data-out]") && one.signOut());
+  // What they signed in to, in their words: "your One App", or a workplace's, "the PTC App".
+  const ours = `${one.config.join_domain ? "the" : "your"} ${one.config.name.replace(/^The /, "")}`;
+  document.addEventListener("click", async (e) => {
+    if (!e.target.closest("[data-out]")) return;
+    if (await one.alert({ title: `Sign Out of ${ours} on this device?`, action: "Sign Out", danger: true })) one.signOut();
+  });
   one.on("changed", draw);
   draw();
 </script>
