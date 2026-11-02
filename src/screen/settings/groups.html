@@ -1,0 +1,192 @@
+<div id="page"></div>
+<style>
+  .tile { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; flex: none; color: white; background: #34c759; }
+  .tile .i { width: 20px; height: 20px; }
+  .action-row { color: var(--accent); cursor: pointer; }
+  .danger-row { color: var(--danger); cursor: pointer; }
+  .action-row.off, .danger-row.off { opacity: 0.4; pointer-events: none; }
+  .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
+  .add { color: var(--accent); width: 24px; height: 24px; }
+  #page h2.section:first-child { margin-top: 8px; }
+</style>
+<script>
+  // The groups this person is in and is invited to, and making one; or, given `group`, that group's members and
+  // invites, each member's role a button on their row for its admins. The last admin's role can't change.
+  const group = one.params?.group;
+  let state;
+  // Roles changed but not yet taken in, shown at once: null for someone being removed.
+  const pending = {};
+  let error = "";
+
+  const names = (list) => {
+    const n = list.map((m) => userName(m.user));
+    return n.length < 2 ? n.join("") : `${n.slice(0, -1).join(", ")} and ${n.at(-1)}`;
+  };
+  const userName = (id) => state.install?.users.find((u) => u.id === id)?.name || "Someone";
+  const roleName = (r) => (r === "admin" ? "Admin" : "Member");
+  const footer = (text, bad) => (text ? `<p class="footer${bad ? " error" : ""}">${one.esc(text)}</p>` : "");
+  const person = (id, name, trailing, sub = "") =>
+    `<div class="row">${one.avatar(id, name)}<div class="main"><div class="title"><span>${one.esc(name)}</span></div>${sub ? `<div class="sub">${one.esc(sub)}</div>` : ""}</div>${trailing}</div>`;
+
+  async function load() {
+    state = await one.api("GET", "/v1/state");
+  }
+
+  // Every group they're in, and those they're invited to.
+  function list() {
+    const me = state.user?.id;
+    const groups = state.install?.groups || [];
+    const invited = groups.filter((g) => g.invited.some((m) => m.user === me));
+    const mine = groups.filter((g) => g.role);
+    one.title("Groups");
+    let html = '<div class="large-title">Groups</div>';
+    if (invited.length) {
+      html += '<h2 class="section">Invited</h2><div class="list">' + invited.map((g) => `<div class="row"><div class="tile">${one.icon("users-three-fill")}</div>
+        <div class="main"><div class="title"><span>${one.esc(g.name)}</span></div><div class="sub">${one.esc(names(g.members))}</div></div>
+        <button class="button capsule filled" onclick="accept('${g.id}', this)">Join</button></div>`).join("") + "</div>";
+    }
+    if (!mine.length && !invited.length) {
+      return html + one.empty({ icon: "users-three", title: "No groups yet", text: "A group shares its apps and data, on a page of its own.", action: { label: "New Group", onclick: "create()" } }) + footer(error, true);
+    }
+    if (mine.length) {
+      html += (invited.length ? '<h2 class="section">Yours</h2>' : "") + '<div class="list">' + mine.map((g) => `<a class="row" onclick="one.open('groups', { group: '${g.id}' })"><div class="tile">${one.icon("users-three-fill")}</div>
+        <div class="main"><div class="title"><span>${one.esc(g.name)}</span></div><div class="sub">${one.esc(names(g.members))}</div></div>
+        ${g.role === "admin" ? '<span class="note">Admin</span>' : ""}<span class="chev">›</span></a>`).join("") + "</div>";
+    }
+    return html + '<div class="list" style="margin-top:20px"><a class="row plain action-row" onclick="create()">New Group</a></div>' + footer(error, true);
+  }
+
+  // One group: its members, its invites, and inviting or leaving.
+  function groupPage() {
+    const me = state.user?.id;
+    const g = state.install?.groups.find((x) => x.id === group);
+    if (!g || (!g.role && !g.invited.some((m) => m.user === me))) return one.notFound({ title: "You're not in this group." });
+    one.title(g.name);
+    const admin = g.role === "admin";
+    const admins = g.members.filter((m) => m.role === "admin").map((m) => m.user);
+    const lastAdmin = admins.length === 1 && admins[0] === me;
+    const members = g.members.filter((m) => pending[m.user] !== null).sort((x, y) => (y.user === me) - (x.user === me) || userName(x.user).localeCompare(userName(y.user)));
+    const rows = members.map((m) => {
+      const role = pending[m.user] || m.role;
+      const leave = m.user === me ? `Leave ${g.name}` : `Remove from ${g.name}`;
+      const trailing = admin && !(role === "admin" && admins.length === 1)
+        ? `<label class="pick">${roleName(role)}<select aria-label="${one.esc(userName(m.user))}'s role" onchange="change('${m.user}', this.value || null)">
+            <option value="admin"${role === "admin" ? " selected" : ""}>Admin</option><option value="member"${role === "member" ? " selected" : ""}>Member</option>
+            <option disabled>──────</option><option value="">${one.esc(leave)}</option></select></label>`
+        : `<span class="note">${roleName(role)}</span>`;
+      return person(m.user, userName(m.user) + (m.user === me ? " (you)" : ""), trailing);
+    });
+    let html = `<div class="large-title">${one.esc(g.name)}</div><h2 class="section">Members</h2><div class="list">${rows.join("")}</div>`;
+    html += error ? footer(error, true) : !admin ? footer("Only its admins change who's in it.") : admins.length === 1 ? footer("Make someone else an admin before you step down.") : "";
+    if (g.invited.length) {
+      html += '<h2 class="section">Invited</h2><div class="list">' + g.invited.map((m) => person(m.user, userName(m.user), '<span class="note">Waiting</span>')).join("") + "</div>";
+    }
+    const stuck = lastAdmin && g.members.length > 1;
+    html += '<div class="list" style="margin-top:20px">' + (admin ? '<a class="row plain action-row" onclick="invite()">Invite Someone…</a>' : "")
+      + `<a class="row plain danger-row${stuck ? " off" : ""}" onclick="change('${me}', null)">Leave ${one.esc(g.name)}</a></div>`;
+    if (stuck) html += footer("Make someone else an admin before you leave.");
+    return html;
+  }
+
+  const draw = () => one.render("#page", async () => {
+    await load();
+    return group ? groupPage() : list();
+  });
+
+  // Changes a member's role, or with none removes them: shown at once, and undone with why if it fails.
+  async function change(user, role) {
+    error = "";
+    pending[user] = role;
+    one.render("#page", async () => (group ? groupPage() : list()));
+    try {
+      await one.api("POST", "/v1/member", { group, user, role });
+      delete pending[user];
+      // Leaving, there's nothing left to show here.
+      if (user === state.user?.id && role === null) return history.length > 1 ? history.back() : one.open("groups");
+    } catch (e) {
+      delete pending[user];
+      error = one.plain(e).title;
+    }
+    draw();
+  }
+
+  async function accept(id, button) {
+    button.disabled = true;
+    error = "";
+    try {
+      await one.api("POST", "/v1/accept", { group: id });
+      one.tap("success");
+    } catch (e) {
+      error = one.plain(e).title;
+    }
+    draw();
+  }
+
+  // A new group, with them its first admin; then its page.
+  function create() {
+    const sheet = one.sheet({ title: "New Group", done: "Cancel" });
+    sheet.body.innerHTML = `<div class="list"><label class="row plain"><input class="field" id="name" placeholder="Name" autocomplete="off" enterkeyhint="done"></label></div>
+      <p class="footer" id="note">You'll be its first admin.</p><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Create</button></div>`;
+    const name = sheet.body.querySelector("#name"), go = sheet.body.querySelector("#go"), note = sheet.body.querySelector("#note");
+    name.oninput = () => (go.disabled = !name.value.trim());
+    name.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
+    go.onclick = async () => {
+      go.disabled = true;
+      try {
+        const made = await one.api("POST", "/v1/group", { name: name.value.trim() });
+        sheet.close();
+        one.tap("success");
+        one.open("groups", { group: made.group });
+      } catch (e) {
+        note.className = "footer error";
+        note.textContent = one.plain(e).title;
+        go.disabled = false;
+      }
+    };
+    setTimeout(() => name.focus(), 50);
+  }
+
+  // Inviting someone already in the install: find them by name, tap one (or Return for the first) to invite.
+  function invite() {
+    const g = state.install.groups.find((x) => x.id === group);
+    const others = [...state.install.users].sort((x, y) => x.name.localeCompare(y.name)).filter((u) => !g.members.some((m) => m.user === u.id) && !g.invited.some((m) => m.user === u.id));
+    let role = "member", query = "", matches = others;
+    const sheet = one.sheet({ title: `Invite to ${g.name}`, done: "Cancel" });
+    sheet.body.innerHTML = `<div class="segmented" id="as"><button data-role="member" class="on">Member</button><button data-role="admin">Admin</button></div>
+      <div id="find"></div><div id="people"></div>`;
+    const people = sheet.body.querySelector("#people");
+    const show = (note = "") => {
+      matches = others.filter((u) => u.name.toLowerCase().includes(query.trim().toLowerCase()));
+      const rows = matches.map((u) => `<a class="row" data-user="${u.id}">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}</span></div>
+        ${u.role === "admin" ? `<div class="sub">Admin of your ${one.esc(one.config.name.replace(/^The /, ""))}</div>` : ""}</div>${one.icon("plus-circle-fill", "add")}</a>`);
+      people.innerHTML = (rows.length ? `<div class="list">${rows.join("")}</div>` : others.length ? `<div class="list"><div class="row plain muted">No one called “${one.esc(query.trim())}”.</div></div>` : "")
+        + (note ? footer(note, true) : footer(others.length ? "They join once they accept." : "Everyone is in this group already."));
+    };
+    const send = async (user) => {
+      try {
+        await one.api("POST", "/v1/invite", { group, user, role });
+        one.tap("success");
+        sheet.close();
+        draw();
+      } catch (e) {
+        show(one.plain(e).title);
+      }
+    };
+    sheet.body.querySelector("#as").onclick = (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      role = b.dataset.role;
+      sheet.body.querySelectorAll("#as button").forEach((x) => x.classList.toggle("on", x === b));
+    };
+    people.onclick = (e) => {
+      const r = e.target.closest("[data-user]");
+      if (r) send(r.dataset.user);
+    };
+    const input = one.search(sheet.body.querySelector("#find"), { placeholder: "Find people", delay: 0, onSearch: (q) => ((query = q), show()) });
+    input.addEventListener("keydown", (e) => e.key === "Enter" && matches[0] && send(matches[0].id));
+    show();
+  }
+
+  one.on("changed", draw);
+  draw();
+</script>

@@ -104,6 +104,12 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .button:disabled { opacity: 0.6; }
 .button:active { opacity: 0.7; }
 
+/* A button that opens a menu, as a row's role: <label class="pick">its text<select>…</select></label>, the system's own
+   menu over it, unseen, so the button is as wide as what it says. */
+.pick { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 15px; padding: 4px 10px; border-radius: 8px; background: var(--code-bg); color: var(--accent); cursor: pointer; white-space: nowrap; }
+.pick::after { content: ""; width: 8px; height: 12px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M1 5l4-4 4 4M1 9l4 4 4-4' fill='none' stroke='%238e8e93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain; }
+.pick select { position: absolute; inset: 0; width: 100%; opacity: 0; font: inherit; cursor: pointer; }
+
 .spinner { width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid var(--line); border-top-color: var(--muted); animation: spin 0.8s linear infinite; flex: none; }
 .spinner.small { width: 14px; height: 14px; border-width: 2px; border-top-color: currentColor; }
 @keyframes spin { to { transform: rotate(360deg); } }

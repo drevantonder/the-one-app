@@ -55,7 +55,8 @@
     if (message.type === "open") {
       const q = new URLSearchParams({ params: JSON.stringify(message.params || {}) });
       if (ctx.scope) q.set("scope", ctx.scope);
-      location.href = `/v1/screens/${message.app || ctx.app}/${message.screen}?${q}`;
+      // A Settings screen opens Settings screens (another, or itself with other params).
+      location.href = ctx.app || message.app ? `/v1/screens/${message.app || ctx.app}/${message.screen}?${q}` : `/v1/settings-screens/${message.screen}?${q}`;
     }
     if (message.type === "api") {
       const r = await fetch(message.path, {
