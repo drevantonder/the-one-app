@@ -272,8 +272,8 @@ fn follow(macs: &[Value], commit: &str, config_commit: Option<&str>) -> bool {
                 if let Some((was, log)) = out.split_once("failed ").and_then(|(_, rest)| rest.split_once('\n')) {
                     println!("  {name}: its last build, of {}, failed:\n{}", &was[..was.len().min(12)], log.trim_end());
                 }
-                let now = if out.contains("building") { "after the build it's on" } else { "now" };
-                println!("  {name}: builds {} {now}, and runs it a few minutes later", &commit[..12]);
+                let now = if out.contains("building") { ", after the build it's on," } else { "" };
+                println!("  {name}: builds {}{now} once ten minutes pass with no newer update, and runs it then", &commit[..12]);
             }
             Ok(r) => {
                 missed = true;
@@ -517,7 +517,11 @@ JOB
 cat > follow.sh <<'JOB'
 c="$HOME/Library/Caches/{CLI}"
 while want=$(cat "$c/want") && [ "$want" != "$(cat "$c/built" 2>/dev/null)" ]; do
-	if /bin/sh "$c/build.sh" $(cat "$c/want") > "$c/update.log" 2>&1; then echo "$want" > "$c/built"; else echo "$want" > "$c/failed"; exit 1; fi
+	# Pushes come in bursts: it builds the last of them, once none has come for ten minutes, at the background's priority,
+	# so the Mac stays quick to use.
+	sleep 600
+	[ "$want" = "$(cat "$c/want")" ] || continue
+	if taskpolicy -b /bin/sh "$c/build.sh" $want > "$c/update.log" 2>&1; then echo "$want" > "$c/built"; else echo "$want" > "$c/failed"; exit 1; fi
 done
 JOB
 {start}"#,
