@@ -4,7 +4,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 . ./project.sh
-./build-client.sh >/dev/null
 id=app.$CONFIG_CLI.phone
 
 if [ "${1:-}" = device ]; then

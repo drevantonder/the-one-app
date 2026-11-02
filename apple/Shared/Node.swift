@@ -243,11 +243,23 @@ protocol NodeTransport: Sendable {
     var unreachable: String { get }
 }
 
-/// The node's local HTTP API.
+/// The node's HTTP API: this machine's own node, or with `auth`, the install's address as the person signed in.
 struct HTTPNode: NodeTransport {
     var base: URL
+    var auth: Auth?
 
-    var unreachable: String { "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." }
+    var unreachable: String {
+        auth == nil ? "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." : String(localized: "Your servers aren’t answering.")
+    }
+
+    /// A request as the person signed in, if this goes through the address: a refused token is renewed once.
+    private func signed(_ request: URLRequest) async throws -> (URLRequest, String?) {
+        guard let auth else { return (request, nil) }
+        var request = request
+        let token = try await auth.token()
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return (request, token)
+    }
 
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data {
         var url = base.appending(path: path)
@@ -255,17 +267,24 @@ struct HTTPNode: NodeTransport {
         if method == "GET", let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
             url.append(queryItems: fields.compactMap { k, v in (v as? String).map { URLQueryItem(name: k, value: $0) } })
         }
-        var request = URLRequest(url: url, timeoutInterval: timeout)
-        request.httpMethod = method
+        var plain = URLRequest(url: url, timeoutInterval: timeout)
+        plain.httpMethod = method
         if let body, method != "GET" {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = body
+            plain.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            plain.httpBody = body
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if (response as? HTTPURLResponse)?.statusCode != 200 {
+        var (request, token) = try await signed(plain)
+        var (data, response) = try await URLSession.shared.data(for: request)
+        if let auth, (response as? HTTPURLResponse)?.statusCode == 401 {
+            request.setValue("Bearer \(try await auth.token(stale: token))", forHTTPHeaderField: "Authorization")
+            (data, response) = try await URLSession.shared.data(for: request)
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status != 200 {
             struct Failure: Decodable { var error: String? }
             let error = (try? JSONDecoder().decode(Failure.self, from: data))?.error
-            throw NodeError(error ?? "The node answered \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+            if auth != nil, status == 401 { throw Auth.SignedOut(message: error ?? String(localized: "Sign in again.")) }
+            throw NodeError(error ?? (auth != nil && status >= 500 ? String(localized: "Your servers aren’t answering.") : "The node answered \(status)"))
         }
         return data
     }
@@ -282,9 +301,11 @@ struct HTTPNode: NodeTransport {
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var request = URLRequest(url: url, timeoutInterval: 60)
-                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    let (bytes, _) = try await URLSession.shared.bytes(for: request)
+                    var plain = URLRequest(url: url, timeoutInterval: 60)
+                    plain.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    let (request, token) = try await signed(plain)
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    if let auth, (response as? HTTPURLResponse)?.statusCode == 401 { _ = try await auth.token(stale: token) }
                     for try await line in bytes.lines where line.hasPrefix("data:") {
                         let json = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
                         if let event = try? JSONDecoder().decode(NodeEvent.self, from: Data(json.utf8)) {

@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 @main
 struct PhoneApp: App {
@@ -33,22 +34,20 @@ struct PhoneApp: App {
     }
 }
 
-/// The phone before and after it joins an install.
+/// The phone before and after it signs in.
 @MainActor @Observable
 final class Phone {
     static let shared = Phone()
 
     enum Stage: Equatable {
-        case starting
-        case failed(String)
         case welcome
         case joined
     }
 
-    private(set) var stage = Stage.starting
-    private(set) var joining = false
+    private(set) var stage = Phone.nodeURL != nil || Auth.signedIn ? Stage.joined : .welcome
+    private(set) var signingIn = false
     var joinError: String?
-    let store = Store(node: Phone.transport)
+    let store = Store(node: NodeClient(transport: PhoneNode(), client: "phone"))
     private var running: Task<Void, Never>?
 
     /// The accent: the build's until a server sends its own.
@@ -56,8 +55,8 @@ final class Phone {
         Color(accentHex: store.config?.accent ?? Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? "")
     }
 
-    /// In the simulator, NODE_URL points the app at a server's local API instead of joining over the network.
-    static var nodeURL: URL? {
+    /// In the simulator, NODE_URL points the app at a server's local API instead of signing in.
+    nonisolated static var nodeURL: URL? {
         #if targetEnvironment(simulator)
         ProcessInfo.processInfo.environment["NODE_URL"].flatMap(URL.init(string:))
         #else
@@ -65,62 +64,66 @@ final class Phone {
         #endif
     }
 
-    private static var transport: NodeClient {
-        NodeClient(transport: nodeURL.map { HTTPNode(base: $0) as any NodeTransport } ?? ClientTransport())
-    }
-
     private var starting: Task<Void, Never>?
 
-    /// Starts the client, once, however many ask.
+    /// Starts, once, however many ask.
     func start() async {
         if starting == nil { starting = Task { await begin() } }
         await starting?.value
     }
 
     private func begin() async {
-        if Self.nodeURL != nil {
-            stage = .joined
-            run()
-            // OPEN_URL opens a link once it's up, as tapping it would: for screenshots.
-            #if targetEnvironment(simulator)
-            if let link = ProcessInfo.processInfo.environment["OPEN_URL"].flatMap(URL.init(string:)) {
-                try? await Task.sleep(for: .seconds(3))
-                open(link)
-            }
-            #endif
-            return
+        guard stage == .joined else { return }
+        run()
+        // OPEN_URL opens a link once it's up, as tapping it would: for screenshots.
+        #if targetEnvironment(simulator)
+        if let link = ProcessInfo.processInfo.environment["OPEN_URL"].flatMap(URL.init(string:)) {
+            try? await Task.sleep(for: .seconds(3))
+            open(link)
         }
-        let dir = URL.applicationSupportDirectory.appending(path: "client")
-        do {
-            stage = try await Client.start(in: dir) ? .joined : .welcome
-        } catch {
-            stage = .failed(error.localizedDescription)
-        }
-        if stage == .joined { run() }
+        #endif
     }
 
-    /// Joins the install a pairing code is for, as `name`, and shows it.
-    func join(_ code: String, name: String) async {
-        guard !joining else { return }
-        joining = true
+    /// Signs in to the install at `typed` (an address, or an invite link, whose page makes the person's passkey
+    /// first), with their passkey in the system's sign-in sheet.
+    func signIn(_ typed: String, session: WebAuthenticationSession) async -> URL? {
+        guard !signingIn else { return nil }
+        signingIn = true
         joinError = nil
-        defer { joining = false }
+        defer { signingIn = false }
         do {
-            try await Client.join(code.trimmingCharacters(in: .whitespacesAndNewlines), name: name)
+            if let invite = try Auth.take(typed) { return invite }
+            let signedIn = try await Auth.shared.signIn(name: "\(appName) on \(UIDevice.current.name)") { url in
+                try await session.authenticate(using: url, callback: .customScheme(Auth.cli), preferredBrowserSession: .shared, additionalHeaderFields: [:])
+            }
+            guard signedIn else { return nil }
         } catch {
-            joinError = joinFailure(error)
-            return
+            joinError = error.localizedDescription
+            return nil
         }
         stage = .joined
         run()
-        try? await store.refreshState()
-        // A device already in the install keeps the name it had there.
-        if let current = store.state?.machine.name, current != name { try? await store.rename(name) }
+        return nil
     }
 
-    /// `<cli>://join?code=…&name=…`: joins without the camera, from a link another device gives. Or a link the
-    /// store opens itself, like an agent's request for a Vault item.
-    /// `<cli>://open?app=…&screen=…&params=…&scope=…`: opens an app's screen, from a widget, on the page it came from.
+    /// Signs out: back to the first screen, with nothing of the person's left on the phone.
+    func signOut() async {
+        await Auth.shared.signOut()
+        signedOut(nil)
+    }
+
+    /// The install no longer takes this phone's sign-in.
+    func signedOut(_ why: String?) {
+        running?.cancel()
+        running = nil
+        starting = nil
+        stage = .welcome
+        joinError = why
+        store.forget()
+    }
+
+    /// `<cli>://open?app=…&screen=…&params=…&scope=…`: opens an app's screen, from a widget, on the page it came
+    /// from. Or a link the store opens itself, like an agent's request for a Vault item.
     func open(_ url: URL) {
         if store.open(url) { return }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -142,16 +145,45 @@ final class Phone {
             if screen == "main", store.app(app)?.hasScreens == false { return }
             if let scope, store.pages.contains(where: { $0.scope == scope }) { store.current = scope }
             store.path = [.screen(ScreenRoute(app: app, screen: screen, params: value("params") ?? "{}", scope: scope))]
-            return
         }
-        guard url.host() == "join", let code = value("code"), !code.isEmpty else { return }
-        let name = value("name").flatMap { $0.isEmpty ? nil : $0 } ?? store.state?.machine.name ?? UIDevice.current.name
-        Task { await join(code, name: name) }
     }
 
     private func run() {
         guard running == nil else { return }
         running = Task { await store.run() }
+    }
+}
+
+/// The install's address, as the person signed in: or in the simulator, NODE_URL's node as its own.
+struct PhoneNode: NodeTransport {
+    private var node: HTTPNode? {
+        if let url = Phone.nodeURL { return HTTPNode(base: url) }
+        return Auth.address.map { HTTPNode(base: $0, auth: .shared) }
+    }
+
+    var unreachable: String { node?.unreachable ?? String(localized: "Sign in again.") }
+
+    private func signedOut<T>(_ work: () async throws -> T) async throws -> T {
+        do {
+            return try await work()
+        } catch let error as Auth.SignedOut {
+            await Phone.shared.signedOut(error.message)
+            throw error
+        }
+    }
+
+    func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data {
+        guard let node else { throw Auth.SignedOut(message: String(localized: "Sign in again.")) }
+        return try await signedOut { try await node.send(method, path, body: body, timeout: timeout) }
+    }
+
+    func page(app: String, screen: String, params: String, scope: String?) async throws -> (html: String, base: URL?) {
+        guard let node else { throw Auth.SignedOut(message: String(localized: "Sign in again.")) }
+        return try await signedOut { try await node.page(app: app, screen: screen, params: params, scope: scope) }
+    }
+
+    func events() -> AsyncThrowingStream<NodeEvent, Error> {
+        node?.events() ?? AsyncThrowingStream { $0.finish() }
     }
 }
 
@@ -165,10 +197,6 @@ struct PhoneRoot: View {
 
     @ViewBuilder private var stage: some View {
         switch phone.stage {
-        case .starting:
-            ProgressView()
-        case .failed(let message):
-            ContentUnavailableView("Can’t Start", systemImage: "exclamationmark.triangle", description: Text(message))
         case .welcome:
             WelcomeView()
         case .joined:

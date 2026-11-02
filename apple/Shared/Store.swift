@@ -175,6 +175,19 @@ final class Store {
         self.node = node
     }
 
+    /// Forgets everything it showed: the person signed out.
+    func forget() {
+        state = nil
+        apps = []
+        widgets = [:]
+        badges = [:]
+        arrangements = [:]
+        path = []
+        current = "user"
+        sheet = nil
+        phase = .connecting
+    }
+
     var config: Config? { state?.config }
     var install: Install? { state?.install }
     var me: Person? { state?.user }

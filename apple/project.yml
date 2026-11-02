@@ -46,16 +46,12 @@ targets:
         NSContactsUsageDescription: Your agents and other devices look up your contacts through this Mac.
         NSAppleEventsUsageDescription: Your agents send iMessages you ask them to through Messages on this Mac.
 
-  # The iPhone and iPad keep no log: it links the client library (build-client.sh) and asks a member device.
+  # The iPhone and iPad sign in at the install's address, as the web client does, and ask its nodes there.
   Phone:
     type: application
     platform: iOS
     sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Phone.xcassets, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
     dependencies:
-      - framework: build/OneClient.xcframework
-        embed: false
-      - sdk: Security.framework
-      - sdk: SystemConfiguration.framework
       - target: Widgets
     settings:
       base:
@@ -77,12 +73,8 @@ targets:
         Accent: ${CONFIG_ACCENT}
         CLI: ${CONFIG_CLI}
         BuildCommit: ${BUILD_COMMIT}
-        SignIn: ${CONFIG_SIGN_IN}
-        SignInAccount: ${CONFIG_ACCOUNT}
         AppGroup: group.app.${CONFIG_CLI}.phone
-        NSCameraUsageDescription: Scan the code another device shows to join its space.
-        # <cli>://join?code=…&name=…: joining from a link, without the camera; <cli>://secret?id=…&scope=…: an
-        # agent's request that the person set a secret.
+        # <cli>://signed-in/: back from signing in; <cli>://vault?id=…&scope=…: an agent's request for a Vault item.
         CFBundleURLTypes:
           - CFBundleURLName: app.${CONFIG_CLI}.join
             CFBundleURLSchemes:
