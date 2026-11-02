@@ -387,3 +387,34 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     }
     out
 }
+
+/// A new install's node starts in a home that isn't there yet, as install.sh starts it.
+#[test]
+fn a_node_starts_in_a_new_home() {
+    let root = std::env::temp_dir().join(format!("one-new-home-{}", rand::random::<u64>()));
+    let home = root.join("home");
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let cli = one::config::CLI.to_uppercase();
+    let mut node = std::process::Command::new(env!("CARGO_BIN_EXE_one"))
+        .arg("serve")
+        .env(format!("{cli}_HOME"), &home)
+        .env(format!("{cli}_ADDR"), format!("127.0.0.1:{port}"))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let started = Instant::now();
+    let answered = loop {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            break true;
+        }
+        if node.try_wait().unwrap().is_some() || started.elapsed() > Duration::from_secs(60) {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let _ = node.kill();
+    let out = node.wait_with_output().unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(answered, "the node didn't start in a new home:\n{}", String::from_utf8_lossy(&out.stderr));
+}

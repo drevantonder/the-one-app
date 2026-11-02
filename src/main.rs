@@ -145,7 +145,7 @@ Usage:
                                        runs a command in it ({CLI} try mcp for an agent), {CLI} try client web, android
                                        or windows gives a client of this checkout's build signed in to it, and
                                        {CLI} try stop deletes it
-  {CLI} update                         test and build main's tip on this machine and the Macs, and run it everywhere
+  {CLI} update                         build main's tip (tested before it was pushed) on this machine and the Macs, and run it everywhere
   {CLI} release <vX.Y.Z>               the same, signed off and published on GitHub for the installer
   {CLI} publish [binary]               sign and publish a build you made; every device on its platform updates
   {CLI} file put <file>                keep a file in the install, for apps and agents; prints its hash
@@ -1108,6 +1108,8 @@ async fn serve(is_try: bool) -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
     let dir = one::home();
+    // A new install's first start makes its home.
+    std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
     let listener = listen(&dir).await?;
     std::fs::write(dir.join("pid"), std::process::id().to_string())?;
     let node = Node::start(&dir, one::sidecars::built_in()).await?;
