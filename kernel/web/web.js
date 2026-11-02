@@ -323,13 +323,14 @@ window.__one = {};
     return `<span class="folder" style="--size:${size}px">${cells}</span>`;
   }
 
-  /// One section per page, listing its apps and its Services; then Settings', listing its items.
+  /// One section per page, listing its apps and its Services; then Settings', listing its items. An app Settings lists
+  /// (the App Store) shows there only.
   function drawSidebar() {
     const at = selection();
     const row = (to, icon, name, count) => `<a class="nav-row${href(to) === at ? " selected" : ""}" href="${esc(href(to))}" data-go='${esc(JSON.stringify(to))}'>${icon}<span class="nav-label">${esc(name)}</span>${count ? `<span class="nav-count">${count}</span>` : ""}</a>`;
     const head = (to, name) => `<a class="nav-head${href(to) === at ? " selected" : ""}" href="${esc(href(to))}" data-go='${esc(JSON.stringify(to))}'>${esc(name)}</a>`;
     const sections = pages().map((p) => `<section>${head(own("pages", { scope: p.scope }), p.title)}` +
-      appsOn(p).map((a) => row({ kind: "screen", app: a.name, screen: "main", params: "{}", scope: p.scope }, one.appIcon(a, 20), label(a), appBadge(a.name, p))).join("") +
+      appsOn(p).filter((a) => !settingsItems().some((i) => i.app === a.name)).map((a) => row({ kind: "screen", app: a.name, screen: "main", params: "{}", scope: p.scope }, one.appIcon(a, 20), label(a), appBadge(a.name, p))).join("") +
       row(own("services", { scope: p.scope }), folder(servicesOn(p), 20), "Services") + `</section>`).join("");
     const items = settingsItems().map((item) => row(item.app ? { kind: "screen", app: item.app, screen: "main", params: "{}" } : { kind: "own", name: item.name, params: "{}" }, settingIcon(item, 20), item.title, item.badge)).join("");
     $(".sidebar", root).innerHTML = `<div class="nav-pages">${sections}<section>${head(own("pages", { scope: "settings" }), "Settings")}${items}</section></div>`;

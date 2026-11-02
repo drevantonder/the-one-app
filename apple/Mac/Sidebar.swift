@@ -15,7 +15,7 @@ struct Sidebar: View {
         return List(selection: $store.selection) {
             ForEach(store.pages) { page in
                 Section {
-                    ForEach(store.apps(on: page)) { app in
+                    ForEach(listed(on: page)) { app in
                         AppTile(app: app, seed: app.name, size: 24)
                             .frame(maxWidth: .infinity)
                             .help(app.label)
@@ -64,6 +64,11 @@ struct Sidebar: View {
     }
 
     /// A page's initials, for its folded header: "You", "PT", "Ev".
+    /// A page's apps, but those Settings lists (the App Store), which the sidebar shows once, under Settings.
+    private func listed(on page: Page) -> [AppInfo] {
+        store.apps(on: page).filter { app in !store.settingsItems.contains { $0.app == app.name } }
+    }
+
     private func initials(_ title: String) -> String {
         let words = title.split(separator: " ")
         return words.count > 1 ? words.prefix(2).compactMap(\.first).map(String.init).joined().uppercased() : String(title.prefix(3))
@@ -76,7 +81,7 @@ struct Sidebar: View {
                 // Held open: macOS folds a sidebar's section when its header is pressed (through accessibility, as
                 // agents drive the app), and here the header opens the page.
                 Section(isExpanded: Binding(get: { true }, set: { _ in })) {
-                    ForEach(store.apps(on: page)) { app in
+                    ForEach(listed(on: page)) { app in
                         Label {
                             Text(app.label)
                         } icon: {

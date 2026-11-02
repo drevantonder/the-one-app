@@ -587,7 +587,8 @@ public sealed class MainWindow : Window
         foreach (var page in store.Pages())
         {
             Head(Route.PageOf(page.Scope), page.Title);
-            foreach (var app in store.AppsOn(page))
+            // Not an app Settings lists (the App Store): the sidebar shows it once, under Settings.
+            foreach (var app in store.AppsOn(page).Where(a => !store.SettingsItems.Any(i => i.App == a.Name)))
                 nav.MenuItems.Add(Item(Route.ScreenOf(app.Name, page.Scope), Labeled(Look.Tile(app, 20), app.Label), store.Badge(app.Name, page)));
             nav.MenuItems.Add(Item(Route.Services(page.Scope), Labeled(Look.Folder(store.ServicesOn(page), 20), "Services")));
         }
