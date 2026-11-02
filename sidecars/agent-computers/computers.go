@@ -224,13 +224,16 @@ func (ds *computers) takesSession(name string) bool {
 
 // closeBrowsers closes the browsers the computer's tools launched, and with
 // signIns the one sign_in opened too, marking their profiles as closed
-// normally, or they'd offer to restore their pages.
+// normally, or they'd offer to restore their pages. One still closing after
+// 10s is killed: a profile's copied once this returns, and a copy of files
+// Chrome is writing can be broken where a killed Chrome's never is. With
+// signIns nothing of any browser's is left running, its helpers included.
 func closeBrowsers(ctx context.Context, d computer, signIns bool) {
 	keep := signInClass
 	if signIns {
 		keep = "--matches-no-browser"
 	}
-	err := sh(ctx, d, `profiles=`+profiles+`
+	err := sh(ctx, d, `profiles=`+profiles+` signIns=`+strconv.FormatBool(signIns)+`
 main() { # each browser's own process, not its helpers
 	for p in $(pgrep -f -- "[-]-user-data-dir=$profiles"); do
 		c=$(tr '\0' ' ' 2>/dev/null </proc/$p/cmdline) || continue
@@ -239,7 +242,13 @@ main() { # each browser's own process, not its helpers
 }
 pids=$(main)
 [ -n "$pids" ] && kill $pids
-for i in $(seq 50); do [ -z "$(main)" ] && break; sleep 0.1; done
+for i in $(seq 100); do [ -z "$(main)" ] && break; sleep 0.1; done
+pids=$(main)
+[ -n "$pids" ] && kill -9 $pids
+if $signIns; then
+	for i in $(seq 50); do pgrep -f -- "[-]-user-data-dir=$profiles" >/dev/null || break; sleep 0.1; done
+	pkill -9 -f -- "[-]-user-data-dir=$profiles"
+fi
 sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/' $profiles*/Default/Preferences 2>/dev/null
 true`)
 	if err != nil {

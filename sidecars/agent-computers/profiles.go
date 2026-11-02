@@ -142,10 +142,7 @@ func (ds *computers) pack(ctx context.Context, d computer, p *profile) (save, er
 		return save{}, fmt.Errorf("computer %s's browser has no %s profile", d.Name, p.Name)
 	}
 	closeBrowsers(ctx, d, true)
-	args := []string{"tar", "-C", profiles + p.Name, "--warning=no-file-changed"}
-	for _, c := range caches {
-		args = append(args, "--exclude="+c)
-	}
+	args := append([]string{"tar", "-C", profiles + p.Name, "--warning=no-file-changed"}, excludes(".")...)
 	var tarball bytes.Buffer
 	if err := in(ctx, d, nil, &tarball, append(args, "-czf", "-", ".")...); !tarred(err) {
 		return save{}, err

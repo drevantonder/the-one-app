@@ -49,13 +49,29 @@ type loan struct {
 	NoScreen  bool      `json:"no_screen,omitempty"` // made without a screen: nobody watches it
 }
 
-// caches are left out of saved profiles and backups: they are most of a
-// browser profile's size and rebuild themselves. So are a running browser's
-// locks, which would make a copy look in use by another computer. Service
-// Worker/ScriptCache isn't one: it's the only copy of an extension's
-// background script, and without it the extension (1Password) never answers.
-var caches = []string{"./.cache", "*/Cache", "*/Code Cache", "*/GPUCache", "*/DawnCache", "*/GrShaderCache", "*/ShaderCache",
-	"*/Service Worker/CacheStorage", "*/SingletonLock", "*/SingletonSocket", "*/SingletonCookie"}
+// caches are left out of saved profiles and backups, each a path in a Chrome
+// folder (* is one of its profiles, like Default): they are most of a profile's
+// size and rebuild themselves. So are a running browser's locks, which would
+// make a copy look in use by another computer. Service Worker/ScriptCache isn't
+// one: it's the only copy of an extension's background script, and without it
+// the extension (1Password) never answers.
+var caches = []string{"*/Cache", "*/Code Cache", "*/GPUCache", "*/DawnGraphiteCache", "*/DawnWebGPUCache", "*/Service Worker/CacheStorage",
+	"GPUPersistentCache", "GrShaderCache", "ShaderCache", "SingletonLock", "SingletonSocket", "SingletonCookie"}
+
+// excludes are tar's arguments that leave out the caches of the Chrome folders
+// at (a path from where tar starts, where * is any one folder) and other: each
+// only there, from the start of a path, with * within one folder, never a
+// folder of the same name elsewhere, like one in an extension or a person's.
+func excludes(at string, other ...string) []string {
+	args := []string{"--anchored", "--no-wildcards-match-slash"}
+	for _, c := range caches {
+		args = append(args, "--exclude="+at+"/"+c)
+	}
+	for _, o := range other {
+		args = append(args, "--exclude="+o)
+	}
+	return args
+}
 
 func (ds *computers) loans() map[string]loan {
 	ds.poolMu.Lock()

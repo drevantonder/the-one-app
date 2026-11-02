@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -53,10 +54,7 @@ func (ds *computers) backup(ctx context.Context, d computer) (backupRecord, erro
 	pr, pw := io.Pipe()
 	packed := make(chan error, 1)
 	go func() {
-		args := []string{"tar", "-C", home, "--warning=no-file-changed"}
-		for _, c := range caches {
-			args = append(args, "--exclude="+c)
-		}
+		args := append([]string{"tar", "-C", home, "--warning=no-file-changed"}, excludes("."+strings.TrimPrefix(profiles, home)+"*", "./.cache")...)
 		err := in(ctx, d, nil, pw, append(args, "-czf", "-", ".")...)
 		if tarred(err) {
 			err = nil
