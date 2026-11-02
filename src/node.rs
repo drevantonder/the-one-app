@@ -2876,6 +2876,18 @@ impl Node {
 
     /// The state as `viewer`, this server or a client it serves, sees it.
     pub fn state_for(&self, viewer: &Caller) -> Value {
+        self.state_as(viewer, None)
+    }
+
+    /// The same for someone signed in with the kernel through `client` (its name), which is no device: not the
+    /// server it reached, as the serverless node says too.
+    pub fn state_for_sign_in(&self, viewer: &Caller, client: &str) -> Value {
+        self.state_as(viewer, Some(client))
+    }
+
+    fn state_as(&self, viewer: &Caller, sign_in: Option<&str>) -> Value {
+        // The device looking, if it's one.
+        let device = sign_in.is_none().then_some(viewer.key);
         let ready = self.ready();
         let waiting = self.item_requests(viewer, None, None).map(|r| r.iter().filter(|r| r["state"] == "waiting").count()).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
@@ -2902,7 +2914,7 @@ impl Node {
                         l
                     });
                     json!({
-                        "key": hex(&s.key), "name": s.name, "user": s.user, "me": s.key == viewer.key, "here": s.key == self.0.id,
+                        "key": hex(&s.key), "name": s.name, "user": s.user, "me": Some(s.key) == device, "here": s.key == self.0.id,
                         "online": s.key == self.0.id || session.is_some(),
                         "owners": list(m.owners(&s.key)), "users": list(m.users_of(&s.key)), "privileged": m.privileged(&s.key),
                         "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(),
@@ -2921,7 +2933,7 @@ impl Node {
                 .collect();
             let clients: Vec<Value> = m
                 .clients()
-                .map(|c| json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "me": c.key == viewer.key, "asked": i.asked.get(&c.key) }))
+                .map(|c| json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "me": Some(c.key) == device, "asked": i.asked.get(&c.key) }))
                 .collect();
             let users: Vec<Value> = m.users.values().filter(|u| !u.removed).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role, "me": &u.id == me })).collect();
             let groups: Vec<Value> = m
@@ -2950,7 +2962,10 @@ impl Node {
         let mut state = json!({
             // `brand` is the same, for shells built before it was `config`.
             "config": config, "brand": config,
-            "me": { "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user },
+            "me": match sign_in {
+                None => json!({ "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user }),
+                Some(client) => json!({ "key": "", "name": client, "user": viewer.user }),
+            },
             "server": { "key": hex(&self.0.id), "name": self.server_name(), "ready": ready, "guide": crate::skills::address() },
             "user": user,
             "install": install,
@@ -2966,7 +2981,7 @@ impl Node {
             // What Settings shows this user, in order (see `settings_items`).
             "settings_items": settings_items,
         });
-        if viewer.key != self.0.id {
+        if sign_in.is_none() && viewer.key != self.0.id {
             state["client"] = json!({ "key": hex(&viewer.key), "name": viewer_name });
         }
         state

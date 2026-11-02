@@ -239,6 +239,9 @@ pub struct Session {
     pub user: String,
     /// The client it's for: an OAuth client's id, or `schedules` for a scheduled run.
     pub client: Option<String>,
+    /// The client's name, as its person sees it ("Chrome on Mac").
+    #[serde(default)]
+    pub name: Option<String>,
     pub until: u64,
 }
 

@@ -319,7 +319,8 @@ fn local(node: &Node) -> Result<Caller, Error> {
 #[derive(Clone)]
 struct Me {
     caller: Caller,
-    signed_in: bool,
+    /// A sign-in's client's name; none for this machine's own programs.
+    sign_in: Option<String>,
 }
 
 impl axum::extract::FromRequestParts<Node> for Me {
@@ -328,7 +329,7 @@ impl axum::extract::FromRequestParts<Node> for Me {
     async fn from_request_parts(parts: &mut axum::http::request::Parts, node: &Node) -> Result<Me, Error> {
         match parts.extensions.get::<Me>() {
             Some(me) => Ok(me.clone()),
-            None => Ok(Me { caller: local(node)?, signed_in: false }),
+            None => Ok(Me { caller: local(node)?, sign_in: None }),
         }
     }
 }
@@ -365,7 +366,7 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     })
     .await??;
     anyhow::ensure!(node.is_user(&claims.sub), "you aren't a person of this install yet: an admin lets you in with {} kernel invite", crate::config::CLI);
-    let me = Me { caller: Caller { key: node.id(), user: claims.sub.clone(), agent: None }, signed_in: true };
+    let me = Me { caller: Caller { key: node.id(), user: claims.sub.clone(), agent: None }, sign_in: Some(session.name.clone().unwrap_or_default()) };
     let mut kept = SIGNED_INS.lock().unwrap();
     kept.retain(|_, (_, until)| now < *until);
     kept.insert(hash, (me.clone(), (claims.exp * 1000).min(session.until)));
@@ -383,7 +384,7 @@ async fn kernel_keys(State(node): State<Node>) -> Reply {
 
 async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Json<Value> {
     Json(match signed_in {
-        Some(me) => node.state_for(&me.caller),
+        Some(me) => node.state_for_sign_in(&me.caller, me.sign_in.as_deref().unwrap_or_default()),
         None => node.state(),
     })
 }
@@ -421,7 +422,7 @@ async fn schedule(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 async fn call(State(node): State<Node>, me: Me, Json(mut req): Json<CallRequest>) -> Reply {
     // Only the node says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);
-    if me.signed_in {
+    if me.sign_in.is_some() {
         req = node.for_sign_in(req)?;
     }
     Ok(Json(json!({ "ok": node.call_as(req, me.caller).await? })))

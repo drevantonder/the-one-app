@@ -713,6 +713,11 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     // server, say.
     let renamed = agent.post(format!("{api}/v1/name")).header("authorization", format!("Bearer {andres}")).header("forwarded", "host=\"one.example\"").send_json(json!({ "name": "elsewhere" })).unwrap();
     assert_eq!(renamed.status(), 403);
+    // A sign-in is no device: not the server it reached, so nothing offers it that server's name to change.
+    let seen = state(&andres);
+    assert_eq!(seen["me"]["key"], "", "{}", seen["me"]);
+    assert!(seen["install"]["servers"].as_array().unwrap().iter().all(|s| s["me"] == false), "{}", seen["install"]["servers"]);
+    assert!(seen.get("client").is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
