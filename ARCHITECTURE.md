@@ -52,8 +52,20 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `tests/`: `sim.rs`, hundreds of servers over bad links; `e2e.rs`, real nodes; `contracts.rs`, wherever two languages must agree; `agents/`, fresh agents doing everyday tasks.
 - `vendor/`: two iroh dependencies patched so the client builds for iPhone; drop them when upstream builds there.
 
+## Being built
+
+The design that replaces privileged servers, replay and sync between servers. As each part lands, the rules and map above are rewritten to match and its line here goes.
+
+- **Kernel servers**: auth (sign-in by passkey and the usual ways, with Better Auth; OAuth for MCP clients), vault (every key, sealed; opened only with a client's secret: a passkey's PRF secret, or an MCP client's refresh token) and schedules (fires schedules; holds, sealed to itself, only the keys for work a person let run while they're away). Small JavaScript for workerd, on Cloudflare or any workerd. Not devices.
+- **Compute servers**: the Rust node and sidecars, owned and used by a user, a group or everyone (today's acl). On a machine, or stateless on Cloudflare (workers-rs): a call fetches what it names, runs, writes and forgets. Any number in one Cloudflare account.
+- **Clients**: the iPhone and Mac apps, browsers and MCP clients like ChatGPT, all signing in through the auth server the same way. What a client has cached stays on it, protected by its OS.
+- **Storage**: one S3-compatible bucket with conditional writes (R2, S3, GCS, MinIO), or a folder for one machine. Each app has one SQLite database per scope, kept as a sealed copy plus sealed changesets (SQLite's session extension; on Workers, SQLite compiled into the Rust WebAssembly, since the stock JavaScript build generates WebAssembly at runtime, which Workers forbid). A changeset is written create-if-absent at its database's next position, so a clash just reruns. Compute servers hold no bucket credentials: the kernel signs create-only URLs for what a call names, so nothing they do deletes data. Erasing destroys a key, not the ciphertext. Who can do what (members, trust, deploys, admins) is a small signed log in `global`, kept forever.
+- **Keys**: a tree per scope (scope, then app, then database). A call gets short-lived keys for what it names, and access tokens for sign-ins like Google's, never refresh tokens.
+- **Calls**: one with side effects outside its database claims a lease (a conditional write) before it runs, so it never runs twice; the rest write and retry on a clash. iroh stays for calls and streams between machines and a "something changed" ping; the bucket is the truth.
+- **Sidecars** run as their own OS user per scope. WhatsApp's linked device is pinned to one compute server and moves only by linking again. Shell and Computer Use run only with a grant for that device and session, approved by the person.
+- **Goes**: privileged servers, the main server, `on` handlers and replay, view snapshots, sync between servers, status kept as entries.
+
 ## Designed, not built
 
 - Backups' weekly restore check and recovery from nothing: a server restoring with no one left to pair with admits itself with the recovery key's countersignature.
 - Sidecars a node starts from a `sidecar` entry's executable, rather than registering themselves.
-- View snapshots on disk, so a node needn't replay every scope when it starts.
