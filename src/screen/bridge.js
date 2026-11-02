@@ -83,7 +83,7 @@
       a.click();
       a.remove();
     }
-    if (message.type === "scan") throw new Error("Scanning documents needs the iPhone or iPad app. Choose the files instead.");
+    if (message.type === "scan") throw new Error("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
     if (message.type === "vault" || message.type === "request") throw new Error("Open this in the app to choose it.");
     if (message.type === "copy") return navigator.clipboard.writeText(message.text);
     if (message.type === "icons") {

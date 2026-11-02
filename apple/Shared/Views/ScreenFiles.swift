@@ -157,7 +157,7 @@ enum ShellFiles {
     static var canScan: Bool { false }
 
     static func scan(from view: NSView?) async throws -> [ScreenFile] {
-        throw NodeError("Scanning documents needs an iPhone or iPad. Choose the files instead.")
+        throw NodeError("Scanning documents needs an iPhone, iPad or Android phone. Choose the files instead.")
     }
     #endif
 }

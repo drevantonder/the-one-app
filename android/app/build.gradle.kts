@@ -1,4 +1,5 @@
 import java.awt.Color as AwtColor
+import java.net.URI
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
@@ -68,6 +69,36 @@ val whiteLabel = tasks.register("whiteLabel") {
     }
 }
 
+// Links to the install's address open the app (App Links), at the addresses it's built for: the white label's own, and
+// $LINKS's (comma-separated), for one that asks where. Android takes them only from the manifest, and opens the app
+// only where the address lists it (kernel set android), so they're in a manifest of their own, merged into the app's.
+val links = (listOf(field("address")) + (System.getenv("LINKS") ?: "").split(","))
+    .map { it.trim().trimEnd('/') }.filter { it.startsWith("https://") }.map { URI(it).host }.distinct()
+val linksManifest = layout.buildDirectory.file("generated/links/AndroidManifest.xml").get().asFile.also { file ->
+    // The web client's own places (kernel/web/web.js's route()), an invite and a Vault request; never `/`, which is
+    // the web client itself.
+    val paths = listOf("path" to "/invite", "path" to "/vault", "path" to "/settings", "pathPrefix" to "/settings/",
+        "pathPrefix" to "/page/", "pathPrefix" to "/services/", "pathPrefix" to "/app/")
+    val data = (links.map { "android:host=\"$it\"" } + paths.map { (k, v) -> "android:$k=\"$v\"" }).joinToString("\n") { "                <data $it />" }
+    val filter = if (links.isEmpty()) "" else """
+        <activity android:name="app.client.MainActivity" android:exported="true">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+$data
+            </intent-filter>
+        </activity>"""
+    val text = """<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>$filter
+    </application>
+</manifest>
+"""
+    if (!file.exists() || file.readText() != text) file.apply { parentFile.mkdirs() }.writeText(text)
+}
+
 android {
     namespace = "app.client"
     compileSdk = 36
@@ -102,6 +133,8 @@ android {
         }
     }
 
+    sourceSets["debug"].manifest.srcFile(linksManifest)
+    sourceSets["release"].manifest.srcFile(linksManifest)
     sourceSets["main"].res.srcDir(generated.map { it.dir("res") })
     sourceSets["main"].assets.srcDir(generated.map { it.dir("assets") })
 
@@ -136,4 +169,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("androidx.glance:glance-appwidget:1.2.0")
     implementation("androidx.work:work-runtime:2.12.0")
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
 }

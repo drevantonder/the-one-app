@@ -32,6 +32,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,7 +66,7 @@ class MainActivity : ComponentActivity() {
                 CompositionLocalProvider(LocalStore provides store) { Root(store) }
             }
         }
-        intent?.data?.let(::open)
+        if (savedInstanceState == null) intent?.data?.let(::open)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -73,8 +74,10 @@ class MainActivity : ComponentActivity() {
         intent.data?.let(::open)
     }
 
-    /** `<cli>://signed-in/?code=…`: back from signing in; `<cli>://open/…`: a home-screen widget, tapped. */
+    /** `<cli>://signed-in/?code=…`: back from signing in; `<cli>://open/…`: a home-screen widget, tapped; a link to the
+     *  install's address (Links). */
     private fun open(uri: Uri) {
+        if (uri.scheme == "https") return Links.open(this, store, uri)
         if (uri.scheme == BuildConfig.CLI && uri.host == "open") return app.client.widget.HomeWidgets.open(store, uri)
         if (uri.scheme != BuildConfig.CLI || uri.host != "signed-in") return
         welcomeError = null
@@ -147,6 +150,14 @@ private fun Welcome(store: Store) {
             }
             busy = false
         }
+    }
+
+    // An invite link this app was opened with, as if it were pasted.
+    LaunchedEffect(Links.invite) {
+        val link = Links.invite ?: return@LaunchedEffect
+        Links.invite = null
+        address = link
+        signIn()
     }
 
     Column(

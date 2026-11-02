@@ -1,6 +1,8 @@
 #!/bin/sh
 # Builds the Android app as a release APK (signed with the debug key until it has a release key of its own), from
 # config.toml's white label, or $CONFIG's: CONFIG=path/to/config.toml ./build.sh. → build/<cli>.apk
+# Links to the white label's address open the app; for one that asks where, give the addresses whose links should:
+# LINKS=https://one.example.com ./build.sh. Each address lists the app's certificate with `kernel set android`.
 set -eu
 cd "$(dirname "$0")"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"

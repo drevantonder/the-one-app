@@ -63,7 +63,7 @@ private const val ORIGIN = "https://screen.invalid"
 
 /** Before the page's scripts: the bridge's way out (`__oneShell.postMessage`, src/screen/bridge.js), one JSON message
  *  each way with an id, and the look that makes the page sit in the app as its own. */
-private fun shim(accent: String, dark: Boolean) = """
+private fun shim(accent: String, dark: Boolean, scan: Boolean) = """
 (() => {
   const port = window.oneShell;
   if (!port) return;
@@ -75,7 +75,7 @@ private fun shim(accent: String, dark: Boolean) = """
     delete waiting[r.id];
     "error" in r ? w.fail(new Error(r.error)) : w.ok(r.ok ?? null);
   };
-  window.__oneShell = { scan: false, postMessage: (message) => new Promise((ok, fail) => {
+  window.__oneShell = { scan: $scan, postMessage: (message) => new Promise((ok, fail) => {
     const id = ++asked;
     waiting[id] = { ok, fail };
     port.postMessage(JSON.stringify({ id, message }));
@@ -108,7 +108,7 @@ fun AppScreen(store: Store, route: Route, setTitle: (String?) -> Unit) {
             modifier = Modifier.fillMaxSize().alpha(if (loaded) 1f else 0f),
             factory = { ctx ->
                 val themed = android.view.ContextThemeWrapper(ctx, if (dark) android.R.style.Theme_DeviceDefault else android.R.style.Theme_DeviceDefault_Light)
-                bridge.make(themed, shim(accent, dark)) { loaded = true }.also { web ->
+                bridge.make(themed, shim(accent, dark, Scanner.available(ctx))) { loaded = true }.also { web ->
                     bridge.scope.launch {
                         try {
                             val html = if (route is Route.Setting) store.settingsScreen(route) else store.screen(route as Route.Screen)
@@ -260,7 +260,7 @@ private class Bridge(val context: Context, val store: Store, route: Route, val s
                 return null
             }
             "vault" -> return JsonPrimitive(askVault(str(m, "need") ?: ""))
-            "scan" -> throw NodeError("Scanning documents needs the iPhone or iPad app. Choose the files instead.")
+            "scan" -> return Scanner.scan(context as? androidx.activity.ComponentActivity ?: throw NodeError("This phone can’t scan documents here."))
             "icons" -> {
                 val names = (m["names"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
                 return JsonObject(names.mapNotNull { n -> Glyphs.data(n)?.let { n to JsonPrimitive(it) } }.toMap())
