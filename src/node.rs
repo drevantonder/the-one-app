@@ -815,24 +815,26 @@ impl Node {
         })
     }
 
-    /// The key of each scope this server holds, with the people who may open it, for an admin handing them to the
-    /// install's kernel (`kernel keys`), so a serverless node opens what this one does.
+    /// The key of each scope this server holds, with the people who may open it and its admins (Everyone's and groups'),
+    /// for an admin handing them to the install's kernel (`kernel keys`), so a serverless node opens what this one does
+    /// and the vault knows who may say who no longer does.
     pub async fn keys_for_kernel(&self, caller: &Caller) -> Result<Vec<Value>> {
         let scopes = self.with(|i| {
             let m = &i.r.members;
             ensure!(members::manages_scope(m, &caller.user, &Scope::Global), "only admins give the kernel the install's keys");
             let people = |s: &Scope| m.users.values().filter(|u| !u.removed && m.may_use(&u.id, s)).map(|u| (u.id.clone(), u.name.clone())).collect::<BTreeMap<_, _>>();
+            let admins = |s: &Scope| m.users.keys().filter(|u| !matches!(s, Scope::User(_)) && m.role_in(u, s) == Some(Role::Admin)).cloned().collect::<Vec<_>>();
             let title = |s: &Scope| match s {
                 Scope::Global => "Everyone".to_string(),
                 Scope::User(u) => m.users.get(u).map(|u| u.name.clone()).unwrap_or_default(),
                 Scope::Group(g) => m.groups.get(g).map(|g| g.name.clone()).unwrap_or_default(),
             };
-            Ok(m.scopes().into_iter().filter(|s| i.r.holds(s)).map(|s| (s.clone(), title(&s), people(&s))).collect::<Vec<_>>())
+            Ok(m.scopes().into_iter().filter(|s| i.r.holds(s)).map(|s| (s.clone(), title(&s), people(&s), admins(&s))).collect::<Vec<_>>())
         })?;
         let mut out = Vec::new();
-        for (scope, title, people) in scopes {
+        for (scope, title, people, admins) in scopes {
             let key = self.scope_key(&scope).await?;
-            out.push(json!({ "scope": scope.to_string(), "title": title, "key": data_encoding::BASE64URL_NOPAD.encode(&key), "people": people.keys().collect::<Vec<_>>(), "names": people }));
+            out.push(json!({ "scope": scope.to_string(), "title": title, "key": data_encoding::BASE64URL_NOPAD.encode(&key), "people": people.keys().collect::<Vec<_>>(), "names": people, "admins": admins }));
         }
         Ok(out)
     }
@@ -2889,8 +2891,31 @@ impl Node {
         // One that wouldn't count would change nothing anywhere: refuse it instead.
         let counts = self.with(|i| i.r.would_count(&caller.user, by, content.clone(), now_ms()))?;
         ensure!(counts, "that changes nothing: you may not {kind} that");
+        let before = self.with(|i| Ok(i.r.members.roles()))?;
         self.append_as(&Scope::Global, &caller.user, by, content).await?;
+        let after = self.with(|i| Ok(i.r.members.roles()))?;
+        self.tell_vault(caller, members::roles_changed(&before, &after)).await;
         Ok(())
+    }
+
+    /// Tells the install's vault how people's roles changed, as `caller`, who changed them: so someone removed opens
+    /// nothing there at once, rather than once an admin next runs `kernel keys`. A role someone gave themselves (accepting
+    /// an invite as an admin) the vault hears from the next `kernel keys`.
+    async fn tell_vault(&self, caller: &Caller, changed: Vec<(String, Option<Role>, Vec<Scope>)>) {
+        let Ok((_, url)) = self.kernel() else { return };
+        for (user, role, scopes) in changed.into_iter().filter(|(user, role, _)| role.is_none() || *user != caller.user) {
+            let told = match caller.token.clone() {
+                None => Err(anyhow!("it was changed by a program on this machine that isn't signed in")),
+                Some(token) => {
+                    let (vault, user, scopes) = (crate::kernel::Vault { url: url.clone() }, user.clone(), scopes.clone());
+                    tokio::task::spawn_blocking(move || vault.role(&token, &user, role, &scopes)).await.map_err(anyhow::Error::from).and_then(|r| r)
+                }
+            };
+            if let Err(err) = told {
+                let scopes: Vec<String> = scopes.iter().map(|s| s.to_string()).collect();
+                tracing::warn!("the vault still has {user} as before in {}, until an admin runs {} kernel keys: {err:#}", scopes.join(", "), crate::config::CLI);
+            }
+        }
     }
 
     /// Deploys `bundle` as `app`'s code, for someone acting for its owner. Deploying an older bundle again rolls back.

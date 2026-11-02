@@ -295,6 +295,14 @@ impl Vault {
         Ok((keys_given(&out)?, out["until"].as_u64().context("the vault didn't say until when")?))
     }
 
+    /// Tells the vault that `user`'s role in `scopes` changed in the install's log, as the person who changed it: with
+    /// none, they open none of them there any more.
+    pub fn role(&self, token: &str, user: &str, role: Option<crate::members::Role>, scopes: &[crate::entry::Scope]) -> Result<()> {
+        let scopes: Vec<String> = scopes.iter().map(|s| s.to_string()).collect();
+        self.post(token, "/role", json!({ "user": user, "role": role, "scopes": scopes }))?;
+        Ok(())
+    }
+
     /// URLs to read and create objects named `<scope's folder>/<app>/…` (or `log/…`, the install's log), and to
     /// replace a database's `…/newest` while it's the version an ETag names: (name, etag) each.
     pub fn urls(&self, token: &str, read: &[&str], create: &[&str], replace: &[(&str, &str)]) -> Result<Urls> {

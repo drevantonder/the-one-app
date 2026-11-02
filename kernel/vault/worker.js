@@ -20,6 +20,7 @@ import { bearer, Issuer } from "../shared/token.js";
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SCOPE = /^(global|user:[0-9a-f]{16}|group:[0-9a-f]{16})$/;
+const USER = /^[0-9a-f]{16}$/;
 /// How long a copy waiting for its client's first token (sealed under an authorization code) is kept.
 const PENDING = 10 * 60_000;
 /// How long presigned URLs last.
@@ -61,6 +62,7 @@ export class Vault extends DurableObject {
       create table if not exists copies (id text primary key, user text not null, kind text not null, name text not null,
         client text, sealed blob not null, made integer not null, until integer, line text);
       create index if not exists copies_user on copies (user);
+      create table if not exists admins (scope text not null, user text not null, primary key (scope, user));
     `);
     this.sql.exec(schema);
     // A client's copies (pending, its own, and its sessions) share a line, so signing it out ends its sessions too.
@@ -115,6 +117,7 @@ export class Vault extends DurableObject {
       case "POST /keys": return json(await this.keys(token, claims, body));
       case "POST /urls": return json(await this.urls(token, claims, body));
       case "POST /erase": return json(await this.erase(token, claims, body));
+      case "POST /role": return json(this.role(token, claims, body));
       case "GET /items": return json(this.items.list((await this.sessionOf(token)).held, url.searchParams.get("scope")));
       case "POST /items": return json(await this.items.set((await this.sessionOf(token)).held, body).catch((err) => refuse(err.status || 400, err.message)));
       case "POST /fetch": return json(await this.fetchFor(token, claims, body));
@@ -189,7 +192,7 @@ export class Vault extends DurableObject {
   /// their passkeys, or an invite link made with the recovery key.
   async passkey({ user, secret, name, from, client = null }) {
     if (this.env.SIGN_IN === "google") refuse(403, "people here sign in with Google");
-    if (!/^[0-9a-f]{16}$/.test(user || "")) refuse(400, "not a user id");
+    if (!USER.test(user || "")) refuse(400, "not a user id");
     secret = secretOf(secret);
     const known = this.sql.exec("select user from people where user = ?", user).toArray()[0];
     let held;
@@ -227,7 +230,7 @@ export class Vault extends DurableObject {
   /// (`to`) as `grant` seals it. Their first sign-in makes their keys, and opens Everyone's to them.
   async google({ user, to, name, client }) {
     if (this.env.SIGN_IN !== "google") refuse(403, "people here open their keys with a passkey");
-    if (!/^[0-9a-f]{16}$/.test(user || "")) refuse(400, "not a user id");
+    if (!USER.test(user || "")) refuse(400, "not a user id");
     const own = await this.own(user);
     let held = (await this.open(own, ["own"]))?.held;
     if (!held) {
@@ -262,10 +265,11 @@ export class Vault extends DurableObject {
   }
 
   /// A scope's key and who may open it, as the install's log says, given by an admin's machine (`kernel keys`): it's
-  /// sealed to each of `people` who has keys here, and nobody else opens it here any more. A key the install's nodes
-  /// made before it had a kernel replaces one this vault made while the scope's key isn't settled, so nothing was
-  /// sealed under the one it replaces; after that, only the scope's own key is taken.
-  async scopeKeyGiven({ scope, key, people }) {
+  /// sealed to each of `people` who has keys here, and nobody else opens it here any more; `admins` (of Everyone's or
+  /// a group's) may say who no longer does (`role`). A key the install's nodes made before it had a kernel replaces
+  /// one this vault made while the scope's key isn't settled, so nothing was sealed under the one it replaces; after
+  /// that, only the scope's own key is taken.
+  async scopeKeyGiven({ scope, key, people, admins }) {
     if (!SCOPE.test(scope || "")) refuse(400, `${scope} isn't a scope`);
     const bytes = b64u.decode(String(key || ""));
     if (bytes.length !== 32) refuse(400, "a scope's key is 32 bytes");
@@ -286,7 +290,35 @@ export class Vault extends DurableObject {
       if (!may.has(user)) this.sql.exec("delete from grants where user = ? and scope = ?", user, scope);
     }
     for (const [user, publicKey] of may) this.sql.exec("insert or replace into grants (user, scope, sealed) values (?, ?, ?)", user, scope, await sealTo(publicKey, bytes));
+    this.sql.exec("delete from admins where scope = ?", scope);
+    if (!scope.startsWith("user:")) {
+      for (const user of Array.isArray(admins) ? admins : []) if (USER.test(String(user))) this.sql.exec("insert or ignore into admins (scope, user) values (?, ?)", scope, String(user));
+    }
     return { granted: [...may.keys()] };
+  }
+
+  /// Someone's role in scopes changed in the install's log, said by whoever changed it as soon as they did: `{ user,
+  /// scopes, role }`. With no role, they open none of them here any more (only `kernel keys` gives one again); as a
+  /// member, they no longer say who's in it; as an admin, they now do. Only an admin of the install says so, or of a
+  /// group for its scope, or someone of themselves leaving a group: admins as the vault last heard from `kernel keys`
+  /// and from this.
+  role(token, claims, { user, scopes, role = null }) {
+    if (token.startsWith("run.")) refuse(403, "work left running says nobody's role");
+    if (!USER.test(user || "")) refuse(400, "not a user id");
+    if (![null, "member", "admin"].includes(role)) refuse(400, "a role is admin, member or none");
+    if (!Array.isArray(scopes) || !scopes.length || scopes.length > 256 || !scopes.every((s) => SCOPE.test(s || ""))) refuse(400, "name 1 to 256 scopes");
+    const admin = (scope) => this.sql.exec("select 1 from admins where scope = ? and user = ?", scope, claims.sub).toArray().length > 0;
+    for (const scope of scopes) {
+      if (role && scope.startsWith("user:")) refuse(400, "nobody is made an admin of someone's own scope");
+      const may = admin("global") || (scope.startsWith("group:") && (admin(scope) || (role === null && user === claims.sub)));
+      if (!may) refuse(403, `only an admin of ${scope} says who's in it`);
+    }
+    for (const scope of scopes) {
+      if (role === "admin") this.sql.exec("insert or ignore into admins (scope, user) values (?, ?)", scope, user);
+      else this.sql.exec("delete from admins where scope = ? and user = ?", scope, user);
+      if (role === null) this.sql.exec("delete from grants where scope = ? and user = ?", scope, user);
+    }
+    return {};
   }
 
   async makeScope(scope, user, publicKey) {

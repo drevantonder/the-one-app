@@ -232,6 +232,19 @@ impl Members {
         self.role_in(user, scope).is_some()
     }
 
+    /// Everyone's role in each scope they may use.
+    pub fn roles(&self) -> BTreeMap<(String, Scope), Role> {
+        let mut out = BTreeMap::new();
+        for user in self.users.keys() {
+            for scope in [Scope::Global, Scope::User(user.clone())].into_iter().chain(self.groups.keys().map(|g| Scope::Group(g.clone()))) {
+                if let Some(role) = self.role_in(user, &scope) {
+                    out.insert((user.clone(), scope), role);
+                }
+            }
+        }
+        out
+    }
+
     /// Whether `user` acts for `owner`: a user for themselves, a group's admins for the group, the install's
     /// admins for `admins` and `install`.
     pub fn acts_for(&self, user: &str, owner: &Principal) -> bool {
@@ -617,6 +630,28 @@ pub fn manages_scope(m: &Members, user: &str, scope: &Scope) -> bool {
         Scope::Group(g) => m.group_role(user, g) == Some(Role::Admin),
         Scope::Global => m.is_admin(user),
     }
+}
+
+/// How people's roles changed from `before` to `after` (`Members::roles`), as the install's vault hears it: (user,
+/// role, scopes) each. None, in every scope they may no longer use; member, in Everyone's or a group's they're no
+/// longer an admin of; admin, in one they've become one of, that was there before. Being let use a scope it doesn't
+/// say: only an admin's `kernel keys` gives a scope's key.
+pub fn roles_changed(before: &BTreeMap<(String, Scope), Role>, after: &BTreeMap<(String, Scope), Role>) -> Vec<(String, Option<Role>, Vec<Scope>)> {
+    let mut out: BTreeMap<(String, Option<Role>), Vec<Scope>> = BTreeMap::new();
+    for key in before.keys().chain(after.keys().filter(|k| !before.contains_key(*k))) {
+        let (user, scope) = key;
+        let role = match (before.get(key), after.get(key)) {
+            (Some(_), None) => None,
+            (Some(Role::Admin), Some(Role::Member)) => Some(Role::Member),
+            (b, Some(Role::Admin)) if b != Some(&Role::Admin) && before.keys().any(|(_, s)| s == scope) => Some(Role::Admin),
+            _ => continue,
+        };
+        if role.is_some() && matches!(scope, Scope::User(_)) {
+            continue;
+        }
+        out.entry((user.clone(), role)).or_default().push(scope.clone());
+    }
+    out.into_iter().map(|((user, role), scopes)| (user, role, scopes)).collect()
 }
 
 /// A page a person arranges: their own (`user`), a group's (`group:<id>`) or everyone's (`global`).

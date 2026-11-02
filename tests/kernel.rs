@@ -296,6 +296,62 @@ fn where_people_sign_in_with_google_the_vault_opens_their_keys_itself_and_only_t
 }
 
 #[test]
+fn someone_removed_opens_nothing_at_once_and_only_an_admin_removes_them() {
+    use one::entry::Scope;
+    const LEE: &str = "00000000000000d4";
+    let group = Scope::parse("group:00000000000000c3").unwrap();
+    let (everyone, sams) = (Scope::Global, Scope::User(SAM.into()));
+    // On an install whose people sign in with a passkey, and on one whose people Google signs in.
+    for google in [false, true] {
+        let v = if google { Vault::start_with(vec![("SIGN_IN".into(), "google".into()), ("VAULT_KEY".into(), B64U.encode(&rand::random::<[u8; 32]>()))]) } else { Vault::start() };
+        let vault = kernel::Vault { url: v.url.clone() };
+        let signs_in = |user: &str, client: &str| {
+            if !google {
+                v.internal("passkey", json!({ "user": user, "secret": format!("{user}'s passkey prf output") }));
+                return v.client(user, &format!("{user}'s passkey prf output"), client);
+            }
+            let code = format!("{client}'s authorization code for {user}");
+            assert_eq!(v.internal("google", json!({ "user": user, "to": code, "client": client })).0, 200);
+            let (token, until) = v.token(user, client);
+            v.internal("rekey", json!({ "from": code, "to": format!("{client}'s refresh token for {user}"), "token": token, "until": until }));
+            token
+        };
+        let (andre, sam, lee) = (signs_in(ANDRE, "web"), signs_in(SAM, "web"), signs_in(LEE, "web"));
+        // As the install's log says: Andre is its admin, Sam the group's, and Lee is in both.
+        let key = || B64U.encode(&rand::random::<[u8; 32]>());
+        assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": key(), "people": [ANDRE, SAM, LEE], "admins": [ANDRE] })).0, 200);
+        assert_eq!(v.internal("scope-key", json!({ "scope": group.to_string(), "key": key(), "people": [SAM, LEE], "admins": [SAM] })).0, 200);
+        let opens = |token: &str, scope: &Scope| vault.keys_until(token, &[(&scope.to_string(), "board", None)]).is_ok();
+        assert!(opens(&lee, &everyone) && opens(&lee, &group) && opens(&sam, &group));
+
+        // Lee isn't an admin, so he takes nobody's away; nor does Sam take Everyone's, whose admin he isn't.
+        assert!(vault.role(&lee, SAM, None, std::slice::from_ref(&group)).is_err());
+        assert!(vault.role(&lee, ANDRE, None, std::slice::from_ref(&everyone)).is_err());
+        assert!(vault.role(&sam, LEE, None, std::slice::from_ref(&everyone)).is_err());
+        assert!(vault.role(&lee, LEE, Some(one::members::Role::Admin), std::slice::from_ref(&group)).is_err(), "nobody makes themselves an admin");
+        assert!(opens(&sam, &group) && opens(&andre, &everyone));
+
+        // Sam removes Lee from the group: at once, Lee gets no key or URL under it, and still Everyone's.
+        vault.role(&sam, LEE, None, std::slice::from_ref(&group)).unwrap();
+        assert!(!opens(&lee, &group));
+        assert!(vault.urls(&lee, &[&format!("{}/board/main/newest", one::bucket::folder(&group.to_string()))], &[], &[]).is_err());
+        assert!(opens(&lee, &everyone));
+
+        // Andre removes Sam from the install: Sam opens nothing, and no longer says who's in his group.
+        vault.role(&andre, SAM, None, &[everyone.clone(), group.clone(), sams.clone()]).unwrap();
+        assert!(!opens(&sam, &everyone) && !opens(&sam, &group) && !opens(&sam, &sams));
+        assert!(vault.urls(&sam, &["global/board/main/newest"], &[], &[]).is_err());
+        assert!(vault.role(&sam, LEE, None, std::slice::from_ref(&group)).is_err());
+        if google {
+            // Google signing him in again opens Everyone's to him no more.
+            let again = signs_in(SAM, "phone");
+            assert!(!opens(&again, &everyone));
+        }
+        assert!(opens(&andre, &everyone) && opens(&lee, &everyone));
+    }
+}
+
+#[test]
 fn the_vault_given_the_installs_keys_opens_what_its_nodes_wrote() {
     let v = Vault::start();
     let vault = kernel::Vault { url: v.url.clone() };
@@ -825,6 +881,18 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let sams_file = sams_file.unwrap();
     assert_eq!(get(&sams, &sams_file), 200, "Sam reads back what he put");
     assert_eq!(get(&andres, &sams_file), 400, "and Andre doesn't, by its hash");
+
+    // Removing someone takes their keys at the vault as soon as the node writes it, with no kernel keys after.
+    let key = || B64U.encode(&rand::random::<[u8; 32]>());
+    v.internal("scope-key", json!({ "scope": "global", "key": key(), "people": [andre, sam], "admins": [andre] }));
+    v.internal("scope-key", json!({ "scope": format!("group:{group}"), "key": key(), "people": [andre, sam], "admins": [sam] }));
+    let vault = kernel::Vault { url: v.url.clone() };
+    let opens = |token: &str, scope: &str| vault.keys_until(token, &[(scope, "board", None)]).is_ok();
+    assert!(opens(&andres, &format!("group:{group}")) && opens(&sams, "global"));
+    assert_eq!(ask(&sams, "POST", "/v1/member", json!({ "group": group, "user": andre, "role": null })).0, 200);
+    assert!(!opens(&andres, &format!("group:{group}")) && opens(&andres, "global"));
+    assert_eq!(ask(&andres, "POST", "/v1/remove", json!({ "user": sam })).0, 200);
+    assert!(!opens(&sams, "global") && !opens(&sams, &format!("group:{group}")) && opens(&andres, "global"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
