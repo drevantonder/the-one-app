@@ -1,4 +1,4 @@
-//! Schedules on an install with a kernel: its schedules service runs them, each with only the keys of the scope and app
+//! Schedules: the kernel's schedules service runs them, each with only the keys of the scope and app
 //! its person let it use. A node tells the service what runs as a signed-in person whenever they change it, and runs
 //! each slot the service hands in (`POST /v1/kernel/run`) as that person, with the run's own token.
 
@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use super::*;
 
 impl Node {
-    /// The schedules service the install's schedules run from, when it has a kernel: (the install's address, the
+    /// The schedules service the install's schedules run from, once its kernel is set up: (the install's address, the
     /// service's).
     pub fn schedules_service(&self) -> Option<(String, String)> {
         self.with(|i| {

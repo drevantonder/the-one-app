@@ -59,8 +59,8 @@ fn full(load: &crate::load::Load) -> bool {
 }
 
 const STOPPED_FOR: u64 = 15 * 60_000;
-/// How often a server looks for schedules to run.
-const SCHEDULE_TICK: Duration = Duration::from_secs(10);
+/// How often a server reads what other servers wrote and said.
+const TICK: Duration = Duration::from_secs(10);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this server's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
 /// The largest step a ping carries: a bigger one, the servers it tells read from the bucket.
@@ -302,8 +302,6 @@ pub struct Inner {
     outbound: u16,
     /// What each app did in its last minute, and the apps stopped here for looping.
     guard: Mutex<Guard>,
-    /// The schedules' slots running here now: `<scope>/<app>/<schedule>/<slot>`.
-    running: Mutex<std::collections::HashSet<String>>,
     /// The calls that returned with work still running (`ctx.waitUntil`), by token: told when it's done.
     later: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     /// Who used which app today from which client, as recorded here: (app, user, client, day).
@@ -430,7 +428,6 @@ impl Node {
             put_by: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
             guard: Mutex::new(Guard::default()),
-            running: Mutex::new(Default::default()),
             later: Mutex::new(HashMap::new()),
             seen: Mutex::new(Default::default()),
             failures: Mutex::new(HashMap::new()),
@@ -478,7 +475,7 @@ impl Node {
             .accept(BLOB_ALPN, BlobHandler(node.clone()))
             .spawn();
         tokio::spawn(node.clone().presence_loop());
-        tokio::spawn(node.clone().schedule_loop());
+        tokio::spawn(node.clone().tick_loop());
         tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().update_loop());
         let worker = node.clone();
@@ -1681,10 +1678,10 @@ impl Node {
 
     // Schedules.
 
-    /// Now and then, runs the schedules this server is next in line for.
-    async fn schedule_loop(self) {
+    /// Now and then, reads what other servers wrote and said, and syncs built-in sidecars' records.
+    async fn tick_loop(self) {
         for tick in 1u64.. {
-            tokio::time::sleep(SCHEDULE_TICK).await;
+            tokio::time::sleep(TICK).await;
             // What other servers wrote and said, every tick; and wrote of a built-in sidecar's records, every minute.
             if self.has_install() {
                 if let Err(err) = self.read_logs().await {
@@ -1697,11 +1694,6 @@ impl Node {
             if tick % 6 == 0 && self.has_install() {
                 for sidecar in self.0.built_in_sidecars.iter().filter(|n| n.sync.is_some()) {
                     self.sync_built_in(sidecar.name);
-                }
-            }
-            if self.has_install() && self.ready() {
-                if let Err(err) = self.run_schedules().await {
-                    tracing::warn!("schedules: {err:#}");
                 }
             }
         }
@@ -1719,89 +1711,6 @@ impl Node {
             }
         }
         out
-    }
-
-    /// Runs every schedule's slot that's due, hasn't run, and that this server is next in line for: in each scope it
-    /// holds where the app is installed, as whoever installed it there or switched the schedule on since. A server
-    /// waits `GRACE` for each server before it in line that it's connected to; one it can't reach doesn't count.
-    async fn run_schedules(&self) -> Result<()> {
-        // An install with a kernel runs them from its schedules service, with only the keys each was let use.
-        if self.schedules_service().is_some() {
-            return Ok(());
-        }
-        let now = now_ms();
-        let declared = self.declared().await;
-        let due = self.with(|i| {
-            let m = &i.r.members;
-            let mut out = Vec::new();
-            for (log, (_, state)) in &i.views {
-                let Ok(scope) = Scope::parse(log) else { continue };
-                for (app, list) in &declared {
-                    if !state.installed.contains(app) || !i.r.holds(&scope) {
-                        continue;
-                    }
-                    for s in list.iter().filter_map(|s| s.as_ref().ok()) {
-                        let Some(user) = runs_as(m, state, &scope, app, &s.name) else { continue };
-                        let Some(slot) = s.slot(now) else { continue };
-                        let installed = state.installers.get(app).map(|(_, t)| *t).unwrap_or(0);
-                        let ran = i.status.get(log).and_then(|st| st.runs.get(&(app.clone(), s.name.clone()))).is_some_and(|r| r.iter().any(|r| r.slot == slot));
-                        if slot < installed || ran || !schedules::due(s, slot, now) {
-                            continue;
-                        }
-                        let line = schedules::line(m, &scope, &user, app, &s.name);
-                        let Some(at) = line.iter().position(|k| *k == self.0.id) else { continue };
-                        let ahead = line[..at].iter().filter(|k| i.online(k)).count() as u64;
-                        if now - slot >= ahead * schedules::GRACE {
-                            out.push((scope.clone(), app.clone(), s.clone(), slot, user));
-                        }
-                    }
-                }
-            }
-            Ok(out)
-        })?;
-        for (scope, app, schedule, slot, user) in due {
-            let key = format!("{scope}/{app}/{}/{slot}", schedule.name);
-            if !self.0.running.lock().unwrap().insert(key.clone()) {
-                continue;
-            }
-            let node = self.clone();
-            tokio::spawn(async move {
-                if let Err(err) = node.run_schedule(&scope, &app, &schedule, slot, &user).await {
-                    tracing::warn!("{app}'s schedule {}: {err:#}", schedule.name);
-                }
-                node.0.running.lock().unwrap().remove(&key);
-            });
-        }
-        Ok(())
-    }
-
-    /// Runs one slot of a schedule here: an ordinary call as `user`, touching only `scope`; then writes how it went.
-    async fn run_schedule(&self, scope: &Scope, app: &str, schedule: &Schedule, slot: u64, user: &str) -> Result<()> {
-        // A slot runs once: the server that takes it in the bucket first, once it's ready to run it.
-        let latest = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone())))?;
-        if !self.ready() || latest.is_none() || self.0.bundles.lock().unwrap().get(app) != latest.as_ref() {
-            return Ok(());
-        }
-        let lease = format!("{}/{}/slots/{app}/{}/{slot}", crate::bucket::folder(&scope.to_string()), members::APP, schedule.name);
-        if !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
-            return Ok(());
-        }
-        let started = Instant::now();
-        let reply = match self.count(app, "schedule").await {
-            Err(err) => Reply::Error(format!("{err:#}")),
-            Ok(()) => {
-                let req = CallRequest { app: app.into(), op: schedule.op.clone(), input: schedule.input.clone(), scopes: Some(vec![scope.to_string()]), client: Some("schedule".into()), ..Default::default() };
-                self.run(&req, &Caller { key: self.0.id, user: user.into(), agent: None, token: None }).await
-            }
-        };
-        let (ok, error) = match reply {
-            Reply::Ok(_) => (true, None),
-            Reply::Error(e) => (false, Some(e.chars().take(500).collect::<String>())),
-            // It took the slot, so it says so; the next slot is tried again.
-            Reply::Elsewhere(why) => (false, Some(format!("it didn't run: {why}"))),
-        };
-        let run = status::Run { slot, time: now_ms(), server: self.0.id, user: user.into(), ok, error, ms: started.elapsed().as_millis() as u64, spec: schedule.spec() };
-        self.say(scope, status::Said::Ran { app: app.into(), schedule: schedule.name.clone(), run }).await
     }
 
     /// An app's schedules where it's installed for `viewer` and this server holds the scope: what each runs and when,

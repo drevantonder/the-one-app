@@ -1,16 +1,9 @@
 //! Schedules: an app's operations that run on their own, every so often or at a time of day.
-//! Which server runs each is decided from the members alone, so every server agrees without asking: no leases.
+//! The kernel's schedules service runs them (src/node/scheduled.rs).
 
 use anyhow::{Context as _, Result, bail, ensure};
 use serde_json::{Value, json};
 
-use crate::entry::{Key, Scope};
-use crate::members::{Members, Principal};
-
-/// How long each server in line waits for the ones before it to run a slot, before running it itself.
-pub const GRACE: u64 = 60_000;
-/// The latest a slot still runs: no later than this after its time (or its period, if shorter).
-pub const LATE: u64 = 3_600_000;
 
 /// A schedule as an app declares it: `{ op, input?, every: "15m" }` or `{ op, input?, at: "09:00", tz?, days? }`.
 #[derive(Clone, Debug, PartialEq)]
@@ -85,36 +78,19 @@ impl Schedule {
         v
     }
 
-    /// How long between runs, at most.
-    pub fn period(&self) -> u64 {
-        match &self.when {
-            When::Every(ms) => *ms,
-            When::At { days, .. } if !days.is_empty() => 7 * 86_400_000,
-            When::At { .. } => 86_400_000,
-        }
-    }
-
-    /// The latest slot at or before `now`: when it was due to run, in milliseconds.
-    pub fn slot(&self, now: u64) -> Option<u64> {
-        match &self.when {
-            When::Every(ms) => Some(now / ms * ms),
-            When::At { .. } => self.occurrences(now).0,
-        }
-    }
-
     /// The next slot after `now`.
     pub fn next(&self, now: u64) -> Option<u64> {
         match &self.when {
             When::Every(ms) => Some((now / ms + 1) * ms),
-            When::At { .. } => self.occurrences(now).1,
+            When::At { .. } => self.next_at(now),
         }
     }
 
-    /// The time of day's latest occurrence at or before `now`, and its next after.
-    fn occurrences(&self, now: u64) -> (Option<u64>, Option<u64>) {
-        let When::At { hour, minute, tz, days } = &self.when else { return (None, None) };
-        let Ok(tz) = jiff::tz::TimeZone::get(tz) else { return (None, None) };
-        let Ok(now_ts) = jiff::Timestamp::from_millisecond(now as i64) else { return (None, None) };
+    /// The time of day's next occurrence after `now`.
+    fn next_at(&self, now: u64) -> Option<u64> {
+        let When::At { hour, minute, tz, days } = &self.when else { return None };
+        let tz = jiff::tz::TimeZone::get(tz).ok()?;
+        let now_ts = jiff::Timestamp::from_millisecond(now as i64).ok()?;
         let today = now_ts.to_zoned(tz.clone()).date();
         let at = |date: jiff::civil::Date| -> Option<u64> {
             if !days.is_empty() && !days.contains(&(date.weekday().to_monday_zero_offset())) {
@@ -124,9 +100,7 @@ impl Schedule {
             Some(t.timestamp().as_millisecond() as u64)
         };
         let day = |n: i64| today.checked_add(jiff::Span::new().days(n)).ok();
-        let last = (0..8).filter_map(|n| day(-n).and_then(at)).find(|t| *t <= now);
-        let next = (0..9).filter_map(|n| day(n).and_then(at)).find(|t| *t > now);
-        (last, next)
+        (0..9).filter_map(|n| day(n).and_then(at)).find(|t| *t > now)
     }
 
     /// When it runs, for people: "every 15 minutes", "at 09:00 (Australia/Melbourne) on Mon, Fri".
@@ -173,28 +147,4 @@ fn say_duration(ms: u64) -> String {
         _ if ms % 60_000 == 0 => format!("{}m", ms / 60_000),
         _ => format!("{}s", ms / 1000),
     }
-}
-
-/// The servers that may run a schedule of `app` in `scope` as `user`, in the order they take it: privileged servers
-/// first, then the user's own, then the rest; each group in an order the schedule picks, so different schedules spread
-/// over the servers. Every server works out the same line from the same members.
-pub fn line(m: &Members, scope: &Scope, user: &str, app: &str, schedule: &str) -> Vec<Key> {
-    let mut servers: Vec<(bool, bool, [u8; 32], Key)> = m
-        .servers()
-        .filter(|s| m.holds(&s.key, scope) && m.serves(&s.key, user))
-        .map(|s| {
-            let own = m.owners(&s.key).contains(&Principal::User(user.into()));
-            let mut h = blake3::Hasher::new();
-            h.update(&s.key);
-            h.update(format!("{scope}/{app}/{schedule}").as_bytes());
-            (!m.privileged(&s.key), !own, *h.finalize().as_bytes(), s.key)
-        })
-        .collect();
-    servers.sort();
-    servers.into_iter().map(|s| s.3).collect()
-}
-
-/// Whether a slot is still worth running at `now`: it's due, and not too late.
-pub fn due(schedule: &Schedule, slot: u64, now: u64) -> bool {
-    slot <= now && now - slot < LATE.min(schedule.period())
 }
