@@ -158,8 +158,6 @@ data class ClientInfo(
     val key: String,
     val name: String,
     val user: String,
-    /** When it last asked, in milliseconds. */
-    val asked: Double? = null,
 )
 
 /** An app as `GET /v1/apps` describes it: only what the app needs to show it. */

@@ -1,4 +1,4 @@
-//! Real nodes and phone clients on this machine, talking over iroh (needs the internet for discovery and relays).
+//! Real nodes on this machine, talking over iroh (needs the internet for discovery and relays).
 
 use std::time::{Duration, Instant};
 
@@ -45,7 +45,7 @@ async fn sees(node: &Node, scope: &str, text: &str) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn servers_and_a_phone_share_a_deployed_board() {
+async fn servers_share_a_deployed_board() {
     let (a, _ra) = start("a").await;
     let (b, _rb) = start("b").await;
 
@@ -75,43 +75,6 @@ async fn servers_and_a_phone_share_a_deployed_board() {
     a.append(&one::entry::Scope::Global, one::node::deploy("board", &blob)).await.unwrap();
     eventually("b to run the new deploy", async || b.call(board("ping", json!({}))).await.is_ok_and(|r| r == "pong")).await;
     assert!(sees(&b, "global", "from b").await, "a new deploy keeps the data");
-
-    let phone = one_client::Client::start(temp("phone"), "Phone").await.unwrap();
-    phone.join(&a.pair(None).unwrap()).await.unwrap();
-    let state = phone.request("GET", "/v1/state", Value::Null).await.unwrap();
-    assert_eq!(state["me"]["name"], "Phone");
-    let page = phone.request("GET", "/v1/screen", json!({ "app": "board", "screen": "main", "scope": "global" })).await.unwrap();
-    let html = page["html"].as_str().unwrap();
-    assert!(html.contains("window.one") && html.contains("one.call(\"topics\""), "a phone gets the board's screen with the bridge");
-    let reply = phone.request("POST", "/v1/call", json!({ "app": "board", "op": "post", "input": { "text": "from the phone" } })).await.unwrap();
-    assert!(reply.get("error").is_none() && reply.get("elsewhere").is_none(), "{reply}");
-    eventually("b to see the phone's post", async || sees(&b, "global", "from the phone").await).await;
-    let news = b.call(board("news", json!({ "format": "json", "since": 0 }))).await.unwrap();
-    let by_phone = news.as_array().unwrap().iter().find(|p| p["text"] == "from the phone").unwrap();
-    assert_eq!(by_phone["name"], "Phone", "posts are credited to the client that asked");
-    phone.request("POST", "/v1/name", json!({ "name": "Andre's iPhone" })).await.unwrap();
-    let state = phone.request("GET", "/v1/state", Value::Null).await.unwrap();
-    assert_eq!(state["me"]["name"], "Andre's iPhone", "a phone renames itself");
-    // A phone manages what its user may: installs, groups, the Vault.
-    let reply = phone.request("POST", "/v1/install", json!({ "app": "board", "scope": "user" })).await.unwrap();
-    assert!(reply.get("error").is_none(), "{reply}");
-    let group = phone.request("POST", "/v1/group", json!({ "name": "Phone's" })).await.unwrap();
-    assert!(group["group"].is_string(), "{group}");
-    let reply = phone.request("POST", "/v1/vault", json!({ "scope": "user", "title": "t", "fields": { "t": { "value": "v", "secret": true } }, "hosts": ["example.com"], "apps": ["board"] })).await.unwrap();
-    assert!(reply.get("error").is_none(), "{reply}");
-    let listed = phone.request("GET", "/v1/vault", json!({ "scope": "user" })).await.unwrap();
-    assert_eq!(listed[0]["title"], "t", "{listed}");
-    let shown = a.state()["install"]["clients"][0].clone();
-    assert!(shown["asked"].is_u64(), "a phone shows when it last asked: {shown}");
-
-    // The phone fails over: with a gone, b answers.
-    _ra.shutdown().await.unwrap();
-    let reply = phone.request("POST", "/v1/call", json!({ "app": "board", "op": "post", "input": { "text": "while a is away" } })).await.unwrap();
-    assert!(reply.get("error").is_none(), "{reply}");
-    assert!(sees(&b, "global", "while a is away").await, "b ran it");
-
-    b.member("remove", json!({ "key": phone.id() })).await.unwrap();
-    assert!(phone.request("GET", "/v1/state", Value::Null).await.is_err(), "a removed client is refused");
 }
 
 fn call(app: &str, op: &str, input: Value) -> CallRequest {

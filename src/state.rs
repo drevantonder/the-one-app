@@ -99,7 +99,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
     let clients: Vec<Value> = m
         .clients()
         .map(|c| {
-            let mut client = json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "me": false, "asked": null });
+            let mut client = json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "me": false });
             client.as_object_mut().unwrap().extend((here.client_now)(c));
             client
         })

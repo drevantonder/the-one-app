@@ -37,7 +37,6 @@ mod tunnel;
 
 const JOIN_ALPN: &[u8] = b"one/join/1";
 const CALL_ALPN: &[u8] = b"one/call/1";
-pub const CLIENT_ALPN: &[u8] = b"one/client/1";
 const BLOB_ALPN: &[u8] = b"one/blob/1";
 /// How long a call may run before it's stopped.
 const CALL_LIMIT: Duration = Duration::from_secs(30);
@@ -122,8 +121,6 @@ struct Install {
     bucket: Option<(Place, BTreeMap<String, String>)>,
     /// Each other server, as it last said hello.
     peers: HashMap<Key, Peer>,
-    /// When each client last asked this server something.
-    asked: HashMap<Key, u64>,
     /// The build each server last said it runs.
     builds: HashMap<Key, release::Running>,
     /// Each scope's rows of how things went, as this server last read them.
@@ -482,7 +479,6 @@ impl Node {
         let router = Router::builder(endpoint)
             .accept(JOIN_ALPN, JoinHandler(node.clone()))
             .accept(CALL_ALPN, CallHandler(node.clone()))
-            .accept(CLIENT_ALPN, ClientHandler(node.clone()))
             .accept(BLOB_ALPN, BlobHandler(node.clone()))
             .spawn();
         tokio::spawn(node.clone().presence_loop());
@@ -582,7 +578,7 @@ impl Node {
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)))?;
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((Place::from_fields(&f)?, f))).transpose()?;
-        let install = Install { r, user: file.user, bucket, peers: HashMap::new(), asked: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), far: HashMap::new(), read: false };
+        let install = Install { r, user: file.user, bucket, peers: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), far: HashMap::new(), read: false };
         *self.0.install.lock().unwrap() = Some(install);
         Ok(())
     }
@@ -2946,8 +2942,7 @@ impl Node {
             }
         };
         let client_now = |c: &members::Machine| {
-            let asked = install.as_ref().and_then(|i| i.asked.get(&c.key));
-            match json!({ "me": Some(c.key) == device, "asked": asked }) {
+            match json!({ "me": Some(c.key) == device }) {
                 Value::Object(now) => now,
                 _ => unreachable!(),
             }
@@ -3034,170 +3029,6 @@ impl Node {
             self.member("rename", json!({ "key": hex(&self.0.id), "name": name })).await?;
         }
         Ok(())
-    }
-
-    // Clients.
-
-    fn is_client(&self, key: &Key) -> bool {
-        self.with(|i| Ok(i.r.members.client(key).is_some())).unwrap_or(false)
-    }
-
-    /// Serves a client (a phone) that keeps no log of its own: one JSON request per stream.
-    async fn accept_client(&self, conn: Connection) -> Result<()> {
-        let caller = *conn.remote_id().as_bytes();
-        ensure!(self.is_client(&caller), "{} is not a client of this install", short(&caller));
-        loop {
-            let (mut send, mut recv) = match conn.accept_bi().await {
-                Ok(s) => s,
-                Err(_) => return Ok(()),
-            };
-            let Ok(user) = self.with(|i| Ok(i.r.members.client(&caller).map(|c| c.user.clone()))) else { return Ok(()) };
-            let Some(user) = user else { return Ok(()) };
-            let _ = self.with(|i| Ok(i.asked.insert(caller, now_ms())));
-            let node = self.clone();
-            let me = Caller { key: caller, user, agent: None, token: None };
-            tokio::spawn(async move {
-                let result = async {
-                    let request: Value = serde_json::from_slice(&recv.read_to_end(MESSAGE_LIMIT).await?)?;
-                    let (method, path) = (request["method"].as_str().unwrap_or("GET"), request["path"].as_str().unwrap_or(""));
-                    if path == "/v1/events" {
-                        let mut events = node.subscribe();
-                        while let Ok(event) = events.recv().await {
-                            if !node.is_client(&caller) {
-                                break;
-                            }
-                            send.write_all(format!("{}\n", serde_json::to_string(&event)?).as_bytes()).await?;
-                        }
-                        return anyhow::Ok(());
-                    }
-                    let reply = match node.client_request(&me, method, path, request["body"].clone()).await {
-                        Ok(ok) => ok,
-                        Err(err) => json!({ "error": format!("{err:#}") }),
-                    };
-                    send.write_all(&serde_json::to_vec(&reply)?).await?;
-                    send.finish()?;
-                    Ok(())
-                }
-                .await;
-                if let Err(err) = result {
-                    tracing::debug!("client request: {err:#}");
-                }
-            });
-        }
-    }
-
-    async fn client_request(&self, me: &Caller, method: &str, path: &str, body: Value) -> Result<Value> {
-        let serves = self.with(|i| Ok(i.r.members.serves(&self.0.id, &me.user)))?;
-        if !serves && path != "/v1/state" {
-            return Ok(json!({ "elsewhere": format!("{} doesn't serve you", self.server_name()) }));
-        }
-        Ok(match (method, path) {
-            ("GET", "/v1/state") => self.state_for(me),
-            ("GET", "/v1/apps") => json!(self.apps(me).await?),
-            ("GET", "/v1/widgets") => json!(self.widgets(me.clone(), body["scope"].as_str()).await?),
-            ("GET", "/v1/badges") => self.badges(me.clone(), body["scope"].as_str()).await?,
-            ("GET", "/v1/screen") => {
-                let (app, name) = (body["app"].as_str().unwrap_or(""), body["screen"].as_str().unwrap_or("main"));
-                json!({ "html": self.screen(me.clone(), app, name, body["params"].clone(), body["scope"].as_str()).await? })
-            }
-            ("POST", "/v1/call") => {
-                let mut req = self.resolve(serde_json::from_value(body)?);
-                (req.from, req.depth, req.client) = (None, 0, Some("phone".into()));
-                let me = &Caller { agent: req.agent.clone(), ..me.clone() };
-                // An app's call runs here or the client tries another server; a sidecar's goes where the sidecar is.
-                match req.sidecar.is_none() {
-                    true => self.run(&req, me).await.json(),
-                    false => match self.route(req, me.clone()).await {
-                        Ok(ok) => json!({ "ok": ok }),
-                        Err(err) => json!({ "error": format!("{err:#}") }),
-                    },
-                }
-            }
-            ("GET", "/v1/source") => self.source(body["app"].as_str().unwrap_or(""), body["bundle"].as_str(), body["path"].as_str()).await?,
-            ("POST", "/v1/install") => {
-                let scope = self.scope_for(me, body["scope"].as_str().unwrap_or("user"))?;
-                self.install(me, body["app"].as_str().unwrap_or(""), &scope, body["installed"] != false).await?;
-                json!({})
-            }
-            ("POST", "/v1/retire") => {
-                self.retire(me, body["app"].as_str().unwrap_or(""), body["how"].as_str().unwrap_or("")).await?;
-                json!({})
-            }
-            ("POST", "/v1/arrange") => {
-                self.arrange(me, body["page"].as_str().unwrap_or(""), body["items"].clone(), body["hidden"].clone()).await?;
-                json!({})
-            }
-            ("POST", "/v1/schedule") => {
-                let scope = self.scope_for(me, body["scope"].as_str().unwrap_or("user"))?;
-                self.switch_schedule(me, body["app"].as_str().unwrap_or(""), body["schedule"].as_str().unwrap_or(""), &scope, body["on"] != false).await?;
-                json!({})
-            }
-            ("POST", "/v1/group") => {
-                let group = new_id();
-                let name = body["name"].as_str().unwrap_or("").trim();
-                ensure!(!name.is_empty(), "give the group a name");
-                self.member_as(me, "group", json!({ "group": group, "name": name })).await?;
-                json!({ "group": group })
-            }
-            ("POST", "/v1/invite") | ("POST", "/v1/member") => {
-                let group = self.find_group(body["group"].as_str().unwrap_or(""))?;
-                let user = self.find_user(body["user"].as_str().unwrap_or(""))?;
-                let role = match (path, &body["role"]) {
-                    ("/v1/invite", Value::Null) => json!("member"),
-                    (_, role) => role.clone(),
-                };
-                let _: Option<Role> = serde_json::from_value(role.clone())?;
-                self.member_as(me, &path["/v1/".len()..], json!({ "group": group, "user": user, "role": role })).await?;
-                json!({})
-            }
-            ("POST", "/v1/accept") => {
-                self.member_as(me, "accept", json!({ "group": self.find_group(body["group"].as_str().unwrap_or(""))? })).await?;
-                json!({})
-            }
-            ("POST", "/v1/settings") => {
-                self.set_setting(me, body["name"].as_str().unwrap_or(""), body["value"].as_str()).await?;
-                json!({})
-            }
-            ("POST", "/v1/role") => {
-                let role: Role = serde_json::from_value(body["role"].clone())?;
-                self.member_as(me, "role", json!({ "user": self.find_user(body["user"].as_str().unwrap_or(""))?, "role": role })).await?;
-                json!({})
-            }
-            ("POST", "/v1/remove") => {
-                let data = match body["user"].as_str() {
-                    Some(user) => json!({ "user": self.find_user(user)? }),
-                    None => json!({ "key": hex(&self.find_machine(body["key"].as_str().unwrap_or(""))?) }),
-                };
-                self.member_as(me, "remove", data).await?;
-                json!({})
-            }
-            (m, p) if p.starts_with("/v1/backups") => self.backups_route(me, m, p, &body).await?.with_context(|| format!("no {m} {p}"))?,
-            (m, p) if p.starts_with("/v1/vault") => self.vault_route(me, m, p, &body).await?.with_context(|| format!("no {m} {p}"))?,
-            ("POST", "/v1/name") => {
-                let name = body["name"].as_str().unwrap_or("").trim();
-                self.member_as(me, "rename", json!({ "key": hex(&me.key), "name": name })).await?;
-                json!({})
-            }
-            ("POST", "/v1/pair") => {
-                let (code, user) = self.pair_as(me, new_user(&body)?, body["user"].as_str())?;
-                json!({ "code": code, "user": user, "qr": qr(&code)? })
-            }
-            ("POST", "/v1/trust") => {
-                let server = self.find_server(body["server"].as_str().unwrap_or(""))?;
-                let kind = if body["trust"] == false { "untrust" } else { "trust" };
-                self.member_as(me, kind, json!({ "server": hex(&server) })).await?;
-                json!({})
-            }
-            ("POST", "/v1/use") => {
-                self.set_use(me, body["server"].as_str().unwrap_or(""), body["use"].as_str().unwrap_or("")).await?;
-                json!({})
-            }
-            ("GET", p) if p.starts_with("/v1/client-screens/") => json!({ "html": self.client_screen(me.clone(), &p["/v1/client-screens/".len()..], body["params"].clone())? }),
-            ("GET", p) if p.starts_with("/v1/blobs/") => {
-                json!({ "blob": data_encoding::BASE64.encode(&self.blob_for(me, &p["/v1/blobs/".len()..]).await?) })
-            }
-            _ => bail!("no such request: {method} {path}"),
-        })
     }
 
     // Pairing.
@@ -4142,8 +3973,6 @@ struct JoinHandler(Node);
 #[derive(Clone, Debug)]
 struct CallHandler(Node);
 #[derive(Clone, Debug)]
-struct ClientHandler(Node);
-#[derive(Clone, Debug)]
 struct BlobHandler(Node);
 
 fn accept_err(err: anyhow::Error) -> AcceptError {
@@ -4153,12 +3982,6 @@ fn accept_err(err: anyhow::Error) -> AcceptError {
 impl ProtocolHandler for BlobHandler {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         self.0.accept_blob(conn).await.map_err(accept_err)
-    }
-}
-
-impl ProtocolHandler for ClientHandler {
-    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
-        self.0.accept_client(conn).await.map_err(accept_err)
     }
 }
 

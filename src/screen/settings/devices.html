@@ -96,7 +96,7 @@
   };
 
   const clientRow = (c) =>
-    row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : c.asked ? `Phone · asked ${one.ago(c.asked, { long: true })}` : "Phone"], trailing: "", removable: !c.me });
+    row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : "Signed in"], trailing: "", removable: !c.me });
 
   function page() {
     one.title("Devices");
@@ -159,7 +159,7 @@
   function remove(key) {
     const m = [...state.install.servers, ...state.install.clients].find((x) => x.key === key);
     one.confirm("#ask", {
-      title: `Remove ${shown(m.name) || "this phone"}?`,
+      title: `Remove ${shown(m.name) || "this device"}?`,
       detail: "It stops being one of your devices, and can’t reach your data. To use it again, pair it again.",
       action: "Remove",
       danger: true,

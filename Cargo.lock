@@ -2160,6 +2160,8 @@ dependencies = [
 [[package]]
 name = "netdev"
 version = "0.46.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3c52c2584961c68f5a6e3356797344061f818c93b8acc9cd6d7e284795e563e"
 dependencies = [
  "block2",
  "dispatch2",
@@ -2261,6 +2263,8 @@ dependencies = [
 [[package]]
 name = "netwatch"
 version = "0.19.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39da9cad5f23aa43401f09497d3b280e51b5feba115d9ffbf38ca35d6ff95e96"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -2553,7 +2557,6 @@ dependencies = [
  "jiff",
  "jsonc-parser",
  "libc",
- "one-client",
  "p2panda-core",
  "qrcode",
  "rand 0.8.8",
@@ -2569,21 +2572,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq",
-]
-
-[[package]]
-name = "one-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ciborium",
- "data-encoding",
- "iroh",
- "rand 0.8.8",
- "serde",
- "serde_json",
- "tokio",
- "tracing-subscriber",
 ]
 
 [[package]]

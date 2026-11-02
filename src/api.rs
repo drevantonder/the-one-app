@@ -123,7 +123,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/vault/answer",
     "/v1/vault/fetch",
     "/mcp",
-    // What Settings' screens ask, as on a phone (`Node::client_request`): each checked as its person.
+    // What Settings' screens ask: each checked as its person.
     "/v1/pair",
     "/v1/remove",
     "/v1/role",

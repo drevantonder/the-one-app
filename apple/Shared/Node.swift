@@ -155,8 +155,6 @@ struct ClientInfo: Codable, Sendable, Equatable, Identifiable {
     var key: String
     var name: String
     var user: String
-    /// When it last asked the server that answered, in milliseconds.
-    var asked: Double?
 
     var id: String { key }
 }

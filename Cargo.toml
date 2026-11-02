@@ -1,12 +1,5 @@
 [workspace]
-members = [".", "client", "serverless"]
-
-# netdev 0.46 uses a macOS-only libc type on every Apple system, which breaks iPhone builds of the client.
-# Drop this once iroh moves to a netdev that builds for iOS.
-[patch.crates-io]
-netdev = { path = "vendor/netdev" }
-# Same story for netwatch's routing socket constants, which libc gives only to macOS.
-netwatch = { path = "vendor/netwatch" }
+members = [".", "serverless"]
 
 [package]
 name = "one"
@@ -92,6 +85,5 @@ incremental = true
 strip = false
 
 [dev-dependencies]
-one-client = { path = "client" }
 # tests/sim.rs runs on tokio's paused clock, so links that wait seconds take none.
 tokio = { version = "1", features = ["test-util"] }

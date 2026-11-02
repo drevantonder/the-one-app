@@ -3,10 +3,12 @@
 The map: what lives where, and the few rules the code only shows by keeping them. How each piece works is in the piece, and its tests.
 
 ```
- Mac app's window, CLI, MCP, browser, agent hooks, git, sidecars              iPhone app, widget
-                         \                                                       |
-                local HTTP API (src/api.rs)                          one/client/1 over iroh
-                                     \                                  /
+ Mac app's window, CLI, MCP, agent hooks, git, sidecars       web, iPhone, Android, Windows, MCP clients
+                         \                                                 |
+                          \                                 the kernel's gateway, signed in
+                           \                                    /
+                local HTTP API (src/api.rs) ─────────────────────
+                                     \
                        node (src/node.rs) ─── iroh: one/join/1, one/call/1, one/blob/1
                         │             │                        │
    store (src/store.rs)       apps (src/apps.rs,       sidecars (src/sidecars.rs)
@@ -35,7 +37,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/replica.rs`: what a server holds and knows: the entries of each scope it holds, as the bucket gives them, and the members they add up to. No clock or I/O.
 - `src/store.rs`: every log of every scope a server holds, and how far it has read each from the bucket.
 - `src/node.rs`: the only place with state and I/O: reading and writing the bucket, pairing, calls, `open`, hooks, blobs, deploys.
-- `src/api.rs`: the local HTTP API every shell, the CLI, MCP and sidecars use, and what phones ask over iroh. A request to `/<app>/…` is the app's `_http` operation, its body a blob: how stock git reaches Repos. A request with a kernel access token (a browser's, through the gateway, or this machine's CLI and MCP after `sign-in`) is its person's, and so is its call's; someone it's for who isn't a person of the install yet is let in as a member, by a server whose own person is an admin, since the kernel signs in only those an admin invited or people at the install's domain; a scheduled run's token reaches only `/v1/kernel/run`; anything else passed on from elsewhere (by the gateway, a tunnel or a proxy) is refused.
+- `src/api.rs`: the local HTTP API every shell, the CLI, MCP and sidecars use, and what clients signed in at the kernel ask through the gateway. A request to `/<app>/…` is the app's `_http` operation, its body a blob: how stock git reaches Repos. A request with a kernel access token (a browser's, through the gateway, or this machine's CLI and MCP after `sign-in`) is its person's, and so is its call's; someone it's for who isn't a person of the install yet is let in as a member, by a server whose own person is an admin, since the kernel signs in only those an admin invited or people at the install's domain; a scheduled run's token reaches only `/v1/kernel/run`; anything else passed on from elsewhere (by the gateway, a tunnel or a proxy) is refused.
 - `src/apps.rs`, `src/runtime/`: workerd, which runs every app; `src/runtime/shim.js` is what an app's `ctx` is.
 - `src/sidecars.rs`: server sidecars: the ones built in (`src/shell.rs`, `src/agents.rs`, `src/models.rs`), and those that register over the local API (`sidecars/`, in Go, and the Mac app's, `apple/Mac/Sidecars`).
 - `src/vault.rs`, `src/outbound.rs`: the Vault's items, and filling them into apps' and sidecars' requests on the way out.
@@ -56,13 +58,13 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `kernel/`: the kernel's services, JavaScript for workerd, each one Worker with one Durable Object: `auth/` (Better Auth: passkeys only, since only a passkey's PRF output opens keys, joined by invite links; or, for a white label whose `sign_in` is `google`, Google only, at its `join_domain`, every time, which people join by doing; and the OAuth server every client signs in through), `vault/` (every scope's keys and the Vault's items, sealed; keys, filled-in requests and bucket URLs for what a call names; where people sign in with Google, each person's keys sealed under its own key too, which it opens itself once auth says Google signed them in), `schedules/` (fires the schedules people let run while they're away, each run once, with only the keys it was let use), and `gateway/`, a Worker with no keys at the install's address: sign-in to auth (passkeys belong to that address), `/v1/` and `/mcp` to a node, stamped so nothing a node says runs at that origin, and the rest to the web client's files, with `src/screen/`'s at `/screen/`. `web/` is the web client, the Mac app's window in a browser: an OAuth client of auth like any other, its code only ever from the kernel since it holds browsers' tokens, its sidebar beside the clients' own screens and apps', each in a sandboxed frame whose bridge it answers. `shared/crypto.js` is the formats nodes read too.
 - `serverless/`: the serverless node, a node as a Worker in the kernel's Cloudflare account, which the gateway sends `/v1/` and `/mcp` to by service binding. `worker.js` checks each request's sign-in, asks the vault for the keys and bucket URLs of what a call names (keeping a sign-in, with its keys, until its token expires), runs the app in an isolate of its own (Worker Loader, with `src/runtime/shim.js`), and writes what it wrote, then tells a node on a machine through the tunnel (`/v1/changed`), which pings the other servers that hold the scope as if it had written it; `src/lib.rs` is the node's own Rust (`src/db.rs`, `src/log.rs` and `src/members.rs`, `src/kernel.rs`'s formats, `src/call.rs`, `src/screen.rs`) as WebAssembly. It reads who can do what from the install's log, and each app's latest deploy, from the bucket; an app's requests go out through the vault, which fills in its Vault items. It runs the calls of apps that keep to their own data, and sends the rest on to a node on a machine; when none answers, it answers the install's state, apps, widgets and badges, and runs any app that needs no sidecar, itself. `src/serverless.rs` deploys it; `update` builds its WebAssembly into the release.
 - `src/kernel.rs`: the kernel as nodes meet it: the same formats, checking access tokens, asking the vault, and building the services with the pinned Bun and running them in workerd.
-- `client/`: the library phones link. `apple/`: the Mac app (a server's node inside, and the Apple sidecars) and the iPhone app and widget (a client).
+- `apple/`: the Mac app (a server's node inside, and the Apple sidecars) and the iPhone app and widget (a client).
 - `android/`: the Android app, a client that signs in through the kernel's auth service as the web client does (a Custom Tab for the passkey, back at `<cli>://signed-in/`), its refresh token sealed by the phone's keystore, pages and widgets drawn natively, each app screen in a web view of its own whose bridge it answers.
 - `windows/`: the Windows app, the Mac app's window on Windows (WinUI 3), a client that signs in through the kernel's auth service as the web client does (in the person's browser, back at a port on the computer, RFC 8252), its refresh token in Windows' Credential Locker, pages and widgets drawn natively, each app screen in a WebView2 of its own whose bridge it answers.
 - `apps/`: the built-in apps, which every release ships and any install's admins may add. Everything else is deployed by an install's own people.
 - `config.toml`: the white label: its name, CLI, port, accent, icons, release key, starter apps, and how its people sign in. Nothing else names the product.
 - `tests/`: `sim.rs`, many servers writing one database in one bucket over bad links; `e2e.rs`, real nodes; `contracts.rs`, wherever two languages must agree; `agents/`, fresh agents doing everyday tasks.
-- `vendor/`: two iroh dependencies patched so the client builds for iPhone; drop them when upstream builds there.
+- `vendor/phosphor/`: Phosphor's icons, which apps name and every client draws.
 
 ## Being built
 
