@@ -180,6 +180,13 @@ fn run(args: Vec<String>) -> Result<()> {
         // Printing into `| head` ends quietly, as other commands do, instead of panicking.
         unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     }
+    // --help shows help, whatever the command: never runs it.
+    if (flags.contains_key("help") || positional.iter().any(|p| p == "-h"))
+        && let Some(text) = command_help(&positional)
+    {
+        print!("{text}");
+        return Ok(());
+    }
     match positional.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         [] | ["help"] => {
             println!("{}", help());
@@ -823,6 +830,33 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     post("/v1/deploy", json!({ "app": name, "bundle": blob }))?;
     println!("Deployed {name} ({}). Every device runs it now.", &blob[..12]);
     Ok(())
+}
+
+/// A built-in command's help, for --help after it: help()'s lines for it, or all of help() when none are. None for an
+/// app's operation, and for an app that isn't a built-in command too, whose help is their own.
+fn command_help(words: &[String]) -> Option<String> {
+    let first = words.first().filter(|w| *w != "-h")?;
+    let text = help();
+    let mut out = String::new();
+    let mut taking = false;
+    for line in text.lines() {
+        if line.starts_with(&format!("  {CLI} {first}")) {
+            taking = true;
+        } else if !line.starts_with("        ") {
+            taking = false;
+        }
+        if taking {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    let app = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default().iter().any(|a| a["name"] == first.as_str());
+    match (app, out.is_empty()) {
+        (true, _) if words.len() > 1 => None,
+        (true, true) => None,
+        (false, true) => Some(format!("{text}\n")),
+        (_, false) => Some(format!("Usage:\n{out}")),
+    }
 }
 
 /// Splits `--key value` flags from positional words. A flag with no value is true.
