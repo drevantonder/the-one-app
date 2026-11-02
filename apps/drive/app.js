@@ -9,7 +9,8 @@ const API = "https://www.googleapis.com/drive/v3";
 // Where Google sends the browser after sign-in. Nothing answers there: the person copies the address it fails to load.
 const APP = "drive";
 const TITLE = "Google Drive";
-const REDIRECT = `http://127.0.0.1:4747/hooks/${APP}/oauth`;
+// Where Google sends the browser back: the node on the person's device, at the port this install's nodes answer on.
+const redirect = (ctx) => `http://127.0.0.1:${ctx.port}/hooks/${APP}/oauth`;
 
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
@@ -95,7 +96,7 @@ async function startSignIn(ctx, hint) {
   ctx.user.exec("delete from pending");
   ctx.user.exec("insert into pending values (?, ?)", [verifier, client.id ?? null]);
   const q = new URLSearchParams({
-    client_id: client.fields.client_id.value, redirect_uri: REDIRECT, response_type: "code", scope: SCOPES, access_type: "offline",
+    client_id: client.fields.client_id.value, redirect_uri: redirect(ctx), response_type: "code", scope: SCOPES, access_type: "offline",
     prompt: "consent", include_granted_scopes: "true", code_challenge: challenge, code_challenge_method: "S256", ...(hint ? { login_hint: hint } : {}),
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
@@ -131,7 +132,7 @@ async function finishSignIn(ctx, given) {
   const r = await fetch(`https://${OAUTH}/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: `grant_type=authorization_code&code=${encodeURIComponent(code)}&client_id=${encodeURIComponent(client.fields.client_id.value)}&client_secret={{${client.id}:client_secret}}&redirect_uri=${encodeURIComponent(REDIRECT)}&code_verifier=${encodeURIComponent(p.verifier)}`,
+    body: `grant_type=authorization_code&code=${encodeURIComponent(code)}&client_id=${encodeURIComponent(client.fields.client_id.value)}&client_secret={{${client.id}:client_secret}}&redirect_uri=${encodeURIComponent(redirect(ctx))}&code_verifier=${encodeURIComponent(p.verifier)}`,
   });
   const tok = await r.json().catch(() => ({}));
   if (!r.ok) return failed(ctx, `Sign-in failed: ${tok.error_description || tok.error || r.status}. Start again with ${APP}_sign_in.`);
@@ -320,7 +321,7 @@ async function start(account) {
     return;
   }
   c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
-    <input id="code" placeholder="http://127.0.0.1:4747/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign In</button><div id="err" class="error small"></div>\`;
+    <input id="code" placeholder="http://127.0.0.1:…/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign In</button><div id="err" class="error small"></div>\`;
   document.getElementById("finish").onclick = async () => {
     try { const r = await one.call("finish_sign_in", { code: document.getElementById("code").value }); if (r?.signed_in === false) throw new Error(r.why); show(); }
     catch (e) { document.getElementById("err").textContent = e.message; }

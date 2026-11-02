@@ -209,7 +209,7 @@ impl Apps {
 
     /// Runs an operation, for at most `limit`: longer for an app that waits on sidecars.
     pub async fn call(&self, app: &str, op: &str, input: Value, ctx: &Context, limit: Duration) -> Result<Outcome> {
-        let reply = self.ask_for(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from }), limit).await?;
+        let reply = self.ask_for(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from, "port": crate::api::port() }), limit).await?;
         Ok(Outcome { result: reply["ok"].clone(), appends: appends(&reply["appends"])?, later: reply["later"] == true })
     }
 
