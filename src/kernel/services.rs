@@ -541,37 +541,9 @@ pub fn write_config(dir: &Path, servers: &[Served]) -> Result<PathBuf> {
 pub fn start(config: &Path, listening: Vec<(String, std::net::TcpListener)>) -> Result<std::process::Child> {
     let mut command = std::process::Command::new(crate::apps::workerd()?);
     command.arg("serve").arg(config).arg("--experimental").stdin(std::process::Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsRawFd;
-        use std::os::unix::process::CommandExt;
-        let fds: Vec<i32> = listening.iter().map(|(_, l)| l.as_raw_fd()).collect();
-        for (name, listener) in &listening {
-            command.arg(format!("--socket-fd={name}={}", listener.as_raw_fd()));
-        }
-        // Only this child keeps them open past exec, not whatever else this process starts meanwhile.
-        unsafe {
-            command.pre_exec(move || {
-                for &fd in &fds {
-                    if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                }
-                Ok(())
-            });
-        }
-    }
-    // On Linux it dies with what started it, as apps' runtime does.
-    #[cfg(target_os = "linux")]
-    unsafe {
-        use std::os::unix::process::CommandExt;
-        command.pre_exec(|| {
-            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-            Ok(())
-        });
-    }
     #[cfg(not(unix))]
     ensure!(listening.is_empty(), "workerd takes listening sockets only on Unix");
+    crate::apps::child(&mut command, &listening.iter().map(|(n, l)| (n.as_str(), l)).collect::<Vec<_>>());
     Ok(command.spawn()?)
 }
 

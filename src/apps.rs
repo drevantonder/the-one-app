@@ -100,7 +100,9 @@ impl Apps {
         stop_previous(dir);
         // Where apps' stores were kept before each app's databases were in the bucket.
         let _ = std::fs::remove_dir_all(dir.join("storage"));
-        let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+        // Held for as long as the node runs, and handed to each workerd it starts: no one takes the port meanwhile.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
         let config = write_config(dir, &[], port, outbound, 0)?;
         let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), 0)), pid: Mutex::new(None), described: Mutex::new(Default::default()) });
         let watch = runtime.clone();
@@ -109,15 +111,8 @@ impl Apps {
             let out = std::fs::OpenOptions::new().create(true).append(true).open(&log).expect("workerd log");
             let mut command = std::process::Command::new(&workerd);
             command.arg("serve").arg(&config).stdout(out.try_clone().unwrap()).stderr(out);
-            // On Linux the runtime dies with its node; elsewhere the next start stops it (stop_previous).
-            #[cfg(target_os = "linux")]
-            unsafe {
-                use std::os::unix::process::CommandExt;
-                command.pre_exec(|| {
-                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-                    Ok(())
-                });
-            }
+            // Elsewhere than Linux, where it dies with its node, the next start stops it (stop_previous).
+            child(&mut command, &[("http", &listener)]);
             match command.spawn() {
                 Ok(mut child) => {
                     *watch.pid.lock().unwrap() = Some(child.id());
@@ -322,6 +317,35 @@ pub fn pinned(dir: &str, bin: &str, url: &str, integrity: &str) -> Result<PathBu
     std::fs::rename(tmp.join(bin), &path)?;
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(path)
+}
+
+/// Makes `command`, a workerd, serve each of `listening`, a socket already listening, as its config's socket of that
+/// name, in place of the address there: no one else can take the port before workerd does, and what reaches it waits
+/// for workerd, while it starts again too, rather than being refused. Only that child keeps them open past exec, not
+/// whatever else this process starts meanwhile. On Linux the child dies with this process.
+pub fn child(command: &mut std::process::Command, listening: &[(&str, &std::net::TcpListener)]) {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+        let fds: Vec<i32> = listening.iter().map(|(_, l)| l.as_raw_fd()).collect();
+        for (name, listener) in listening {
+            command.arg(format!("--socket-fd={name}={}", listener.as_raw_fd()));
+        }
+        // SAFETY: only async-signal-safe calls, between fork and exec.
+        unsafe {
+            command.pre_exec(move || {
+                for &fd in &fds {
+                    if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                Ok(())
+            });
+        }
+    }
 }
 
 /// Writes each app's modules and the workerd config that runs them all behind one router.
