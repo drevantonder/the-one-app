@@ -18,7 +18,7 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
 /// it in the background, and the node by building it, which every Linux device then takes, and which deploys the kernel
-/// (and the serverless node with it) from the device with the kernel's settings. Then it runs `after-update` in this
+/// (and the serverless node with it) from the device with the kernel's settings. Beside it runs `after-update` in this
 /// device's home, if there is one: what else is built from main here, like another white label's update.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this white label names no repo, so it has nothing to update from");
@@ -53,19 +53,18 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let macs: Vec<Value> =
         if parts.mac { devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect() } else { Vec::new() };
 
+    let sends = parts.node || parts.mac || !parts.apps.is_empty();
+    let after = if sends && tag.is_none() { after_update()? } else { None };
     if !parts.node {
         deploy_apps(&src, &parts.apps)?;
         let missed = follow(&macs, &commit, config_commit.as_deref());
-        if parts.apps.is_empty() && !parts.mac {
+        if !sends {
             println!("Nothing to send out: what changed since the last update here isn't in any build.");
         }
         if !missed {
             std::fs::write(&done, &this)?;
         }
-        if !parts.apps.is_empty() || parts.mac {
-            after_update()?;
-        }
-        return Ok(());
+        return finish(after);
     }
 
     let key = release_key()?;
@@ -118,12 +117,13 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let kernel_failed = deploy_kernel(&linux);
 
     let Some(tag) = tag else {
+        let after = finish(after);
         ensure!(!failed, "not every device runs {short}");
         ensure!(!kernel_failed, "every device runs {short}, but the kernel isn't deployed");
         if !missed {
             std::fs::write(&done, &this)?;
         }
-        return after_update();
+        return after;
     };
     let mut assets = Vec::new();
     let dir = cache().join("release").join(tag);
@@ -343,13 +343,34 @@ fn deploy_kernel(linux: &[Value]) -> bool {
     failed
 }
 
-/// Runs this device's `after-update`, if it has one, once an update sent something out.
-fn after_update() -> Result<()> {
+/// This device's `after-update`, running beside the update that started it.
+struct After {
+    child: std::process::Child,
+    log: PathBuf,
+}
+
+/// Starts this device's `after-update`, if it has one, for an update that sends something out: it builds from main as
+/// this update does, so it needn't wait for it. What it says goes to a file, so it finishes even if this update stops.
+fn after_update() -> Result<Option<After>> {
     let script = one::home().join("after-update");
-    if script.exists() {
-        println!("Running {}", script.display());
-        step(Command::new("sh").arg(&script))?;
+    if !script.exists() {
+        return Ok(None);
     }
+    println!("Running {} beside this", script.display());
+    let log = cache().join(format!("after-update-{}.log", std::process::id()));
+    let out = std::fs::File::create(&log)?;
+    let child = Command::new("sh").arg(&script).stdin(std::process::Stdio::null()).stdout(out.try_clone()?).stderr(out).spawn()?;
+    Ok(Some(After { child, log }))
+}
+
+/// Waits for `after-update` to finish, and shows what it said.
+fn finish(after: Option<After>) -> Result<()> {
+    let Some(mut after) = after else { return Ok(()) };
+    let status = after.child.wait()?;
+    println!("{} said:", one::home().join("after-update").display());
+    print!("{}", std::fs::read_to_string(&after.log).unwrap_or_default());
+    let _ = std::fs::remove_file(&after.log);
+    ensure!(status.success(), "after-update failed");
     Ok(())
 }
 
