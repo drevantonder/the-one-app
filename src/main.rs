@@ -66,6 +66,14 @@ Usage:
                                        or make one, so you never see it; vault status <id> says how it went
   {CLI} vault requests                 the requests waiting for you; vault answer <id> [--item <id> | --decline]
                                        answers one, a new item's values on stdin (one line, or a JSON object)
+  {CLI} kernel                         where this machine's kernel is: its services' addresses and what it's set to
+  {CLI} kernel serve [--auth-url <url>]
+                                       run the kernel's services (auth, vault, schedules) on this machine; the first
+                                       time, with where people will reach its sign-in, and it shows a new recovery key
+  {CLI} kernel set <setting> <value>   change one: auth-url, vault-url, schedules-url, resources (nodes' addresses,
+                                       comma-separated), bucket or google (its JSON object piped, with - as its value)
+  {CLI} kernel use <auth> <vault> <schedules>
+                                       point this install at its kernel's services
   {CLI} backups                        how backups are going: each place, its last backup, what's failing
   {CLI} backups now                    back up now, without waiting for the hour
   {CLI} backups place add <folder> [--title t]
@@ -305,6 +313,43 @@ fn run(args: Vec<String>) -> Result<()> {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             post("/v1/install", json!({ "app": app, "scope": scope, "installed": !flags.contains_key("remove") }))?;
             println!("{app} is {} in {scope}.", if flags.contains_key("remove") { "no longer installed" } else { "installed" });
+        }
+        ["kernel"] => print!("{}", kernel_said(&one::kernel::Settings::load()?)),
+        ["kernel", "serve"] => {
+            let settings = match one::kernel::Settings::load() {
+                Ok(settings) => settings,
+                Err(_) => {
+                    let url = flags.get("auth-url").and_then(Value::as_str).context("say where people will reach its sign-in, with --auth-url https://…")?;
+                    let (settings, recovery) = one::kernel::Settings::new(NAME, url);
+                    settings.save()?;
+                    println!("Its recovery key, shown only this once; keep it in your admins' password manager:\n\n  {recovery}\n");
+                    settings
+                }
+            };
+            print!("{}", kernel_said(&settings));
+            one::kernel::serve(&settings)?
+        }
+        ["kernel", "set", name, value] => {
+            let mut settings = one::kernel::Settings::load()?;
+            let piped = || -> Result<Value> { serde_json::from_reader(std::io::stdin()).context("pipe its JSON object on stdin") };
+            match *name {
+                "auth-url" => settings.auth_url = value.trim_end_matches('/').to_string(),
+                "vault-url" => settings.vault_url = value.trim_end_matches('/').to_string(),
+                "schedules-url" => settings.schedules_url = value.trim_end_matches('/').to_string(),
+                "resources" => settings.resources = value.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect(),
+                "bucket" if *value == "-" => settings.bucket = Some(piped()?),
+                "google" if *value == "-" => settings.google = Some(piped()?),
+                "bucket" | "google" => bail!("pipe {name}'s JSON object on stdin and give - as its value, so it's in no shell's history"),
+                _ => bail!("no kernel setting {name}: auth-url, vault-url, schedules-url, resources, bucket or google"),
+            }
+            settings.save()?;
+            println!("Set {name}. {CLI} kernel serve runs with it from its next start.");
+        }
+        ["kernel", "use", auth, vault, schedules] => {
+            for (name, url) in [("kernel_auth", auth), ("kernel_vault", vault), ("kernel_schedules", schedules)] {
+                post("/v1/settings", json!({ "name": name, "value": url.trim_end_matches('/') }))?;
+            }
+            println!("This install's kernel is at {auth}.");
         }
         ["backups"] => print!("{}", backups_said(&get("/v1/backups")?)),
         ["backups", "now"] => {
@@ -1118,6 +1163,16 @@ fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> 
 
 
 /// Backups' status, for people.
+/// Where a kernel is, and what it's set to, without its secrets.
+fn kernel_said(s: &one::kernel::Settings) -> String {
+    let mut out = format!("{}'s kernel\n  sign-in   {}\n  vault     {}\n  schedules {}\n", s.name, s.auth_url, s.vault_url, s.schedules_url);
+    out += &format!("  here on   127.0.0.1:{} (auth), :{} (vault), :{} (schedules)\n", s.ports[0], s.ports[1], s.ports[2]);
+    out += &format!("  nodes     {}\n", if s.resources.is_empty() { "none yet: kernel set resources".into() } else { s.resources.join(", ") });
+    out += &format!("  bucket    {}\n", s.bucket.as_ref().map(|b| format!("{} in {}", b["bucket"].as_str().unwrap_or("?"), b["endpoint"].as_str().unwrap_or("?"))).unwrap_or("none yet: kernel set bucket -".into()));
+    out += &format!("  Google    {}\n", if s.google.is_some() { "sign-in on" } else { "sign-in off" });
+    out
+}
+
 fn backups_said(r: &Value) -> String {
     let mut out = String::new();
     let places = r["places"].as_array().cloned().unwrap_or_default();

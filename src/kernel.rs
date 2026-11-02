@@ -257,7 +257,156 @@ pub fn folder_of(scope: &str) -> String {
 // Building and running.
 
 /// The kernel's services: each one's name, its module, and its Durable Object's class.
-pub const SERVERS: &[(&str, &str, Option<&str>)] = &[("vault", "vault/worker.js", Some("Vault")), ("auth", "auth/worker.js", Some("Auth")), ("schedules", "schedules/worker.js", Some("Schedules"))];
+pub const SERVICES: &[(&str, &str, &str)] = &[("auth", "auth/worker.js", "Auth"), ("vault", "vault/worker.js", "Vault"), ("schedules", "schedules/worker.js", "Schedules")];
+
+/// How an install's kernel is set up, wherever it runs: kept in `<home>/kernel/settings.json`, readable only by its
+/// owner, since it holds the kernel's secrets.
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct Settings {
+    /// The install's name, as sign-in screens say it.
+    pub name: String,
+    /// Where people reach the auth service: passkeys belong to its host name, so it doesn't change.
+    pub auth_url: String,
+    /// Where nodes reach the vault and the schedules service.
+    pub vault_url: String,
+    pub schedules_url: String,
+    /// The local ports each service listens on, when this machine runs them.
+    pub ports: [u16; 3],
+    /// The secret only the kernel's services share, for asking each other.
+    pub kernel_secret: String,
+    /// Better Auth's own secret, for its cookies and the keys it keeps.
+    pub auth_secret: String,
+    /// The schedules service's own X25519 key pair.
+    pub schedules_key: Value,
+    /// The recovery key's X25519 twin's public half.
+    pub recovery_key: String,
+    /// The nodes' addresses MCP clients sign in for (each a resource, in OAuth's words).
+    #[serde(default)]
+    pub resources: Vec<String>,
+    /// The install's bucket: `{ endpoint, bucket, region, key_id, secret }`.
+    #[serde(default)]
+    pub bucket: Option<Value>,
+    /// Google sign-in: `{ clientId, clientSecret }`.
+    #[serde(default)]
+    pub google: Option<Value>,
+}
+
+impl Settings {
+    pub fn path() -> PathBuf {
+        crate::home().join("kernel").join("settings.json")
+    }
+
+    pub fn load() -> Result<Settings> {
+        let path = Settings::path();
+        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine runs no kernel yet: {} kernel serve --auth-url <url> starts one", crate::config::CLI))?;
+        serde_json::from_str(&text).with_context(|| format!("{} isn't a kernel's settings", path.display()))
+    }
+
+    /// New settings, with new secrets: → them, and the new recovery key's secret, to be shown once.
+    pub fn new(name: &str, auth_url: &str) -> (Settings, String) {
+        let port = crate::config::PORT;
+        let ports = [port + 10, port + 11, port + 12];
+        let secret = || B64U.encode(&rand::random::<[u8; 32]>());
+        let own: [u8; 32] = rand::random();
+        let seed: [u8; 32] = rand::random();
+        let settings = Settings {
+            name: name.into(),
+            auth_url: auth_url.trim_end_matches('/').into(),
+            vault_url: format!("http://127.0.0.1:{}", ports[1]),
+            schedules_url: format!("http://127.0.0.1:{}", ports[2]),
+            ports,
+            kernel_secret: secret(),
+            auth_secret: secret(),
+            schedules_key: json!({ "secret": B64U.encode(&own), "public": B64U.encode(&public_of(&own)) }),
+            recovery_key: B64U.encode(&twin(&seed).1),
+            resources: vec![],
+            bucket: None,
+            google: None,
+        };
+        (settings, data_encoding::HEXLOWER.encode(&seed))
+    }
+
+    pub fn save(&self) -> Result<()> {
+        let path = Settings::path();
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        let part = path.with_extension("part");
+        std::fs::write(&part, serde_json::to_vec_pretty(self)?)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o600))?;
+        }
+        Ok(std::fs::rename(part, path)?)
+    }
+
+    /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service.
+    pub fn bindings(&self, service: &str) -> Vec<(String, String, bool)> {
+        let issuer = format!("{}/api/auth", self.auth_url);
+        let mut out = vec![("KERNEL_SECRET".into(), self.kernel_secret.clone(), true)];
+        let mut plain = |name: &str, value: String| out.push((name.into(), value, false));
+        match service {
+            "auth" => {
+                plain("VAULT", "service:vault".into());
+                plain("AUTH_URL", self.auth_url.clone());
+                plain("NAME", self.name.clone());
+                plain("RESOURCES", json!(self.resources).to_string());
+            }
+            "vault" => {
+                plain("AUTH", "service:auth".into());
+                plain("ISSUER", issuer);
+                plain("RECOVERY_KEY", self.recovery_key.clone());
+            }
+            _ => {
+                plain("VAULT", "service:vault".into());
+                plain("AUTH", "service:auth".into());
+                plain("ISSUER", issuer);
+            }
+        }
+        match service {
+            "auth" => {
+                out.push(("AUTH_SECRET".into(), self.auth_secret.clone(), true));
+                if let Some(google) = &self.google {
+                    out.push(("GOOGLE".into(), google.to_string(), true));
+                }
+            }
+            "vault" => {
+                if let Some(bucket) = &self.bucket {
+                    out.push(("BUCKET".into(), bucket.to_string(), true));
+                }
+            }
+            _ => out.push(("SCHEDULES_KEY".into(), self.schedules_key.to_string(), true)),
+        }
+        out
+    }
+}
+
+/// The kernel's services as one workerd runs them, with `modules` in `SERVICES`' order.
+pub fn served(settings: &Settings, modules: Vec<Vec<u8>>) -> Vec<Served> {
+    SERVICES
+        .iter()
+        .zip(modules)
+        .enumerate()
+        .map(|(i, ((name, _, class), module))| Served {
+            name: name.to_string(),
+            module,
+            class: Some(class.to_string()),
+            listen: format!("127.0.0.1:{}", settings.ports[i]),
+            bindings: settings.bindings(name).into_iter().map(|(n, v, _)| (n, v)).collect(),
+            outbound: None,
+        })
+        .collect()
+}
+
+/// Runs the kernel's services on this machine, in the pinned workerd, until it stops: their modules built from this
+/// release, their storage in `<home>/kernel/data`.
+pub fn serve(settings: &Settings) -> Result<()> {
+    let dir = Settings::path().parent().unwrap().to_path_buf();
+    let modules = SERVICES.iter().map(|(_, entry, _)| module(entry)).collect::<Result<Vec<_>>>()?;
+    let config = write_config(&dir, &served(settings, modules))?;
+    let mut child = start(&config)?;
+    let status = child.wait()?;
+    bail!("the kernel's workerd stopped: {status}")
+}
 
 /// A kernel service's module, built from the sources this release was signed with by the pinned Bun, once per
 /// version of them.

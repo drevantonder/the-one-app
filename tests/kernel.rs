@@ -503,43 +503,17 @@ struct Kernel {
 const RESOURCE: &str = "https://node.test/mcp";
 
 impl Kernel {
+    /// Runs them as `one kernel serve` does, from new settings.
     fn start() -> Kernel {
-        let (vault, auth) = (port(), port());
-        let (recovery, recovery_public) = kernel::twin(&rand::random());
-        let secret = B64U.encode(&rand::random::<[u8; 32]>());
-        let origin = format!("http://localhost:{auth}");
-        let bucket = json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }).to_string();
-        let running = run(vec![
-            Served {
-                name: "auth".into(),
-                module: module("auth/worker.js"),
-                class: Some("Auth".into()),
-                listen: format!("127.0.0.1:{auth}"),
-                bindings: vec![
-                    ("VAULT".into(), "service:vault".into()),
-                    ("AUTH_URL".into(), origin.clone()),
-                    ("AUTH_SECRET".into(), B64U.encode(&rand::random::<[u8; 32]>())),
-                    ("KERNEL_SECRET".into(), secret.clone()),
-                    ("RESOURCES".into(), json!([RESOURCE]).to_string()),
-                ],
-                outbound: None,
-            },
-            Served {
-                name: "vault".into(),
-                module: module("vault/worker.js"),
-                class: Some("Vault".into()),
-                listen: format!("127.0.0.1:{vault}"),
-                bindings: vec![
-                    ("AUTH".into(), "service:auth".into()),
-                    ("ISSUER".into(), format!("{origin}/api/auth")),
-                    ("KERNEL_SECRET".into(), secret.clone()),
-                    ("RECOVERY_KEY".into(), B64U.encode(&recovery_public)),
-                    ("BUCKET".into(), bucket),
-                ],
-                outbound: None,
-            },
-        ]);
-        Kernel { running, auth: origin, vault: format!("http://127.0.0.1:{vault}"), secret, recovery }
+        let auth = port();
+        let (mut settings, recovery) = kernel::Settings::new("Test", &format!("http://localhost:{auth}"));
+        settings.ports = [auth, port(), port()];
+        settings.resources = vec![RESOURCE.into()];
+        settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
+        let modules = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();
+        let running = run(kernel::served(&settings, modules));
+        let seed: [u8; 32] = data_encoding::HEXLOWER.decode(recovery.as_bytes()).unwrap().try_into().unwrap();
+        Kernel { running, auth: settings.auth_url.clone(), vault: format!("http://127.0.0.1:{}", settings.ports[1]), secret: settings.kernel_secret.clone(), recovery: kernel::twin(&seed).0 }
     }
 
     fn browser(&self) -> Browser {
