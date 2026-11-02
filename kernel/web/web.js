@@ -137,14 +137,14 @@ window.__one = {};
   class NodeError extends Error {}
 
   /// A request to the node, as this person: JSON in and out, or with `raw` the response itself.
-  async function api(path, { method = "GET", body, query, raw } = {}) {
+  async function api(path, { method = "GET", body, query, raw, signal } = {}) {
     const url = new URL(path, location.origin);
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
     let token = await auth.token();
     for (let tries = 0; ; tries++) {
       const headers = { authorization: `Bearer ${token}` };
       if (body !== undefined) headers["content-type"] = "application/json";
-      const r = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      const r = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal });
       if (r.status === 401 && tries === 0) {
         token = await auth.token(token);
         continue;
@@ -217,11 +217,14 @@ window.__one = {};
   }
 
   /// The node's events: what changed, so the window and its screens keep up. EventSource can't send a token, so it's a
-  /// fetch that streams.
+  /// fetch that streams, only while the page shows: a page the browser keeps for Back would hold its connection, and
+  /// over HTTP/1.1 a browser opens six to an address, so after a few visits the next page waited for one to close.
+  let events = null;
   async function listen() {
-    for (;;) {
+    const mine = (events = new AbortController());
+    while (!mine.signal.aborted) {
       try {
-        const r = await api("/v1/events", { raw: true });
+        const r = await api("/v1/events", { raw: true, signal: mine.signal });
         const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
         let buffer = "";
         for (;;) {
@@ -239,9 +242,12 @@ window.__one = {};
       } catch (err) {
         if (err.signedOut) return showSignedOut();
       }
-      await new Promise((r) => setTimeout(r, 3000));
+      if (!mine.signal.aborted) await new Promise((r) => setTimeout(r, 3000));
     }
   }
+  addEventListener("pagehide", () => events?.abort());
+  // Back to a page the browser kept: what changed while it was away, then its events again.
+  addEventListener("pageshow", (e) => e.persisted && auth.kept() && (refreshState().catch(() => {}), listen()));
 
   async function handle(event) {
     for (const f of frames) f.frame.contentWindow?.postMessage({ oneEvent: event }, "*");
