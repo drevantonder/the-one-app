@@ -72,6 +72,10 @@ pub struct Settings {
     pub vault_key: String,
     #[serde(default, skip_serializing)]
     pub google: Option<(String, String)>,
+    /// The API token `kernel deploy` and `serverless deploy` edit the Cloudflare account's Workers with, where
+    /// CLOUDFLARE_API_TOKEN isn't set.
+    #[serde(default, skip_serializing)]
+    pub cloudflare_token: Option<String>,
 }
 
 /// Whether people sign in with Google, which the vault then opens their keys for itself.
@@ -98,6 +102,9 @@ VAULT_KEY=
 GOOGLE_CLIENT_ID=
 # @optional
 GOOGLE_CLIENT_SECRET=
+# The API token kernel deploy edits the Cloudflare account's Workers with, where CLOUDFLARE_API_TOKEN isn't set.
+# @optional
+CLOUDFLARE_API_TOKEN=
 ";
 
 /// The Varlock `kernel` reads secrets with, and each platform's download of it with the download's sha256, as its
@@ -191,6 +198,7 @@ impl Settings {
         settings.auth_secret = get("AUTH_SECRET").context("no AUTH_SECRET")?;
         settings.schedules_key = serde_json::from_str(&get("SCHEDULES_KEY").context("no SCHEDULES_KEY")?).context("SCHEDULES_KEY isn't JSON")?;
         settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
+        settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
         if google() {
             settings.vault_key = get("VAULT_KEY").context("no VAULT_KEY, which people signing in with Google need")?;
             settings.google = get("GOOGLE_CLIENT_ID").zip(get("GOOGLE_CLIENT_SECRET"));
@@ -224,6 +232,7 @@ impl Settings {
             android: vec![],
             vault_key: if google() { secret() } else { String::new() },
             google: None,
+            cloudflare_token: None,
         };
         (settings, data_encoding::HEXLOWER.encode(&seed))
     }

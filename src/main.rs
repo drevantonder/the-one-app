@@ -362,9 +362,12 @@ fn run(args: Vec<String>) -> Result<()> {
             one::kernel::serve(&settings)?
         }
         ["kernel", "deploy"] => {
-            let cf = cloudflare(&flags)?;
-            let settings = match one::kernel::Settings::load() {
+            let loaded = one::kernel::Settings::load();
+            let cf = cloudflare(&flags, loaded.as_ref().ok())?;
+            let settings = match loaded {
                 Ok(settings) => settings,
+                // Settings here that can't be read are this kernel's still: never made again.
+                Err(err) if one::kernel::Settings::path().exists() => return Err(err),
                 Err(_) => {
                     // A kernel already in the account was made elsewhere: new settings here would replace its secrets.
                     let made = cf.scripts()?.contains_key(&one::kernel::worker_name("vault"));
@@ -409,8 +412,8 @@ fn run(args: Vec<String>) -> Result<()> {
             }
         }
         ["serverless", "deploy"] => {
-            let cf = cloudflare(&flags)?;
             let mut settings = one::kernel::Settings::load()?;
+            let cf = cloudflare(&flags, Some(&settings))?;
             one::serverless::deploy(&cf, &settings)?;
             if !settings.serverless {
                 settings.serverless = true;
@@ -1398,12 +1401,11 @@ fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> 
     }
 }
 
-
-/// Backups' status, for people.
-/// Where a kernel is, and what it's set to, without its secrets.
-/// Cloudflare's API with the token in CLOUDFLARE_API_TOKEN, for the account `--account` names or the token's only one.
-fn cloudflare(flags: &Map<String, Value>) -> Result<one::kernel::Cloudflare> {
-    let token = std::env::var("CLOUDFLARE_API_TOKEN").context("give a Cloudflare API token that may edit Workers in CLOUDFLARE_API_TOKEN")?;
+/// Cloudflare's API with the token in CLOUDFLARE_API_TOKEN, or else the kernel's own (its .env.local's), for the account
+/// `--account` names or the token's only one.
+fn cloudflare(flags: &Map<String, Value>, settings: Option<&one::kernel::Settings>) -> Result<one::kernel::Cloudflare> {
+    let token = std::env::var("CLOUDFLARE_API_TOKEN").ok().or_else(|| settings.and_then(|s| s.cloudflare_token.clone()));
+    let token = token.context("give a Cloudflare API token that may edit Workers in CLOUDFLARE_API_TOKEN, or as the kernel's CLOUDFLARE_API_TOKEN in its .env.local")?;
     let api = "https://api.cloudflare.com/client/v4".to_string();
     let account = match flags.get("account").and_then(Value::as_str) {
         Some(account) => account.to_string(),
@@ -1412,6 +1414,7 @@ fn cloudflare(flags: &Map<String, Value>) -> Result<one::kernel::Cloudflare> {
     Ok(one::kernel::Cloudflare { api, token, account })
 }
 
+/// Where a kernel is, and what it's set to, without its secrets.
 fn kernel_said(s: &one::kernel::Settings) -> String {
     let mut out = format!("{}'s kernel\n  address   {}\n  vault     {}\n  schedules {}\n", s.name, s.address, s.vault_url, s.schedules_url);
     if s.vault_url.starts_with("http://127.0.0.1") {
@@ -1428,6 +1431,7 @@ fn kernel_said(s: &one::kernel::Settings) -> String {
     out
 }
 
+/// Backups' status, for people.
 fn backups_said(r: &Value) -> String {
     let mut out = String::new();
     let places = r["places"].as_array().cloned().unwrap_or_default();

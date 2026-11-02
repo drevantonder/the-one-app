@@ -320,7 +320,16 @@ fn deploy_kernel(linux: &[Value]) -> bool {
     let mut failed = false;
     for device in linux.iter().filter(|d| d["online"] == true) {
         let name = device["name"].as_str().unwrap_or("");
-        match shell(device, &deploy, 600) {
+        // Its node and this one have only just started again on the new build: their link may drop once more.
+        let mut tries = 0;
+        let said = loop {
+            tries += 1;
+            match shell(device, &deploy, 600) {
+                Err(_) if tries < 5 => std::thread::sleep(Duration::from_secs(5)),
+                said => break said,
+            }
+        };
+        match said {
             Ok(r) if r["exit"] == 0 && r["stdout"].as_str().is_some_and(|o| o.trim() == "none") => {}
             Ok(r) if r["exit"] == 0 => println!("  {name}: deployed the kernel"),
             Ok(r) => {
