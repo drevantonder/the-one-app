@@ -1,0 +1,274 @@
+<div id="page"></div>
+<style>
+  .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; text-align: right; }
+  .row .label { flex: none; }
+  .row .segmented { margin: 0 0 0 auto; width: 180px; }
+  .action-row { color: var(--accent); cursor: pointer; }
+  .action-row.off { opacity: 0.4; pointer-events: none; }
+  .pair { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding-top: 4px; }
+  .pair .lead { color: var(--muted); font-size: 15px; max-width: 26em; }
+  .qr { width: 236px; height: 236px; padding: 12px; border-radius: 18px; background: white; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12); display: grid; place-items: center; }
+  .qr svg { width: 100%; height: 100%; shape-rendering: crispEdges; }
+  .code { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--code-bg); }
+  .code span { font: 13px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; user-select: all; }
+</style>
+<script>
+  // Everyone in the install, for admins: each one's role a button on their row, with Remove there too, and adding
+  // someone new by a pairing code. The last admin's role can't change.
+  let state;
+  // What a person joins, in their words: "your One App".
+  const ours = `your ${one.config.name.replace(/^The /, "")}`;
+  // Roles changed but not yet taken in, shown at once: null for someone being removed.
+  const pending = {};
+  let error = "";
+  // What's typed under Add Someone, kept across redraws.
+  let newName = "", newRole = "member";
+
+  function page() {
+    const me = state.user?.id;
+    // Them first, then everyone by name.
+    const users = [...(state.install?.users || [])].sort((x, y) => (y.id === me) - (x.id === me) || x.name.localeCompare(y.name));
+    const admin = state.user?.role === "admin";
+    const admins = users.filter((u) => u.role === "admin").length;
+    const rows = users.filter((u) => pending[u.id] !== null).map((u) => {
+      const role = pending[u.id] || u.role;
+      const trailing = !admin || u.id === me || (role === "admin" && admins === 1)
+        ? `<span class="note">${role === "admin" ? "Admin" : "Member"}</span>`
+        : `<label class="pick">${role === "admin" ? "Admin" : "Member"}<select aria-label="${one.esc(u.name)}'s role" onchange="change('${u.id}', this.value || null, this)">
+            <option value="admin"${role === "admin" ? " selected" : ""}>Admin</option><option value="member"${role === "member" ? " selected" : ""}>Member</option>
+            <option disabled>──────</option><option value="">Remove ${one.esc(u.name)}</option></select></label>`;
+      return `<div class="row">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div></div>${trailing}</div>`;
+    });
+    let html = `<div class="large-title">Users</div><h2 class="section">People in ${one.esc(ours)}</h2><div class="list">${rows.join("")}</div><div id="confirm"></div>`;
+    html += error ? `<p class="footer error">${one.esc(error)}</p>` : '<p class="footer">Admins keep the recovery key. It opens every backup, everyone\'s.</p>';
+    if (admin) {
+      html += `<h2 class="section">Add Someone</h2><div class="list">
+        <label class="row plain"><span class="label">Name</span><input class="field" id="name" placeholder="Their name" autocomplete="off" value="${one.esc(newName)}"></label>
+        <div class="row plain"><span class="label">Role</span><div class="segmented" id="role"><button data-role="member"${newRole === "member" ? ' class="on"' : ""}>Member</button><button data-role="admin"${newRole === "admin" ? ' class="on"' : ""}>Admin</button></div></div>
+        <a class="row plain action-row${newName.trim() ? "" : " off"}" id="show" onclick="pair()">Show Their Pairing Code</a></div>
+        <p class="footer">They scan it on their own device.</p>`;
+    }
+    return html;
+  }
+
+  // Wires what page() drew: typing a name, picking a role.
+  function wire() {
+    const name = document.getElementById("name");
+    if (!name) return;
+    name.oninput = () => {
+      newName = name.value;
+      document.getElementById("show").classList.toggle("off", !newName.trim());
+    };
+    name.onkeydown = (e) => e.key === "Enter" && newName.trim() && pair();
+    document.getElementById("role").onclick = (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      newRole = b.dataset.role;
+      document.querySelectorAll("#role button").forEach((x) => x.classList.toggle("on", x === b));
+    };
+  }
+
+  const show = () => one.render("#page", () => page()).then(wire);
+  const draw = () => {
+    // Not while they type or are asked to confirm: it'd take that away from under them.
+    if (document.activeElement?.id === "name" || document.querySelector("#confirm .confirm")) return;
+    one.render("#page", async () => {
+      state = await one.api("GET", "/v1/state");
+      return page();
+    }).then(wire);
+  };
+
+  // Changes someone's role, or with none removes them (once they say so): shown at once, and undone with why if it
+  // fails.
+  async function change(user, role, select) {
+    error = "";
+    const u = state.install.users.find((x) => x.id === user);
+    if (role === null) {
+      const sure = await one.confirm("#confirm", { title: `Remove ${u.name} from ${ours}?`, detail: "Their devices stop reaching it.", action: "Remove", danger: true });
+      if (!sure) return void (select.value = u.role);
+    }
+    pending[user] = role;
+    show();
+    try {
+      await (role === null ? one.api("POST", "/v1/remove", { user }) : one.api("POST", "/v1/role", { user, role }));
+    } catch (e) {
+      error = one.plain(e).title;
+    }
+    delete pending[user];
+    draw();
+  }
+
+  // A pairing code for someone new, as a QR code and text: the device that scans it joins as them.
+  async function pair() {
+    const name = newName.trim();
+    if (!name) return;
+    const sheet = one.sheet({ title: `Invite ${name}` });
+    sheet.body.innerHTML = one.loading("Making their code");
+    try {
+      const { code } = await one.api("POST", "/v1/pair", { new_user: { name, role: newRole } });
+      sheet.body.innerHTML = `<div class="pair"><div class="lead">They join ${one.esc(ours)} on the device that scans this.</div>
+        <div class="qr">${qr(code)}</div><div class="code"><span>${one.esc(code)}</span>${one.copyButton(code)}</div>
+        <div class="small muted">Or run ${one.esc(one.config.cli)} join with the code there. It works once, for seven days.</div></div>`;
+      newName = "";
+      newRole = "member";
+      draw();
+    } catch (e) {
+      sheet.body.innerHTML = one.banner(e, { retry: false });
+    }
+  }
+
+  // A QR code of `text` as SVG: byte mode, medium error correction, the smallest version that holds it.
+  function qr(text) {
+    const data = [...new TextEncoder().encode(text)];
+    const ECC = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28];
+    const BLOCKS = [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49];
+    const raw = (v) => {
+      let r = (16 * v + 128) * v + 64;
+      if (v >= 2) {
+        const n = Math.floor(v / 7) + 2;
+        r -= (25 * n - 10) * n - 55;
+        if (v >= 7) r -= 36;
+      }
+      return r;
+    };
+    const capacity = (v) => Math.floor(raw(v) / 8) - ECC[v] * BLOCKS[v];
+    let v = 1;
+    while (4 + (v < 10 ? 8 : 16) + data.length * 8 > capacity(v) * 8) if (++v > 40) throw new Error("too long for a QR code");
+    // The bits: byte mode, the length, the bytes, a terminator, then padding.
+    const bits = [];
+    const put = (n, len) => { for (let i = len - 1; i >= 0; i--) bits.push((n >>> i) & 1); };
+    put(4, 4);
+    put(data.length, v < 10 ? 8 : 16);
+    data.forEach((b) => put(b, 8));
+    const cap = capacity(v) * 8;
+    put(0, Math.min(4, cap - bits.length));
+    put(0, (8 - (bits.length % 8)) % 8);
+    for (let pad = 0xec; bits.length < cap; pad ^= 0xec ^ 0x11) put(pad, 8);
+    const words = [];
+    for (let i = 0; i < bits.length; i += 8) words.push(parseInt(bits.slice(i, i + 8).join(""), 2));
+    // Reed-Solomon over GF(256), each block's error correction after it, interleaved.
+    const mul = (x, y) => {
+      let z = 0;
+      for (let i = 7; i >= 0; i--) {
+        z = (z << 1) ^ ((z >>> 7) * 0x11d);
+        z ^= ((y >>> i) & 1) * x;
+      }
+      return z;
+    };
+    const n = ECC[v];
+    const divisor = Array(n).fill(0);
+    divisor[n - 1] = 1;
+    for (let i = 0, root = 1; i < n; i++, root = mul(root, 2)) {
+      for (let j = 0; j < n; j++) {
+        divisor[j] = mul(divisor[j], root);
+        if (j + 1 < n) divisor[j] ^= divisor[j + 1];
+      }
+    }
+    const remainder = (block) => {
+      const r = Array(n).fill(0);
+      for (const b of block) {
+        const f = b ^ r.shift();
+        r.push(0);
+        divisor.forEach((d, i) => (r[i] ^= mul(d, f)));
+      }
+      return r;
+    };
+    const total = Math.floor(raw(v) / 8), count = BLOCKS[v], short = count - (total % count), shortLen = Math.floor(total / count);
+    const blocks = [];
+    for (let i = 0, k = 0; i < count; i++) {
+      const block = words.slice(k, k + shortLen - n + (i < short ? 0 : 1));
+      k += block.length;
+      const ecc = remainder(block);
+      if (i < short) block.push(0);
+      blocks.push(block.concat(ecc));
+    }
+    const all = [];
+    for (let i = 0; i < blocks[0].length; i++) blocks.forEach((b, j) => (i !== shortLen - n || j >= short) && all.push(b[i]));
+    // The modules: finders, timing, alignment, format and version, then the data, masked.
+    const size = v * 4 + 17;
+    const dark = Array.from({ length: size }, () => Array(size).fill(false));
+    const fixed = Array.from({ length: size }, () => Array(size).fill(false));
+    const set = (x, y, on) => { dark[y][x] = on; fixed[y][x] = true; };
+    for (let i = 0; i < size; i++) set(6, i, i % 2 === 0), set(i, 6, i % 2 === 0);
+    for (const [cx, cy] of [[3, 3], [size - 4, 3], [3, size - 4]]) {
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+        const d = Math.max(Math.abs(dx), Math.abs(dy)), x = cx + dx, y = cy + dy;
+        if (x >= 0 && x < size && y >= 0 && y < size) set(x, y, d !== 2 && d !== 4);
+      }
+    }
+    if (v > 1) {
+      const na = Math.floor(v / 7) + 2, step = v === 32 ? 26 : Math.ceil((v * 4 + 4) / (na * 2 - 2)) * 2;
+      const at = [6];
+      for (let p = size - 7; at.length < na; p -= step) at.splice(1, 0, p);
+      at.forEach((y, i) => at.forEach((x, j) => {
+        if ((i === 0 && j === 0) || (i === 0 && j === na - 1) || (i === na - 1 && j === 0)) return;
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) set(x + dx, y + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+      }));
+    }
+    const format = (mask) => {
+      const d = mask; // medium error correction is 00
+      let r = d;
+      for (let i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+      const b = ((d << 10) | r) ^ 0x5412;
+      const bit = (i) => ((b >>> i) & 1) === 1;
+      for (let i = 0; i <= 5; i++) set(8, i, bit(i));
+      set(8, 7, bit(6)), set(8, 8, bit(7)), set(7, 8, bit(8));
+      for (let i = 9; i < 15; i++) set(14 - i, 8, bit(i));
+      for (let i = 0; i < 8; i++) set(size - 1 - i, 8, bit(i));
+      for (let i = 8; i < 15; i++) set(8, size - 15 + i, bit(i));
+      set(8, size - 8, true);
+    };
+    format(0);
+    if (v >= 7) {
+      let r = v;
+      for (let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1f25);
+      const b = (v << 12) | r;
+      for (let i = 0; i < 18; i++) {
+        const on = ((b >>> i) & 1) === 1, a = size - 11 + (i % 3), c = Math.floor(i / 3);
+        set(a, c, on), set(c, a, on);
+      }
+    }
+    for (let right = size - 1, i = 0; right >= 1; right -= 2) {
+      if (right === 6) right = 5;
+      for (let vert = 0; vert < size; vert++) for (let j = 0; j < 2; j++) {
+        const x = right - j, y = ((right + 1) & 2) === 0 ? size - 1 - vert : vert;
+        if (!fixed[y][x] && i < all.length * 8) dark[y][x] = ((all[i >>> 3] >>> (7 - (i & 7))) & 1) === 1, i++;
+      }
+    }
+    const masks = [(x, y) => (x + y) % 2, (x, y) => y % 2, (x) => x % 3, (x, y) => (x + y) % 3, (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2,
+      (x, y) => ((x * y) % 2) + ((x * y) % 3), (x, y) => (((x * y) % 2) + ((x * y) % 3)) % 2, (x, y) => (((x + y) % 2) + ((x * y) % 3)) % 2];
+    const flip = (m) => { for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (!fixed[y][x] && masks[m](x, y) === 0) dark[y][x] = !dark[y][x]; };
+    // The mask with the fewest long runs, solid blocks and imbalance, as scanners read best.
+    const penalty = () => {
+      let p = 0, on = 0;
+      for (let k = 0; k < 2; k++) for (let a = 0; a < size; a++) {
+        let run = 1;
+        for (let b = 1; b <= size; b++) {
+          const same = b < size && (k ? dark[b][a] === dark[b - 1][a] : dark[a][b] === dark[a][b - 1]);
+          if (same) run++;
+          else (run >= 5 && (p += run - 2), (run = 1));
+        }
+      }
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+        on += dark[y][x];
+        if (x && y && dark[y][x] === dark[y - 1][x] && dark[y][x] === dark[y][x - 1] && dark[y][x] === dark[y - 1][x - 1]) p += 3;
+      }
+      return p + Math.floor(Math.abs(on * 20 - size * size * 10) / (size * size)) * 10;
+    };
+    let best = 0, least = Infinity;
+    for (let m = 0; m < 8; m++) {
+      flip(m), format(m);
+      const p = penalty();
+      if (p < least) (least = p), (best = m);
+      flip(m);
+    }
+    flip(best), format(best);
+    let path = "";
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (dark[y][x]) path += `M${x + 4} ${y + 4}h1v1h-1z`;
+    return `<svg viewBox="0 0 ${size + 8} ${size + 8}" role="img" aria-label="QR code"><path d="${path}" fill="#000"/></svg>`;
+  }
+
+  one.title("Users");
+  one.on("changed", draw);
+  draw();
+</script>
