@@ -3750,7 +3750,9 @@ impl Node {
                 Ok(exe) => {
                     let _ = std::fs::write(self.0.dir.join("release"), &r.blob);
                     tracing::info!("updated {} to {}; restarting", exe.display(), r.commit);
-                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    // Closing says so to every server connected, which would otherwise wait half a minute to notice:
+                    // those taking this release from here try again, and get it once this server is back.
+                    let _ = tokio::time::timeout(Duration::from_secs(2), self.0.endpoint.close()).await;
                     std::process::exit(0);
                 }
                 Err(err) => tracing::warn!("couldn't take the release of {}, trying again in {}s: {err:#}", r.commit, wait.as_secs()),
