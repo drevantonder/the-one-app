@@ -115,7 +115,7 @@ export class Vault extends DurableObject {
       case "POST /share": return json(await this.share(token, claims, body));
       case "POST /erase": return json(await this.erase(token, claims, body));
       case "GET /items": return json(this.items.list((await this.sessionOf(token)).held, url.searchParams.get("scope")));
-      case "POST /items": return json(await this.items.set((await this.sessionOf(token)).held, body));
+      case "POST /items": return json(await this.items.set((await this.sessionOf(token)).held, body).catch((err) => refuse(err.status || 400, err.message)));
       case "POST /fetch": return json(await this.fetchFor(token, claims, body));
       case "POST /fill": return json(await this.fillFor(token, claims, body));
       case "GET /copies": return json(this.copies(claims.sub));

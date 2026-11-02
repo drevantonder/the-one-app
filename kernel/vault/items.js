@@ -60,8 +60,10 @@ export class Items {
 
   /// Makes, changes or deletes an item: `{ scope, item: { id, title?, type?, domain?, fields?, hosts?, apps?,
   /// deleted? } }`. A field is `{ value, secret? }`, `{ from: <another field> }` to rename it, `{ generate: true }`
-  /// for a new random secret, or null to drop it.
+  /// for a new random secret, or null to drop it. A field taken from a secret one stays secret. Standing work changes
+  /// none: it may use only some apps, and an item is everyone's in its scope.
   async set(held, { scope, item }) {
+    if (held.apps) throw new Error("this may not change the Vault");
     if (!item || !ID.test(item.id || "")) throw new Error("an item's id is 16 hex characters");
     const key = await itemsKey(await this.vault.scopeKey(held, scope));
     const row = this.sql.exec("select * from items where id = ?", item.id).toArray()[0];
@@ -92,7 +94,7 @@ export class Items {
       if (field.generate) [value, secret] = [b64u.encode(random(32)), true];
       else if (typeof field.from === "string") {
         if (!(field.from in values)) throw new Error(`no field ${field.from} to take`);
-        [value, secret] = [values[field.from], field.secret ?? before.fields[field.from]?.secret ?? false];
+        [value, secret] = [values[field.from], data.fields[field.from]?.secret || (field.secret ?? false)];
       } else {
         if (typeof field.value !== "string") throw new Error("a field's value is text");
         [value, secret] = [field.value, field.secret ?? before.fields[name]?.secret ?? false];

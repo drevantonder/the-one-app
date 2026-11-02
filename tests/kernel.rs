@@ -332,6 +332,20 @@ fn the_vault_fills_an_apps_requests_with_secrets_it_never_shows() {
     assert!(!list.to_string().contains("the refresh token itself"));
     assert_eq!(list["items"][0]["fields"], json!({ "client_id": { "value": "the client id" }, "refresh_token": { "secret": true } }));
 
+    // A field taken from a secret one stays secret, whatever it's asked to be.
+    let copied = json!({ "id": id, "fields": { "copied": { "from": "refresh_token", "secret": false } } });
+    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": copied })).0, 200);
+    let (_, list) = v.ask(&token, "GET", "/items", json!({}));
+    assert!(!list.to_string().contains("the refresh token itself"));
+    assert_eq!(list["items"][0]["fields"]["copied"], json!({ "secret": true }));
+
+    // Standing work, let use only some apps, changes no item.
+    let (_, standing) = v.internal("standing", json!({ "token": token, "scopes": [me], "apps": ["calendar"] }));
+    let (_, run) = v.internal("run", json!({ "secret": standing["secret"], "until": now() + 600_000 }));
+    let run = run["token"].as_str().unwrap();
+    let moved = json!({ "id": id, "hosts": ["evil.example.com"], "apps": ["calendar"] });
+    assert_eq!(v.ask(run, "POST", "/items", json!({ "scope": me, "item": moved })).0, 400);
+
     // Gmail's refresh goes out with it filled in, to its host, through the vault.
     let fetch = |app: &str, url: &str, body: &str| v.ask(&token, "POST", "/fetch", json!({ "app": app, "url": url, "method": "POST", "headers": { "content-type": "text/plain" }, "body": body }));
     let (status, sent) = fetch("gmail", "https://oauth2.googleapis.com/token", &format!("grant_type=refresh_token&refresh_token={{{{{id}:refresh_token}}}}&client_id={{{{client_id}}}}"));
