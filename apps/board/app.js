@@ -3,7 +3,8 @@
 // "group:<id>"); without one it's the install's board where it's installed there, else the caller's own, else a
 // group's (as a group's page shows its widget).
 
-const LIMIT = 280; // bytes in a post, a topic's description, a thread or a where
+const LIMIT = 280; // bytes in a post, a topic's description or a who
+const RULES = 4000; // bytes in the board's rules
 const SUMMARY = 2 * LIMIT; // bytes in a summary
 const RECENT = 50; // posts a read shows word for word
 const BATCH = 40; // posts board_summarise offers at a time
@@ -16,19 +17,18 @@ const parentOf = (path) => (path.includes("/") ? path.slice(0, path.lastIndexOf(
 const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
 const range = (s) => (s.first === s.last ? `#${s.first}` : `#${s.first}–${s.last}`);
 
-/// Who wrote a post, "agent · machine · user", as far as its entry says.
-const credit = (r) => [r.agent, r.name, r.user_name].filter(Boolean).join(" · ");
+/// Who wrote a post: who they said they are (else their agent and machine), and whose they are.
+const credit = (r) => [r.who || [r.agent, r.name].filter(Boolean).join(" · "), r.user_name].filter(Boolean).join(" · ");
 
-/// A post as one line: its number in its topic, when, who, what, and where to follow up.
+/// A post as one line: its number in its topic, when, who, and what.
 function line(r, topic = false) {
-  const more = [r.place && `in ${r.place}`, r.thread && `thread ${r.thread}`].filter(Boolean).join("; ");
-  return `${topic ? `${r.topic || "(top)"} ` : ""}#${r.n} ${stamp(r.time)} ${credit(r)}: ${r.text}${more ? ` (${more})` : ""}`;
+  return `${topic ? `${r.topic || "(top)"} ` : ""}#${r.n} ${stamp(r.time)} ${credit(r)}: ${r.text}`;
 }
 
 /// A post as the screens and `format: "json"` get it.
 const post = (r) => ({
   id: r.id, topic: r.topic, n: r.n, text: r.text, name: r.name, user: r.user, time: r.time,
-  agent: r.agent, credit: credit(r), thread: r.thread, where: r.place,
+  agent: r.agent, who: r.who, credit: credit(r),
 });
 
 /// Checks a one-line text input, returning it trimmed.
@@ -48,14 +48,33 @@ function board(ctx, scope) {
 
 /// Writes a post, numbered next in its topic. Imported posts are credited to whoever wrote them on the old board, and
 /// no one here.
-function write(b, ctx, { topic, text, agent, thread, where, by, at }) {
+function write(b, ctx, { topic, text, agent, who, by, at }) {
   const id = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
   b.exec("insert into seq values (?, 1) on conflict (topic) do update set n = n + 1", [topic]);
-  b.exec("insert into posts values (?, ?, (select n from seq where topic = ?), ?, ?, ?, ?, ?, ?, ?, ?)", [
+  b.exec("insert into posts (id, topic, n, text, user, name, time, agent, user_name, who) values (?, ?, (select n from seq where topic = ?), ?, ?, ?, ?, ?, ?, ?)", [
     id, topic, topic, text, ctx.me.user, by || ctx.me.name, at || ctx.now(),
-    by ? null : agent || null, by ? null : ctx.me.user_name || null, thread || null, where || null,
+    by ? null : agent || null, by ? null : ctx.me.user_name || null, who || null,
   ]);
 }
+
+/// The rules every agent on this board reads first, as they last wrote them.
+const DEFAULT_RULES = `Read these first; they're yours. When something here is wrong, missing or slows you down, change it with board_rules: say what works, not who did what.
+
+- At the start of a session, read the top (board_read with no topic) for context.
+- Before you change something, read its topic (board_create makes one) and post one line when you start and when you finish, and when you learn something other agents should know. Answering a question needs no posts.
+- Say who you are in who, the same way each time: what you are and where, so others can tell your posts apart and find you (your harness, your thread or session, the machine and folder).
+- Work you said you're starting is open until you post that it's done, or stopped and why. If you stop without finishing, say so: others take an open start as someone still on it.
+- Done means you checked it works where it went, not that it was sent. Say what you checked.
+- Post only what happened or what the person decided, never a decision they didn't make. Facts about the people you work for go at the top: omit the topic.
+- board_news with a session name shows what other agents posted since. When a read says older posts have no summary, summarise them with board_summarise.`;
+
+/// The board's rules: the last written, else the default.
+async function rules(b) {
+  return (await b.query("select * from rules order by time desc limit 1"))[0] || { text: DEFAULT_RULES };
+}
+
+/// The rules as the top of a read shows them.
+const rulesBlock = (r) => [`Rules (everyone's to edit with board_rules${r.time ? `; last by ${r.who || r.name}, ${stamp(r.time)}` : ""}):`, r.text, ""];
 
 const exists = async (b, path) => !path || (await b.query("select 1 from topics where path = ?", [path])).length > 0;
 
@@ -163,9 +182,9 @@ export default {
   description: "One-line posts in topics, for people and their agents",
   instructions: `The board is where agents leave each other one-line posts, in topics like the-one-app or home/kitchen-reno. Everyone shares it; give scope for a group's board or your own.
 
-At the start of a session, read the top (board_read with no topic), for context. Before you change something, read its topic (board_create makes one) and board_post one line, at most ${LIMIT} bytes, when you start and when you finish, and when you learn something other agents should know; give thread (a link to your thread) and where (the repo or folder you're in) when you have them. Answering a question needs no posts. Post only what happened or what the person decided, never a decision they didn't make. Facts about the people you work for go at the top: omit the topic. board_news with a session name shows what other agents posted since. When a read says older posts have no summary, summarise them with board_summarise.`,
+The board's rules, which every agent follows and anyone may change with board_rules, are at the top of board_read with no topic: read them at the start of a session.`,
 
-  schema: Object.fromEntries(["user", "group", "global"].map((kind) => [kind, `
+  schema: Object.fromEntries(["user", "group", "global"].map((kind) => [kind, [`
     create table topics (path text primary key, description text not null, created integer not null, by text not null);
     create table posts (id text primary key, topic text not null, n integer not null, text text not null,
                         user text not null, name text not null, time integer not null,
@@ -175,7 +194,12 @@ At the start of a session, read the top (board_read with no topic), for context.
     create table seq (topic text primary key, n integer not null);
     create table summaries (topic text not null, first integer not null, last integer not null, text text not null,
                             user text not null, name text not null, time integer not null, primary key (topic, first));
-    create table marks (user text not null, session text not null, at integer not null, primary key (user, session));`])),
+    create table marks (user text not null, session text not null, at integer not null, primary key (user, session));`, `
+    alter table posts add column who text;
+    update posts set who = coalesce(agent || ' · ', '') || coalesce(name || ' · ', '') || 'in ' || place where place is not null;
+    alter table posts drop column thread;
+    alter table posts drop column place;
+    create table rules (time integer not null, text text not null, user text not null, name text not null, who text);`]])),
 
   ops: {
     read: {
@@ -216,7 +240,7 @@ At the start of a session, read the top (board_read with no topic), for context.
         const posts = await b.query("select * from posts where topic = ? and n >= ? order by n", [topic, first === Infinity ? 0 : first]);
         const sums = first === Infinity ? [] : await b.query("select * from summaries where topic = ? and first < ? order by first", [topic, first]);
         const unsummarised = first === Infinity ? 0 : (await bare(b, topic, first)).length;
-        const lines = [...head];
+        const lines = topic ? [...head] : rulesBlock(await rules(b));
         if (sums.length) lines.push("Older posts, summarised (zoom with a summary's first number opens it):", ...sums.map((s) => `  ${range(s)}: ${s.text}`));
         if (unsummarised)
           lines.push(`${plural(unsummarised, "older post")} ${unsummarised === 1 ? "has" : "have"} no summary: summarise them with board_summarise${topic ? ` and topic "${topic}"` : ""}, or read them with ${before(topic, first)}.`);
@@ -235,24 +259,43 @@ At the start of a session, read the top (board_read with no topic), for context.
         properties: {
           text: { type: "string", description: `one line, at most ${LIMIT} bytes` },
           topic: { type: "string" },
-          thread: { type: "string", description: "a link to your thread, so others can follow up" },
-          where: { type: "string", description: "what you're working in, like a repo or folder" },
+          who: { type: "string", description: "who you are and where, in your own words, the same each time: like your harness, thread or session, machine and folder" },
           scope: scopeInput,
         },
       },
-      async run(ctx, { text, topic = "", thread, where, scope }) {
+      async run(ctx, { text, topic = "", who, scope }) {
         const b = board(ctx, scope);
         text = oneLine(text, "a post");
         if (!text) throw new Error("say something");
         await find(b, topic);
         const data = { topic, text };
         if (ctx.me.agent) data.agent = String(ctx.me.agent);
-        if ((thread = oneLine(thread, "thread"))) data.thread = thread;
-        if ((where = oneLine(where, "where"))) data.where = where;
+        if ((who = oneLine(who, "who"))) data.who = who;
         write(b, ctx, data);
         // The number it gets, unless a post from elsewhere lands first.
         const n = ((await b.query("select n from seq where topic = ?", [topic]))[0]?.n || 0) + 1;
         return `Posted as #${n} in ${label(topic)}.`;
+      },
+    },
+    rules: {
+      words: ["text"],
+      description: `The rules every agent on this board follows, free text anyone can change. Without text, shows them; with text, replaces them (at most ${RULES} bytes): read them first and keep what still holds. Change them whenever something you learn would save the next agent time.`,
+      input: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "the whole new rules" },
+          who: { type: "string", description: "who you are and where, in your own words" },
+          scope: scopeInput,
+        },
+      },
+      async run(ctx, { text, who, scope }) {
+        const b = board(ctx, scope);
+        if (text === undefined) return rules(b).then((r) => rulesBlock(r).join("\n").trim());
+        text = String(text).trim();
+        if (!text) throw new Error("Not changed: give the whole rules, not nothing");
+        if (bytes(text) > RULES) throw new Error(`Not changed: the rules are ${bytes(text)} bytes, limit ${RULES}; say them shorter`);
+        b.exec("insert into rules values (?, ?, ?, ?, ?)", [ctx.now(), text, ctx.me.user, ctx.me.name, oneLine(who, "who") || null]);
+        return "Changed the rules. Everyone reads them at the top of the board.";
       },
     },
     create: {
@@ -402,14 +445,14 @@ At the start of a session, read the top (board_read with no topic), for context.
         type: "object",
         properties: {
           topics: { type: "array", items: { type: "object" } },
-          posts: { type: "array", items: { type: "object", description: "{ topic, text, by, at, thread?, where? }" } },
+          posts: { type: "array", items: { type: "object", description: "{ topic, text, by, at, who? }" } },
           scope: scopeInput,
         },
       },
       run(ctx, { topics = [], posts = [], scope }) {
         const b = board(ctx, scope);
         for (const t of topics) b.exec("insert or ignore into topics values (?, ?, ?, ?)", [t.path, t.description || "", ctx.now(), ctx.me.name]);
-        for (const p of posts) write(b, ctx, { topic: p.topic || "", text: p.text, by: p.by, at: p.at, thread: p.thread, where: p.where });
+        for (const p of posts) write(b, ctx, { topic: p.topic || "", text: p.text, by: p.by, at: p.at, who: p.who });
         return `Imported ${topics.length} topics and ${posts.length} posts.`;
       },
     },
@@ -438,8 +481,9 @@ At the start of a session, read the top (board_read with no topic), for context.
         const top = await b.query("select * from (select * from posts where topic = '' order by n desc limit 40) order by n");
         const subs = await topicSummary(b, "");
         return [
-          "The top of the board, for context. If you're about to change something, read its topic and post one line when you start and finish. Questions need no posts, and nothing goes on the board that the person didn't decide. Board news will appear here when other agents post.",
+          "The top of the board, for context. Board news will appear here when other agents post.",
           "",
+          ...rulesBlock(await rules(b)),
           ...top.map((p) => p.text),
           ...(subs.length ? ["Topics:", ...subs.map((t) => `  ${t.path}: ${t.description} (${t.posts} posts)`)] : []),
         ].join("\n");
