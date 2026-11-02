@@ -55,9 +55,10 @@ const PAGE = `
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 40vw), 1fr)); gap: 22px 14px; margin-top: 6px; }
   .tile { display: block; color: inherit; text-decoration: none; min-width: 0; }
   .tile.opens { cursor: pointer; }
-  .pic { aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: var(--card); border: 0.5px solid var(--line); display: grid; place-items: center; color: var(--faint); }
+  .pic { position: relative; aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: var(--card); border: 0.5px solid var(--line); display: grid; place-items: center; color: var(--faint); }
   .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .pic img.tall { object-fit: contain; background: #000; }
+  /* A phone's whole screen, upright in the tile, like a phone. */
+  .pic img.phone { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: auto; height: calc(100% - 16px); box-sizing: border-box; border: 3px solid #1c1c1e; border-radius: 12px; }
   .tile.paused .pic img { filter: grayscale(0.9) brightness(0.5); }
   .tile.opens:hover .pic { border-color: var(--accent); }
   .name { font-weight: 600; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -93,7 +94,7 @@ const PAGE = `
     const name = b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : named(c);
     const line = [b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : paused(c) ? off(c) : "", servers > 1 ? host(c.server) : ""].filter(Boolean).join(" · ");
     const k = key(c);
-    const pic = pics[k] ? \`<img src="\${pics[k]}" alt=""\${phone(c) ? ' class="tall"' : ""}>\` : glyph(screenless(c), c);
+    const pic = pics[k] ? \`<img src="\${pics[k]}" alt=""\${phone(c) ? ' class="phone"' : ""}>\` : glyph(screenless(c), c);
     // A phone or Windows opens even when off: it starts for whoever opens it.
     const opens = !screenless(c) && (!paused(c) || c.kind !== "linux");
     return \`<div class="tile\${paused(c) ? " paused" : ""}\${opens ? " opens" : ""}" data-k="\${one.esc(k)}"><div class="pic">\${pic}</div><div class="name">\${one.esc(name)}</div><div class="sub">\${one.esc(line)}</div></div>\`;
