@@ -67,6 +67,8 @@ export class Vault extends DurableObject {
         client text, sealed blob not null, made integer not null, until integer, line text);
       create index if not exists copies_user on copies (user);
       create table if not exists admins (scope text not null, user text not null, primary key (scope, user));
+      create table if not exists offers (user text not null, scope text not null, role text not null, sealed blob not null, primary key (user, scope));
+      create table if not exists welcomes (id text primary key, sealed blob not null, until integer not null);
     `);
     this.sql.exec(schema);
     // A client's copies (pending, its own, and its sessions) share a line, so signing it out ends its sessions too.
@@ -122,7 +124,7 @@ export class Vault extends DurableObject {
       case "POST /urls": return json(await this.urls(token, claims, body));
       case "POST /erase": return json(await this.erase(token, claims, body));
       case "POST /invite": return json(await this.invite(token, claims, body));
-      case "POST /role": return json(this.role(token, claims, body));
+      case "POST /role": return json(await this.role(token, claims, body));
       case "GET /items": return json(this.items.list((await this.sessionOf(token)).held, url.searchParams.get("scope")));
       case "POST /items": return json(await this.items.set((await this.sessionOf(token)).held, body).catch((err) => refuse(err.status || 400, err.message)));
       case "POST /fetch": return json(await this.fetchFor(token, claims, body));
@@ -203,6 +205,7 @@ export class Vault extends DurableObject {
     let held;
     if (!known) {
       held = await this.person(user);
+      if (from) await this.welcome(secretOf(from), held);
     } else {
       const opened = from && (await this.open(secretOf(from), ["passkey", "recovery"]));
       if (!opened || opened.held.user !== user) refuse(403, "a new passkey is added with one you have already");
@@ -210,6 +213,17 @@ export class Vault extends DurableObject {
       if (opened.row.kind === "recovery") this.sql.exec("delete from copies where id = ?", opened.row.id);
     }
     return { id: await this.seal(secret, { user, kind: "passkey", name: String(name || "Passkey"), client, held }) };
+  }
+
+  /// Opens Everyone's to someone new whose invite link an admin made signed in (`invite`): its key, sealed under the
+  /// link's secret, is sealed to them, and the link's copy goes.
+  async welcome(secret, held) {
+    const id = await idOf(secret);
+    const [row] = this.sql.exec("select sealed, until from welcomes where id = ?", id).toArray();
+    this.sql.exec("delete from welcomes where id = ? or until <= ?", id, Date.now());
+    if (!row || row.until <= Date.now()) return;
+    const key = await openUnder(secret, row.sealed);
+    this.sql.exec("insert or replace into grants (user, scope, sealed) values (?, 'global', ?)", held.user, await sealTo(b64u.decode(held.public), key));
   }
 
   /// Makes `user`'s key pair and their scope's key (and the install's, for the first person): → what their copies hold.
@@ -306,25 +320,49 @@ export class Vault extends DurableObject {
   }
 
   /// Someone's role in scopes changed in the install's log, said by whoever changed it as soon as they did: `{ user,
-  /// scopes, role }`. With no role, they open none of them here any more (only `kernel keys` gives one again); as a
-  /// member, they no longer say who's in it; as an admin, they now do. Only an admin of the install says so, or of a
-  /// group for its scope, or someone of themselves leaving a group: admins as the vault last heard from `kernel keys`
-  /// and from this.
-  role(token, claims, { user, scopes, role = null }) {
+  /// scopes, role, invited }`. With no role, they open none of them here any more, and aren't invited; as a member or
+  /// an admin, they open each (sealed with the key the caller's session opens, or the one they were invited with), and
+  /// say who's in it as an admin; invited to a group, its key is kept for them until they accept. Only an admin of the
+  /// install says so, or of a group for its scope; or someone of themselves, leaving a group or accepting what they
+  /// were invited to: admins as the vault last heard from `kernel keys` and from this. A scope the vault has no key
+  /// for yet changes nothing here.
+  async role(token, claims, { user, scopes, role = null, invited = false }) {
     if (token.startsWith("run.")) refuse(403, "work left running says nobody's role");
     if (!USER.test(user || "")) refuse(400, "not a user id");
     if (![null, "member", "admin"].includes(role)) refuse(400, "a role is admin, member or none");
     if (!Array.isArray(scopes) || !scopes.length || scopes.length > 256 || !scopes.every((s) => SCOPE.test(s || ""))) refuse(400, "name 1 to 256 scopes");
+    if (invited && (!role || !scopes.every((s) => s.startsWith("group:")))) refuse(400, "only a group's invite offers a role");
     const admin = (scope) => this.sql.exec("select 1 from admins where scope = ? and user = ?", scope, claims.sub).toArray().length > 0;
-    for (const scope of scopes) {
-      if (role && scope.startsWith("user:")) refuse(400, "nobody is made an admin of someone's own scope");
-      const may = admin("global") || (scope.startsWith("group:") && (admin(scope) || (role === null && user === claims.sub)));
-      if (!may) refuse(403, `only an admin of ${scope} says who's in it`);
+    const offer = (scope) => this.sql.exec("select role, sealed from offers where user = ? and scope = ?", user, scope).toArray()[0];
+    const known = scopes.filter((s) => this.sql.exec("select 1 from scopes where scope = ?", s).toArray().length);
+    for (const scope of known) {
+      if (role && scope.startsWith("user:")) refuse(400, "nobody is let in to someone's own");
+      const manages = admin("global") || (scope.startsWith("group:") && admin(scope));
+      const self = user === claims.sub && scope.startsWith("group:") && (role === null || (!invited && offer(scope)?.role === role));
+      if (!manages && !self) refuse(403, role && user === claims.sub && !invited ? "nobody invited you to that" : "only its admins say who's in it");
     }
-    for (const scope of scopes) {
-      if (role === "admin") this.sql.exec("insert or ignore into admins (scope, user) values (?, ?)", scope, user);
-      else this.sql.exec("delete from admins where scope = ? and user = ?", scope, user);
-      if (role === null) this.sql.exec("delete from grants where scope = ? and user = ?", scope, user);
+    const [person] = this.sql.exec("select public from people where user = ?", user).toArray();
+    if (role && !person && known.length) refuse(409, "they haven't signed in yet");
+    let held;
+    // The scope's key, as the caller's session opens it.
+    const keyOf = async (scope) => {
+      held ||= (await this.sessionOf(token)).held;
+      const key = await this.scopeKey(held, scope).catch(() => refuse(403, "you can't open what's in it yourself, so you can't let anyone in"));
+      await this.settle(scope);
+      return key;
+    };
+    for (const scope of known) {
+      if (role === null) {
+        for (const table of ["grants", "admins", "offers"]) this.sql.exec(`delete from ${table} where scope = ? and user = ?`, scope, user);
+      } else if (invited) {
+        this.sql.exec("insert or replace into offers (user, scope, role, sealed) values (?, ?, ?, ?)", user, scope, role, await sealTo(person.public, await keyOf(scope)));
+      } else {
+        const has = this.sql.exec("select 1 from grants where user = ? and scope = ?", user, scope).toArray().length;
+        if (!has) this.sql.exec("insert into grants (user, scope, sealed) values (?, ?, ?)", user, scope, offer(scope)?.sealed ?? (await sealTo(person.public, await keyOf(scope))));
+        this.sql.exec("delete from offers where user = ? and scope = ?", user, scope);
+        if (role === "admin") this.sql.exec("insert or ignore into admins (scope, user) values (?, ?)", scope, user);
+        else this.sql.exec("delete from admins where scope = ? and user = ?", scope, user);
+      }
     }
     return {};
   }
@@ -334,6 +372,7 @@ export class Vault extends DurableObject {
     const recovery = b64u.decode(this.env.RECOVERY_KEY);
     this.sql.exec("insert into scopes (scope, recovery, made, hash) values (?, ?, ?, ?)", scope, await sealTo(recovery, key), Date.now(), await keyHash(key));
     this.sql.exec("insert into grants (user, scope, sealed) values (?, ?, ?)", user, scope, await sealTo(publicKey, key));
+    return key;
   }
 
   /// A copy for a client being added, opened with a passkey (`from`) and sealed under its authorization code (`to`)
@@ -492,12 +531,15 @@ export class Vault extends DurableObject {
   }
 
   /// An invite link's secret for someone new, called `name`, and until when it works, made by the auth service as
-  /// for `kernel invite`: asked by an admin of the install (as the vault last heard who is), signed in.
+  /// for `kernel invite`: asked by an admin of the install (as the vault last heard who is), signed in. Everyone's key,
+  /// as their session opens it, is kept sealed under the link's secret, for whoever joins with it (`welcome`).
   async invite(token, claims, { name }) {
     if (opensItself(this.env)) refuse(403, "people here join by signing in, with no invite");
     if (token.startsWith("run.")) refuse(403, "work left running invites nobody");
-    await this.sessionOf(token);
+    const { held } = await this.sessionOf(token);
     if (!this.sql.exec("select 1 from admins where scope = 'global' and user = ?", claims.sub).toArray().length) refuse(403, "only an admin invites someone");
+    // Whoever joins with it opens Everyone's as soon as they do, with the key the admin's session opens (if it does).
+    const key = await this.scopeKey(held, "global").then(async (key) => (await this.settle("global"), key), () => null);
     const resp = await this.env.AUTH.fetch(new Request("https://auth/internal/invite", {
       method: "POST",
       headers: { "content-type": "application/json", "x-kernel-secret": this.env.KERNEL_SECRET },
@@ -505,6 +547,7 @@ export class Vault extends DurableObject {
     }));
     const out = await resp.json().catch(() => ({}));
     if (!resp.ok) refuse(resp.status, out.error || "the auth service made no invite");
+    if (key) this.sql.exec("insert into welcomes (id, sealed, until) values (?, ?, ?)", await idOf(secretOf(out.token)), await sealUnder(secretOf(out.token), key), out.until);
     return { token: out.token, until: out.until };
   }
 

@@ -296,11 +296,13 @@ fn where_people_sign_in_with_google_the_vault_opens_their_keys_itself_and_only_t
 }
 
 #[test]
-fn someone_removed_opens_nothing_at_once_and_only_an_admin_removes_them() {
+fn who_opens_a_scope_changes_at_once_and_only_as_its_admins_say() {
     use one::entry::Scope;
+    use one::members::Role::{Admin, Member};
     const LEE: &str = "00000000000000d4";
     let group = Scope::parse("group:00000000000000c3").unwrap();
-    let (everyone, sams) = (Scope::Global, Scope::User(SAM.into()));
+    let (everyone, lees) = (Scope::Global, Scope::User(LEE.into()));
+    let one = |s: &Scope| vec![s.clone()];
     // On an install whose people sign in with a passkey, and on one whose people Google signs in.
     for google in [false, true] {
         let v = if google { Vault::start_with(vec![("SIGN_IN".into(), "google".into()), ("VAULT_KEY".into(), B64U.encode(&rand::random::<[u8; 32]>()))]) } else { Vault::start() };
@@ -317,37 +319,56 @@ fn someone_removed_opens_nothing_at_once_and_only_an_admin_removes_them() {
             token
         };
         let (andre, sam, lee) = (signs_in(ANDRE, "web"), signs_in(SAM, "web"), signs_in(LEE, "web"));
-        // As the install's log says: Andre is its admin, Sam the group's, and Lee is in both.
+        // As the install's log says: Andre is its admin and all three are in it; Sam is the group's only one.
         let key = || B64U.encode(&rand::random::<[u8; 32]>());
         assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": key(), "people": [ANDRE, SAM, LEE], "admins": [ANDRE] })).0, 200);
-        assert_eq!(v.internal("scope-key", json!({ "scope": group.to_string(), "key": key(), "people": [SAM, LEE], "admins": [SAM] })).0, 200);
-        let opens = |token: &str, scope: &Scope| vault.keys_until(token, &[(&scope.to_string(), "board", None)]).is_ok();
-        assert!(opens(&lee, &everyone) && opens(&lee, &group) && opens(&sam, &group));
+        assert_eq!(v.internal("scope-key", json!({ "scope": group.to_string(), "key": key(), "people": [SAM], "admins": [SAM] })).0, 200);
+        let opens = |token: &str, scope: &Scope| vault.keys_until(token, &[(&scope.to_string(), "board", None)]).map(|k| k.0[0].key).ok();
+        assert!(opens(&lee, &group).is_none());
 
-        // Lee isn't an admin, so he takes nobody's away; nor does Sam take Everyone's, whose admin he isn't.
-        assert!(vault.role(&lee, SAM, None, std::slice::from_ref(&group)).is_err());
-        assert!(vault.role(&lee, ANDRE, None, std::slice::from_ref(&everyone)).is_err());
-        assert!(vault.role(&sam, LEE, None, std::slice::from_ref(&everyone)).is_err());
-        assert!(vault.role(&lee, LEE, Some(one::members::Role::Admin), std::slice::from_ref(&group)).is_err(), "nobody makes themselves an admin");
-        assert!(opens(&sam, &group) && opens(&andre, &everyone));
+        // Lee, a member, lets nobody in, himself included, and takes nobody out; Andre, who doesn't open the group,
+        // can't let anyone in to it, though he's the install's admin.
+        assert!(vault.role(&lee, LEE, Some(Member), false, &one(&group)).is_err(), "nobody invited him");
+        assert!(vault.role(&lee, LEE, Some(Member), true, &one(&group)).is_err());
+        assert!(vault.role(&lee, SAM, None, false, &one(&group)).is_err());
+        assert!(vault.role(&lee, ANDRE, None, false, &one(&everyone)).is_err());
+        assert!(vault.role(&sam, LEE, None, false, &one(&everyone)).is_err(), "Sam isn't the install's admin");
+        assert!(vault.role(&andre, LEE, Some(Member), true, &one(&group)).is_err());
+        assert!(vault.role(&lee, LEE, Some(Admin), false, &one(&everyone)).is_err(), "nobody makes themselves an admin");
+        assert!(opens(&lee, &group).is_none() && opens(&sam, &group).is_some());
 
-        // Sam removes Lee from the group: at once, Lee gets no key or URL under it, and still Everyone's.
-        vault.role(&sam, LEE, None, std::slice::from_ref(&group)).unwrap();
-        assert!(!opens(&lee, &group));
-        assert!(vault.urls(&lee, &[&format!("{}/board/main/newest", one::bucket::folder(&group.to_string()))], &[], &[]).is_err());
-        assert!(opens(&lee, &everyone));
+        // Sam invites Lee as a member: Lee opens it once he accepts, as that and nothing more, with Sam's key.
+        vault.role(&sam, LEE, Some(Member), true, &one(&group)).unwrap();
+        assert!(opens(&lee, &group).is_none(), "an invite opens nothing yet");
+        assert!(vault.role(&lee, LEE, Some(Admin), false, &one(&group)).is_err(), "he was invited as a member");
+        vault.role(&lee, LEE, Some(Member), false, &one(&group)).unwrap();
+        assert_eq!(opens(&lee, &group), opens(&sam, &group));
+        assert!(vault.role(&lee, SAM, None, false, &one(&group)).is_err(), "a member takes nobody out");
 
-        // Andre removes Sam from the install: Sam opens nothing, and no longer says who's in his group.
-        vault.role(&andre, SAM, None, &[everyone.clone(), group.clone(), sams.clone()]).unwrap();
-        assert!(!opens(&sam, &everyone) && !opens(&sam, &group) && !opens(&sam, &sams));
-        assert!(vault.urls(&sam, &["global/board/main/newest"], &[], &[]).is_err());
-        assert!(vault.role(&sam, LEE, None, std::slice::from_ref(&group)).is_err());
+        // Made an admin, Lee takes Sam out of it; Sam, out, neither opens it nor lets himself back in.
+        vault.role(&sam, LEE, Some(Admin), false, &one(&group)).unwrap();
+        vault.role(&lee, SAM, None, false, &one(&group)).unwrap();
+        assert!(opens(&sam, &group).is_none() && opens(&lee, &group).is_some() && opens(&sam, &everyone).is_some());
+        assert!(vault.role(&sam, SAM, Some(Member), false, &one(&group)).is_err());
+        assert!(vault.urls(&sam, &[&format!("{}/board/main/newest", one::bucket::folder(&group.to_string()))], &[], &[]).is_err());
+
+        // An admin who stops being one says so of himself, and from then on says nobody's role.
+        vault.role(&lee, LEE, Some(Member), false, &one(&group)).unwrap();
+        assert!(vault.role(&lee, SAM, Some(Member), true, &one(&group)).is_err());
+        assert!(opens(&lee, &group).is_some(), "he's still in it");
+
+        // Andre takes Lee out of the install: Lee opens nothing, and says nobody's role any more.
+        vault.role(&andre, LEE, None, false, &[everyone.clone(), group.clone(), lees.clone()]).unwrap();
+        assert!(opens(&lee, &everyone).is_none() && opens(&lee, &group).is_none() && opens(&lee, &lees).is_none());
+        assert!(vault.urls(&lee, &["global/board/main/newest"], &[], &[]).is_err());
+        assert!(vault.role(&lee, SAM, Some(Member), true, &one(&group)).is_err());
         if google {
             // Google signing him in again opens Everyone's to him no more.
-            let again = signs_in(SAM, "phone");
-            assert!(!opens(&again, &everyone));
+            assert!(opens(&signs_in(LEE, "phone"), &everyone).is_none());
         }
-        assert!(opens(&andre, &everyone) && opens(&lee, &everyone));
+        // A group the vault has no key for yet changes nothing here.
+        vault.role(&andre, SAM, Some(Member), true, &one(&Scope::parse("group:00000000000000e5").unwrap())).unwrap();
+        assert!(opens(&andre, &everyone).is_some() && opens(&sam, &everyone).is_some());
     }
 }
 
@@ -733,8 +754,13 @@ fn an_admin_signed_in_makes_an_invite_link_that_works_once() {
     assert!(err.contains("only an admin"), "{err}");
     let (secret, until) = vault.invite(&andres, "Kim").unwrap();
     assert!(until > now() + 2 * 86_400_000, "it works for days");
-    let (_, kim) = joins_with(&k, &mut k.browser(), &secret);
+    let mut kims = k.browser();
+    let (kim_key, kim) = joins_with(&k, &mut kims, &secret);
     assert!(kim != andre && kim != sam, "it's for someone new");
+    // She opens Everyone's as soon as she's joined, with no kernel keys after: Andre's key, sealed into the link.
+    let kims = signs_in(&mut kims, &kim_key);
+    let everyone = |token: &str| vault.keys_until(token, &[("global", "board", None)]).map(|k| k.0[0].key).unwrap();
+    assert_eq!(everyone(&kims), everyone(&andres));
     let (status, used) = k.browser().post("/invite/about", json!({ "token": secret }));
     assert_eq!(status, 404, "a used link lets nobody else in: {used}");
 }
@@ -970,6 +996,16 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert!(opens(&andres, &format!("group:{group}")) && opens(&sams, "global"));
     assert_eq!(ask(&sams, "POST", "/v1/member", json!({ "group": group, "user": andre, "role": null })).0, 200);
     assert!(!opens(&andres, &format!("group:{group}")) && opens(&andres, "global"));
+    // Letting someone in does too. Andre, the install's admin but no longer in it, can't: the invite is made, and
+    // he's told why he won't open it, on the screen he asked from. Sam invites him back as an admin, and he opens it
+    // once he accepts.
+    let (status, said) = ask(&andres, "POST", "/v1/invite", json!({ "group": group, "user": andre }));
+    assert_eq!(status, 400);
+    assert!(said["error"].as_str().unwrap().starts_with("You are invited to Sam's, but won't open what's in it"), "{said}");
+    assert_eq!(ask(&sams, "POST", "/v1/invite", json!({ "group": group, "user": andre, "role": "admin" })).0, 200);
+    assert!(!opens(&andres, &format!("group:{group}")));
+    assert_eq!(ask(&andres, "POST", "/v1/accept", json!({ "group": group })).0, 200);
+    assert!(opens(&andres, &format!("group:{group}")));
     assert_eq!(ask(&andres, "POST", "/v1/remove", json!({ "user": sam })).0, 200);
     assert!(!opens(&sams, "global") && !opens(&sams, &format!("group:{group}")) && opens(&andres, "global"));
     let _ = std::fs::remove_dir_all(&dir);

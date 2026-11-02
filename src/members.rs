@@ -234,14 +234,19 @@ impl Members {
         self.role_in(user, scope).is_some()
     }
 
-    /// Everyone's role in each scope they may use.
-    pub fn roles(&self) -> BTreeMap<(String, Scope), Role> {
+    /// Everyone's role in each scope they may use, and in each group they're invited to: (role, invited).
+    pub fn roles(&self) -> BTreeMap<(String, Scope), (Role, bool)> {
         let mut out = BTreeMap::new();
         for user in self.users.keys() {
             for scope in [Scope::Global, Scope::User(user.clone())].into_iter().chain(self.groups.keys().map(|g| Scope::Group(g.clone()))) {
                 if let Some(role) = self.role_in(user, &scope) {
-                    out.insert((user.clone(), scope), role);
+                    out.insert((user.clone(), scope), (role, false));
                 }
+            }
+        }
+        for g in self.groups.values() {
+            for (user, role) in g.invited.iter().filter(|(u, _)| self.user(u).is_some()) {
+                out.entry((user.clone(), Scope::Group(g.id.clone()))).or_insert((*role, true));
             }
         }
         out
@@ -635,25 +640,24 @@ pub fn manages_scope(m: &Members, user: &str, scope: &Scope) -> bool {
 }
 
 /// How people's roles changed from `before` to `after` (`Members::roles`), as the install's vault hears it: (user,
-/// role, scopes) each. None, in every scope they may no longer use; member, in Everyone's or a group's they're no
-/// longer an admin of; admin, in one they've become one of, that was there before. Being let use a scope it doesn't
-/// say: only an admin's `kernel keys` gives a scope's key.
-pub fn roles_changed(before: &BTreeMap<(String, Scope), Role>, after: &BTreeMap<(String, Scope), Role>) -> Vec<(String, Option<Role>, Vec<Scope>)> {
-    let mut out: BTreeMap<(String, Option<Role>), Vec<Scope>> = BTreeMap::new();
+/// role, invited, scopes) each. None, in every scope they may no longer use or were invited to; otherwise their role
+/// in each they're newly in, invited to, or an admin of no longer or now. Not someone joining the install (their
+/// invite link opens Everyone's to them), their own scope, nor a group just made (the vault made its key with it).
+pub fn roles_changed(before: &BTreeMap<(String, Scope), (Role, bool)>, after: &BTreeMap<(String, Scope), (Role, bool)>) -> Vec<(String, Option<Role>, bool, Vec<Scope>)> {
+    let mut out: BTreeMap<(String, Option<Role>, bool), Vec<Scope>> = BTreeMap::new();
     for key in before.keys().chain(after.keys().filter(|k| !before.contains_key(*k))) {
         let (user, scope) = key;
-        let role = match (before.get(key), after.get(key)) {
-            (Some(_), None) => None,
-            (Some(Role::Admin), Some(Role::Member)) => Some(Role::Member),
-            (b, Some(Role::Admin)) if b != Some(&Role::Admin) && before.keys().any(|(_, s)| s == scope) => Some(Role::Admin),
-            _ => continue,
+        let (role, invited) = match (before.get(key), after.get(key)) {
+            (Some(_), None) => (None, false),
+            (b, Some(a)) if b == Some(a) => continue,
+            (_, Some(_)) if matches!(scope, Scope::User(_)) || !before.keys().any(|(_, s)| s == scope) => continue,
+            (None, Some((Role::Member, false))) if *scope == Scope::Global => continue,
+            (_, Some((role, invited))) => (Some(*role), *invited),
+            (None, None) => continue,
         };
-        if role.is_some() && matches!(scope, Scope::User(_)) {
-            continue;
-        }
-        out.entry((user.clone(), role)).or_default().push(scope.clone());
+        out.entry((user.clone(), role, invited)).or_default().push(scope.clone());
     }
-    out.into_iter().map(|((user, role), scopes)| (user, role, scopes)).collect()
+    out.into_iter().map(|((user, role, invited), scopes)| (user, role, invited, scopes)).collect()
 }
 
 /// A page a person arranges: their own (`user`), a group's (`group:<id>`) or everyone's (`global`).

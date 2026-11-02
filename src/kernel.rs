@@ -296,10 +296,10 @@ impl Vault {
     }
 
     /// Tells the vault that `user`'s role in `scopes` changed in the install's log, as the person who changed it: with
-    /// none, they open none of them there any more.
-    pub fn role(&self, token: &str, user: &str, role: Option<crate::members::Role>, scopes: &[crate::entry::Scope]) -> Result<()> {
+    /// none, they open none of them there any more; invited, the vault keeps a group's key for them until they accept.
+    pub fn role(&self, token: &str, user: &str, role: Option<crate::members::Role>, invited: bool, scopes: &[crate::entry::Scope]) -> Result<()> {
         let scopes: Vec<String> = scopes.iter().map(|s| s.to_string()).collect();
-        self.post(token, "/role", json!({ "user": user, "role": role, "scopes": scopes }))?;
+        self.post(token, "/role", json!({ "user": user, "role": role, "invited": invited, "scopes": scopes }))?;
         Ok(())
     }
 

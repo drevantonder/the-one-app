@@ -190,28 +190,59 @@ impl Node {
         let before = self.with(|i| Ok(i.r.members.roles()))?;
         self.append_as(&Scope::Global, &caller.user, by, content).await?;
         let after = self.with(|i| Ok(i.r.members.roles()))?;
-        self.tell_vault(caller, members::roles_changed(&before, &after)).await;
-        Ok(())
+        // A role someone gave themselves the vault hears from the next `kernel keys`, but for accepting an invite.
+        let changed = members::roles_changed(&before, &after).into_iter().filter(|(user, role, invited, _)| role.is_none() || *invited || *user != caller.user || kind == "accept").collect();
+        self.tell_vault(caller, changed).await
     }
 
-    /// Tells the install's vault how people's roles changed, as `caller`, who changed them: so someone removed opens
-    /// nothing there at once, rather than once an admin next runs `kernel keys`. A role someone gave themselves (accepting
-    /// an invite as an admin) the vault hears from the next `kernel keys`.
-    pub(super) async fn tell_vault(&self, caller: &Caller, changed: Vec<(String, Option<Role>, Vec<Scope>)>) {
-        let Ok((_, url)) = self.kernel() else { return };
-        for (user, role, scopes) in changed.into_iter().filter(|(user, role, _)| role.is_none() || *user != caller.user) {
+    /// Tells the install's vault how people's roles changed, as `caller`, who changed them, so whoever was let in opens
+    /// what's there at once, and whoever was taken out no longer does, rather than once an admin next runs `kernel
+    /// keys`; the vault decides what `caller` may say. What it couldn't be told, it says, in words for whoever made the
+    /// change: the change itself is made.
+    pub(super) async fn tell_vault(&self, caller: &Caller, changed: Vec<(String, Option<Role>, bool, Vec<Scope>)>) -> Result<()> {
+        let Ok((_, url)) = self.kernel() else { return Ok(()) };
+        let ours = format!("your {}", crate::config::NAME.trim_start_matches("The "));
+        let mut untold = Vec::new();
+        for (user, role, invited, scopes) in changed {
             let told = match caller.token.clone() {
-                None => Err(anyhow!("it was changed by a program on this machine that isn't signed in")),
+                None => Err("this device isn't signed in".to_string()),
                 Some(token) => {
                     let (vault, user, scopes) = (crate::kernel::Vault { url: url.clone() }, user.clone(), scopes.clone());
-                    tokio::task::spawn_blocking(move || vault.role(&token, &user, role, &scopes)).await.map_err(anyhow::Error::from).and_then(|r| r)
+                    match tokio::task::spawn_blocking(move || vault.role(&token, &user, role, invited, &scopes)).await {
+                        Ok(Ok(())) => Ok(()),
+                        Ok(Err(err)) => Err(format!("{err:#}").strip_prefix("the vault said: ").map(str::to_string).unwrap_or_else(|| format!("{ours} couldn't be reached"))),
+                        Err(_) => Err(format!("{ours} couldn't be reached")),
+                    }
                 }
             };
-            if let Err(err) = told {
-                let scopes: Vec<String> = scopes.iter().map(|s| s.to_string()).collect();
-                tracing::warn!("the vault still has {user} as before in {}, until an admin runs {} kernel keys: {err:#}", scopes.join(", "), crate::config::CLI);
-            }
+            let Err(why) = told else { continue };
+            tracing::warn!("the vault still has {user} as before in {scopes:?}: {why}");
+            let said = self.with(|i| {
+                let m = &i.r.members;
+                let me = user == caller.user;
+                let who = if me { "You".to_string() } else { m.users.get(&user).map(|u| u.name.clone()).unwrap_or(user.clone()) };
+                // Someone's own scope goes with the install's: it's named only alone.
+                let at: Vec<String> = scopes
+                    .iter()
+                    .filter(|s| scopes.len() == 1 || !matches!(s, Scope::User(_)))
+                    .map(|s| match s {
+                        Scope::Global => ours.clone(),
+                        Scope::User(_) => "their own".to_string(),
+                        Scope::Group(g) => m.groups.get(g).map(|g| g.name.clone()).unwrap_or_default(),
+                    })
+                    .collect();
+                let (at, cli, (are, open, they)) = (at.join(", "), crate::config::CLI, if me { ("are", "open", "you") } else { ("is", "opens", "they") });
+                Ok(match (role, invited) {
+                    (None, _) => format!("{who} {are} out of {at}, but still {open} what's in it until an admin runs {cli} kernel keys: {why}."),
+                    (Some(_), true) => format!("{who} {are} invited to {at}, but won't open what's in it on joining until an admin runs {cli} kernel keys: {why}."),
+                    (Some(Role::Admin), false) => format!("{who} {are} an admin of {at} now, but what {they} open and say there changes only when an admin runs {cli} kernel keys: {why}."),
+                    (Some(Role::Member), false) => format!("{who} {are} a member of {at} now, but what {they} open there changes only when an admin runs {cli} kernel keys: {why}."),
+                })
+            })?;
+            untold.push(said);
         }
+        ensure!(untold.is_empty(), "{}", untold.join(" "));
+        Ok(())
     }
 
     pub async fn rename_server(&self, name: &str) -> Result<()> {
