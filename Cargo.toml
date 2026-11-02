@@ -50,6 +50,9 @@ iroh = "1.4"
 jiff = "0.2"
 # So workerd dies with its node on Linux (prctl PR_SET_PDEATHSIG).
 libc = "0.2"
+# A pairing code's QR code, as SVG, for Settings' Devices screen, which every client draws from the node: no image
+# crates, no other dependencies.
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # Release signatures are OpenSSH signatures (sshsig), which install.sh checks with ssh-keygen; this reads the keys and
 # makes and checks the signatures.
 ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"] }

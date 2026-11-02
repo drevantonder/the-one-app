@@ -3187,7 +3187,7 @@ impl Node {
             }
             ("POST", "/v1/pair") => {
                 let (code, user) = self.pair_as(me, new_user(&body)?, body["user"].as_str())?;
-                json!({ "code": code, "user": user })
+                json!({ "code": code, "user": user, "qr": qr(&code)? })
             }
             ("POST", "/v1/trust") => {
                 let server = self.find_server(body["server"].as_str().unwrap_or(""))?;
@@ -4184,6 +4184,11 @@ impl ProtocolHandler for CallHandler {
     }
 }
 
+/// `text` as a QR code, an SVG with no margin, for a screen to draw on white: a pairing code, for a phone's camera.
+pub fn qr(text: &str) -> Result<String> {
+    Ok(qrcode::QrCode::new(text)?.render::<qrcode::render::svg::Color>().quiet_zone(false).build())
+}
+
 /// The Settings screens, by name: each client's own (src/screen/settings/<name>.html), the same on every one.
 const SETTINGS_SCREENS: &[(&str, &str)] = &[
     ("account", include_str!("screen/settings/account.html")),
@@ -4195,6 +4200,7 @@ const SETTINGS_SCREENS: &[(&str, &str)] = &[
     ("users", include_str!("screen/settings/users.html")),
     ("install", include_str!("screen/settings/install.html")),
     ("backups", include_str!("screen/settings/backups.html")),
+    ("devices", include_str!("screen/settings/devices.html")),
 ];
 
 /// Settings' items for `user`, in order, as every client draws them: each opens the Settings screen it names, but the

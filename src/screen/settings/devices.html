@@ -1,0 +1,155 @@
+<div id="page"></div>
+<style>
+  .tile { width: 34px; height: 34px; display: grid; place-items: center; flex: none; color: var(--accent); }
+  .tile .i { width: 26px; height: 26px; }
+  .tile.off { color: var(--faint); }
+  .status { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 15px; flex: none; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+  .dot.on { background: var(--ok); }
+  .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
+  .action-row { color: var(--accent); cursor: pointer; }
+  .action-row .i { width: 22px; height: 22px; }
+  a.row { cursor: pointer; }
+  #page h2.section:first-of-type { margin-top: 8px; }
+  .pair { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 8px 0 4px; }
+  .qr { width: 236px; height: 236px; padding: 16px; border-radius: 18px; background: #fff; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12); display: grid; place-items: center; }
+  .qr svg { width: 100%; height: 100%; display: block; shape-rendering: crispEdges; }
+  .code { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--code-bg); }
+  .pair code { font: 0.92em var(--mono); }
+  .code span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
+</style>
+<script>
+  // This person's devices, the servers they may use, and which hold their data: naming this device, trusting a
+  // server, removing a device, and pairing another with a code.
+  let state;
+  let error = "";
+
+  const me = () => state.user?.id;
+  const shown = (name) => (name.endsWith(".local") ? name.slice(0, -6) : name);
+  const list = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
+  const userName = (id) => state.install?.users.find((u) => u.id === id)?.name || "someone";
+  const groupOf = (id) => state.install?.groups.find((g) => g.id === id);
+  const icon = (name) => {
+    const n = name.toLowerCase();
+    if (n.includes("iphone") || n.includes("phone") || n.includes("android")) return "device-mobile";
+    if (n.includes("ipad") || n.includes("tablet")) return "device-tablet";
+    if (n.includes("macbook") || n.includes("laptop")) return "laptop";
+    if (n.includes("imac") || n.includes("mac") || n.includes("windows") || n.includes("pc")) return "desktop";
+    return "hard-drives";
+  };
+  // "Memory 12.2 of 32 GB · CPU 12%", memory in GB as macOS counts them (2^30 bytes).
+  const load = (l) => {
+    const gb = (b) => (b / 1073741824).toFixed(1);
+    const parts = [];
+    if (l?.memory?.total > 0) parts.push(`Memory ${gb(l.memory.used)} of ${gb(l.memory.total)} GB`);
+    if (l?.cpu?.length) parts.push(`CPU ${l.cpu.at(-1)}%`);
+    return parts.join(" · ");
+  };
+  const holds = (s) => s.privileged || s.owners.includes(`user:${me()}`) || (s.trusted_by || []).includes(me());
+  // Whether they may choose to trust it: they may use it, but don't run it, and it isn't privileged.
+  const mayTrust = (s) => !s.privileged && !s.owners.includes(`user:${me()}`) &&
+    s.users.some((p) => p === `user:${me()}` || p === "install" || (p.startsWith("group:") && groupOf(p.slice(6))?.role));
+  const runBy = (s) => {
+    if (s.privileged) return "Keeps everyone’s data";
+    const owners = s.owners.filter((o) => o !== `user:${me()}`).map((o) =>
+      o === "install" ? "everyone" : o.startsWith("group:") ? groupOf(o.slice(6))?.name || "a group" : userName(o.slice(5)));
+    return owners.length ? `Run by ${list(owners)}` : "";
+  };
+  const status = (on) => `<span class="status"><span class="dot${on ? " on" : ""}"></span>${on ? "Online" : "Offline"}</span>`;
+  const subs = (...lines) => lines.filter(Boolean).map((l) => `<div class="sub">${one.esc(l)}</div>`).join("");
+
+  // A row is tapped to remove it, unless it's the device looking.
+  const row = ({ key, name, online, lines, trailing, removable }) =>
+    `<${removable ? `a class="row" onclick="remove('${key}')"` : 'div class="row"'}>
+      <div class="tile${online ? "" : " off"}">${one.icon(icon(name || "phone"))}</div>
+      <div class="main"><div class="title"><span>${one.esc(shown(name) || "Phone")}</span></div>${subs(...lines)}</div>${trailing}</${removable ? "a" : "div"}>`;
+
+  const serverRow = (s) => {
+    const online = !!s.online;
+    const trailing = mayTrust(s)
+      ? `<input type="checkbox" class="switch" aria-label="Trust ${one.esc(shown(s.name))} to keep your data"${(s.trusted_by || []).includes(me()) ? " checked" : ""} onchange="trust('${s.key}', this)">`
+      : status(online);
+    return row({ key: s.key, name: s.name, online, lines: [s.me ? "This device" : runBy(s), online && load(s.load)], trailing, removable: s.user === me() && !s.me });
+  };
+  const clientRow = (c) =>
+    row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : c.asked ? `Phone · asked ${one.ago(c.asked, { long: true })}` : "Phone"], trailing: "", removable: !c.me });
+
+  function page() {
+    one.title("Devices");
+    const servers = state.install?.servers || [], clients = state.install?.clients || [];
+    const mine = servers.filter((s) => s.user === me()), others = servers.filter((s) => s.user !== me());
+    const here = [...servers, ...clients].find((m) => m.me);
+    let html = '<div class="large-title">Devices</div>';
+    if (here) {
+      html += `<h2 class="section">This Device</h2><div class="list"><label class="row plain"><input class="field" id="name" aria-label="This device’s name" value="${one.esc(here.name)}" autocomplete="off" spellcheck="false" enterkeyhint="done"></label></div>`;
+    }
+    html += '<h2 class="section">Your Devices</h2><div class="list">' + mine.map(serverRow).join("") + clients.filter((c) => c.user === me()).map(clientRow).join("") +
+      `<a class="row plain action-row" onclick="pair()">${one.icon("qr-code")}<span>Pair a Phone or Computer</span></a></div><div id="ask"></div>`;
+    if (others.length) html += '<h2 class="section">Servers</h2><div class="list">' + others.map(serverRow).join("") + "</div>";
+    const holding = servers.filter(holds).map((s) => shown(s.name));
+    html += `<h2 class="section">Where Your Data Lives</h2><div class="list"><div class="row plain"><div class="main">${one.esc(list(holding))}</div></div></div>`;
+    html += error ? `<p class="footer error">${one.esc(error)}</p>` : '<p class="footer">Only these keep your own data.</p>';
+    return html;
+  }
+
+  const draw = () => one.render("#page", async () => {
+    state = await one.api("GET", "/v1/state");
+    const html = page();
+    // Not while they're naming this device or answering a question.
+    if (document.activeElement?.id === "name" || document.querySelector("#ask .confirm")) return;
+    return html;
+  });
+
+  async function act(fn) {
+    error = "";
+    try {
+      await fn();
+    } catch (err) {
+      error = one.plain(err).title;
+      one.tap("error");
+    }
+    await draw();
+  }
+
+  document.addEventListener("change", (e) => e.target.id === "name" && rename(e.target));
+  document.addEventListener("keydown", (e) => e.target.id === "name" && e.key === "Enter" && e.target.blur());
+  function rename(input) {
+    const name = input.value.trim();
+    const here = [...(state.install?.servers || []), ...(state.install?.clients || [])].find((m) => m.me);
+    if (!name || name === here?.name) return void (input.value = here?.name || "");
+    act(() => one.api("POST", "/v1/name", { name }));
+  }
+
+  function trust(server, input) {
+    one.tap();
+    act(() => one.api("POST", "/v1/trust", { server, trust: input.checked }));
+  }
+
+  function remove(key) {
+    const m = [...state.install.servers, ...state.install.clients].find((x) => x.key === key);
+    one.confirm("#ask", {
+      title: `Remove ${shown(m.name) || "this phone"}?`,
+      detail: "It stops being one of your devices, and can’t reach your data. To use it again, pair it again.",
+      action: "Remove",
+      danger: true,
+      run: () => one.api("POST", "/v1/remove", { key }),
+    }).then((done) => done && draw());
+    document.querySelector("#ask").scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function pair() {
+    const { body } = one.sheet({ title: "Pair a Phone or Computer", html: one.loading("Making a code") });
+    one.api("POST", "/v1/pair", {}).then(
+      ({ code, qr }) => {
+        body.innerHTML = `<div class="pair"><div class="muted">It joins as you, with everything you can see and do.</div>
+          <div class="qr" role="img" aria-label="QR code of the pairing code">${qr}</div>
+          <div class="code"><span>${one.esc(code)}</span>${one.copyButton(code)}</div>
+          <div class="small muted">Scan it with the other device’s camera, or run <code>${one.esc(one.config.cli)} join</code> with the code there. It works once, for seven days.</div></div>`;
+      },
+      (err) => (body.innerHTML = one.banner(err, { retry: false })),
+    );
+  }
+
+  one.on("changed", draw);
+  draw();
+</script>
