@@ -105,7 +105,8 @@ export class Relay {
   async devices() {
     const said = this.env.DEVICES ? JSON.parse(this.env.DEVICES) : null;
     let known = (await this.ctx.storage.get("devices")) || { keys: [], at: -1, added: {}, pairings: {} };
-    if (said && said.at > known.at) {
+    // Any list unlike the one kept is a newer deploy's: one from before lists were as of the log kept a later time.
+    if (said && (said.at !== known.at || said.keys.join() !== known.keys.join())) {
       const added = Object.fromEntries(Object.entries(known.added).filter(([, t]) => t > said.at));
       known = { keys: said.keys, at: said.at, added, pairings: known.pairings };
       await this.ctx.storage.put("devices", known);
