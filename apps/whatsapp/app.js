@@ -13,7 +13,7 @@ async function sidecar(ctx, op, input) {
   }
 }
 
-const NEEDS = "WhatsApp needs one of your devices to link your phone to, and none of them runs it. Ask an owner of one to install it.";
+const NEEDS = "WhatsApp isn't on any of your devices yet, so there's no phone to link: whoever owns a device installs it there, and the App Store's WhatsApp page shows where. Then whatsapp_sign_in links your phone.";
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {

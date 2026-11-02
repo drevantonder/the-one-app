@@ -1,5 +1,5 @@
 // Computer Use: the devices agents can use, and the tools they use them with. Agent devices are Linux devices with a
-// browser on the person's servers, which the agent-devices sidecar runs (Incus, or a Mac's containers); the person's own
+// browser on the person's servers, which the agent-devices sidecar runs (Podman, or a Mac's containers); the person's own
 // devices are here too once they let agents use them, through the computer sidecar the Mac app hosts. Use,
 // tools and screen go to a device when one is named; this app keeps who used which device when, as `session`
 // entries in the person's own scope. Agent Devices (apps/agent-devices) is the person's page for them.
@@ -15,7 +15,7 @@ async function sidecar(ctx, op, input) {
   }
 }
 
-const NEEDS = "Computer Use needs a Linux device with Incus, or a Mac, and none of yours runs it.";
+const NEEDS = "No device of yours lets agents use it yet. Agents use your Mac once you turn on Let Agents Use This Mac in the Mac app's menu bar; agent devices, each with a browser, need Agent Devices on a Linux device with Podman, or a Mac.";
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
@@ -150,7 +150,7 @@ export default {
   color: "#5e5ce6",
   description: "Devices your agents can use: agent devices with a browser, and your own devices when you let them",
   connector: true,
-  needs: "Needs a Linux device with Incus, or a Mac",
+  needs: "Needs a Linux device with Podman, or a Mac",
   instructions: "Computer Use is the devices agents can use: agent devices (Linux, on the person's own devices, each with a browser) and the person's own devices once they let agents use them. To browse, borrow an agent device of your own: agent-devices_borrow with for (what it's for, in a few words: the person sees it) gives you one whose browser starts with a copy of a browser profile, signed in to its sites (default unless you pass profile; agent-devices_profiles lists them, like Personal or PTC, with the sites each was used on); pass its name as device to the other tools, and give it back with agent-devices_give_back when done: it's deleted, with anything it did to the profile. One left 15 minutes without a call is given back for you. In it: computer_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":\"default\"} (the profile's name, as agent-devices_borrow gives it) launches the browser; computer_use with tool list_windows gives its window_id; computer_get_browser_state with that pid and window_id gives target_id and tab_id; then computer_browser_navigate, computer_browser_click and computer_browser_type act, and computer_get_browser_state reads the page. A browser left idle for 5 minutes closes; prepare it again. computer_screen shows the device. When a site needs the person to sign in, agent-devices_sign_in with the profile and the site's url gives them a link to sign in there themselves. For a challenge in your own device, give them computer_view's link. Never sign in or submit forms for them unless they asked. Everything else on a device (apps, windows, keyboard, mouse): computer_tools lists the tools and computer_use runs one. For Windows, Android or an iPhone, borrow with kind (agent-devices_borrow kind windows): you get the person's lasting device, to leave as you found it, or with copy true a throwaway copy; computer_tools on it lists what it takes (screenshot, click, type_text, press_key, swipe, open_url, install_app, run_command), and computer_screen and computer_view work as on Linux. An iPhone takes no clicks or typing. computer_list shows the agent devices on all of their devices, who has borrowed which and what for; to act on one on another of their devices, pass server (that device's name) too. A lasting device nobody calls or watches for 30 minutes is paused, and unpaused by the next call. computer_list also lists the person's own devices they let agents use (own: true, like their Mac), by their device's name: computer_tools, computer_use and computer_screen work on one as on an agent device, acting in the background where they can, but there's nothing to borrow and no view link. The person sees in their menu bar while you use their device and can stop you. Use one only for what they asked of that device, and never their messages, mail, browser sessions or files unless they asked.",
   uses: { sidecars: ["agent-devices", "computer"] },
 

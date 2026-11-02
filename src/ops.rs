@@ -29,8 +29,8 @@ pub fn find(app: &str, op: &str) -> Option<(Value, Value)> {
 pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     let (words, mut flags) = split(args);
     let spec = find(app, op);
+    let Some((a, o)) = &spec else { bail!("{}", unknown(app, op)) };
     if flags.contains_key("help") || flags.contains_key("h") {
-        let Some((a, o)) = &spec else { bail!("{}", unknown(app, op)) };
         print!("{}", help(a, o));
         return Ok(());
     }
@@ -40,8 +40,8 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     let out = take("out");
     let confirmed = flags.remove("confirm").is_some() || flags.remove("yes").is_some();
     let files: Vec<String> = flags.remove("file").unwrap_or_default().into_iter().flatten().collect();
-    let schema = spec.as_ref().map(|(_, o)| o["input"].clone()).unwrap_or(Value::Null);
-    let places = spec.as_ref().map(|(_, o)| places(o)).unwrap_or_default();
+    let schema = o["input"].clone();
+    let places = places(o);
     let mut input = input(&schema, &places, words, flags, &files)?;
     let missing = missing(&schema, &input);
     if !missing.is_empty() {
@@ -54,15 +54,49 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
             if missing.len() == 1 { "it" } else { "them" }
         );
     }
-    if spec.as_ref().is_some_and(|(_, o)| o["confirm"] == true) && !confirmed {
+    if o["confirm"] == true && !confirmed {
         ask(&format!("{CLI} {app} {op} can't be undone. Go ahead?"), &format!("{app} {op} can't be undone: run it again with --confirm"))?;
     }
-    let r = post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" }))?;
-    if let Some(none) = spec.as_ref().and_then(|(a, _)| none_said(a, op, &r["ok"], true)) {
+    let mut r = match post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })) {
+        Ok(r) => r,
+        Err(e) => bail!("{}", in_cli_words(&format!("{e:#}"))),
+    };
+    if let Some(none) = none_said(a, op, &r["ok"], true) {
         println!("{none}");
         return Ok(());
     }
+    if let Some(text) = r["ok"].as_str() {
+        r["ok"] = json!(in_cli_words(text));
+    }
     show(app, op, &r["ok"], out.as_deref())
+}
+
+/// What an app says, as the command line says it: each tool it names (`gmail_sign_in`) as its command
+/// (`one gmail sign_in`).
+fn in_cli_words(text: &str) -> String {
+    let mut apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    apps.extend([one::skills::vault_app(), one::skills::groups_app()]);
+    let command = |word: &str| -> Option<String> {
+        word.match_indices('_').find_map(|(i, _)| {
+            let (app, op) = (&word[..i], &word[i + 1..]);
+            let a = apps.iter().find(|a| a["name"] == app)?;
+            a["ops"].as_array()?.iter().any(|o| o["name"] == op).then(|| format!("{CLI} {app} {op}"))
+        })
+    };
+    let mut out = String::new();
+    let mut word = String::new();
+    for c in text.chars().chain(std::iter::once('\0')) {
+        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+            word.push(c);
+            continue;
+        }
+        out.push_str(&command(&word).unwrap_or_else(|| word.clone()));
+        word.clear();
+        if c != '\0' {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// An operation as the caller names it: `one gmail sign_in` on the command line, `gmail_sign_in` to MCP.

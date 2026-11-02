@@ -13,7 +13,7 @@ async function sidecar(ctx, op, input) {
   }
 }
 
-const NEEDS = "Messenger needs Agent Devices on one of your devices, and none of them runs it. Ask an owner of one to install it.";
+const NEEDS = "Messenger needs Agent Devices, and none of your devices runs it yet: whoever owns a device installs it there, and the App Store's Agent Devices page shows where. Then messenger_sign_in signs in.";
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {

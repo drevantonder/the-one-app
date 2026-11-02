@@ -747,7 +747,14 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         [app] if !app.starts_with('-') => {
             let apps = get("/v1/apps")?;
-            let found = apps.as_array().into_iter().flatten().find(|a| a["name"] == *app).with_context(|| format!("unknown command {app}; {CLI} help lists them, {CLI} apps every app's"))?;
+            let tool = |a: &&Value| app.strip_prefix(&format!("{}_", a["name"].as_str().unwrap_or("-"))).filter(|op| a["ops"].as_array().into_iter().flatten().any(|o| o["name"] == *op)).map(|op| format!("{} {op}", a["name"].as_str().unwrap_or("")));
+            let found = match apps.as_array().into_iter().flatten().find(|a| a["name"] == *app) {
+                Some(found) => found,
+                None => match apps.as_array().into_iter().flatten().find_map(|a| tool(&a)) {
+                    Some(command) => bail!("no command {app}: did you mean {CLI} {command}?"),
+                    None => bail!("no command or app {app}; {CLI} help lists the commands, {CLI} apps the apps"),
+                },
+            };
             println!("{} ({app})", found["title"].as_str().unwrap_or(app));
             if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
                 println!("\n{i}\n");
