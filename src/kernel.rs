@@ -173,6 +173,40 @@ pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> 
     Ok(claims)
 }
 
+/// The auth service at an install's address, as nodes check its tokens: its keys fetched and kept five minutes, or
+/// until a token names a key that isn't among them (as `kernel/shared/token.js`'s `Issuer` does).
+pub struct Issuer {
+    pub iss: String,
+    keys: std::sync::Mutex<Option<(Value, std::time::Instant)>>,
+}
+
+impl Issuer {
+    pub fn new(address: &str) -> Issuer {
+        Issuer { iss: format!("{}/api/auth", address.trim_end_matches('/')), keys: Default::default() }
+    }
+
+    /// A token's claims, as `verify` checks them, at `now` (milliseconds).
+    pub fn verify(&self, token: &str, now: u64) -> Result<Claims> {
+        for fresh in [false, true] {
+            let kept = self.keys.lock().unwrap().clone().filter(|(_, at)| !fresh && at.elapsed() < Duration::from_secs(300));
+            let jwks = match kept {
+                Some((jwks, _)) => jwks,
+                None => {
+                    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build().into();
+                    let jwks: Value = agent.get(format!("{}/jwks", self.iss)).call().context("the auth service didn't give its keys")?.body_mut().read_json()?;
+                    *self.keys.lock().unwrap() = Some((jwks.clone(), std::time::Instant::now()));
+                    jwks
+                }
+            };
+            match verify(token, &jwks, &self.iss, now) {
+                Err(err) if !fresh && err.to_string().contains("key the auth service") => continue,
+                other => return other,
+            }
+        }
+        unreachable!("the second try returns")
+    }
+}
+
 // The vault, as nodes ask it.
 
 /// A key a call names, and (from the vault) the key itself.
@@ -239,7 +273,7 @@ impl Vault {
         Ok(out)
     }
 
-    /// What a token opens: a node asks before it runs a scheduled run as its person.
+    /// What a token opens: a node asks before it runs anything as its person.
     pub fn session(&self, token: &str) -> Result<Session> {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
         let mut resp = agent.get(format!("{}/session", self.url.trim_end_matches('/'))).header("authorization", format!("Bearer {token}")).call()?;
@@ -686,11 +720,11 @@ impl Cloudflare {
     }
 }
 
-/// Lets someone sign up at the auth service at `auth_url`, with the kernel's secret: nobody signs up uninvited, the
-/// install's first person too.
-pub fn invite(auth_url: &str, kernel_secret: &str, email: &str) -> Result<()> {
+/// Lets someone sign up at the auth service at `auth_url`, with the kernel's secret, as `user` (who they are in the
+/// install, so nodes know them) if it's given: nobody signs up uninvited, the install's first person too.
+pub fn invite(auth_url: &str, kernel_secret: &str, email: &str, user: Option<&str>) -> Result<()> {
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-    let mut resp = agent.post(format!("{}/internal/invite", auth_url.trim_end_matches('/'))).header("x-kernel-secret", kernel_secret).send_json(json!({ "email": email }))?;
+    let mut resp = agent.post(format!("{}/internal/invite", auth_url.trim_end_matches('/'))).header("x-kernel-secret", kernel_secret).send_json(json!({ "email": email, "user": user }))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
     ensure!(resp.status() == 200, "the auth service said: {}", out["error"].as_str().unwrap_or("nothing"));
     Ok(())

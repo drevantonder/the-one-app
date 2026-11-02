@@ -1,4 +1,6 @@
-//! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user.
+//! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; and how someone
+//! signed in with the install's kernel (a browser, through the gateway) reaches it, as themselves, for what their
+//! sign-in opens.
 
 use std::convert::Infallible;
 
@@ -85,9 +87,32 @@ pub fn router(node: Node) -> Router {
         .route("/v1/providers/{app}/calls", get(next_call))
         .route("/v1/providers/{app}/calls/{id}", post(reply))
         .route("/{app}/{*path}", any(app_http).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
-        .layer(axum::middleware::from_fn(only_this_machine))
+        .route_layer(axum::middleware::from_fn_with_state(node.clone(), only_this_machine))
         .with_state(node)
 }
+
+/// Headers that say a request was passed on from elsewhere: the gateway sends `forwarded`, tunnels and proxies the rest.
+pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip", "cf-worker"];
+
+/// What someone signed in with the kernel may ask; the rest is for this machine's own programs.
+pub const SIGNED_IN: &[&str] = &[
+    "/v1/state",
+    "/v1/apps",
+    "/v1/call",
+    "/v1/widgets",
+    "/v1/badges",
+    "/v1/screens/{app}/{screen}",
+    "/v1/blobs/{hash}",
+    "/v1/events",
+    "/v1/arrange",
+    "/v1/install",
+    "/v1/retire",
+    "/v1/vault",
+    "/v1/vault/requests",
+    "/v1/vault/request",
+    "/v1/vault/answer",
+    "/v1/vault/fetch",
+];
 
 /// The skills for this machine's person (src/skills.rs).
 async fn skills(node: &Node) -> Vec<crate::skills::Skill> {
@@ -175,12 +200,24 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
     found
 }
 
-/// Headers that say a request was passed on from elsewhere: the gateway sends `forwarded`, tunnels and proxies the rest.
-pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip", "cf-worker"];
-
 /// Browsers send an Origin, and a page that rebinds its DNS to 127.0.0.1 still sends its own Host:
-/// refuse both, so no web page can drive this machine's node.
-async fn only_this_machine(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+/// refuse both, so no web page can drive this machine's node. A request with a kernel sign-in's access token is
+/// someone's instead, for what `SIGNED_IN` lists.
+async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
+    if let Some(token) = token {
+        let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str()).unwrap_or("");
+        if !SIGNED_IN.contains(&path) {
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response();
+        }
+        return match signed_in(&node, token).await {
+            Ok(me) => {
+                req.extensions_mut().insert(me);
+                next.run(req).await
+            }
+            Err(err) => (StatusCode::UNAUTHORIZED, Json(json!({ "error": format!("{err:#}") }))).into_response(),
+        };
+    }
     let host = req.headers().get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
     // The gateway, a tunnel or a proxy on this machine still says it passed on someone else's request.
     let forwarded = FORWARDED.iter().any(|h| req.headers().contains_key(*h));
@@ -218,16 +255,100 @@ fn local(node: &Node) -> Result<Caller, Error> {
     Ok(Caller { key: node.id(), user: node.user()?, agent: None })
 }
 
+/// Who asked: this machine's own user, or someone signed in with the kernel, whom this server acts for, limited to
+/// the scopes their sign-in opens (and its apps, if it's limited to some).
+#[derive(Clone)]
+struct Me {
+    caller: Caller,
+    scopes: Option<Vec<String>>,
+    apps: Option<Vec<String>>,
+    read_only: bool,
+}
+
+impl Me {
+    /// Refuses a change if their sign-in may only read.
+    fn may_change(&self) -> Result<(), Error> {
+        match self.read_only {
+            true => Err(anyhow::anyhow!("this sign-in may only read").into()),
+            false => Ok(()),
+        }
+    }
+
+    /// Refuses a scope their sign-in doesn't open; `None` is every scope they're in.
+    fn may_use(&self, node: &Node, scope: Option<&str>) -> Result<(), Error> {
+        let Some(opens) = &self.scopes else { return Ok(()) };
+        let wanted = match scope {
+            Some(scope) => vec![node.scope_for(&self.caller, scope)?],
+            None => node.scopes_of(&self.caller.user)?,
+        };
+        match wanted.iter().find(|s| !opens.contains(&s.to_string())) {
+            Some(s) => Err(anyhow::anyhow!("this sign-in doesn't open {s}").into()),
+            None => Ok(()),
+        }
+    }
+}
+
+impl axum::extract::FromRequestParts<Node> for Me {
+    type Rejection = Error;
+
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, node: &Node) -> Result<Me, Error> {
+        match parts.extensions.get::<Me>() {
+            Some(me) => Ok(me.clone()),
+            None => Ok(Me { caller: local(node)?, scopes: None, apps: None, read_only: false }),
+        }
+    }
+}
+
+/// Sign-ins checked lately, by their token's hash, until they expire.
+static SIGNED_INS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>> = std::sync::LazyLock::new(Default::default);
+static ISSUER: std::sync::Mutex<Option<std::sync::Arc<crate::kernel::Issuer>>> = std::sync::Mutex::new(None);
+
+/// Whom a kernel access token is for: one the auth service at the install's address signed for it, whose session at
+/// the vault is open, for a person of the install.
+async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
+    use sha2::Digest;
+    let now = crate::node::now_ms();
+    let hash: [u8; 32] = sha2::Sha256::digest(token.as_bytes()).into();
+    if let Some((me, _)) = SIGNED_INS.lock().unwrap().get(&hash).filter(|(_, until)| now < *until) {
+        return Ok(me.clone());
+    }
+    let (address, vault) = node.kernel()?;
+    let issuer = {
+        let mut kept = ISSUER.lock().unwrap();
+        match kept.as_ref().filter(|i| i.iss == crate::kernel::Issuer::new(&address).iss) {
+            Some(issuer) => issuer.clone(),
+            None => kept.insert(std::sync::Arc::new(crate::kernel::Issuer::new(&address))).clone(),
+        }
+    };
+    let (claims, session) = tokio::task::spawn_blocking(move || {
+        let claims = issuer.verify(&token, now)?;
+        anyhow::ensure!(claims.for_resource(&address), "that sign-in isn't for {address}");
+        let session = crate::kernel::Vault { url: vault }.session(&token)?;
+        anyhow::ensure!(session.user == claims.sub, "that sign-in's session is someone else's");
+        Ok((claims, session))
+    })
+    .await??;
+    anyhow::ensure!(node.is_user(&claims.sub), "you aren't a person of this install yet: an admin lets you in with {} kernel invite", crate::config::CLI);
+    let me = Me { caller: Caller { key: node.id(), user: claims.sub.clone(), agent: None }, scopes: Some(session.scopes), apps: session.apps, read_only: session.read_only };
+    let mut kept = SIGNED_INS.lock().unwrap();
+    kept.retain(|_, (_, until)| now < *until);
+    kept.insert(hash, (me.clone(), (claims.exp * 1000).min(session.until)));
+    Ok(me)
+}
+
 fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
     body[key].as_str().filter(|s| !s.trim().is_empty()).map(str::trim).ok_or_else(|| anyhow::anyhow!("give {key}").into())
 }
 
-async fn state(State(node): State<Node>) -> Json<Value> {
-    Json(node.state())
+async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Json<Value> {
+    Json(match signed_in {
+        Some(me) => node.state_for(&me.caller),
+        None => node.state(),
+    })
 }
 
-async fn apps(State(node): State<Node>) -> Reply {
-    Ok(Json(json!(node.apps(&local(&node)?).await?)))
+async fn apps(State(node): State<Node>, me: Me) -> Reply {
+    Ok(Json(json!(node.apps(&me.caller).await?)))
 }
 
 /// `{ name, server?, installed? }`: removes a sidecar from a server (this one by default), or with `installed` lets it
@@ -238,14 +359,18 @@ async fn sidecar(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 }
 
 /// `{ app, how }`: deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`).
-async fn retire(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.retire(&local(&node)?, text(&body, "app")?, text(&body, "how")?).await?;
+async fn retire(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    me.may_use(&node, None)?;
+    me.may_change()?;
+    node.retire(&me.caller, text(&body, "app")?, text(&body, "how")?).await?;
     done()
 }
 
 /// `{ page, items, hidden }`: how the local user arranges one of their pages.
-async fn arrange(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.arrange(&local(&node)?, text(&body, "page")?, body["items"].clone(), body["hidden"].clone()).await?;
+async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    me.may_use(&node, None)?;
+    me.may_change()?;
+    node.arrange(&me.caller, text(&body, "page")?, body["items"].clone(), body["hidden"].clone()).await?;
     done()
 }
 
@@ -256,10 +381,13 @@ async fn schedule(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-async fn call(State(node): State<Node>, Json(mut req): Json<CallRequest>) -> Reply {
+async fn call(State(node): State<Node>, me: Me, Json(mut req): Json<CallRequest>) -> Reply {
     // Only the node says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);
-    Ok(Json(json!({ "ok": node.call(req).await? })))
+    if let Some(scopes) = &me.scopes {
+        req = node.keep_to(req, &me.caller, scopes, me.apps.as_deref(), me.read_only)?;
+    }
+    Ok(Json(json!({ "ok": node.call_as(req, me.caller).await? })))
 }
 
 #[derive(Deserialize)]
@@ -267,12 +395,14 @@ struct WidgetsQuery {
     scope: Option<String>,
 }
 
-async fn badges(State(node): State<Node>, Query(q): Query<WidgetsQuery>) -> Reply {
-    Ok(Json(node.badges(local(&node)?, q.scope.as_deref()).await?))
+async fn badges(State(node): State<Node>, me: Me, Query(q): Query<WidgetsQuery>) -> Reply {
+    me.may_use(&node, q.scope.as_deref())?;
+    Ok(Json(node.badges(me.caller, q.scope.as_deref()).await?))
 }
 
-async fn widgets(State(node): State<Node>, Query(q): Query<WidgetsQuery>) -> Reply {
-    Ok(Json(json!(node.widgets(local(&node)?, q.scope.as_deref()).await?)))
+async fn widgets(State(node): State<Node>, me: Me, Query(q): Query<WidgetsQuery>) -> Reply {
+    me.may_use(&node, q.scope.as_deref())?;
+    Ok(Json(json!(node.widgets(me.caller, q.scope.as_deref()).await?)))
 }
 
 async fn create(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
@@ -415,10 +545,11 @@ async fn source(State(node): State<Node>, Path(app): Path<String>, Query(q): Que
 
 /// `{ app, scope, installed }`: `scope` is `user`, `group:<id>` (or a group's name) or `global`.
 /// Installing an app also installs the apps it uses.
-async fn install(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let me = local(&node)?;
-    let scope = node.scope_for(&me, text(&body, "scope")?)?;
-    node.install(&me, text(&body, "app")?, &scope, body["installed"] != false).await?;
+async fn install(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    me.may_use(&node, Some(text(&body, "scope")?))?;
+    me.may_change()?;
+    let scope = node.scope_for(&me.caller, text(&body, "scope")?)?;
+    node.install(&me.caller, text(&body, "app")?, &scope, body["installed"] != false).await?;
     done()
 }
 
@@ -452,13 +583,16 @@ async fn backups_post(State(node): State<Node>, uri: axum::http::Uri, Json(body)
 
 /// The Vault's routes, `/v1/vault…` and their earlier names `/v1/secrets…`: a GET's query goes to the node as a
 /// POST's body does.
-async fn vault_get(State(node): State<Node>, uri: axum::http::Uri, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
+async fn vault_get(State(node): State<Node>, me: Me, uri: axum::http::Uri, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
+    me.may_use(&node, q.get("scope").map(String::as_str))?;
     let input: serde_json::Map<String, Value> = q.into_iter().map(|(k, v)| (k, json!(v))).collect();
-    Ok(Json(node.vault_route(&local(&node)?, "GET", uri.path(), &json!(input)).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
+    Ok(Json(node.vault_route(&me.caller, "GET", uri.path(), &json!(input)).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
-async fn vault_post(State(node): State<Node>, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
-    Ok(Json(node.vault_route(&local(&node)?, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
+async fn vault_post(State(node): State<Node>, me: Me, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
+    me.may_use(&node, Some(body["scope"].as_str().unwrap_or("user")))?;
+    me.may_change()?;
+    Ok(Json(node.vault_route(&me.caller, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
 /// For agent harnesses' hooks: the body is the hook's JSON, the reply is plain text to show the agent.
@@ -543,9 +677,10 @@ struct ScreenQuery {
 }
 
 /// An app screen as a page, for shells' web views and for a browser on this machine.
-async fn screen(State(node): State<Node>, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
+async fn screen(State(node): State<Node>, me: Me, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
+    me.may_use(&node, q.scope.as_deref())?;
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    let html = node.screen(local(&node)?, &app, &name, params, q.scope.as_deref()).await?;
+    let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref()).await?;
     Ok(axum::response::Html(html).into_response())
 }
 

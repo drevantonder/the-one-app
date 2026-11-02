@@ -443,3 +443,83 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The gateway (`kernel/gateway/worker.js`) sends a node every path the node takes kernel sign-ins at
+/// (`api::SIGNED_IN`), and marks each with a header the node knows means it came from elsewhere (`api::FORWARDED`),
+/// so a node on the gateway's own machine never takes it as one of the machine's own programs.
+#[test]
+fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere() {
+    use std::io::{BufRead, BufReader, Write};
+    use one::kernel;
+
+    // A stand-in node: it answers each request with the request's line and headers.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let node = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let mut headers = Vec::new();
+            loop {
+                let mut h = String::new();
+                if reader.read_line(&mut h).unwrap() == 0 || h.trim().is_empty() {
+                    break;
+                }
+                headers.push(h.split(':').next().unwrap().trim().to_lowercase());
+            }
+            let body = json!({ "line": line.trim(), "headers": headers }).to_string();
+            let mut stream = stream;
+            let _ = write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+        }
+    });
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
+    let files = vec![("gateway/worker.js".to_string(), std::fs::read(root.join("gateway/worker.js")).unwrap())];
+    let dir = std::env::temp_dir().join(format!("one-gateway-{}", rand::random::<u64>()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let addr = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
+    let served = kernel::Served {
+        name: "gateway".into(),
+        module: kernel::module_from(files, "gateway/worker.js").unwrap(),
+        class: None,
+        listen: addr.clone(),
+        bindings: vec![("NODE_URL".into(), node)],
+        assets: None,
+        outbound: Some(kernel::NEARBY.into()),
+    };
+    let mut child = kernel::start(&kernel::write_config(&dir, &[served]).unwrap()).unwrap();
+    let started = std::time::Instant::now();
+    while std::net::TcpStream::connect(&addr).is_err() {
+        assert!(started.elapsed().as_secs() < 30, "workerd didn't start");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    for route in one::api::SIGNED_IN {
+        let path = route.replace("{app}", "board").replace("{screen}", "main").replace("{hash}", "00");
+        let seen: Value = agent.get(format!("http://{addr}{path}")).call().unwrap().body_mut().read_json().unwrap_or(Value::Null);
+        assert_eq!(seen["line"], format!("GET {path} HTTP/1.1"), "the gateway didn't send {path} to the node");
+        let marked = seen["headers"].as_array().unwrap().iter().any(|h| one::api::FORWARDED.contains(&h.as_str().unwrap()));
+        assert!(marked, "the gateway sent {path} without saying it came from elsewhere: {seen}");
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Every node path the web client (`kernel/web/web.js`) asks with its sign-in is one a node takes sign-ins at
+/// (`api::SIGNED_IN`).
+#[test]
+fn nodes_take_sign_ins_at_every_path_the_web_client_asks() {
+    let web = read("kernel/web/web.js");
+    let asked: BTreeSet<&str> = web.match_indices("/v1/").map(|(i, _)| web[i..].split(|c: char| !(c.is_ascii_alphanumeric() || c == '/' || c == '-' || c == '_')).next().unwrap()).collect();
+    assert!(asked.contains("/v1/call"), "{asked:?}");
+    let takes = |path: &str| {
+        one::api::SIGNED_IN.iter().any(|route| match route.split_once('{') {
+            Some((prefix, _)) => path.starts_with(prefix) && path.len() >= prefix.len(),
+            None => *route == path,
+        })
+    };
+    let refused: Vec<_> = asked.iter().filter(|p| !takes(p)).collect();
+    assert!(refused.is_empty(), "the web client asks nodes for what they don't take sign-ins at: {refused:?}");
+}

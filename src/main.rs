@@ -76,13 +76,15 @@ Usage:
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
                                        domains ({CLI}-<service>.<domain>, the install's address {CLI}.<domain> unless
                                        --address says, for good: passkeys belong to it), or at its workers.dev address
-  {CLI} kernel invite <email>         let someone sign up at the kernel's sign-in: nobody can uninvited, its first
-                                       person too
+  {CLI} kernel invite <email> [--user <id>]
+                                       let someone sign up at the kernel's sign-in, as who they are in the install
+                                       (this machine's person, unless --user says), so nodes know them: nobody can
+                                       uninvited, its first person too
   {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/), auth-url, vault-url,
                                        schedules-url, resources (nodes' own addresses, comma-separated), bucket or
                                        google (its JSON object piped, with - as its value)
-  {CLI} kernel use <auth> <vault> <schedules>
-                                       point this install at its kernel's services
+  {CLI} kernel use <address> <vault> <schedules>
+                                       point this install at its kernel: its nodes take sign-ins made at the address
   {CLI} storage                        where the install's data is kept
   {CLI} storage move --endpoint <url>  move it to S3-compatible storage (R2, S3, GCS, MinIO), which every server
                                        reaches: piped a JSON object of bucket, key_id and secret (and region) it tries
@@ -372,7 +374,11 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["kernel", "invite", email] => {
             let settings = one::kernel::Settings::load()?;
-            one::kernel::invite(&settings.auth_url, &settings.kernel_secret, email)?;
+            let user = match flags.get("user").and_then(Value::as_str) {
+                Some(user) => Some(user.to_string()),
+                None => get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
+            };
+            one::kernel::invite(&settings.auth_url, &settings.kernel_secret, email, user.as_deref())?;
             println!("{email} can sign up at {}/sign-in now.", settings.address);
         }
         ["kernel", "set", name, value] => {
@@ -392,11 +398,11 @@ fn run(args: Vec<String>) -> Result<()> {
             settings.save()?;
             println!("Set {name}. {CLI} kernel serve takes it at its next start, and {CLI} kernel deploy when it next runs.");
         }
-        ["kernel", "use", auth, vault, schedules] => {
-            for (name, url) in [("kernel_auth", auth), ("kernel_vault", vault), ("kernel_schedules", schedules)] {
+        ["kernel", "use", address, vault, schedules] => {
+            for (name, url) in [("address", address), ("kernel_vault", vault), ("kernel_schedules", schedules)] {
                 post("/v1/settings", json!({ "name": name, "value": url.trim_end_matches('/') }))?;
             }
-            println!("This install's kernel is at {auth}.");
+            println!("This install is at {address}: its nodes take sign-ins made there.");
         }
         ["storage"] => {
             let s = get("/v1/storage")?;

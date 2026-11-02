@@ -697,7 +697,7 @@ fn signs_in(k: &Kernel) -> (String, String) {
     // Nobody signs up uninvited, the install's first person too; invited (one kernel invite), he makes an account.
     let (status, _) = browser.post("/api/auth/sign-up/email", json!({ "name": "Andre", "email": "andre@example.com", "password": "a long enough password" }));
     assert_ne!(status, 200, "not invited, nobody signs up");
-    kernel::invite(&k.auth, &k.secret, "Andre@example.com").unwrap();
+    kernel::invite(&k.auth, &k.secret, "Andre@example.com", None).unwrap();
     let (status, made) = browser.post("/api/auth/sign-up/email", json!({ "name": "Andre", "email": "andre@example.com", "password": "a long enough password" }));
     assert_eq!(status, 200, "{made}");
     let user = made["user"]["id"].as_str().unwrap().to_string();
@@ -1166,4 +1166,136 @@ fn the_gateway_sends_each_path_where_it_belongs_and_nothing_a_node_says_runs_at_
     assert_eq!(ask("POST", &at("/v1/call"), &[], Some(json!({}))).0, 200);
     assert_eq!(ask("GET", &at("/mcp"), &[], None).0, 200, "/mcp is a node's");
     assert_eq!(ask("GET", &at("/v1/state"), &[("service-worker", "script")], None).0, 403, "no node's answer becomes a service worker");
+}
+
+#[test]
+fn a_browser_signs_in_at_the_address_and_uses_a_node_as_its_person_for_what_its_sign_in_opens() {
+    // A node with an install, its API where the gateway sends /v1/.
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let dir = std::env::temp_dir().join(format!("one-kernel-node-{}", rand::random::<u64>()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "node" }).to_string()).unwrap();
+    let (node, _router, api) = rt.block_on(async {
+        let (node, router) = one::node::Node::start(&dir, one::sidecars::built_in()).await.unwrap();
+        node.create("Test", "Andre").await.unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let api = format!("http://{}", listener.local_addr().unwrap());
+        let app = one::api::router(node.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (node, router, api)
+    });
+    let andre = node.user().unwrap();
+    let k = Kernel::start(Some(api.clone()));
+    let at = |path: &str| format!("{}{path}", k.address);
+
+    // The install's nodes take sign-ins made at its address, and Andre is let in as who he is in the install.
+    rt.block_on(async {
+        node.member("setting", json!({ "name": "address", "value": k.address })).await.unwrap();
+        node.member("setting", json!({ "name": "kernel_vault", "value": k.vault })).await.unwrap();
+    });
+    kernel::invite(&k.auth, &k.secret, "andre@example.com", Some(&andre)).unwrap();
+    let mut browser = k.browser();
+    let (status, made) = browser.post("/api/auth/sign-up/email", json!({ "name": "Andre", "email": "andre@example.com", "password": "a long enough password" }));
+    assert_eq!(status, 200, "{made}");
+    assert_eq!(made["user"]["id"], andre.as_str(), "he signs up as who he is in the install");
+    let passkey = k.passkey();
+    let (_, options, _) = browser.get("/api/auth/passkey/generate-register-options");
+    let (status, registered) = browser.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "name": "MacBook" }));
+    assert_eq!(status, 200, "{registered}");
+
+    let (_, options, _) = browser.get("/api/auth/passkey/generate-authenticate-options");
+    let (status, signed) = browser.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options, &andre) }));
+    assert_eq!(status, 200, "{signed}");
+
+    // The web client signs in as any OAuth client does, at its own origin, and he lets it use his own scope only.
+    let mine = format!("user:{andre}");
+    let access = web_sign_in(&k, &mut browser, &passkey, json!({ "scopes": [mine] }));
+    let bearer = format!("Bearer {access}");
+    let with = [("authorization", bearer.as_str())];
+
+    // With it, the node is his: what he sees, and a call in his scope, through the address.
+    let (status, headers, body) = ask("GET", &at("/v1/state"), &with, None);
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(headers["content-security-policy"], "sandbox allow-scripts allow-forms allow-popups allow-downloads");
+    let state: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(state["me"]["user"], andre.as_str());
+    let called = |input: Value| {
+        let (status, _, body) = ask("POST", &at("/v1/call"), &with, Some(json!({ "app": "board", "op": "post", "input": input })));
+        (status, serde_json::from_str::<Value>(&body).unwrap())
+    };
+    let eventually = |what: &str, f: &dyn Fn() -> bool| {
+        let started = std::time::Instant::now();
+        while !f() {
+            assert!(started.elapsed() < Duration::from_secs(45), "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    };
+    eventually("the node to be ready", &|| called(json!({ "text": "From the browser" })).0 == 200);
+    let (status, _, body) = ask("POST", &at("/v1/call"), &with, Some(json!({ "app": "board", "op": "news", "input": { "format": "json", "since": 0, "scope": "user" } })));
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("From the browser"), "{body}");
+    let (status, headers, screen) = ask("GET", &at("/v1/screens/board/main?scope=user"), &with, None);
+    assert!(status == 200 && screen.starts_with("<!doctype html>"), "{status} {screen}");
+    assert_eq!(headers["content-security-policy"], "sandbox allow-scripts allow-forms allow-popups allow-downloads", "a screen runs in an origin of its own");
+
+    // Only what his sign-in opens: not Everyone's scope, nor what this machine's own programs may do.
+    let (status, refused) = called(json!({ "text": "To everyone", "scope": "global" }));
+    assert!(status == 400 && refused["error"].as_str().unwrap().contains("no board in global"), "the call reaches only his scope: {refused}");
+    let (status, _, body) = ask("POST", &at("/v1/call"), &with, Some(json!({ "app": "board", "op": "post", "input": { "text": "To everyone" }, "scopes": ["global"] })));
+    assert!(status == 400 && body.contains("doesn't open global"), "{body}");
+    let (status, _, body) = ask("GET", &at("/v1/widgets"), &with, None);
+    assert!(status == 400 && body.contains("doesn't open"), "every scope he's in is more than it opens: {body}");
+    let (status, _, body) = ask("POST", &at("/v1/settings"), &with, Some(json!({ "name": "address", "value": "https://elsewhere.test" })));
+    assert_eq!(status, 403, "{body}");
+    let (status, _, body) = ask("POST", &format!("{api}/v1/pair"), &with, Some(json!({})));
+    assert_eq!(status, 403, "{body}");
+
+    // A sign-in he let only read reads, and changes nothing.
+    let reader = format!("Bearer {}", web_sign_in(&k, &mut browser, &passkey, json!({ "scopes": [mine], "read_only": true })));
+    let reading = [("authorization", reader.as_str())];
+    let (status, _, body) = ask("POST", &at("/v1/call"), &reading, Some(json!({ "app": "board", "op": "news", "input": { "format": "json", "since": 0, "scope": "user" } })));
+    assert!(status == 200 && body.contains("From the browser"), "{body}");
+    let (status, _, body) = ask("POST", &at("/v1/call"), &reading, Some(json!({ "app": "board", "op": "post", "input": { "text": "Read only" } })));
+    assert!(status == 400 && body.contains("only reads"), "a read-only sign-in posts nothing: {body}");
+    let (status, _, body) = ask("POST", &at("/v1/install"), &reading, Some(json!({ "app": "repos", "scope": "user" })));
+    assert!(status == 400 && body.contains("only read"), "{body}");
+
+    // Without a sign-in the node takes nothing from the address; with a forged or someone else's, nothing either.
+    assert_eq!(ask("GET", &at("/v1/state"), &[], None).0, 403);
+    let forged = format!("Bearer {}x", &access[..access.len() - 1]);
+    assert_eq!(ask("GET", &at("/v1/state"), &[("authorization", &forged)], None).0, 401);
+    let (status, _, body) = ask("GET", &at("/v1/state"), &[("authorization", "Bearer not.a.token")], None);
+    assert_eq!(status, 401, "{body}");
+}
+
+/// The web client's sign-in at the install's address, as any OAuth client's (PKCE, the passkey's secret at consent),
+/// in a browser signed in with that passkey, with what the person lets it have (`{ scopes, apps?, read_only? }`): →
+/// its access token.
+fn web_sign_in(k: &Kernel, browser: &mut Browser, passkey: &Passkey, consent: Value) -> String {
+    let callback = format!("{}/callback", k.address);
+    let (status, client) = k.browser().post("/api/auth/oauth2/register", json!({
+        "client_name": "The web client", "redirect_uris": [callback], "token_endpoint_auth_method": "none",
+        "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"] }));
+    assert_eq!(status, 201, "{client}");
+    let client_id = client["client_id"].as_str().unwrap().to_string();
+    let verifier = B64U.encode(&rand::random::<[u8; 32]>());
+    let challenge = { use sha2::Digest; B64U.encode(&sha2::Sha256::digest(verifier.as_bytes())) };
+    let (status, _, location) = browser.get(&format!(
+        "/api/auth/oauth2/authorize?response_type=code&client_id={client_id}&redirect_uri={}&scope={}&state=s&code_challenge={challenge}&code_challenge_method=S256",
+        enc(&callback), enc("openid offline_access")
+    ));
+    assert_eq!(status, 302);
+    let oauth_query = location.unwrap().split_once('?').unwrap().1.to_string();
+    let prf = B64U.encode(&passkey.id.repeat(2));
+    let (status, _) = browser.post("/consent/scopes", json!({ "prf": prf, "credential": B64U.encode(&passkey.id) }));
+    assert_eq!(status, 200);
+    let mut accept = json!({ "oauth_query": oauth_query, "accept": true, "prf": prf });
+    accept.as_object_mut().unwrap().extend(consent.as_object().unwrap().clone());
+    let (status, accepted) = browser.post("/consent/accept", accept);
+    assert_eq!(status, 200, "{accepted}");
+    let code = query_of(accepted["url"].as_str().unwrap())["code"].clone();
+    let (status, tokens, _) = k.browser().send("POST", &format!("{}/api/auth/oauth2/token", k.address), None, Some(&[
+        ("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", &callback), ("client_id", &client_id), ("code_verifier", &verifier)]));
+    assert_eq!(status, 200, "{tokens}");
+    tokens["access_token"].as_str().unwrap().to_string()
 }
