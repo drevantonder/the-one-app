@@ -676,6 +676,11 @@ pub fn valid_host(host: &str) -> bool {
 }
 
 /// Whether a node entry in a user or group scope counts, by its kind's rules, and what it changes.
+/// Whether one of a scope's node entries would count, after what its earlier ones add up to: why not, if it wouldn't.
+pub fn applies_in_scope(m: &Members, state: &ScopeState, e: &Entry) -> Result<()> {
+    apply_in_scope(m, &mut state.clone(), e)
+}
+
 fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> {
     let scope = e.scope();
     let w = e.user();
@@ -739,7 +744,11 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
                     (data["title"].as_str().unwrap_or("").trim().to_string(), fields)
                 }
             };
-            ensure!(!title.is_empty() && !fields.is_empty() && fields.iter().all(|(n, _)| valid_secret_name(n)), "a request asks for named fields, with a title");
+            ensure!(!title.is_empty(), "a request has a title");
+            ensure!(!fields.is_empty(), "a request asks for one field or more");
+            if let Some((name, _)) = fields.iter().find(|(n, _)| !valid_secret_name(n)) {
+                bail!("“{name}” can't be a field's name: use letters, digits, _, - and . with no spaces, like {}", name.trim().replace(|c: char| !c.is_ascii_alphanumeric() && !"_-.".contains(c), "_"));
+            }
             let hosts: Vec<String> = data["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
             ensure!(hosts.iter().all(|h| valid_host(h)), "a host is a host name, like api.example.com");
             ensure!(!hosts.is_empty() || !fields.iter().any(|(_, secret)| *secret), "a secret field goes to one host or more");

@@ -648,6 +648,10 @@ impl Node {
             }
         }
         let entry = self.with(|i| i.r.make(scope, user, by, content, now_ms()))?;
+        // One of a scope's node entries that its replay would skip is never written: it would say it was done.
+        if *scope != Scope::Global && entry.content.app == members::APP {
+            self.with(|i| members::applies_in_scope(&i.r.members, &i.views.get(&scope.to_string()).map(|(_, s)| s.clone()).unwrap_or_default(), &entry))?;
+        }
         self.put_entry(scope, &entry).await?;
         let handled = self.with(|i| i.r.add_own(&entry))?;
         self.after(handled).await?;
