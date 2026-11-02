@@ -1,9 +1,9 @@
 // The serverless node: a node of the install on Cloudflare Workers, which the gateway sends `/v1/` and `/mcp` to by
 // service binding. It holds nothing open. Each request brings its person's access token, checked as every node checks
 // one (src/lib.rs, which is the machine node's own Rust); for a call it asks the vault for the keys and bucket URLs of
-// what the call names, runs the app in an isolate of its own (Worker Loader, src/runtime/shim.js as its `ctx`), writes
-// what the call wrote as one step (src/db.rs), and forgets. What it can't do itself goes on to the install's node on
-// a machine (`MACHINE`), as the gateway sent it.
+// what the call names, keeping the sign-in and its keys until its token expires, runs the app in an isolate of its own
+// (Worker Loader, src/runtime/shim.js as its `ctx`), writes what the call wrote as one step (src/db.rs), and forgets
+// the rest. What it can't do itself goes on to the install's node on a machine (`MACHINE`), as the gateway sent it.
 //
 // Bindings: AUTH and VAULT (the kernel's services), LOADER (Worker Loader), MACHINE (a node on a machine: a Workers
 // VPC service; or MACHINE_URL, its address), ADDRESS (the install's) and NAME (its name). `built.js`, made when it's
@@ -76,17 +76,28 @@ async function nameOf(env, token, user) {
   return names.get(user);
 }
 
+/// Sign-ins this isolate checked, by a hash of their token, until it expires: whom each is for, with the keys its
+/// calls named, so the vault is asked once a session for each, not every call.
+const signedIn = new Map();
+
 /// Whom a request is for: an access token the auth service at the install's address signed for it, whose session at
-/// the vault is open. → `{ token, user, client, name }`.
+/// the vault is open. → `{ token, user, client, name, keys }`.
 async function whom(request, env) {
   const auth = request.headers.get("authorization") || "";
   const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : refuse(403, "sign in first: a serverless node takes only sign-ins");
+  const hash = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))));
+  const now = Date.now();
+  const kept = signedIn.get(hash);
+  if (kept && now < kept.until) return kept.who;
   const claims = await claimsOf(env, token);
   const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!aud.includes(env.ADDRESS)) refuse(401, `that sign-in isn't for ${env.ADDRESS}`);
   const session = await vault(env, token, "GET", "/session");
   if (session.user !== claims.sub) refuse(401, "that sign-in's session is someone else's");
-  return { token, user: claims.sub, client: claims.azp, name: await nameOf(env, token, claims.sub) };
+  const who = { token, user: claims.sub, client: claims.azp, name: await nameOf(env, token, claims.sub), keys: new Map() };
+  for (const [h, s] of signedIn) if (s.until <= now) signedIn.delete(h);
+  signedIn.set(hash, { who, until: Math.min(claims.exp * 1000, session.until) });
+  return who;
 }
 
 /// What an app is told about who it runs for (src/apps.rs: `Me`).
@@ -191,9 +202,13 @@ class Call {
   }
 
   async open(scope) {
-    const { keys } = await vault(this.env, this.who.token, "POST", "/keys", { keys: [{ scope, app: this.app, database: "main" }] });
+    const id = `${scope}/${this.app}/main`;
+    if (!this.who.keys.has(id)) {
+      const { keys } = await vault(this.env, this.who.token, "POST", "/keys", { keys: [{ scope, app: this.app, database: "main" }] });
+      this.who.keys.set(id, keys[0].key);
+    }
     const migrations = (await describe(this.env, this.app)).schema?.[kindOf(scope)] || [];
-    return open(this.bucket, prefix(scope, this.app, "main"), keys[0].key, JSON.stringify(migrations));
+    return open(this.bucket, prefix(scope, this.app, "main"), this.who.keys.get(id), JSON.stringify(migrations));
   }
 
   async query(scope, sql, params) {
