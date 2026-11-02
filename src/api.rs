@@ -6,7 +6,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -84,6 +84,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/providers/{app}", post(register))
         .route("/v1/providers/{app}/calls", get(next_call))
         .route("/v1/providers/{app}/calls/{id}", post(reply))
+        .route("/{app}/{*path}", any(app_http).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
         .layer(axum::middleware::from_fn(only_this_machine))
         .with_state(node)
 }
@@ -116,11 +117,16 @@ async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, 
     }
 }
 
+/// The local API's port.
+pub fn port() -> u16 {
+    addr().rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(crate::config::PORT)
+}
+
 /// Serves the skills, and nothing else, on this machine's Tailscale address and the local API's port, so an agent on
 /// any of the person's devices can read them, starting at /llms.txt. Looks again every minute: Tailscale may come up
 /// later, or move.
 pub async fn serve_guide(node: Node) {
-    let port = addr().rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(crate::config::PORT);
+    let port = port();
     let mut serving: Option<(std::net::Ipv4Addr, tokio::task::JoinHandle<()>)> = None;
     loop {
         let ip = tailnet_address();
@@ -474,6 +480,24 @@ struct ReleaseRequest {
 async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> Reply {
     let r = node.publish(std::path::Path::new(&req.path), &req.commit, &req.target, req.committed, &req.signature).await?;
     Ok(Json(json!(r)))
+}
+
+/// A request to `/<app>/<path>`, answered by the app's `_http` operation, run as this machine's person: the body
+/// reaches it as a blob, and it answers `{ status, type, text }`, or `{ status, type, blob }` for bytes it keeps.
+async fn app_http(State(node): State<Node>, Path((app, path)): Path<(String, String)>, req: axum::extract::Request) -> Result<Response, Error> {
+    let method = req.method().to_string();
+    let query = req.uri().query().unwrap_or("").to_string();
+    let body = axum::body::to_bytes(req.into_body(), 1 << 30).await?;
+    let body = if body.is_empty() { None } else { Some(node.put_blob(&body)?) };
+    let input = json!({ "method": method, "path": path, "query": query, "body": body });
+    let out = node.call(CallRequest { app, op: "_http".into(), input, ..Default::default() }).await?;
+    let status = StatusCode::from_u16(out["status"].as_u64().unwrap_or(200) as u16)?;
+    let kind = out["type"].as_str().unwrap_or("text/plain").to_string();
+    let bytes = match out["blob"].as_str() {
+        Some(hash) => node.blob(hash).await?,
+        None => out["text"].as_str().unwrap_or("").as_bytes().to_vec(),
+    };
+    Ok((status, [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response())
 }
 
 async fn put_blob(State(node): State<Node>, body: axum::body::Bytes) -> Reply {

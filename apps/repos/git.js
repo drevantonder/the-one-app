@@ -5,6 +5,7 @@
 // input each stream used, which DecompressionStream can't.
 import zlib from "pako/lib/zlib/inflate.js";
 import ZStream from "pako/lib/zlib/zstream.js";
+import crc32 from "pako/lib/zlib/crc32.js";
 
 const TYPES = { 1: "commit", 2: "tree", 3: "blob", 4: "tag" };
 const OFS_DELTA = 6, REF_DELTA = 7;
@@ -184,6 +185,62 @@ export async function objects(ctx, hashes) {
       return data;
     },
   };
+}
+
+const sha1 = async (bytes) => new Uint8Array(await crypto.subtle.digest("SHA-1", bytes));
+
+/// A pack someone pushed, checked whole and never thin: its name (its checksum, as git names packs) and each object's
+/// hash, CRC and offset, for its index.
+export async function check(bytes) {
+  if (bytes.length < 32) throw new Error("a pack is damaged");
+  if (hex(await sha1(bytes.subarray(0, -20))) !== hex(bytes.subarray(-20))) throw new Error("a pack is damaged: its checksum is wrong");
+  const p = await new Pack(bytes).index();
+  const starts = [...p.headers.keys()];
+  const ends = new Map(starts.map((s, i) => [s, starts[i + 1] ?? bytes.length - 20]));
+  const entries = [...p.at].map(([sha, offset]) => ({ sha, offset, crc: crc32(0, bytes.subarray(offset, ends.get(offset)), ends.get(offset) - offset, 0) >>> 0 }));
+  return { name: hex(bytes.subarray(-20)), entries };
+}
+
+/// Packs one after another as one pack, with each object's place in it. Each is whole (no delta reaches outside it),
+/// and a delta's base is a distance back within its own pack, so their objects are copied as they are.
+export async function merge(packs) {
+  const total = 12 + packs.reduce((n, p) => n + p.bytes.length - 32, 0) + 20;
+  const out = new Uint8Array(total);
+  out.set(packs[0].bytes.subarray(0, 8));
+  let at = 12, count = 0;
+  const entries = [];
+  for (const p of packs) {
+    const view = new DataView(p.bytes.buffer, p.bytes.byteOffset);
+    count += view.getUint32(8);
+    out.set(p.bytes.subarray(12, -20), at);
+    for (const e of p.entries) entries.push({ ...e, offset: e.offset - 12 + at });
+    at += p.bytes.length - 32;
+  }
+  new DataView(out.buffer).setUint32(8, count);
+  out.set(await sha1(out.subarray(0, at)), at);
+  return { bytes: out, name: hex(out.subarray(at)), entries };
+}
+
+/// A pack's index file (git's version 2), from its objects; an object in it twice is listed twice, as git does.
+export async function idx(entries, name) {
+  const rows = [...entries].sort((a, b) => (a.sha < b.sha ? -1 : a.sha > b.sha ? 1 : a.offset - b.offset));
+  const large = rows.filter((r) => r.offset >= 0x80000000);
+  const n = rows.length;
+  const out = new Uint8Array(8 + 1024 + n * 28 + large.length * 8 + 40);
+  const view = new DataView(out.buffer);
+  out.set([0xff, 0x74, 0x4f, 0x63, 0, 0, 0, 2]);
+  const fan = new Uint32Array(256);
+  for (const r of rows) fan[parseInt(r.sha.slice(0, 2), 16)]++;
+  for (let i = 0, acc = 0; i < 256; i++) view.setUint32(8 + 4 * i, (acc += fan[i]));
+  let at = 8 + 1024;
+  for (const r of rows) for (let i = 0; i < 20; i++) out[at++] = parseInt(r.sha.slice(2 * i, 2 * i + 2), 16);
+  for (const r of rows) { view.setUint32(at, r.crc); at += 4; }
+  let big = 0;
+  for (const r of rows) { view.setUint32(at, r.offset >= 0x80000000 ? 0x80000000 | big++ : r.offset); at += 4; }
+  for (const r of large) { view.setBigUint64(at, BigInt(r.offset)); at += 8; }
+  for (let i = 0; i < 20; i++) out[at++] = parseInt(name.slice(2 * i, 2 * i + 2), 16);
+  out.set(await sha1(out.subarray(0, at)), at);
+  return out;
 }
 
 /// Someone and when, from `Name <email> 1700000000 +0100`.

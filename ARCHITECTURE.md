@@ -3,7 +3,7 @@
 The map: what lives where, and the few rules the code only shows by keeping them. How each piece works is in the piece, and its tests.
 
 ```
- Mac app's window, CLI, MCP, browser, agent hooks, git-remote-one, sidecars    iPhone app, widget
+ Mac app's window, CLI, MCP, browser, agent hooks, git, sidecars              iPhone app, widget
                          \                                                       |
                 local HTTP API (src/api.rs)                          one/client/1 over iroh
                                      \                                  /
@@ -35,7 +35,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/replica.rs`: what a server holds and knows: the entries of each scope it holds, as the bucket gives them, and the members they add up to. No clock or I/O.
 - `src/store.rs`: every log of every scope a server holds, and how far it has read each from the bucket.
 - `src/node.rs`: the only place with state and I/O: reading and writing the bucket, pairing, calls, `open`, hooks, blobs, deploys.
-- `src/api.rs`: the local HTTP API every shell, the CLI, MCP and sidecars use, and what phones ask over iroh.
+- `src/api.rs`: the local HTTP API every shell, the CLI, MCP and sidecars use, and what phones ask over iroh. A request to `/<app>/…` is the app's `_http` operation, its body a blob: how stock git reaches Repos.
 - `src/apps.rs`, `src/runtime/`: workerd, which runs every app; `src/runtime/shim.js` is what an app's `ctx` is.
 - `src/sidecars.rs`: server sidecars: the ones built in (`src/shell.rs`, `src/agents.rs`, `src/models.rs`), and those that register over the local API (`sidecars/`, in Go, and the Mac app's, `apple/Mac/Sidecars`).
 - `src/vault.rs`, `src/outbound.rs`: the Vault's items, and filling them into apps' and sidecars' requests on the way out.
@@ -49,7 +49,6 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/screen/`: the design kit and the bridge every app screen is served in. `src/mcp_apps.rs`, `src/mcp_view.html`: widgets and screens drawn inline in chats.
 - `src/skills.rs`, `skills/`: what agents are told, as Agent Skills. `src/code.rs`, `src/codemode/`: search, and code mode.
 - `src/ops.rs`, `src/main.rs`: the CLI and MCP.
-- `src/git.rs`: `git-remote-one`, for the Repos app.
 - `src/load.rs`, `src/logos.rs`: how loaded a machine is, and the logos of the sites apps connect to.
 - `src/update.rs`, `src/release.rs`: building, signing and publishing the node; tooling, not protocol.
 - `kernel/`: the kernel's services, JavaScript for workerd, each one Worker with one Durable Object: `auth/` (Better Auth: passkeys, email, Google, and the OAuth server every client signs in through), `vault/` (every scope's keys and the Vault's items, sealed; keys, filled-in requests and bucket URLs for what a call names), `schedules/` (fires the schedules people let run while they're away, each run once, with only the keys it was let use). `shared/crypto.js` is the formats nodes read too.

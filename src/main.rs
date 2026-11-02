@@ -132,13 +132,7 @@ fn addr() -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // Linked as git-remote-<cli>, it's git's remote helper for <cli>://<repo>: git runs it with a remote and a URL.
-    let invoked = std::env::args().next().map(|a| std::path::Path::new(&a).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()).unwrap_or_default();
-    let result = match invoked == format!("git-remote-{CLI}") {
-        true => one::git::remote(args.last().map(String::as_str).unwrap_or("")),
-        false => run(args),
-    };
-    if let Err(err) = result {
+    if let Err(err) = run(args) {
         eprintln!("{CLI}: {err:#}");
         std::process::exit(1);
     }

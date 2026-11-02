@@ -555,14 +555,14 @@ impl Members {
     }
 }
 
-/// An app's source link as an `app` entry gives it: a web address or `<cli>://<repo>`, or empty (or null) for none.
+/// An app's source link as an `app` entry gives it: a web address, or empty (or null) for none.
 pub fn source_link(v: &Value) -> Result<String> {
     let link = match v {
         Value::Null => "",
         v => v.as_str().context("a source link is text")?.trim(),
     };
     let scheme = link.split_once("://").map(|(s, _)| s);
-    ensure!(link.is_empty() || (link.len() <= 500 && (matches!(scheme, Some("https" | "http")) || scheme == Some(crate::config::CLI))), "a source link is a web address (https://…) or {}://<repo>", crate::config::CLI);
+    ensure!(link.is_empty() || (link.len() <= 500 && matches!(scheme, Some("https" | "http"))), "a source link is a web address (https://…)");
     ensure!(!link.chars().any(char::is_whitespace), "a source link has no spaces");
     Ok(link.to_string())
 }

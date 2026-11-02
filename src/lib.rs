@@ -28,7 +28,6 @@ pub mod backups;
 pub mod bucket;
 pub mod db;
 pub mod entry;
-pub mod git;
 pub mod skills;
 pub mod members;
 pub mod store;

@@ -62,8 +62,6 @@ class Install:
         path = [p for p in env.get("PATH", "").split(":") if p and not pathlib.Path(p, CLI).exists()]
         if not (agent and self.setup == "mcp"):
             path.insert(0, str(pathlib.Path(self.one).parent))
-        if not agent:
-            path.insert(0, str(self.home / "seed-bin"))
         env["PATH"] = ":".join(path)
         return env
 
@@ -81,10 +79,9 @@ class Install:
             shutil.rmtree(self.home)
         self.home.mkdir(parents=True)
         # The harness folders a device of Andre's has, so the node's agents sync finds and fills them.
-        for d in [".config/opencode", ".claude", ".agents", "seed-bin"]:
+        for d in [".config/opencode", ".claude", ".agents"]:
             (self.home / d).mkdir(parents=True)
         (self.home / ".gitconfig").write_text("[user]\n\tname = Andre van Tonder\n\temail = andre@example.com\n[init]\n\tdefaultBranch = main\n")
-        (self.home / "seed-bin" / f"git-remote-{CLI}").symlink_to(self.one)
         log = open(self.home / "node.log", "w")
         self.proc = subprocess.Popen([self.one, "serve"], env=self.env(), stdout=log, stderr=log, start_new_session=True)
         for _ in range(240):
@@ -170,7 +167,6 @@ class Install:
             data["provider"] = {"ollama": {"npm": "@ai-sdk/openai-compatible", "name": "Ollama", "options": {"baseURL": "http://127.0.0.1:11434/v1"},
                                            "models": {model[7:]: {"name": model[7:], "tool_call": True, "limit": {"context": 65536, "output": 8192}}}}}
         cfg.write_text(json.dumps(data, indent=2) + "\n")
-        shutil.rmtree(self.home / "seed-bin")
 
     def checks(self, check, forbidden, events):
         """What the install says after a run, against what the prompt should have done."""

@@ -248,8 +248,8 @@ export default {
       },
     },
     source: {
-      description: "Set where an app you own keeps its code, shown on its page as Source: a web address (GitHub, any git host or page) or one://<repo> for one in Repos. An empty link clears it. Built-in apps start with their folder in the open-source repo; forks start with none.",
-      input: { type: "object", required: ["app", "link"], properties: { app: { type: "string" }, link: { type: "string", description: "https://… or one://<repo>; empty for none" } } },
+      description: "Set where an app you own keeps its code, shown on its page as Source: a web address: GitHub, any git host or page, or a repo's address in Repos (http://localhost:<port>/repos/<repo>.git). An empty link clears it. Built-in apps start with their folder in the open-source repo; forks start with none.",
+      input: { type: "object", required: ["app", "link"], properties: { app: { type: "string" }, link: { type: "string", description: "https://…, or a repo's address in Repos; empty for none" } } },
       async run(ctx, { app, link }) {
         const a = await find(ctx, app);
         if (!mine(ctx, a.owner)) throw new Error(`only ${app}'s owners set its source link`);
@@ -481,11 +481,10 @@ const sections = [
   },
 ];
 
-/// The Source row: \`<cli>://<repo>\` opens the repo in Repos, anything else in the browser.
+/// The Source row: a repo's address in Repos opens it there, anything else in the browser.
 function sourceRow(link) {
-  const prefix = (one.config?.cli || "one") + "://";
-  const repo = link.startsWith(prefix) ? link.slice(prefix.length).replace(/[/]$/, "").replace(/[.]git$/, "") : null;
-  const open = repo && /^[a-z0-9][a-z0-9._-]*$/.test(repo) ? \` onclick='one.open("repo", \${JSON.stringify({ repo })}, "repos")'\` : ' href="' + one.esc(link) + '" target="_blank" rel="noopener"';
+  const repo = /^http:[/][/](localhost|127[.]0[.]0[.]1):[0-9]+[/]repos[/]([a-z0-9][a-z0-9._-]*?)([.]git)?[/]?$/.exec(link)?.[2];
+  const open = repo ? \` onclick='one.open("repo", \${JSON.stringify({ repo })}, "repos")'\` : ' href="' + one.esc(link) + '" target="_blank" rel="noopener"';
   return '<a class="row plain"' + open + '><div class="main"><div class="title"><span>Source</span></div></div><div class="chev">›</div></a>';
 }
 
@@ -493,7 +492,7 @@ function sourceRow(link) {
 function editSource() {
   const a = data.apps.find((x) => x.name === name);
   const sheet = one.sheet({ title: "Source Link", done: "Save" });
-  sheet.body.innerHTML = '<div class="list"><div class="row plain"><input id="link" class="link-field" type="url" placeholder="https://github.com/… or ' + one.esc(one.config?.cli || "one") + '://repo" autocapitalize="none" autocorrect="off" spellcheck="false"></div></div>'
+  sheet.body.innerHTML = '<div class="list"><div class="row plain"><input id="link" class="link-field" type="url" placeholder="https://github.com/…" autocapitalize="none" autocorrect="off" spellcheck="false"></div></div>'
     + '<div id="link-error" class="footer error"></div>'
     + (a.source ? '<div class="list" style="margin-top:20px"><a class="row plain danger-row" id="unlink">Remove Link</a></div>' : "");
   const field = sheet.body.querySelector("#link");

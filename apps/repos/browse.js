@@ -22,7 +22,7 @@ export async function open(ctx, g, repo, ref) {
   const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [repo])).map((p) => p.hash);
   const o = await objects(ctx, packs);
   if (!branches.length) return { r, o, branches, ref: null, sha: null };
-  ref ||= branches.find((b) => b.branch === "main")?.branch || branches.find((b) => !b.branch.includes("@"))?.branch || branches[0].branch;
+  ref ||= branches.find((b) => b.branch === "main")?.branch || branches[0].branch;
   const b = branches.find((x) => x.branch === ref);
   const sha = b ? b.head : SHA.test(ref) && o.has(ref) ? ref : null;
   if (!sha) throw new Error(`There's no branch or commit ${ref} in ${repo}`);

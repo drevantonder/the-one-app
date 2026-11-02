@@ -7,6 +7,8 @@ const wide = () => matchMedia("(min-width: 700px)").matches;
 const go = (screen, params) => esc(`one.open(${JSON.stringify(screen)}, ${JSON.stringify(params)})`);
 // The ref to keep using: the branch if there is one, else the commit.
 const refOf = (d) => d.branch || d.sha;
+// Where git reaches a repo, on any computer in this install.
+const address = (repo) => `${one.config?.api || "http://localhost"}/repos/${repo}.git`;
 const plural = (n, one_, many) => `${n.toLocaleString()} ${n === 1 ? one_ : many}`;
 const avatar = (c, cls = "") => `<span class="who-avatar ${cls}">${one.avatar(c.email || c.author, c.author)}</span>`;
 one.haptics();

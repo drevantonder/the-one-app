@@ -1,12 +1,13 @@
-// Repos: git hosting as an ordinary app. Installed in global, so every repo is visible to everyone. Local git builds
-// packs and `git-remote-one` keeps them as blobs; this app only moves branches: a push moves a branch iff its base is
-// the branch's head. No git runs here: pages read the packs themselves (browse.js, git.js).
+// Repos: git hosting as an ordinary app. Installed in global, so every repo is visible to everyone. Stock git clones and
+// pushes over HTTP through the node's local API (http.js), and a repo's packs are blobs. No git runs here: pages read
+// the packs themselves (browse.js, git.js).
 //
-// A repo has an owner (user:<id>, group:<id> or admins). Only someone acting for it moves bare branches (`main`);
-// anyone pushes `<branch>@<their name>`, a suggestion, which then belongs to them. Its owners delete it, as apps are:
-// it waits in Recently Deleted, read by no one, until they restore it or erase it, and its packs, for good.
+// A repo has an owner (user:<id>, group:<id> or admins), and only someone acting for it pushes; anyone else forks it
+// and pushes to their fork. Its owners delete it, as apps are: it waits in Recently Deleted, read by no one, until they
+// restore it or erase it, and its packs, for good.
 
 import * as browse from "./browse.js";
+import * as http from "./http.js";
 import css from "./screens/repos.css" with { type: "text" };
 import common from "./screens/common.js" with { type: "text" };
 import mainScreen from "./screens/main.html" with { type: "text" };
@@ -20,8 +21,7 @@ import branchesScreen from "./screens/branches.html" with { type: "text" };
 const page = (title, html) => ({ title, html: `<style>${css}</style><script>${common}</script>${html}` });
 
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
-const BRANCH = /^[A-Za-z0-9._\/-]{1,200}(@[a-z0-9._-]{1,64})?$/;
-const SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+const BRANCH = /^(?!\/)(?!.*(\.\.|\/\/|\/$|\.lock$|@\{))[A-Za-z0-9._\/@+-]{1,200}$/;
 
 /// Whether the writer of `e` acts for `owner`: themselves, a group they're an admin of, or admins.
 function actsFor(e, owner) {
@@ -31,31 +31,13 @@ function actsFor(e, owner) {
   return false;
 }
 
-/// A branch's name, and the user it's a suggestion of (`main@bob`), if it is one.
-const split = (branch) => {
-  const at = branch.lastIndexOf("@");
-  return at < 0 ? { base: branch, by: null } : { base: branch.slice(0, at), by: branch.slice(at + 1) };
-};
-
-/// What a user's name looks like after `@`.
-const slug = (name) => String(name || "").toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-
-/// Why `e` may not push to `branch` of `repo` (rows from the store), or null if it may.
-function refusal(repo, row, e, branch) {
-  if (!BRANCH.test(branch)) return `${branch} isn't a branch name`;
-  const { by } = split(branch);
-  if (!by) return actsFor(e, repo.owner) ? null : `only ${repo.owner} moves ${branch}; push your own, ${branch}@<your name>`;
-  if (row && row.user !== e.user) return `${branch} is someone else's suggestion`;
-  return null;
-}
-
 const randomId = () => [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
 
-/// Writes a new repo, or a fork of `from` with its branches (not suggestions) and history as they are now.
+/// Writes a new repo, or a fork of `from` with its branches and history as they are now.
 function newRepo(ctx, g, { name, owner, from = null }) {
   g.exec(`insert into repos (name, owner, "from", created, user) values (?, ?, ?, ?, ?)`, [name, owner, from, ctx.now(), ctx.me.user]);
   if (from) {
-    g.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ? and branch not like '%@%'`, [name, ctx.me.user, ctx.me.name, ctx.now(), from]);
+    g.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ?`, [name, ctx.me.user, ctx.me.name, ctx.now(), from]);
     g.exec("insert or ignore into packs select ?, hash, time from packs where repo = ?", [name, from]);
   }
 }
@@ -107,10 +89,10 @@ export default {
   icon: "arrow.triangle.branch",
   color: "#5856d6",
   description: "Git hosting in the install: clone, push and suggest changes",
-  instructions: `Repos is git hosting in this install: \`git clone one://<repo>\`, \`git push\` and \`git fetch\` work on any computer in this install. Only a repo's owner moves main; push your own branch as main@<your name> to suggest changes.`,
+  instructions: `Repos is git hosting in this install. On any computer in it, \`git clone http://localhost:<port>/repos/<repo>.git\` (the address its page shows), \`git push\` and \`git fetch\` work as with any git host; pushing to a name that isn't a repo yet makes it, yours. Only a repo's owner pushes to it: to suggest changes, fork it (repos fork), push to your fork, and tell its owner, who fetches from it.`,
 
   schema: {
-    global: `
+    global: [`
       create table repos (name text primary key, owner text not null, "from" text, created integer not null, user text not null,
                           deleted integer, deleted_by text);
       create table branches (repo text not null, branch text not null, head text not null, user text not null, name text not null,
@@ -119,20 +101,21 @@ export default {
       create table pushes (id text primary key, repo text not null, branch text not null, base text, head text,
                            user text not null, name text not null, time integer not null);
       create index pushes_repo on pushes (repo, time);`,
+      // Each pack's name (its checksum) and index file, which git fetches beside it.
+      `create table indexes (pack text primary key, name text not null, idx text not null, size integer not null);`],
   },
 
   ops: {
     list: {
       reads: true,
-      description: "Every repo: its owner, where it was forked from, its default branch (main, or else its first), how many branches and suggestions it has, and when it last moved. Deleted ones say when, and wait in Recently Deleted.",
+      description: "Every repo: its owner, where it was forked from, its default branch (main, or else its first), how many branches it has, and when it last moved. Deleted ones say when, and wait in Recently Deleted.",
       input: { type: "object", properties: {} },
       async run(ctx) {
         const repos = await global(ctx).query(
           `select r.name, r.owner, r."from", r.created, r.deleted, r.deleted_by,
                   coalesce((select branch from branches b where b.repo = r.name and b.branch = 'main'),
-                           (select min(branch) from branches b where b.repo = r.name and b.branch not like '%@%')) as branch,
-                  (select count(*) from branches b where b.repo = r.name and b.branch not like '%@%') as branches,
-                  (select count(*) from branches b where b.repo = r.name and b.branch like '%@%') as suggestions,
+                           (select min(branch) from branches b where b.repo = r.name)) as branch,
+                  (select count(*) from branches b where b.repo = r.name) as branches,
                   (select max(time) from branches b where b.repo = r.name) as updated
              from repos r order by coalesce(updated, r.created) desc`,
         );
@@ -141,7 +124,7 @@ export default {
     },
     get: {
       reads: true,
-      description: "A repo: its owner, branches and suggestions with their heads, forks, and the packs that hold its objects, oldest first.",
+      description: "A repo: its owner, branches with their heads, forks, and the packs that hold its objects, oldest first.",
       input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
       async run(ctx, { repo }) {
         const g = global(ctx);
@@ -156,7 +139,7 @@ export default {
     },
     tree: {
       reads: true,
-      description: "A folder of a repo at a branch or commit (main if none): its files and folders, its README, and the latest commit.",
+      description: "A folder of a repo at a branch or commit (main if none): its files and folders, its README, the latest commit, and the repo's forks.",
       input: { type: "object", required: ["repo"], properties: { repo: { type: "string" }, ref: { type: "string" }, path: { type: "string" } } },
       async run(ctx, input) {
         const r = await repoOf(global(ctx), input.repo);
@@ -164,7 +147,8 @@ export default {
         // A deleted one shows only that it was, for its owners to restore or erase.
         if (r?.deleted) return { repo: r.name, owner: r.owner, owner_name: ownerName(ctx, r.owner), yours, deleted: deletedOf(r), branches: [], entries: [] };
         const t = await browse.tree(ctx, global(ctx), input);
-        return { ...t, owner_name: ownerName(ctx, t.owner), yours };
+        const forks = (await global(ctx).query(`select name from repos where "from" = ? and deleted is null order by name`, [input.repo])).map((f) => f.name);
+        return { ...t, owner_name: ownerName(ctx, t.owner), yours, forks };
       },
     },
     file: {
@@ -199,7 +183,7 @@ export default {
     },
     branches: {
       reads: true,
-      description: "A repo's branches and suggestions, each with its head commit's subject and author.",
+      description: "A repo's branches, each with its head commit's subject and author.",
       input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
       run: (ctx, input) => browse.branches(ctx, global(ctx), input),
     },
@@ -217,7 +201,7 @@ export default {
       },
     },
     fork: {
-      description: "Fork a repo as a new one of yours: its branches (not suggestions) as they are now, and its history.",
+      description: "Fork a repo as a new one of yours, to push changes you'd suggest to its owner: its branches as they are now, and its history.",
       input: { type: "object", required: ["repo", "name"], properties: { repo: { type: "string" }, name: { type: "string" }, owner: { type: "string" } } },
       async run(ctx, { repo, name, owner }) {
         const g = global(ctx);
@@ -259,47 +243,21 @@ export default {
         const g = global(ctx);
         const r = await owned(ctx, repo);
         if (!r.deleted) throw new Error(`delete ${repo} before erasing it`);
-        const packs = await g.query("select hash from packs where repo = ? and hash not in (select hash from packs where repo != ?)", [repo, repo]);
+        const packs = await g.query("select hash from packs where repo = ?", [repo]);
         // Erased, it's gone, and its name is free again; its forks keep their code, no longer forked from it.
+        for (const p of packs) await http.forgetUnshared(g, repo, p.hash);
         for (const table of ["branches", "packs", "pushes"]) g.exec(`delete from ${table} where repo = ?`, [repo]);
         g.exec("delete from repos where name = ?", [repo]);
         g.exec(`update repos set "from" = null where "from" = ?`, [repo]);
-        for (const p of packs) g.forget(p.hash);
         return `Erased ${repo}.`;
       },
     },
-    push: {
-      description: "Move a branch from base (its head now, or null for a new branch) to head (null deletes it), with the pack that holds the new objects. git-remote-one calls this; a new repo is made, yours.",
-      input: {
-        type: "object",
-        required: ["repo", "branch"],
-        properties: { repo: { type: "string" }, branch: { type: "string" }, base: { type: ["string", "null"] }, head: { type: ["string", "null"] }, pack: { type: ["string", "null"] } },
-      },
-      async run(ctx, { repo, branch, base = null, head = null, pack = null }) {
-        const g = global(ctx);
-        let r = await live(g, repo);
-        if (!r) {
-          if (!NAME.test(repo || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
-          r = { name: repo, owner: `user:${ctx.me.user}` };
-          newRepo(ctx, g, { name: repo, owner: r.owner });
-        }
-        if ((base && !SHA.test(base)) || (head && !SHA.test(head))) throw new Error("base and head are commit hashes");
-        const row = (await g.query("select * from branches where repo = ? and branch = ?", [repo, branch]))[0];
-        const why = refusal(r, row, asWriter(ctx), branch);
-        if (why) throw new Error(why);
-        const { by } = split(branch);
-        if (by && !row && by !== slug(ctx.user?.name) && by !== ctx.me.user) throw new Error(`suggestions are yours: push ${split(branch).base}@${slug(ctx.user?.name) || ctx.me.user}`);
-        if ((row?.head ?? null) !== base) throw new Error(`${branch} has moved (it's at ${row?.head ?? "nothing"}): fetch, then push again`);
-        g.check("select (select head from branches where repo = ? and branch = ?) is ?", [repo, branch, base], `${branch} has moved: fetch, then push again`);
-        if (head) g.exec("insert or replace into branches values (?, ?, ?, ?, ?, ?)", [repo, branch, head, row?.user ?? ctx.me.user, ctx.me.name, ctx.now()]);
-        else g.exec("delete from branches where repo = ? and branch = ?", [repo, branch]);
-        if (pack) g.exec("insert or ignore into packs values (?, ?, ?)", [repo, pack, ctx.now()], [pack]);
-        g.exec("insert into pushes values (?, ?, ?, ?, ?, ?, ?, ?)", [randomId(), repo, branch, base, head, ctx.me.user, ctx.me.name, ctx.now()]);
-        return head ? `${repo} ${branch} is at ${head.slice(0, 12)}.` : `Deleted ${branch} of ${repo}.`;
-      },
+    _http: {
+      description: "Git over HTTP, as the node passes it on: clone, fetch and push with stock git.",
+      input: { type: "object", required: ["method", "path"], properties: { method: { type: "string" }, path: { type: "string" }, query: { type: "string" }, body: { type: ["string", "null"] } } },
+      run: (ctx, input) => http.serve(ctx, global(ctx), git, input),
     },
   },
-
 
   screens: {
     main: page("Repos", mainScreen),
@@ -362,11 +320,33 @@ export default {
   },
 };
 
+/// What http.js needs of repos: who owns one and may push, making one, and moving a branch.
+const git = {
+  BRANCH,
+  repoOf,
+  ownerName,
+  mayPush: (ctx, r) => actsFor(asWriter(ctx), r.owner),
+  defaultBranch: (names) => (names.includes("main") ? "main" : names[0]),
+  /// Makes `name`, the caller's, or says why not.
+  newRepo(ctx, g, name) {
+    if (!NAME.test(name || "")) return "repo names are lowercase letters, digits, ., _ and -";
+    newRepo(ctx, g, { name, owner: `user:${ctx.me.user}` });
+    return null;
+  },
+  /// Moves `branch` from `base` (null if it's new) to `head` (null deletes it), only if no one moved it meanwhile.
+  moveBranch(ctx, g, repo, branch, base, head) {
+    g.check("select (select head from branches where repo = ? and branch = ?) is ?", [repo, branch, base], `${branch} has moved: fetch, then push again`);
+    if (head) g.exec("insert or replace into branches values (?, ?, ?, ?, ?, ?)", [repo, branch, head, ctx.me.user, ctx.me.name, ctx.now()]);
+    else g.exec("delete from branches where repo = ? and branch = ?", [repo, branch]);
+    g.exec("insert into pushes values (?, ?, ?, ?, ?, ?, ?, ?)", [randomId(), repo, branch, base, head, ctx.me.user, ctx.me.name, ctx.now()]);
+  },
+};
+
 /// The newest `many` commits across repos' main branches, each with its repo and branch: the branches pushed to last,
 /// and their history, newest first. A repo whose packs can't be read is left out.
 async function recent(ctx, many, repo = "") {
   const heads = await ctx.global.query(
-    "select repo, branch from branches where branch not like '%@%' and (? = '' or repo = ?) and repo not in (select name from repos where deleted is not null) order by time desc limit ?",
+    "select repo, branch from branches where (? = '' or repo = ?) and repo not in (select name from repos where deleted is not null) order by time desc limit ?",
     [repo || "", repo || "", many],
   );
   const all = [];

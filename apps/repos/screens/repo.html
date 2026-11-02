@@ -35,7 +35,7 @@ function readme(d) {
 
 function head(d) {
   if (at) return "";
-  const clone = `git clone ${one.config?.cli || "one"}://${d.repo}`;
+  const clone = `git clone ${address(d.repo)}`;
   const box = d.deleted ? "" : `<div class="clone"><code>${esc(clone)}</code>${one.copyButton(clone)}</div>`;
   return `<div class="repo-head">
       <div class="repo-title"><span class="repo-icon">${one.icon("book")}</span><div>
@@ -50,10 +50,9 @@ const few = (names) => (names.length <= 3 ? esc(names.join(", ")) : "");
 
 function more(d) {
   if (at || d.empty) return "";
-  const bare = d.branches.filter((b) => !b.includes("@")), sugg = d.branches.filter((b) => b.includes("@"));
   return `<div class="list repo-links">
-      <a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("branch", "row-icon")}<div class="main"><div class="title"><span>Branches</span><span class="when">${few(bare)}</span></div></div><div class="chev">›</div></a>
-      ${sugg.length ? `<a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("diff", "row-icon")}<div class="main"><div class="title"><span>Suggestions</span><span class="when">${few(sugg)}</span></div></div><div class="chev">›</div></a>` : ""}
+      <a class="row plain" onclick="${go("branches", { repo: d.repo })}">${one.icon("branch", "row-icon")}<div class="main"><div class="title"><span>Branches</span><span class="when">${few(d.branches)}</span></div></div><div class="chev">›</div></a>
+      ${(d.forks || []).map((f) => `<a class="row plain" onclick="${go("repo", { repo: f })}">${one.icon("branch", "row-icon")}<div class="main"><div class="title"><span>Fork</span><span class="when">${esc(f)}</span></div></div><div class="chev">›</div></a>`).join("")}
       <a class="row plain" onclick="${go("history", { repo: d.repo, ref: refOf(d) })}">${one.icon("history", "row-icon")}<div class="main"><div class="title"><span>Commits</span></div></div><div class="chev">›</div></a>
     </div>`;
 }
@@ -90,7 +89,7 @@ async function show() {
       + (d.yours ? '<button class="button capsule" onclick="restore(this)">Restore</button>' : "") + danger(d);
   if (d.file) return one.open("file", { repo: d.repo, ref: refOf(d), path: at });
   if (d.empty)
-    return head(d) + one.empty({ icon: "code", title: "No code yet.", text: `Push some with <code>git push ${one.config?.cli || "one"}://${esc(d.repo)} main</code>` }) + danger(d);
+    return head(d) + one.empty({ icon: "code", title: "No code yet.", text: `Push some with <code>git push ${esc(address(d.repo))} main</code>` }) + danger(d);
   const list = d.entries.length
     ? `<div class="list files">${at ? `<a class="row plain entry up" onclick="${go("repo", { repo: d.repo, ref: refOf(d), path: at.split("/").slice(0, -1).join("/") })}">${one.icon("folder", "entry-icon")}<span class="entry-name">..</span></a>` : ""}${d.entries.map((e) => entry(d, e)).join("")}</div>`
     : one.empty({ icon: "folder", title: "This folder is empty." });

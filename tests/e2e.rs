@@ -484,23 +484,14 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
     assert_eq!(find("jottings")["title"], "Notes");
 }
 
-/// Runs git in `dir` with git-remote-<cli> on its PATH, talking to the node serving `addr`.
-async fn git(addr: &str, dir: &std::path::Path, args: &[&str]) -> Result<String, String> {
-    let bin = std::env::temp_dir().join(format!("one-e2e-bin-{}", std::process::id()));
-    std::fs::create_dir_all(&bin).unwrap();
-    let helper = bin.join(format!("git-remote-{}", one::config::CLI));
-    if !helper.exists() {
-        let _ = std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_one"), &helper);
-    }
-    let (addr, dir) = (addr.to_string(), dir.to_path_buf());
+/// Runs stock git in `dir`.
+async fn git(dir: &std::path::Path, args: &[&str]) -> Result<String, String> {
+    let dir = dir.to_path_buf();
     let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
     tokio::task::spawn_blocking(move || {
-        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
         let out = std::process::Command::new("git")
             .args(&args)
             .current_dir(&dir)
-            .env("PATH", path)
-            .env(format!("{}_ADDR", one::config::CLI.to_uppercase()), &addr)
             .envs([("GIT_AUTHOR_NAME", "T"), ("GIT_AUTHOR_EMAIL", "t@example.com"), ("GIT_COMMITTER_NAME", "T"), ("GIT_COMMITTER_EMAIL", "t@example.com"), ("GIT_CONFIG_NOSYSTEM", "1"), ("HOME", dir.to_str().unwrap())])
             .output()
             .unwrap();
@@ -512,90 +503,113 @@ async fn git(addr: &str, dir: &std::path::Path, args: &[&str]) -> Result<String,
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn repos_clone_push_and_take_suggestions_with_real_git() {
+async fn repos_clone_push_and_fork_with_stock_git() {
     let (a, _ra) = start("git-a").await;
     let (bob, _rb) = start("git-bob").await;
     a.create("Repos", "Andre").await.unwrap();
     let (api_a, work) = (serve_api(&a).await, temp("git"));
-    let cli = one::config::CLI;
+    let url = |addr: &str, repo: &str| format!("http://{addr}/repos/{repo}.git");
 
     // A new repo, pushed from a local one.
     let src = work.join("src");
     std::fs::create_dir_all(&src).unwrap();
-    git(&api_a, &src, &["init", "-q", "-b", "main"]).await.unwrap();
+    git(&src, &["init", "-q", "-b", "main"]).await.unwrap();
     std::fs::write(src.join("app.js"), "export default { name: \"hello\" };\n").unwrap();
-    git(&api_a, &src, &["add", "."]).await.unwrap();
-    git(&api_a, &src, &["commit", "-qm", "first"]).await.unwrap();
-    git(&api_a, &src, &["remote", "add", "origin", &format!("{cli}://hello")]).await.unwrap();
-    git(&api_a, &src, &["push", "-q", "origin", "main"]).await.unwrap();
+    git(&src, &["add", "."]).await.unwrap();
+    git(&src, &["commit", "-qm", "first"]).await.unwrap();
+    git(&src, &["remote", "add", "origin", &url(&api_a, "hello")]).await.unwrap();
+    git(&src, &["push", "-q", "origin", "main"]).await.unwrap();
 
     // Cloned elsewhere, changed and pushed back; fetched by the first.
-    git(&api_a, &work, &["clone", "-q", &format!("{cli}://hello"), "copy"]).await.unwrap();
+    git(&work, &["clone", "-q", &url(&api_a, "hello"), "copy"]).await.unwrap();
     let copy = work.join("copy");
     assert_eq!(std::fs::read_to_string(copy.join("app.js")).unwrap(), "export default { name: \"hello\" };\n");
     std::fs::write(copy.join("README"), "hi\n").unwrap();
-    git(&api_a, &copy, &["add", "."]).await.unwrap();
-    git(&api_a, &copy, &["commit", "-qm", "second"]).await.unwrap();
-    git(&api_a, &copy, &["push", "-q"]).await.unwrap();
-    git(&api_a, &src, &["pull", "-q", "origin", "main"]).await.unwrap();
+    git(&copy, &["add", "."]).await.unwrap();
+    git(&copy, &["commit", "-qm", "second"]).await.unwrap();
+    git(&copy, &["push", "-q"]).await.unwrap();
+    git(&src, &["pull", "-q", "origin", "main"]).await.unwrap();
     assert_eq!(std::fs::read_to_string(src.join("README")).unwrap(), "hi\n");
 
     // A push from behind is refused, unless forced.
     std::fs::write(src.join("app.js"), "// mine\n").unwrap();
-    git(&api_a, &src, &["commit", "-qam", "third"]).await.unwrap();
-    git(&api_a, &src, &["push", "-q", "origin", "main"]).await.unwrap();
+    git(&src, &["commit", "-qam", "third"]).await.unwrap();
+    git(&src, &["push", "-q", "origin", "main"]).await.unwrap();
     std::fs::write(copy.join("README"), "behind\n").unwrap();
-    git(&api_a, &copy, &["commit", "-qam", "behind"]).await.unwrap();
-    let refused = git(&api_a, &copy, &["push", "-q"]).await.unwrap_err();
+    git(&copy, &["commit", "-qam", "behind"]).await.unwrap();
+    let refused = git(&copy, &["push", "-q"]).await.unwrap_err();
     assert!(refused.contains("non-fast-forward") || refused.contains("rejected"), "{refused}");
 
-    // Another user pushes suggestions, never main.
+    // A big push (git sends it in chunks, after asking with an empty one), and a branch made and deleted.
+    let noise: String = (0..400_000u64).map(|i| format!("{:x}", i.wrapping_mul(0x9e3779b97f4a7c15) >> 40)).collect::<Vec<_>>().join("\n");
+    std::fs::write(src.join("big.txt"), noise).unwrap();
+    git(&src, &["add", "."]).await.unwrap();
+    git(&src, &["commit", "-qm", "big"]).await.unwrap();
+    git(&src, &["push", "-q", "origin", "main"]).await.unwrap();
+    git(&src, &["push", "-q", "origin", "main:side"]).await.unwrap();
+    git(&src, &["push", "-q", "origin", ":side"]).await.unwrap();
+
+    // Each push's pack was merged into the ones before it, smaller ones first: fewer packs than pushes, and a fresh
+    // clone has everything.
+    let r = a.call(call("repos", "get", json!({ "repo": "hello" }))).await.unwrap();
+    assert!(r["packs"].as_array().unwrap().len() < 3, "packs are merged: {}", r["packs"]);
+    git(&work, &["clone", "-q", &url(&api_a, "hello"), "fresh"]).await.unwrap();
+    git(&work.join("fresh"), &["fsck", "--strict"]).await.unwrap();
+    assert_eq!(git(&work.join("fresh"), &["rev-parse", "HEAD"]).await.unwrap(), git(&src, &["rev-parse", "HEAD"]).await.unwrap());
+    git(&src, &["rm", "-q", "big.txt"]).await.unwrap();
+    git(&src, &["commit", "-qm", "smaller"]).await.unwrap();
+    git(&src, &["push", "-q", "origin", "main"]).await.unwrap();
+
+    // Another user can't push to it: they fork it, push to their fork, and its owner fetches from there.
     bob.join(&a.pair(Some(("Bob".into(), one::members::Role::Member))).unwrap()).await.unwrap();
     let api_bob = serve_api(&bob).await;
     eventually("bob to run repos", async || bob.call(call("repos", "list", json!({}))).await.is_ok_and(|r| r.as_array().is_some_and(|l| !l.is_empty()))).await;
     let bobs = work.join("bobs");
-    git(&api_bob, &work, &["clone", "-q", &format!("{cli}://hello"), "bobs"]).await.unwrap();
-    assert_eq!(std::fs::read_to_string(bobs.join("app.js")).unwrap(), "// mine\n", "bob's server fetched the packs from a's");
-    std::fs::write(bobs.join("app.js"), "// bob's idea\n").unwrap();
-    git(&api_bob, &bobs, &["commit", "-qam", "idea"]).await.unwrap();
-    let refused = git(&api_bob, &bobs, &["push", "-q", "origin", "main"]).await.unwrap_err();
-    assert!(refused.contains("only user:"), "{refused}");
-    let refused = git(&api_bob, &bobs, &["push", "-q", "origin", "main:main@andre"]).await.unwrap_err();
-    assert!(refused.contains("suggestions are yours"), "{refused}");
-    git(&api_bob, &bobs, &["push", "-q", "origin", "main:main@bob"]).await.unwrap();
-    eventually("a to see bob's suggestion", async || {
-        a.call(call("repos", "get", json!({ "repo": "hello" }))).await.is_ok_and(|r| r["branches"].as_array().unwrap().iter().any(|b| b["branch"] == "main@bob"))
+    eventually("bob to clone hello as it is now", async || {
+        let _ = std::fs::remove_dir_all(&bobs);
+        git(&work, &["clone", "-q", &url(&api_bob, "hello"), "bobs"]).await.is_ok() && std::fs::read_to_string(bobs.join("app.js")).is_ok_and(|t| t == "// mine\n")
     })
     .await;
-    git(&api_a, &src, &["fetch", "-q", "origin", "main@bob"]).await.unwrap();
-    let shown = git(&api_a, &src, &["show", "FETCH_HEAD:app.js"]).await.unwrap();
-    assert_eq!(shown, "// bob's idea\n");
+    std::fs::write(bobs.join("app.js"), "// bob's idea\n").unwrap();
+    git(&bobs, &["commit", "-qam", "idea"]).await.unwrap();
+    let refused = git(&bobs, &["push", "-q", "origin", "main"]).await.unwrap_err();
+    assert!(refused.contains("fork it"), "{refused}");
+    bob.call(call("repos", "fork", json!({ "repo": "hello", "name": "hello-bob" }))).await.unwrap();
+    git(&bobs, &["push", "-q", &url(&api_bob, "hello-bob"), "main"]).await.unwrap();
+    eventually("a to have bob's idea", async || {
+        let _ = git(&src, &["fetch", "-q", &url(&api_a, "hello-bob"), "main"]).await;
+        git(&src, &["show", "FETCH_HEAD:app.js"]).await.is_ok_and(|t| t == "// bob's idea\n")
+    })
+    .await;
 
     // A fork has the branches and history, under a new name.
     a.call(call("repos", "fork", json!({ "repo": "hello", "name": "hello-too" }))).await.unwrap();
-    git(&api_a, &work, &["clone", "-q", &format!("{cli}://hello-too"), "fork"]).await.unwrap();
+    git(&work, &["clone", "-q", &url(&api_a, "hello-too"), "fork"]).await.unwrap();
     assert_eq!(std::fs::read_to_string(work.join("fork/app.js")).unwrap(), "// mine\n");
     let r = a.call(call("repos", "get", json!({ "repo": "hello" }))).await.unwrap();
-    assert_eq!(r["forks"], json!(["hello-too"]));
+    assert_eq!(r["forks"], json!(["hello-bob", "hello-too"]));
 
     // Its pages read the packs: folders, files, history and diffs, as git has them.
     let tree = a.call(call("repos", "tree", json!({ "repo": "hello" }))).await.unwrap();
     let names: Vec<&str> = tree["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["app.js", "README"]);
     assert_eq!(tree["readme"]["text"], "hi\n");
-    assert_eq!(tree["commit"]["subject"], "third");
+    assert_eq!(tree["commit"]["subject"], "smaller");
     let file = a.call(call("repos", "file", json!({ "repo": "hello", "path": "app.js" }))).await.unwrap();
     assert_eq!(file["text"], "// mine\n");
     let log = a.call(call("repos", "log", json!({ "repo": "hello" }))).await.unwrap();
     let subjects: Vec<&str> = log["commits"].as_array().unwrap().iter().map(|c| c["subject"].as_str().unwrap()).collect();
-    assert_eq!(subjects, ["third", "second", "first"]);
+    assert_eq!(subjects, ["smaller", "big", "third", "second", "first"]);
     let head = log["commits"][0]["sha"].as_str().unwrap();
-    assert_eq!(head, git(&api_a, &src, &["rev-parse", "main"]).await.unwrap().trim());
+    assert_eq!(head, git(&src, &["rev-parse", "main"]).await.unwrap().trim());
     let commit = a.call(call("repos", "commit", json!({ "repo": "hello", "sha": head }))).await.unwrap();
+    assert_eq!(commit["files"][0]["path"], "big.txt");
+    let earlier = log["commits"][2]["sha"].as_str().unwrap();
+    let commit = a.call(call("repos", "commit", json!({ "repo": "hello", "sha": earlier }))).await.unwrap();
     assert_eq!(commit["files"][0]["path"], "app.js");
     assert_eq!(commit["files"][0]["hunks"][0]["lines"], json!(["-export default { name: \"hello\" };", "+// mine"]));
     let branches = a.call(call("repos", "branches", json!({ "repo": "hello" }))).await.unwrap();
-    assert!(branches.as_array().unwrap().iter().any(|b| b["branch"] == "main@bob" && b["subject"] == "idea"), "{branches}");
+    assert_eq!(branches.as_array().unwrap().iter().map(|b| b["branch"].as_str().unwrap()).collect::<Vec<_>>(), ["main"]);
     let missing = a.call(call("repos", "file", json!({ "repo": "hello", "path": "nope" }))).await.unwrap_err();
     assert!(format!("{missing:#}").contains("There's no file nope"), "{missing:#}");
     let html = a.screen(one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None }, "repos", "repo", json!({ "repo": "hello" }), None).await.unwrap();
@@ -609,18 +623,18 @@ async fn repos_clone_push_and_take_suggestions_with_real_git() {
     a.call(call("repos", "delete", json!({ "repo": "hello", "confirm": true }))).await.unwrap();
     let listed = a.call(call("repos", "list", json!({}))).await.unwrap();
     assert!(listed.as_array().unwrap().iter().any(|r| r["name"] == "hello" && r["deleted"]["time"].is_u64() && r["yours"] == true), "{listed}");
-    let gone = git(&api_a, &work, &["clone", "-q", &format!("{cli}://hello"), "deleted"]).await.unwrap_err();
+    let gone = git(&work, &["clone", "-q", &url(&api_a, "hello"), "deleted"]).await.unwrap_err();
     assert!(gone.contains("was deleted"), "{gone}");
     assert!(a.call(call("repos", "tree", json!({ "repo": "hello" }))).await.unwrap()["deleted"].is_object(), "its page says so");
     a.call(call("repos", "restore", json!({ "repo": "hello" }))).await.unwrap();
-    git(&api_a, &work, &["clone", "-q", &format!("{cli}://hello"), "restored"]).await.unwrap();
+    git(&work, &["clone", "-q", &url(&api_a, "hello"), "restored"]).await.unwrap();
     assert!(a.call(call("repos", "erase", json!({ "repo": "hello", "confirm": true }))).await.is_err(), "deleted before erased");
     a.call(call("repos", "delete", json!({ "repo": "hello", "confirm": true }))).await.unwrap();
     a.call(call("repos", "erase", json!({ "repo": "hello", "confirm": true }))).await.unwrap();
     let listed = a.call(call("repos", "list", json!({}))).await.unwrap();
     assert!(!listed.as_array().unwrap().iter().any(|r| r["name"] == "hello"), "erased, it's gone: {listed}");
     assert!(listed.as_array().unwrap().iter().any(|r| r["name"] == "hello-too" && r["from"].is_null()), "its fork stays, forked from nothing now: {listed}");
-    git(&api_a, &work, &["clone", "-q", &format!("{cli}://hello-too"), "fork-after"]).await.unwrap();
+    git(&work, &["clone", "-q", &url(&api_a, "hello-too"), "fork-after"]).await.unwrap();
     assert_eq!(std::fs::read_to_string(work.join("fork-after/app.js")).unwrap(), "// mine\n", "the fork's packs stay");
     a.call(call("repos", "create", json!({ "name": "hello" }))).await.unwrap();
 }
@@ -1384,9 +1398,10 @@ async fn an_apps_owners_link_where_its_code_is() {
     assert!(board.as_str().is_some_and(|l| l.starts_with(&format!("https://github.com/{}/tree/", one::config::REPO)) && l.ends_with("/apps/board")), "a built-in app links to its folder: {board}");
     set("https://example.com/scratch").await.unwrap();
     assert_eq!(source("scratch").await, "https://example.com/scratch");
-    set(&format!("{}://scratch", one::config::CLI)).await.unwrap();
-    assert_eq!(source("scratch").await, format!("{}://scratch", one::config::CLI), "or a repo in Repos");
-    assert!(set("javascript:alert(1)").await.is_err(), "only web addresses and repos");
+    set("http://localhost:4747/repos/scratch.git").await.unwrap();
+    assert_eq!(source("scratch").await, "http://localhost:4747/repos/scratch.git", "or a repo in Repos");
+    assert!(set(&format!("{}://scratch", one::config::CLI)).await.is_err(), "only web addresses");
+    assert!(set("javascript:alert(1)").await.is_err(), "only web addresses");
     set("").await.unwrap();
     assert_eq!(source("scratch").await, Value::Null, "an empty link clears it");
     a.call(call("apps", "source", json!({ "app": "board", "link": "" }))).await.unwrap();
