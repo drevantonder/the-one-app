@@ -881,3 +881,13 @@ fn signing_out_ends_a_clients_sessions_at_the_vault() {
     assert_eq!(v.ask(&phone, "DELETE", &format!("/copies/{id}"), json!(null)).0, 200);
     assert!(vault.keys_until(&phone, &board).is_err(), "a removed client's session still gets keys");
 }
+
+#[test]
+fn the_address_serves_only_scripts_that_parse() {
+    let (settings, _) = kernel::Settings::new("Test", "https://one.example.com");
+    kernel::parses(&settings.web()).unwrap();
+    let broken = vec![("web.js".to_string(), b"const label = 1;\nconst label = 2;\n".to_vec())];
+    assert!(kernel::parses(&broken).is_err(), "a script that doesn't parse is refused");
+    let inline = vec![("index.html".to_string(), b"<p>hi</p><script>let a = ;</script>".to_vec())];
+    assert!(kernel::parses(&inline).is_err(), "so is an HTML page's inline script");
+}

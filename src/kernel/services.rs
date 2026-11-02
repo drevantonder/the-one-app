@@ -432,7 +432,9 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let modules = SERVICES.iter().map(|(_, entry, _)| module(entry)).collect::<Result<Vec<_>>>()?;
     let web = dir.join("web");
     let _ = std::fs::remove_dir_all(&web);
-    for (file, bytes) in settings.web() {
+    let files = settings.web();
+    parses(&files)?;
+    for (file, bytes) in files {
         let path = web.join(file);
         std::fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(path, bytes)?;
@@ -441,6 +443,51 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let mut child = start(&config, Vec::new())?;
     let status = child.wait()?;
     bail!("the kernel's workerd stopped: {status}")
+}
+
+/// Fails, naming what's wrong, unless every script among `web` parses: its `.js` files and the HTML's inline scripts,
+/// each read by the pinned Bun as it reads the services' sources. A browser given one that doesn't runs none of it.
+pub fn parses(web: &[(String, Vec<u8>)]) -> Result<()> {
+    let mut scripts: Vec<(String, String)> = Vec::new();
+    for (path, bytes) in web {
+        let text = String::from_utf8_lossy(bytes);
+        if path.ends_with(".js") {
+            scripts.push((path.clone(), text.into_owned()));
+        } else if path.ends_with(".html") {
+            let mut rest = text.as_ref();
+            while let Some(start) = rest.find("<script") {
+                let Some(open) = rest[start..].find('>') else { break };
+                let tag = &rest[start..start + open];
+                let body = &rest[start + open + 1..];
+                let end = body.find("</script>").unwrap_or(body.len());
+                if !tag.contains("src=") {
+                    scripts.push((format!("{path}.{}.js", scripts.len()), body[..end].to_string()));
+                }
+                rest = &body[end..];
+            }
+        }
+    }
+    if scripts.is_empty() {
+        return Ok(());
+    }
+    let dir = std::env::temp_dir().join(format!("{}-scripts-{}", crate::config::CLI, rand::random::<u64>()));
+    let checked = (|| {
+        for (path, text) in &scripts {
+            let file = dir.join(path);
+            std::fs::create_dir_all(file.parent().unwrap())?;
+            std::fs::write(file, text)?;
+        }
+        let out = std::process::Command::new(crate::deploy::bun()?)
+            .args(["build", "--no-bundle", "--outdir=out"])
+            .args(scripts.iter().map(|(path, _)| path))
+            .current_dir(&dir)
+            .env("DO_NOT_TRACK", "1")
+            .output()?;
+        ensure!(out.status.success(), "a script the address serves doesn't parse, so it isn't deployed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        Ok(())
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    checked
 }
 
 /// A kernel service's module, built from the sources this release was signed with by the pinned Bun, once per
@@ -830,6 +877,9 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[
 
 /// `deploy`, of only the services named.
 pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[(String, Vec<u8>)], services: &[&str]) -> Result<()> {
+    if services.contains(&"gateway") {
+        parses(web)?;
+    }
     let mut left: Vec<usize> = (0..SERVICES.len()).filter(|i| services.contains(&SERVICES[*i].0)).collect();
     for _ in 0..2 {
         let mut again = Vec::new();
