@@ -384,6 +384,12 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let place = |title: &str| a.backups().unwrap()["places"].as_array().unwrap().iter().find(|p| p["title"] == title).cloned();
     eventually("the old disk's backup", async || place("Old disk").is_some_and(|p| p["last"]["device"] == "backup-a")).await;
     assert!(place("Cloudflare Tunnel").is_none(), "{}", a.backups().unwrap());
+
+    // A place typed into the sheet on the person's device is a place too.
+    let asked = a.request_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "title": "Sheet bucket" })).await.unwrap();
+    let answer = json!({ "fields": { "endpoint": "http://127.0.0.1:9", "bucket": "b", "key_id": "k", "secret": "s" } });
+    a.answer_request(&me, &global, asked["id"].as_str().unwrap(), &answer).await.unwrap();
+    assert!(place("Sheet bucket").is_some_and(|p| p["kind"] == "s3"), "{}", a.backups().unwrap());
 }
 
 /// The board's posts in `global` as a place's copy of the install's bucket holds them, opened with the scope's key.

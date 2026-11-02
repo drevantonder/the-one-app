@@ -514,7 +514,7 @@ impl Node {
         let fields = json!({ "endpoint": { "secret": false }, "bucket": { "secret": false }, "key_id": { "secret": false }, "secret": { "secret": true } });
         let ask = json!({ "title": body["title"].as_str().unwrap_or("Backups"), "fields": fields, "hosts": [host] });
         let why = format!("Backups go to {endpoint}, encrypted: its bucket, access key ID and secret key.");
-        self.request_item(caller, &Scope::Global, members::APP, None, &ask, &why).await
+        self.request_item(caller, &Scope::Global, members::APP, Some(b::KIND), &ask, &why).await
     }
 
     /// Stops backing up to a place: deletes its item. What's in the place stays there.
