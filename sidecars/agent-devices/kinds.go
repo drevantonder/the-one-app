@@ -57,7 +57,7 @@ type kind interface {
 }
 
 // runtimes are every kind but linux, as this machine might run them.
-var runtimes = []kind{windowsQEMU{}}
+var runtimes = []kind{windowsQEMU{}, androidEmulator{}}
 
 // A vm is a device of a kind other than linux, as its file in the sidecar's folder says.
 type vm struct {
