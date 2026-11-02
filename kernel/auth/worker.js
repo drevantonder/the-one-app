@@ -58,6 +58,8 @@ const INVITE = 3 * 86_400_000;
 const CODE = 10 * 60_000;
 /// How lately someone signed in with Google for a client to be added as them.
 const FRESH = 5 * 60_000;
+/// How long a Google sign-in started for a client's authorization goes on to it once it's back.
+const STARTED = 15 * 60_000;
 /// A sign-in code's letters: no vowels, so it spells no word, and none that look alike.
 const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
 
@@ -89,6 +91,7 @@ export class Auth extends DurableObject {
     ctx.storage.sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null, until integer not null, used integer)");
     if (!ctx.storage.sql.exec("select name from pragma_table_info('invites') where name = 'email'").toArray().length) ctx.storage.sql.exec("alter table invites add column email text");
     ctx.storage.sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
+    ctx.storage.sql.exec("create table if not exists google_starts (id text primary key, query text not null, made integer not null)");
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const options = this.options();
       const { runMigrations } = await getMigrations(options);
@@ -242,7 +245,8 @@ export class Auth extends DurableObject {
       const tried = this.env.SIGN_IN === "try";
       if (path === "/sign-in" && request.method === "GET") return html(tried ? tryPage({ name, person: this.env.TRY_NAME }) : signInPage({ name, google }));
       if (path === "/internal/invite" && request.method === "POST") return json(await this.invite(request, await request.json()));
-      if (path === "/sign-in/about") return json(await this.about(request, url.searchParams.get("client_id"), url.searchParams.get("redirect_uri")));
+      if (path === "/sign-in/about") return json(await this.about(request, url.searchParams));
+      if (path === "/sign-in/google" && request.method === "POST" && google) return await this.startGoogle(request, await request.json());
       if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
       if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), name, google);
       if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ name, google, done: await this.codeDone(url.searchParams) }));
@@ -303,17 +307,52 @@ export class Auth extends DurableObject {
     if (name === ours || (name.startsWith(ours) && toSites)) refuse(400, `a client can't be called ${body.client_name}: that's the name of what it signs in to`);
   }
 
-  /// What signing in to a client says: its name (the install's, for the web client, which is at its address), where
-  /// its sign-in goes (`redirect`, if it's one of the client's, else its first), since the name is only what it calls
-  /// itself, the person's, if they're signed in here already, and whether they just signed in with Google.
-  async about(request, clientId, redirect) {
+  /// What signing in to a client (its authorization's `query`) says: its name (the install's, for the web client, which
+  /// is at its address), where its sign-in goes (its redirect_uri, if it's one of the client's, else its first), since
+  /// the name is only what it calls itself, the person's, if they're signed in here already, and whether they're back
+  /// from the Google sign-in this browser started for it, which goes straight on.
+  async about(request, query) {
     const session = await this.auth.api.getSession({ headers: request.headers });
-    const client = await this.client(clientId);
+    const client = await this.client(query.get("client_id"));
+    const redirect = query.get("redirect_uri");
     const origin = new URL(this.env.ADDRESS).origin;
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const web = uris.length > 0 && uris.every((u) => u === `${origin}/callback`);
     const goes = web ? null : goesTo(uris.includes(redirect) ? redirect : uris[0], origin);
-    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, person: session?.user.name || null, fresh: !!session && fresh(session) };
+    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, person: session?.user.name || null, fresh: !!(await this.started(request, session, query)) };
+  }
+
+  // Signing in to a client with Google goes straight on once Google says yes, with no second tap, but only for the
+  // authorization this browser started it for: a sign-in with Google made for another client (the web client's, a
+  // minute ago) gives nothing to a client whose link the person was sent. Starting one keeps a secret in a cookie only
+  // this address sets, with a hash of the authorization's query; coming back, the two must match, once.
+
+  /// Starts signing in with Google for a client's authorization (`oauth_query`), on the sign-in page.
+  async startGoogle(request, { oauth_query }) {
+    const origin = new URL(this.env.ADDRESS).origin;
+    if (request.headers.get("origin") !== origin) refuse(403, "only the sign-in page starts that");
+    const query = new URLSearchParams(typeof oauth_query === "string" ? oauth_query : "");
+    await this.client(query.get("client_id"));
+    const secret = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+    const sql = this.ctx.storage.sql;
+    sql.exec("delete from google_starts where made <= ?", Date.now() - STARTED);
+    sql.exec("insert into google_starts (id, query, made) values (?, ?, ?)", await hash(secret), await hash(query.toString()), Date.now());
+    const secure = origin.startsWith("https:");
+    const cookie = `${secure ? "__Host-" : ""}one-google-start=${secret}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${STARTED / 1000}${secure ? "; Secure" : ""}`;
+    return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": cookie } });
+  }
+
+  /// The Google sign-in this browser started for the authorization `query`, if it's back from it just now: → its id.
+  async started(request, session, query) {
+    if (!session || !fresh(session)) return null;
+    const secure = this.env.ADDRESS.startsWith("https:");
+    const name = `${secure ? "__Host-" : ""}one-google-start=`;
+    const secret = (request.headers.get("cookie") || "").split(/;\s*/).find((c) => c.startsWith(name))?.slice(name.length);
+    if (!secret) return null;
+    const id = await hash(secret);
+    const [row] = this.ctx.storage.sql.exec("select query, made from google_starts where id = ? and made > ?", id, Date.now() - STARTED).toArray();
+    const signedIn = new Date(session.session.createdAt).getTime();
+    return row && row.query === (await hash(query.toString())) && row.made <= signedIn ? id : null;
   }
 
   // Signing in with a code, for a client with no browser of its own (the CLI on a server): it makes an authorization
@@ -438,12 +477,14 @@ export class Auth extends DurableObject {
     });
   }
 
-  /// Signing in to a client with Google, just now (a client's code is swapped for tokens only while that sign-in
-  /// lasts, so it isn't ended here; a later client asks Google again): the client gets a code, and the vault opens
-  /// the person's keys for it.
+  /// Signing in to a client with Google, just now, started for this authorization (a client's code is swapped for
+  /// tokens only while that sign-in lasts, so it isn't ended here; a later client asks Google again): the client gets
+  /// a code, and the vault opens the person's keys for it.
   async acceptGoogle(request, { oauth_query }) {
     const signedIn = await this.session(request);
-    if (!fresh(signedIn)) refuse(403, "Sign in with Google again.");
+    const started = await this.started(request, signedIn, new URLSearchParams(typeof oauth_query === "string" ? oauth_query : ""));
+    if (!started) refuse(403, "Sign in with Google again.");
+    this.ctx.storage.sql.exec("delete from google_starts where id = ?", started);
     const { user } = signedIn;
     return this.consent(request, user, oauth_query, (client, code) =>
       this.vault("own", { user: user.id, to: code, name: client.name || client.clientId, client: client.clientId }));

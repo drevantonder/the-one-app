@@ -567,6 +567,15 @@ impl Kernel {
     /// Runs them as `one kernel serve` does, from new settings, with the stand-in sites as the bucket, the gateway
     /// sending `/v1/` to `node_url` and serving a web client of two pages.
     pub(crate) fn start(node_url: Option<String>) -> Kernel {
+        Kernel::start_as(node_url, false)
+    }
+
+    /// As `start`, for an install whose people sign in with Google at test.example, the stand-in sites as Google.
+    fn google() -> Kernel {
+        Kernel::start_as(None, true)
+    }
+
+    fn start_as(node_url: Option<String>, google: bool) -> Kernel {
         let gateway = port();
         let (mut settings, recovery) = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), port(), port(), gateway];
@@ -584,6 +593,12 @@ impl Kernel {
         std::fs::write(web.join("screen/kit.css"), include_str!("../src/screen/kit.css")).unwrap();
         let mut served = kernel::served(&settings, modules, &web);
         served[1].outbound = Some("sites".into());
+        if google {
+            let vault_key = B64U.encode(&rand::random::<[u8; 32]>());
+            served[0].outbound = Some("sites".into());
+            served[0].bindings.extend([("SIGN_IN", "google"), ("JOIN_DOMAIN", "test.example"), ("GOOGLE_CLIENT_ID", "a client id"), ("GOOGLE_CLIENT_SECRET", "a client secret")].map(|(n, v)| (n.into(), v.into())));
+            served[1].bindings.extend([("SIGN_IN".into(), "google".into()), ("VAULT_KEY".into(), vault_key)]);
+        }
         served.push(Served { name: "sites".into(), module: module("test/sites.js"), class: None, listen: format!("127.0.0.1:{sites}"), bindings: vec![], assets: None, outbound: None });
         let running = run(served);
         Kernel {
@@ -980,6 +995,65 @@ fn a_client_is_shown_by_where_it_goes_and_none_is_named_as_the_install() {
     assert_eq!(goes("Claude Code", "http://localhost:33418/callback").1, "an app on this device");
     assert_eq!(goes("Test on Andre's iPhone", "one://signed-in/").1, "an app on this device");
     assert_eq!(goes("Test on a server", &format!("{}/sign-in/code/done", k.address)).1, "where you got your code");
+}
+
+/// A client registers itself (anyone may) and its authorization goes to the sign-in page: → the page's query.
+fn authorizes(browser: &mut Browser, name: &str, back: &str) -> String {
+    let (status, client) = browser.post("/api/auth/oauth2/register", json!({ "client_name": name, "redirect_uris": [back], "token_endpoint_auth_method": "none" }));
+    assert_eq!(status, 201, "{client}");
+    let client = client["client_id"].as_str().unwrap();
+    let (_, _, sign_in) = browser.get(&format!("/api/auth/oauth2/authorize?response_type=code&client_id={client}&redirect_uri={}&scope=openid&state=s&code_challenge=c&code_challenge_method=S256", enc(back)));
+    sign_in.expect("authorizing goes to the sign-in page").split_once('?').unwrap().1.to_string()
+}
+
+/// Andre signs in with Google in `browser`, coming back to the sign-in page for `query`, as its button does, which
+/// starts it there first unless `started` is false.
+fn signs_in_with_google(browser: &mut Browser, query: &str, started: bool) {
+    if started {
+        let (status, out) = browser.post("/sign-in/google", json!({ "oauth_query": query }));
+        assert_eq!(status, 200, "{out}");
+    }
+    let back = format!("/sign-in?{query}");
+    let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": back, "errorCallbackURL": back }));
+    assert_eq!(status, 200, "{out}");
+    let state = url_query(out["url"].as_str().unwrap())["state"].clone();
+    let andre = json!({ "iss": "https://accounts.google.com", "sub": "1234", "email": "andre@test.example", "email_verified": true, "hd": "test.example", "name": "Andre" });
+    let (status, _, to) = browser.get(&format!("/api/auth/callback/google?code={}&state={state}", B64U.encode(andre.to_string().as_bytes())));
+    assert_eq!((status, to.as_deref()), (302, Some(back.as_str())));
+}
+
+/// Signing in to a client with Google goes straight on, with no second tap, only for the authorization the sign-in
+/// was started for, in that browser: a link to someone else's client, opened just after signing in to another, waits
+/// for the person.
+#[test]
+fn a_google_sign_in_goes_on_only_to_the_client_it_was_started_for() {
+    let k = Kernel::google();
+    let mut andres = k.browser();
+    let fresh = |b: &mut Browser, query: &str| b.get(&format!("/sign-in/about?{query}")).1["fresh"].clone();
+    let accept = |b: &mut Browser, query: &str| b.post("/sign-in/accept", json!({ "oauth_query": query })).0;
+    let ours = authorizes(&mut andres, "Andre's", "http://localhost:9/signed-in");
+    signs_in_with_google(&mut andres, &ours, true);
+    assert_eq!(fresh(&mut andres, &ours), true);
+    assert_eq!(accept(&mut andres, &ours), 200);
+    assert_eq!(accept(&mut andres, &ours), 403, "it goes on once");
+
+    // Someone's client, whose link he opens a minute later: signed in with Google just now, all the same.
+    let theirs = authorizes(&mut k.browser(), "Someone's", "https://elsewhere.example/back");
+    assert_eq!(fresh(&mut andres, &theirs), false);
+    assert_eq!(accept(&mut andres, &theirs), 403);
+    // Nor once its sender starts a Google sign-in for it in their own browser, nor a page elsewhere in his.
+    let mut theirs_started = k.browser();
+    assert_eq!(theirs_started.post("/sign-in/google", json!({ "oauth_query": theirs })).0, 200);
+    let mut elsewhere = Browser { origin: "https://elsewhere.example".into(), cookies: andres.cookies.clone() };
+    let (status, out) = elsewhere.post(&format!("{}/sign-in/google", k.address), json!({ "oauth_query": theirs }));
+    assert_eq!(status, 403, "{out}");
+    assert_eq!(accept(&mut andres, &theirs), 403);
+    // Nor signing in with Google again not started for it.
+    signs_in_with_google(&mut andres, &theirs, false);
+    assert_eq!(accept(&mut andres, &theirs), 403);
+    // Tapping Sign In with Google on its page, he means it.
+    signs_in_with_google(&mut andres, &theirs, true);
+    assert_eq!(accept(&mut andres, &theirs), 200);
 }
 
 #[test]

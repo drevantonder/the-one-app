@@ -119,7 +119,7 @@ export function signInPage({ name, google }) {
     const install = ${JSON.stringify(name).replaceAll("<", "\\u003c")};
     if (client_id) (async () => {
       try {
-        const about = await api("/sign-in/about?" + new URLSearchParams({ client_id, redirect_uri: new URLSearchParams(oauth_query).get("redirect_uri") || "" }));
+        const about = await api("/sign-in/about?" + oauth_query);
         const title = "Sign in to " + about.client + (about.person ? " as " + about.person : "");
         document.title = title;
         document.getElementById("title").textContent = title;
@@ -153,18 +153,19 @@ function googlePage({ name, google }) {
     if (failed) say("That didn't sign you in. Use your Google account at " + domain + ".");
     if (client_id) (async () => {
       try {
-        const about = await api("/sign-in/about?" + new URLSearchParams({ client_id, redirect_uri: new URLSearchParams(oauth_query).get("redirect_uri") || "" }));
+        const about = await api("/sign-in/about?" + oauth_query);
         const title = "Sign in to " + about.client;
         document.title = title;
         document.getElementById("title").textContent = title;
         if (!about.web) acts(about);
-        // Back from Google just now: on to the client.
+        // Back from the Google sign-in started here for this client, just now: on to it.
         if (about.fresh && !failed) location.replace((await api("/sign-in/accept", { oauth_query })).url);
       } catch (err) { say(err.message); }
     })();
     document.getElementById("google").onclick = async () => {
       say();
       try {
+        if (client_id) await api("/sign-in/google", { oauth_query });
         const out = await api("/api/auth/sign-in/social", { provider: "google", callbackURL: back, errorCallbackURL: back });
         location.href = out.url;
       } catch (err) { say(err.message); }
