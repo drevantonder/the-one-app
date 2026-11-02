@@ -424,9 +424,8 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
   /// A page's Services folder: its services' icons, nine at most, small, on frosted glass; with none, nine faint
   /// empty places.
   function folder(apps, size) {
-    const mini = (size - size * 0.26 - size * 0.12) / 3;
-    const cells = apps.length ? apps.slice(0, 9).map((a) => one.appIcon(a, mini)).join("") : `<i></i>`.repeat(9);
-    return `<span class="folder" style="--size:${size}px;--mini:${mini}px">${cells}</span>`;
+    const cells = apps.length ? apps.slice(0, 9).map((a) => one.appIcon(a, size / 4)).join("") : `<i></i>`.repeat(9);
+    return `<span class="folder" style="--size:${size}px">${cells}</span>`;
   }
 
   function badge(n) {
@@ -567,8 +566,14 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
   function layoutGrid() {
     const grid = $(".detail .grid", root);
     if (!grid?.__items) return;
-    const gap = 14, cell = 82;
-    const columns = Math.max(4, Math.floor((grid.clientWidth + gap) / (cell + gap)));
+    // A phone's is four across its width; wider, cells stay an icon's size and more fit across.
+    const narrow = grid.clientWidth < 500;
+    const gap = narrow ? 12 : 14;
+    const cell = narrow ? Math.max(1, (grid.clientWidth - gap * 3) / 4) : 82;
+    const columns = narrow ? 4 : Math.max(4, Math.floor((grid.clientWidth + gap) / (cell + gap)));
+    grid.style.gap = `${gap}px`;
+    grid.style.gridAutoRows = `${cell}px`;
+    grid.style.setProperty("--icon", `${Math.max(40, Math.min(60, cell - 19))}px`);
     const taken = [];
     for (const item of grid.__items) {
       let [w, h] = item.span;

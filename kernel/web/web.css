@@ -36,9 +36,11 @@ a { color: inherit; }
 .nav-symbol { width: 20px; height: 20px; color: var(--muted); flex: none; }
 
 /* A page's Services folder: its services' icons, small, nine to a folder, on frosted glass. */
-.folder { --size: 20px; width: var(--size); height: var(--size); flex: none; display: grid; grid-template-columns: repeat(3, var(--mini)); grid-auto-rows: var(--mini); gap: calc(var(--size) * 0.06); padding: calc(var(--size) * 0.13); border-radius: calc(var(--size) * 0.225); background: rgba(128, 128, 128, 0.22); box-shadow: inset 0 0 0 0.5px rgba(128, 128, 128, 0.3); align-content: start; }
+.folder { --size: 20px; --mini: calc(var(--size) * 0.62 / 3); width: var(--size); height: var(--size); flex: none; display: grid; grid-template-columns: repeat(3, var(--mini)); grid-auto-rows: var(--mini); gap: calc(var(--size) * 0.06); padding: calc(var(--size) * 0.13); border-radius: calc(var(--size) * 0.225); background: rgba(128, 128, 128, 0.22); box-shadow: inset 0 0 0 0.5px rgba(128, 128, 128, 0.3); align-content: start; }
 .folder > i { border-radius: calc(var(--mini) * 0.25); background: rgba(128, 128, 128, 0.18); }
-.folder .app-icon { font-size: 0; }
+.folder .app-icon { --size: var(--mini) !important; font-size: 0; }
+/* On a page, icons are as big as its grid's cells leave room for. */
+.grid .tile-icon > .app-icon, .grid .tile-icon > .folder { --size: var(--icon, 60px) !important; }
 
 /* What's open: its bar, as a Mac window's toolbar, then the page, list or screen. */
 .detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
