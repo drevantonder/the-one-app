@@ -2165,7 +2165,7 @@ impl Node {
         self.append_as(scope, &caller.user, by, members::node("vault-request", data)).await?;
         // At the install's address (where its kernel signs people in) the web client opens it in any browser; an
         // install without one has only its apps to.
-        let web = self.with(|i| Ok(settings(&i.r.members).remove("address")))?;
+        let web = self.with(|i| Ok(crate::state::settings(&i.r.members).remove("address")))?;
         let link = match web.as_ref().and_then(Value::as_str).filter(|w| w.starts_with("https://") || w.starts_with("http://")) {
             Some(web) => format!("{}/vault?id={id}&scope={scope}", web.trim_end_matches('/')),
             None => format!("{}://vault?id={id}&scope={scope}", crate::config::CLI),
@@ -2452,7 +2452,7 @@ impl Node {
     /// looking.
     fn page(&self, viewer: &Caller, mut context: Value, body: &str) -> Result<String> {
         context["me"] = json!(self.me_for(viewer)?);
-        let made_here = self.with(|i| Ok(settings(&i.r.members).remove("made_here")))?;
+        let made_here = self.with(|i| Ok(crate::state::settings(&i.r.members).remove("made_here")))?;
         let api = format!("http://localhost:{}", crate::api::port());
         context["config"] = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": made_here });
         Ok(crate::screen::page(&context, body))
@@ -2838,7 +2838,7 @@ impl Node {
             // setting names, wherever that runs (the server with Apple's push key); with push off, it isn't sent.
             ("POST", "/notify") => {
                 ensure!(!grant.read_only, "this call only reads: it can't push");
-                let push = self.with(|i| Ok(settings(&i.r.members).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()))?;
+                let push = self.with(|i| Ok(crate::state::settings(&i.r.members).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()))?;
                 if push.is_empty() {
                     return Ok(ok(json!({ "ok": { "sent": false, "why": "push is off in this install" } })));
                 }
@@ -2916,105 +2916,60 @@ impl Node {
         let arrangements = self.arrangements(&viewer.user);
         let install = self.0.install.lock().unwrap();
         let viewer_name = if viewer.key == self.0.id { self.server_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
-        let user = install.as_ref().and_then(|i| i.r.members.user(&viewer.user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role }));
-        let settings = settings(install.as_ref().map(|i| &i.r.members).unwrap_or(&Members::default()));
         let backups = install.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
-        let settings_items = install.as_ref().map(|i| settings_items(&i.r.members, &viewer.user, waiting, backups.is_some(), settings["store"].as_str().unwrap_or(""))).unwrap_or_default();
-        let install = install.as_ref().map(|i| {
+        let here_sidecars = install.as_ref().map(|i| self.sidecars_here(i)).unwrap_or_default();
+        let me = &viewer.user;
+        let server_now = |s: &members::Machine| {
+            let Some(i) = install.as_ref() else { return serde_json::Map::new() };
             let m = &i.r.members;
-            let me = &viewer.user;
-            let list = |ps: Vec<Principal>| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
-            let here_sidecars = self.sidecars_here(i);
-            let set = rank::set(&m.settings);
-            let mut servers: Vec<Value> = m
-                .servers()
-                .map(|s| {
-                    let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
-                    // The containers on a server are its owners' business.
-                    let load = if s.key == self.0.id { Some(crate::load::current()) } else { session.and_then(|s| s.load.clone()) }.map(|mut l| {
-                        if !m.owners(&s.key).iter().any(|o| m.acts_for(me, o)) {
-                            l.containers.clear();
-                        }
-                        l
-                    });
-                    // What it is, as it last said; a server that hasn't, as one that's always on.
-                    let kind = load.as_ref().map(|l| l.kind.clone()).filter(|k| !k.is_empty()).unwrap_or_else(|| "always_on".into());
-                    json!({
-                        "kind": kind, "use": rank::place(&set, &hex(&s.key), &kind), "far": i.far.get(&s.key).is_some_and(|d| *d > FAR),
-                        "key": hex(&s.key), "name": s.name, "user": s.user, "me": Some(s.key) == device, "here": s.key == self.0.id,
-                        "online": s.key == self.0.id || session.is_some(),
-                        "owners": list(m.owners(&s.key)), "users": list(m.users_of(&s.key)), "privileged": m.privileged(&s.key),
-                        "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(),
-                        "serves_me": m.serves(&s.key, me),
-                        "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
-                        // When it last sent another server a step that wasn't the bucket's.
-                        "sent_wrong": i.status.get(&Scope::Global.to_string()).and_then(|st| st.insights.get(members::APP)).and_then(|ins| ins.errors.iter().filter(|((op, _), f)| op == "changed" && f.user == hex(&s.key)).map(|(_, f)| f.last).max()),
-                        "sidecars": if s.key == self.0.id { here_sidecars.iter().map(|d| d.0.clone()).collect() } else { session.map(|s| s.sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },
-                        "installed_sidecars": installed_sidecars(m, s, if s.key == self.0.id { &here_sidecars } else { session.map(|s| s.sidecars.as_slice()).unwrap_or_default() }, i.builds.get(&s.key).map(|r| r.commit.as_str())),
-                        "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
-                        "load": load,
-                    })
-                })
-                .collect();
-            // Each server's place in where things run first, 0 first, for sidecars that pick one themselves.
-            let mut by_order: Vec<usize> = (0..servers.len()).collect();
-            by_order.sort_by_cached_key(|&n| {
-                let s = &servers[n];
-                (rank::order(&set, s["key"].as_str().unwrap_or(""), s["kind"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase())
+            let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
+            // The containers on a server are its owners' business.
+            let load = if s.key == self.0.id { Some(crate::load::current()) } else { session.and_then(|s| s.load.clone()) }.map(|mut l| {
+                if !m.owners(&s.key).iter().any(|o| m.acts_for(me, o)) {
+                    l.containers.clear();
+                }
+                l
             });
-            for (place, n) in by_order.into_iter().enumerate() {
-                servers[n]["order"] = json!(place);
+            let sidecars = if s.key == self.0.id { here_sidecars.as_slice() } else { session.map(|s| s.sidecars.as_slice()).unwrap_or_default() };
+            let now = json!({
+                "kind": load.as_ref().map(|l| l.kind.clone()), "far": i.far.get(&s.key).is_some_and(|d| *d > FAR),
+                "me": Some(s.key) == device, "here": s.key == self.0.id, "online": s.key == self.0.id || session.is_some(),
+                "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
+                // When it last sent another server a step that wasn't the bucket's.
+                "sent_wrong": i.status.get(&Scope::Global.to_string()).and_then(|st| st.insights.get(members::APP)).and_then(|ins| ins.errors.iter().filter(|((op, _), f)| op == "changed" && f.user == hex(&s.key)).map(|(_, f)| f.last).max()),
+                "sidecars": sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>(),
+                "installed_sidecars": installed_sidecars(m, s, sidecars, i.builds.get(&s.key).map(|r| r.commit.as_str())),
+                "load": load,
+            });
+            match now {
+                Value::Object(now) => now,
+                _ => unreachable!(),
             }
-            let clients: Vec<Value> = m
-                .clients()
-                .map(|c| json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "me": Some(c.key) == device, "asked": i.asked.get(&c.key) }))
-                .collect();
-            let users: Vec<Value> = m.users.values().filter(|u| !u.removed).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role, "me": &u.id == me })).collect();
-            let groups: Vec<Value> = m
-                .groups
-                .values()
-                .map(|g| {
-                    let members: Vec<Value> = g.members.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
-                    let invited: Vec<Value> = g.invited.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
-                    json!({ "id": g.id, "name": g.name, "role": m.group_role(me, &g.id), "members": members, "invited": invited })
-                })
-                .collect();
-            json!({
-                "name": m.name, "root": i.r.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
-                "member": m.server(&self.0.id).is_some(),
-                "users": users, "groups": groups, "servers": servers, "clients": clients,
-                "entries": i.r.store.count().unwrap_or(0), "settings": settings,
-                // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
-                "serverless": settings.contains_key("serverless").then(|| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE) })),
-            })
-        });
-        let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "accent": crate::config::ACCENT, "store": settings["store"], "push": settings["push"] });
-        let mut state = json!({
-            "config": config,
-            "me": match sign_in {
+        };
+        let client_now = |c: &members::Machine| {
+            let asked = install.as_ref().and_then(|i| i.asked.get(&c.key));
+            match json!({ "me": Some(c.key) == device, "asked": asked }) {
+                Value::Object(now) => now,
+                _ => unreachable!(),
+            }
+        };
+        let here = crate::state::Here {
+            me: match sign_in {
                 None => json!({ "key": hex(&viewer.key), "name": viewer_name, "user": viewer.user }),
                 Some(client) => json!({ "key": "", "name": client, "user": viewer.user }),
             },
-            "server": { "key": hex(&self.0.id), "name": self.server_name(), "ready": ready, "guide": crate::skills::address() },
-            "user": user,
-            "install": install,
-            // Requests for an item waiting for this user to answer (see GET /v1/vault/requests); and for shells
-            // built before the Vault.
-            "vault_requests": waiting,
-            "secret_requests": waiting,
-            // How this user arranged each of their pages (see `arrange`).
-            "arrangements": arrangements,
-            // What's wrong with backups, for an admin: a badge on Settings until a run works again.
-            "backups": backups,
-            // What Settings shows this user, in order (see `settings_items`).
-            "settings_items": settings_items,
-            // What to paste into an agent so it connects itself, for Ask Your Agent.
-            "agent_prompt": crate::skills::agent_prompt(settings.get("address").and_then(|a| a.as_str())),
-        });
-        if sign_in.is_none() && viewer.key != self.0.id {
-            state["client"] = json!({ "key": hex(&viewer.key), "name": viewer_name });
-        }
-        state
+            client: (sign_in.is_none() && viewer.key != self.0.id).then(|| json!({ "key": hex(&viewer.key), "name": viewer_name })),
+            server: json!({ "key": hex(&self.0.id), "name": self.server_name(), "ready": ready, "guide": crate::skills::address() }),
+            member: install.as_ref().is_some_and(|i| i.r.members.server(&self.0.id).is_some()),
+            entries: install.as_ref().map(|i| i.r.store.count().unwrap_or(0) as u64).unwrap_or(0),
+            waiting,
+            arrangements: json!(arrangements),
+            backups,
+            guide: crate::skills::address(),
+            server_now: &server_now,
+            client_now: &client_now,
+        };
+        crate::state::state(install.as_ref().map(|i| &i.r.members), me, here)
     }
 
     // Members.
@@ -4224,52 +4179,3 @@ const SETTINGS_SCREENS: &[(&str, &str)] = &[
     ("agents", include_str!("screen/settings/agents.html")),
 ];
 
-/// Settings' items for `user`, in order, as every client draws them: each opens the Settings screen it names, but the
-/// App Store, which opens its app's screen (the install's `store` setting), and is left out while that app isn't
-/// there. `account` (theirs) is first, titled with their name; Requests only while something waits for them (invites, servers to
-/// trust, items asked for); Users, Install and Backups only for admins. A badge is the count the icon shows.
-fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, store: &str) -> Vec<Value> {
-    let Some(me) = m.user(user) else { return Vec::new() };
-    let item = |name: &str, title: &str, icon: &str, color: &str| json!({ "name": name, "title": title, "icon": icon, "color": color });
-    let with = |mut item: Value, key: &str, value: Value| {
-        item[key] = value;
-        item
-    };
-    let invites = m.groups.values().filter(|g| g.invited.contains_key(user)).count();
-    let offers = m
-        .servers()
-        .filter(|s| !m.privileged(&s.key) && !m.owners(&s.key).contains(&Principal::User(user.into())) && !m.trusts(user, &s.key))
-        .filter(|s| m.users_of(&s.key).iter().any(|p| matches!(p, Principal::User(u) if u == user) || matches!(p, Principal::Group(g) if m.group_role(user, g).is_some())))
-        .count();
-    let mut out = vec![item("account", &me.name, "user-circle", "#8e8e93")];
-    let requests = invites + offers + items_asked;
-    if requests > 0 {
-        out.push(with(item("requests", "Requests", "tray", "#ff2d55"), "badge", json!(requests)));
-    }
-    if m.apps.get(store).is_some_and(|a| !a.erased && a.deleted.is_none()) {
-        out.push(with(item("store", "App Store", "squares-four", "#007aff"), "app", json!(store)));
-    }
-    out.extend([
-        item("groups", "Groups", "users-three", "#34c759"),
-        item("devices", "Devices", "devices", "#8e8e93"),
-        item("agents", "Agents", "sparkle", "#ff2d55"),
-        item("vault", "Vault", "lock", "#5856d6"),
-        item("appearance", "Appearance", "circle-half", "#007aff"),
-    ]);
-    if me.role == Role::Admin {
-        out.extend([item("users", "Users", "user-gear", "#30b0c7"), item("install", "Install", "sliders-horizontal", "#8e8e93")]);
-        let backed = item("backups", "Backups", "hard-drives", "#ff9500");
-        out.push(if backups { with(backed, "badge", json!(1)) } else { backed });
-    }
-    out
-}
-
-/// The install's settings: the white label's defaults (config.toml's `[settings]`), and what its admins set over them.
-fn settings(m: &Members) -> serde_json::Map<String, Value> {
-    let mut out: serde_json::Map<String, Value> = crate::config::SETTINGS.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
-    out.extend(m.settings.iter().map(|(k, v)| (k.clone(), json!(v))));
-    for key in ["store", "push"] {
-        out.entry(key).or_insert(json!(""));
-    }
-    out
-}

@@ -11,7 +11,7 @@ use one::bucket::{Bucket, Object};
 use one::call::Append;
 use one::db::Db;
 use one::entry::{Entry, Scope};
-use one::members::{self, Members, Principal, ScopeState};
+use one::members::{self, Members, ScopeState};
 use p2panda_core::Hash;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
@@ -284,60 +284,29 @@ pub fn install(user: &str, client: &str, scopes: &str, now: f64) -> Result<Strin
 }
 
 fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &str, now: u64) -> Value {
-    let list = |ps: Vec<Principal>| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
-    let hex = one::entry::hex;
-    let set = one::rank::set(&m.settings);
-    let servers: Vec<Value> = m
-        .servers()
-        .map(|s| {
-            json!({
-                "key": hex(&s.key), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
-                "owners": list(m.owners(&s.key)), "users": list(m.users_of(&s.key)), "privileged": m.privileged(&s.key),
-                "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(), "serves_me": m.serves(&s.key, me),
-                "build": null, "target": null, "sidecars": [], "installed_sidecars": [],
-                "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
-                "load": null, "kind": null, "use": one::rank::place(&set, &hex(&s.key), ""), "far": false,
-            })
-        })
-        .collect();
-    let clients: Vec<Value> = m.clients().map(|c| json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "me": false, "asked": null })).collect();
-    let users: Vec<Value> = m.users.values().filter(|u| !u.removed).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role, "me": u.id == me })).collect();
-    let groups: Vec<Value> = m
-        .groups
-        .values()
-        .map(|g| {
-            let members: Vec<Value> = g.members.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
-            let invited: Vec<Value> = g.invited.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
-            json!({ "id": g.id, "name": g.name, "role": m.group_role(me, &g.id), "members": members, "invited": invited })
-        })
-        .collect();
     let mine = states.get(&Scope::User(me.into()).to_string());
-    let mut settings: serde_json::Map<String, Value> = one::config::SETTINGS.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
-    settings.extend(m.settings.iter().map(|(k, v)| (k.clone(), json!(v))));
-    for key in ["store", "push"] {
-        settings.entry(key).or_insert(json!(""));
-    }
     // Requests for an item waiting for `me` to answer, as src/node.rs's `item_requests` counts them.
     let manages = |s: &String| Scope::parse(s).is_ok_and(|s| members::manages_scope(m, me, &s));
     let waiting = states.iter().filter(|(s, _)| manages(s)).flat_map(|(_, s)| s.requests.values()).filter(|r| r.answer.is_none() && now < r.time + 86_400_000).count();
-    let config = json!({ "name": one::config::NAME, "cli": one::config::CLI, "accent": one::config::ACCENT, "store": settings["store"], "push": settings["push"] });
-    let user = m.user(me).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role }));
-    let user_name = m.user(me).map(|u| u.name.clone()).unwrap_or_default();
-    let state = json!({
-        "config": config,
-        "me": { "key": "", "name": client, "user": me },
-        "server": { "key": "", "name": "", "ready": true, "guide": null },
-        "user": user,
-        "install": {
-            "name": m.name, "root": m.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role), "member": false,
-            "users": users, "groups": groups, "servers": servers, "clients": clients, "entries": 0, "settings": settings,
-            "serverless": { "use": one::rank::place(&set, one::rank::CLOUDFLARE, one::rank::CLOUDFLARE) },
+    // It knows of no server being on, nor of who else is looking.
+    let state = one::state::state(
+        Some(m),
+        me,
+        one::state::Here {
+            me: json!({ "key": "", "name": client, "user": me }),
+            client: Some(json!({ "key": "", "name": client })),
+            server: json!({ "key": "", "name": "", "ready": true, "guide": null }),
+            member: false,
+            entries: 0,
+            waiting,
+            arrangements: json!(mine.map(|s| s.arrangements.clone()).unwrap_or_default()),
+            backups: None,
+            guide: None,
+            server_now: &|_| Default::default(),
+            client_now: &|_| Default::default(),
         },
-        "vault_requests": waiting, "secret_requests": waiting,
-        "arrangements": mine.map(|s| s.arrangements.clone()).unwrap_or_default(),
-        "backups": null,
-        "client": { "key": "", "name": client },
-    });
+    );
+    let user_name = m.user(me).map(|u| u.name.clone()).unwrap_or_default();
     let installed_in = |app: &str, scope: &Scope| states.get(&scope.to_string()).is_some_and(|s| s.installed.contains(app));
     let handle = |s: &Scope| {
         let name = match s {

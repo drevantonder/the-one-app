@@ -26,7 +26,6 @@ public sealed class NodeState
     [JsonPropertyName("user")] public Person? User { get; init; }
     [JsonPropertyName("install")] public Install? Install { get; init; }
     [JsonPropertyName("vault_requests")] public int? VaultRequests { get; init; }
-    [JsonPropertyName("secret_requests")] public int? SecretRequests { get; init; }
     [JsonPropertyName("arrangements")] public Dictionary<string, Arrangement>? Arrangements { get; set; }
     /// What this app's sign-in opens: some scopes and apps, or (null) all of them.
     [JsonPropertyName("sign_in")] public SignedIn? SignIn { get; init; }
@@ -34,7 +33,7 @@ public sealed class NodeState
     /// What Settings shows this person, in order.
     [JsonPropertyName("settings_items")] public List<SettingsItem>? SettingsItems { get; init; }
 
-    public int Waiting => VaultRequests ?? SecretRequests ?? 0;
+    public int Waiting => VaultRequests ?? 0;
 }
 
 /// One of Settings' items: it opens the Settings screen it names, or with `app`, that app's main screen.

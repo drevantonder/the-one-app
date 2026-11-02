@@ -20,9 +20,8 @@ struct NodeState: Decodable, Sendable, Equatable {
     /// The user this machine was admitted for, once it is in an install.
     var user: Person?
     var install: Install?
-    /// How many requests for a Vault item wait for this user; and as nodes before the Vault said it.
+    /// How many requests for a Vault item wait for this user.
     var vaultRequests: Int?
-    var secretRequests: Int?
     /// How this user arranged each page, by scope; nil from a server too old to keep arrangements.
     var arrangements: [String: Arrangement]?
     /// What's wrong with backups, for an admin; nil while they work.
@@ -32,10 +31,10 @@ struct NodeState: Decodable, Sendable, Equatable {
     /// What to paste into an agent so it connects itself; nil from a server too old to say.
     var agentPrompt: String?
 
-    var waitingRequests: Int { vaultRequests ?? secretRequests ?? 0 }
+    var waitingRequests: Int { vaultRequests ?? 0 }
 
     enum CodingKeys: String, CodingKey {
-        case config, machine = "me", host = "server", user, install, vaultRequests = "vault_requests", secretRequests = "secret_requests", arrangements, backups
+        case config, machine = "me", host = "server", user, install, vaultRequests = "vault_requests", arrangements, backups
         case settingsItems = "settings_items", agentPrompt = "agent_prompt"
     }
 }

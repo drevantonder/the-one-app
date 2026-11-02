@@ -71,16 +71,6 @@ pub fn connecting() -> String {
     )
 }
 
-/// What to paste into an agent so it connects itself: the MCP server at the install's address, where it has one; else
-/// the skills a server serves on its tailnet, or, where it serves none, the command line's guide.
-pub fn agent_prompt(address: Option<&str>) -> String {
-    match (address.filter(|a| !a.is_empty()), self::address()) {
-        (Some(address), _) => format!("Connect yourself to {NAME}: add the MCP server {}/mcp, and I'll sign in when it asks.", address.trim_end_matches('/')),
-        (None, Some(guide)) => format!("Connect yourself to {NAME}: read {guide} and set it up for me."),
-        (None, None) => format!("Connect yourself to {NAME}: run \"{CLI} guide\" in a terminal and set it up for me."),
-    }
-}
-
 /// A skill: its name and description (its frontmatter), the body of its SKILL.md, and its other files.
 #[derive(Clone, Debug)]
 pub struct Skill {

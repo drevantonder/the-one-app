@@ -181,7 +181,7 @@ impl Node {
         let me = self.0.id;
         let (due, admins, push) = self.with(|i| {
             let m = &i.r.members;
-            let push = settings(m).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+            let push = crate::state::settings(m).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
             if push.is_empty() || !i.views.contains_key("global") {
                 return Ok((Vec::new(), Vec::new(), push));
             }

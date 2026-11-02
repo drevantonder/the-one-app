@@ -71,6 +71,7 @@ pub mod sidecars;
 pub mod kernel;
 pub mod log;
 pub mod screen;
+pub mod state;
 pub mod vault;
 #[cfg(not(target_family = "wasm"))]
 pub mod shell;
