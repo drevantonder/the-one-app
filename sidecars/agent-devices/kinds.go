@@ -61,7 +61,7 @@ type kind interface {
 }
 
 // runtimes are every kind but linux, as this machine might run them.
-var runtimes = []kind{windowsQEMU{}, androidEmulator{}}
+var runtimes = []kind{windowsQEMU{}, androidEmulator{}, iosSimulator{}}
 
 // A vm is a device of a kind other than linux, as its file in the sidecar's folder says.
 type vm struct {
@@ -413,7 +413,7 @@ func vmTools(k kind) string {
 		"scroll {x, y, to_x, to_y}, swipe {x, y, to_x, to_y}: drags from one point to the other",
 		"open_url {url}: opens it in the browser",
 		"install_app {app}: a file on this machine or a URL (an .apk on Android, an .msi, .msix or .exe on Windows, an .app on an iPhone), or a winget id on Windows",
-		"run_command {command}: runs it and gives its output (PowerShell on Windows, the shell on Android, simctl spawn on an iPhone)",
+		"run_command {command}: runs it and gives its output (PowerShell on Windows, the shell on Android, a program in the simulator on an iPhone: it has no shell)",
 		"Input here: " + k.limits(),
 	}, "\n")
 }
