@@ -26,7 +26,7 @@ function describe() {
     name: app.name, title: app.title, icon: app.icon, color: app.color, domain: app.domain, ...(app.tagline ? { tagline: String(app.tagline) } : {}), description: app.description || "", instructions: app.instructions || "",
     ...(app.connector ? { connector: true } : {}), ...(app.needs ? { needs: String(app.needs) } : {}),
     ...(app.vault && Object.keys(app.vault).length ? { vault: app.vault } : {}),
-    ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}) })),
+    ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}), ...(o.words ? { words: o.words.map(String) } : {}) })),
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => {
       const size = w.size || "medium";
       const options = Object.entries(w.options || {}).map(([name, o]) => ({ name, title: o.title || name, default: o.default ?? null }));

@@ -41,7 +41,8 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     let confirmed = flags.remove("confirm").is_some() || flags.remove("yes").is_some();
     let files: Vec<String> = flags.remove("file").unwrap_or_default().into_iter().flatten().collect();
     let schema = spec.as_ref().map(|(_, o)| o["input"].clone()).unwrap_or(Value::Null);
-    let mut input = input(&schema, words, flags, &files)?;
+    let places = spec.as_ref().map(|(_, o)| places(o)).unwrap_or_default();
+    let mut input = input(&schema, &places, words, flags, &files)?;
     let missing = missing(&schema, &input);
     if !missing.is_empty() {
         from_stdin(&schema, &missing, &mut input)?;
@@ -126,8 +127,18 @@ fn input_name(props: &Map<String, Value>, flag: &str) -> String {
     props.keys().find(|p| flat(p) == flat(flag)).cloned().unwrap_or_else(|| flag.replace('-', "_"))
 }
 
-/// The operation's input from flags, words (the required inputs, in order) and files.
-fn input(schema: &Value, words: Vec<String>, flags: BTreeMap<String, Vec<Option<String>>>, files: &[String]) -> Result<Map<String, Value>> {
+/// The inputs words fill, in order: the operation's `words` when it names them, else its required inputs.
+fn places(op: &Value) -> Vec<String> {
+    match op["words"].as_array() {
+        Some(words) => words.iter().filter_map(Value::as_str).map(String::from).collect(),
+        None => required(&op["input"]),
+    }
+}
+
+/// The operation's input from flags, words (filling `places` in order) and files. Given fewer words than places, the
+/// optional places are skipped first: `one board post "hi"` is text, `one board post ideas "hi"` a topic and text.
+/// A word left over is an error, never folded into another input: it says to quote text, or which flag to give it as.
+fn input(schema: &Value, places: &[String], words: Vec<String>, flags: BTreeMap<String, Vec<Option<String>>>, files: &[String]) -> Result<Map<String, Value>> {
     let props = schema["properties"].as_object().cloned().unwrap_or_default();
     let mut input = Map::new();
     for (flag, values) in flags {
@@ -143,21 +154,31 @@ fn input(schema: &Value, words: Vec<String>, flags: BTreeMap<String, Vec<Option<
             false => drop(input.insert(name, file)),
         }
     }
-    let open: Vec<String> = required(schema).into_iter().filter(|r| !input.contains_key(r)).collect();
-    let mut words = words.into_iter().peekable();
-    for (i, name) in open.iter().enumerate() {
+    let required = required(schema);
+    let mut open: Vec<&String> = places.iter().filter(|p| !input.contains_key(*p)).collect();
+    while open.len() > words.len()
+        && let Some(i) = open.iter().position(|p| !required.contains(p))
+    {
+        open.remove(i);
+    }
+    let filled = !open.is_empty();
+    let mut words = words.into_iter();
+    for name in open {
         let Some(word) = words.next() else { break };
-        let prop = props.get(name);
-        // The last word input takes the rest when it's text: `one board post Starting the CLI work`.
-        let word = match i + 1 == open.len() && prop.is_some_and(|p| p["type"] == "string") && words.peek().is_some() {
-            true => std::iter::once(word).chain(words.by_ref()).collect::<Vec<_>>().join(" "),
-            false => word,
-        };
-        input.insert(name.clone(), value(name, &[Some(word)], prop)?);
+        input.insert(name.clone(), value(name, &[Some(word)], props.get(name))?);
     }
     let rest: Vec<String> = words.collect();
-    ensure!(rest.is_empty(), "{} isn't an input: give inputs as --flags (see --help)", rest.join(" "));
-    Ok(input)
+    let Some(first) = rest.first() else { return Ok(input) };
+    ensure!(!filled, "{} is left over: put text with spaces in quotes (see --help)", rest.join(" "));
+    let unset: Vec<&String> = props.keys().filter(|p| !input.contains_key(*p) && props[*p]["type"] == "string").collect();
+    bail!(
+        "{} isn't an input: {} (see --help)",
+        rest.join(" "),
+        match unset.as_slice() {
+            few if !few.is_empty() && few.len() <= 3 => format!("did you mean {}?", few.iter().map(|p| format!("--{} {first}", kebab(p))).collect::<Vec<_>>().join(" or ")),
+            _ => "give inputs as --flags".to_string(),
+        }
+    );
 }
 
 fn required(schema: &Value) -> Vec<String> {
@@ -371,11 +392,18 @@ pub fn help(app: &Value, op: &Value) -> String {
     let schema = &op["input"];
     let props = schema["properties"].as_object().cloned().unwrap_or_default();
     let required = required(schema);
+    let places = places(op);
     let mut usage = format!("{CLI} {a} {o}");
-    for r in &required {
-        usage.push_str(&format!(" <{}>", kebab(r)));
+    for p in &places {
+        usage.push_str(&match required.contains(p) {
+            true => format!(" <{}>", kebab(p)),
+            false => format!(" [<{}>]", kebab(p)),
+        });
     }
-    if props.keys().any(|p| !required.contains(p)) {
+    for r in required.iter().filter(|r| !places.contains(r)) {
+        usage.push_str(&format!(" --{} <{}>", kebab(r), kebab(r)));
+    }
+    if props.keys().any(|p| !required.contains(p) && !places.contains(p)) {
         usage.push_str(" [--input value]...");
     }
     let mut rows: Vec<(String, String)> = Vec::new();

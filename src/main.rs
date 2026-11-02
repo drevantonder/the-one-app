@@ -132,10 +132,11 @@ Usage:
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's operations
   {CLI} <app> <op> [words] [--input value]
-                                       run an operation, e.g. {CLI} board post \"hi there\" --topic x; --help says
-                                       what it takes. Required inputs may be words, lists repeat a flag, inputs not
-                                       given are read as JSON from stdin, --file <input>=<path> gives a file and
-                                       --out <path> saves what it gives back. --server <name> runs it on that device
+                                       run an operation, e.g. {CLI} board post ideas \"hi there\"; --help says what
+                                       it takes. Words fill its main inputs in order (--help shows which), lists
+                                       repeat a flag, inputs not given are read as JSON from stdin, --file
+                                       <input>=<path> gives a file and --out <path> saves what it gives back.
+                                       --server <name> runs it on that device
   {CLI} try [<command>]                a new install, on this machine beside yours, with only what every new install
                                        starts with: to look around and test in. {CLI} try <command> runs a command in
                                        it ({CLI} try mcp for an agent), and {CLI} try stop deletes it

@@ -176,6 +176,7 @@ At the start of every session, call board_read with no topic and do what the top
 
   ops: {
     read: {
+      words: ["topic"],
       description: `Read a topic: its last ${RECENT} posts, older ones as summaries, then its subtopics. Omit the topic to read the top. before reads posts before a number word for word; zoom opens the summary with that number.`,
       reads: true,
       input: {
@@ -223,6 +224,7 @@ At the start of every session, call board_read with no topic and do what the top
       },
     },
     post: {
+      words: ["topic", "text"],
       description: `Post one line, at most ${LIMIT} bytes, to a topic; omit the topic to post at the top.`,
       input: {
         type: "object",
@@ -251,6 +253,7 @@ At the start of every session, call board_read with no topic and do what the top
       },
     },
     create: {
+      words: ["path", "description"],
       description: "Create a topic under an existing one (the top always exists), with a one-line description. Paths are lowercase words joined by - and nested with /, like projects/the-one-app.",
       input: {
         type: "object",
@@ -330,6 +333,7 @@ At the start of every session, call board_read with no topic and do what the top
       },
     },
     summarise: {
+      words: ["topic"],
       description: `Summarise a topic's older posts, so reads fold them into one line. Without text, shows the next posts that need a summary; then call it again with from, to and text (one line, at most ${SUMMARY} bytes).`,
       input: {
         type: "object",
@@ -371,6 +375,7 @@ At the start of every session, call board_read with no topic and do what the top
       },
     },
     withdraw: {
+      words: ["topic", "n"],
       description: "Withdraw a post you wrote: its topic and number as read shows them (or its id).",
       confirm: true,
       input: { type: "object", properties: { topic: { type: "string" }, n: { type: "number", description: "the post's number" }, id: { type: "string" }, scope: scopeInput } },
@@ -401,6 +406,7 @@ At the start of every session, call board_read with no topic and do what the top
       },
     },
     recall: {
+      words: ["pattern", "topic"],
       description: "Search posts with a case-insensitive regular expression, in one topic or all of them.",
       reads: true,
       input: { type: "object", required: ["pattern"], properties: { pattern: { type: "string" }, topic: { type: "string" }, scope: scopeInput, format: formatInput } },
