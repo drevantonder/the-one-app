@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -52,10 +53,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.ByteArrayOutputStream
 import java.io.File
 
-// An app's screen: the page its node serves, in a web view of its own. Screens are untrusted: the page gets an origin
-// of its own that's nowhere (ORIGIN), never this app's or the install's; it reaches nothing but the bridge, a message
-// listener only that origin's main frame is given, answered here as the iPhone app's AppScreen.swift answers it, each
-// call made as the screen's own app; it never navigates, and its links open in the browser.
+// An app's screen, or a Settings screen: the page its node serves, in a web view of its own. Screens are untrusted: the
+// page gets an origin of its own that's nowhere (ORIGIN), never this app's or the install's; it reaches nothing but the
+// bridge, a message listener only that origin's main frame is given, answered here as the iPhone app's AppScreen.swift
+// answers it, each call made as the screen's own app, and only a Settings screen's (a route this app chose, never the
+// page) as the person; it never navigates, and its links open in the browser, the install's own in a Custom Tab.
 
 private const val ORIGIN = "https://screen.invalid"
 
@@ -90,23 +92,27 @@ private fun shim(accent: String, dark: Boolean) = """
 private fun css(accent: String, dark: Boolean) = accentColor(accent, dark).let { "rgb(${(it.red * 255).toInt()}, ${(it.green * 255).toInt()}, ${(it.blue * 255).toInt()})" }
 
 @Composable
-fun AppScreen(store: Store, route: Route.Screen, setTitle: (String?) -> Unit) {
+fun AppScreen(store: Store, route: Route, setTitle: (String?) -> Unit) {
     val context = LocalContext.current
     val palette = LocalPalette.current
-    var loaded by remember(route) { mutableStateOf(false) }
-    var failure by remember(route) { mutableStateOf<String?>(null) }
+    // Drawn again in this app's light or dark, once it changes: a web view takes the scheme its theme says.
+    val dark = palette.dark
+    var loaded by remember(route, dark) { mutableStateOf(false) }
+    var failure by remember(route, dark) { mutableStateOf<String?>(null) }
     val accent = store.config?.accent ?: BuildConfig.ACCENT
-    val bridge = remember(route) { Bridge(context, store, route, setTitle) }
+    val bridge = remember(route, dark) { Bridge(context, store, route, setTitle) }
     DisposableEffect(bridge) { onDispose { bridge.close() } }
 
-    Box(Modifier.fillMaxSize()) {
+    key(dark) { Box(Modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize().alpha(if (loaded) 1f else 0f),
             factory = { ctx ->
-                bridge.make(ctx, shim(accent, palette.dark)) { loaded = true }.also { web ->
+                val themed = android.view.ContextThemeWrapper(ctx, if (dark) android.R.style.Theme_DeviceDefault else android.R.style.Theme_DeviceDefault_Light)
+                bridge.make(themed, shim(accent, dark)) { loaded = true }.also { web ->
                     bridge.scope.launch {
                         try {
-                            web.loadDataWithBaseURL("$ORIGIN/", store.screen(route), "text/html", "utf-8", null)
+                            val html = if (route is Route.Setting) store.settingsScreen(route) else store.screen(route as Route.Screen)
+                            web.loadDataWithBaseURL("$ORIGIN/", html, "text/html", "utf-8", null)
                         } catch (e: Exception) {
                             failure = e.message
                         }
@@ -120,11 +126,14 @@ fun AppScreen(store: Store, route: Route.Screen, setTitle: (String?) -> Unit) {
             LaunchedEffect(Unit) { delay(400); slow = true }
             if (slow) CircularProgressIndicator(Modifier.align(Alignment.Center), color = palette.secondary)
         }
-    }
+    } }
 }
 
 /** A screen's web view, and the bridge it answers. */
-private class Bridge(val context: Context, val store: Store, val route: Route.Screen, val setTitle: (String?) -> Unit) {
+private class Bridge(val context: Context, val store: Store, route: Route, val setTitle: (String?) -> Unit) {
+    /** A Settings screen's name, for one; its app's screen, for the rest. */
+    private val settings = (route as? Route.Setting)?.name
+    private val screen = route as? Route.Screen ?: Route.Screen("")
     val scope: CoroutineScope = MainScope()
     private var web: WebView? = null
 
@@ -168,7 +177,9 @@ private class Bridge(val context: Context, val store: Store, val route: Route.Sc
             // The page never goes anywhere: links open in the browser.
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
-                if (url.scheme in listOf("http", "https", "mailto", "tel")) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                val address = store.signIn.address?.let(Uri::parse)
+                if (address != null && url.scheme == address.scheme && url.authority == address.authority) SignIn.openInTab(context, url)
+                else if (url.scheme in listOf("http", "https", "mailto", "tel")) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 return true
             }
 
@@ -197,14 +208,38 @@ private class Bridge(val context: Context, val store: Store, val route: Route.Sc
 
     private fun str(m: JsonObject, k: String) = (m[k] as? JsonPrimitive)?.contentOrNull
 
-    /** The bridge: `{ type: "call" | "open" | "title" | … }`. A page only ever calls its own app, but may open
-     *  another's screens. */
+    /** The bridge: `{ type: "call" | "open" | "title" | … }`, and for Settings screens alone, `"api" | "signOut" |
+     *  "appearance" | "device" | "request"`. A page only ever calls its own app, but may open another's screens. */
     private suspend fun answer(m: JsonObject): JsonElement? {
-        when (str(m, "type")) {
-            "call" -> return store.call(route.app, str(m, "op") ?: "", m["input"] ?: JsonObject(emptyMap()))
+        val type = str(m, "type")
+        if (type in listOf("api", "signOut", "appearance", "device", "request") && settings == null) throw NodeError("Only Settings can do that.")
+        when (type) {
+            "api" -> {
+                val path = str(m, "path") ?: ""
+                val bare = Uri.parse(path).path ?: ""
+                if (!bare.startsWith("/v1/") || ".." in bare) throw NodeError("That isn’t your server’s.")
+                val method = (str(m, "method") ?: "GET").uppercase()
+                val body = m["body"]?.takeIf { it !is JsonNull && method != "GET" } ?: if (method == "GET") null else JsonObject(emptyMap())
+                return json.parseToJsonElement(String(store.api(path, method, body)).ifEmpty { "null" })
+            }
+            "signOut" -> {
+                store.signOut()
+                return null
+            }
+            "appearance" -> {
+                str(m, "value")?.let { v -> Appearance.entries.firstOrNull { it.name.equals(v, ignoreCase = true) }?.let(store::choose) }
+                return JsonPrimitive(store.appearance.name.lowercase())
+            }
+            "device" -> return obj("name" to SignIn.deviceName(context), "build" to "${store.config?.name ?: BuildConfig.NAME}, app ${BuildConfig.COMMIT}", "signOut" to true)
+            "request" -> return JsonPrimitive(ask(str(m, "scope") ?: "", str(m, "id") ?: ""))
+            "call" -> {
+                if (settings != null) throw NodeError("Settings has no app to call.")
+                return store.call(screen.app, str(m, "op") ?: "", m["input"] ?: JsonObject(emptyMap()))
+            }
             "open" -> {
-                val app = str(m, "app")?.ifEmpty { null } ?: route.app
-                store.path.add(Route.Screen(app, str(m, "screen") ?: "main", (m["params"] ?: JsonObject(emptyMap())).toString(), route.scope))
+                val params = (m["params"] ?: JsonObject(emptyMap())).toString()
+                val app = str(m, "app")?.ifEmpty { null }
+                store.path.add(if (settings != null && app == null) Route.Setting(str(m, "screen") ?: "", params) else Route.Screen(app ?: screen.app, str(m, "screen") ?: "main", params, screen.scope))
                 return null
             }
             "title" -> {
@@ -270,12 +305,18 @@ private class Bridge(val context: Context, val store: Store, val route: Route.Sc
         context.startActivity(intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    /** `one.vault(need)`: asks for what the app declares, in the Vault's sheet → whether it's allowed once it's gone,
-     *  or once the request is answered somewhere else (another device, an agent's CLI), which closes the sheet. */
+    /** `one.vault(need)`: asks for what the app declares, in the Vault's sheet → whether it's allowed. */
     private suspend fun askVault(need: String): Boolean {
-        val scope = route.scope ?: "user"
-        val out = store.post("/v1/vault/request", obj("scope" to scope, "app" to route.app, "need" to need)) as? JsonObject
+        if (settings != null) throw NodeError("Settings has no app to ask for.")
+        val scope = screen.scope ?: "user"
+        val out = store.post("/v1/vault/request", obj("scope" to scope, "app" to screen.app, "need" to need)) as? JsonObject
         val id = (out?.get("id") as? JsonPrimitive)?.contentOrNull ?: throw NodeError("The Vault didn’t take the request")
+        return ask(scope, id)
+    }
+
+    /** A request for a Vault item, in the Vault's sheet → whether it's allowed once it's gone, or once the request is
+     *  answered somewhere else (another device, an agent's CLI), which closes the sheet. */
+    private suspend fun ask(scope: String, id: String): Boolean {
         val sheet = VaultSheet(scope, id)
         store.sheet = sheet
         var waited = 0

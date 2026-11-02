@@ -234,24 +234,6 @@ fun AppTile(look: TileLook, size: Dp, title: String = look.seed) {
 @Composable
 fun AppTile(app: AppInfo?, seed: String, size: Dp) = AppTile(app?.look() ?: TileLook(null, seed), size, app?.label ?: seed)
 
-/** A row's icon, as Settings draws one: a white Phosphor icon (or Material one) on a system colour. */
-@Composable
-fun SymbolTile(icon: ImageVector? = null, glyph: String? = null, color: Color, size: Dp = 29.dp) {
-    val context = LocalContext.current
-    Glyphs.load(context)
-    Box(Modifier.size(size).background(Brush.verticalGradient(listOf(color.copy(alpha = 0.85f), color)), RoundedCornerShape(size * 0.225f)), contentAlignment = Alignment.Center) {
-        if (glyph != null && Glyphs.has(glyph)) {
-            val px = with(LocalDensity.current) { (size * 0.62f).roundToPx() }
-            val bitmap = remember(glyph, px) {
-                Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888).also { Glyphs.draw(Canvas(it), glyph, 0f, 0f, px.toFloat(), android.graphics.Color.WHITE) }.asImageBitmap()
-            }
-            Image(bitmap, null, Modifier.size(size * 0.62f))
-        } else if (icon != null) {
-            androidx.compose.material3.Icon(icon, null, tint = Color.White, modifier = Modifier.size(size * 0.62f))
-        }
-    }
-}
-
 /** A person: their initials on a colour picked by their id, the same one app screens draw (`one.avatar`). */
 @Composable
 fun Avatar(id: String, name: String, size: Dp = 32.dp) {
@@ -262,12 +244,6 @@ fun Avatar(id: String, name: String, size: Dp = 32.dp) {
     Box(Modifier.size(size).background(Brush.verticalGradient(listOf(color.copy(alpha = 0.85f), color)), CircleShape), contentAlignment = Alignment.Center) {
         Text(initials.ifEmpty { "?" }, color = Color.White, style = TextStyle(fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.SemiBold))
     }
-}
-
-/** A device's symbol, guessed from its name. */
-fun deviceGlyph(name: String): String {
-    val n = name.lowercase()
-    return if (n.contains("mac") || n.contains("laptop") || n.contains("book")) "desktopcomputer" else if (n.contains("phone") || n.contains("pixel") || n.contains("android")) "phone" else "cpu"
 }
 
 fun displayName(name: String) = name.removeSuffix(".local")

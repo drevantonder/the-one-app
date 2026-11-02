@@ -46,9 +46,16 @@ data class NodeState(
     @SerialName("secret_requests") val secretRequests: Int? = null,
     /** How this person arranged each page, by scope. */
     val arrangements: Map<String, Arrangement>? = null,
+    /** What Settings shows this person, in order. */
+    @SerialName("settings_items") val settingsItems: List<SettingsItem> = emptyList(),
 ) {
     val waitingRequests get() = vaultRequests ?: secretRequests ?: 0
 }
+
+/** One of Settings' items: it opens the Settings screen it names, or with `app`, that app's main screen. `icon` is a
+ *  Phosphor icon's name, on `color`. */
+@Serializable
+data class SettingsItem(val name: String, val title: String, val icon: String, val color: String, val badge: Int? = null, val app: String? = null)
 
 @Serializable
 data class Arrangement(

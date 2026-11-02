@@ -28,10 +28,8 @@ import java.net.URLEncoder
 sealed interface Route {
     data class Screen(val app: String, val screen: String = "main", val params: String = "{}", val scope: String? = null) : Route
     data class Services(val scope: String) : Route
-    data object Devices : Route
-    data object AppStore : Route
-    data object Requests : Route
-    data object Appearance : Route
+    /** A Settings screen, by its item's name. */
+    data class Setting(val name: String, val params: String = "{}") : Route
 }
 
 /** A page: a scope this person may read (theirs, a group's, everyone's), as a page of icons and widgets. */
@@ -112,6 +110,9 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
 
     /** An app screen's page, as its node made it. */
     suspend fun screen(r: Route.Screen): String = String(api("/v1/screens/${enc(r.app)}/${enc(r.screen)}", query = mapOf("params" to r.params, "scope" to r.scope)))
+
+    /** A Settings screen's page. */
+    suspend fun settingsScreen(r: Route.Setting): String = String(api("/v1/settings-screens/${enc(r.name)}", query = mapOf("params" to r.params)))
 
     suspend fun blob(hash: String): ByteArray = api("/v1/blobs/${enc(hash)}")
 
@@ -397,9 +398,11 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
         return if (s.has("app") && (a.deploys ?: 0) > 0) Route.Screen(s.name, "app", obj("app" to a.name).toString()) else null
     }
 
-    /** What waits for this person: invites to groups, and requests for Vault items. */
-    val requests: Int
-        get() = (install?.groups?.count { g -> g.invited.orEmpty().any { it.user == me?.id } } ?: 0) + (state?.waitingRequests ?: 0)
+    /** What Settings shows this person, in order, as the node says. */
+    val settingsItems: List<SettingsItem> get() = state?.settingsItems.orEmpty()
+
+    /** Whether Settings has something to see: requests waiting, or backups' problem. */
+    val attention: Boolean get() = settingsItems.any { (it.badge ?: 0) > 0 }
 
     companion object {
         const val SETTINGS = "settings"

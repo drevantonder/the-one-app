@@ -119,7 +119,7 @@ private fun Home(store: Store) {
         BottomBar(
             titles = pages.map { it.title } + "Settings",
             index = pager.currentPage,
-            attention = store.requests > 0,
+            attention = store.attention,
             go = { scope.launch { pager.animateScrollToPage(it) } },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
@@ -266,7 +266,7 @@ private fun EmptyPage(store: Store, page: Page) {
         )
         if (store.canArrange(page.scope)) {
             Spacer(Modifier.height(4.dp))
-            Prominent("Open the App Store") { store.path.add(store.storeApp?.let { Route.Screen(it.name) } ?: Route.AppStore) }
+            Prominent("Open the App Store") { store.path.add(Route.Setting("store")) }
         }
     }
 }
@@ -456,10 +456,7 @@ fun RouteView(store: Store, route: Route) {
     val default = when (route) {
         is Route.Screen -> store.app(route.app).let { a -> a?.screens?.firstOrNull { it.name == route.screen }?.title ?: a?.label ?: "" }
         is Route.Services -> "Services"
-        Route.Devices -> "Devices"
-        Route.AppStore -> "App Store"
-        Route.Requests -> "Requests"
-        Route.Appearance -> "Appearance"
+        is Route.Setting -> store.settingsItems.firstOrNull { it.name == route.name }?.title ?: "Settings"
     }
     Column(Modifier.fillMaxSize().background(p.background)) {
         Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
@@ -477,10 +474,10 @@ fun RouteView(store: Store, route: Route) {
             when (route) {
                 is Route.Screen -> AppScreen(store, route) { title = it }
                 is Route.Services -> ServicesView(store, route.scope)
-                Route.Devices -> DevicesView(store)
-                Route.AppStore -> AppStoreView(store)
-                Route.Requests -> RequestsView(store)
-                Route.Appearance -> AppearanceView()
+                // An item with an app (the App Store) opens that app.
+                is Route.Setting -> store.settingsItems.firstOrNull { it.name == route.name }?.app
+                    ?.let { app -> AppScreen(store, Route.Screen(app)) { title = it } }
+                    ?: AppScreen(store, route) { title = it }
             }
         }
     }
