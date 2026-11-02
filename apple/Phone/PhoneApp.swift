@@ -1,5 +1,6 @@
 import SwiftUI
 import AuthenticationServices
+import WidgetKit
 
 @main
 struct PhoneApp: App {
@@ -49,6 +50,8 @@ final class Phone {
     var joinError: String?
     let store = Store(node: NodeClient(transport: PhoneNode(), client: "phone"))
     private var running: Task<Void, Never>?
+    /// This launch's APNs token, once registered with the push driver.
+    var pushToken: String?
 
     /// The accent: the build's until a server sends its own.
     var accent: Color {
@@ -106,20 +109,24 @@ final class Phone {
         return nil
     }
 
-    /// Signs out: back to the first screen, with nothing of the person's left on the phone.
+    /// Signs out: back to the first screen, with nothing of the person's left on the phone, and no more of their pushes.
     func signOut() async {
+        await unregisterPush()
         await Auth.shared.signOut()
         signedOut(nil)
     }
 
-    /// The install no longer takes this phone's sign-in.
+    /// The install no longer takes this phone's sign-in. A call that fails once the person signed out says nothing.
     func signedOut(_ why: String?) {
+        if stage == .welcome, why != nil { return }
         running?.cancel()
         running = nil
         starting = nil
         stage = .welcome
         joinError = why
         store.forget()
+        WidgetCache.forget()
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     /// `<cli>://open?app=…&screen=…&params=…&scope=…`: opens an app's screen, from a widget, on the page it came

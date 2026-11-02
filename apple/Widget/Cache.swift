@@ -23,6 +23,8 @@ struct WidgetCache: Codable {
     }
     var install: String?
     var widgets: [Item]
+    /// The person signed out, so the home-screen widgets say to sign in.
+    var signedOut: Bool?
 
     private static var group: URL? {
         guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
@@ -39,16 +41,30 @@ struct WidgetCache: Codable {
         guard let file = Self.file, let data = try? JSONEncoder().encode(self) else { return }
         try? data.write(to: file, options: .atomic)
     }
+
+    /// Signed out: none of the person's widgets or their images are left for the home screen's.
+    static func forget() {
+        WidgetCache(widgets: [], signedOut: true).save()
+        WidgetImages.forget()
+    }
 }
 
 /// The images widgets show, saved by the app where its home-screen widgets can read them: they can't download.
 enum WidgetImages {
+    private static var dir: URL? {
+        guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?.appending(path: "images")
+    }
+
     private static func file(_ url: String) -> URL? {
         let name = SHA256.hash(data: Data(url.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
-        guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String,
-              let dir = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?.appending(path: "images") else { return nil }
+        guard let dir else { return nil }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appending(path: name)
+    }
+
+    static func forget() {
+        if let dir { try? FileManager.default.removeItem(at: dir) }
     }
 
     static func load(_ url: String) -> Image? {

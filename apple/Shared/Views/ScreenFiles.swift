@@ -30,13 +30,20 @@ struct ScreenFile {
         throw NodeError("The file has neither base64 nor a blob.")
     }
 
+    private static var dir: URL { FileManager.default.temporaryDirectory.appending(path: "screen-files") }
+
     /// The file, written where the shell can hand it on: a folder of its own in the temporary directory.
     func write() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory.appending(path: "screen-files/\(UUID().uuidString)")
+        let dir = Self.dir.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appending(path: name.replacingOccurrences(of: "/", with: "-"))
         try data.write(to: url)
         return url
+    }
+
+    /// Every file handed on, gone: the person signed out.
+    static func forget() {
+        try? FileManager.default.removeItem(at: dir)
     }
 
     /// As a screen gets one back, from a file input or the scanner.

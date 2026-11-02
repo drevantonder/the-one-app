@@ -70,6 +70,7 @@ struct Entry: TimelineEntry {
     var widget: WidgetCache.Item?
     /// The widget chosen, if it's gone: its id.
     var missing: String?
+    var signedOut = false
 }
 
 /// The app reloads the timelines whenever its widgets change; between reloads, times count on from each entry, and a
@@ -98,7 +99,9 @@ struct Provider: AppIntentTimelineProvider {
     }
 
     private func entry(for configuration: ChooseWidget) -> Entry {
-        let items = WidgetCache.load()?.widgets ?? []
+        let cache = WidgetCache.load()
+        if cache?.signedOut == true { return Entry(signedOut: true) }
+        let items = cache?.widgets ?? []
         guard let chosen = configuration.widget?.id else { return Entry(widget: items.first) }
         if let item = items.first(where: { $0.id == chosen }) { return Entry(widget: item) }
         return items.isEmpty ? Entry() : Entry(missing: chosen)
@@ -159,7 +162,7 @@ struct EntryView: View {
                 Image("Logo")
                     .resizable()
                     .frame(width: 44, height: 44)
-                Text("Open \(appName) to see your pages.")
+                Text(entry.signedOut ? "Sign in to \(appName) to see your pages." : "Open \(appName) to see your pages.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

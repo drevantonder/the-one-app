@@ -65,9 +65,18 @@ extension Phone {
         guard let data = try? JSONSerialization.data(withJSONObject: input) else { return }
         do {
             _ = try await store.node.call(app: push, op: "register", input: data)
+            pushToken = token
         } catch {
             print("push: can't register with \(push): \(error.localizedDescription)")
         }
+    }
+
+    /// Stops the person's pushes coming to this phone, before they sign out.
+    func unregisterPush() async {
+        guard let token = pushToken, let push = store.config?.push, !push.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: ["token": token]) else { return }
+        pushToken = nil
+        _ = try? await store.node.call(app: push, op: "unregister", input: data)
     }
 
     /// Every app's badge, and the requests, on the app's icon.

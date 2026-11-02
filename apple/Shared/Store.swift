@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import WebKit
 
 /// A page: one scope the user can read, showing the apps installed there and their widgets.
 struct Page: Identifiable, Hashable {
@@ -151,9 +152,16 @@ final class Store {
         self.node = node
     }
 
-    /// Forgets everything it showed: the person signed out.
+    /// Forgets everything it showed, and what it kept of the person's on this device: they signed out.
     func forget() {
         ScreenCache.forget()
+        ScreenFile.forget()
+        URLCache.shared.removeAllCachedResponses()
+        WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {}
+        for key in ["pageOrder", "hiddenPages"] { UserDefaults.standard.removeObject(forKey: key) }
+        pageOrder = []
+        hiddenPages = []
+        selection = nil
         state = nil
         apps = []
         widgets = [:]
