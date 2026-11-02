@@ -201,10 +201,14 @@ pub struct Hosted {
 
 /// The sidecars this program hosts.
 pub fn hosted() -> Vec<Hosted> {
-    vec![Hosted { name: crate::push::NAME, describe: crate::push::describe, call: crate::push::call }]
+    vec![
+        Hosted { name: crate::push::NAME, describe: crate::push::describe, call: crate::push::call },
+        Hosted { name: crate::messenger::NAME, describe: crate::messenger::describe, call: crate::messenger::call },
+    ]
 }
 
 /// What a hosted sidecar has: its folder, and its machine's node.
+#[derive(Clone)]
 pub struct Host {
     pub name: &'static str,
     pub dir: std::path::PathBuf,
@@ -221,6 +225,11 @@ impl Host {
         Ok(answer(self.agent.post(format!("{}{path}", self.node)).send_json(body))?.unwrap_or_default())
     }
 
+    /// `post`, given up on after `limit`.
+    pub fn post_within(&self, path: &str, body: &Value, limit: Duration) -> Result<Value> {
+        Ok(answer(self.agent.post(format!("{}{path}", self.node)).config().timeout_global(Some(limit)).build().send_json(body))?.unwrap_or_default())
+    }
+
     /// `text` with the Vault's fields (`{{name}}`) filled in by the node for call `id`, which only `host` may be sent.
     pub fn fill(&self, id: u64, text: &str, host: &str) -> Result<String> {
         let out = self.post(&format!("/v1/sidecars/{}/calls/{id}/vault", self.name), &json!({ "text": text, "host": host })).map_err(|err| anyhow!("the Vault: {err}"))?;
@@ -235,8 +244,11 @@ fn answer(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result
         return Ok(None);
     }
     let body: Value = resp.body_mut().read_json().unwrap_or_default();
+    if let Some(err) = body["error"].as_str().filter(|e| !e.is_empty()) {
+        bail!("{err}");
+    }
     if !resp.status().is_success() {
-        bail!("{}: {}", resp.status(), body["error"].as_str().unwrap_or("failed"));
+        bail!("{}", resp.status());
     }
     Ok(Some(body))
 }

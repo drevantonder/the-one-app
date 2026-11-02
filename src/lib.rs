@@ -51,6 +51,8 @@ pub mod bundle;
 #[cfg(not(target_family = "wasm"))]
 pub mod deploy;
 #[cfg(not(target_family = "wasm"))]
+pub mod messenger;
+#[cfg(not(target_family = "wasm"))]
 pub mod models;
 #[cfg(not(target_family = "wasm"))]
 pub mod load;
