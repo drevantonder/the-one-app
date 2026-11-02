@@ -178,7 +178,11 @@ export class Items {
     for (const [k, v] of Object.entries(headers)) filled.set(k, await this.fill(held, app, String(v), host));
     let payload = body64 !== undefined ? b64u.decode(body64) : body;
     if (typeof payload === "string" && payload.includes("{{")) payload = await this.fill(held, app, payload, host);
-    const resp = await fetch(await this.fill(held, app, url, host), { method, headers: filled, body: payload, redirect: "manual" });
+    // A plain field filled in before the path could move the request to another host, after the secrets were let go there.
+    const sent = await this.fill(held, app, url, host);
+    const out = new URL(sent);
+    if (out.protocol !== "https:" || out.hostname.toLowerCase() !== host) throw new Error(`a field filled into the address may not change its host, ${host}`);
+    const resp = await fetch(sent, { method, headers: filled, body: payload, redirect: "manual" });
     const bytes = new Uint8Array(await resp.arrayBuffer());
     if (bytes.length > LIMIT) throw new Error(`${host} answered with more than 32 MB`);
     return { status: resp.status, headers: Object.fromEntries(resp.headers), body64: b64u.encode(bytes) };

