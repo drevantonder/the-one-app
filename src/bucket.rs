@@ -644,4 +644,63 @@ mod tests {
         assert!(b2.can_hold_an_install().unwrap_err().to_string().starts_with("Backblaze B2 can't"));
         assert!(Place::from_fields(&fields("https://abc.r2.cloudflarestorage.com")).unwrap().can_hold_an_install().is_ok());
     }
+
+    /// Real S3-compatible storage, by hand: `ONE_BUCKET_PROBE` holds a JSON object of an empty bucket's endpoint,
+    /// bucket, key_id and secret, and `cargo test --lib bucket::tests::real_storage -- --ignored` checks what an
+    /// install's bucket needs of it, through presigned URLs.
+    #[test]
+    #[ignore]
+    fn real_storage_writes_only_if_absent_or_unchanged_and_reads_what_it_wrote() {
+        let fields: BTreeMap<String, String> = serde_json::from_str(&std::env::var("ONE_BUCKET_PROBE").expect("ONE_BUCKET_PROBE")).unwrap();
+        let place = Place::from_fields(&fields).unwrap();
+        place.can_hold_an_install().unwrap();
+        let at = format!("probe-{}", &hex(&rand::random())[..16]);
+        let (x, y, z) = (format!("{at}/x"), format!("{at}/y"), format!("{at}/z"));
+
+        assert!(place.create(&x, b"one").unwrap());
+        assert!(!place.create(&x, b"two").unwrap(), "create-if-absent wrote over it");
+        let one = place.get_object(&x).unwrap().expect("read after create");
+        assert_eq!(one.bytes, b"one");
+
+        assert!(!place.replace(&x, b"two", Some("\"0123456789abcdef0123456789abcdef\"")).unwrap(), "If-Match replaced a changed object");
+        assert!(!place.replace(&x, b"two", None).unwrap(), "no tag replaced one that's there");
+        assert_eq!(place.get(&x).unwrap().unwrap(), b"one");
+        assert!(place.replace(&x, b"two", Some(&one.tag)).unwrap(), "If-Match refused an unchanged object");
+        let two = place.get_object(&x).unwrap().expect("read after replace");
+        assert_eq!(two.bytes, b"two", "read after replace gave the old object");
+        assert_ne!(two.tag, one.tag);
+        assert!(!place.replace(&x, b"three", Some(&one.tag)).unwrap(), "the old tag still replaced it");
+        assert_eq!(place.get(&x).unwrap().unwrap(), b"two");
+
+        let won: Vec<usize> = std::thread::scope(|s| {
+            let runs: Vec<_> = (0..16).map(|i| { let (place, y) = (&place, &y); s.spawn(move || place.create(y, format!("{i}").as_bytes()).unwrap().then_some(i)) }).collect();
+            runs.into_iter().filter_map(|r| r.join().unwrap()).collect()
+        });
+        assert_eq!(won.len(), 1, "creates at once: {won:?} won");
+        assert_eq!(place.get(&y).unwrap().unwrap(), format!("{}", won[0]).as_bytes());
+        let tag = place.get_object(&y).unwrap().unwrap().tag;
+        let won: Vec<usize> = std::thread::scope(|s| {
+            let runs: Vec<_> = (0..8).map(|i| { let (place, y, tag) = (&place, &y, &tag); s.spawn(move || place.replace(y, format!("r{i}").as_bytes(), Some(tag)).unwrap().then_some(i)) }).collect();
+            runs.into_iter().filter_map(|r| r.join().unwrap()).collect()
+        });
+        assert_eq!(won.len(), 1, "replaces at once: {won:?} won");
+        assert_eq!(place.get(&y).unwrap().unwrap(), format!("r{}", won[0]).as_bytes());
+
+        // A URL signed to create, which is all a node is given, can't be used without its If-None-Match.
+        let Place::S3(keys) = place.clone() else { unreachable!() };
+        let signer = keys.clone();
+        let create_only = Place::S3(S3 { auth: Auth::Signed(Arc::new(move |ask: &Ask| signer.url(&Ask { headers: &[("if-none-match", "*")], ..*ask }))), ..keys });
+        assert!(create_only.put(&x, b"overwritten").is_err(), "a create URL wrote without If-None-Match");
+        assert!(!create_only.create(&x, b"overwritten").unwrap());
+        assert!(create_only.create(&z, b"new").unwrap());
+        assert_eq!(place.get(&x).unwrap().unwrap(), b"two");
+
+        let mut listed = place.list(&at).unwrap();
+        listed.sort();
+        assert_eq!(listed, ["x", "y", "z"], "list after write");
+        for name in [&x, &y, &z] {
+            place.delete(name).unwrap();
+            assert!(place.get(name).unwrap().is_none(), "read after delete");
+        }
+    }
 }
