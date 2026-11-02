@@ -73,7 +73,7 @@ Usage:
                                        run the kernel's services (auth, vault, schedules, and the gateway people reach
                                        at the install's address) on this machine; the first time, with that address,
                                        and it shows a new recovery key
-  {CLI} kernel deploy [--domain <domain>] [--address <url>] [--account <id>]
+  {CLI} kernel deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]
                                        deploy the kernel's services to Cloudflare as Workers, with an API token that
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
                                        domains ({CLI}-<service>.<domain>, the install's address {CLI}.<domain> unless
@@ -361,6 +361,9 @@ fn run(args: Vec<String>) -> Result<()> {
             let settings = match one::kernel::Settings::load() {
                 Ok(settings) => settings,
                 Err(_) => {
+                    // A kernel already in the account was made elsewhere: new settings here would replace its secrets.
+                    let made = cf.scripts()?.contains_key(&one::kernel::worker_name("vault"));
+                    anyhow::ensure!(!made || flags.contains_key("new"), "the Cloudflare account has a kernel already, made on another machine: deploy it there, where its settings are, or bring them here ({} and .env.local). --new replaces it, and everything it holds can't be read again", one::kernel::Settings::path().display());
                     let domain = flags.get("domain").and_then(Value::as_str).map(|d| d.trim_matches('.').to_string());
                     let (domain, address) = match domain {
                         Some(domain) => (domain.clone(), format!("https://{CLI}.{domain}")),
@@ -375,7 +378,7 @@ fn run(args: Vec<String>) -> Result<()> {
                     (settings.auth_url, settings.vault_url, settings.schedules_url) = (at("auth"), at("vault"), at("schedules"));
                     settings.save()?;
                     println!("Its recovery key, shown only this once; keep it in your admins' password manager:\n\n  {recovery}\n");
-                    println!("Keep {} too: the kernel's secrets are in it, and a deploy without them can't read what's there.\n", one::kernel::Settings::path().display());
+                    println!("Keep {} too: the kernel's secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an op(op://…) reference in its place.\n", one::kernel::Settings::path().with_file_name(".env.local").display());
                     settings
                 }
             };
@@ -433,7 +436,11 @@ fn run(args: Vec<String>) -> Result<()> {
                 "vault-url" => settings.vault_url = value.trim_end_matches('/').to_string(),
                 "schedules-url" => settings.schedules_url = value.trim_end_matches('/').to_string(),
                 "resources" => settings.resources = value.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect(),
-                "bucket" if *value == "-" => settings.bucket = Some(piped()?),
+                "bucket" if *value == "-" => {
+                    let bucket = piped()?;
+                    settings.set_secret("BUCKET", &bucket.to_string())?;
+                    settings.bucket = Some(bucket);
+                }
                 "bucket" => bail!("pipe its JSON object on stdin and give - as its value, so it's in no shell's history"),
                 _ => bail!("no kernel setting {name}: node-url, auth-url, vault-url, schedules-url, resources or bucket"),
             }

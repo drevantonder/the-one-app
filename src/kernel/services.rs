@@ -20,8 +20,9 @@ pub const SERVICES: &[(&str, &str, Option<&str>)] = &[
     ("gateway", "gateway/worker.js", None),
 ];
 
-/// How an install's kernel is set up, wherever it runs: kept in `<home>/kernel/settings.json`, readable only by its
-/// owner, since it holds the kernel's secrets.
+/// How an install's kernel is set up, wherever it runs: kept in `<home>/kernel/settings.json`, with its secrets in
+/// `.env.local` beside it, which Varlock reads (see `SCHEMA`): their values, for a kernel tried here, or
+/// `op(op://…)` references to 1Password, for one people use, so no file here holds them.
 #[derive(Debug, Clone, serde::Serialize, Deserialize)]
 pub struct Settings {
     /// The install's name, as sign-in screens say it.
@@ -45,10 +46,13 @@ pub struct Settings {
     /// The local ports each service listens on, in `SERVICES`' order, when this machine runs them.
     pub ports: [u16; 4],
     /// The secret only the kernel's services share, for asking each other.
+    #[serde(default, skip_serializing)]
     pub kernel_secret: String,
     /// Better Auth's own secret, for its cookies and the keys it keeps.
+    #[serde(default, skip_serializing)]
     pub auth_secret: String,
     /// The schedules service's own X25519 key pair.
+    #[serde(default, skip_serializing)]
     pub schedules_key: Value,
     /// The recovery key's X25519 twin's public half.
     pub recovery_key: String,
@@ -56,8 +60,82 @@ pub struct Settings {
     #[serde(default)]
     pub resources: Vec<String>,
     /// The install's bucket: `{ endpoint, bucket, region, key_id, secret }`.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub bucket: Option<Value>,
+}
+
+/// What Varlock reads the kernel's secrets by, each named as the services' binding is; `.env.local` gives their values.
+const SCHEMA: &str = "\
+# The kernel's secrets, read with Varlock: their values are in .env.local, as written for a kernel tried on this
+# machine, or op(op://…) references to 1Password for one people use. Never print them.
+# @defaultSensitive=true
+# @defaultRequired=true
+# ---
+KERNEL_SECRET=
+AUTH_SECRET=
+SCHEDULES_KEY=
+# @optional
+BUCKET=
+";
+
+/// The Varlock `kernel` reads secrets with, and each platform's download of it with the download's sha256, as its
+/// release's checksums.txt says.
+const VARLOCK: &str = "1.24.0";
+const VARLOCK_DOWNLOADS: &[(&str, &str, &str)] = &[
+    ("x86_64-unknown-linux-gnu", "varlock-linux-x64.tar.gz", "254ed7df6959852296919d885494f851cdeab98c544c584316f42125c56a0519"),
+    ("aarch64-unknown-linux-gnu", "varlock-linux-arm64.tar.gz", "8da290816331b51dc0d21b3d574c2003b88d33195da48e5c193d04e54d85b81d"),
+    ("aarch64-apple-darwin", "varlock-macos-arm64.tar.gz", "4ea453c1d93cde3bfc761dbe7a8b29bf309d451a34a7c6661c06f1a131ffcea4"),
+    ("x86_64-apple-darwin", "varlock-macos-x64.tar.gz", "745842687c0c0bf06bc598084e664384e78ee9e6025a28a7fa30f7a3f3c04fae"),
+];
+
+/// The pinned Varlock, downloaded once into the cache and checked against its pinned hash.
+fn varlock() -> Result<PathBuf> {
+    let (_, file, sha256) = VARLOCK_DOWNLOADS
+        .iter()
+        .find(|(target, _, _)| *target == crate::config::TARGET)
+        .ok_or_else(|| anyhow!("this machine can't run a kernel: Varlock has no build for {}", crate::config::TARGET))?;
+    let dir = crate::cache().join(format!("varlock-{VARLOCK}"));
+    let path = dir.join("varlock");
+    if path.exists() {
+        return Ok(path);
+    }
+    let url = format!("https://github.com/dmno-dev/varlock/releases/download/varlock@{VARLOCK}/{file}");
+    let download = ureq::get(&url).call()?.body_mut().with_config().limit(200 << 20).read_to_vec()?;
+    ensure!(data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(&download)) == *sha256, "the download of Varlock doesn't match its pinned hash");
+    // Unpacked beside where it goes and moved into place in one step, so another run at once never runs half of it.
+    let tmp = dir.with_extension(format!("{}.part", rand::random::<u64>()));
+    std::fs::create_dir_all(&tmp)?;
+    std::fs::write(tmp.join("download.tgz"), &download)?;
+    let unpacked = std::process::Command::new("tar").args(["-xzf", "download.tgz", "./varlock"]).current_dir(&tmp).status();
+    std::fs::create_dir_all(&dir)?;
+    let moved = std::fs::rename(tmp.join("varlock"), &path);
+    let _ = std::fs::remove_dir_all(&tmp);
+    ensure!(unpacked?.success(), "couldn't unpack Varlock");
+    moved?;
+    Ok(path)
+}
+
+/// Where the kernel's secrets' values are: `KEY=value` lines, Varlock's `.env.local`.
+fn local() -> PathBuf {
+    Settings::path().with_file_name(".env.local")
+}
+
+/// Writes a file only its owner may read, in one step.
+fn write_private(path: &Path, text: &str) -> Result<()> {
+    std::fs::create_dir_all(path.parent().unwrap())?;
+    let part = path.with_extension("part");
+    std::fs::write(&part, text)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(std::fs::rename(part, path)?)
+}
+
+/// A value as `.env.local` writes it: in single quotes, which Varlock takes as they are.
+fn quoted(value: &str) -> String {
+    format!("'{value}'")
 }
 
 impl Settings {
@@ -67,8 +145,31 @@ impl Settings {
 
     pub fn load() -> Result<Settings> {
         let path = Settings::path();
-        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine runs no kernel yet: {} kernel serve --address <url> starts one", crate::config::CLI))?;
-        serde_json::from_str(&text).with_context(|| format!("{} isn't a kernel's settings", path.display()))
+        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine runs no kernel yet: {} kernel serve --address <url> starts one, and its settings are on the machine that made it", crate::config::CLI))?;
+        let mut settings: Settings = serde_json::from_str(&text).with_context(|| format!("{} isn't a kernel's settings", path.display()))?;
+        // Settings written before Varlock kept the secrets hold them: they move to .env.local.
+        if !settings.kernel_secret.is_empty() {
+            ensure!(!local().exists(), "{} still holds secrets, and {} is there too: keep one", path.display(), local().display());
+            settings.save()?;
+            return Ok(settings);
+        }
+        let dir = path.parent().unwrap();
+        std::fs::write(dir.join(".env.schema"), SCHEMA)?;
+        let out = std::process::Command::new(varlock()?)
+            .args(["load", "--format", "json"])
+            .current_dir(dir)
+            .env("VARLOCK_TELEMETRY_DISABLED", "true")
+            .env("DO_NOT_TRACK", "1")
+            .output()?;
+        // Varlock masks secrets in what it says when it can't load them.
+        ensure!(out.status.success(), "Varlock couldn't read the kernel's secrets ({}):\n{}{}", local().display(), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let secrets: std::collections::BTreeMap<String, String> = serde_json::from_slice(&out.stdout).context("Varlock said something other than the kernel's secrets")?;
+        let get = |name: &str| secrets.get(name).filter(|v| !v.is_empty()).cloned();
+        settings.kernel_secret = get("KERNEL_SECRET").context("no KERNEL_SECRET")?;
+        settings.auth_secret = get("AUTH_SECRET").context("no AUTH_SECRET")?;
+        settings.schedules_key = serde_json::from_str(&get("SCHEDULES_KEY").context("no SCHEDULES_KEY")?).context("SCHEDULES_KEY isn't JSON")?;
+        settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
+        Ok(settings)
     }
 
     /// New settings, with new secrets: → them, and the new recovery key's secret, to be shown once.
@@ -97,17 +198,33 @@ impl Settings {
         (settings, data_encoding::HEXLOWER.encode(&seed))
     }
 
+    /// Writes the settings, and, the first time, the secrets' values to `.env.local`; after that a secret changes
+    /// only by `set_secret`, so a reference to 1Password there stays one.
     pub fn save(&self) -> Result<()> {
         let path = Settings::path();
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        let part = path.with_extension("part");
-        std::fs::write(&part, serde_json::to_vec_pretty(self)?)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o600))?;
+        if !local().exists() {
+            let mut text = String::new();
+            for (name, value) in [("KERNEL_SECRET", self.kernel_secret.clone()), ("AUTH_SECRET", self.auth_secret.clone()), ("SCHEDULES_KEY", self.schedules_key.to_string())] {
+                text += &format!("{name}={}\n", quoted(&value));
+            }
+            if let Some(bucket) = &self.bucket {
+                text += &format!("BUCKET={}\n", quoted(&bucket.to_string()));
+            }
+            write_private(&local(), &text)?;
         }
-        Ok(std::fs::rename(part, path)?)
+        std::fs::write(path.with_file_name(".env.schema"), SCHEMA)?;
+        write_private(&path, &String::from_utf8(serde_json::to_vec_pretty(self)?)?)
+    }
+
+    /// Sets a secret's value in `.env.local`, unless it's a reference to 1Password, where it changes instead.
+    pub fn set_secret(&self, name: &str, value: &str) -> Result<()> {
+        let text = std::fs::read_to_string(local()).unwrap_or_default();
+        let mut lines: Vec<String> = text.lines().filter(|l| !l.starts_with(&format!("{name}="))).map(str::to_string).collect();
+        if let Some(line) = text.lines().find(|l| l.starts_with(&format!("{name}="))) {
+            ensure!(!line.contains("op("), "{name} is kept in 1Password: change it there ({})", line.trim_start_matches(&format!("{name}=")));
+        }
+        lines.push(format!("{name}={}", quoted(value)));
+        write_private(&local(), &(lines.join("\n") + "\n"))
     }
 
     /// How a Worker reaches the node on a machine, `node_url`, as the binding `name`: a Workers VPC service, or else
@@ -431,7 +548,7 @@ impl Cloudflare {
     }
 
     /// The account's Workers, by name, with the Durable Object migration each has had.
-    pub(crate) fn scripts(&self) -> Result<std::collections::BTreeMap<String, Option<String>>> {
+    pub fn scripts(&self) -> Result<std::collections::BTreeMap<String, Option<String>>> {
         let list = self.call("GET", &format!("/accounts/{}/workers/scripts", self.account), None)?;
         Ok(list.as_array().into_iter().flatten().filter_map(|s| Some((s["id"].as_str()?.to_string(), s["migration_tag"].as_str().map(str::to_string)))).collect())
     }
