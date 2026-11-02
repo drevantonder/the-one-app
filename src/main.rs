@@ -990,8 +990,11 @@ fn groups_said(state: &Value) -> String {
     let people = |list: &Value| -> Vec<String> {
         list.as_array().into_iter().flatten().map(|m| {
             let id = m["user"].as_str().unwrap_or("");
-            let me = if i["user"].as_str() == Some(id) { ", you" } else { "" };
-            format!("{} ({}{me})", names.get(id).copied().unwrap_or(id), m["role"].as_str().unwrap_or("member"))
+            let (name, role) = (names.get(id).copied().unwrap_or(id), m["role"].as_str().unwrap_or("member"));
+            match i["user"].as_str() == Some(id) {
+                true => format!("you ({name}, {role})"),
+                false => format!("{name} ({role})"),
+            }
         }).collect()
     };
     let groups = i["groups"].as_array().cloned().unwrap_or_default();
