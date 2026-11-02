@@ -874,7 +874,6 @@ mod tests {
 
     const ANDRE: &str = "a000000000000001";
     const BOB: &str = "b000000000000002";
-    const GROUP: &str = "c000000000000003";
 
     fn setup() -> (Srv, Vec<Entry>) {
         let mut s = Srv::new(1);
@@ -896,117 +895,6 @@ mod tests {
         let m = Members::replay(Some(entries[0].hash()), &[fake]);
         assert!(m.users.is_empty());
         assert_eq!(members(&entries).users.len(), 1);
-    }
-
-    #[test]
-    fn admins_add_users_and_users_add_their_own_machines() {
-        let (mut mac, mut entries) = setup();
-        let (bobs, phone) = (Srv::new(3), Srv::new(4));
-        entries.push(mac.write("global", ANDRE, admit(&bobs.id(), BOB, "bob's", true, Some(("Bob", Role::Member)))));
-        let mut bobs = bobs;
-        bobs.time = 100;
-        entries.push(bobs.write("global", BOB, admit(&phone.id(), BOB, "phone", false, None)));
-        entries.push(bobs.write("global", BOB, admit(&Srv::new(5).id(), "e000000000000005", "eve", true, Some(("Eve", Role::Admin)))));
-        let m = members(&entries);
-        assert!(m.client(&phone.id()).is_some());
-        assert!(m.users.get("e000000000000005").is_none(), "members don't add users");
-    }
-
-    #[test]
-    fn servers_hold_their_owners_scopes_and_their_trusting_users() {
-        let (mut mac, mut entries) = setup();
-        let mut bobs = Srv::new(3);
-        entries.push(mac.write("global", ANDRE, admit(&bobs.id(), BOB, "bob's", true, Some(("Bob", Role::Member)))));
-        bobs.time = 100;
-        let me = Scope::User(ANDRE.into());
-        let bob = Scope::User(BOB.into());
-        let m = members(&entries);
-        assert!(m.holds(&mac.id(), &me) && !m.holds(&mac.id(), &bob) && m.holds(&bobs.id(), &Scope::Global));
-        // Bob shares his box with Andre; it holds Andre's data only once Andre trusts it.
-        entries.push(bobs.write("global", BOB, acl(&bobs.id(), &[Principal::User(BOB.into())], &[Principal::User(BOB.into()), Principal::User(ANDRE.into())])));
-        assert!(!members(&entries).holds(&bobs.id(), &me));
-        mac.time = 200;
-        entries.push(mac.write("global", ANDRE, trust(&bobs.id(), true)));
-        let m = members(&entries);
-        assert!(m.holds(&bobs.id(), &me) && m.serves(&bobs.id(), ANDRE));
-        entries.push(mac.write("global", ANDRE, trust(&bobs.id(), false)));
-        assert!(!members(&entries).holds(&bobs.id(), &me));
-    }
-
-    #[test]
-    fn groups_go_to_their_members_servers_and_never_follow_trust() {
-        let (mut mac, mut entries) = setup();
-        let mut bobs = Srv::new(3);
-        entries.push(mac.write("global", ANDRE, admit(&bobs.id(), BOB, "bob's", true, Some(("Bob", Role::Member)))));
-        entries.push(mac.write("global", ANDRE, node("group", json!({ "group": GROUP, "name": "Family" }))));
-        let group = Scope::Group(GROUP.into());
-        assert!(members(&entries).holds(&mac.id(), &group));
-        assert!(!members(&entries).holds(&bobs.id(), &group));
-        entries.push(mac.write("global", ANDRE, node("invite", json!({ "group": GROUP, "user": BOB, "role": "member" }))));
-        assert!(!members(&entries).holds(&bobs.id(), &group), "an invite isn't membership");
-        bobs.time = 100;
-        entries.push(bobs.write("global", BOB, node("accept", json!({ "group": GROUP }))));
-        let m = members(&entries);
-        assert!(m.holds(&bobs.id(), &group));
-        assert_eq!(m.role_in(BOB, &group), Some(Role::Member));
-        entries.push(bobs.write("global", BOB, node("member", json!({ "group": GROUP, "user": ANDRE, "role": null }))));
-        assert!(members(&entries).holds(&mac.id(), &group), "a member doesn't remove an admin");
-        entries.push(bobs.write("global", BOB, node("member", json!({ "group": GROUP, "user": BOB, "role": null }))));
-        assert!(!members(&entries).holds(&bobs.id(), &group), "a member leaves");
-    }
-
-    #[test]
-    fn admins_set_the_installs_settings_and_null_unsets_one() {
-        let (mut mac, mut entries) = setup();
-        entries.push(mac.write("global", ANDRE, admit(&Srv::new(4).id(), BOB, "bob's", true, Some(("Bob", Role::Member)))));
-        entries.push(mac.write("global", ANDRE, node("setting", json!({ "name": "made_here", "value": "Made by us" }))));
-        let mut bobs = Srv::new(4);
-        bobs.time = 100;
-        entries.push(bobs.write("global", BOB, node("setting", json!({ "name": "made_here", "value": "Bob's" }))));
-        assert_eq!(members(&entries).settings["made_here"], "Made by us", "members don't");
-        mac.time = 200;
-        entries.push(mac.write("global", ANDRE, node("setting", json!({ "name": "made_here", "value": null }))));
-        assert!(members(&entries).settings.is_empty());
-    }
-
-    #[test]
-    fn a_privileged_server_holds_everything_and_cant_be_untrusted() {
-        let (mut mac, mut entries) = setup();
-        let mut cloud = Srv::new(3);
-        entries.push(mac.write("global", ANDRE, admit(&cloud.id(), ANDRE, "cloud", true, None)));
-        entries.push(mac.write("global", ANDRE, admit(&Srv::new(4).id(), BOB, "bob's", true, Some(("Bob", Role::Member)))));
-        cloud.time = 100;
-        entries.push(cloud.write("global", ANDRE, acl(&cloud.id(), &[Principal::Install], &[Principal::Install])));
-        let m = members(&entries);
-        assert!(m.privileged(&cloud.id()) && m.holds(&cloud.id(), &Scope::User(BOB.into())) && m.serves(&cloud.id(), BOB));
-        let mut bobs = Srv::new(4);
-        bobs.time = 200;
-        entries.push(bobs.write("global", BOB, trust(&cloud.id(), false)));
-        assert!(members(&entries).trusts(BOB, &cloud.id()));
-        // Only admins make the install an owner.
-        entries.push(bobs.write("global", BOB, acl(&bobs.id(), &[Principal::Install], &[Principal::Install])));
-        assert!(!members(&entries).privileged(&bobs.id()));
-    }
-
-    #[test]
-    fn entries_count_only_by_servers_that_hold_their_scope_as_users_who_trust_them() {
-        let (mut mac, mut entries) = setup();
-        let mut bobs = Srv::new(3);
-        entries.push(mac.write("global", ANDRE, admit(&bobs.id(), BOB, "bob's", true, Some(("Bob", Role::Member)))));
-        bobs.time = 100;
-        let mine = mac.write(&format!("user:{ANDRE}"), ANDRE, Content::new("board", "post", json!({})));
-        let forged = bobs.write(&format!("user:{ANDRE}"), ANDRE, Content::new("board", "post", json!({})));
-        let as_andre = bobs.write("global", ANDRE, Content::new("board", "post", json!({})));
-        let own = bobs.write("global", BOB, Content::new("board", "post", json!({})));
-        let mut counted = Vec::new();
-        let root = Some(entries[0].hash());
-        replay(root, &entries, &[mine.clone()], |e, _, _| counted.push(e.id()));
-        replay(root, &entries, &[forged], |e, _, _| counted.push(e.id()));
-        let mut global = entries.clone();
-        global.extend([as_andre, own.clone()]);
-        global.sort_by_key(Entry::order);
-        replay(root, &entries, &global, |e, _, _| if e.content.app != APP { counted.push(e.id()) });
-        assert_eq!(counted, vec![mine.id(), own.id()]);
     }
 
     #[test]

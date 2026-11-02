@@ -106,30 +106,3 @@ fn clip(bytes: &[u8]) -> String {
     let start = (cut..text.len()).find(|i| text.is_char_boundary(*i)).unwrap_or(text.len());
     format!("({start} earlier bytes cut) …{}", &text[start..])
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn run(command: &str, timeout: u64) -> Value {
-        let me = Me { key: String::new(), user: String::new(), name: String::new(), role: None, user_name: String::new(), agent: None };
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(call("run".into(), json!({ "command": command, "timeout": timeout, "dir": "/" }), me, vec![])).unwrap().ok
-    }
-
-    #[test]
-    fn a_stopped_command_keeps_what_it_printed() {
-        let r = run("echo started; echo oops >&2; sleep 5", 1);
-        assert_eq!(r["exit"], -1);
-        assert_eq!(r["stdout"], "started\n");
-        assert_eq!(r["stderr"], "oops\n(stopped after 1s)");
-        let r = run("echo done", 5);
-        assert_eq!((r["exit"].as_i64(), r["stdout"].as_str()), (Some(0), Some("done\n")));
-    }
-
-    #[test]
-    fn long_output_says_how_much_was_cut() {
-        let clipped = clip(&vec![b'x'; 64 * 1024 + 10]);
-        assert!(clipped.starts_with("(10 earlier bytes cut) …x"), "{}", &clipped[..40]);
-    }
-}

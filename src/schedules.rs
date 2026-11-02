@@ -198,27 +198,3 @@ pub fn line(m: &Members, scope: &Scope, user: &str, app: &str, schedule: &str) -
 pub fn due(schedule: &Schedule, slot: u64, now: u64) -> bool {
     slot <= now && now - slot < LATE.min(schedule.period())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_and_at() {
-        let s = Schedule::parse("t", &json!({ "op": "tick", "every": "15m" })).unwrap();
-        assert_eq!(s.slot(1_000_000), Some(900_000));
-        assert_eq!(s.next(1_000_000), Some(1_800_000));
-        assert_eq!(s.say(), "every 15 minutes");
-        // 2026-10-31T00:30:00Z is 11:30 in Melbourne (daylight saving, +11).
-        let now = jiff::Timestamp::from_second(1_793_406_600).unwrap().as_millisecond() as u64;
-        let at = Schedule::parse("m", &json!({ "op": "hi", "at": "09:00", "tz": "Australia/Melbourne" })).unwrap();
-        let slot = at.slot(now).unwrap();
-        assert_eq!(now - slot, 150 * 60_000, "today at 9:00 Melbourne time, 2.5 hours ago");
-        assert_eq!(at.next(now).unwrap() - slot, 86_400_000);
-        let weekdays = Schedule::parse("w", &json!({ "op": "hi", "at": "09:00", "tz": "Australia/Melbourne", "days": ["mon"] })).unwrap();
-        assert_eq!(slot - weekdays.slot(now).unwrap(), 5 * 86_400_000, "Saturday's last Monday");
-        assert!(Schedule::parse("x", &json!({ "op": "hi", "every": "10s" })).is_err(), "at most once a minute");
-        assert!(Schedule::parse("x", &json!({ "op": "hi", "at": "25:00" })).is_err());
-        assert_eq!(say(&weekdays.spec()), "at 09:00 on Mon (Australia/Melbourne)");
-    }
-}

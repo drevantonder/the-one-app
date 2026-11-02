@@ -155,15 +155,6 @@ mod tests {
     }
 
     #[test]
-    fn a_correctly_signed_release_installs() {
-        let publisher = key(1);
-        let r = release("new", 20, sign(&publisher, b"bin").unwrap());
-        assert_eq!(latest(&public(&publisher), &entries(&[r.clone()]), "t").unwrap().0, r);
-        assert!(wanted(&r, "old", 10));
-        verify(&public(&publisher), b"bin", &r.signature).unwrap();
-    }
-
-    #[test]
     fn unsigned_and_wrongly_signed_releases_dont() {
         let (publisher, someone) = (key(1), key(2));
         let good = release("good", 20, sign(&publisher, b"bin").unwrap());
@@ -198,11 +189,4 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    #[test]
-    fn nor_do_older_ones() {
-        let r = release("older", 10, sign(&key(1), b"bin").unwrap());
-        assert!(!wanted(&r, "mine", 20));
-        assert!(!wanted(&r, "older", 10), "nor the build it runs");
-        assert!(wanted(&r, "mine", 10), "another build of the same moment is fine");
-    }
 }

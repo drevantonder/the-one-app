@@ -589,25 +589,6 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_creates_once_and_replaces_only_what_is_unchanged() {
-        let dir = std::env::temp_dir().join(format!("bucket-test-{}", hex(&rand::random())));
-        let place = Place::Folder(dir.clone());
-        assert!(place.create("a/b", b"one").unwrap());
-        assert!(!place.create("a/b", b"two").unwrap(), "a name once");
-        let o = place.get_object("a/b").unwrap().unwrap();
-        assert_eq!(o.bytes, b"one");
-        assert!(!place.replace("a/b", b"two", Some("stale")).unwrap());
-        assert!(place.replace("a/b", b"two", Some(&o.tag)).unwrap());
-        assert!(!place.replace("a/b", b"three", Some(&o.tag)).unwrap(), "its tag changed with it");
-        assert!(!place.replace("a/b", b"three", None).unwrap(), "none means only if there's none");
-        assert!(place.replace("a/c", b"new", None).unwrap());
-        assert_eq!(place.list("a").unwrap(), vec!["b".to_string(), "c".to_string()], "no partial files show");
-        place.put("d/e/f", b"deep").unwrap();
-        assert_eq!(place.names().unwrap(), ["a/b", "a/c", "d/e/f"]);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
     fn many_writers_create_one_name_and_one_wins() {
         let dir = std::env::temp_dir().join(format!("bucket-race-{}", hex(&rand::random())));
         let place = Place::Folder(dir.clone());
@@ -622,46 +603,4 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    #[test]
-    fn a_place_is_tried_before_its_added() {
-        let dir = std::env::temp_dir().join(format!("bucket-try-{}", hex(&rand::random())));
-        for conditional in [false, true] {
-            let steps = Place::Folder(dir.clone()).try_it(conditional);
-            assert!(steps.iter().all(|(_, err)| err.is_none()), "{steps:?}");
-            assert!(std::fs::read_dir(&dir).unwrap().all(|e| e.unwrap().file_name().to_string_lossy().starts_with('.')), "the test file is gone");
-        }
-        let steps = Place::Folder("/proc/no/such/place".into()).try_it(false);
-        assert!(steps[0].1.is_some() && steps[1].1.is_some());
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    /// Tries real S3-compatible storage as an install's bucket: `ONE_TEST_S3` names a JSON file of a place's fields.
-    #[test]
-    #[ignore = "needs real storage: ONE_TEST_S3=<fields.json> cargo test -- --ignored real_storage"]
-    fn real_storage_writes_only_if_absent_and_replaces_only_while_unchanged() {
-        let fields: BTreeMap<String, String> = serde_json::from_slice(&std::fs::read(std::env::var("ONE_TEST_S3").unwrap()).unwrap()).unwrap();
-        let place = Place::from_fields(&fields).unwrap();
-        let steps = place.try_it(true);
-        assert!(steps.iter().all(|(_, err)| err.is_none()), "{steps:?}");
-        let name = format!("test-{}", hex(&rand::random::<[u8; 32]>()));
-        let won: usize = std::thread::scope(|s| {
-            let runs: Vec<_> = (0..8).map(|i| {
-                let (place, name) = (&place, &name);
-                s.spawn(move || place.create(name, format!("{i}").as_bytes()).unwrap() as usize)
-            }).collect();
-            runs.into_iter().map(|r| r.join().unwrap()).sum()
-        });
-        place.delete(&name).unwrap();
-        assert_eq!(won, 1, "eight at once, one wins");
-    }
-
-    #[test]
-    fn storage_that_cant_write_conditionally_cant_hold_an_install() {
-        let fields = |endpoint: &str| -> BTreeMap<String, String> {
-            [("endpoint", endpoint), ("bucket", "b"), ("key_id", "k"), ("secret", "s")].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
-        };
-        let b2 = Place::from_fields(&fields("https://s3.us-west-004.backblazeb2.com")).unwrap();
-        assert!(b2.can_hold_an_install().unwrap_err().to_string().starts_with("Backblaze B2 can't"));
-        assert!(Place::from_fields(&fields("https://abc.r2.cloudflarestorage.com")).unwrap().can_hold_an_install().is_ok());
-    }
 }

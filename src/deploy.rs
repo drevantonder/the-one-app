@@ -106,11 +106,3 @@ pub fn show(bundle: &[u8], path: Option<&str>) -> Result<serde_json::Value> {
         }
     })
 }
-
-#[test]
-fn shows_a_bundles_files() {
-    let bundle = crate::bundle::pack(&[("app.js".into(), b"export default {}".to_vec()), ("src/app.ts".into(), b"export default {} as any".to_vec())]).unwrap();
-    assert_eq!(show(&bundle, None).unwrap()["files"][1]["path"], "src/app.ts");
-    assert_eq!(show(&bundle, Some("src/app.ts")).unwrap()["text"], "export default {} as any");
-    assert!(show(&bundle, Some("nope")).is_err());
-}

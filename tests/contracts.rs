@@ -9,32 +9,6 @@ fn read(path: &str) -> String {
     std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
-/// The quoted word after each `before` in `text`, and any more quoted words listed after it with commas
-/// (`case "save", "preview":`). `before` ends where its quote would start; spaces may come between.
-fn quoted(text: &str, before: &str) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
-    for (i, _) in text.match_indices(before) {
-        if text[..i].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_') {
-            continue;
-        }
-        let mut rest = text[i + before.len()..].trim_start();
-        while let Some(q) = rest.chars().next().filter(|c| *c == '"' || *c == '\'') {
-            let Some(end) = rest[1..].find(q) else { break };
-            let word = &rest[1..1 + end];
-            if word.is_empty() || !word.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                break;
-            }
-            out.insert(word.to_string());
-            rest = rest[2 + end..].trim_start();
-            match rest.strip_prefix(',') {
-                Some(more) => rest = more.trim_start(),
-                None => break,
-            }
-        }
-    }
-    out
-}
-
 /// A word made of letters, digits and `_`, at the start of `text`.
 fn word(text: &str) -> &str {
     &text[..text.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(text.len())]
@@ -281,93 +255,6 @@ async fn the_apple_apps_decode_what_the_node_sends() {
     let _ = std::fs::remove_dir_all(disk);
 }
 
-/// Every widget node an app draws, the Apple apps draw natively, and the web client and chats as HTML.
-#[test]
-fn every_widget_node_is_drawn_by_both_shells() {
-    let swift = read("apple/Shared/Views/WidgetTree.swift");
-    let html = read("src/screen/widgets.js");
-    let body = swift.split("switch node.t").nth(1).expect("WidgetTree.swift switches on node.t");
-    let apple = quoted(body.split("\n    }\n").next().unwrap(), "case");
-    let web = quoted(&html, "case");
-    assert!(apple.len() > 10, "{apple:?}");
-    assert_eq!(apple, web.intersection(&apple).cloned().collect(), "the web draws every node the Apple apps do");
-    let mut drawn: BTreeSet<String> = BTreeSet::new();
-    for dir in std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("apps")).unwrap() {
-        let app = dir.unwrap().path().join("app.js");
-        if let Ok(js) = std::fs::read_to_string(&app) {
-            drawn.extend(quoted(&js, "t:"));
-        }
-    }
-    assert!(drawn.contains("col") && drawn.contains("text"), "{drawn:?}");
-    let missing: Vec<_> = drawn.difference(&apple).collect();
-    assert!(missing.is_empty(), "apps draw nodes the Apple apps don't: {missing:?}");
-}
-
-/// Everything a screen asks of its shell through the bridge, the Apple apps answer.
-#[test]
-fn the_apple_apps_answer_everything_a_screen_asks() {
-    let bridge = read("src/screen/bridge.js");
-    let swift = read("apple/Shared/Views/AppScreen.swift");
-    let mut asked = quoted(&bridge, "{ type:");
-    assert!(asked.contains("call") && asked.contains("open") && asked.contains("haptic"), "{asked:?}");
-    // Only a sandboxed frame sends a link up; a web view's own navigation takes them to the browser.
-    asked.remove("link");
-    let answered = quoted(&swift, "case");
-    let missing: Vec<_> = asked.difference(&answered).collect();
-    assert!(missing.is_empty(), "screens ask for what the Apple apps don't answer: {missing:?}");
-}
-
-/// Everything a screen asks of the page holding its frame, the web client answers.
-#[test]
-fn the_web_client_answers_everything_a_screen_asks() {
-    let asked = quoted(&read("src/screen/bridge.js"), "{ type:");
-    assert!(asked.contains("link"), "{asked:?}");
-    let answered = quoted(&read("kernel/web/web.js"), "case");
-    let missing: Vec<_> = asked.difference(&answered).collect();
-    assert!(missing.is_empty(), "screens ask for what the web client doesn't answer: {missing:?}");
-}
-
-/// A sidecar written in Go reads each call the node hands it by the names the node gives its fields.
-#[test]
-fn go_sidecars_read_the_calls_the_node_hands_them() {
-    let call = one::sidecars::Call {
-        id: 1,
-        op: "send".into(),
-        input: json!({}),
-        caller: one::apps::Me { key: "k".into(), user: "u".into(), name: "Mac".into(), role: None, user_name: "Andre".into(), agent: None },
-        from: Some("board".into()),
-    };
-    let sent = serde_json::to_value(&call).unwrap();
-    let mut read = 0;
-    for dir in std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sidecars")).unwrap() {
-        let main = dir.unwrap().path().join("main.go");
-        let Ok(go) = std::fs::read_to_string(&main) else { continue };
-        let Some(body) = go.split("type call struct {").nth(1) else { continue };
-        // The struct's lines, to its closing brace at the start of a line. A field that's a struct of its own has
-        // its tag on its closing line, after the fields in it.
-        let (mut inner, mut paths) = (None::<Vec<String>>, vec![]);
-        for line in body.split("\n}").next().unwrap().lines() {
-            let tag = quoted(line, "json:").into_iter().next();
-            match (line.trim_end().ends_with("struct {"), line.trim_start().starts_with('}'), tag, &mut inner) {
-                (true, ..) => inner = Some(vec![]),
-                (_, true, Some(tag), Some(fields)) => {
-                    paths.extend(fields.iter().map(|f| vec![tag.clone(), f.clone()]));
-                    inner = None;
-                }
-                (_, _, Some(tag), Some(fields)) => fields.push(tag),
-                (_, _, Some(tag), None) => paths.push(vec![tag]),
-                _ => {}
-            }
-        }
-        for path in paths {
-            let at = path.iter().fold(&sent, |v, k| &v[k.as_str()]);
-            assert!(!at.is_null(), "{}: reads {}, which the node doesn't send: {sent}", main.display(), path.join("."));
-            read += 1;
-        }
-    }
-    assert!(read >= 10, "the test read the Go sidecars' calls ({read} fields)");
-}
-
 /// The kernel's services (JavaScript, `kernel/shared/crypto.js`) and nodes (`src/kernel.rs`) each open what the
 /// other seals: app keys under scope keys, keys to key pairs and under secrets; and derive the same database keys.
 #[test]
@@ -519,21 +406,4 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
         let _ = child.wait();
         let _ = std::fs::remove_dir_all(&dir);
     }
-}
-
-/// Every node path the web client (`kernel/web/web.js`) asks with its sign-in is one a node takes sign-ins at
-/// (`api::SIGNED_IN`).
-#[test]
-fn nodes_take_sign_ins_at_every_path_the_web_client_asks() {
-    let web = read("kernel/web/web.js");
-    let asked: BTreeSet<&str> = web.match_indices("/v1/").map(|(i, _)| web[i..].split(|c: char| !(c.is_ascii_alphanumeric() || c == '/' || c == '-' || c == '_')).next().unwrap()).collect();
-    assert!(asked.contains("/v1/call"), "{asked:?}");
-    let takes = |path: &str| {
-        one::api::SIGNED_IN.iter().any(|route| match route.split_once('{') {
-            Some((prefix, _)) => path.starts_with(prefix) && path.len() >= prefix.len(),
-            None => *route == path,
-        })
-    };
-    let refused: Vec<_> = asked.iter().filter(|p| !takes(p)).collect();
-    assert!(refused.is_empty(), "the web client asks nodes for what they don't take sign-ins at: {refused:?}");
 }

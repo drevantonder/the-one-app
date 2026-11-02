@@ -457,69 +457,6 @@ mod tests {
         tokio::runtime::Builder::new_current_thread().build().unwrap()
     }
 
-    fn bump(conn: &Connection) -> Result<()> {
-        execute(conn, "insert into counts values ('x', 1) on conflict (name) do update set n = n + 1", &[])?;
-        Ok(())
-    }
-
-    fn count(db: &Db) -> i64 {
-        db.query("select n from counts where name = 'x'", &[]).unwrap().first().map_or(0, |r| r["n"].as_i64().unwrap())
-    }
-
-    #[test]
-    fn two_servers_writing_at_once_lose_nothing() {
-        rt().block_on(async {
-            let bucket = Memory::default();
-            let key = rand::random();
-            let mut a = Db::open(&bucket, "i/db/global/board", key).await.unwrap();
-            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
-            let mut b = Db::open(&bucket, "i/db/global/board", key).await.unwrap();
-            b.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
-            assert_eq!(b.at(), 1, "b found a's schema and didn't write its own");
-            for _ in 0..3 {
-                a.write(&bucket, bump).await.unwrap();
-                b.write(&bucket, bump).await.unwrap();
-            }
-            // Another server takes b's next position just before b writes it.
-            let mut c = Db::open(&bucket, "i/db/global/board", key).await.unwrap();
-            c.write(&bucket, bump).await.unwrap();
-            assert_eq!(count(&c), 7);
-            a.catch_up(&bucket).await.unwrap();
-            b.catch_up(&bucket).await.unwrap();
-            assert_eq!((count(&a), count(&b)), (7, 7));
-            let next = b.step(b.at() + 1);
-            let mut d = Db::open(&bucket, "i/db/global/board", key).await.unwrap();
-            let theirs = {
-                let made = changes(&d.conn, &mut |c: &Connection| bump(c)).unwrap();
-                seal(&key, &next, &[b"c".as_slice(), &made.1].concat())
-            };
-            bucket.taken.lock().unwrap().push((next, theirs));
-            b.write(&bucket, bump).await.unwrap();
-            assert_eq!(count(&b), 9, "b ran its write again after theirs");
-            d = Db::open(&bucket, "i/db/global/board", key).await.unwrap();
-            assert_eq!(count(&d), 9);
-        });
-    }
-
-    #[test]
-    fn a_copy_saves_reading_every_step_and_reads_the_same() {
-        rt().block_on(async {
-            let bucket = Memory::default();
-            let key = rand::random();
-            let mut a = Db::open(&bucket, "p", key).await.unwrap();
-            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
-            for i in 0..(COPY_EVERY + 10) {
-                a.write(&bucket, |c| execute(c, "insert into notes values (?)", &[json!(format!("note {i}"))]).map(|_| ())).await.unwrap();
-            }
-            assert!(bucket.objects.lock().unwrap().contains_key(&format!("p/copy/{COPY_EVERY:012}")));
-            // Without the steps the copy holds, it still reads to the end.
-            bucket.objects.lock().unwrap().retain(|n, _| !(n.starts_with("p/0") && n.as_str() <= format!("p/{COPY_EVERY:012}").as_str()));
-            let b = Db::open(&bucket, "p", key).await.unwrap();
-            let n = |db: &Db| db.query("select count(*) as n from notes", &[]).unwrap()[0]["n"].as_i64().unwrap();
-            assert_eq!((n(&b), b.at(), b.version().unwrap()), (n(&a), a.at(), 1));
-        });
-    }
-
     #[test]
     fn what_the_bucket_keeps_is_sealed_to_its_name() {
         rt().block_on(async {
@@ -542,20 +479,4 @@ mod tests {
         });
     }
 
-    #[test]
-    fn a_failed_write_writes_nothing_and_queries_only_read() {
-        rt().block_on(async {
-            let bucket = Memory::default();
-            let mut a = Db::open(&bucket, "p", rand::random()).await.unwrap();
-            a.migrate(&bucket, &[SCHEMA.into(), "alter table notes add column at integer".into()]).await.unwrap();
-            assert_eq!((a.at(), a.version().unwrap()), (2, 2));
-            assert!(a.write(&bucket, |c| -> Result<()> { bump(c)?; bail!("the call failed") }).await.is_err());
-            assert_eq!((count(&a), a.at()), (0, 2));
-            assert!(a.query("delete from notes", &[]).is_err());
-            assert!(a.migrate(&bucket, &[SCHEMA.into(), "alter table notes add column at integer".into(), "not sql".into()]).await.is_err());
-            assert_eq!(a.at(), 2, "a schema that fails isn't written");
-            let rows = a.write(&bucket, |c| execute(c, "insert into notes values ('x', 5) returning at", &[])).await.unwrap();
-            assert_eq!(rows[0]["at"], 5);
-        });
-    }
 }

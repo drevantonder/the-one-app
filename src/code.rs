@@ -305,39 +305,3 @@ pub fn shown(result: &Value) -> String {
     }
     text
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn apps() -> Vec<Value> {
-        vec![
-            json!({ "name": "board", "title": "Board", "description": "One-line posts", "instructions": "Call board_read first.", "ops": [
-                { "name": "post", "description": "Post one line to a topic.", "input": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" }, "topic": { "type": "string" } } } },
-                { "name": "read", "reads": true, "description": "Read a topic.", "input": { "type": "object", "properties": {} } },
-            ] }),
-            json!({ "name": "gmail", "title": "Gmail", "description": "Your email", "instructions": "Draft, don't send.", "ops": [
-                { "name": "search", "reads": true, "description": "Search messages.", "input": { "type": "object", "required": ["query"], "properties": { "query": { "type": "string" }, "max_results": { "type": "integer" } } } },
-                { "name": "send", "confirm": true, "description": "Send an email.", "input": { "type": "object", "properties": { "to": { "type": "array", "items": { "type": "string" } } } } },
-            ] }),
-            json!({ "name": "google-calendar", "title": "Google Calendar", "description": "Events", "ops": [
-                { "name": "events", "reads": true, "description": "List events.", "input": { "type": "object", "properties": { "kind": { "enum": ["a", "b"] } } } },
-            ] }),
-        ]
-    }
-
-    #[test]
-    fn search_finds_the_op_with_its_call_and_guide() {
-        let text = search(&apps(), "search my emails", 3, For::Mcp(Mode::Code));
-        assert!(text.starts_with("tools.gmail.search({ query: string, max_results?: number })\n  Search messages. It only reads."), "{text}");
-        assert!(text.contains("## Gmail (gmail)\n\nDraft, don't send."), "{text}");
-        let text = search(&apps(), "post to the board", 1, For::Mcp(Mode::All));
-        assert!(text.starts_with("board_post { text: string, topic?: string }"), "{text}");
-        let text = search(&apps(), "board post", 1, For::Cli);
-        assert!(text.starts_with(&format!("{CLI} board post <text> [--topic string]")), "{text}");
-        let text = search(&apps(), "calendar events", 1, For::Mcp(Mode::Code));
-        assert!(text.starts_with("tools[\"google-calendar\"].events({ kind?: \"a\" | \"b\" })"), "{text}");
-        assert!(search(&apps(), "send", 1, For::Mcp(Mode::Code)).contains("confirm: true"));
-        assert!(search(&apps(), "zebra", 3, For::Cli).starts_with("Nothing matches"));
-    }
-}

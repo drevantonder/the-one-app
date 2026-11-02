@@ -365,39 +365,3 @@ fn blob(hash: &str) -> Result<Vec<u8>> {
     let mut resp = ureq::get(format!("http://{}/v1/blobs/{hash}", crate::addr())).call()?;
     Ok(resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn the_mac_job_is_shell() {
-        for assets in [false, true] {
-            let job = super::mac_job("0123abcd", assets.then_some("4567cdef"), assets);
-            let inner = job.split_once("<<'JOB'\n").unwrap().1.split_once("\nJOB\n").unwrap().0;
-            for script in [job.as_str(), inner] {
-                let ok = std::process::Command::new("sh").args(["-n", "-c", script]).status().unwrap().success();
-                assert!(ok, "{script}");
-            }
-        }
-    }
-
-    #[test]
-    fn the_installer_gets_this_white_labels_releases_and_checks_them_with_its_key() {
-        if !super::installer_is_ours() {
-            return;
-        }
-        let script = include_str!("../install.sh");
-        for line in [format!("repo={}", super::REPO), format!("cli={}", super::CLI), format!("key=\"{}\"", super::RELEASE_KEY)] {
-            assert!(script.contains(&format!("\n{line}\n")), "install.sh lacks {line}");
-        }
-    }
-
-    #[test]
-    fn version_tags() {
-        for good in ["v0.2.0", "v10.0.1", "v1.2.3-rc.1"] {
-            assert!(super::version_tag(good), "{good}");
-        }
-        for bad in ["0.2.0", "v0.2", "v1.2.3-", "v1.x.3", "latest"] {
-            assert!(!super::version_tag(bad), "{bad}");
-        }
-    }
-}

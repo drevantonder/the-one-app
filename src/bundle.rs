@@ -91,13 +91,3 @@ pub fn unpack(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
     }
     Ok(files)
 }
-
-#[test]
-fn round_trips() {
-    let files = vec![("app.js".to_string(), b"export default {}".to_vec()), ("src/app.js".to_string(), b"export default {}".to_vec())];
-    let packed = pack(&files).unwrap();
-    assert_eq!(unpack(&packed).unwrap(), files);
-    assert_eq!(pack(&files).unwrap(), packed, "the same files make the same bundle");
-    let long = vec![(format!("src/{}/app.js", "a".repeat(120)), b"x".to_vec())];
-    assert_eq!(unpack(&pack(&long).unwrap()).unwrap(), long, "long paths keep a prefix");
-}

@@ -17,7 +17,9 @@ func TestNothingTellsWhatsAppMessagesWereRead(t *testing.T) {
 			continue
 		}
 		src, err := os.ReadFile(file)
-		must(t, err)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if told.Match(src) {
 			t.Errorf("%s tells WhatsApp the user read or is online: %s", file, told.Find(src))
 		}
