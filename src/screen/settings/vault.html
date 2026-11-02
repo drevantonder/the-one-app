@@ -1,0 +1,403 @@
+<style>
+  .head { display: flex; align-items: center; justify-content: space-between; }
+  .head .button { font-size: 22px; padding: 4px 6px; }
+  #search { margin-bottom: 14px; }
+  .used { display: flex; gap: 4px; flex: none; }
+  .hero { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; margin: 8px 0 18px; }
+  .hero .name { font-size: 22px; font-weight: 600; margin-top: 8px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+  .hero .button { margin-top: 2px; }
+  .field .label { flex: none; }
+  .field .value { flex: 1; min-width: 0; text-align: right; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; -webkit-user-select: text; }
+  .field .button, .field .copy { flex: none; }
+  .input { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
+  .action-row { color: var(--accent); }
+  .danger-row { color: var(--danger); justify-content: center; }
+  .sheet .list + .list { margin-top: 20px; }
+  .sheet .error { margin: 8px 4px; }
+</style>
+<div class="head"><div class="large-title">Vault</div><button class="button plain" id="new" aria-label="New Item"></button></div>
+<div id="pages"></div>
+<div id="search"></div>
+<div id="list"></div>
+<script>
+  // The Vault: the items on each page this person keeps (theirs, their groups' as an admin, everyone's as an admin),
+  // searchable, each with what it's for and the apps that use it. The node never gives a secret field's value, so
+  // this screen never has one: replacing one sends the new value once.
+  const esc = one.esc;
+  // Opened for an item (`{ scope, id }`, from another screen), on its page with it open.
+  let scope = one.params?.scope || "user";
+  let opening = one.params?.id;
+  let query = "";
+  let items = [];
+  let apps = [];
+  let pages = [];
+  // The item whose page is open, and its sheet; what an app's action left open, by item.
+  let open = null;
+  const following = {};
+
+  document.getElementById("new").innerHTML = one.icon("plus");
+  one.title("Vault");
+  one.search("#search", { onSearch: (q) => ((query = q.trim().toLowerCase()), drawList()) });
+
+  const api = one.api;
+  const call = async (app, op, input) => (await api("POST", "/v1/call", { app, op, input })).ok;
+  const listItems = (s) => api("GET", `/v1/vault?scope=${encodeURIComponent(s)}`);
+  const setItem = (s, id, change) => api("POST", "/v1/vault", { ...change, scope: s, ...(id ? { id } : {}) });
+  const app = (name) => apps.find((a) => a.name === name);
+  const label = (name) => app(name)?.title || name;
+  const has = (a, op) => (Array.isArray(a?.ops) ? a.ops.some((o) => (o.name ?? o) === op) : !!a?.ops?.[op]);
+  // "Gmail and Drive".
+  const names = (list) => new Intl.ListFormat(undefined, { type: "conjunction" }).format(list.map(label));
+  const shown = (item) => item.fields.filter((f) => !f.name.startsWith("_"));
+  // Its one short line: what it is, else its first plain field; none when what it is is its title.
+  const line = (item) => (item.type ? (item.type === item.title ? "" : item.type) : shown(item).find((f) => !f.secret && f.value)?.value || "");
+  // A field's name as a person reads it: `client_id` is "Client ID".
+  const fieldLabel = (name) => {
+    const words = name.split(/[_\-.]/).filter(Boolean).map((w) => (["id", "url", "api", "pin", "otp"].includes(w.toLowerCase()) ? w.toUpperCase() : w.toLowerCase()));
+    return words.length ? [words[0][0].toUpperCase() + words[0].slice(1), ...words.slice(1)].join(" ") : name;
+  };
+  const sites = (text) => text.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const failed = (el, err) => (el.textContent = err ? one.plain(err).title : "");
+
+  // An item's icon: the logo of the site it's for, else the icon of the app that made or uses it, else a key.
+  const icon = (item, size) => {
+    if (item.image) return one.appIcon({ name: item.title, image: item.image, image_kind: item.image_kind }, size);
+    const a = app(item.app || item.apps[0]);
+    return a ? one.appIcon(a, size) : one.appIcon({ name: item.title, icon: "key", color: "#8e8e93" }, size);
+  };
+
+  // The items the apps installed for this person make, as their `vault` says; and what the apps switched on for an
+  // item do with items of its type.
+  const makers = () => apps.filter((a) => a.installed?.length).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.make && n.type).map((n) => ({ app: a.name, op: n.make, type: n.type }))).sort((x, y) => x.type.localeCompare(y.type));
+  const actions = (item) => apps.filter((a) => item.apps.includes(a.name)).flatMap((a) => Object.values(a.vault || {}).filter((n) => n.type && n.type === item.type).flatMap((n) => Object.entries(n.actions || {}).map(([op, title]) => ({ app: a.name, op, title })))).sort((x, y) => x.title.localeCompare(y.title));
+  // The apps that want it or use it, those using it first.
+  const usedBy = (item) => [...new Set([...item.apps, ...(item.wanted_by || [])])];
+
+  // The pages this person keeps items on: theirs, the groups they're an admin of, and everyone's as an admin.
+  function pagesFrom(state) {
+    const i = state.install || {};
+    const groups = (i.groups || []).filter((g) => g.role === "admin").sort((a, b) => a.name.localeCompare(b.name));
+    return [{ scope: "user", title: "You" }, ...groups.map((g) => ({ scope: `group:${g.id}`, title: g.name })), ...(state.user?.role === "admin" ? [{ scope: "global", title: "Everyone" }] : [])];
+  }
+  function drawPages() {
+    const el = document.getElementById("pages");
+    if (pages.length < 2) return void (el.innerHTML = "");
+    el.innerHTML = `<div class="segmented">${pages.map((p) => `<button data-scope="${esc(p.scope)}" class="${p.scope === scope ? "on" : ""}">${esc(p.title)}</button>`).join("")}</div>`;
+    el.querySelectorAll("button").forEach((b) => (b.onclick = () => ((scope = b.dataset.scope), drawPages(), load())));
+  }
+
+  function matches(item) {
+    if (!query) return true;
+    const words = [item.title, item.type, item.domain, ...item.hosts, ...item.apps.map(label), ...item.fields.filter((f) => !f.secret).map((f) => f.value)];
+    return words.some((w) => String(w ?? "").toLowerCase().includes(query));
+  }
+  const row = (item) => `<div class="row" data-item="${esc(item.id)}">${icon(item, 36)}<div class="main"><div class="title"><span>${esc(item.title)}</span></div>` +
+    (line(item) ? `<div class="sub">${esc(line(item))}</div>` : "") + `</div>` +
+    `<div class="used" aria-label="${esc(names(item.apps))}">${item.apps.slice(0, 6).map((a) => one.appIcon(app(a) || { name: a }, 20)).join("")}</div><div class="chev">›</div></div>`;
+  function drawList() {
+    const el = document.getElementById("list");
+    const found = items.filter(matches);
+    el.innerHTML = found.length ? `<div class="list">${found.map(row).join("")}</div>`
+      : query ? one.empty({ icon: "magnifying-glass", title: "No Results", text: esc(`Nothing matches “${query}”.`) })
+      : one.empty({ icon: "lock", title: "Nothing here yet." });
+    el.querySelectorAll("[data-item]").forEach((r) => (r.onclick = () => showItem(items.find((i) => i.id === r.dataset.item))));
+  }
+
+  const load = () => one.render("#list", async () => {
+    const [state, all, list] = await Promise.all([api("GET", "/v1/state"), api("GET", "/v1/apps"), listItems(scope)]);
+    [pages, apps, items] = [pagesFrom(state), all, list];
+    if (!pages.some((p) => p.scope === scope)) return void ((scope = "user"), drawPages(), load());
+    drawPages();
+    drawList();
+    if (opening) {
+      showItem(items.find((i) => i.id === opening));
+      opening = null;
+    }
+    if (open) {
+      const fresh = items.find((i) => i.id === open.item.id);
+      // Gone elsewhere (deleted on another device): its page goes too. Changed: shown as it is, unless it's being typed in.
+      if (!fresh) open.sheet.close();
+      else if (!open.sheet.body.contains(document.activeElement) || document.activeElement.tagName !== "INPUT") drawItem((open.item = fresh));
+    }
+    return undefined;
+  });
+
+  // Deletes an item, signing an account out first: each app using it, or whose sign-in made it, that lists it among
+  // its accounts (by its title or a plain field) signs that account out, so what the app keeps elsewhere goes too and
+  // listing accounts doesn't make the item again.
+  async function remove(item) {
+    if (item.account) {
+      const known = new Set([item.title, ...item.fields.filter((f) => !f.secret).map((f) => f.value)]);
+      for (const name of [...new Set([...item.apps, item.app].filter(Boolean))].sort()) {
+        const a = app(name);
+        if (!has(a, "accounts") || !has(a, "sign_out")) continue;
+        const account = (await call(name, "accounts", {})).find((x) => known.has(x.account));
+        if (account) await call(name, "sign_out", { account: account.account });
+      }
+      // Signing out may have let go of it already.
+      if (!(await listItems(item.scope)).some((i) => i.id === item.id)) return;
+    }
+    await setItem(item.scope, item.id, { deleted: true });
+  }
+  const deleteWords = (item) => ({
+    title: item.account ? `Sign out of ${item.title}?` : `Delete ${item.title}?`,
+    detail: esc(item.apps.length ? `${names(item.apps)} ${item.apps.length === 1 ? "stops" : "stop"} using it.` : "It can’t be undone."),
+    action: item.account ? "Sign Out" : "Delete",
+  });
+
+  // An item's page: its fields (a plain one to copy, a secret one only to replace), where they're sent, the apps that
+  // want it, each with a switch, and deleting it (signing out, for an account a sign-in made).
+  function showItem(item) {
+    if (!item) return;
+    const sheet = one.sheet({ onClose: () => (open = null) });
+    open = { item, sheet };
+    drawItem(item);
+  }
+  function drawItem(item) {
+    const { sheet } = open;
+    const acts = actions(item);
+    const f = following[item.id];
+    const wanting = usedBy(item);
+    const hostsShown = !item.hosts.length || !item.hosts.every(app);
+    const fieldRow = (field) => `<div class="row plain field" data-field="${esc(field.name)}"><span class="label">${esc(fieldLabel(field.name))}</span>` +
+      (field.secret ? `<span class="value">••••••••</span><button class="button plain" data-replace>Replace</button>`
+        : `<span class="value">${esc(field.value)}</span>${one.copyButton(field.value || "", { label: "" })}`) + "</div>";
+    sheet.body.innerHTML = `<div class="hero">${icon(item, 72)}<div class="name">${esc(item.title)}</div>` +
+      (item.scope_name ? `<div class="muted">${esc(item.scope_name)}</div>` : "") + `<button class="button plain" data-rename>Rename</button></div>` +
+      (acts.length ? `<div class="list">${f
+        ? (f.screen || f.url ? `<div class="row plain action-row" data-again>Open Again</div>` : "") + `<div class="row plain action-row" data-finish>${esc(f.title)}</div>`
+        : acts.map((a, n) => `<div class="row plain action-row" data-act="${n}">${esc(a.title)}</div>`).join("")}</div>` : "") +
+      `<div class="list">${shown(item).map(fieldRow).join("")}<div class="row plain action-row" data-add-field>${one.icon("plus")} Add Field</div></div>` +
+      (hostsShown ? `<h2 class="section">Sent only to</h2><div class="list"><div class="row plain"><input class="input" data-hosts placeholder="api.example.com" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="url" value="${esc(item.hosts.join(", "))}"></div></div>` : "") +
+      (wanting.length ? `<h2 class="section">Used by</h2><div class="list">${wanting.map((a) => `<label class="row plain">${one.appIcon(app(a) || { name: a }, 28)}<div class="main"><div class="title"><span>${esc(label(a))}</span></div></div><input type="checkbox" class="switch" data-app="${esc(a)}"${item.apps.includes(a) ? " checked" : ""}></label>`).join("")}</div>` : "") +
+      `<div class="list"><div class="row plain danger-row" data-delete>${item.account ? "Sign Out" : "Delete Item"}</div></div><div data-ask></div><div class="error small" data-error></div>`;
+    const err = sheet.body.querySelector("[data-error]");
+    const $ = (sel) => sheet.body.querySelector(sel);
+
+    // Changes the item, then shows it as it is now. Whether it worked.
+    const save = async (change) => {
+      failed(err);
+      try {
+        await setItem(item.scope, item.id, change);
+        await refresh();
+        return true;
+      } catch (e) {
+        failed(err, e);
+        return false;
+      }
+    };
+    const refresh = async () => {
+      items = await listItems(scope);
+      const fresh = items.find((i) => i.id === item.id);
+      drawList();
+      if (fresh && open?.item.id === item.id) drawItem((open.item = fresh));
+    };
+
+    $("[data-rename]").onclick = () => {
+      const name = $(".hero .name");
+      name.innerHTML = `<input class="input" style="text-align:center" value="${esc(item.title)}" aria-label="Title">`;
+      const input = name.querySelector("input");
+      input.focus();
+      input.select();
+      let finished = false;
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        const title = input.value.trim();
+        title && title !== item.title ? save({ title }) : drawItem(item);
+      };
+      input.onkeydown = (e) => (e.key === "Enter" ? done() : e.key === "Escape" && ((finished = true), e.stopPropagation(), drawItem(item)));
+      input.onblur = done;
+    };
+
+    // An app's action on the item: it opens the app's screen it gives, or else its link; one that leaves something
+    // open says how to finish it.
+    const go = (to) => (to.screen ? one.open(to.screen.screen || "main", to.screen.params || {}, to.app) : to.url && openLink(to.url));
+    sheet.body.querySelectorAll("[data-act]").forEach((b) => (b.onclick = async () => {
+      const a = acts[b.dataset.act];
+      if (sheet.body.querySelector(".busy")) return;
+      b.classList.add("busy");
+      b.textContent = `${a.title}…`;
+      failed(err);
+      try {
+        const reply = (await call(a.app, a.op, { item: item.id })) || {};
+        const to = { app: a.app, screen: reply.screen, url: reply.url };
+        if (reply.then?.op) following[item.id] = { ...to, op: reply.then.op, title: reply.then.title || "Done" };
+        await refresh();
+        go(to);
+      } catch (e) {
+        drawItem(item);
+        failed(sheet.body.querySelector("[data-error]"), e);
+      }
+    }));
+    $("[data-again]")?.addEventListener("click", () => go(f));
+    $("[data-finish]")?.addEventListener("click", async (e) => {
+      if (e.currentTarget.classList.contains("busy")) return;
+      e.currentTarget.classList.add("busy");
+      failed(err);
+      try {
+        await call(f.app, f.op, { item: item.id });
+        delete following[item.id];
+        await refresh();
+      } catch (x) {
+        e.currentTarget.classList.remove("busy");
+        failed(err, x);
+      }
+    });
+
+    // A field: a plain one is changed by tapping it, a secret one only replaced, typed unseen; either can be removed.
+    sheet.body.querySelectorAll("[data-field]").forEach((r) => {
+      const field = item.fields.find((x) => x.name === r.dataset.field);
+      const edit = () => {
+        r.innerHTML = `<span class="label">${esc(fieldLabel(field.name))}</span><input class="input" type="${field.secret ? "password" : "text"}" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="${esc(fieldLabel(field.name))}"${field.secret ? ' placeholder="New value"' : ""}>` +
+          `<button class="button plain" data-save>Save</button><button class="button plain" style="color:var(--danger)" data-remove>Remove</button>`;
+        const input = r.querySelector("input");
+        if (!field.secret) input.value = field.value || "";
+        input.focus();
+        const put = async () => {
+          if (!input.value) return;
+          const value = input.value;
+          input.value = "";
+          if (!(await save({ fields: { [field.name]: { value } } }))) input.value = field.secret ? "" : value;
+        };
+        r.querySelector("[data-save]").onclick = put;
+        r.querySelector("[data-remove]").onclick = () => save({ fields: { [field.name]: null } });
+        input.onkeydown = (e) => (e.key === "Enter" ? put() : e.key === "Escape" && (e.stopPropagation(), drawItem(item)));
+      };
+      if (field.secret) r.querySelector("[data-replace]").onclick = edit;
+      else r.onclick = (e) => !e.target.closest(".copy, input, button") && edit();
+    });
+    $("[data-add-field]").onclick = (e) => {
+      const r = e.currentTarget;
+      r.outerHTML = `<div class="row plain"><input class="input" data-new-name placeholder="Name" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Name"></div>` +
+        `<div class="row plain"><input class="input" data-new-value type="password" placeholder="Value" autocomplete="off" aria-label="Value"></div>` +
+        `<label class="row plain"><div class="main">Secret</div><input type="checkbox" class="switch" data-new-secret checked></label>` +
+        `<div class="row plain action-row" data-new-save>Save Field</div>`;
+      const [name, value, secret] = ["[data-new-name]", "[data-new-value]", "[data-new-secret]"].map($);
+      name.focus();
+      secret.onchange = () => (value.type = secret.checked ? "password" : "text");
+      const put = () => name.value.trim() && value.value && save({ fields: { [name.value.trim()]: { value: value.value, secret: secret.checked } } });
+      $("[data-new-save]").onclick = put;
+      value.onkeydown = (e) => e.key === "Enter" && put();
+    };
+    const hosts = $("[data-hosts]");
+    if (hosts) {
+      const put = () => {
+        const list = sites(hosts.value);
+        if (list.join() !== item.hosts.join()) save({ hosts: list }).then((ok) => ok || (hosts.value = item.hosts.join(", ")));
+      };
+      hosts.onkeydown = (e) => e.key === "Enter" && hosts.blur();
+      hosts.onchange = put;
+    }
+    sheet.body.querySelectorAll("[data-app]").forEach((box) => (box.onchange = () => {
+      box.disabled = true;
+      save({ apps: [...item.apps.filter((a) => a !== box.dataset.app), ...(box.checked ? [box.dataset.app] : [])] });
+    }));
+    $("[data-delete]").onclick = () => {
+      $("[data-ask]").scrollIntoView({ behavior: "smooth", block: "center" });
+      one.confirm($("[data-ask]"), { ...deleteWords(item), danger: true, run: () => remove(item) }).then((done) => done && (sheet.close(), load()));
+    };
+  }
+
+  // A link: through the bridge's link handling where there is one (a frame), else a new tab or the browser.
+  function openLink(url) {
+    const a = Object.assign(document.createElement("a"), { href: url, target: "_blank", rel: "noopener" });
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+
+  // New: an item a person types, or with the apps that make items of a type, one of those.
+  document.getElementById("new").onclick = () => {
+    const made = makers();
+    if (!made.length) return newItem();
+    const sheet = one.sheet({ title: "New", done: "Cancel" });
+    sheet.body.innerHTML = `<div class="list"><div class="row plain" data-n="-1">${one.appIcon({ name: "Item", icon: "key", color: "#8e8e93" }, 30)}<div class="main"><div class="title"><span>Item</span></div></div><div class="chev">›</div></div>` +
+      made.map((m, n) => `<div class="row plain" data-n="${n}">${one.appIcon(app(m.app) || { name: m.app }, 30)}<div class="main"><div class="title"><span>${esc(m.type)}</span></div></div><div class="chev">›</div></div>`).join("") + "</div>";
+    sheet.body.querySelectorAll("[data-n]").forEach((r) => (r.onclick = () => {
+      sheet.close();
+      const n = Number(r.dataset.n);
+      setTimeout(() => (n < 0 ? newItem() : makeItem(made[n])), 300);
+    }));
+  };
+
+  // A new item a person types: its page, title, fields (each secret or not) and the sites they're sent to.
+  function newItem() {
+    const sheet = one.sheet({ title: "New Item", done: "Save" });
+    let page = scope;
+    const fieldRows = (secret) => `<div class="list" data-draft><div class="row plain"><input class="input" data-name placeholder="Name" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Name"></div>` +
+      `<div class="row plain"><input class="input" data-value type="${secret ? "password" : "text"}" placeholder="Value" autocomplete="off" aria-label="Value"></div>` +
+      `<label class="row plain"><div class="main">Secret</div><input type="checkbox" class="switch" data-secret${secret ? " checked" : ""}></label></div>`;
+    sheet.body.innerHTML = `<div class="list"><div class="row plain"><input class="input" data-title placeholder="Title" aria-label="Title"></div></div>` +
+      (pages.length > 1 ? `<div class="segmented" data-pages>${pages.map((p) => `<button data-scope="${esc(p.scope)}" class="${p.scope === page ? "on" : ""}">${esc(p.title)}</button>`).join("")}</div>` : "") +
+      `<div data-fields>${fieldRows(true)}</div>` +
+      `<div class="list"><div class="row plain action-row" data-more>${one.icon("plus")} Add Field</div></div>` +
+      `<h2 class="section">Sent only to</h2><div class="list"><div class="row plain"><input class="input" data-hosts placeholder="api.example.com" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="url"></div></div>` +
+      `<div class="error small" data-error></div>`;
+    const $ = (sel) => sheet.body.querySelector(sel);
+    const wire = (draft) => {
+      const box = draft.querySelector("[data-secret]"), value = draft.querySelector("[data-value]");
+      box.onchange = () => (value.type = box.checked ? "password" : "text");
+    };
+    sheet.body.querySelectorAll("[data-draft]").forEach(wire);
+    sheet.body.querySelectorAll("[data-pages] button").forEach((b) => (b.onclick = () => {
+      page = b.dataset.scope;
+      sheet.body.querySelectorAll("[data-pages] button").forEach((x) => x.classList.toggle("on", x === b));
+    }));
+    $("[data-more]").onclick = () => {
+      $("[data-fields]").insertAdjacentHTML("beforeend", fieldRows(false));
+      const drafts = sheet.body.querySelectorAll("[data-draft]");
+      wire(drafts[drafts.length - 1]);
+      drafts[drafts.length - 1].querySelector("[data-name]").focus();
+    };
+    setTimeout(() => $("[data-title]").focus(), 300);
+    const saveButton = sheet.body.closest(".sheet").querySelector("[data-done]");
+    saveButton.onclick = async () => {
+      const title = $("[data-title]").value.trim();
+      const fields = {};
+      for (const d of sheet.body.querySelectorAll("[data-draft]")) {
+        const name = d.querySelector("[data-name]").value.trim(), value = d.querySelector("[data-value]").value;
+        if (name && value) fields[name] = { value, secret: d.querySelector("[data-secret]").checked };
+      }
+      if (!title || !Object.keys(fields).length) return failed($("[data-error]"), new Error(title ? "Give a field a name and a value" : "Give it a title"));
+      saveButton.disabled = true;
+      try {
+        await setItem(page, null, { title, fields, hosts: sites($("[data-hosts]").value), apps: [] });
+        sheet.body.querySelectorAll("input").forEach((i) => (i.value = ""));
+        sheet.close();
+        if (page !== scope) ((scope = page), drawPages());
+        load();
+      } catch (e) {
+        saveButton.disabled = false;
+        failed($("[data-error]"), e);
+      }
+    };
+  }
+
+  // A new item an app makes, of a type it uses: the person names it.
+  function makeItem(maker) {
+    const sheet = one.sheet({ title: `New ${maker.type}`, done: "Add" });
+    sheet.body.innerHTML = `<div class="list"><div class="row plain"><input class="input" data-title placeholder="Name" aria-label="Name"></div></div><div class="error small" data-error></div>`;
+    const input = sheet.body.querySelector("[data-title]"), add = sheet.body.closest(".sheet").querySelector("[data-done]");
+    setTimeout(() => input.focus(), 300);
+    const make = async () => {
+      const title = input.value.trim();
+      if (!title || add.disabled) return;
+      add.disabled = true;
+      try {
+        await call(maker.app, maker.op, { title });
+        sheet.close();
+        load();
+      } catch (e) {
+        add.disabled = false;
+        failed(sheet.body.querySelector("[data-error]"), e);
+      }
+    };
+    add.onclick = make;
+    input.onkeydown = (e) => e.key === "Enter" && make();
+  }
+
+  // The node's own entries (an item changed) change no app.
+  one.on("changed", (e) => e.type === "changed" && !(e.apps || []).length && load());
+  load();
+</script>

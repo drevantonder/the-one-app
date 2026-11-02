@@ -83,7 +83,7 @@
       a.remove();
     }
     if (message.type === "scan") throw new Error("Scanning documents needs the iPhone or iPad app. Choose the files instead.");
-    if (message.type === "vault") throw new Error("Open this in the app to choose it.");
+    if (message.type === "vault" || message.type === "request") throw new Error("Open this in the app to choose it.");
     if (message.type === "copy") return navigator.clipboard.writeText(message.text);
     if (message.type === "icons") {
       icons ||= fetch("/v1/icons").then((r) => r.json());
@@ -184,6 +184,9 @@
     // "light" or "dark"), first setting it to `value` if given. `device` is this client:
     // `{ name ("mac", "Chrome on Mac"), build, signOut (whether it can sign out) }`.
     api: (method, path, body) => host({ type: "api", method, path, body }),
+    // Opens the client's own Vault sheet for a request already made (as an agent's link does): true once it's
+    // answered with an item, false if declined or closed.
+    request: (scope, id) => host({ type: "request", scope, id }),
     signOut: () => host({ type: "signOut" }),
     appearance: (value) => host({ type: "appearance", value }),
     device: () => host({ type: "device" }),

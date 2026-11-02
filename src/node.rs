@@ -4135,7 +4135,11 @@ impl ProtocolHandler for CallHandler {
 }
 
 /// The Settings screens, by name: each client's own (src/screen/settings/<name>.html), the same on every one.
-const SETTINGS_SCREENS: &[(&str, &str)] = &[("access", include_str!("screen/settings/access.html"))];
+const SETTINGS_SCREENS: &[(&str, &str)] = &[
+    ("access", include_str!("screen/settings/access.html")),
+    ("vault", include_str!("screen/settings/vault.html")),
+    ("requests", include_str!("screen/settings/requests.html")),
+];
 
 /// Settings' items for `user`, in order, as every client draws them: each opens the Settings screen it names, but the
 /// App Store, which opens its app's screen (the install's `store` setting), and is left out while that app isn't
