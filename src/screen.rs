@@ -37,7 +37,6 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
     ("pages", concat!("<script>", include_str!("screen/widgets.js"), include_str!("screen/home.js"), "</script>", include_str!("screen/pages.html"))),
     ("services", concat!("<script>", include_str!("screen/home.js"), "</script>", include_str!("screen/services.html"))),
     ("request", include_str!("screen/request.html")),
-    ("account", include_str!("screen/settings/account.html")),
     ("appearance", include_str!("screen/settings/appearance.html")),
     ("vault", include_str!("screen/settings/vault.html")),
     ("requests", include_str!("screen/settings/requests.html")),

@@ -710,14 +710,13 @@
     lay(el.querySelector(".grid"), list);
   }
 
-  /// Settings, as a page: its items' icons, you first, as your picture.
+  /// Settings, as a page: its items' icons.
   function drawSettings(el) {
-    const me = home.me();
     el.innerHTML = (swipe ? "" : `<div class="header"><div><h1>Settings</h1><div class="subtitle">${esc(home.install()?.name || "")}</div></div></div>`) + `<div class="grid"></div>`;
     const list = (home.data.state.settings_items || []).map((item) => {
-      const icon = item.name === "account" && me ? one.avatar(me.id, me.name) : one.appIcon({ name: item.name, title: item.title, icon: item.icon, color: item.color }, 60);
-      // An item with an app (the App Store) opens that app.
-      return tile(item.title, icon, item.badge || 0, () => (item.app ? one.open("main", {}, item.app) : one.open(item.name)));
+      const icon = one.appIcon({ name: item.name, title: item.title, icon: item.icon, color: item.color }, 60);
+      // An item with an app (the App Store) opens that app; one with a url (Passkeys), the browser.
+      return tile(item.title, icon, item.badge || 0, () => (item.url ? one.link(item.url) : item.app ? one.open("main", {}, item.app) : one.open(item.name)));
     });
     lay(el.querySelector(".grid"), list);
   }

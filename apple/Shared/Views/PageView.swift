@@ -558,9 +558,10 @@ private struct EmptyPage: View {
 }
 
 /// Settings, as a page: its title and the install's name (on a Mac; a phone's bar names it), then its items' icons in a
-/// page's grid, you first, as your picture. A phone and an iPad show it as the last page.
+/// page's grid. A phone and an iPad show it as the last page.
 struct SettingsPage: View {
     @Environment(Store.self) private var store
+    @Environment(\.openURL) private var openURL
     var open: (Route) -> Void
     @State private var width: CGFloat = 0
 
@@ -574,7 +575,9 @@ struct SettingsPage: View {
                 if width > 0 {
                     HomeGrid(grid: grid) {
                         ForEach(store.settingsItems) { item in
-                            IconButton(title: item.title, badge: item.badge ?? 0) { open(.setting(item.name)) } icon: {
+                            IconButton(title: item.title, badge: item.badge ?? 0) {
+                                if let url = item.url { openURL(url) } else { open(.setting(item.name)) }
+                            } icon: {
                                 SettingIcon(item: item, size: grid.icon)
                             }
                         }
@@ -595,18 +598,13 @@ struct SettingsPage: View {
     }
 }
 
-/// A Settings item's icon: yours is your picture; the rest, its symbol on its colour, as an app's tile.
+/// A Settings item's icon: its symbol on its colour, as an app's tile.
 struct SettingIcon: View {
-    @Environment(Store.self) private var store
     var item: SettingsItem
     var size: CGFloat
 
     var body: some View {
-        if item.name == "account", let me = store.me {
-            Avatar(id: me.id, name: me.name, size: size)
-        } else {
-            AppTile(icon: item.icon, seed: item.name, color: item.color, size: size)
-        }
+        AppTile(icon: item.icon, seed: item.name, color: item.color, size: size)
     }
 }
 

@@ -1,6 +1,9 @@
 import Foundation
 import Observation
 import WebKit
+#if os(macOS)
+import AppKit
+#endif
 
 /// A page: one scope the user can read, showing the apps installed there and their widgets.
 struct Page: Identifiable, Hashable {
@@ -125,6 +128,14 @@ final class Store {
     var selection: Route? {
         didSet {
             guard selection != oldValue else { return }
+            // A Settings item with a url (Passkeys) opens in the browser, and the sidebar stays where it was.
+            if case .setting(let name, _) = selection, let url = settingsItem(name)?.url {
+                #if os(macOS)
+                NSWorkspace.shared.open(url)
+                #endif
+                selection = oldValue
+                return
+            }
             path = []
             editing = false
             UserDefaults.standard.set(selection.flatMap { try? JSONEncoder().encode($0) }, forKey: "selection")

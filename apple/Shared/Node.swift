@@ -48,6 +48,8 @@ struct SettingsItem: Decodable, Sendable, Equatable, Identifiable {
     var color: String
     var badge: Int?
     var app: String?
+    /// Where it's opened in a browser, in place of a screen (Passkeys, at the install's address).
+    var url: URL?
 
     var id: String { name }
 }

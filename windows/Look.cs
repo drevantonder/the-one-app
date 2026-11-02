@@ -192,9 +192,9 @@ public static class Look
         };
     }
 
-    /// A Settings item's icon: yours is your picture; the rest, its symbol on its colour, as an app's tile.
+    /// A Settings item's icon: its symbol on its colour, as an app's tile.
     public static FrameworkElement Setting(SettingsItem item, double size) =>
-        item.Name == "account" && Store.Shared.Me is { } me ? Avatar(me.Id, me.Name, size) : Tile(item.Icon, item.Name, item.Color, null, null, size);
+        Tile(item.Icon, item.Name, item.Color, null, null, size);
 
     public static TextBlock Text(string text, double size = 14, Brush? brush = null, bool semibold = false, int lines = 0, bool wrap = false)
     {

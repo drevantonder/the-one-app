@@ -150,11 +150,7 @@ impl Node {
         context["me"] = json!(self.me_for(viewer)?);
         let made_here = self.with(|i| Ok(crate::state::settings(&i.r.members).remove("made_here")))?;
         let api = format!("http://localhost:{}", crate::api::port());
-        // Whether people have passkeys to manage at the install's address: not where they sign in with Google, nor in a
-        // try install, whose kernel beside this node signs its people in with none.
-        let tried = std::fs::read_to_string(crate::kernel::Settings::path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).is_some_and(|s| !s["try_person"].is_null());
-        let passkeys = crate::config::SIGN_IN != "google" && !tried;
-        context["config"] = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": made_here, "passkeys": passkeys });
+        context["config"] = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": made_here });
         Ok(crate::screen::page(&context, body, own))
     }
 

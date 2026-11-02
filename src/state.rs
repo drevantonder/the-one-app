@@ -28,6 +28,9 @@ pub struct Here<'a> {
     pub backups: Option<Value>,
     /// Where an agent reads how to connect itself, when the install has no address.
     pub guide: Option<String>,
+    /// Whether people manage passkeys at the install's address: not where they sign in with Google, nor in a try
+    /// install, whose kernel signs its person in with none.
+    pub passkeys: bool,
     /// What it knows of each device now: `kind` (as it last said), and whatever else it says of it.
     pub device_now: &'a dyn Fn(&Machine) -> Map<String, Value>,
     /// What it knows of each client now.
@@ -39,7 +42,9 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
     let empty = Members::default();
     let settings = settings(m.unwrap_or(&empty));
     let install = m.map(|m| install(m, user, &settings, &here));
-    let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), settings["store"].as_str().unwrap_or(""))).unwrap_or_default();
+    let address = settings.get("address").and_then(|a| a.as_str()).filter(|a| !a.is_empty());
+    let passkeys = address.filter(|_| here.passkeys).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
+    let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), settings["store"].as_str().unwrap_or(""), passkeys.as_deref())).unwrap_or_default();
     let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "accent": crate::config::ACCENT, "store": settings["store"], "push": settings["push"] });
     let mut state = json!({
         "config": config,
@@ -56,7 +61,7 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
         // What Settings shows this user, in order (see `settings_items`).
         "settings_items": settings_items,
         // What to paste into an agent so it connects itself, for Ask Your Agent.
-        "agent_prompt": agent_prompt(settings.get("address").and_then(|a| a.as_str()), here.guide.as_deref()),
+        "agent_prompt": agent_prompt(address, here.guide.as_deref()),
     });
     if let Some(client) = here.client {
         state["client"] = client;
@@ -146,8 +151,8 @@ pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
 }
 
 /// What Settings shows `user`, in order, with a badge on Requests for `items_asked` and their other requests, and on
-/// Backups when `backups` are failing.
-fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, store: &str) -> Vec<Value> {
+/// Backups when `backups` are failing. Passkeys opens `passkeys` in a browser, where they're kept.
+fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, store: &str, passkeys: Option<&str>) -> Vec<Value> {
     let Some(me) = m.user(user) else { return Vec::new() };
     let item = |name: &str, title: &str, icon: &str, color: &str| json!({ "name": name, "title": title, "icon": icon, "color": color });
     let with = |mut item: Value, key: &str, value: Value| {
@@ -160,7 +165,7 @@ fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, st
         .filter(|s| !m.privileged(&s.key) && !m.owners(&s.key).contains(&Principal::User(user.into())) && !m.trusts(user, &s.key))
         .filter(|s| m.users_of(&s.key).iter().any(|p| matches!(p, Principal::User(u) if u == user) || matches!(p, Principal::Group(g) if m.group_role(user, g).is_some())))
         .count();
-    let mut out = vec![item("account", &me.name, "user-circle", "#8e8e93")];
+    let mut out: Vec<Value> = passkeys.map(|url| with(item("passkeys", "Passkeys", "key", "#8e8e93"), "url", json!(url))).into_iter().collect();
     let requests = invites + offers + items_asked;
     if requests > 0 {
         out.push(with(item("requests", "Requests", "tray", "#ff2d55"), "badge", json!(requests)));

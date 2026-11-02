@@ -165,6 +165,7 @@ impl Node {
             arrangements: json!(arrangements),
             backups,
             guide: crate::skills::address(),
+            passkeys: crate::config::SIGN_IN != "google" && !tried(),
             device_now: &device_now,
             client_now: &client_now,
         };
@@ -335,6 +336,12 @@ impl Node {
 
 /// What a device says of each sidecar serving there, as `GET /v1/state` lists it: what it is, its version (a
 /// sidecar's own, or for one built into the node, the node's build), whom it serves, and who installed it.
+/// Whether this node's install is a try install (`one try`), whose kernel beside it signs its person in with no passkey.
+fn tried() -> bool {
+    let settings = std::fs::read_to_string(crate::kernel::Settings::path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    settings.is_some_and(|s| !s["try_person"].is_null())
+}
+
 fn installed_sidecars(m: &Members, device: &members::Machine, sidecars: &[Sidecar], build: Option<&str>) -> Vec<Value> {
     let name_of = |u: &String| m.users.get(u).map(|u| u.name.clone());
     sidecars

@@ -948,8 +948,9 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let items = |token: &str| state(token)["settings_items"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     let refused = |(status, body): (u16, Value)| status == 400 && body["error"].as_str().is_some_and(|e| !e.is_empty());
 
-    // Settings shows each their own: Sam first, as himself; only admins see Users, General and Backups.
-    assert_eq!(state(&sams)["settings_items"][0], json!({ "name": "account", "title": "Sam", "icon": "user-circle", "color": "#8e8e93" }));
+    // Settings shows each their own: Passkeys first, at the install's address (no try install has it, so it's seen only
+    // here); only admins see Users, General and Backups.
+    assert_eq!(state(&sams)["settings_items"][0]["url"], json!(format!("{}/passkeys", v.auth.trim_end_matches('/'))));
     assert!(!items(&sams).iter().any(|i| ["users", "general", "backups"].contains(&i.as_str())), "{:?}", items(&sams));
     assert!(["users", "general", "backups"].iter().all(|i| items(&andres).iter().any(|n| n == i)), "{:?}", items(&andres));
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();

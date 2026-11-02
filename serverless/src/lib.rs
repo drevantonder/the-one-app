@@ -326,6 +326,8 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
             arrangements: json!(mine.map(|s| s.arrangements.clone()).unwrap_or_default()),
             backups: None,
             guide: None,
+            // No try install has a serverless node.
+            passkeys: one::config::SIGN_IN != "google",
             device_now: &|_| Default::default(),
             client_now: &|_| Default::default(),
         },
