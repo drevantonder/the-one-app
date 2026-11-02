@@ -548,7 +548,6 @@ impl Members {
                 ensure!(blob.as_ref().is_none_or(|b| e.content.blobs.contains(b)), "a sidecar names its executable among its blobs");
                 self.sidecars.insert((server, name), SidecarInstall { blob, local: data["local"] == true, by: w, time: e.time() });
             }
-            "secret" => ensure!(self.is_admin(&w), "admins only"),
             "install" | "uninstall" | "node-release" => {}
             other => bail!("unknown kind {other}"),
         }
@@ -659,14 +658,6 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let on = data["on"].as_bool().context("on or off?")?;
             state.switches.insert((app, name), (on, w.to_string(), e.time()));
         }
-        "secret" => {
-            // An earlier server's: the item of its own it is.
-            ensure!(manages_scope(m, w, &scope), "not allowed to change the Vault there");
-            let data = &e.content.data;
-            ensure!(data["app"].as_str().is_some_and(|a| m.apps.get(a).is_some_and(|a| !a.erased)), "no such app");
-            let id = crate::vault::apply_legacy(&mut state.items, data, w, e.time())?;
-            answered(state, data, &id, w, e.time());
-        }
         "item" => {
             ensure!(manages_scope(m, w, &scope), "not allowed to change the Vault there");
             let data = &e.content.data;
@@ -758,7 +749,7 @@ pub fn replay_from(root: Option<Hash>, member_entries: &[Entry], scope_entries: 
         }
         let counted = if is_member_entry(e) {
             members.next_if(|me| me.order() == order);
-            let counted = m.step(e) && (!matches!(e.content.kind.as_str(), "install" | "uninstall" | "secret") || apply_in_scope(&m, &mut state, e).is_ok());
+            let counted = m.step(e) && (!matches!(e.content.kind.as_str(), "install" | "uninstall") || apply_in_scope(&m, &mut state, e).is_ok());
             forget_erased(&m, &mut state, e);
             counted
         } else if e.content.app == APP && e.log() == "global" {

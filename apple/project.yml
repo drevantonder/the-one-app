@@ -33,7 +33,7 @@ targets:
         BuildCommit: ${BUILD_COMMIT}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        # <cli>://secret?id=…&scope=…: an agent's request that the person set a secret.
+        # <cli>://vault?id=…&scope=…: an agent's request for a Vault item.
         CFBundleURLTypes:
           - CFBundleURLName: app.${CONFIG_CLI}.mac
             CFBundleURLSchemes:

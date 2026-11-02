@@ -420,8 +420,6 @@ struct VaultRequest: Decodable, Sendable, Hashable, Identifiable {
     var app: String
     var title: String?
     var fields: [Field]?
-    /// The one secret it asks for, as nodes before the Vault asked.
-    var name: String?
     var hosts: [String]
     var why: String?
     /// The user who asked, and the agent they asked through, if one did.
@@ -434,8 +432,8 @@ struct VaultRequest: Decodable, Sendable, Hashable, Identifiable {
 
     var waiting: Bool { state == "waiting" }
     var asker: String { agent.flatMap { $0.isEmpty ? nil : $0 } ?? by }
-    var label: String { title ?? name ?? "" }
-    var wanted: [Field] { fields ?? name.map { [Field(name: $0, secret: true)] } ?? [] }
+    var label: String { title ?? "" }
+    var wanted: [Field] { fields ?? [] }
 }
 
 /// Backups, as the node says how they're going.

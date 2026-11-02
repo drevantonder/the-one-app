@@ -109,11 +109,6 @@ function context(ask, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ forget: String(hash), scope: s.id });
     },
-    /// Sets one of this app's secrets in this scope (null deletes it): never read back, only sent to `hosts`.
-    secret: (name, value, hosts = []) => {
-      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ secret: name, scope: s.id, value: value ?? null, hosts });
-    },
   });
   const scopes = body.scopes.map(handle);
   // `ctx.apps.<name>.<op>(input, { server })`, for exactly the apps (or sidecars) the app says it uses; `server` (a

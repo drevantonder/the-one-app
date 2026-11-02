@@ -244,8 +244,6 @@ data class VaultRequest(
     val app: String,
     val title: String? = null,
     val fields: List<VaultField>? = null,
-    /** The one secret it asks for, as nodes before the Vault asked. */
-    val name: String? = null,
     val hosts: List<String>,
     val why: String? = null,
     val by: String,
@@ -254,9 +252,9 @@ data class VaultRequest(
     val state: String,
     val matches: List<VaultMatch>? = null,
 ) {
-    val label get() = title ?: name ?: ""
+    val label get() = title ?: ""
     val asker get() = agent?.ifEmpty { null } ?: by
-    val wanted get() = fields ?: name?.let { listOf(VaultField(it, true)) } ?: emptyList()
+    val wanted get() = fields ?: emptyList()
 }
 
 @Serializable

@@ -65,8 +65,7 @@ enum Sheet: Hashable, Identifiable {
     case pair
     case join
     case pages
-    /// A request for a Vault item, from a `<cli>://vault?id=…&scope=…` link (or `<cli>://secret?…`, as before), or an
-    /// app screen's `one.vault(need)`.
+    /// A request for a Vault item, from a `<cli>://vault?id=…&scope=…` link, or an app screen's `one.vault(need)`.
     case vault(scope: String, id: String)
     /// The shell's own request for an item, made here rather than as an entry (push's Apple key, from Settings).
     case ask(VaultRequest)
@@ -559,13 +558,13 @@ final class Store {
         #endif
     }
 
-    /// `<cli>://vault?id=…&scope=…` (or `<cli>://secret?…`, as agents gave it before), which an agent gives a person
+    /// `<cli>://vault?id=…&scope=…`, which an agent gives a person
     /// to answer a request for an item. Whether it was one.
     @discardableResult
     func open(_ url: URL) -> Bool {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let value = { (name: String) in query.first { $0.name == name }?.value ?? "" }
-        guard ["vault", "secret"].contains(url.host() ?? ""), !value("id").isEmpty, !value("scope").isEmpty else { return false }
+        guard url.host() == "vault", !value("id").isEmpty, !value("scope").isEmpty else { return false }
         sheet = .vault(scope: value("scope"), id: value("id"))
         return true
     }

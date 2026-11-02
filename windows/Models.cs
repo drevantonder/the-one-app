@@ -230,7 +230,6 @@ public sealed class VaultRequest
     [JsonPropertyName("scope_name")] public required string ScopeName { get; init; }
     [JsonPropertyName("app")] public required string App { get; init; }
     [JsonPropertyName("title")] public string? Title { get; init; }
-    [JsonPropertyName("name")] public string? Name { get; init; }
     [JsonPropertyName("fields")] public List<VaultField>? Fields { get; init; }
     [JsonPropertyName("hosts")] public required List<string> Hosts { get; init; }
     [JsonPropertyName("why")] public string? Why { get; init; }
@@ -239,9 +238,9 @@ public sealed class VaultRequest
     [JsonPropertyName("state")] public required string State { get; init; }
     [JsonPropertyName("matches")] public List<VaultMatch>? Matches { get; init; }
 
-    public string What => Title ?? Name ?? "";
+    public string What => Title ?? "";
     public string Asker => string.IsNullOrEmpty(Agent) ? By : Agent;
-    public List<VaultField> Wanted => Fields ?? (Name is null ? new List<VaultField>() : new List<VaultField> { new() { Name = Name, Secret = true } });
+    public List<VaultField> Wanted => Fields ?? new List<VaultField>();
 }
 
 public sealed class VaultField

@@ -92,15 +92,15 @@ async fn servers_and_a_phone_share_a_deployed_board() {
     phone.request("POST", "/v1/name", json!({ "name": "Andre's iPhone" })).await.unwrap();
     let state = phone.request("GET", "/v1/state", Value::Null).await.unwrap();
     assert_eq!(state["me"]["name"], "Andre's iPhone", "a phone renames itself");
-    // A phone manages what its user may: installs, groups, secrets.
+    // A phone manages what its user may: installs, groups, the Vault.
     let reply = phone.request("POST", "/v1/install", json!({ "app": "board", "scope": "user" })).await.unwrap();
     assert!(reply.get("error").is_none(), "{reply}");
     let group = phone.request("POST", "/v1/group", json!({ "name": "Phone's" })).await.unwrap();
     assert!(group["group"].is_string(), "{group}");
-    let reply = phone.request("POST", "/v1/secrets", json!({ "scope": "user", "app": "board", "name": "t", "hosts": ["example.com"], "value": "v" })).await.unwrap();
+    let reply = phone.request("POST", "/v1/vault", json!({ "scope": "user", "title": "t", "fields": { "t": { "value": "v", "secret": true } }, "hosts": ["example.com"], "apps": ["board"] })).await.unwrap();
     assert!(reply.get("error").is_none(), "{reply}");
-    let listed = phone.request("GET", "/v1/secrets", json!({ "scope": "user" })).await.unwrap();
-    assert_eq!(listed[0]["name"], "t", "{listed}");
+    let listed = phone.request("GET", "/v1/vault", json!({ "scope": "user" })).await.unwrap();
+    assert_eq!(listed[0]["title"], "t", "{listed}");
     let shown = a.state()["install"]["clients"][0].clone();
     assert!(shown["asked"].is_u64(), "a phone shows when it last asked: {shown}");
 
@@ -181,13 +181,6 @@ async fn agents_ask_for_items_and_never_see_them() {
     a.answer_request(&me, &mine, again, &json!({ "item": item })).await.unwrap();
     assert_eq!(a.vault(&me, Some(&mine)).await.unwrap()[0]["apps"], json!(["board", "other"]));
 
-    // Its earlier name asks for one secret field, and is declined.
-    let old = a.vault_route(&me, "POST", "/v1/secrets/request", &json!({ "app": "board", "name": "other", "hosts": ["example.org"] })).await.unwrap().unwrap();
-    assert!(old["link"].as_str().unwrap().contains("secret?id="), "{old}");
-    let old = old["id"].as_str().unwrap();
-    assert_eq!(a.item_requests(&me, None, Some(old)).unwrap()[0]["name"], "other", "shells built before ask for it by name");
-    a.vault_route(&me, "POST", "/v1/secrets/answer", &json!({ "id": old, "value": null })).await.unwrap();
-    assert_eq!(a.item_requests(&me, None, Some(old)).unwrap()[0]["state"], "declined");
 }
 
 #[tokio::test(flavor = "multi_thread")]

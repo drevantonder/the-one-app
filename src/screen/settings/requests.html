@@ -14,7 +14,7 @@
     const app = (name) => apps.find((a) => a.name === name) || { name };
     const userName = (id) => (i.users || []).find((u) => u.id === id)?.name || "Someone";
     const mine = [`user:${me}`, ...(i.groups || []).filter((g) => g.role).map((g) => `group:${g.id}`)];
-    const vault = asked.filter((r) => r.state === "waiting").map((r) => row(one.appIcon(app(r.app), 32), `${app(r.app).title || r.app} wants ${r.title || r.name || ""}`,
+    const vault = asked.filter((r) => r.state === "waiting").map((r) => row(one.appIcon(app(r.app), 32), `${app(r.app).title || r.app} wants ${r.title || ""}`,
       [r.agent || r.by, r.why].filter(Boolean).join(" · "), `<button class="button capsule filled" data-request="${esc(r.id)}" data-scope="${esc(r.scope)}">Choose</button>`));
     const invites = (i.groups || []).filter((g) => g.invited.some((x) => x.user === me)).map((g) => row(one.avatar(g.id, g.name), g.name,
       new Intl.ListFormat(undefined, { type: "conjunction" }).format(g.members.map((m) => userName(m.user))), `<button class="button capsule filled" data-join="${esc(g.id)}">Join</button>`));

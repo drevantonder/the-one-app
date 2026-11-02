@@ -1,6 +1,6 @@
 //! What a call hands back when it returns, as `src/runtime/shim.js` gives it, on a machine and on Workers alike.
 
-use anyhow::{Context as _, Result, ensure};
+use anyhow::{Context as _, Result};
 use serde_json::Value;
 
 /// What a call asks the node to write once it returns.
@@ -21,8 +21,6 @@ pub enum Append {
     Sidecar { server: String, name: String, installed: bool },
     /// What the call spent on AI: `{ model, usd, input, output }`, for the insights of the app that called it.
     Cost { data: Value },
-    /// Sets (or with no value, deletes) one of the calling app's secrets in a scope, as earlier apps did.
-    Secret { scope: String, name: String, value: Option<String>, hosts: Vec<String> },
     /// Makes, changes or lets go of (`release`) a Vault item: `scope` for one it makes, `same` a plain field by
     /// which it changes an item of that type instead.
     Vault { id: String, scope: Option<String>, data: Value, same: Option<String>, release: bool },
@@ -33,13 +31,6 @@ pub fn appends(list: &Value) -> Result<Vec<Append>> {
     let mut appends = Vec::new();
     for a in list.as_array().into_iter().flatten() {
         let scope = a["scope"].as_str().unwrap_or("").to_string();
-        if let Some(name) = a["secret"].as_str() {
-            let hosts = a["hosts"].as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect();
-            let value = a["value"].as_str().map(str::to_string);
-            ensure!(value.is_some() || a["value"].is_null(), "a secret's value is text");
-            appends.push(Append::Secret { scope, name: name.into(), value, hosts });
-            continue;
-        }
         if let Some(id) = a["vault"].as_str() {
             let scope = a["scope"].as_str().map(str::to_string);
             let data = if a["item"].is_object() { a["item"].clone() } else { serde_json::json!({}) };

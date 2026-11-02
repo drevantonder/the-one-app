@@ -2245,8 +2245,6 @@ impl Node {
                     let fields: Vec<Value> = r.fields.iter().map(|(n, secret)| json!({ "name": n, "secret": secret })).collect();
                     out.push(json!({
                         "id": rid, "scope": log, "scope_name": scope_name, "app": r.app, "title": r.title, "fields": fields, "need": r.need,
-                        // For shells built before the Vault, which ask for one secret by name.
-                        "name": r.fields.first().map(|(n, _)| n.clone()),
                         "hosts": r.hosts, "why": r.why, "by": name(&r.user), "agent": r.agent, "time": r.time, "state": state_now,
                         "answered": answered, "matches": matches,
                     }));
@@ -2257,11 +2255,10 @@ impl Node {
         })
     }
 
-    /// The Vault's routes, for the local API and clients alike, `/v1/vault…` and their earlier names `/v1/secrets…`;
-    /// `body` is a GET's query or a POST's body. None for another path.
+    /// The Vault's routes, `/v1/vault…`, for the local API and clients alike; `body` is a GET's query or a POST's body.
+    /// None for another path.
     pub async fn vault_route(&self, me: &Caller, method: &str, path: &str, body: &Value) -> Result<Option<Value>> {
         let scope = |default: Option<&str>| body["scope"].as_str().or(default).map(|s| self.scope_for(me, s)).transpose();
-        let hosts = || json!(body["hosts"].as_array().cloned().unwrap_or_default());
         let me = &Caller { agent: body["agent"].as_str().map(str::to_string).or(me.agent.clone()), ..me.clone() };
         Ok(Some(match (method, path) {
             ("GET", "/v1/vault") => json!(self.vault(me, scope(None)?.as_ref()).await?),
@@ -2271,7 +2268,7 @@ impl Node {
                 data.as_object_mut().context("an item is an object")?.remove("scope");
                 json!({ "id": self.set_item(me, &scope, data).await? })
             }
-            ("GET", "/v1/vault/requests" | "/v1/secrets/requests") => json!(self.item_requests(me, scope(None)?.as_ref(), body["id"].as_str())?),
+            ("GET", "/v1/vault/requests") => json!(self.item_requests(me, scope(None)?.as_ref(), body["id"].as_str())?),
             ("POST", "/v1/vault/request") => {
                 let scope = scope(Some("user"))?.unwrap();
                 self.request_item(me, &scope, body["app"].as_str().unwrap_or(""), body["need"].as_str(), body, body["why"].as_str().unwrap_or("")).await?
@@ -2281,83 +2278,8 @@ impl Node {
                 json!({})
             }
             ("POST", "/v1/vault/fetch") => self.vault_fetch(me, body).await?,
-            ("GET", "/v1/secrets") => json!(self.secrets(me, scope(None)?.as_ref())?),
-            ("POST", "/v1/secrets") => {
-                let scope = scope(Some("user"))?.unwrap();
-                let (app, name) = (body["app"].as_str().unwrap_or(""), body["name"].as_str().unwrap_or(""));
-                self.set_secret(me, &scope, app, name, hosts(), body["value"].as_str()).await?;
-                json!({})
-            }
-            ("POST", "/v1/secrets/request") => {
-                let scope = scope(Some("user"))?.unwrap();
-                let name = body["name"].as_str().unwrap_or("");
-                let ask = json!({ "title": name, "fields": { name: { "secret": true } }, "hosts": hosts() });
-                let mut r = self.request_item(me, &scope, body["app"].as_str().unwrap_or(""), None, &ask, body["why"].as_str().unwrap_or("")).await?;
-                r["link"] = json!(r["link"].as_str().unwrap_or("").replace("://vault?", "://secret?"));
-                r
-            }
-            ("POST", "/v1/secrets/answer") => {
-                let scope = scope(Some("user"))?.unwrap();
-                let id = body["id"].as_str().unwrap_or("");
-                let answer = match body["value"].as_str() {
-                    None => json!({ "declined": true }),
-                    Some(value) => {
-                        let r = self.item_requests(me, Some(&scope), Some(id))?.into_iter().next().with_context(|| format!("no request {id} in {scope}"))?;
-                        json!({ "fields": { r["name"].as_str().unwrap_or(""): value } })
-                    }
-                };
-                self.answer_request(me, &scope, id, &answer).await?;
-                json!({})
-            }
             _ => return Ok(None),
         }))
-    }
-
-    /// Sets field `name` of the item `app` uses in `scope` that has it (or with no value, removes it), or makes an
-    /// item of its own: what the earlier `POST /v1/secrets` did.
-    async fn set_secret(&self, caller: &Caller, scope: &Scope, app: &str, name: &str, hosts: Value, value: Option<&str>) -> Result<()> {
-        let found = self.with(|i| Ok(i.views.get(&scope.to_string()).and_then(|(_, s)| vault::find(&s.items, app, name).map(|(id, it)| (id.clone(), it.fields.len())))))?;
-        let data = match (found, value) {
-            (Some((id, 1)), None) => json!({ "id": id, "deleted": true }),
-            (Some((id, _)), None) => json!({ "id": id, "fields": { name: null } }),
-            (None, None) => bail!("{app} has no {name} in {scope}"),
-            (Some((id, _)), Some(value)) => {
-                let mut d = json!({ "id": id, "fields": { name: { "value": value, "secret": true } } });
-                if hosts.as_array().is_some_and(|h| !h.is_empty()) {
-                    d["hosts"] = hosts;
-                }
-                d
-            }
-            (None, Some(value)) => json!({ "title": name, "fields": { name: { "value": value, "secret": true } }, "hosts": hosts, "apps": [app] }),
-        };
-        self.with(|i| {
-            ensure!(i.r.members.apps.get(app).is_some_and(|a| !a.erased), "no app named {app}");
-            Ok(())
-        })?;
-        self.set_item(caller, scope, data).await.map(|_| ())
-    }
-
-    /// Every field of the items `viewer` may change, here or in `scope`, as the earlier `GET /v1/secrets` listed
-    /// secrets: scope, app, name, hosts, who set it and when, `given` (not an app's own), and its item. Never a value.
-    pub fn secrets(&self, viewer: &Caller, scope: Option<&Scope>) -> Result<Vec<Value>> {
-        self.with(|i| {
-            let m = &i.r.members;
-            let mut out = Vec::new();
-            for (log, (_, state)) in &i.views {
-                let Ok(s) = Scope::parse(log) else { continue };
-                if scope.is_some_and(|want| *want != s) || !members::manages_scope(m, &viewer.user, &s) {
-                    continue;
-                }
-                for (id, it) in &state.items {
-                    let app = it.app.clone().or_else(|| it.apps.first().cloned()).unwrap_or_default();
-                    for name in it.fields.keys() {
-                        out.push(json!({ "scope": log, "app": app, "name": name, "hosts": it.hosts, "user": it.user, "time": it.time, "given": it.app.is_none(), "item": id, "title": it.title }));
-                    }
-                }
-            }
-            out.sort_by_key(|v| (v["scope"].to_string(), v["app"].to_string(), v["name"].to_string()));
-            Ok(out)
-        })
     }
 
     /// Who a caller is, as apps see them.
@@ -3297,7 +3219,7 @@ impl Node {
                 json!({})
             }
             (m, p) if p.starts_with("/v1/backups") => self.backups_route(me, m, p, &body).await?.with_context(|| format!("no {m} {p}"))?,
-            (m, p) if p.starts_with("/v1/vault") || p.starts_with("/v1/secrets") => self.vault_route(me, m, p, &body).await?.with_context(|| format!("no {m} {p}"))?,
+            (m, p) if p.starts_with("/v1/vault") => self.vault_route(me, m, p, &body).await?.with_context(|| format!("no {m} {p}"))?,
             ("POST", "/v1/name") => {
                 let name = body["name"].as_str().unwrap_or("").trim();
                 self.member_as(me, "rename", json!({ "key": hex(&me.key), "name": name })).await?;
@@ -3826,15 +3748,9 @@ fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
     }
 }
 
-/// Checks one of a call's appends: into a scope it named, or a secret of the calling app's in a scope it named, which
-/// the caller may set.
+/// Checks one of a call's appends: into a scope it named, which the caller may write.
 fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &Caller) -> Result<(Scope, Content)> {
     Ok(match append {
-        Append::Secret { scope, name, value, hosts } => {
-            let scope = Scope::parse(&scope)?;
-            ensure!(scopes.contains(&scope), "the call didn't name {scope}");
-            (scope.clone(), secret_entry(i, &me.user, &scope, app, &name, hosts, value)?)
-        }
         Append::Switch { app, schedule, scope, on } => {
             let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
             (scope.clone(), switch_entry(i, &me.user, &scope, &app, &schedule, on)?)
@@ -3930,18 +3846,6 @@ fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, schedule: &st
     ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{app} isn't installed in {scope}");
     ensure!(i.r.holds(scope), "this server doesn't hold {scope}");
     Ok(members::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
-}
-
-/// An earlier app's `secret(name, value, hosts)`: the `secret` entry `user` may write in `scope`, the item of its
-/// own that `app` keeps.
-fn secret_entry(i: &Install, user: &str, scope: &Scope, app: &str, name: &str, hosts: Vec<String>, value: Option<String>) -> Result<Content> {
-    let m = &i.r.members;
-    ensure!(members::manages_scope(m, user, scope), "you can't change the Vault in {scope}");
-    ensure!(m.apps.get(app).is_some_and(|a| !a.erased), "no app named {app}");
-    ensure!(vault::valid_field(name), "a field's name is letters, digits, _, - and .");
-    ensure!(value.is_none() || (!hosts.is_empty() && hosts.iter().all(|h| members::valid_host(h))), "give the hosts it's sent to, as host names (api.example.com)");
-    ensure!(i.r.holds(scope), "this server doesn't hold {scope}");
-    Ok(members::node("secret", json!({ "app": app, "name": name, "hosts": hosts, "value": value })))
 }
 
 /// An `item` entry `user` may write in `scope`, checked as replaying it will check it.

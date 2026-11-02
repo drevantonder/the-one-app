@@ -45,11 +45,6 @@ pub fn valid_field(name: &str) -> bool {
     crate::members::valid_secret_name(name)
 }
 
-/// The item an earlier server's `secret { app, name }` is.
-pub fn legacy_id(app: &str, name: &str) -> String {
-    blake3::hash(format!("secret/{app}/{name}").as_bytes()).to_hex()[..16].to_string()
-}
-
 /// Applies an `item` entry's data, written by `user` at `time`, to `items`. `known` says whether an app name may be
 /// switched on (it isn't erased). Fails, changing nothing, if it doesn't make sense.
 pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time: u64, known: impl Fn(&str) -> bool) -> Result<String> {
@@ -100,35 +95,6 @@ pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time:
     item.user = user.to_string();
     item.time = time;
     items.insert(id.clone(), item);
-    Ok(id)
-}
-
-/// Applies an earlier server's `secret { app, name, hosts, value, given? }`, as the item it is.
-pub fn apply_legacy(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time: u64) -> Result<String> {
-    let app = data["app"].as_str().context("no app")?;
-    let name = data["name"].as_str().filter(|n| valid_field(n)).context("not a secret's name")?;
-    let id = legacy_id(app, name);
-    match data["value"].as_str() {
-        None => {
-            if let Some(item) = items.get_mut(&id) {
-                item.fields.remove(name);
-                if item.fields.is_empty() {
-                    items.remove(&id);
-                }
-            }
-        }
-        Some(value) => {
-            let hosts: Vec<String> = data["hosts"].as_array().context("no hosts")?.iter().filter_map(|h| h.as_str().map(str::to_string)).collect();
-            ensure!(!hosts.is_empty() && hosts.iter().all(|h| crate::members::valid_host(h)), "a secret goes to one host or more");
-            let given = data["given"] == true;
-            let item = items.entry(id.clone()).or_insert_with(|| Item { title: name.to_string(), made: time, app: (!given).then(|| app.to_string()), ..Default::default() });
-            item.fields.insert(name.to_string(), Field { value: value.to_string(), secret: true });
-            item.hosts = hosts;
-            item.apps.insert(app.to_string());
-            item.user = user.to_string();
-            item.time = time;
-        }
-    }
     Ok(id)
 }
 

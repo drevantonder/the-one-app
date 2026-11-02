@@ -837,7 +837,7 @@ window.__one = {};
         }
         const a = app(request.app);
         const wanted = request.fields || (request.name ? [{ name: request.name, secret: true }] : []);
-        const what = request.title || request.name || "";
+        const what = request.title || "";
         const asker = request.agent || request.by;
         let html = `<div class="list"><div class="row vault-who">${one.appIcon(a || { name: request.app }, 44)}<div class="main"><div class="title"><span>${esc(a ? `${label(a)} wants ${what}` : what)}</span></div>${request.why ? `<div class="sub wrap">${esc(request.why)}</div>` : ""}</div></div></div>` +
           `<div class="footer">${esc(request.agent ? `${asker} · ${request.scope_name}` : request.scope_name)}</div>`;

@@ -62,7 +62,7 @@ fun VaultRequestSheet(store: Store, sheet: VaultSheet) {
             else {
                 request = r
                 picked = r.matches?.firstOrNull()?.id
-                title = r.title ?: r.name ?: ""
+                title = r.title ?: ""
             }
         } catch (e: Exception) {
             error = e.message

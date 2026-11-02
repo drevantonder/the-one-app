@@ -78,10 +78,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/vault/request", post(vault_post))
         .route("/v1/vault/answer", post(vault_post))
         .route("/v1/vault/fetch", post(vault_post))
-        .route("/v1/secrets", get(vault_get).post(vault_post))
-        .route("/v1/secrets/requests", get(vault_get))
-        .route("/v1/secrets/request", post(vault_post))
-        .route("/v1/secrets/answer", post(vault_post))
         .route("/v1/node-release", post(release))
         .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
         .route("/v1/blobs/{hash}", get(blob))
@@ -651,7 +647,7 @@ async fn backups_post(State(node): State<Node>, me: Me, uri: axum::http::Uri, Js
     Ok(Json(node.backups_route(&me.caller, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
-/// The Vault's routes, `/v1/vault…` and their earlier names `/v1/secrets…`: a GET's query goes to the node as a
+/// The Vault's routes, `/v1/vault…`: a GET's query goes to the node as a
 /// POST's body does.
 async fn vault_get(State(node): State<Node>, me: Me, uri: axum::http::Uri, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
     let input: serde_json::Map<String, Value> = q.into_iter().map(|(k, v)| (k, json!(v))).collect();

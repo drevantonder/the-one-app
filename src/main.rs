@@ -647,69 +647,6 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/vault/answer", body)?;
             println!("Answered.");
         }
-        ["secret", "request", app, name] => {
-            let hosts: Vec<&str> = flags.get("hosts").and_then(Value::as_str).context("give the hosts it's sent to: --hosts api.example.com")?.split(',').map(str::trim).collect();
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            let r = post("/v1/secrets/request", json!({ "scope": scope, "app": app, "name": name, "hosts": hosts, "why": flags.get("why"), "agent": agent_from_env() }))?;
-            println!("Open this to set it: {}\nOr: {CLI} secret answer {} < file\n{CLI} secret status {} says how it went.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""));
-        }
-        ["secret", "status", id] => {
-            let r = get(&format!("/v1/secrets/requests?id={id}"))?;
-            let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
-            println!("{}/{} in {}: {}", r["app"].as_str().unwrap_or(""), r["name"].as_str().unwrap_or(""), r["scope"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""));
-        }
-        ["secret", "requests"] => {
-            for r in get("/v1/secrets/requests")?.as_array().into_iter().flatten() {
-                println!("{}  {}/{} in {}  {}  {}", r["id"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["name"].as_str().unwrap_or(""), r["scope"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""), r["why"].as_str().unwrap_or(""));
-            }
-        }
-        ["secret", "answer", id] => {
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            let value = match flags.contains_key("decline") {
-                true => Value::Null,
-                false => {
-                    let mut v = String::new();
-                    std::io::stdin().read_line(&mut v)?;
-                    let v = v.trim_end_matches(['\n', '\r']).to_string();
-                    anyhow::ensure!(!v.is_empty(), "give the secret on stdin, or --decline");
-                    json!(v)
-                }
-            };
-            post("/v1/secrets/answer", json!({ "scope": scope, "id": id, "value": value }))?;
-            println!("{}", if value.is_null() { "Declined." } else { "Set." });
-        }
-        ["secret", "set", app, name] => {
-            let hosts: Vec<&str> = flags.get("hosts").and_then(Value::as_str).context("give the hosts it's sent to: --hosts api.example.com")?.split(',').map(str::trim).collect();
-            let value = match flags.get("value").and_then(Value::as_str) {
-                Some(v) => v.to_string(),
-                None => {
-                    // Typed, one line; from a file (a key's PEM), all of it.
-                    let mut v = String::new();
-                    match std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                        true => std::io::stdin().read_line(&mut v)?,
-                        false => std::io::Read::read_to_string(&mut std::io::stdin(), &mut v)?,
-                    };
-                    v.trim_end_matches(['\n', '\r']).to_string()
-                }
-            };
-            anyhow::ensure!(!value.is_empty(), "give the secret on stdin");
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            post("/v1/secrets", json!({ "scope": scope, "app": app, "name": name, "hosts": hosts, "value": value }))?;
-            println!("{app}'s secret {name} is set in {scope}; it's sent only to {}.", hosts.join(", "));
-        }
-        ["secret", "list"] => {
-            let q = flags.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default();
-            for s in get(&format!("/v1/secrets{q}"))?.as_array().into_iter().flatten() {
-                let hosts: Vec<&str> = s["hosts"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-                let kept = if s["given"] == true { "" } else { "  (kept by the app)" };
-                println!("{}  {}/{}  → {}{kept}", s["scope"].as_str().unwrap_or(""), s["app"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), hosts.join(", "));
-            }
-        }
-        ["secret", "remove", app, name] => {
-            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
-            post("/v1/secrets", json!({ "scope": scope, "app": app, "name": name, "value": null }))?;
-            println!("{app}'s secret {name} is gone from {scope}.");
-        }
         ["app", how @ ("delete" | "restore" | "erase"), app] => {
             let past = match *how { "delete" => "deleted", "restore" => "restored", _ => "erased" };
             post("/v1/retire", json!({ "app": app, "how": past }))?;
@@ -1623,26 +1560,6 @@ fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Resu
     }
 }
 
-/// The tools' earlier names, `secrets_*`, still answered (not listed) for agents that learned them.
-fn secret_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
-    let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
-    match op {
-        "request" => {
-            let r = post("/v1/secrets/request", json!({ "scope": scope, "app": input.get("app"), "name": input.get("name"), "hosts": input.get("hosts"), "why": input.get("why"), "agent": agent }))?;
-            Ok(json!(format!("Asked. Give the person this link to set it: {}\nIt's also waiting in their Settings, under Requests. Poll secrets_status with id {} until it's set.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""))))
-        }
-        "status" => {
-            let id = input.get("id").and_then(Value::as_str).context("give the request's id")?;
-            let r = get(&format!("/v1/secrets/requests?id={id}"))?;
-            let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
-            Ok(json!({ "state": r["state"], "app": r["app"], "name": r["name"], "answered": r["answered"] }))
-        }
-        "set" => post("/v1/secrets", json!({ "scope": scope, "app": input.get("app"), "name": input.get("name"), "hosts": input.get("hosts"), "value": input.get("value") })).map(|_| json!("Set.")),
-        "remove" => post("/v1/secrets", json!({ "scope": scope, "app": input.get("app"), "name": input.get("name"), "value": null })).map(|_| json!("Removed.")),
-        _ => get(&format!("/v1/secrets{}", input.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default())),
-    }
-}
-
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
     let mut tools = one::vault::tools();
@@ -1694,9 +1611,6 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     let (app, op) = name.split_once('_').with_context(|| format!("no tool {name}"))?;
     if app == "vault" {
         return vault_tool(op, &input, agent);
-    }
-    if app == "secrets" {
-        return secret_tool(op, &input, agent);
     }
     if app == "backups" {
         return backups_tool(op, &input, agent);
