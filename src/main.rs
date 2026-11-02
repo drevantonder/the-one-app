@@ -75,6 +75,8 @@ Usage:
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
                                        domains (sign-in at {CLI}-auth.<domain>, for good: passkeys belong to it), or
                                        at its workers.dev address
+  {CLI} kernel invite <email>         let someone sign up at the kernel's sign-in: nobody can uninvited, its first
+                                       person too
   {CLI} kernel set <setting> <value>   change one: auth-url, vault-url, schedules-url, resources (nodes' addresses,
                                        comma-separated), bucket or google (its JSON object piped, with - as its value)
   {CLI} kernel use <auth> <vault> <schedules>
@@ -360,6 +362,11 @@ fn run(args: Vec<String>) -> Result<()> {
             let modules = one::kernel::SERVICES.iter().map(|(_, entry, _)| one::kernel::module(entry)).collect::<Result<Vec<_>>>()?;
             one::kernel::deploy(&cf, &settings, &modules)?;
             print!("Deployed.\n{}", kernel_said(&settings));
+        }
+        ["kernel", "invite", email] => {
+            let settings = one::kernel::Settings::load()?;
+            one::kernel::invite(&settings.auth_url, &settings.kernel_secret, email)?;
+            println!("{email} can sign up at {}/sign-in now.", settings.auth_url);
         }
         ["kernel", "set", name, value] => {
             let mut settings = one::kernel::Settings::load()?;

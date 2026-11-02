@@ -651,7 +651,10 @@ fn signs_in(k: &Kernel) -> (String, String) {
         assert!(meta[field].is_string(), "no {field} in {meta}");
     }
 
-    // The install's first person makes an account; nobody else can without an invite.
+    // Nobody signs up uninvited, the install's first person too; invited (one kernel invite), he makes an account.
+    let (status, _) = browser.post("/api/auth/sign-up/email", json!({ "name": "Andre", "email": "andre@example.com", "password": "a long enough password" }));
+    assert_ne!(status, 200, "not invited, nobody signs up");
+    kernel::invite(&k.auth, &k.secret, "Andre@example.com").unwrap();
     let (status, made) = browser.post("/api/auth/sign-up/email", json!({ "name": "Andre", "email": "andre@example.com", "password": "a long enough password" }));
     assert_eq!(status, 200, "{made}");
     let user = made["user"]["id"].as_str().unwrap().to_string();

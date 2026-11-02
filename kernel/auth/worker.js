@@ -65,11 +65,11 @@ export class Auth extends DurableObject {
       databaseHooks: {
         user: {
           create: {
-            // The install's first person signs up; anyone after is invited.
+            // Only someone invited signs up, the install's first person too (one kernel invite), so nobody who finds
+            // the sign-in page first takes the install.
             async before(user) {
-              const people = sql.exec("select count(*) n from user").one().n;
               const invited = sql.exec("select email from invites where email = ?", user.email.toLowerCase()).toArray().length;
-              if (people && !invited) return false;
+              if (!invited) return false;
               sql.exec("delete from invites where email = ?", user.email.toLowerCase());
             },
           },

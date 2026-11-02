@@ -637,6 +637,16 @@ impl Cloudflare {
     }
 }
 
+/// Lets someone sign up at the auth service at `auth_url`, with the kernel's secret: nobody signs up uninvited, the
+/// install's first person too.
+pub fn invite(auth_url: &str, kernel_secret: &str, email: &str) -> Result<()> {
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
+    let mut resp = agent.post(format!("{}/internal/invite", auth_url.trim_end_matches('/'))).header("x-kernel-secret", kernel_secret).send_json(json!({ "email": email }))?;
+    let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
+    ensure!(resp.status() == 200, "the auth service said: {}", out["error"].as_str().unwrap_or("nothing"));
+    Ok(())
+}
+
 /// A kernel service's Worker's name on Cloudflare: `<cli>-<service>`, so white labels sharing an account don't clash.
 pub fn worker_name(service: &str) -> String {
     format!("{}-{service}", crate::config::CLI)
