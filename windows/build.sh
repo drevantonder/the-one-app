@@ -21,9 +21,12 @@ file=${name//[^A-Za-z0-9]/}
 widgets=$(printf '%s widgets' "$cli" | sha1sum | sed -E 's/^(.{8})(.{4})(.{4})(.{4})(.{12}).*/\1-\2-\3-\4-\5/')
 now=$(date -u +%s)
 version="1.$(( (now - $(date -u -d 2026-01-01 +%s)) / 86400 )).$(( now % 86400 / 60 )).0"
+# Links to the config's address open the app; a white label without one has the app add the address it signs in to
+# (Shell.Claim), and names a host no link has.
+host=$(field address | sed -E 's|^[a-z]+://||; s|[/:].*||'); host=${host:-$cli.invalid}
 xml() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/[&|\\]/\\&/g'; }
 sed -e "s|@ID@|$file|g; s|@PUBLISHER@|CN=$(xml "${name//[^A-Za-z0-9 ]/}")|g; s|@VERSION@|$version|g; s|@NAME@|$(xml "$name")|g" \
-  -e "s|@FILE@|$file|g; s|@CLI@|$(xml "$cli")|g; s|@WIDGETS@|$widgets|g" Package.appxmanifest |
+  -e "s|@FILE@|$file|g; s|@CLI@|$(xml "$cli")|g; s|@WIDGETS@|$widgets|g; s|@HOST@|$(xml "$host")|g" Package.appxmanifest |
   awk '/<Definition /{d=1} d{b=b $0 "\n"} !d{print} /<\/Definition>/{d=0; for (n=1; n<=4; n++) {x=b; gsub(/@N@/, n, x); printf "%s", x}}' > "$stage/Package.appxmanifest"
 cp "$(art icon)" "$stage/Assets/Icon.png"
 cp "$(art logo)" "$stage/Assets/Logo.png"
@@ -50,8 +53,8 @@ public static class Brand
 CS
 printf '{"name":%s,"file":%s,"publisher":%s}\n' "$(quote "$name")" "$(quote "$file")" "$(quote "CN=${name//[^A-Za-z0-9 ]/}")" > "$stage/build.json"
 
-ssh=(ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=$HOME/devices/windows-vm/known_hosts -o LogLevel=ERROR -o ConnectTimeout=10 one@127.0.0.1)
+ssh=(ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=$HOME/.local/share/one/agent-devices/windows/windows/known_hosts -o LogLevel=ERROR -o ConnectTimeout=10 one@127.0.0.1)
 "${ssh[@]}" exit 2>/dev/null || { one agent-devices start windows >/dev/null; until "${ssh[@]}" exit 2>/dev/null; do sleep 5; done; }
 "${ssh[@]}" "Remove-Item -Recurse -Force build\\$cli -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force build | Out-Null"
-scp -q -r -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$HOME/devices/windows-vm/known_hosts" -o LogLevel=ERROR "$stage" "one@127.0.0.1:build/"
+scp -q -r -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$HOME/.local/share/one/agent-devices/windows/windows/known_hosts" -o LogLevel=ERROR "$stage" "one@127.0.0.1:build/"
 "${ssh[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File build\\$cli\\build.ps1"

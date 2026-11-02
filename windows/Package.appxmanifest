@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The app as Windows installs it: its window, its links (@CLI@://open?…, which widgets open it at), and the Widgets
+<!-- The app as Windows installs it: its window, its links (@CLI@://open?…, which widgets open it at, and links to your
+     One App's address: the config's, or whichever the app signs in to, which it adds itself (Shell.Claim)), and the Widgets
      board's widgets, served by the same program started as a COM server (Program.cs, Widgets.cs). build.sh fills in
      the @…@ from config.toml, and repeats the widget's definition: the board pins only one of each definition, so
      there are a few alike, each showing whichever widget from your pages its person chooses. -->
@@ -7,9 +8,10 @@
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7"
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap3 com rescap">
+  IgnorableNamespaces="uap uap3 uap7 com rescap">
   <Identity Name="@ID@" Publisher="@PUBLISHER@" Version="@VERSION@" />
   <Properties>
     <DisplayName>@NAME@</DisplayName>
@@ -32,6 +34,11 @@
             <uap:DisplayName>@NAME@</uap:DisplayName>
           </uap:Protocol>
         </uap:Extension>
+        <uap3:Extension Category="windows.appUriHandler">
+          <uap3:AppUriHandler uap7:Name="links">
+            <uap3:Host Name="@HOST@" />
+          </uap3:AppUriHandler>
+        </uap3:Extension>
         <com:Extension Category="windows.comServer">
           <com:ComServer>
             <com:ExeServer Executable="@FILE@.exe" Arguments="-RegisterProcessAsComServer" DisplayName="@NAME@ widgets">

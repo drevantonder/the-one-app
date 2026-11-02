@@ -49,6 +49,12 @@ public static class Program
     [System.Runtime.InteropServices.DllImport("Microsoft.ui.xaml.dll")] static extern void XamlCheckProcessRequirements();
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(uint process);
 
-    /// The link a start opens (`<cli>://open?…`), if it's one.
-    static Uri? Link(AppActivationArguments e) => e.Kind == ExtendedActivationKind.Protocol && e.Data is IProtocolActivatedEventArgs p ? p.Uri : null;
+    /// The link a start opens (`<cli>://open?…`, or a page at your One App's address), if it's one: Windows gives an
+    /// address it opens here as a link, or as the start's argument.
+    static Uri? Link(AppActivationArguments e) => e.Data switch
+    {
+        IProtocolActivatedEventArgs p when e.Kind == ExtendedActivationKind.Protocol => p.Uri,
+        ILaunchActivatedEventArgs l when Uri.TryCreate(l.Arguments.Trim().Trim('"'), UriKind.Absolute, out var url) && url.Scheme == "https" => url,
+        _ => null,
+    };
 }

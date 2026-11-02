@@ -381,7 +381,8 @@ pub fn android_package() -> String {
 
 impl Settings {
     /// The files the address serves itself: the web client's, as this release has them, and Android's App Links file
-    /// (`.well-known/assetlinks.json`), which lets the app open links to the address.
+    /// (`.well-known/assetlinks.json`) and Windows' web links file (`.well-known/windows-app-web-link`), which let the
+    /// apps open links to the address.
     pub fn web(&self) -> Vec<(String, Vec<u8>)> {
         let mut files: Vec<(String, Vec<u8>)> =
             crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
@@ -392,8 +393,30 @@ impl Settings {
             }]);
             files.push((".well-known/assetlinks.json".into(), links.to_string().into_bytes()));
         }
+        files.push((".well-known/windows-app-web-link".into(), windows_links()));
         files
     }
+}
+
+/// The Windows app's package family name, as Windows names the package windows/build.sh makes: the config's name in
+/// letters and digits, then its publisher's (`CN=` and the name in letters, digits and spaces) hash, the first 8 bytes
+/// of the SHA-256 of it in UTF-16LE, in Crockford's base32.
+pub fn windows_package() -> String {
+    use sha2::Digest;
+    let name = crate::config::NAME;
+    let publisher = format!("CN={}", name.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ' ').collect::<String>());
+    let hash = sha2::Sha256::digest(publisher.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>());
+    let bits = u128::from(u64::from_be_bytes(hash[..8].try_into().unwrap())) << 1;
+    let id: String = (0..13).map(|i| b"0123456789abcdefghjkmnpqrstvwxyz"[(bits >> ((12 - i) * 5)) as usize & 31] as char).collect();
+    format!("{}_{id}", name.chars().filter(char::is_ascii_alphanumeric).collect::<String>())
+}
+
+/// `/.well-known/windows-app-web-link`: the pages at the address the Windows app opens, when a link to one is opened
+/// from another app, as the web client has them (kernel/web/web.js): You, a page, its Services, an app's screen,
+/// Settings, a Vault request and an invite.
+fn windows_links() -> Vec<u8> {
+    let paths = ["/", "/page/*", "/services/*", "/app/*", "/settings", "/settings/*", "/vault", "/invite"];
+    json!([{ "packageFamilyName": windows_package(), "paths": paths }]).to_string().into_bytes()
 }
 
 /// Runs the kernel's services on this machine, in the pinned workerd, until it stops: their modules built from this
@@ -504,7 +527,8 @@ pub fn write_config(dir: &Path, servers: &[Served]) -> Result<PathBuf> {
         sockets.push(format!("(name = {}, address = {}, http = (), service = {})", quote(&s.name), quote(&s.listen), quote(&s.name)));
         let mut bindings: Vec<String> = s.class.iter().map(|c| format!("(name = {}, durableObjectNamespace = {})", quote(&c.to_uppercase()), quote(c))).collect();
         if let Some(assets) = &s.assets {
-            services.push(format!("(name = {}, disk = (path = {}, writable = false))", quote(&format!("{}-assets", s.name)), quote(&assets.to_string_lossy())));
+            // With `.well-known/`, which Windows and Android ask the address for.
+            services.push(format!("(name = {}, disk = (path = {}, writable = false, allowDotfiles = true))", quote(&format!("{}-assets", s.name)), quote(&assets.to_string_lossy())));
             bindings.push(format!("(name = \"ASSETS\", service = {})", quote(&format!("{}-assets", s.name))));
         }
         for (name, value) in &s.bindings {

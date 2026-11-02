@@ -83,25 +83,88 @@ public sealed class MainWindow : Window
         SetForegroundWindow(hwnd);
     }
 
-    /// Where a link opens (a widget's: `<cli>://open?app=…&screen=…&params=…&scope=…`), once the window shows the pages.
+    /// Where a link opens, once the window shows the pages: a widget's (`<cli>://open?app=…&screen=…&params=…&scope=…`),
+    /// or a page at your One App's address, as the web client has them (kernel/web/web.js): `/`, `/page/<scope>`,
+    /// `/services/<scope>`, `/app/<app>/<screen>?params=&scope=`, `/settings`, `/settings/<item>?params=`, and
+    /// `/vault?id=&scope=` (or `<cli>://vault?…`), a request for an item, in the Vault's sheet. An invite link
+    /// (`<address>/invite#…`) welcomes the person with it, as pasting it does. `<cli>://signed-in`, where the browser
+    /// comes back after signing in, only brings the window to the front.
     Route? opening;
+    (string scope, string id)? asking;
 
     public void Open(Uri link)
     {
-        if (link.Host != "open") return;
         var q = System.Web.HttpUtility.ParseQueryString(link.Query);
-        var scope = q["scope"];
-        opening = q["app"] is { Length: > 0 } app ? Route.ScreenOf(app, scope, q["screen"] ?? "main", q["params"] ?? "{}") : Route.PageOf(scope ?? "user");
+        if (link.Scheme == "https")
+        {
+            if (link.AbsolutePath == "/invite" && link.Fragment.Length > 1)
+            {
+                Invited(link);
+                return;
+            }
+            // Another One App's, while this computer is signed in to yours, stays in the browser.
+            var address = link.GetLeftPart(UriPartial.Authority);
+            if (Auth.Shared.Address != null && address != Auth.Shared.Address)
+            {
+                Shell.Open(link.AbsoluteUri);
+                return;
+            }
+            if (Auth.Shared.Address == null)
+            {
+                Auth.Shared.Take(address);
+                Welcome(null);
+            }
+            var path = link.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.UnescapeDataString).ToArray();
+            string? At(int i) => path.Length > i ? path[i] : null;
+            if (At(0) == "vault")
+            {
+                if (q["id"] is { Length: > 0 } id && q["scope"] is { Length: > 0 } s) asking = (s, id);
+            }
+            else opening = At(0) switch
+            {
+                "page" when At(1) is { } scope => Route.PageOf(scope),
+                "services" when At(1) is { } scope => Route.Services(scope),
+                "app" when At(1) is { } app => Route.ScreenOf(app, q["scope"], At(2) ?? "main", q["params"] ?? "{}"),
+                "settings" => At(1) is { } item ? Route.SettingOf(item, q["params"] ?? "{}") : Route.Settings,
+                _ => Route.PageOf("user"),
+            };
+        }
+        else if (link.Host == "open")
+        {
+            var scope = q["scope"];
+            opening = q["app"] is { Length: > 0 } app ? Route.ScreenOf(app, scope, q["screen"] ?? "main", q["params"] ?? "{}") : Route.PageOf(scope ?? "user");
+        }
+        else if (link.Host == "vault" && q["id"] is { Length: > 0 } id && q["scope"] is { Length: > 0 } s) asking = (s, id);
         if (nav != null) Opening();
     }
 
     void Opening()
     {
-        if (opening is not { } r) return;
-        opening = null;
-        // Its page, if this computer opens it; an app's screen on a page it isn't on still opens.
-        if (r.Kind == "page" && Store.Shared.PageFor(r.Scope) == null) return;
-        Go(r);
+        if (opening is { } r)
+        {
+            opening = null;
+            // Its page, if this computer opens it; an app's screen on a page it isn't on still opens.
+            if (r.Kind is not ("page" or "services") || Store.Shared.PageFor(r.Scope) != null) Go(r);
+        }
+        if (asking is { } a)
+        {
+            asking = null;
+            DispatcherQueue.TryEnqueue(async () => await VaultSheet.Show(Content.XamlRoot, a.scope, a.id));
+        }
+    }
+
+    /// An invite link: signed out, the welcome with it, its page in the browser, where the person makes their passkey;
+    /// signed in, only its page, so this computer stays signed in.
+    void Invited(Uri invite)
+    {
+        if (Auth.Shared.SignedIn)
+        {
+            Shell.Open(invite.AbsoluteUri);
+            return;
+        }
+        Auth.Shared.Take(invite.AbsoluteUri);
+        Shell.Open(invite.AbsoluteUri);
+        Welcome(null, invited: true);
     }
 
     public void Restyle()
@@ -114,6 +177,7 @@ public sealed class MainWindow : Window
 
     async Task Start()
     {
+        _ = Shell.Claim(Auth.Shared.Address);
         if (Auth.Shared.Address == null || !Auth.Shared.SignedIn)
         {
             Welcome(null);
@@ -144,7 +208,7 @@ public sealed class MainWindow : Window
         }
         if (Store.Shared.Install == null)
         {
-            body.Content = Look.Unavailable("Nothing Here Yet", $"This install isn’t set up yet. Set it up from the {Brand.Name} app on one of your devices.");
+            body.Content = Look.Unavailable("Nothing Here Yet", $"It isn’t set up yet. Set it up from the {Brand.Name} app on one of your devices.");
             return;
         }
         try
@@ -183,8 +247,8 @@ public sealed class MainWindow : Window
         if (Auth.Shared.Address == null)
         {
             var address = new TextBox { PlaceholderText = "one.example.com, or an invite link", Width = 340, HorizontalAlignment = HorizontalAlignment.Center, IsSpellCheckEnabled = false };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(address, "Your install’s address or invite link");
-            panel.Children.Add(new TextBlock { Text = "Where is your install? Its address, or the invite link you were sent.", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords });
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(address, "Your One App’s address or invite link");
+            panel.Children.Add(new TextBlock { Text = "Your One App’s address, or the invite link you were sent.", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords });
             panel.Children.Add(address);
             void Go()
             {
@@ -250,7 +314,7 @@ public sealed class MainWindow : Window
             panel.Children.Add(new TextBlock { Text = new Uri(Auth.Shared.Address).Host, FontSize = 12, Foreground = Look.Tertiary, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 16, 0, 0) });
             if (string.IsNullOrEmpty(Brand.Address))
             {
-                var other = Look.Link("Use another install…", () =>
+                var other = Look.Link("Use another One App…", () =>
                 {
                     Auth.Shared.Leave();
                     Welcome(null);

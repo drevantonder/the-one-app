@@ -569,3 +569,14 @@ fn every_host_answers_each_message_of_the_bridge() {
         assert!(missing.is_empty(), "{path} doesn't answer the bridge's {missing:?}");
     }
 }
+
+/// Windows opens links to the address in the app only if the address's `windows-app-web-link` names its package as
+/// Windows does: from the name and publisher windows/build.sh gives it, as the hash Windows made in a VM says.
+#[test]
+fn the_gateway_names_the_windows_app_as_windows_does() {
+    let build = read("windows/build.sh");
+    assert!(build.contains("file=${name//[^A-Za-z0-9]/}") && build.contains("CN=${name//[^A-Za-z0-9 ]/}"), "build.sh names the package and its publisher otherwise");
+    if one::config::NAME == "The One App" {
+        assert_eq!(one::kernel::windows_package(), "TheOneApp_ah4xyz62b3km4");
+    }
+}
