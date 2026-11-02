@@ -66,6 +66,6 @@ port=$(sed -n 's/.*"port": *\([0-9]*\).*/\1/p' "$kept") dir=$(sed -n 's/.*"dir":
 opts=(-o StrictHostKeyChecking=no -o "UserKnownHostsFile=$dir/known_hosts" -o LogLevel=ERROR -o ConnectTimeout=10)
 ssh=(ssh -p "$port" "${opts[@]}" one@127.0.0.1)
 "${ssh[@]}" exit 2>/dev/null || { one agent-devices start "$device" >/dev/null; until "${ssh[@]}" exit 2>/dev/null; do sleep 5; done; }
-"${ssh[@]}" "Remove-Item -Recurse -Force build\\$cli -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force build | Out-Null"
-scp -q -r -P "$port" "${opts[@]}" "$stage" "one@127.0.0.1:build/"
+# One stream into Windows' own tar: scp takes seconds a file there.
+tar -C "$stage" -cf - . | "${ssh[@]}" "Remove-Item -Recurse -Force build\\$cli -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force build\\$cli | Out-Null; tar -xf - -C build\\$cli"
 "${ssh[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File build\\$cli\\build.ps1"
