@@ -1,0 +1,29 @@
+<!-- The Windows app: unpackaged and self-contained, so it runs from a folder with nothing else installed (WebView2
+     comes with Windows 11). build.sh writes Brand.g.cs and Assets/ from config.toml before building. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>One</RootNamespace>
+    <AssemblyName>$(AppFile)</AssemblyName>
+    <Product>$(AppName)</Product>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\App.ico</ApplicationIcon>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- WinUI 3 and what it stands on (Mica, the window, WebView2), without the rest of the Windows App SDK. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.6.4" />
+    <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

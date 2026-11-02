@@ -1,5 +1,5 @@
 // The bridge every app screen gets as `one`. Inside a shell, the shell answers it (WKWebView's
-// `one` message handler, or `__oneShell.postMessage` where another web view puts one, as Android's does); in a sandboxed frame (the web client's, a chat's), the page
+// `one` message handler, or `__oneShell.postMessage` where another web view puts one, as Android's and Windows' do); in a sandboxed frame (the web client's, a chat's), the page
 // holding the frame answers its messages; in a plain browser on the device it talks to the node directly. A screen
 // never knows which. The web client's own page loads it too, for the kit, answering it itself (`__one.host`).
 (() => {

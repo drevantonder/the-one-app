@@ -1,4 +1,4 @@
-//! Where code in two languages must agree (the node sends, the Mac, iPhone and Android apps, the Go sidecars, the screens'
+//! Where code in two languages must agree (the node sends, the Mac, iPhone, Android and Windows apps, the Go sidecars, the screens'
 //! bridge and the chat view read), a test reads both and checks they do, so neither can drift from the other.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -185,6 +185,45 @@ fn kotlin_classes(src: &str) -> BTreeMap<String, Vec<Field>> {
     out
 }
 
+/// The classes the Windows app decodes (windows/Models.cs), by name, each with the fields it reads: a property is one
+/// line, `[JsonPropertyName("key")] public [required] Type Name { … }`, its type written as Swift's are (`int` as
+/// `Int32`, which a bigger number doesn't fit), and System.Text.Json fails without a `required` one.
+fn csharp_classes(src: &str) -> BTreeMap<String, Vec<Field>> {
+    fn swifty(ty: &str) -> String {
+        let ty = ty.trim().trim_end_matches('?');
+        let inner = |t: &str, prefix: &str| t.strip_prefix(prefix).and_then(|t| t.strip_suffix('>')).map(str::to_string);
+        if let Some(of) = inner(ty, "List<") {
+            return format!("[{}]", swifty(&of));
+        }
+        if let Some(of) = inner(ty, "Dictionary<string,") {
+            return format!("[String: {}]", swifty(&of));
+        }
+        match ty {
+            "string" => "String",
+            "int" => "Int32",
+            "long" => "Int",
+            "double" => "Double",
+            "bool" => "Bool",
+            other => other,
+        }
+        .to_string()
+    }
+    let mut out: BTreeMap<String, Vec<Field>> = BTreeMap::new();
+    let mut class = None;
+    for line in src.lines().map(str::trim) {
+        if let Some((_, rest)) = line.split_once(" class ").filter(|(before, _)| before.starts_with("public")) {
+            class = Some(word(rest).to_string());
+            out.entry(word(rest).to_string()).or_default();
+        }
+        let (Some(class), Some(rest)) = (&class, line.strip_prefix("[JsonPropertyName(\"")) else { continue };
+        let (key, rest) = rest.split_once('"').unwrap();
+        let rest = rest.split_once("public ").unwrap().1;
+        let (ty, _) = rest.trim_start_matches("required ").split_once(" {").unwrap().0.rsplit_once(' ').unwrap();
+        out.get_mut(class).unwrap().push(Field { key: key.into(), ty: swifty(ty), required: rest.starts_with("required ") });
+    }
+    out
+}
+
 /// What's wrong with `value` as Swift's `ty` would decode it, from inside struct `within`: each problem by its path.
 fn check(structs: &BTreeMap<String, Vec<Field>>, within: &str, ty: &str, value: &Value, path: &str, problems: &mut Vec<String>) {
     let ty = ty.trim().trim_end_matches('?');
@@ -218,6 +257,7 @@ fn check(structs: &BTreeMap<String, Vec<Field>>, within: &str, ty: &str, value: 
     let ok = match ty {
         "String" => value.is_string(),
         "Int" => value.is_i64() || value.is_u64(),
+        "Int32" => value.as_i64().is_some_and(|n| i32::try_from(n).is_ok()),
         "Double" => value.is_number(),
         "Bool" => value.is_boolean(),
         _ => match named(ty) {
@@ -264,12 +304,12 @@ async fn api(addr: &str, method: &str, path: &str, body: Value) -> Value {
     .unwrap()
 }
 
-/// Every payload the Mac, iPhone and Android apps decode from a node decodes with the structs (Kotlin's data classes,
-/// in android/…/Node.kt) they decode it into: each field they need is there, and each field they read has the type
-/// they read it as. A shell built before still decodes what a newer server sends, so a field leaves the payload only
-/// once no shell needs it.
+/// Every payload the Mac, iPhone, Android and Windows apps decode from a node decodes with the structs (Kotlin's data
+/// classes, in android/…/Node.kt; C#'s, in windows/Models.cs) they decode it into: each field they need is there, and
+/// each field they read has the type they read it as. A shell built before still decodes what a newer server sends,
+/// so a field leaves the payload only once no shell needs it.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_apple_and_android_apps_decode_what_the_node_sends() {
+async fn the_apps_decode_what_the_node_sends() {
     let swift = read("apple/Shared/Node.swift") + &read("apple/Shared/Views/WidgetTree.swift");
     let structs = swift_structs(&swift);
     for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "WidgetNode", "VaultItem", "VaultRequest", "Arrangement.Item", "Backups", "Backups.Place", "Backups.Snapshot"] {
@@ -283,6 +323,11 @@ async fn the_apple_and_android_apps_decode_what_the_node_sends() {
     }
     assert!(classes["NodeState"].iter().any(|f| f.key == "me" && f.required), "@SerialName renames fields");
     assert!(classes["AppInfo"].iter().any(|f| f.key == "screens" && f.ty == "[AppScreenInfo]" && !f.required), "{:?}", classes["AppInfo"]);
+    let windows_classes = csharp_classes(&read("windows/Models.cs"));
+    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "VaultItem", "VaultRequest", "ArrangedItem"] {
+        assert!(windows_classes.get(name).is_some_and(|f| !f.is_empty()), "the test reads C#'s {name}: {:?}", windows_classes.keys());
+    }
+    assert!(windows_classes["NodeState"].iter().any(|f| f.key == "arrangements" && f.ty == "[String: Arrangement]" && !f.required), "{:?}", windows_classes["NodeState"]);
 
     let (node, _router) = start("contracts").await;
     node.create("Contracts", "Andre").await.unwrap();
@@ -332,10 +377,15 @@ async fn the_apple_and_android_apps_decode_what_the_node_sends() {
     for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]"), ("/v1/badges?scope=user", "[String: Int]"), ("/v1/vault", "[VaultItem]"), ("/v1/vault/requests", "[VaultRequest]")] {
         check(&classes, "", ty, &api(&addr, "GET", path, Value::Null).await, path, &mut android);
     }
+    let mut windows = vec![];
+    for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]"), ("/v1/badges?scope=user", "[String: Int32]"), ("/v1/vault", "[VaultItem]"), ("/v1/vault/requests", "[VaultRequest]")] {
+        check(&windows_classes, "", ty, &api(&addr, "GET", path, Value::Null).await, path, &mut windows);
+    }
     let state = api(&addr, "GET", "/v1/state", Value::Null).await;
     assert!(!state["install"]["groups"].as_array().unwrap().is_empty() && state["arrangements"]["user"].is_object(), "{state}");
     assert!(problems.is_empty(), "the Apple apps can't decode what the node sends:\n{}", problems.join("\n"));
     assert!(android.is_empty(), "the Android app can't decode what the node sends:\n{}", android.join("\n"));
+    assert!(windows.is_empty(), "the Windows app can't decode what the node sends:\n{}", windows.join("\n"));
     let _ = std::fs::remove_dir_all(disk);
 }
 
