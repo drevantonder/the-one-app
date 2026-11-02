@@ -605,10 +605,17 @@ try {{
     if ($p) {{
       $window = $A::FromHandle($p.MainWindowHandle)
       $button = Find $window $A::NameProperty 'Sign In'
-      if (-not $button) {{ 'signed in' | Set-Content $log; exit }}
       $field = Find $window $A::ControlTypeProperty ([Windows.Automation.ControlType]::Edit)
-      if ($field) {{ $field.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('{address}') }}
-      Start-Sleep -Milliseconds 500
+      # The welcome asks for the address first, with Continue, unless it has one; then Sign In.
+      $next = Find $window $A::NameProperty 'Continue'
+      if ($field -and $next) {{
+        $field.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('{address}')
+        Start-Sleep -Milliseconds 500
+        $next.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Start-Sleep -Seconds 1
+        continue
+      }}
+      if (-not $button) {{ 'signed in' | Set-Content $log; exit }}
       $button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
       'pressed' | Set-Content $log
       exit
