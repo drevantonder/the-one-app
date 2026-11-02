@@ -39,8 +39,10 @@ import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
 import androidx.glance.layout.Column
+import androidx.glance.layout.ColumnScope
 import androidx.glance.layout.ContentScale
 import androidx.glance.layout.Row
+import androidx.glance.layout.RowScope
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
@@ -201,10 +203,10 @@ private fun Body(widgetId: Int, shown: HomeWidgets.Shown) {
             .cornerRadius(android.R.dimen.system_app_widget_background_radius).padding(16.dp),
     ) {
         when {
-            !shown.signedIn -> Broken(colors, appName, "Sign in to $appName to see your pages here.", app)
+            !shown.signedIn -> Waiting(colors, "Sign in to $appName to see your pages.", app)
             widget == null && chosen != null && !kept?.widgets.isNullOrEmpty() ->
                 Broken(colors, appName, "${HomeWidgets.title(widgetId) ?: "This widget"} isn’t on your pages any more. Touch and hold to choose another.", app)
-            widget == null -> Waiting(colors, app)
+            widget == null -> Waiting(colors, "Open $appName to see your pages.", app)
             else -> Drawn(context, widget, colors)
         }
     }
@@ -254,22 +256,23 @@ private fun Broken(colors: Colors, title: String, text: String, tap: Action) {
     }
 }
 
-/** Nothing kept yet: the app hasn't shown its pages since it was signed in. */
+/** Nothing to show yet: signed out, or the app hasn't shown its pages since it was signed in. */
 @Composable
-private fun Waiting(colors: Colors, tap: Action) {
+private fun Waiting(colors: Colors, text: String, tap: Action) {
     Column(GlanceModifier.fillMaxSize().clickable(tap), horizontalAlignment = Alignment.CenterHorizontally, verticalAlignment = Alignment.CenterVertically) {
         Image(ImageProvider(app.client.R.drawable.logo), null, GlanceModifier.size(44.dp).cornerRadius(10.dp))
         Spacer(GlanceModifier.height(8.dp))
-        Text("Open $appName to see your pages.", style = TextStyle(color = colors.of { it.secondary }, fontSize = 12.sp, textAlign = TextAlign.Center))
+        Text(text, style = TextStyle(color = colors.of { it.secondary }, fontSize = 12.sp, textAlign = TextAlign.Center))
     }
 }
 
 // MARK: The tree, as WidgetTree.kt draws it
 
-/** The home screen's views take at most ten children: more go in columns (or rows) of their own, as even as can be. */
-private fun <T> List<T>.groups(): List<List<T>> {
-    if (size <= 10) return listOf(this)
-    val n = (size + 9) / 10
+/** The home screen's views take at most ten children: more go in columns (or rows) of their own, `most` to each (with
+ *  the spacers between them, half of ten), as even as can be. */
+private fun <T> List<T>.groups(most: Int = 10): List<List<T>> {
+    if (size <= most) return listOf(this)
+    val n = (size + most - 1) / most
     return chunked((size + n - 1) / n)
 }
 
@@ -343,23 +346,17 @@ private fun Mask(bitmap: Bitmap, color: ColorProvider, modifier: GlanceModifier,
 private fun Col(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     val gap = (n.gap ?: 4.0).dp
     val align = if (n.align == "center") Alignment.CenterHorizontally else Alignment.Start
-    val groups = n.c.orEmpty().groups()
+    val groups = n.c.orEmpty().groups(5)
+    @Composable
+    fun ColumnScope.Kids(kids: List<WidgetNode>) = kids.forEachIndexed { i, kid ->
+        if (i > 0) Spacer(GlanceModifier.height(gap))
+        Node(kid, c, if (kid.grow == true) GlanceModifier.defaultWeight() else GlanceModifier)
+    }
     Column(modifier, horizontalAlignment = align) {
-        groups.forEachIndexed { g, kids ->
-            if (groups.size == 1) {
-                kids.forEachIndexed { i, kid ->
-                    val m = (if (kid.grow == true) GlanceModifier.defaultWeight() else GlanceModifier).let { if (i > 0) it.padding(top = gap) else it }
-                    Node(kid, c, m)
-                }
-            } else {
-                val grows = kids.any { it.grow == true }
-                Column((if (grows) GlanceModifier.defaultWeight() else GlanceModifier).let { if (g > 0) it.padding(top = gap) else it }, horizontalAlignment = align) {
-                    kids.forEachIndexed { i, kid ->
-                        val m = (if (kid.grow == true) GlanceModifier.defaultWeight() else GlanceModifier).let { if (i > 0) it.padding(top = gap) else it }
-                        Node(kid, c, m)
-                    }
-                }
-            }
+        if (groups.size == 1) Kids(groups[0])
+        else groups.forEachIndexed { g, kids ->
+            if (g > 0) Spacer(GlanceModifier.height(gap))
+            Column(if (kids.any { it.grow == true }) GlanceModifier.defaultWeight() else GlanceModifier, horizontalAlignment = align) { Kids(kids) }
         }
     }
 }
@@ -367,16 +364,23 @@ private fun Col(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
 @Composable
 private fun Line(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     val gap = (n.gap ?: 6.0).toFloat()
-    val kids = n.c.orEmpty()
+    val all = n.c.orEmpty()
     // What grows takes what the rest leave.
-    val growing = kids.count { it.grow == true }
-    val left = (c.width - kids.filter { it.grow != true }.sumOf { breadth(it).toDouble() }.toFloat() - gap * (kids.size - 1)).coerceAtLeast(24f)
+    val growing = all.count { it.grow == true }
+    val left = (c.width - all.filter { it.grow != true }.sumOf { breadth(it).toDouble() }.toFloat() - gap * (all.size - 1)).coerceAtLeast(24f)
     val growCtx = c.copy(width = if (growing > 0) left / growing else left)
+    val groups = all.groups(5)
+    @Composable
+    fun RowScope.Kids(kids: List<WidgetNode>) = kids.forEachIndexed { i, kid ->
+        if (i > 0) Spacer(GlanceModifier.width(gap.dp))
+        Node(kid, if (kid.grow == true) growCtx else c.copy(width = breadth(kid).takeIf { it > 0 } ?: left), if (kid.grow == true) GlanceModifier.defaultWeight() else GlanceModifier)
+    }
     // A row whose child grows is as wide as it can be, as it is in the app; the home screen's rows aren't by themselves.
     Row(if (growing > 0 && n.w == null) modifier.fillMaxWidth() else modifier, horizontalAlignment = if (n.align == "center") Alignment.CenterHorizontally else Alignment.Start, verticalAlignment = Alignment.CenterVertically) {
-        kids.take(10).forEachIndexed { i, kid ->
-            val m = (if (kid.grow == true) GlanceModifier.defaultWeight() else GlanceModifier).let { if (i > 0) it.padding(start = gap.dp) else it }
-            Node(kid, if (kid.grow == true) growCtx else c.copy(width = breadth(kid).takeIf { it > 0 } ?: left), m)
+        if (groups.size == 1) Kids(groups[0])
+        else groups.forEachIndexed { g, kids ->
+            if (g > 0) Spacer(GlanceModifier.width(gap.dp))
+            Row(if (kids.any { it.grow == true }) GlanceModifier.defaultWeight() else GlanceModifier, verticalAlignment = Alignment.CenterVertically) { Kids(kids) }
         }
     }
 }
@@ -574,7 +578,7 @@ private fun Toggle(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     Row(m.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(n.label ?: "", GlanceModifier.defaultWeight(), style = TextStyle(color = c.color { it.label }, fontSize = 13.sp), maxLines = 1)
         Box(GlanceModifier.size(40.dp, 24.dp), contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
-            Mask(c.masks.bar(40f, 24f, 1f), if (on) c.color { it.accent } else c.color { if (it.dark) Color(0xFF39393D) else Color(0xFFE9E9EB) }, GlanceModifier.size(40.dp, 24.dp))
+            Mask(c.masks.bar(40f, 24f, 1f), if (on) c.color { it.accent } else c.color { if (it.dark) Color(0xFF39393D) else Color(0xFFDCDCE1) }, GlanceModifier.size(40.dp, 24.dp))
             Box(GlanceModifier.padding(horizontal = 2.dp)) {
                 Mask(c.masks.circle(20f), c.color { Color.White }, GlanceModifier.size(20.dp))
             }
