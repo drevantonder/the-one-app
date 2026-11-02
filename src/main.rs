@@ -1663,7 +1663,7 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     if app == "backups" {
         return backups_tool(op, &input, agent);
     }
-    let server = input.remove("server").or(input.remove("device"));
+    let server = input.remove("server");
     let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = spec.or_else(|| ops::find(app, op).map(|(_, spec)| spec)) {
         anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} can't be undone: ask the person first, then call it again with confirm: true");

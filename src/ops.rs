@@ -35,7 +35,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
         return Ok(());
     }
     let mut take = |k: &str| flags.remove(k).and_then(|v| v.into_iter().last().flatten());
-    let server = take("server").or_else(|| take("device"));
+    let server = take("server");
     let scopes = take("scopes").map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     let out = take("out");
     let confirmed = flags.remove("confirm").is_some() || flags.remove("yes").is_some();
