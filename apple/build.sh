@@ -63,6 +63,9 @@ fi
 osascript -e "quit app id \"$BUNDLE_ID\"" 2>/dev/null || true
 for _ in $(seq 20); do pgrep -f "/Contents/MacOS/$CONFIG_NAME\$" >/dev/null || break; sleep 0.5; done
 pkill -f "/Contents/MacOS/$CONFIG_NAME\$" 2>/dev/null && sleep 1 || true
+# A node the app started itself, when its launch agent wasn't on, outlives it: stop it too, so the launch agent's, the
+# new build, is the one that runs.
+pkill -f "/Contents/MacOS/$CONFIG_CLI serve\$" 2>/dev/null || true
 dest="$HOME/Applications/$CONFIG_NAME.app"
 rm -rf "$dest"
 ditto "$app" "$dest"

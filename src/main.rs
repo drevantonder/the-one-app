@@ -1099,8 +1099,9 @@ async fn serve(is_try: bool) -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn,iroh=error,noq_proto=error".into()))
         .init();
     let dir = one::home();
+    let listener = listen(&dir).await?;
+    std::fs::write(dir.join("pid"), std::process::id().to_string())?;
     let (node, router) = Node::start(&dir, one::sidecars::built_in()).await?;
-    let listener = tokio::net::TcpListener::bind(addr()).await.with_context(|| format!("listen on {}", addr()))?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
     let routes = api::routes().route("/mcp", axum::routing::post(mcp_http));
@@ -1137,6 +1138,49 @@ async fn serve(is_try: bool) -> Result<()> {
     }
     router.shutdown().await.ok();
     Ok(())
+}
+
+/// The node's address, listened on. A node of this install already there (one left running outside launchd or systemd
+/// by an earlier build, or started by hand) is stopped first: the one starting is the one to keep, so its supervisor's
+/// node never waits on a stray, and an update's node replaces whatever ran before it.
+async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
+    let bind = || tokio::net::TcpListener::bind(addr());
+    match bind().await {
+        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {}
+        bound => return bound.with_context(|| format!("listen on {}", addr())),
+    }
+    // Who listens there: the pid this home's node wrote, or, for one built before nodes wrote it, the port's listener.
+    let port = addr().rsplit(':').next().unwrap_or_default().to_string();
+    let mut pids: Vec<i32> = std::fs::read_to_string(dir.join("pid")).ok().and_then(|p| p.trim().parse().ok()).into_iter().collect();
+    if let Ok(out) = std::process::Command::new("lsof").args(["-nP", "-t", &format!("-iTCP:{port}"), "-sTCP:LISTEN"]).output() {
+        pids.extend(String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.trim().parse::<i32>().ok()));
+    }
+    // Only a process of this program, never whatever else took the port.
+    let me = std::env::current_exe().ok().and_then(|e| e.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
+    let ours = |pid: i32| {
+        let out = std::process::Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output().ok();
+        out.is_some_and(|o| std::path::Path::new(String::from_utf8_lossy(&o.stdout).trim()).file_name().is_some_and(|n| n.to_string_lossy() == me))
+    };
+    pids.sort();
+    pids.dedup();
+    pids.retain(|&pid| pid as u32 != std::process::id() && ours(pid));
+    anyhow::ensure!(!pids.is_empty(), "{} is taken, and not by {NAME}'s node", addr());
+    for &pid in &pids {
+        tracing::warn!("a node of this install was already running (pid {pid}): stopping it, to run this one");
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+    }
+    for tries in 0..100 {
+        if let Ok(listener) = bind().await {
+            return Ok(listener);
+        }
+        if tries == 50 {
+            for &pid in &pids {
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    bind().await.with_context(|| format!("listen on {}: the node there didn't stop", addr()))
 }
 
 /// MCP over stdio: every app operation is a tool, with `search` to find them; or in code mode (`--code`), `search` and
