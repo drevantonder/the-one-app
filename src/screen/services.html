@@ -35,7 +35,7 @@
         : list.map((x) => `<div class="row plain"><span class="status ${x.ok ? "ok" : "off"}" title="${x.ok ? "Signed in" : "Needs signing in again"}"></span><div class="main"><div class="title"><span>${esc(x.account)}</span></div>` +
           `${x.ok ? "" : `<div class="sub wrap">${esc(x.why || "Needs signing in again")}</div>`}</div>${x.ok || !signIn ? "" : `<button class="button plain" data-signin="${esc(a.name)}">Sign In</button>`}</div>`).join("");
       const add = signIn ? `<button class="row plain add" data-add="${esc(a.name)}"><span class="plus">+</span>Add Account</button>` : "";
-      return `<div><div class="head">${one.appIcon(a, 32)}<b>${esc(home.label(a))}</b><button class="more" data-more="${esc(a.name)}" aria-label="More for ${esc(home.label(a))}">${one.icon("dots-three-fill")}</button></div><div class="list">${rows}${add}</div></div>`;
+      return `<div><div class="head">${one.appIcon(a, 32)}<b>${esc(home.label(a))}</b><button class="more" data-more="${esc(a.name)}" aria-label="More for ${esc(home.label(a))}">${one.icon("dots-three-outline-fill")}</button></div><div class="list">${rows}${add}</div></div>`;
     }).join("");
     const rest = others.length ? `<div class="list">${others.map((a) => {
       const opens = home.inStore(a) || home.settings(a, p);
