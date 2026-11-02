@@ -1036,11 +1036,6 @@ fn load_pairings(dir: &Path) -> HashMap<[u8; 16], Pairing> {
 
 fn load_device(dir: &Path) -> Result<DeviceFile> {
     let path = dir.join("device.json");
-    // Called server.json until 2026-11-02: moved once, on each device's first start since.
-    let was = dir.join("server.json");
-    if !path.exists() && was.exists() {
-        std::fs::rename(&was, &path)?;
-    }
     if let Ok(bytes) = std::fs::read(&path) {
         return Ok(serde_json::from_slice(&bytes)?);
     }
