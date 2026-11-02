@@ -1678,7 +1678,7 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     let server = input.remove("server");
     let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = spec.or_else(|| ops::find(app, op).map(|(_, spec)| spec)) {
-        anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone: ask the person first, and only once they agreed, call it again with confirm: true");
+        anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
         ops::mcp_files(&spec, &mut input)?;
     }
     Ok(post("/v1/call", json!({ "server": server, "app": app, "op": op, "input": input, "agent": agent, "client": client }))?["ok"].take())

@@ -55,7 +55,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
         );
     }
     if o["confirm"] == true && !confirmed {
-        ask(&format!("{CLI} {app} {op} sends or can't be undone. Go ahead?"), &format!("{CLI} {app} {op} sends or can't be undone: ask the person first, and only once they agreed, run it again with --confirm"))?;
+        ask(&format!("{CLI} {app} {op} sends or can't be undone. Go ahead?"), &format!("{CLI} {app} {op} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action"))?;
     }
     let mut r = match post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })) {
         Ok(r) => r,
