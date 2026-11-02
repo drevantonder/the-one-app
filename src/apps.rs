@@ -106,18 +106,28 @@ impl Apps {
         let config = write_config(dir, &[], port, outbound, 0)?;
         let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), 0)), pid: Mutex::new(None), described: Mutex::new(Default::default()) });
         let watch = runtime.clone();
-        let (dir, log) = (dir.to_path_buf(), dir.join("workerd.log"));
+        let log = dir.join("workerd.log");
         std::thread::Builder::new().name("workerd".into()).spawn(move || loop {
             let out = std::fs::OpenOptions::new().create(true).append(true).open(&log).expect("workerd log");
             let mut command = std::process::Command::new(&workerd);
             command.arg("serve").arg(&config).stdout(out.try_clone().unwrap()).stderr(out);
-            // Elsewhere than Linux, where it dies with its node, the next start stops it (stop_previous).
+            // Elsewhere than Linux, where it dies with its node, the node stops it as it stops (stop_all), and the
+            // next start stops one a killed node left (stop_previous).
             child(&mut command, &[("http", &listener)]);
-            match command.spawn() {
+            let spawned = {
+                let mut running = RUNNING.lock().unwrap();
+                if STOPPING.load(std::sync::atomic::Ordering::SeqCst) {
+                    return;
+                }
+                command.spawn().inspect(|c| {
+                    running.insert(c.id());
+                })
+            };
+            match spawned {
                 Ok(mut child) => {
                     *watch.pid.lock().unwrap() = Some(child.id());
-                    let _ = std::fs::write(dir.join("workerd.pid"), child.id().to_string());
                     let status = child.wait();
+                    RUNNING.lock().unwrap().remove(&child.id());
                     tracing::debug!("the app runtime stopped ({status:?}); starting it again");
                 }
                 Err(err) => tracing::warn!("couldn't start the app runtime: {err}"),
@@ -270,13 +280,34 @@ impl Runtime {
     }
 }
 
-/// A runtime left behind by an earlier run of the node would still be running; stop it.
+/// Set once this process is stopping, under `RUNNING`'s lock: no workerd starts again.
+static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The workerds this process's nodes run, by process id.
+static RUNNING: Mutex<std::collections::BTreeSet<u32>> = Mutex::new(std::collections::BTreeSet::new());
+
+/// Stops every workerd this process runs, for good, as it stops: elsewhere than Linux they'd outlive it.
+pub fn stop_all() {
+    let mut running = RUNNING.lock().unwrap();
+    STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
+    for pid in std::mem::take(&mut *running) {
+        let _ = std::process::Command::new("kill").arg("-9").arg(pid.to_string()).status();
+    }
+}
+
+/// Stops each workerd still serving this runtime's config, which a node of this home left running: one killed, or
+/// elsewhere than Linux, where they don't die with it.
 fn stop_previous(dir: &Path) {
-    let Ok(pid) = std::fs::read_to_string(dir.join("workerd.pid")) else { return };
-    let pid = pid.trim();
-    let is_workerd = std::process::Command::new("ps").args(["-p", pid, "-o", "comm="]).output().is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("workerd"));
-    if is_workerd {
-        let _ = std::process::Command::new("kill").arg(pid).status();
+    let serving = format!(" serve {}", dir.join("config.capnp").display());
+    let Ok(out) = std::process::Command::new("ps").args(["-A", "-ww", "-o", "pid=,command="]).output() else { return };
+    let mut stopped = false;
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let Some((pid, command)) = line.trim().split_once(' ') else { continue };
+        if command.contains("workerd") && command.contains(&serving) {
+            tracing::info!("stopping the app runtime an earlier node left running (pid {pid})");
+            stopped |= std::process::Command::new("kill").arg("-9").arg(pid).status().is_ok_and(|s| s.success());
+        }
+    }
+    if stopped {
         std::thread::sleep(Duration::from_millis(300));
     }
 }

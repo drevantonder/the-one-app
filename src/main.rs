@@ -1137,6 +1137,14 @@ async fn serve(is_try: bool) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
+    // Asked to stop, even while it starts: its workerd first, then at once, rather than once every blocking task
+    // ends, which a stuck request would hold up.
+    let stop = stopped()?;
+    tokio::spawn(async move {
+        stop.await;
+        one::apps::stop_all();
+        std::process::exit(0)
+    });
     let dir = one::home();
     // A new install's first start makes its home.
     std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
@@ -1173,11 +1181,29 @@ async fn serve(is_try: bool) -> Result<()> {
         });
     }
     let http = api::serve(listener, routes);
-    tokio::select! {
-        r = http => r?,
-        _ = tokio::signal::ctrl_c() => {}
+    let served = http.await;
+    one::apps::stop_all();
+    Ok(served?)
+}
+
+/// When the node is asked to stop: Ctrl-C, or SIGTERM from its supervisor, an update or a node replacing it, each
+/// listened for from when it's called.
+fn stopped() -> Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let (mut term, mut interrupt) = (signal(SignalKind::terminate())?, signal(SignalKind::interrupt())?);
+        Ok(Box::pin(async move {
+            tokio::select! {
+                _ = term.recv() => {}
+                _ = interrupt.recv() => {}
+            }
+        }))
     }
-    Ok(())
+    #[cfg(not(unix))]
+    Ok(Box::pin(async {
+        let _ = tokio::signal::ctrl_c().await;
+    }))
 }
 
 /// The node's address, listened on. A node of this install already there (one left running outside launchd or systemd
