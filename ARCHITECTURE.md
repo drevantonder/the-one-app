@@ -47,7 +47,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/backups.rs`, `src/node/backups.rs`: backups, each scope's entries and blobs encrypted with its key and a copy of its folder in the bucket, sent to a place, a folder or S3-compatible storage, that's a Vault item; and which server backs up what, when. A scope's key is in the bucket, sealed to each server that holds the scope and to the recovery key.
 - `src/schedules.rs`: apps' schedules, and which server runs each.
 - `src/deploy.rs`, `src/bundle.rs`: `one deploy`, building an app with a pinned Bun into a bundle that keeps its source; each app's latest is kept in the bucket too, for a node that holds nothing.
-- `src/screen/`: the design kit and the bridge every app screen is served in, and widgets drawn as HTML. `src/mcp_apps.rs`, `src/mcp_view.html`: widgets and screens drawn inline in chats.
+- `src/screen/`: the design kit and the bridge every app screen is served in, and widgets drawn as HTML. `settings/` is Settings' screens, every client's own and the same on each, served as app screens are but with no app: they act through the bridge's `one.api`, as the person looking, which a client answers only for them. `src/mcp_apps.rs`, `src/mcp_view.html`: widgets and screens drawn inline in chats.
 - `src/skills.rs`, `skills/`: what agents are told, as Agent Skills. `src/code.rs`, `src/codemode/`: search, and code mode.
 - `src/ops.rs`, `src/main.rs`: the CLI and MCP, over stdio and at `/mcp`, where MCP clients elsewhere reach a node through the gateway, as the person they signed in as.
 - `src/load.rs`, `src/logos.rs`: how loaded a machine is, and the logos of the sites apps connect to.

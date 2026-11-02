@@ -2411,11 +2411,27 @@ impl Node {
                 body.as_str().context("the screen isn't text")?.to_string()
             }
         };
-        let me = self.me_for(&viewer)?;
+        self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body)
+    }
+
+    /// A Settings screen (src/screen/settings/<name>.html) as a whole page, like an app's but no app's: the clients'
+    /// own, which act through `one.api` as the person looking, and which each client answers only for these.
+    pub fn settings_screen(&self, viewer: Caller, name: &str, params: Value) -> Result<String> {
+        let body = match SETTINGS_SCREENS.iter().find(|(n, _)| *n == name) {
+            Some((_, html)) => html.to_string(),
+            None => "<div id=\"missing\"></div><script>missing.innerHTML = one.notFound()</script>".into(),
+        };
+        self.page(&viewer, json!({ "screen": name, "params": params }), &body)
+    }
+
+    /// A screen's page: its body with the design kit, the bridge, and `window.__one`, which is `context` and who's
+    /// looking.
+    fn page(&self, viewer: &Caller, mut context: Value, body: &str) -> Result<String> {
+        context["me"] = json!(self.me_for(viewer)?);
         let made_here = self.with(|i| Ok(settings(&i.r.members).remove("made_here")))?;
         let api = format!("http://localhost:{}", crate::api::port());
-        let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": made_here });
-        Ok(crate::screen::page(&json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope, "config": config }), &body))
+        context["config"] = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": made_here });
+        Ok(crate::screen::page(&context, body))
     }
 
     /// Every app in the install, with what each does for `viewer` where it's installed for them; and the sidecars
@@ -2824,6 +2840,7 @@ impl Node {
         let user = install.as_ref().and_then(|i| i.r.members.user(&viewer.user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role }));
         let settings = settings(install.as_ref().map(|i| &i.r.members).unwrap_or(&Members::default()));
         let backups = install.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
+        let settings_items = install.as_ref().map(|i| settings_items(&i.r.members, &viewer.user, waiting, backups.is_some(), settings["store"].as_str().unwrap_or(""))).unwrap_or_default();
         let install = install.as_ref().map(|i| {
             let m = &i.r.members;
             let me = &viewer.user;
@@ -2900,6 +2917,8 @@ impl Node {
             "arrangements": arrangements,
             // What's wrong with backups, for an admin: a badge on Settings until a run works again.
             "backups": backups,
+            // What Settings shows this user, in order (see `settings_items`).
+            "settings_items": settings_items,
         });
         if viewer.key != self.0.id {
             state["client"] = json!({ "key": hex(&viewer.key), "name": viewer_name });
@@ -2914,7 +2933,8 @@ impl Node {
         self.member_as(&Caller { key: self.0.id, user: self.user()?, agent: None }, kind, data).await
     }
 
-    async fn member_as(&self, caller: &Caller, kind: &str, data: Value) -> Result<()> {
+    /// The same, as `caller`, whose rights it's checked against.
+    pub async fn member_as(&self, caller: &Caller, kind: &str, data: Value) -> Result<()> {
         self.member_content(caller, members::node(kind, data)).await
     }
 
@@ -3129,6 +3149,7 @@ impl Node {
                 self.member_as(me, kind, json!({ "server": hex(&server) })).await?;
                 json!({})
             }
+            ("GET", p) if p.starts_with("/v1/settings-screens/") => json!({ "html": self.settings_screen(me.clone(), &p["/v1/settings-screens/".len()..], body["params"].clone())? }),
             ("GET", p) if p.starts_with("/v1/blobs/") => {
                 let hash = &p["/v1/blobs/".len()..];
                 ensure!(self.blob_named_for(hash, &me.user)?, "no such blob for you");
@@ -3142,16 +3163,12 @@ impl Node {
 
     /// Makes a one-time pairing code for another of the local user's machines, or, for an admin, a new user's.
     pub fn pair(&self, new_user: Option<(String, Role)>) -> Result<String> {
-        Ok(self.pair_local(new_user, None)?.0)
+        Ok(self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None }, new_user, None)?.0)
     }
 
-    /// Like `pair`, or for an admin, a code for another machine of `user` (an id or a name). With the id of the user
-    /// the code admits.
-    pub fn pair_local(&self, new_user: Option<(String, Role)>, user: Option<&str>) -> Result<(String, String)> {
-        self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None }, new_user, user)
-    }
-
-    fn pair_as(&self, asker: &Caller, new_user: Option<(String, Role)>, user: Option<&str>) -> Result<(String, String)> {
+    /// Like `pair`, for `asker`, or for an admin, a code for another machine of `user` (an id or a name). With the id
+    /// of the user the code admits.
+    pub fn pair_as(&self, asker: &Caller, new_user: Option<(String, Role)>, user: Option<&str>) -> Result<(String, String)> {
         let user = user.map(|u| self.find_user(u)).transpose()?;
         self.with(|i| {
             let m = &i.r.members;
@@ -4115,6 +4132,50 @@ impl ProtocolHandler for CallHandler {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         self.0.accept_call(conn).await.map_err(accept_err)
     }
+}
+
+/// The Settings screens, by name: each client's own (src/screen/settings/<name>.html), the same on every one.
+const SETTINGS_SCREENS: &[(&str, &str)] = &[("access", include_str!("screen/settings/access.html"))];
+
+/// Settings' items for `user`, in order, as every client draws them: each opens the Settings screen it names, but the
+/// App Store, which opens its app's screen (the install's `store` setting), and is left out while that app isn't
+/// there. `account` (theirs) is first, titled with their name; Requests only while something waits for them (invites, servers to
+/// trust, items asked for); Users, Install and Backups only for admins. A badge is the count the icon shows.
+fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, store: &str) -> Vec<Value> {
+    let Some(me) = m.user(user) else { return Vec::new() };
+    let item = |name: &str, title: &str, icon: &str, color: &str| json!({ "name": name, "title": title, "icon": icon, "color": color });
+    let with = |mut item: Value, key: &str, value: Value| {
+        item[key] = value;
+        item
+    };
+    let invites = m.groups.values().filter(|g| g.invited.contains_key(user)).count();
+    let offers = m
+        .servers()
+        .filter(|s| !m.privileged(&s.key) && !m.owners(&s.key).contains(&Principal::User(user.into())) && !m.trusts(user, &s.key))
+        .filter(|s| m.users_of(&s.key).iter().any(|p| matches!(p, Principal::User(u) if u == user) || matches!(p, Principal::Group(g) if m.group_role(user, g).is_some())))
+        .count();
+    let mut out = vec![item("account", &me.name, "user-circle", "#8e8e93")];
+    let requests = invites + offers + items_asked;
+    if requests > 0 {
+        out.push(with(item("requests", "Requests", "tray", "#ff2d55"), "badge", json!(requests)));
+    }
+    if m.apps.get(store).is_some_and(|a| !a.erased && a.deleted.is_none()) {
+        out.push(with(item("store", "App Store", "squares-four", "#007aff"), "app", json!(store)));
+    }
+    out.extend([
+        item("groups", "Groups", "users-three", "#34c759"),
+        item("devices", "Devices", "devices", "#8e8e93"),
+        item("agents", "Agents", "sparkle", "#ff2d55"),
+        item("vault", "Vault", "lock", "#5856d6"),
+        item("access", "Access Log", "eye", "#af52de"),
+        item("appearance", "Appearance", "circle-half", "#007aff"),
+    ]);
+    if me.role == Role::Admin {
+        out.extend([item("users", "Users", "user-gear", "#30b0c7"), item("install", "Install", "sliders-horizontal", "#8e8e93")]);
+        let backed = item("backups", "Backups", "hard-drives", "#ff9500");
+        out.push(if backups { with(backed, "badge", json!(1)) } else { backed });
+    }
+    out
 }
 
 /// The install's settings: the white label's defaults (config.toml's `[settings]`), and what its admins set over them.

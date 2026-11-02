@@ -1,7 +1,7 @@
-//! An app screen's page, as every node serves it: the design kit and the bridge (`src/screen/`), what the screen is
+//! A screen's page, as every node serves it, an app's or Settings': the design kit and the bridge (`src/screen/`), what the screen is
 //! told (`window.__one`), and the screen's own HTML.
 
-/// A screen's page: `context` is `{ app, screen, params, me, scope, config }`, `body` the HTML the app wrote.
+/// A screen's page: `context` is `{ app, screen, params, me, scope, config }` (a Settings screen has no app or scope), `body` its HTML.
 pub fn page(context: &serde_json::Value, body: &str) -> String {
     // `</` can't appear inside the inline script, so it can't end it early.
     let context = context.to_string().replace("</", "<\\/");

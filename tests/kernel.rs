@@ -118,7 +118,8 @@ impl Vault {
         let (vault, auth, sites) = (port(), port(), port());
         let (_, recovery_public) = kernel::twin(&rand::random());
         let secret = B64U.encode(&rand::random::<[u8; 32]>());
-        let issuer = "https://auth.test/api/auth".to_string();
+        // Nodes fetch its keys from the address their sign-ins are for, as from the auth service at an install's.
+        let issuer = format!("http://127.0.0.1:{auth}/api/auth");
         let bucket = json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }).to_string();
         let running = run(vec![
             Served { name: "auth".into(), module: module("test/auth.js"), class: None, listen: format!("127.0.0.1:{auth}"), bindings: vec![], assets: None, outbound: None },
@@ -154,11 +155,11 @@ impl Vault {
         post(&format!("{}/internal/{path}", self.url), &[("x-kernel-secret", &self.secret)], body)
     }
 
-    /// An access token for `user` from `client`, good for an hour.
+    /// An access token for `user` from `client`, good for an hour, for the install at `auth`'s address.
     fn token(&self, user: &str, client: &str) -> (String, u64) {
         let exp = now() / 1000 + 3600;
         let agent: ureq::Agent = ureq::Agent::config_builder().build().into();
-        let token = agent.post(format!("{}/sign", self.auth)).send_json(json!({ "iss": self.issuer, "sub": user, "azp": client, "client_id": client, "aud": "https://node.test", "scope": "openid", "exp": exp })).unwrap().body_mut().read_to_string().unwrap();
+        let token = agent.post(format!("{}/sign", self.auth)).send_json(json!({ "iss": self.issuer, "sub": user, "azp": client, "client_id": client, "aud": self.auth, "scope": "openid", "exp": exp })).unwrap().body_mut().read_to_string().unwrap();
         (token, exp * 1000)
     }
 
@@ -639,4 +640,76 @@ fn the_gateway_sends_each_path_where_it_belongs_and_nothing_a_node_says_runs_at_
     assert_eq!(ask("POST", &at("/v1/call"), &[], Some(json!({}))).0, 200);
     assert_eq!(ask("GET", &at("/mcp"), &[], None).0, 200, "/mcp is a node's");
     assert_eq!(ask("GET", &at("/v1/state"), &[("service-worker", "script")], None).0, 403, "no node's answer becomes a service worker");
+}
+
+/// Settings' screens work for someone signed in, through the gateway, as they do on that person's own Mac: each route
+/// acts as them and is checked as theirs, so a member can't do what only admins may, and nobody acts as anyone else.
+#[test]
+fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
+    let v = Vault::start();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let dir = std::env::temp_dir().join(format!("one-kernel-node-{}", rand::random::<u64>()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "node" }).to_string()).unwrap();
+    let (node, _router, api) = rt.block_on(async {
+        let (node, router) = one::node::Node::start(&dir, one::sidecars::built_in()).await.unwrap();
+        node.create("Test", "Andre").await.unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let api = format!("http://{}", listener.local_addr().unwrap());
+        let app = one::api::router(node.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (node, router, api)
+    });
+    // Andre made the install; Sam is a member. The server is the install's, so both use it; it takes sign-ins made
+    // at the install's address.
+    let (andre, sam) = (node.user().unwrap(), one::entry::new_id());
+    rt.block_on(async {
+        node.member("admit", json!({ "key": one::entry::hex(&rand::random()), "user": sam, "as": "client", "name": "Sam's phone", "user_name": "Sam", "role": "member" })).await.unwrap();
+        node.member("acl", json!({ "server": one::entry::hex(&node.id()), "owners": ["install"], "users": ["install"] })).await.unwrap();
+        node.member("setting", json!({ "name": "address", "value": v.auth })).await.unwrap();
+        node.member("setting", json!({ "name": "kernel_vault", "value": v.url })).await.unwrap();
+    });
+    v.internal("passkey", json!({ "user": andre, "secret": "andre's passkey's prf output" }));
+    v.internal("passkey", json!({ "user": sam, "secret": "sam's passkey's prf output" }));
+    let (andres, sams) = (v.client(&andre, "andre's passkey's prf output", "web"), v.client(&sam, "sam's passkey's prf output", "web"));
+    let ask = |token: &str, method: &str, path: &str, body: Value| ask_at(&api, token, method, path, body);
+    let state = |token: &str| ask(token, "GET", "/v1/state", Value::Null).1;
+    let items = |token: &str| state(token)["settings_items"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let refused = |(status, body): (u16, Value)| status == 400 && body["error"].as_str().is_some_and(|e| !e.is_empty());
+
+    // Settings shows each their own: Sam first, as himself; only admins see Users, Install and Backups.
+    assert_eq!(state(&sams)["settings_items"][0], json!({ "name": "account", "title": "Sam", "icon": "user-circle", "color": "#8e8e93" }));
+    assert!(!items(&sams).iter().any(|i| ["users", "install", "backups"].contains(&i.as_str())), "{:?}", items(&sams));
+    assert!(["users", "install", "backups"].iter().all(|i| items(&andres).iter().any(|n| n == i)), "{:?}", items(&andres));
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    let page = |path: &str| agent.get(format!("{api}{path}")).header("authorization", format!("Bearer {sams}")).call().unwrap().body_mut().read_to_string().unwrap();
+    let access = page("/v1/settings-screens/access");
+    assert!(access.contains("Access Log") && access.contains(&format!("\"user\":\"{sam}\"")), "the page is Sam's: {access}");
+    assert!(page("/v1/settings-screens/nothing").contains("one.notFound()"));
+
+    // What only admins may do, Sam can't; Andre can, signed in as on his Mac.
+    let setting = json!({ "name": "made_here", "value": "Ours" });
+    assert!(refused(ask(&sams, "POST", "/v1/settings", setting.clone())), "a member changes no install setting");
+    assert!(refused(ask(&sams, "POST", "/v1/role", json!({ "user": sam, "role": "admin" }))), "nor makes himself an admin");
+    assert!(refused(ask(&sams, "POST", "/v1/remove", json!({ "user": andre }))), "nor removes anyone");
+    assert!(refused(ask(&sams, "POST", "/v1/backups/place", json!({ "path": dir.join("backups"), "title": "Disk" }))), "nor adds backups");
+    assert!(refused(ask(&sams, "POST", "/v1/pair", json!({ "new_user": { "name": "Eve", "role": "admin" } }))), "nor adds people");
+    assert_eq!(ask(&andres, "POST", "/v1/settings", setting).0, 200);
+    assert_eq!(state(&andres)["install"]["settings"]["made_here"], "Ours");
+
+    // A group Sam makes is his, not this server's person's; its members change only as its admins and invitees say.
+    let (status, made) = ask(&sams, "POST", "/v1/group", json!({ "name": "Sam's" }));
+    assert_eq!(status, 200, "{made}");
+    let group = made["group"].as_str().unwrap().to_string();
+    let members = || state(&sams)["install"]["groups"].as_array().unwrap().iter().find(|g| g["id"] == group.as_str()).unwrap()["members"].clone();
+    assert_eq!(members(), json!([{ "user": sam, "role": "admin" }]));
+    assert!(refused(ask(&sams, "POST", "/v1/accept", json!({ "group": group }))), "nobody accepts an invite they weren't sent");
+    assert_eq!(ask(&sams, "POST", "/v1/invite", json!({ "group": group, "user": andre })).0, 200);
+    assert!(state(&andres)["settings_items"].as_array().unwrap().iter().any(|i| i["name"] == "requests" && i["badge"] == 1), "his invite waits in Requests");
+    assert_eq!(ask(&andres, "POST", "/v1/accept", json!({ "group": group })).0, 200);
+    assert_eq!(members().as_array().unwrap().len(), 2);
+
+    // What only this machine's own programs do, no sign-in does: renaming the server, say.
+    assert_eq!(ask(&andres, "POST", "/v1/name", json!({ "name": "elsewhere" })).0, 403);
+    let _ = std::fs::remove_dir_all(&dir);
 }

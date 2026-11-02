@@ -57,6 +57,20 @@
       if (ctx.scope) q.set("scope", ctx.scope);
       location.href = `/v1/screens/${message.app || ctx.app}/${message.screen}?${q}`;
     }
+    if (message.type === "api") {
+      const r = await fetch(message.path, {
+        method: message.method,
+        headers: { "content-type": "application/json" },
+        body: message.method === "GET" || message.body === undefined ? undefined : JSON.stringify(message.body),
+      });
+      const body = await r.json();
+      if (body?.error) throw new Error(body.error);
+      return body;
+    }
+    // A browser on the device is no sign-in, and follows the system's appearance.
+    if (message.type === "signOut") throw new Error("Sign out in the app.");
+    if (message.type === "appearance") return "automatic";
+    if (message.type === "device") return { name: "This browser", build: null, signOut: false };
     if (message.type === "title") document.title = message.text;
     // A browser saves a file as a download, and shows one in a tab of its own.
     if (message.type === "save" || message.type === "preview") {
@@ -159,10 +173,20 @@
     // A haptic on a phone: "selection" (a press), "medium" (a long press), "success" or "error". Elsewhere, nothing.
     tap: (style = "selection") => shell?.postMessage({ type: "haptic", style }).catch(() => {}),
     on: (event, fn) => (handlers[event] ||= []).push(fn),
-    // The shell calls this with node events.
+    // The shell calls this with node events: an app screen's "changed" is its app's data changing; a Settings
+    // screen's, any event, since what it shows is the install's.
     __event(e) {
-      if (e.type === "changed" && (e.apps || []).includes(ctx.app)) handlers.changed.forEach((f) => f(e));
+      if (!ctx.app || (e.type === "changed" && (e.apps || []).includes(ctx.app))) handlers.changed.forEach((f) => f(e));
     },
+    // For Settings screens only (no app's: a client answers these for its own Settings screens and refuses an app
+    // screen). `api` asks the node's /v1 API as the person looking ("POST", "/v1/group", { name }) and gives its JSON,
+    // failing with its `error`. `signOut` signs this client out. `appearance` gives this client's ("automatic",
+    // "light" or "dark"), first setting it to `value` if given. `device` is this client:
+    // `{ name ("mac", "Chrome on Mac"), build, signOut (whether it can sign out) }`.
+    api: (method, path, body) => host({ type: "api", method, path, body }),
+    signOut: () => host({ type: "signOut" }),
+    appearance: (value) => host({ type: "appearance", value }),
+    device: () => host({ type: "device" }),
     // A Phosphor icon by its name ("magnifying-glass", "check-circle-fill"), at the text's size and colour.
     icon: (name, cls = "") => glyph(name, `i ${cls}`.trim()),
     esc: (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]),

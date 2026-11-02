@@ -1,0 +1,18 @@
+<div class="large-title">Access Log</div>
+<div id="log"></div>
+<p class="footer">Whoever runs a server with your data can read it for an hour, and it shows here.</p>
+<script>
+  // Who opened this person's data, where and when, newest first.
+  const draw = () => one.render("#log", async () => {
+    const state = await one.api("GET", "/v1/state");
+    const servers = Object.fromEntries((state.install?.servers || []).map((s) => [s.key, s.name]));
+    const opens = [...(state.opens || [])].sort((a, b) => b.time - a.time);
+    if (!opens.length) return one.empty({ icon: "eye", title: "Nobody has opened your data." });
+    return `<div class="list">${opens.map((o) => `<div class="row">${one.avatar(o.by, o.by_name)}<div class="main">
+      <div class="title">${one.esc(o.by_name || "Someone")} opened your data on ${one.esc(servers[o.server] || o.server.slice(0, 8))}${o.agent ? `, through ${one.esc(o.agent)}` : ""}</div>
+      <div class="muted">${one.esc(new Date(o.time).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }))}</div></div></div>`).join("")}</div>`;
+  });
+  one.title("Access Log");
+  one.on("changed", draw);
+  draw();
+</script>

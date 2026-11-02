@@ -85,6 +85,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/blobs/{hash}", get(blob))
         .route("/v1/events", get(events))
         .route("/v1/screens/{app}/{screen}", get(screen))
+        .route("/v1/settings-screens/{name}", get(settings_screen))
         .route("/hooks/{app}/{name}", post(hook))
         .route("/v1/sidecars/{app}", post(register))
         .route("/v1/sidecars/{app}/calls", get(next_call))
@@ -116,6 +117,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/icons",
     "/v1/screens/{app}/{screen}",
     "/v1/blobs",
+    "/v1/settings-screens/{name}",
     "/v1/blobs/{hash}",
     "/v1/events",
     "/v1/arrange",
@@ -127,6 +129,18 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/vault/answer",
     "/v1/vault/fetch",
     "/mcp",
+    // What Settings' screens ask, as on a phone (`Node::client_request`): each checked as its person.
+    "/v1/pair",
+    "/v1/remove",
+    "/v1/role",
+    "/v1/settings",
+    "/v1/trust",
+    "/v1/group",
+    "/v1/invite",
+    "/v1/accept",
+    "/v1/member",
+    "/v1/backups",
+    "/v1/backups/{op}",
 ];
 
 /// The skills for this machine's person (src/skills.rs).
@@ -423,8 +437,8 @@ async fn create(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     Ok(Json(json!({ "recovery": recovery })))
 }
 
-async fn pair(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let (code, user) = node.pair_local(crate::node::new_user(&body)?, body["user"].as_str())?;
+async fn pair(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    let (code, user) = node.pair_as(&me.caller, crate::node::new_user(&body)?, body["user"].as_str())?;
     Ok(Json(json!({ "code": code, "user": user })))
 }
 
@@ -439,17 +453,17 @@ async fn name(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 }
 
 /// `{ key }` (a server or client, by name or key) or `{ user }`.
-async fn remove(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+async fn remove(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     match body["user"].as_str() {
-        Some(user) => node.member("remove", json!({ "user": node.find_user(user)? })).await?,
-        None => node.member("remove", json!({ "key": hex(&node.find_machine(text(&body, "key")?)?) })).await?,
+        Some(user) => node.member_as(&me.caller, "remove", json!({ "user": node.find_user(user)? })).await?,
+        None => node.member_as(&me.caller, "remove", json!({ "key": hex(&node.find_machine(text(&body, "key")?)?) })).await?,
     }
     done()
 }
 
-async fn role(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+async fn role(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let role: Role = serde_json::from_value(body["role"].clone())?;
-    node.member("role", json!({ "user": node.find_user(text(&body, "user")?)?, "role": role })).await?;
+    node.member_as(&me.caller, "role", json!({ "user": node.find_user(text(&body, "user")?)?, "role": role })).await?;
     done()
 }
 
@@ -459,8 +473,8 @@ async fn relays(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 }
 
 /// `{ name, value }`: one of the install's settings, for admins; `value: null` puts back the white label's default.
-async fn settings(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.member("setting", json!({ "name": text(&body, "name")?, "value": body["value"] })).await?;
+async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    node.member_as(&me.caller, "setting", json!({ "name": text(&body, "name")?, "value": body["value"] })).await?;
     done()
 }
 
@@ -488,9 +502,9 @@ async fn acl(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-async fn trust(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+async fn trust(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let server = node.find_server(text(&body, "server")?)?;
-    node.member(if body["trust"] == false { "untrust" } else { "trust" }, json!({ "server": hex(&server) })).await?;
+    node.member_as(&me.caller, if body["trust"] == false { "untrust" } else { "trust" }, json!({ "server": hex(&server) })).await?;
     done()
 }
 
@@ -499,29 +513,29 @@ async fn open(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     Ok(Json(json!({ "ok": node.open(&user, text(&body, "server")?, body["agent"].as_str().map(str::to_string)).await? })))
 }
 
-async fn group(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+async fn group(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let group = crate::entry::new_id();
-    node.member("group", json!({ "group": group, "name": text(&body, "name")? })).await?;
+    node.member_as(&me.caller, "group", json!({ "group": group, "name": text(&body, "name")? })).await?;
     Ok(Json(json!({ "group": group })))
 }
 
-async fn invite(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+async fn invite(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let role: Role = serde_json::from_value(body.get("role").cloned().unwrap_or(json!("member")))?;
     let (group, user) = (node.find_group(text(&body, "group")?)?, node.find_user(text(&body, "user")?)?);
-    node.member("invite", json!({ "group": group, "user": user, "role": role })).await?;
+    node.member_as(&me.caller, "invite", json!({ "group": group, "user": user, "role": role })).await?;
     done()
 }
 
-async fn accept(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.member("accept", json!({ "group": node.find_group(text(&body, "group")?)? })).await?;
+async fn accept(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    node.member_as(&me.caller, "accept", json!({ "group": node.find_group(text(&body, "group")?)? })).await?;
     done()
 }
 
 /// `{ group, user, role }`, with `role: null` to remove them.
-async fn member(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+async fn member(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let role: Option<Role> = serde_json::from_value(body["role"].clone())?;
     let (group, user) = (node.find_group(text(&body, "group")?)?, node.find_user(text(&body, "user")?)?);
-    node.member("member", json!({ "group": group, "user": user, "role": role })).await?;
+    node.member_as(&me.caller, "member", json!({ "group": group, "user": user, "role": role })).await?;
     done()
 }
 
@@ -593,12 +607,12 @@ async fn tunnel_post(State(node): State<Node>, Json(body): Json<Value>) -> Reply
 }
 
 /// Backups' routes, `/v1/backups…`.
-async fn backups_get(State(node): State<Node>, uri: axum::http::Uri) -> Reply {
-    Ok(Json(node.backups_route(&local(&node)?, "GET", uri.path(), &json!({})).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
+async fn backups_get(State(node): State<Node>, me: Me, uri: axum::http::Uri) -> Reply {
+    Ok(Json(node.backups_route(&me.caller, "GET", uri.path(), &json!({})).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
-async fn backups_post(State(node): State<Node>, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
-    Ok(Json(node.backups_route(&local(&node)?, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
+async fn backups_post(State(node): State<Node>, me: Me, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
+    Ok(Json(node.backups_route(&me.caller, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
 /// The Vault's routes, `/v1/vault…` and their earlier names `/v1/secrets…`: a GET's query goes to the node as a
@@ -698,6 +712,12 @@ async fn screen(State(node): State<Node>, me: Me, Path((app, name)): Path<(Strin
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
     let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref()).await?;
     Ok(axum::response::Html(html).into_response())
+}
+
+/// A Settings screen as a page (see `Node::settings_screen`).
+async fn settings_screen(State(node): State<Node>, me: Me, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
+    let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
+    Ok(axum::response::Html(node.settings_screen(me.caller, &name, params)?).into_response())
 }
 
 async fn events(State(node): State<Node>) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {

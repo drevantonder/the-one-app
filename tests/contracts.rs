@@ -528,7 +528,7 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
         }
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         for route in one::api::SIGNED_IN {
-            let path = route.replace("{app}", "board").replace("{screen}", "main").replace("{hash}", "00");
+            let path = route.replace("{app}", "board").replace("{screen}", "main").replace("{hash}", "00").replace("{name}", "access").replace("{op}", "now");
             let mut resp = agent.get(format!("http://{addr}{path}")).header("host", "one.example").header("mcp-session-id", "s").call().unwrap();
             if path == "/mcp" {
                 for h in ["www-authenticate", "mcp-session-id"] {
