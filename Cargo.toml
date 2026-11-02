@@ -69,6 +69,14 @@ ureq = { version = "3", features = ["json"] }
 flate2 = "1"
 jsonc-parser = { version = "0.34", features = ["cst", "serde"] }
 toml_edit = "0.25"
+# Push (src/push.rs) reaches Apple's push service, which speaks only HTTP/2: hyper's (axum already builds hyper; this
+# adds h2) over the rustls tokio-tungstenite already builds, and signs its ES256 tokens with ring, which rustls builds.
+hyper = { version = "1", features = ["client", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "1"
+ring = "0.17"
 
 [build-dependencies]
 toml = "0.9"

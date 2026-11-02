@@ -61,6 +61,8 @@ pub mod node;
 #[cfg(not(target_family = "wasm"))]
 pub mod outbound;
 #[cfg(not(target_family = "wasm"))]
+pub mod push;
+#[cfg(not(target_family = "wasm"))]
 pub mod release;
 #[cfg(not(target_family = "wasm"))]
 pub mod schedules;

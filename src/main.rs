@@ -132,6 +132,8 @@ Usage:
   {CLI} sidecars remove|add <name> [--device <name>]
                                        remove a sidecar from a device you own (here by default), or allow it there
                                        again; sidecars/install.sh <name> [device] installs one and allows it
+  {CLI} sidecars serve <name>          run a sidecar this program hosts ({hosted}) beside this machine's node, as
+                                       the service sidecars/install.sh installs
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's operations
@@ -159,7 +161,8 @@ Usage:
                                        it from stdin), and print what it returns; {CLI} search gives each call
   {CLI} mcp [--code]                   serve MCP over stdio, for agents: every tool, or with --code, search and execute
 
-{NAME} holds one install. For another context, run that context's own app."
+{NAME} holds one install. For another context, run that context's own app.",
+        hosted = one::sidecars::hosted().iter().map(|h| h.name).collect::<Vec<_>>().join(", ")
     )
 }
 
@@ -733,6 +736,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
+        ["sidecars", "serve", name] => one::sidecars::serve(name)?,
         ["sidecars", how @ ("remove" | "add"), name] => {
             let device = flags.get("device").and_then(Value::as_str);
             post("/v1/sidecar", json!({ "name": name, "device": device, "installed": *how == "add" }))?;

@@ -1,8 +1,9 @@
 //! Device sidecars: native code a device runs beside its node, for what apps can't reach from workerd (a shell, local
 //! models, WhatsApp's linked phone, a Mac's own apps). A sidecar serves its device's users, and the node says so in its
 //! hello to the other devices; an app over it calls it with `ctx.sidecars`. Some are built into the node (Shell, AGENTS.md, Models: `built_in`);
-//! the rest are programs that register over the local API, in whatever language the platform needs (Go for WhatsApp,
-//! Swift in the Mac app), and long-poll for calls. The core never names one: only `built_in` does, for the binary.
+//! the rest are programs that register over the local API and long-poll for calls: this program itself, hosting one
+//! (`Hosted`), or another in whatever language the platform needs (Go for WhatsApp, Swift in the Mac app). The core
+//! never names one: only `built_in` and `hosted` do, for the binary.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -11,7 +12,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
@@ -85,7 +86,7 @@ pub fn built_in() -> Vec<BuiltIn> {
 /// A registered sidecar that hasn't asked for calls in this long is gone.
 const GONE_AFTER: Duration = Duration::from_secs(60);
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Call {
     pub id: u64,
     pub op: String,
@@ -185,4 +186,111 @@ impl Sidecars {
         let replies = p.replies.lock().unwrap();
         replies.get(&id).map(|(_, me)| me.clone())
     }
+}
+
+/// A sidecar this program hosts as a process of its own beside its machine's node, `<cli> sidecars serve <name>`, which
+/// `sidecars/install.sh` installs as a service on a device whose owner wants it there. It registers over the local API
+/// as any sidecar does (`serve` is the one place it meets its callers), keeps what it keeps in `<home>/<name>`, and
+/// runs only where it's installed, unlike those `built_in`.
+pub struct Hosted {
+    pub name: &'static str,
+    pub describe: fn() -> Value,
+    /// Runs one call, on a thread of its own.
+    pub call: fn(host: &Host, call: &Call) -> Result<Value>,
+}
+
+/// The sidecars this program hosts.
+pub fn hosted() -> Vec<Hosted> {
+    vec![Hosted { name: crate::push::NAME, describe: crate::push::describe, call: crate::push::call }]
+}
+
+/// What a hosted sidecar has: its folder, and its machine's node.
+pub struct Host {
+    pub name: &'static str,
+    pub dir: std::path::PathBuf,
+    node: String,
+    agent: ureq::Agent,
+}
+
+impl Host {
+    pub fn get(&self, path: &str) -> Result<Value> {
+        Ok(answer(self.agent.get(format!("{}{path}", self.node)).call())?.unwrap_or_default())
+    }
+
+    pub fn post(&self, path: &str, body: &Value) -> Result<Value> {
+        Ok(answer(self.agent.post(format!("{}{path}", self.node)).send_json(body))?.unwrap_or_default())
+    }
+
+    /// `text` with the Vault's fields (`{{name}}`) filled in by the node for call `id`, which only `host` may be sent.
+    pub fn fill(&self, id: u64, text: &str, host: &str) -> Result<String> {
+        let out = self.post(&format!("/v1/sidecars/{}/calls/{id}/vault", self.name), &json!({ "text": text, "host": host })).map_err(|err| anyhow!("the Vault: {err}"))?;
+        Ok(out["text"].as_str().unwrap_or_default().to_string())
+    }
+}
+
+/// The node's answer: None for no content.
+fn answer(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Option<Value>> {
+    let mut resp = resp?;
+    if resp.status() == 204 {
+        return Ok(None);
+    }
+    let body: Value = resp.body_mut().read_json().unwrap_or_default();
+    if !resp.status().is_success() {
+        bail!("{}: {}", resp.status(), body["error"].as_str().unwrap_or("failed"));
+    }
+    Ok(Some(body))
+}
+
+/// Serves the hosted sidecar `name` until this program is replaced by an update, when the service manager starts the
+/// new one: registers with the node and answers its calls, registering again whenever the node forgets it (it keeps
+/// sidecars in memory) or restarts.
+pub fn serve(name: &str) -> Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let hosted = hosted().into_iter().find(|h| h.name == name).ok_or_else(|| anyhow!("{name} isn't a sidecar this program hosts"))?;
+    let dir = crate::home().join(name);
+    std::fs::create_dir_all(&dir)?;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    let host = std::sync::Arc::new(Host { name: hosted.name, dir, node: format!("http://{}", crate::api::addr()), agent: crate::api::agent() });
+    let poll: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(40))).middleware(crate::api::as_this_machine).build().into();
+    let exe = std::env::current_exe()?.canonicalize()?;
+    let ino = std::fs::metadata(&exe)?.ino();
+    let replaced = || std::fs::metadata(&exe).map(|m| m.ino()).ok() != Some(ino);
+    let mut describe = (hosted.describe)();
+    describe["version"] = json!(crate::config::BUILD);
+    while !replaced() {
+        if let Err(err) = host.post(&format!("/v1/sidecars/{name}"), &describe) {
+            eprintln!("registering: {err:#}");
+            std::thread::sleep(Duration::from_secs(3));
+            continue;
+        }
+        while !replaced() {
+            let call = match answer(poll.get(format!("{}/v1/sidecars/{name}/calls", host.node)).call()) {
+                Ok(Some(call)) => match serde_json::from_value::<Call>(call) {
+                    Ok(call) => call,
+                    Err(err) => {
+                        eprintln!("a call it can't read: {err}");
+                        continue;
+                    }
+                },
+                Ok(None) => continue,
+                Err(err) => {
+                    eprintln!("waiting for calls: {err:#}");
+                    std::thread::sleep(Duration::from_secs(1));
+                    break;
+                }
+            };
+            let (host, run) = (host.clone(), hosted.call);
+            std::thread::spawn(move || {
+                let reply = match run(&host, &call) {
+                    Ok(ok) => json!({ "ok": ok }),
+                    Err(err) => json!({ "error": format!("{err:#}") }),
+                };
+                if let Err(err) = host.post(&format!("/v1/sidecars/{}/calls/{}", host.name, call.id), &reply) {
+                    eprintln!("answering {}: {err:#}", call.op);
+                }
+            });
+        }
+    }
+    eprintln!("{name}: this program was replaced, so it stops for the new one");
+    Ok(())
 }

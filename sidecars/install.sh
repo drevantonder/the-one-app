@@ -1,12 +1,12 @@
 #!/bin/sh
-# Builds a sidecar and installs it as the one-<sidecar> service on a device,
-# here or over ssh: ./install.sh whatsapp [host]. On Linux it's a systemd
-# service; on a Mac, a launch agent of the user's. CONFIG=path/to/config.toml
-# installs it as <cli>-<sidecar>, for that white label's node: its port, CLI and
-# data folder (the node service's <CLI>_HOME, if it has one).
+# Installs a sidecar as the one-<sidecar> service on a device, here or over ssh: ./install.sh whatsapp [host]. One
+# with a folder here is a Go program, built for the device; any other is one the node's own program hosts
+# (one sidecars serve <sidecar>), so the device's node must have the build that has it. On Linux it's a systemd
+# service; on a Mac, a launch agent of the user's. CONFIG=path/to/config.toml installs it as <cli>-<sidecar>, for that
+# white label's node: its port, CLI and data folder (the node service's <CLI>_HOME, if it has one).
 set -eu
 config=${CONFIG:+$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")}
-cd "$(dirname "$0")/$1"
+cd "$(dirname "$0")"
 sidecar=$1 name=one-$1 node=one env=
 host=${2:-}
 on() { if [ -n "$host" ]; then ssh "$host" "$@" </dev/null; else sh -c "$*"; fi; }
@@ -16,29 +16,36 @@ if [ -n "$config" ]; then
 	upper=$(echo "$cli" | tr a-z A-Z)
 	home=$(on "systemctl show -p Environment $cli 2>/dev/null | tr ' ' '\n' | sed -n 's/^${upper}_HOME=//p'")
 	home=${home:-'$HOME'/.local/share/$cli}
-	env="ONE_ADDR=127.0.0.1:$(field port) ONE_CLI=$cli ONE_HOME=$home $(echo "$sidecar" | tr a-z- A-Z_)_DATA=$home/$sidecar"
+	env="${upper}_HOME=$home"
+	[ ! -d "$sidecar" ] || env="ONE_ADDR=127.0.0.1:$(field port) ONE_CLI=$cli ONE_HOME=$home $(echo "$sidecar" | tr a-z- A-Z_)_DATA=$home/$sidecar"
 fi
 # Installed by the device's owner who runs this, and allowed there if an owner removed it before.
 allow() { on "~/.local/bin/$node sidecars add $sidecar" || echo "$node sidecars add $sidecar failed: the sidecar serves once an owner allows it there" >&2; }
 set -- $(on uname -sm)
 os=$(echo "$1" | tr A-Z a-z)
 case $2 in x86_64) arch=amd64 ;; *) arch=arm64 ;; esac
-CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "-X main.built=$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- . || echo +dirty)" -o "$name" .
-if [ -n "$host" ]; then scp -q "$name" "$host:/tmp/$name"; else cp "$name" "/tmp/$name"; fi
-rm "$name"
+if [ -d "$sidecar" ]; then
+	(cd "$sidecar" && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "-X main.built=$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- . || echo +dirty)" -o "../$name" .)
+	if [ -n "$host" ]; then scp -q "$name" "$host:/tmp/$name"; else cp "$name" "/tmp/$name"; fi
+	rm "$name"
+	run='$HOME/.local/bin/$name' install='mv /tmp/$name ~/.local/bin/$name'
+else
+	# A Go program it was before goes.
+	run='$HOME/.local/bin/'"$node"' sidecars serve '"$sidecar" install='rm -f ~/.local/bin/$name'
+fi
 if [ "$os" = darwin ]; then
 [ -z "$config" ] || { echo "CONFIG installs on Linux only, for now" >&2; exit 1; }
 on "name=$name"'
 set -e
 mkdir -p ~/.local/bin ~/Library/LaunchAgents ~/Library/Logs
-mv /tmp/$name ~/.local/bin/$name
+'"$install"'
 plist=~/Library/LaunchAgents/app.one.$name.plist
 cat >$plist <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>app.one.$name</string>
-<key>ProgramArguments</key><array><string>$HOME/.local/bin/$name</string></array>
+<key>ProgramArguments</key><array>$(for a in '"$run"'; do echo "<string>$a</string>"; done)</array>
 <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>HOME</key><string>$HOME</string></dict>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><true/>
@@ -54,7 +61,7 @@ on "name=$name"'
 set -e
 user=$(id -un)
 mkdir -p ~/.local/bin
-mv /tmp/$name ~/.local/bin/$name
+'"$install"'
 sudo tee /etc/systemd/system/$name.service >/dev/null <<EOF
 [Unit]
 Description=$name
@@ -63,7 +70,7 @@ Wants='"$node"'.service
 
 [Service]
 User=$user
-ExecStart=$HOME/.local/bin/$name
+ExecStart='"$run"'
 Restart=always
 RestartSec=2
 Environment=HOME=$HOME
@@ -74,5 +81,7 @@ WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
 sudo systemctl enable $name
-sudo systemctl restart $name'
+sudo systemctl restart $name
+sleep 3
+systemctl is-active --quiet $name || { journalctl -u $name -n 5 --no-pager; exit 1; }'
 allow

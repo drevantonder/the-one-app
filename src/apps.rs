@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail, ensure};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::Digest;
 
@@ -31,7 +31,7 @@ pub const COMPATIBILITY_DATE: &str = "2026-10-01";
 /// How long an app may take to answer before its runtime is restarted.
 const TIME_LIMIT: Duration = Duration::from_secs(30);
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Me {
     pub key: String,
     pub user: String,
