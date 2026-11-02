@@ -35,7 +35,7 @@ pub fn describe() -> Value {
             { "name": "set", "confirm": true, "description": "Replace the AGENTS.md every harness on every device gets (all of it; history keeps the old one).", "input": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } } },
             { "name": "skills", "reads": true, "description": "Every skill: its name and description.", "input": { "type": "object", "properties": {} } },
             { "name": "skill", "reads": true, "description": "One skill's files.", "input": { "type": "object", "required": ["name"], "properties": { "name": name } } },
-            { "name": "skill_set", "description": "Add or replace a skill on every device: all of its files, SKILL.md first among them.", "input": { "type": "object", "required": ["name", "files"], "properties": { "name": name, "files": { "type": "object", "description": "file path within the skill → its text" } } } },
+            { "name": "skill_set", "description": "Add or replace a skill on every device: all of its files, SKILL.md first among them, which starts with frontmatter giving its name and description (what it's for, and when to use it).", "input": { "type": "object", "required": ["name", "files"], "properties": { "name": name, "files": { "type": "object", "description": "file path within the skill → its text" } } } },
             { "name": "skill_remove", "confirm": true, "description": "Remove a skill from every device.", "input": { "type": "object", "required": ["name"], "properties": { "name": name } } },
             { "name": "history", "reads": true, "description": "Every revision of AGENTS.md, or of a skill if given its name, newest first: its id, when, who from which device, its size and what changed.", "input": { "type": "object", "properties": { "name": name } } },
             { "name": "restore", "confirm": true, "description": "Make an older revision (an id from history) the current one again, on every device.", "input": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "description": "the revision's id, from history" } } } },
@@ -82,6 +82,19 @@ fn valid(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
     Ok(())
 }
 
+/// Whether a new skill's SKILL.md starts with the frontmatter harnesses load it by: without a name and description,
+/// it's never used.
+fn introduced(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
+    let md = files.get("SKILL.md").map(String::as_str).unwrap_or("");
+    let front = md.strip_prefix("---\n").and_then(|rest| rest.split_once("\n---")).map(|(f, _)| f).unwrap_or("");
+    let field = |k: &str| front.lines().find_map(|l| l.strip_prefix(&format!("{k}:"))).map(|v| v.trim().trim_matches('"').to_string()).filter(|v| !v.is_empty());
+    ensure!(
+        field("name").as_deref() == Some(name) && field("description").is_some(),
+        "SKILL.md starts with frontmatter naming it and saying when to use it:\n---\nname: {name}\ndescription: what it's for, and when to use it\n---"
+    );
+    Ok(())
+}
+
 pub fn call(op: String, input: Value, _caller: Me, records: Vec<Record>) -> Reply {
     Box::pin(async move {
         let (text, skills) = state(&records);
@@ -104,6 +117,7 @@ pub fn call(op: String, input: Value, _caller: Me, records: Vec<Record>) -> Repl
                 let n = name()?;
                 let files: BTreeMap<String, String> = serde_json::from_value(input["files"].clone()).context("files is path → text")?;
                 valid(&n, &files)?;
+                introduced(&n, &files)?;
                 (json!(format!("{n} is set on every device.")), vec![("skill".to_string(), json!({ "name": n, "files": files }))])
             }
             "skill_remove" => {
