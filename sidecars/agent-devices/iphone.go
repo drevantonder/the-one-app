@@ -80,6 +80,7 @@ func simulatorOf(ctx context.Context, udid string) (simulator, string, bool) {
 
 func (s iosSimulator) make(ctx context.Context, v *vm, from *vm) error {
 	name := "Agent Devices " + v.Name
+	v.GB = 2
 	if from != nil {
 		src, rt, ok := simulatorOf(ctx, from.ID)
 		if !ok {

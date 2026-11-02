@@ -758,6 +758,9 @@ func (ds *devices) adopt(ctx context.Context, name, kindName string, in map[stri
 	}
 	v := &vm{Name: name, Kind: k.name(), Made: time.Now().UTC(), CPUs: num("cpus"), GB: num("gb"), Port: num("port"), Display: num("display"), ID: text("id")}
 	v.Dir = text("dir")
+	if v.GB == 0 && k.name() == "iphone" {
+		v.GB = 2
+	}
 	if err := k.adopt(ctx, v); err != nil {
 		return nil, err
 	}

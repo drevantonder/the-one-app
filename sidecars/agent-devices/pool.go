@@ -446,29 +446,19 @@ func memory() (free, total int64) {
 	return max(free-(swapTotal-swapFree), 0), total
 }
 
-// macMemory reads vm_stat: free, inactive and speculative pages are
-// available.
+// macMemory is macOS's own measure of the memory free, compressed pages and swap counted: memory_pressure's free
+// percentage of the Mac's memory.
 func macMemory() (free, total int64) {
 	out, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
 	if err != nil {
 		return 0, 0
 	}
 	fmt.Sscan(strings.TrimSpace(string(out)), &total)
-	if out, err = exec.Command("vm_stat").Output(); err != nil {
-		return 0, 0
+	if out, err = exec.Command("memory_pressure", "-Q").Output(); err != nil {
+		return 0, total
 	}
-	page := int64(16384)
-	for line := range strings.Lines(string(out)) {
-		if _, rest, ok := strings.Cut(line, "page size of "); ok {
-			fmt.Sscan(rest, &page)
-		}
-		for _, k := range []string{"Pages free:", "Pages inactive:", "Pages speculative:"} {
-			if v, ok := strings.CutPrefix(line, k); ok {
-				var n int64
-				fmt.Sscan(strings.TrimSuffix(strings.TrimSpace(v), "."), &n)
-				free += n * page
-			}
-		}
-	}
-	return free, total
+	_, pct, _ := strings.Cut(string(out), "free percentage:")
+	var p int64
+	fmt.Sscan(strings.TrimSuffix(strings.TrimSpace(pct), "%"), &p)
+	return total * p / 100, total
 }
