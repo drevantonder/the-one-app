@@ -141,6 +141,44 @@ async fn echo() -> u16 {
     port
 }
 
+/// An app's screen opened in a browser at the node's own address is that app's code, not this machine's own programs:
+/// whatever a page asks there is refused, and nothing the node answers runs as script at its address.
+#[tokio::test(flavor = "multi_thread")]
+async fn no_page_uses_the_local_api_as_this_machine() {
+    let (a, _ra) = start("pages").await;
+    a.create("Pages", "Andre").await.unwrap();
+    deploy_module(&a, "lamps", r#"export default { name: "lamps", ops: {}, screens: { main: { title: "Lamps", html: "<p>Lamps</p>" } } };"#).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let at = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, one::api::router(a)).await.unwrap() });
+    let own = at.clone();
+    tokio::task::spawn_blocking(move || {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        let get = |path: &str, headers: &[(&str, &str)]| {
+            let mut req = agent.get(format!("{own}{path}"));
+            for (k, v) in headers {
+                req = req.header(*k, *v);
+            }
+            req.call().unwrap()
+        };
+        // This machine's own programs, a shell fetching a screen among them, send no browser's headers.
+        assert_eq!(get("/v1/vault", &[]).status(), 200);
+        let screen = get("/v1/screens/lamps/main", &[]);
+        assert_eq!(screen.status(), 200);
+        assert_eq!(screen.headers()["content-security-policy"], "sandbox", "a screen opened in a browser runs no script at the node's address");
+        // What a page at the node's own address asks, a same-origin GET (Sec-Fetch-Site only) or anything with an Origin.
+        for headers in [&[("sec-fetch-site", "same-origin")][..], &[("origin", own.as_str())], &[("origin", "null")]] {
+            assert_eq!(get("/v1/vault", headers).status(), 403, "{headers:?}");
+        }
+        let call = agent.post(format!("{own}/v1/call")).header("origin", own.as_str()).header("sec-fetch-site", "same-origin").send_json(json!({ "app": "board", "op": "topics", "input": {} })).unwrap();
+        assert_eq!(call.status(), 403);
+        // What the person opens themselves, a link to a file the node keeps, say, is theirs.
+        assert_eq!(get("/v1/state", &[("sec-fetch-site", "none")]).status(), 200);
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn agents_ask_for_items_and_never_see_them() {
     let (a, _ra) = start("asks").await;

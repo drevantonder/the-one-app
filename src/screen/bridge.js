@@ -1,7 +1,7 @@
 // The bridge every app screen gets as `one`. Inside a shell, the shell answers it (WKWebView's
 // `one` message handler, or `__oneShell.postMessage` where another web view puts one, as Android's and Windows' do); in a sandboxed frame (the web client's, a chat's), the page
-// holding the frame answers its messages; in a plain browser on the device it talks to the node directly. A screen
-// never knows which. The web client's own page loads it too, for the kit, answering it itself (`__one.host`).
+// holding the frame answers its messages. A screen never knows which. The web client's own page loads it too, for the
+// kit, answering it itself (`__one.host`).
 (() => {
   const ctx = window.__one;
   const handlers = { changed: [] };
@@ -42,61 +42,8 @@
         window.parent.postMessage({ one: message, id }, "*");
       });
     }
-    if (message.type === "call") {
-      const r = await fetch("/v1/call", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ app: message.app, op: message.op, input: message.input }),
-      });
-      const body = await r.json();
-      if (body.error) throw new Error(body.error);
-      return body.ok;
-    }
-    if (message.type === "open") {
-      const q = new URLSearchParams({ params: JSON.stringify(message.params || {}) });
-      if (ctx.scope) q.set("scope", ctx.scope);
-      // A Settings screen opens Settings screens (another, or itself with other params).
-      location.href = ctx.app || message.app ? `/v1/screens/${message.app || ctx.app}/${message.screen}?${q}` : `/v1/settings-screens/${message.screen}?${q}`;
-    }
-    if (message.type === "api") {
-      const r = await fetch(message.path, {
-        method: message.method,
-        headers: { "content-type": "application/json" },
-        body: message.method === "GET" || message.body === undefined ? undefined : JSON.stringify(message.body),
-      });
-      const body = await r.json();
-      if (body?.error) throw new Error(body.error);
-      return body;
-    }
-    // A browser on the device is no sign-in, and follows the system's appearance.
-    if (message.type === "signOut") throw new Error("Sign out in the app.");
-    if (message.type === "appearance") return "automatic";
-    if (message.type === "device") return { name: "This browser", build: null, signOut: false };
-    if (message.type === "title") document.title = message.text;
-    // A browser saves a file as a download, and shows one in a tab of its own.
-    if (message.type === "save" || message.type === "preview") {
-      const f = message.file || {};
-      const url = f.base64 ? `data:${f.type || "application/octet-stream"};base64,${f.base64}` : `/v1/blobs/${f.blob || f.file}`;
-      if (message.type === "preview") return void window.open(url, "_blank");
-      const a = Object.assign(document.createElement("a"), { href: url, download: f.name || "file" });
-      document.body.append(a);
-      a.click();
-      a.remove();
-    }
-    if (message.type === "scan") throw new Error("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
-    if (message.type === "vault" || message.type === "request") throw new Error("Open this in the app to choose it.");
-    if (message.type === "copy") return navigator.clipboard.writeText(message.text);
-    if (message.type === "icons") {
-      icons ||= fetch("/v1/icons").then((r) => r.json());
-      const all = await icons;
-      return Object.fromEntries(message.names.map((n) => [n, all[n]]));
-    }
-  }
-  let icons;
-
-  // Browser only: the node's events, to refresh when this app's data changes.
-  if (!shell && !framed && !ctx.host && window.EventSource) {
-    new EventSource("/v1/events").onmessage = (m) => one.__event(JSON.parse(m.data));
+    // Nothing else answers: the node refuses browsers, which would run a screen as this machine's own programs.
+    throw new Error("Open this in the app.");
   }
 
   // Icons are Phosphor's (vendor/phosphor), the same in every shell: each a path on a 256-point grid, filled in the

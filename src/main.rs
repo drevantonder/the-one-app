@@ -1042,16 +1042,13 @@ fn try_install(rest: &[String]) -> Result<()> {
     }
     let state = get("/v1/state")?;
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("you");
-    let store = state["install"]["settings"]["store"].as_str().unwrap_or("apps");
     println!(
         "The try install is running beside yours, on {addr}: a new install, Try, with only what every new install
 starts with, and {me} as its admin.
 
   {CLI} try <command>   any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
   {CLI} try mcp         its MCP server, for an agent: claude mcp add {CLI}-try -- {CLI} try mcp
-  {CLI} try stop        stop and delete it; {CLI} try then starts a new one
-
-Its App Store, in a browser: http://{addr}/v1/screens/{store}/main"
+  {CLI} try stop        stop and delete it; {CLI} try then starts a new one"
     );
     Ok(())
 }

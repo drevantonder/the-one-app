@@ -177,12 +177,12 @@ struct PhoneNode: NodeTransport {
         return try await signedOut { try await node.send(method, path, body: body, timeout: timeout) }
     }
 
-    func page(app: String, screen: String, params: String, scope: String?) async throws -> (html: String, base: URL?) {
+    func page(app: String, screen: String, params: String, scope: String?) async throws -> String {
         guard let node else { throw Auth.SignedOut(message: String(localized: "Sign in again.")) }
         return try await signedOut { try await node.page(app: app, screen: screen, params: params, scope: scope) }
     }
 
-    func settingsPage(_ name: String, params: String) async throws -> (html: String, base: URL?) {
+    func settingsPage(_ name: String, params: String) async throws -> String {
         guard let node else { throw Auth.SignedOut(message: String(localized: "Sign in again.")) }
         return try await signedOut { try await node.settingsPage(name, params: params) }
     }

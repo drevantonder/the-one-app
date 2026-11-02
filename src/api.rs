@@ -95,7 +95,7 @@ pub fn routes() -> Router<Node> {
 /// Routes as only this machine's own programs, and people signed in with the kernel for what `SIGNED_IN` lists, may
 /// use them.
 pub fn guarded(routes: Router<Node>, node: Node) -> Router {
-    routes.route_layer(axum::middleware::from_fn_with_state(node.clone(), only_this_machine)).with_state(node)
+    routes.route_layer(axum::middleware::from_fn_with_state(node.clone(), only_this_machine)).layer(axum::middleware::map_response(sandboxed)).with_state(node)
 }
 
 /// Headers that say a request was passed on from elsewhere: the gateway sends `forwarded`, tunnels and proxies the rest.
@@ -234,8 +234,8 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
     found
 }
 
-/// Browsers send an Origin, and a page that rebinds its DNS to 127.0.0.1 still sends its own Host:
-/// refuse both, so no web page can drive this machine's node. A request with a kernel sign-in's access token is
+/// Browsers say a page asked, and a page that rebinds its DNS to 127.0.0.1 still sends its own Host: refuse both, so no
+/// web page, an app's screen this node served included, can drive this machine's node. A request with a kernel sign-in's access token is
 /// someone's instead, for what `SIGNED_IN` lists.
 async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
@@ -267,16 +267,26 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
     next.run(req).await
 }
 
-/// Whether a request is from one of this machine's own programs: to its own address, passed on by nothing, and from
-/// no web page but a screen this node served, whose origin is its own address.
+/// Whether a request is from one of this machine's own programs: to its own address, passed on by nothing, and from no
+/// page. A browser says when a page asked, its own address's too (`Origin`, `Sec-Fetch-Site`), and a screen this node
+/// served is an app's code, which only a shell or a sandboxed frame answers; what the person opens themselves, a link
+/// or an address typed in, is theirs, and runs no script here (`sandboxed`).
 fn from_this_machine(req: &axum::extract::Request) -> bool {
-    let host = req.headers().get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let header = |name| req.headers().get(name).and_then(|h| h.to_str().ok());
+    let host = header(axum::http::header::HOST.as_str()).unwrap_or("");
     // The gateway, a tunnel or a proxy on this machine still says it passed on someone else's request.
     let forwarded = FORWARDED.iter().any(|h| req.headers().contains_key(*h));
-    let local = !forwarded && host.split(':').next().is_some_and(|h| matches!(h, "127.0.0.1" | "localhost" | "[::1]"));
-    let origin = req.headers().get(axum::http::header::ORIGIN).and_then(|o| o.to_str().ok());
-    let own = origin.is_some_and(|o| o.strip_prefix("http://").is_some_and(|h| h == host));
-    local && (origin.is_none() || own)
+    let page = header("origin").is_some() || header("sec-fetch-site").is_some_and(|s| s != "none");
+    !forwarded && !page && host.split(':').next().is_some_and(|h| matches!(h, "127.0.0.1" | "localhost" | "[::1]"))
+}
+
+/// Nothing this node answers runs as script at its address, where a page would ask as this machine's own programs: a
+/// browser shows it as the gateway does, sandboxed with no script, and never sniffs it into another type.
+async fn sandboxed(mut resp: Response) -> Response {
+    let headers = resp.headers_mut();
+    headers.insert(axum::http::header::CONTENT_SECURITY_POLICY, axum::http::HeaderValue::from_static("sandbox"));
+    headers.insert(axum::http::header::X_CONTENT_TYPE_OPTIONS, axum::http::HeaderValue::from_static("nosniff"));
+    resp
 }
 
 /// An MCP client elsewhere is told where to sign in, as MCP's authorization spec says: the install's
@@ -735,7 +745,7 @@ struct ScreenQuery {
     scope: Option<String>,
 }
 
-/// An app screen as a page, for shells' web views and for a browser on this machine.
+/// An app screen as a page, for shells' web views and the web client's frames.
 async fn screen(State(node): State<Node>, me: Me, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
     let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref()).await?;

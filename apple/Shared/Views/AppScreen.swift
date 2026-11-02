@@ -223,8 +223,10 @@ private struct ScreenWebView: Representable {
                 do {
                     let page = try await settings ? node.settingsPage(route.screen, params: route.params) : node.page(app: route.app, screen: route.screen, params: route.params, scope: route.scope)
                     guard let self, !Task.isCancelled else { return }
-                    web.loadHTMLString(page.html, baseURL: page.base)
-                    ScreenCache.keep(page.html, for: route)
+                    // No base: a screen is an app's code, never at the node's address, where it would ask as this
+                    // machine's own programs.
+                    web.loadHTMLString(page, baseURL: nil)
+                    ScreenCache.keep(page, for: route)
                     misses = 0
                     view.offline = nil
                 } catch {

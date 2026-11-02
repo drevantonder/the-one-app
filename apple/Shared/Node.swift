@@ -236,10 +236,10 @@ struct NodeError: LocalizedError, Sendable {
 protocol NodeTransport: Sendable {
     /// Sends a request and returns the local API's JSON reply, or throws its error.
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data
-    /// An app screen's page, and the address it may call back to.
-    func page(app: String, screen: String, params: String, scope: String?) async throws -> (html: String, base: URL?)
+    /// An app screen's page.
+    func page(app: String, screen: String, params: String, scope: String?) async throws -> String
     /// A Settings screen's page.
-    func settingsPage(_ name: String, params: String) async throws -> (html: String, base: URL?)
+    func settingsPage(_ name: String, params: String) async throws -> String
     /// The node's events, until the connection drops.
     func events() -> AsyncThrowingStream<NodeEvent, Error>
     /// What to say when nothing answers.
@@ -292,16 +292,16 @@ struct HTTPNode: NodeTransport {
         return data
     }
 
-    func page(app: String, screen: String, params: String, scope: String?) async throws -> (html: String, base: URL?) {
+    func page(app: String, screen: String, params: String, scope: String?) async throws -> String {
         var query = ["params": params]
         query["scope"] = scope
         let html = try await send("GET", "v1/screens/\(app)/\(screen)", body: try JSONEncoder().encode(query), timeout: 10)
-        return (String(decoding: html, as: UTF8.self), base)
+        return String(decoding: html, as: UTF8.self)
     }
 
-    func settingsPage(_ name: String, params: String) async throws -> (html: String, base: URL?) {
+    func settingsPage(_ name: String, params: String) async throws -> String {
         let html = try await send("GET", "v1/settings-screens/\(name)", body: try JSONEncoder().encode(["params": params]), timeout: 10)
-        return (String(decoding: html, as: UTF8.self), base)
+        return String(decoding: html, as: UTF8.self)
     }
 
     func events() -> AsyncThrowingStream<NodeEvent, Error> {
@@ -491,11 +491,11 @@ struct NodeClient: Sendable {
         return try JSONSerialization.data(withJSONObject: reply["ok"] ?? NSNull(), options: .fragmentsAllowed)
     }
 
-    func page(app: String, screen: String, params: String, scope: String?) async throws -> (html: String, base: URL?) {
+    func page(app: String, screen: String, params: String, scope: String?) async throws -> String {
         try await transport.page(app: app, screen: screen, params: params, scope: scope)
     }
 
-    func settingsPage(_ name: String, params: String) async throws -> (html: String, base: URL?) {
+    func settingsPage(_ name: String, params: String) async throws -> String {
         try await transport.settingsPage(name, params: params)
     }
 
