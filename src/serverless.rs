@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use crate::kernel::{Cloudflare, Settings, worker_name};
+use crate::kernel::{Cloudflare, Settings, Uploaded, worker_name};
 
 /// The serverless node's Worker is `<cli>-node`.
 pub const SERVICE: &str = "node";
@@ -56,7 +56,17 @@ pub fn metadata(settings: &Settings) -> Value {
 pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
     anyhow::ensure!(settings.try_person.is_none(), "a try install's kernel runs only beside its try install");
     let modules = modules()?;
+    let name = worker_name(SERVICE);
+    let meta = metadata(settings);
+    let mut what = vec![meta.to_string().into_bytes()];
+    what.extend(modules.iter().flat_map(|(n, k, b)| [n.as_bytes().to_vec(), k.as_bytes().to_vec(), b.clone()]));
+    let what = Uploaded::hash(&what);
+    let uploaded = Uploaded::load();
+    if uploaded.same(&cf.scripts()?, &name, &what) {
+        return Ok(());
+    }
     let modules: Vec<(&str, &str, &[u8])> = modules.iter().map(|(n, k, b)| (n.as_str(), *k, b.as_slice())).collect();
-    cf.upload(&worker_name(SERVICE), &modules, &metadata(settings))?;
-    cf.hide(&worker_name(SERVICE))
+    cf.upload(&name, &modules, &meta)?;
+    cf.hide(&name)?;
+    uploaded.record(cf, vec![(name, what)])
 }

@@ -731,10 +731,11 @@ impl Cloudflare {
         Ok(self.call("GET", &format!("/accounts/{}/workers/subdomain", self.account), None)?["subdomain"].as_str().context("the account has no workers.dev subdomain yet: open Workers in Cloudflare's dashboard once")?.to_string())
     }
 
-    /// The account's Workers, by name, with the Durable Object migration each has had.
-    pub fn scripts(&self) -> Result<std::collections::BTreeMap<String, Option<String>>> {
+    /// The account's Workers, by name.
+    pub fn scripts(&self) -> Result<std::collections::BTreeMap<String, Script>> {
         let list = self.call("GET", &format!("/accounts/{}/workers/scripts", self.account), None)?;
-        Ok(list.as_array().into_iter().flatten().filter_map(|s| Some((s["id"].as_str()?.to_string(), s["migration_tag"].as_str().map(str::to_string)))).collect())
+        let script = |s: &Value| Script { migration: s["migration_tag"].as_str().map(str::to_string), modified: s["modified_on"].as_str().map(str::to_string) };
+        Ok(list.as_array().into_iter().flatten().filter_map(|s| Some((s["id"].as_str()?.to_string(), script(s)))).collect())
     }
 
     /// Uploads a Worker: its modules (name, type, bytes), the first its main one, and its bindings and Durable Object
@@ -930,30 +931,102 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
         parses(web)?;
     }
     let mut left: Vec<usize> = (0..SERVICES.len()).filter(|i| services.contains(&SERVICES[*i].0)).collect();
+    let mut scripts = cf.scripts()?;
+    let uploaded = Uploaded::load();
+    let mut sent = Vec::new();
     for _ in 0..2 {
         let mut again = Vec::new();
         for i in left {
             let (service, _, class) = SERVICES[i];
-            let scripts = cf.scripts()?;
-            let migrated = scripts.get(&worker_name(service)).is_some_and(|tag| tag.as_deref() == Some("v1"));
-            let (mut meta, complete) = metadata(settings, service, class, migrated, |name| scripts.contains_key(name) || name == worker_name(service));
+            let name = worker_name(service);
+            let migrated = scripts.get(&name).is_some_and(|s| s.migration.as_deref() == Some("v1"));
+            let (mut meta, complete) = metadata(settings, service, class, migrated, |other| scripts.contains_key(other) || other == name);
+            let url = [&settings.auth_url, &settings.vault_url, &settings.schedules_url, &settings.address][i];
+            let mut what = vec![meta.to_string().into_bytes(), modules[i].clone(), url.as_bytes().to_vec()];
             if service == "gateway" {
-                let jwt = cf.assets(&worker_name(service), web)?;
+                what.extend(web.iter().flat_map(|(path, bytes)| [path.as_bytes().to_vec(), bytes.clone()]));
+            }
+            let what = Uploaded::hash(&what);
+            if complete && uploaded.same(&scripts, &name, &what) {
+                continue;
+            }
+            if service == "gateway" {
+                let jwt = cf.assets(&name, web)?;
                 meta["assets"] = json!({ "jwt": jwt, "config": { "html_handling": "none", "not_found_handling": "none", "run_worker_first": true } });
                 meta["bindings"].as_array_mut().unwrap().push(json!({ "type": "assets", "name": "ASSETS" }));
             }
-            cf.upload(&worker_name(service), &[("worker.js", "application/javascript+module", &modules[i])], &meta)?;
-            cf.reach(&worker_name(service), [&settings.auth_url, &settings.vault_url, &settings.schedules_url, &settings.address][i])?;
-            if !complete {
+            cf.upload(&name, &[("worker.js", "application/javascript+module", &modules[i])], &meta)?;
+            cf.reach(&name, url)?;
+            // Later services' bindings to it resolve in this pass, and its class has had its migration.
+            scripts.insert(name.clone(), Script { migration: class.map(|_| "v1".to_string()), modified: None });
+            if complete {
+                sent.push((name, what));
+            } else {
                 again.push(i);
             }
         }
         left = again;
         if left.is_empty() {
-            return Ok(());
+            return uploaded.record(cf, sent);
         }
     }
     bail!("some services' bindings never resolved")
+}
+
+/// A Worker of the account's, as its list says.
+pub struct Script {
+    /// The Durable Object migration it has had.
+    pub migration: Option<String>,
+    /// When it last changed, by whatever means.
+    pub modified: Option<String>,
+}
+
+/// What this machine last uploaded to each of the kernel's Workers: a hash of everything it sent (the secrets in its
+/// bindings too), and when Cloudflare then said the Worker last changed. A Worker that would get the same, and that
+/// nothing has changed since, isn't uploaded again: an update deploys the kernel each time the node changes, and most of
+/// its changes leave every Worker as it was.
+pub(crate) struct Uploaded(serde_json::Map<String, Value>);
+
+impl Uploaded {
+    fn path() -> PathBuf {
+        Settings::path().with_file_name("uploaded.json")
+    }
+
+    pub(crate) fn load() -> Uploaded {
+        let read = std::fs::read(Uploaded::path()).ok().and_then(|b| serde_json::from_slice(&b).ok());
+        Uploaded(read.unwrap_or_default())
+    }
+
+    pub(crate) fn hash(parts: &[Vec<u8>]) -> String {
+        let mut hash = Sha256::new();
+        for part in parts {
+            hash.update((part.len() as u64).to_le_bytes());
+            hash.update(part);
+        }
+        data_encoding::HEXLOWER.encode(&hash.finalize())
+    }
+
+    /// Whether `name` holds `what`, as this machine uploaded it, and has had nothing done to it since.
+    pub(crate) fn same(&self, scripts: &std::collections::BTreeMap<String, Script>, name: &str, what: &str) -> bool {
+        let modified = scripts.get(name).and_then(|s| s.modified.as_deref());
+        self.0.get(name).is_some_and(|was| was["hash"] == what && modified.is_some() && was["modified"].as_str() == modified)
+    }
+
+    /// Keeps what was uploaded to each of `sent` (name, hash), with when Cloudflare says it changed once it's all done.
+    pub(crate) fn record(mut self, cf: &Cloudflare, sent: Vec<(String, String)>) -> Result<()> {
+        if sent.is_empty() {
+            return Ok(());
+        }
+        let scripts = cf.scripts()?;
+        for (name, what) in sent {
+            match scripts.get(&name).and_then(|s| s.modified.clone()) {
+                Some(modified) => self.0.insert(name, json!({ "hash": what, "modified": modified })),
+                None => self.0.remove(&name),
+            };
+        }
+        std::fs::write(Uploaded::path(), Value::Object(self.0).to_string())?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
