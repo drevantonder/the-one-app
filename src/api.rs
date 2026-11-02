@@ -272,28 +272,35 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
     if let Some(token) = token {
         // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `SIGNED_IN`.
         if !SIGNED_IN.contains(&path.as_str()) && !from_this_machine(&node, &req) {
-            return (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response();
+            return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
         }
         // A run the schedules service hands in brings a token for that alone.
         if token.starts_with("run.") != (path == "/v1/kernel/run") {
-            return (StatusCode::FORBIDDEN, Json(json!({ "error": "only a scheduled run asks that, and it asks nothing else" }))).into_response();
+            return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only a scheduled run asks that, and it asks nothing else" }))).into_response()).await;
         }
         return match signed_in(&node, token).await {
             Ok(me) => {
                 req.extensions_mut().insert(me);
                 next.run(req).await
             }
-            Err(err) if path == "/mcp" => sign_in_first(&node, Some(format!("{err:#}"))),
-            Err(err) => (StatusCode::UNAUTHORIZED, Json(json!({ "error": format!("{err:#}") }))).into_response(),
+            Err(err) if path == "/mcp" => refuse(req, sign_in_first(&node, Some(format!("{err:#}")))).await,
+            Err(err) => refuse(req, (StatusCode::UNAUTHORIZED, Json(json!({ "error": format!("{err:#}") }))).into_response()).await,
         };
     }
     if !from_this_machine(&node, &req) {
         if path == "/mcp" {
-            return sign_in_first(&node, None);
+            return refuse(req, sign_in_first(&node, None)).await;
         }
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine() }))).into_response();
+        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine() }))).into_response()).await;
     }
     next.run(req).await
+}
+
+/// Refuses a request once what it sends is read, up to 1 MiB: refused mid-body, the rest unread, the connection closes
+/// with a reset that can reach the client before the refusal does, which it sees as a broken connection instead.
+async fn refuse(req: axum::extract::Request, refusal: Response) -> Response {
+    let _ = axum::body::to_bytes(req.into_body(), 1 << 20).await;
+    refusal
 }
 
 /// What a program that didn't show the token is told, as JSON: an older client shows it as it shows any error. One
