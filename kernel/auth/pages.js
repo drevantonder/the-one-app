@@ -215,3 +215,27 @@ export function passkeysPage({ name }) {
     };`;
   return page(`Passkeys`, body, script);
 }
+
+/// Signing in with a code another device shows (the CLI on a server): typing it here goes on to signing in with a
+/// passkey; `done` says how that went, once it's back.
+export function codePage({ name, error = "", done }) {
+  if (done !== undefined) {
+    const body = done
+      ? `<h1>You're signed in</h1><p>Go back to where you got the code: it carries on by itself.</p>`
+      : `<h1>That didn't sign in</h1><p>Start signing in again where you got the code.</p>`;
+    return page(`Sign in to ${name}`, body, "");
+  }
+  const body = `
+    <h1>Sign in with a code</h1>
+    <p>Type the code you were shown, then sign in with your passkey. Only use a code you got yourself, on your own device.</p>
+    <form id="form"><input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BCDF-GHJK" aria-label="Code">
+    <button class="primary">Continue</button></form>`;
+  const script = `
+    say(${JSON.stringify(error).replaceAll("<", "\\u003c")});
+    document.getElementById("code").focus();
+    document.getElementById("form").onsubmit = (e) => {
+      e.preventDefault();
+      location.href = "/sign-in/code?c=" + encodeURIComponent(document.getElementById("code").value);
+    };`;
+  return page(`Sign in to ${name}`, body, script);
+}

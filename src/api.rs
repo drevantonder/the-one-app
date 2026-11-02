@@ -243,7 +243,8 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
     let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
     if let Some(token) = token {
-        if !SIGNED_IN.contains(&path.as_str()) {
+        // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `SIGNED_IN`.
+        if !SIGNED_IN.contains(&path.as_str()) && !from_this_machine(&req) {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response();
         }
         return match signed_in(&node, token).await {
@@ -255,20 +256,25 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
             Err(err) => (StatusCode::UNAUTHORIZED, Json(json!({ "error": format!("{err:#}") }))).into_response(),
         };
     }
-    let host = req.headers().get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
-    // The gateway, a tunnel or a proxy on this machine still says it passed on someone else's request.
-    let forwarded = FORWARDED.iter().any(|h| req.headers().contains_key(*h));
-    let local = !forwarded && host.split(':').next().is_some_and(|h| matches!(h, "127.0.0.1" | "localhost" | "[::1]"));
-    // A screen this node served may call it: its origin is this node's own address.
-    let origin = req.headers().get(axum::http::header::ORIGIN).and_then(|o| o.to_str().ok());
-    let own = origin.is_some_and(|o| o.strip_prefix("http://").is_some_and(|h| h == host));
-    if (origin.is_some() && !own) || !local {
+    if !from_this_machine(&req) {
         if path == "/mcp" {
             return sign_in_first(&node, None);
         }
         return (StatusCode::FORBIDDEN, "only this machine's own programs may use this").into_response();
     }
     next.run(req).await
+}
+
+/// Whether a request is from one of this machine's own programs: to its own address, passed on by nothing, and from
+/// no web page but a screen this node served, whose origin is its own address.
+fn from_this_machine(req: &axum::extract::Request) -> bool {
+    let host = req.headers().get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    // The gateway, a tunnel or a proxy on this machine still says it passed on someone else's request.
+    let forwarded = FORWARDED.iter().any(|h| req.headers().contains_key(*h));
+    let local = !forwarded && host.split(':').next().is_some_and(|h| matches!(h, "127.0.0.1" | "localhost" | "[::1]"));
+    let origin = req.headers().get(axum::http::header::ORIGIN).and_then(|o| o.to_str().ok());
+    let own = origin.is_some_and(|o| o.strip_prefix("http://").is_some_and(|h| h == host));
+    local && (origin.is_none() || own)
 }
 
 /// An MCP client elsewhere is told where to sign in, as MCP's authorization spec says: the install's

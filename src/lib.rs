@@ -32,6 +32,8 @@ pub mod call;
 pub mod db;
 pub mod entry;
 #[cfg(not(target_family = "wasm"))]
+pub mod sign_in;
+#[cfg(not(target_family = "wasm"))]
 pub mod skills;
 pub mod members;
 #[cfg(not(target_family = "wasm"))]

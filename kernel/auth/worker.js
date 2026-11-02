@@ -20,7 +20,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
-import { NO_PRF, invitePage, passkeysPage, signInPage } from "./pages.js";
+import { NO_PRF, codePage, invitePage, passkeysPage, signInPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
 
 const json = (v, status = 200) => Response.json(v, { status });
@@ -31,12 +31,21 @@ const refuse = (status, message) => {
 };
 /// How long an invite link works.
 const INVITE = 3 * 86_400_000;
+/// How long a sign-in code works.
+const CODE = 10 * 60_000;
+/// A sign-in code's letters: no vowels, so it spells no word, and none that look alike.
+const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
 
 /// The hash an invite is kept by, so the auth service's database holds no link that works.
 async function inviteId(token) {
   if (!token) refuse(403, "Joining takes an invite link: ask whoever runs this install for one.");
   if (typeof token !== "string" || token.length < 32) refuse(404, "That invite link isn't whole: open the link you were sent as it is.");
-  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hash(token);
+}
+
+/// A SHA-256 hash, as hex, of a secret kept only that way.
+async function hash(secret) {
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /// A passkey's name, for the person's list of them: its maker's, if it says, a security key's, or the device it was
@@ -53,6 +62,7 @@ export class Auth extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     ctx.storage.sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null, until integer not null, used integer)");
+    ctx.storage.sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const options = this.options();
       const { runMigrations } = await getMigrations(options);
@@ -193,6 +203,10 @@ export class Auth extends DurableObject {
       if (path === "/passkeys" && request.method === "GET") return html(passkeysPage({ name }));
       if (path === "/passkeys/add" && request.method === "POST") return json(await this.addPasskey(request, await request.json()));
       if (path === "/sign-in/about") return json(await this.about(request, url.searchParams.get("client_id")));
+      if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
+      if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), name);
+      if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ name, done: await this.codeDone(url.searchParams) }));
+      if (path === "/sign-in/code/take" && request.method === "POST") return this.codeTaken(await request.json());
       if (path === "/sign-in/accept" && request.method === "POST") return json(await this.accept(request, await request.json()));
       if (path === "/internal/invite" && request.method === "POST") return json(await this.invite(request, await request.json()));
       return new Response("not found", { status: 404 });
@@ -237,8 +251,60 @@ export class Auth extends DurableObject {
     const client = await this.client(clientId);
     const origin = new URL(this.env.ADDRESS).origin;
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
-    const web = uris.length > 0 && uris.every((u) => URL.canParse(u) && new URL(u).origin === origin);
+    const web = uris.length > 0 && uris.every((u) => u === `${origin}/callback`);
     return { client: web ? this.auth.options.appName : client.name || client.clientId, web, person: session?.user.name || null };
+  }
+
+  // Signing in with a code, for a client with no browser of its own (the CLI on a server): it makes an authorization
+  // request coming back to /sign-in/code/done and gets a short code for it; the person opens /sign-in/code on any
+  // device, types the code (or follows its link), and signs in there with their passkey; the client takes the
+  // authorization code by its state and turns it into tokens with its PKCE verifier, which only it has.
+
+  /// A code for an authorization request: `{ query }`, the request's query, coming back here. → `{ code, url, until }`.
+  async codeFor({ query }) {
+    const q = new URLSearchParams(typeof query === "string" ? query : "");
+    const origin = new URL(this.env.ADDRESS).origin;
+    if (q.get("redirect_uri") !== `${origin}/sign-in/code/done`) refuse(400, `a sign-in code's request comes back to ${origin}/sign-in/code/done`);
+    if ((q.get("state") || "").length < 32 || !q.get("code_challenge")) refuse(400, "a sign-in code's request has a state of 32 characters or more, and PKCE");
+    await this.client(q.get("client_id"));
+    const sql = this.ctx.storage.sql;
+    sql.exec("delete from codes where until <= ?", Date.now());
+    const until = Date.now() + CODE;
+    for (;;) {
+      const code = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => LETTERS[b % LETTERS.length]).join("");
+      if (sql.exec("select code from codes where code = ?", code).toArray().length) continue;
+      sql.exec("insert into codes (code, state, query, until) values (?, ?, ?, ?)", code, await hash(q.get("state")), q.toString(), until);
+      return { code: `${code.slice(0, 4)}-${code.slice(4)}`, url: `${origin}/sign-in/code?c=${code}`, until };
+    }
+  }
+
+  /// The page a code is typed into, or with one (`c`), on to its sign-in.
+  codeOpened(typed, name) {
+    if (typed == null) return html(codePage({ name }));
+    const code = String(typed).toUpperCase().replace(/[^A-Z]/g, "");
+    const [row] = this.ctx.storage.sql.exec("select query from codes where code = ? and until > ? and back is null", code, Date.now()).toArray();
+    if (!row) return html(codePage({ name, error: "That code doesn't work: it may have expired. Start signing in again where you got it." }));
+    return Response.redirect(`${new URL(this.env.ADDRESS).origin}/api/auth/oauth2/authorize?${row.query}`, 302);
+  }
+
+  /// Where a code's sign-in comes back: the authorization code (or why there's none) is kept for its client to take.
+  /// → whether it's signed in.
+  async codeDone(params) {
+    const state = params.get("state");
+    const back = params.get("code") ? JSON.stringify({ code: params.get("code") }) : JSON.stringify({ error: params.get("error_description") || params.get("error") || "Signing in didn't work." });
+    if (!state) return false;
+    const changed = this.ctx.storage.sql.exec("update codes set back = ? where state = ? and until > ? and back is null", back, await hash(state), Date.now()).rowsWritten;
+    return changed > 0 && !!params.get("code");
+  }
+
+  /// A client takes what its code's sign-in gave, once: `{ state }` → `{ code }` or `{ error }`; 202 while it waits.
+  async codeTaken({ state }) {
+    const sql = this.ctx.storage.sql;
+    const [row] = sql.exec("select code, back from codes where state = ? and until > ?", await hash(String(state || "")), Date.now()).toArray();
+    if (!row) return json({ error: "That sign-in code has expired. Sign in again." }, 404);
+    if (!row.back) return json({ waiting: true }, 202);
+    sql.exec("delete from codes where code = ?", row.code);
+    return json(JSON.parse(row.back));
   }
 
   /// One of the person's passkeys, by its credential id: → its row, or a refusal.

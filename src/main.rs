@@ -19,6 +19,9 @@ fn help() -> String {
 Usage:
   {CLI} serve                          run this machine's server
   {CLI} status                         this server, its install, its users, groups and servers
+  {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code with your passkey on any of
+                                       your devices; {CLI} and {CLI} mcp here then act as you
+  {CLI} sign-out                       sign this machine out
   {CLI} create <name> --as <your name> create an install, with you as its first admin
   {CLI} pair [--new-user <name> [--admin] | --user <name>]
                                        a pairing code for another of your machines (or, for admins, a new user or someone else)
@@ -178,8 +181,14 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["serve"] => {
             usual_path();
+            IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
             serve()?
         }
+        ["sign-in"] => sign_in(&flags)?,
+        ["sign-out"] => match one::sign_in::sign_out()? {
+            true => println!("Signed out: {CLI} on this machine no longer acts as you."),
+            false => println!("This machine isn't signed in."),
+        },
         ["mcp"] => mcp(if flags.contains_key("code") { Mode::Code } else { Mode::All })?,
         ["run", file] => {
             let script = match *file {
@@ -884,12 +893,46 @@ fn signed_in() -> bool {
     SIGNED_IN.with(|t| t.borrow().is_some())
 }
 
-/// A request to this machine's node: as the person an MCP request over HTTP came from, while it's answered.
+/// Whether this process is the node, which is never signed in itself: it's only sent its people's access tokens.
+static IN_NODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A request to this machine's node: as the person an MCP request over HTTP came from, while it's answered, or as
+/// whom this machine is signed in as.
 fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
-    match SIGNED_IN.with(|t| t.borrow().clone()) {
+    let token = match SIGNED_IN.with(|t| t.borrow().clone()) {
+        Some(token) => Some(token),
+        None if IN_NODE.load(std::sync::atomic::Ordering::Relaxed) => None,
+        None => one::sign_in::token().unwrap_or_else(|err| {
+            static SAID: std::sync::Once = std::sync::Once::new();
+            SAID.call_once(|| eprintln!("{err:#}"));
+            None
+        }),
+    };
+    match token {
         Some(token) => r.header("authorization", format!("Bearer {token}")),
         None => r,
     }
+}
+
+/// `sign-in`: this machine signs in to the install's kernel, as the person who approves its code with their passkey.
+fn sign_in(flags: &Map<String, Value>) -> Result<()> {
+    let address = match flags.get("address").and_then(Value::as_str) {
+        Some(a) => a.to_string(),
+        None => {
+            let state = request(agent().get(format!("http://{}/v1/state", addr())).call())?;
+            state["install"]["settings"]["address"].as_str().context(format!("this install has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} kernel use"))?.to_string()
+        }
+    };
+    let started = one::sign_in::start(&address)?;
+    println!("To sign in this machine, open this link on any of your devices and sign in with your passkey:\n\n  {}\n\nor go to {}/sign-in/code and type {}.", started.url, address.trim_end_matches('/'), started.code);
+    if one::sign_in::has_screen() && one::sign_in::open(&started.url) {
+        println!("It's open in your browser here.");
+    }
+    one::sign_in::finish(started)?;
+    let state = get("/v1/state")?;
+    let me = state["user"]["name"].as_str().unwrap_or("you");
+    println!("Signed in as {me}. {CLI} and {CLI} mcp on this machine act as you until {CLI} sign-out.");
+    Ok(())
 }
 
 fn get(path: &str) -> Result<Value> {

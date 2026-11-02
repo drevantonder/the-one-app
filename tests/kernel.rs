@@ -709,7 +709,9 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert_eq!(ask(&andres, "POST", "/v1/accept", json!({ "group": group })).0, 200);
     assert_eq!(members().as_array().unwrap().len(), 2);
 
-    // What only this machine's own programs do, no sign-in does: renaming the server, say.
-    assert_eq!(ask(&andres, "POST", "/v1/name", json!({ "name": "elsewhere" })).0, 403);
+    // What only this machine's own programs do, no sign-in from elsewhere (through the gateway) does: renaming the
+    // server, say.
+    let renamed = agent.post(format!("{api}/v1/name")).header("authorization", format!("Bearer {andres}")).header("forwarded", "host=\"one.example\"").send_json(json!({ "name": "elsewhere" })).unwrap();
+    assert_eq!(renamed.status(), 403);
     let _ = std::fs::remove_dir_all(&dir);
 }
