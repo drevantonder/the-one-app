@@ -21,29 +21,29 @@ import (
 	"time"
 )
 
-type computers struct {
+type devices struct {
 	dir   string // this sidecar's files
 	node  string // its node's local API
-	cache string // the computers' tools, kept for when none is running
+	cache string // the devices' tools, kept for when none is running
 
 	mu    sync.Mutex
 	tools []tool
 
 	connMu sync.Mutex
-	conns  map[string]*conn // by computer
+	conns  map[string]*conn // by device
 
 	poolMu sync.Mutex
-	lent   map[string]loan      // borrowed computers, by name
+	lent   map[string]loan      // borrowed devices, by name
 	held   map[string]*profile  // their profiles, with their keys
-	used   map[string]time.Time // each computer's last call
+	used   map[string]time.Time // each device's last call
 	take   sync.Mutex           // one borrow, or spare made, at a time
 	kick   chan struct{}        // tend the pool now
 
 	backupMu sync.Mutex
 }
 
-func newComputers(dir, node string) *computers {
-	ds := &computers{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, held: map[string]*profile{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
+func newDevices(dir, node string) *devices {
+	ds := &devices{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, held: map[string]*profile{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
 	if b, err := os.ReadFile(ds.cache); err == nil {
 		json.Unmarshal(b, &ds.tools)
 	}
@@ -51,20 +51,20 @@ func newComputers(dir, node string) *computers {
 	return ds
 }
 
-func (ds *computers) describe() map[string]any {
+func (ds *devices) describe() map[string]any {
 	ops := ownOps()
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 	for _, t := range ds.tools {
 		if slices.Contains(browsing, t.Name) {
-			ops = append(ops, map[string]any{"name": t.Name, "description": t.Description, "input": withComputer(t.InputSchema)})
+			ops = append(ops, map[string]any{"name": t.Name, "description": t.Description, "input": withDevice(t.InputSchema)})
 		}
 	}
-	return map[string]any{"title": "Agent Computers", "description": "Computers your agents use, each with a browser", "version": built, "icon": "browsers", "color": "#a2845e", "instructions": instructions, "ops": ops, "widgets": []any{}}
+	return map[string]any{"title": "Agent Devices", "description": "Devices your agents use, each with a browser", "version": built, "icon": "browsers", "color": "#a2845e", "instructions": instructions, "ops": ops, "widgets": []any{}}
 }
 
-// withComputer adds the computer argument to a tool's input.
-func withComputer(schema json.RawMessage) map[string]any {
+// withDevice adds the device argument to a tool's input.
+func withDevice(schema json.RawMessage) map[string]any {
 	var s map[string]any
 	json.Unmarshal(schema, &s)
 	if s == nil {
@@ -74,13 +74,13 @@ func withComputer(schema json.RawMessage) map[string]any {
 	if props == nil {
 		props = map[string]any{}
 	}
-	props["computer"] = computerArg
+	props["device"] = deviceArg
 	s["properties"] = props
 	return s
 }
 
 // refreshIfEmpty reads the tools if it never has.
-func (ds *computers) refreshIfEmpty(ctx context.Context) {
+func (ds *devices) refreshIfEmpty(ctx context.Context) {
 	ds.mu.Lock()
 	empty := len(ds.tools) == 0
 	ds.mu.Unlock()
@@ -89,15 +89,15 @@ func (ds *computers) refreshIfEmpty(ctx context.Context) {
 	}
 }
 
-// refresh reads the tools from a running computer: every computer runs the
+// refresh reads the tools from a running device: every device runs the
 // same image, so any one will do. It gives how many there are.
-func (ds *computers) refresh(ctx context.Context) (int, error) {
+func (ds *devices) refresh(ctx context.Context) (int, error) {
 	all, err := list(ctx)
 	if err != nil {
 		log.Print(err)
 		return 0, err
 	}
-	err = errors.New("no computer is running to read them from")
+	err = errors.New("no device is running to read them from")
 	for _, d := range all {
 		if d.State != "running" {
 			continue
@@ -124,10 +124,10 @@ func (ds *computers) refresh(ctx context.Context) (int, error) {
 	return 0, err
 }
 
-// conn is the computer's session, made the first time it's needed. A browser
+// conn is the device's session, made the first time it's needed. A browser
 // an earlier session launched can't be used or closed by this one, and holds
 // its profile, so those are closed first.
-func (ds *computers) conn(ctx context.Context, d computer) (*conn, error) {
+func (ds *devices) conn(ctx context.Context, d device) (*conn, error) {
 	ds.connMu.Lock()
 	defer ds.connMu.Unlock()
 	if c := ds.conns[d.Name]; c != nil {
@@ -142,7 +142,7 @@ func (ds *computers) conn(ctx context.Context, d computer) (*conn, error) {
 	return c, nil
 }
 
-func (ds *computers) drop(name string) {
+func (ds *devices) drop(name string) {
 	ds.connMu.Lock()
 	delete(ds.conns, name)
 	ds.connMu.Unlock()
@@ -153,9 +153,9 @@ func (ds *computers) drop(name string) {
 // bound to the connection that made it, so a new connection (as after this
 // program restarted) can't take an old one over.
 
-// call runs one of a computer's tools, dialing again once if the connection is
-// gone, as after the computer restarted.
-func (ds *computers) call(ctx context.Context, d computer, name string, args map[string]any) (result, error) {
+// call runs one of a device's tools, dialing again once if the connection is
+// gone, as after the device restarted.
+func (ds *devices) call(ctx context.Context, d device, name string, args map[string]any) (result, error) {
 	_, given := args["session"]
 	ours := !given && ds.takesSession(name)
 	var r result
@@ -208,7 +208,7 @@ func said(r result, code string) bool {
 	return false
 }
 
-func (ds *computers) takesSession(name string) bool {
+func (ds *devices) takesSession(name string) bool {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 	for _, t := range ds.tools {
@@ -222,13 +222,13 @@ func (ds *computers) takesSession(name string) bool {
 	return false
 }
 
-// closeBrowsers closes the browsers the computer's tools launched, and with
+// closeBrowsers closes the browsers the device's tools launched, and with
 // signIns the one sign_in opened too, marking their profiles as closed
 // normally, or they'd offer to restore their pages. One still closing after
 // 10s is killed: a profile's copied once this returns, and a copy of files
 // Chrome is writing can be broken where a killed Chrome's never is. With
 // signIns nothing of any browser's is left running, its helpers included.
-func closeBrowsers(ctx context.Context, d computer, signIns bool) {
+func closeBrowsers(ctx context.Context, d device, signIns bool) {
 	keep := signInClass
 	if signIns {
 		keep = "--matches-no-browser"
@@ -275,23 +275,23 @@ func content(r result) (any, error) {
 	return map[string]any{"content": items}, nil
 }
 
-func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (any, error) {
+func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any, error) {
 	in := map[string]any{}
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &in); err != nil {
 			return nil, fmt.Errorf("bad input: %w", err)
 		}
 	}
-	name, _ := in["computer"].(string)
-	delete(in, "computer")
+	name, _ := in["device"].(string)
+	delete(in, "device")
 	text := func(k string) string { s, _ := in[k].(string); return strings.TrimSpace(s) }
 	here, _ := in["here"].(bool)
 	delete(in, "here")
 	if name != "" && !here && !slices.Contains(local, op) {
-		// A computer on another server: pass the call on to it.
+		// A device on another server: pass the call on to it.
 		if _, err := find(ctx, name); err != nil {
 			if s := ds.located(ctx, name); s != "" {
-				in["computer"], in["here"] = name, true
+				in["device"], in["here"] = name, true
 				return ds.callNode(ctx, s, op, in)
 			}
 		}
@@ -300,7 +300,7 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 	case "list":
 		if here {
 			all, err := ds.listHere(ctx)
-			return map[string]any{"computers": all}, err
+			return map[string]any{"devices": all}, err
 		}
 		return ds.listAll(ctx)
 	case "create":
@@ -314,7 +314,7 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		}
 		ds.touch(d.Name)
 		ds.refreshIfEmpty(ctx)
-		return fmt.Sprintf("Created computer %s, %s. Its browser is yours to sign in to sites with: open it with view.", d.Name, sz), nil
+		return fmt.Sprintf("Created device %s, %s. Its browser is yours to sign in to sites with: open it with view.", d.Name, sz), nil
 	case "resize":
 		sz, err := sizeNamed(text("size"))
 		if err != nil {
@@ -327,7 +327,7 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		if err := resize(ctx, d, sz); err != nil {
 			return nil, err
 		}
-		return fmt.Sprintf("Computer %s is now %s.", d.Name, sz), nil
+		return fmt.Sprintf("Device %s is now %s.", d.Name, sz), nil
 	case "start":
 		d, err := find(ctx, name)
 		if err != nil || d.State != "stopped" {
@@ -362,14 +362,14 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		if _, ok := ds.loans()[d.Name]; ok {
 			ds.setLoan(d.Name, nil)
 		}
-		return fmt.Sprintf("Deleted computer %s and everything in it.", d.Name), nil
+		return fmt.Sprintf("Deleted device %s and everything in it.", d.Name), nil
 	case "view":
 		d, err := ds.running(ctx, name)
 		if err != nil {
 			return nil, err
 		}
 		if ds.loans()[d.Name].NoScreen {
-			return nil, fmt.Errorf("computer %s was made without a screen: there's nothing to watch", d.Name)
+			return nil, fmt.Errorf("device %s was made without a screen: there's nothing to watch", d.Name)
 		}
 		minutes := 60
 		if m, ok := in["minutes"].(float64); ok {
@@ -397,7 +397,7 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		if err != nil {
 			return nil, err
 		}
-		return fmt.Sprintf("Read %d tools from the computers.", n), nil
+		return fmt.Sprintf("Read %d tools from the devices.", n), nil
 	case "use":
 		tool, _ := in["tool"].(string)
 		args, _ := in["args"].(map[string]any)
@@ -421,8 +421,8 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 			return nil, err
 		}
 		me, _, _ := ds.servers(ctx)
-		out := map[string]any{"computer": d.Name, "server": me}
-		msg := fmt.Sprintf("Borrowed computer %s: pass computer %q to the other tools.", d.Name, d.Name)
+		out := map[string]any{"device": d.Name, "server": me}
+		msg := fmt.Sprintf("Borrowed device %s: pass device %q to the other tools.", d.Name, d.Name)
 		if p != nil {
 			out["profile"] = p.Name
 			msg += fmt.Sprintf(` Its browser starts with a copy of the %s profile: browser_prepare with allow_launch true and profile {"mode":"isolated_named","name":%q}.`, p.Name, p.Name)
@@ -431,16 +431,16 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		return out, nil
 	case "give_back":
 		if name == "" {
-			return nil, errors.New("which computer? pass the one you borrowed")
+			return nil, errors.New("which device? pass the one you borrowed")
 		}
 		l, ok := ds.loans()[name]
 		if err := ds.giveBack(ctx, name, "given back by "+caller(ctx)); err != nil {
 			return nil, err
 		}
 		if ok && l.SigningIn {
-			return fmt.Sprintf("Saved the %s profile and closed computer %s.", l.Profile, name), nil
+			return fmt.Sprintf("Saved the %s profile and closed device %s.", l.Profile, name), nil
 		}
-		return fmt.Sprintf("Gave back computer %s.", name), nil
+		return fmt.Sprintf("Gave back device %s.", name), nil
 	case "sign_in":
 		p, err := profileIn(in)
 		if err != nil || p == nil {
@@ -465,9 +465,9 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		}
 		msg := fmt.Sprintf("Sign in to sites in the %s profile here:\n%s\nIt's saved in %d minutes, or as soon as it's saved (save_profile).", p.Name, url, minutes)
 		me, _, _ := ds.servers(ctx)
-		return map[string]any{"computer": d.Name, "server": me, "profile": p.Name, "url": url, "until": until, "text": msg}, nil
+		return map[string]any{"device": d.Name, "server": me, "profile": p.Name, "url": url, "until": until, "text": msg}, nil
 	case "save_profile":
-		// The computer signing in to the profile, or the one named, with the profile the app gives (and its key).
+		// The device signing in to the profile, or the one named, with the profile the app gives (and its key).
 		p, err := profileIn(in)
 		if err != nil {
 			return nil, err
@@ -506,19 +506,19 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 			if err := ds.giveBack(ctx, d.Name, "signed in"); err != nil {
 				return nil, err
 			}
-			return fmt.Sprintf("Saved the %s profile and closed computer %s.", p.Name, d.Name), nil
+			return fmt.Sprintf("Saved the %s profile and closed device %s.", p.Name, d.Name), nil
 		}
 		if err := ds.saveProfile(ctx, d, p); err != nil {
 			return nil, err
 		}
-		return fmt.Sprintf("Saved computer %s's browser as the %s profile: computers borrowed with it start signed in to the same sites.", d.Name, p.Name), nil
+		return fmt.Sprintf("Saved device %s's browser as the %s profile: devices borrowed with it start signed in to the same sites.", d.Name, p.Name), nil
 	case "signing_in":
-		// Which profiles are being signed in to here: their items, with the computer and its server.
+		// Which profiles are being signed in to here: their items, with the device and its server.
 		me, _, _ := ds.servers(ctx)
 		out := []map[string]any{}
 		for n, l := range ds.loans() {
 			if l.SigningIn {
-				out = append(out, map[string]any{"item": l.Item, "profile": l.Profile, "computer": n, "server": me, "until": l.Until})
+				out = append(out, map[string]any{"item": l.Item, "profile": l.Profile, "device": n, "server": me, "until": l.Until})
 			}
 		}
 		return map[string]any{"signing_in": out}, nil
@@ -531,7 +531,7 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		if err != nil {
 			return nil, err
 		}
-		return reply{ok: map[string]any{"backup": rec, "text": fmt.Sprintf("Backed up computer %s (%s). Restore it on any server with restore.", d.Name, bytesText(rec.Bytes))},
+		return reply{ok: map[string]any{"backup": rec, "text": fmt.Sprintf("Backed up device %s (%s). Restore it on any server with restore.", d.Name, bytesText(rec.Bytes))},
 			blobs: []string{rec.Blob}}, nil
 	case "backups":
 		if here {
@@ -548,7 +548,7 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		if err != nil {
 			return nil, err
 		}
-		as := cmpOr(text("as"), cmpOr(name, rec.Computer))
+		as := cmpOr(text("as"), cmpOr(name, rec.Device))
 		sz, err := sizeNamed(cmpOr(text("size"), rec.Size))
 		if err != nil {
 			sz = sizes[0]
@@ -558,7 +558,7 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 			return nil, err
 		}
 		ds.touch(d.Name)
-		return fmt.Sprintf("Restored computer %s from its backup of %s.", d.Name, rec.At.Local().Format(time.DateTime)), nil
+		return fmt.Sprintf("Restored device %s from its backup of %s.", d.Name, rec.At.Local().Format(time.DateTime)), nil
 	case "move":
 		to := text("to")
 		if to == "" {
@@ -569,7 +569,7 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 			return nil, err
 		}
 		if _, ok := ds.loans()[d.Name]; ok {
-			return nil, errors.New("a borrowed computer can't be moved: borrow one on the other server")
+			return nil, errors.New("a borrowed device can't be moved: borrow one on the other server")
 		}
 		closeBrowsers(ctx, d, true)
 		// Backed up through the node, so the entry naming the backup's blob is
@@ -578,7 +578,7 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 		if err != nil {
 			return nil, err
 		}
-		raw, err := ds.callNode(ctx, me, "backup", map[string]any{"computer": d.Name, "here": true})
+		raw, err := ds.callNode(ctx, me, "backup", map[string]any{"device": d.Name, "here": true})
 		if err != nil {
 			return nil, err
 		}
@@ -587,14 +587,14 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 			return nil, fmt.Errorf("backing it up: %s", raw)
 		}
 		rec := backed.Backup
-		if _, err := ds.callNode(ctx, to, "restore", map[string]any{"computer": d.Name, "blob": rec.Blob, "size": rec.Size}); err != nil {
+		if _, err := ds.callNode(ctx, to, "restore", map[string]any{"device": d.Name, "blob": rec.Blob, "size": rec.Size}); err != nil {
 			return nil, fmt.Errorf("not moved: restoring it on %s: %w", to, err)
 		}
 		ds.drop(d.Name)
 		if err := stop(ctx, d); err != nil {
 			return nil, fmt.Errorf("moved to %s, but stopping it here failed: %w", to, err)
 		}
-		return fmt.Sprintf("Moved computer %s to %s, where it's running. It's stopped here; delete it here (delete) once it's fine there.", d.Name, to), nil
+		return fmt.Sprintf("Moved device %s to %s, where it's running. It's stopped here; delete it here (delete) once it's fine there.", d.Name, to), nil
 	}
 	if slices.Contains(browsing, op) {
 		return ds.use(ctx, name, op, in)
@@ -602,9 +602,9 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 	return nil, fmt.Errorf("no operation %s", op)
 }
 
-func (ds *computers) use(ctx context.Context, name, tool string, args map[string]any) (any, error) {
+func (ds *devices) use(ctx context.Context, name, tool string, args map[string]any) (any, error) {
 	if tool == "" {
-		return nil, errors.New("which tool? computers_tools lists them")
+		return nil, errors.New("which tool? computer_tools lists them")
 	}
 	d, err := ds.running(ctx, name)
 	if err != nil {
@@ -620,13 +620,13 @@ func (ds *computers) use(ctx context.Context, name, tool string, args map[string
 	return content(r)
 }
 
-// list is the computer's tools other than the browser's, or one in full.
-func (ds *computers) list(ctx context.Context, computer string, name any) (any, error) {
+// list is the device's tools other than the browser's, or one in full.
+func (ds *devices) list(ctx context.Context, device string, name any) (any, error) {
 	ds.mu.Lock()
 	tools := ds.tools
 	ds.mu.Unlock()
 	if len(tools) == 0 {
-		if _, err := ds.running(ctx, computer); err != nil {
+		if _, err := ds.running(ctx, device); err != nil {
 			return nil, err
 		}
 		ds.refresh(ctx)
@@ -660,8 +660,8 @@ func gist(s string) string {
 	return s
 }
 
-// screen is a small JPEG of the computer.
-func (ds *computers) screen(ctx context.Context, d computer, width int) (any, error) {
+// screen is a small JPEG of the device.
+func (ds *devices) screen(ctx context.Context, d device, width int) (any, error) {
 	r, err := ds.call(ctx, d, "get_desktop_state", map[string]any{"max_image_dimension": width})
 	if err != nil {
 		return nil, err
@@ -685,15 +685,15 @@ func (ds *computers) screen(ctx context.Context, d computer, width int) (any, er
 		}
 		return map[string]any{"content": []map[string]any{
 			{"type": "image", "mimeType": "image/jpeg", "data": base64.StdEncoding.EncodeToString(b.Bytes())},
-			{"type": "text", "text": "Computer " + d.Name + " now."},
+			{"type": "text", "text": "Device " + d.Name + " now."},
 		}}, nil
 	}
-	return nil, errors.New("the computer sent no picture")
+	return nil, errors.New("the device sent no picture")
 }
 
-// viewURL is a link to the computer's viewer that works for minutes, served
+// viewURL is a link to the device's viewer that works for minutes, served
 // over HTTPS on the tailnet: browsers only play its video on secure pages.
-func viewURL(ctx context.Context, d computer, minutes int) (string, error) {
+func viewURL(ctx context.Context, d device, minutes int) (string, error) {
 	port := strconv.Itoa(d.port)
 	if _, err := tailscale(ctx, "serve", "--bg", "--https="+port, "http://127.0.0.1:"+port); err != nil {
 		return "", err
@@ -714,7 +714,7 @@ func viewURL(ctx context.Context, d computer, minutes int) (string, error) {
 }
 
 // local are the operations that act on this server even when given a
-// computer it doesn't have.
+// device it doesn't have.
 var local = []string{"list", "create", "borrow", "sign_in", "signing_in", "backups", "restore", "refresh_tools"}
 
 // reply is a result with blobs the caller's scope keeps, so its servers can fetch them.

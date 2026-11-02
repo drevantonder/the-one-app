@@ -14,9 +14,9 @@ import (
 	"sync/atomic"
 )
 
-// conn is an MCP session with a computer's server, over streamable HTTP. The
+// conn is an MCP session with a device's server, over streamable HTTP. The
 // browsers its tools launch belong to the session that launched them, so a
-// computer keeps one for as long as this runs.
+// device keeps one for as long as this runs.
 type conn struct {
 	url, token string
 	id         string // the session's, from the server
@@ -25,7 +25,7 @@ type conn struct {
 }
 
 // errGone is a session the server no longer knows, as after it restarted.
-var errGone = errors.New("the computer's session ended")
+var errGone = errors.New("the device's session ended")
 
 type tool struct {
 	Name        string          `json:"name"`
@@ -33,7 +33,7 @@ type tool struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
-func dial(ctx context.Context, d computer) (*conn, error) {
+func dial(ctx context.Context, d device) (*conn, error) {
 	b := make([]byte, 3)
 	rand.Read(b)
 	c := &conn{url: d.local() + "/mcp", token: d.token, label: "agents-" + hex.EncodeToString(b)}
@@ -122,7 +122,7 @@ func (c *conn) send(ctx context.Context, msg map[string]any) ([]byte, error) {
 	case resp.StatusCode == http.StatusNotFound && c.id != "":
 		return nil, errGone
 	case resp.StatusCode >= 300:
-		return nil, fmt.Errorf("the computer's server: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("the device's server: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	case msg["id"] == nil:
 		return nil, nil
 	case strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream"):
@@ -147,5 +147,5 @@ func event(stream []byte) ([]byte, error) {
 			return msg, nil
 		}
 	}
-	return nil, errors.New("the computer's server sent no reply")
+	return nil, errors.New("the device's server sent no reply")
 }

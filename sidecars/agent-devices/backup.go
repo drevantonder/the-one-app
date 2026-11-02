@@ -15,27 +15,27 @@ import (
 	"time"
 )
 
-// A backup is a copy of a computer's home folder, without caches, as a blob in
-// the install: any server can fetch it, so a computer can be restored on
+// A backup is a copy of a device's home folder, without caches, as a blob in
+// the install: any server can fetch it, so a device can be restored on
 // another (move). Each server keeps an index of its own backups on disk, and
 // each backup is an entry in the user's log too. These aren't kept off-site:
 // a blob lives on the servers that have fetched it, and a backup to a bucket
 // isn't built yet.
 
 type backupRecord struct {
-	Computer string    `json:"computer"`
+	Device string    `json:"device"`
 	Server   string    `json:"server"`
 	Blob     string    `json:"blob"`
 	Bytes    int64     `json:"bytes"`
-	Size     string    `json:"size"` // the computer's
+	Size     string    `json:"size"` // the device's
 	At       time.Time `json:"at"`
 }
 
 const keepBackups = 5
 
-func (ds *computers) backupIndex() string { return filepath.Join(ds.dir, "backups.json") }
+func (ds *devices) backupIndex() string { return filepath.Join(ds.dir, "backups.json") }
 
-func (ds *computers) backupsHere() []backupRecord {
+func (ds *devices) backupsHere() []backupRecord {
 	var all []backupRecord
 	if b, err := os.ReadFile(ds.backupIndex()); err == nil {
 		json.Unmarshal(b, &all)
@@ -43,14 +43,14 @@ func (ds *computers) backupsHere() []backupRecord {
 	return all
 }
 
-// backup packs the computer's home folder into a blob and records it, keeping
+// backup packs the device's home folder into a blob and records it, keeping
 // the newest few in the index.
-func (ds *computers) backup(ctx context.Context, d computer) (backupRecord, error) {
+func (ds *devices) backup(ctx context.Context, d device) (backupRecord, error) {
 	me, _, err := ds.servers(ctx)
 	if err != nil {
 		return backupRecord{}, err
 	}
-	lims, _ := limits(ctx, []computer{d})
+	lims, _ := limits(ctx, []device{d})
 	pr, pw := io.Pipe()
 	packed := make(chan error, 1)
 	go func() {
@@ -84,7 +84,7 @@ func (ds *computers) backup(ctx context.Context, d computer) (backupRecord, erro
 	if resp.StatusCode != http.StatusOK || put.Blob == "" {
 		return backupRecord{}, fmt.Errorf("storing the backup: %s", cmpOr(put.Error, resp.Status))
 	}
-	rec := backupRecord{Computer: d.Name, Server: me, Blob: put.Blob, Bytes: put.Size, Size: lims[d.Name].sizeOf(), At: time.Now().UTC()}
+	rec := backupRecord{Device: d.Name, Server: me, Blob: put.Blob, Bytes: put.Size, Size: lims[d.Name].sizeOf(), At: time.Now().UTC()}
 	ds.backupMu.Lock()
 	defer ds.backupMu.Unlock()
 	all := append(ds.backupsHere(), rec)
@@ -92,7 +92,7 @@ func (ds *computers) backup(ctx context.Context, d computer) (backupRecord, erro
 	for i, r := range all {
 		newer := 0
 		for _, o := range all[i+1:] {
-			if o.Computer == r.Computer {
+			if o.Device == r.Device {
 				newer++
 			}
 		}
@@ -108,8 +108,8 @@ func (ds *computers) backup(ctx context.Context, d computer) (backupRecord, erro
 	return rec, nil
 }
 
-// backupsAll are every server's backups, of one computer or all, newest first.
-func (ds *computers) backupsAll(ctx context.Context, computer string) ([]backupRecord, map[string]string) {
+// backupsAll are every server's backups, of one device or all, newest first.
+func (ds *devices) backupsAll(ctx context.Context, device string) ([]backupRecord, map[string]string) {
 	all := ds.backupsHere()
 	got, failed := ds.everywhere(ctx, "backups", nil)
 	for _, r := range got {
@@ -119,7 +119,7 @@ func (ds *computers) backupsAll(ctx context.Context, computer string) ([]backupR
 	}
 	out := []backupRecord{}
 	for _, r := range all {
-		if computer == "" || r.Computer == computer {
+		if device == "" || r.Device == device {
 			out = append(out, r)
 		}
 	}
@@ -127,11 +127,11 @@ func (ds *computers) backupsAll(ctx context.Context, computer string) ([]backupR
 	return out, failed
 }
 
-// restore makes a computer from a backup: a new one, its home folder unpacked
+// restore makes a device from a backup: a new one, its home folder unpacked
 // from the blob, fetched from whichever server has it.
-func (ds *computers) restore(ctx context.Context, name string, rec backupRecord, sz size) (computer, error) {
+func (ds *devices) restore(ctx context.Context, name string, rec backupRecord, sz size) (device, error) {
 	if _, err := find(ctx, name); err == nil {
-		return computer{}, fmt.Errorf("computer %s already exists", name)
+		return device{}, fmt.Errorf("device %s already exists", name)
 	}
 	var resp *http.Response
 	// Another server serves the blob once the entry naming it reaches it,
@@ -139,10 +139,10 @@ func (ds *computers) restore(ctx context.Context, name string, rec backupRecord,
 	for try := 0; ; try++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ds.node+"/v1/blobs/"+rec.Blob, nil)
 		if err != nil {
-			return computer{}, err
+			return device{}, err
 		}
 		if resp, err = http.DefaultClient.Do(req); err != nil {
-			return computer{}, err
+			return device{}, err
 		}
 		if resp.StatusCode == http.StatusOK {
 			break
@@ -150,7 +150,7 @@ func (ds *computers) restore(ctx context.Context, name string, rec backupRecord,
 		msg, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if try == 5 {
-			return computer{}, fmt.Errorf("fetching the backup: %s: %s", resp.Status, msg)
+			return device{}, fmt.Errorf("fetching the backup: %s: %s", resp.Status, msg)
 		}
 		time.Sleep(2 * time.Second)
 	}
@@ -159,10 +159,10 @@ func (ds *computers) restore(ctx context.Context, name string, rec backupRecord,
 	if err != nil {
 		return d, err
 	}
-	fail := func(err error) (computer, error) {
+	fail := func(err error) (device, error) {
 		ds.drop(d.Name)
 		remove(context.WithoutCancel(ctx), d)
-		return computer{}, err
+		return device{}, err
 	}
 	if err := in(ctx, d, resp.Body, nil, "tar", "-C", home, "-xzf", "-"); err != nil {
 		return fail(fmt.Errorf("unpacking the backup: %w", err))
@@ -177,18 +177,18 @@ func (ds *computers) restore(ctx context.Context, name string, rec backupRecord,
 }
 
 // findBackup is the backup with the blob given, or else the newest of the
-// computer.
-func (ds *computers) findBackup(ctx context.Context, computer, blob string) (backupRecord, error) {
+// device.
+func (ds *devices) findBackup(ctx context.Context, device, blob string) (backupRecord, error) {
 	all, failed := ds.backupsAll(ctx, "")
 	for _, r := range all {
-		if blob != "" && r.Blob == blob || blob == "" && r.Computer == computer {
+		if blob != "" && r.Blob == blob || blob == "" && r.Device == device {
 			return r, nil
 		}
 	}
 	if blob != "" {
-		return backupRecord{Computer: computer, Blob: blob}, nil // a blob from elsewhere
+		return backupRecord{Device: device, Blob: blob}, nil // a blob from elsewhere
 	}
-	msg := fmt.Sprintf("no backup of computer %s", computer)
+	msg := fmt.Sprintf("no backup of device %s", device)
 	if len(failed) > 0 {
 		msg += fmt.Sprintf(" (couldn't ask %d servers)", len(failed))
 	}

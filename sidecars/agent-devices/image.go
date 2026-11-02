@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// Computers run Cua's image with Google Chrome in place of its Chromium, so
+// Devices run Cua's image with Google Chrome in place of its Chromium, so
 // the person can sign in to the browser as their Google account. Chrome's
 // terms don't let us pass it on, so each server builds the image itself,
 // downloading Chrome from Google, and builds it again each week for Chrome's
@@ -38,7 +38,7 @@ RUN curl -fsSLo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome
   > /etc/opt/chrome/policies/managed/one.json
 `
 
-const imageName = "localhost/one-agent-computer"
+const imageName = "localhost/one-agent-device"
 
 // imageFor is the week's image: a new recipe or a new week is a new one.
 func imageFor(now time.Time) string {
@@ -50,7 +50,7 @@ func imageFor(now time.Time) string {
 var building sync.Mutex
 
 // ensureImage builds this week's image if this server hasn't yet, then
-// deletes the older ones no computer uses.
+// deletes the older ones no device uses.
 func ensureImage(ctx context.Context) (string, error) {
 	building.Lock()
 	defer building.Unlock()
@@ -58,7 +58,7 @@ func ensureImage(ctx context.Context) (string, error) {
 	if rt.hasImage(ctx, img) {
 		return img, nil
 	}
-	dir, err := os.MkdirTemp("", "agent-computer-image")
+	dir, err := os.MkdirTemp("", "agent-device-image")
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +69,7 @@ func ensureImage(ctx context.Context) (string, error) {
 	log.Printf("building %s, with Chrome from Google", img)
 	start := time.Now()
 	if err := rt.build(context.WithoutCancel(ctx), img, dir); err != nil {
-		return "", fmt.Errorf("building the computers' image: %w", err)
+		return "", fmt.Errorf("building the devices' image: %w", err)
 	}
 	log.Printf("built %s in %s", img, time.Since(start).Round(time.Second))
 	old, err := rt.images(ctx)
@@ -78,7 +78,7 @@ func ensureImage(ctx context.Context) (string, error) {
 	}
 	for _, o := range old {
 		if strings.HasPrefix(o, imageName+":") && o != img {
-			rt.removeImage(ctx, o) // refused while a computer runs on it
+			rt.removeImage(ctx, o) // refused while a device runs on it
 		}
 	}
 	return img, nil

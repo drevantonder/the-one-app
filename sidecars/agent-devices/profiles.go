@@ -25,12 +25,12 @@ import (
 // over this sidecar names the item in its calls, and the node fills in the
 // secret, so only this process ever holds it or the profile; the app records
 // each save on the item (its blob, salt and sites), and nothing here keeps a
-// profile once its computer is gone.
+// profile once its device is gone.
 
-// A profile is what a call says of the browser profile a computer starts with.
+// A profile is what a call says of the browser profile a device starts with.
 type profile struct {
 	Item string `json:"item"`           // the Vault item's id
-	Name string `json:"name"`           // its title, the profile's folder in the computer
+	Name string `json:"name"`           // its title, the profile's folder in the device
 	Key  string `json:"key"`            // its secret field, filled in by the node
 	Blob string `json:"blob,omitempty"` // its last save; none for a new one
 	Salt string `json:"salt,omitempty"`
@@ -54,7 +54,7 @@ func profileIn(in map[string]any) (*profile, error) {
 	return &p, nil
 }
 
-// folder is the profile's folder in a computer, named as its item is, as far
+// folder is the profile's folder in a device, named as its item is, as far
 // as the browser tools allow: letters, digits and dashes.
 func folder(title string) string {
 	b := []byte(strings.TrimSpace(title))
@@ -105,9 +105,9 @@ func unseal(key, salt string, sealed []byte) ([]byte, error) {
 	return plain, nil
 }
 
-// unpack puts the profile's last save in the computer's browser profiles, or
+// unpack puts the profile's last save in the device's browser profiles, or
 // an empty profile for one never saved.
-func (ds *computers) unpack(ctx context.Context, d computer, p *profile) error {
+func (ds *devices) unpack(ctx context.Context, d device, p *profile) error {
 	if p.Blob == "" {
 		return sh(ctx, d, owned(p.Name))
 	}
@@ -135,11 +135,11 @@ type save struct {
 	Sites string `json:"sites"`
 }
 
-// pack closes the computer's browsers, so the profile is written out, and
+// pack closes the device's browsers, so the profile is written out, and
 // saves it as a new blob, encrypted with a fresh salt; the app records it.
-func (ds *computers) pack(ctx context.Context, d computer, p *profile) (save, error) {
+func (ds *devices) pack(ctx context.Context, d device, p *profile) (save, error) {
 	if err := sh(ctx, d, "test -d "+profiles+p.Name); err != nil {
-		return save{}, fmt.Errorf("computer %s's browser has no %s profile", d.Name, p.Name)
+		return save{}, fmt.Errorf("device %s's browser has no %s profile", d.Name, p.Name)
 	}
 	closeBrowsers(ctx, d, true)
 	args := append([]string{"tar", "-C", profiles + p.Name, "--warning=no-file-changed"}, excludes(".")...)
@@ -163,7 +163,7 @@ func (ds *computers) pack(ctx context.Context, d computer, p *profile) (save, er
 
 // saved has the app record a save on the profile's item. A save made while a
 // call of the app's waits (save_profile) is recorded the same way.
-func (ds *computers) saved(ctx context.Context, s save) error {
+func (ds *devices) saved(ctx context.Context, s save) error {
 	if _, err := ds.callApp(ctx, "_saved", s); err != nil {
 		return fmt.Errorf("recording the save: %w", err)
 	}
@@ -172,7 +172,7 @@ func (ds *computers) saved(ctx context.Context, s save) error {
 
 // history reads a Chrome profile's History: each site's registrable domain
 // (example.com, example.com.au) with the day it was last used, newest first,
-// at most 30. Python's sqlite3 is in every computer, so this needs nothing
+// at most 30. Python's sqlite3 is in every device, so this needs nothing
 // new; a short list of second-level labels stands in for the public suffix
 // list.
 const history = `
@@ -196,7 +196,7 @@ print(", ".join(f"{s} {day(t)}" for s, t in sorted(last.items(), key=lambda x: -
 
 // sites are the sites the profile was used on, as history reads them; "" if
 // it has no history yet.
-func sites(ctx context.Context, d computer, name string) string {
+func sites(ctx context.Context, d device, name string) string {
 	var out bytes.Buffer
 	file := profiles + name + "/Default/History"
 	if err := in(ctx, d, strings.NewReader(history), &out, "sh", "-c", `test -f "$1" && python3 - "$1" || true`, "sh", file); err != nil {
@@ -206,7 +206,7 @@ func sites(ctx context.Context, d computer, name string) string {
 	return strings.TrimSpace(out.String())
 }
 
-func (ds *computers) putBlob(ctx context.Context, b []byte) (string, error) {
+func (ds *devices) putBlob(ctx context.Context, b []byte) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ds.node+"/v1/blobs", bytes.NewReader(b))
 	if err != nil {
 		return "", err
@@ -227,7 +227,7 @@ func (ds *computers) putBlob(ctx context.Context, b []byte) (string, error) {
 	return put.Blob, nil
 }
 
-func (ds *computers) getBlob(ctx context.Context, hash string) ([]byte, error) {
+func (ds *devices) getBlob(ctx context.Context, hash string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ds.node+"/v1/blobs/"+hash, nil)
 	if err != nil {
 		return nil, err

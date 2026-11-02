@@ -17,12 +17,12 @@ import (
 
 // This sidecar reaches the same sidecar on the user's other servers through
 // its own node's local API, as any app would: list and backups show every
-// server's, and move restores a computer on another. Calls passed on carry
+// server's, and move restores a device on another. Calls passed on carry
 // here: true, so they go no further.
 
 // callNode runs op on server (by name; "" for wherever the node picks) and
 // returns its result.
-func (ds *computers) callNode(ctx context.Context, server, op string, input map[string]any) (json.RawMessage, error) {
+func (ds *devices) callNode(ctx context.Context, server, op string, input map[string]any) (json.RawMessage, error) {
 	req := map[string]any{"app": app, "sidecar": app, "op": op, "input": input}
 	if server != "" {
 		req["server"] = server
@@ -31,11 +31,11 @@ func (ds *computers) callNode(ctx context.Context, server, op string, input map[
 }
 
 // callApp calls one of the app's operations, on this server's node.
-func (ds *computers) callApp(ctx context.Context, op string, input any) (json.RawMessage, error) {
+func (ds *devices) callApp(ctx context.Context, op string, input any) (json.RawMessage, error) {
 	return ds.post(ctx, map[string]any{"app": app, "op": op, "input": input})
 }
 
-func (ds *computers) post(ctx context.Context, req map[string]any) (json.RawMessage, error) {
+func (ds *devices) post(ctx context.Context, req map[string]any) (json.RawMessage, error) {
 	b, _ := json.Marshal(req)
 	r, err := http.NewRequestWithContext(ctx, http.MethodPost, ds.node+"/v1/call", bytes.NewReader(b))
 	if err != nil {
@@ -67,8 +67,8 @@ func cmpOr(a, b string) string {
 }
 
 // servers are this server's name and the other online servers that run
-// computers, as the node says.
-func (ds *computers) servers(ctx context.Context) (me string, others []string, err error) {
+// devices, as the node says.
+func (ds *devices) servers(ctx context.Context) (me string, others []string, err error) {
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, ds.node+"/v1/state", nil)
 	if err != nil {
 		return "", nil, err
@@ -100,9 +100,9 @@ func (ds *computers) servers(ctx context.Context) (me string, others []string, e
 	return st.Me.Name, others, nil
 }
 
-// everywhere runs op on every other server that runs computers, at once,
+// everywhere runs op on every other server that runs devices, at once,
 // giving each one's result, or why it couldn't.
-func (ds *computers) everywhere(ctx context.Context, op string, input map[string]any) (map[string]json.RawMessage, map[string]string) {
+func (ds *devices) everywhere(ctx context.Context, op string, input map[string]any) (map[string]json.RawMessage, map[string]string) {
 	_, others, err := ds.servers(ctx)
 	got, failed := map[string]json.RawMessage{}, map[string]string{}
 	if err != nil {
@@ -133,7 +133,7 @@ func (ds *computers) everywhere(ctx context.Context, op string, input map[string
 	return got, failed
 }
 
-// listed is a computer as list shows it.
+// listed is a device as list shows it.
 type listed struct {
 	Name        string    `json:"name"`
 	Server      string    `json:"server"`
@@ -149,8 +149,8 @@ type listed struct {
 	LastCall    time.Time `json:"last_call,omitzero"`
 }
 
-// listHere is this server's computers.
-func (ds *computers) listHere(ctx context.Context) ([]listed, error) {
+// listHere is this server's devices.
+func (ds *devices) listHere(ctx context.Context) ([]listed, error) {
 	me, _, err := ds.servers(ctx)
 	if err != nil {
 		return nil, err
@@ -182,23 +182,23 @@ func (ds *computers) listHere(ctx context.Context) ([]listed, error) {
 	return out, nil
 }
 
-// listAll is every server's computers, this one's first.
-func (ds *computers) listAll(ctx context.Context) (map[string]any, error) {
+// listAll is every server's devices, this one's first.
+func (ds *devices) listAll(ctx context.Context) (map[string]any, error) {
 	all, err := ds.listHere(ctx)
 	if err != nil {
 		return nil, err
 	}
 	got, failed := ds.everywhere(ctx, "list", nil)
 	for _, s := range slices.Sorted(maps.Keys(got)) {
-		var r struct{ Computers []listed }
+		var r struct{ Devices []listed }
 		if err := json.Unmarshal(got[s], &r); err != nil {
 			failed[s] = err.Error()
 		}
-		all = append(all, r.Computers...)
+		all = append(all, r.Devices...)
 	}
-	out := map[string]any{"computers": all}
+	out := map[string]any{"devices": all}
 	if len(all) == 0 {
-		out["note"] = "No computers. Borrow one with borrow, or make a lasting one with create."
+		out["note"] = "No devices. Borrow one with borrow, or make a lasting one with create."
 	}
 	if len(failed) > 0 {
 		var why []string
@@ -211,13 +211,13 @@ func (ds *computers) listAll(ctx context.Context) (map[string]any, error) {
 	return out, nil
 }
 
-// located is the other server that has the computer named, or "".
-func (ds *computers) located(ctx context.Context, name string) string {
+// located is the other server that has the device named, or "".
+func (ds *devices) located(ctx context.Context, name string) string {
 	got, _ := ds.everywhere(ctx, "list", nil)
 	for s, r := range got {
-		var theirs struct{ Computers []listed }
+		var theirs struct{ Devices []listed }
 		json.Unmarshal(r, &theirs)
-		for _, d := range theirs.Computers {
+		for _, d := range theirs.Devices {
 			if d.Name == name {
 				return s
 			}
@@ -227,8 +227,8 @@ func (ds *computers) located(ctx context.Context, name string) string {
 }
 
 // borrowElsewhere runs op (borrow or sign_in) on another server that runs
-// computers, for a server that shouldn't make one itself; nil if none could.
-func (ds *computers) borrowElsewhere(ctx context.Context, op string, input map[string]any) json.RawMessage {
+// devices, for a server that shouldn't make one itself; nil if none could.
+func (ds *devices) borrowElsewhere(ctx context.Context, op string, input map[string]any) json.RawMessage {
 	_, others, err := ds.servers(ctx)
 	if err != nil {
 		return nil
@@ -247,8 +247,8 @@ func (ds *computers) borrowElsewhere(ctx context.Context, op string, input map[s
 	return nil
 }
 
-// signingIn reports whether a computer here is signing in to the profile.
-func (ds *computers) signingIn(item string) bool {
+// signingIn reports whether a device here is signing in to the profile.
+func (ds *devices) signingIn(item string) bool {
 	for _, l := range ds.loans() {
 		if l.SigningIn && l.Item == item {
 			return true
@@ -257,9 +257,9 @@ func (ds *computers) signingIn(item string) bool {
 	return false
 }
 
-// signingInElsewhere is the other server with a computer signing in to the
+// signingInElsewhere is the other server with a device signing in to the
 // profile, or "".
-func (ds *computers) signingInElsewhere(ctx context.Context, item string) string {
+func (ds *devices) signingInElsewhere(ctx context.Context, item string) string {
 	got, _ := ds.everywhere(ctx, "signing_in", nil)
 	for s, r := range got {
 		var theirs struct {

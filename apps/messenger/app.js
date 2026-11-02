@@ -1,4 +1,4 @@
-// Messenger: the person's Facebook Messenger, read through messenger.com in an agent computer's browser. The messenger sidecar
+// Messenger: the person's Facebook Messenger, read through messenger.com in an agent device's browser. The messenger sidecar
 // drives the browser, on each server whose owner installed it; this app is what people and agents use, and a
 // connector: each account is a browser profile signed in to Messenger.
 
@@ -13,7 +13,7 @@ async function sidecar(ctx, op, input) {
   }
 }
 
-const NEEDS = "Messenger needs Computer Use on one of your servers, and none of them runs it. Ask an owner of one to install it.";
+const NEEDS = "Messenger needs Agent Devices on one of your servers, and none of them runs it. Ask an owner of one to install it.";
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
@@ -47,8 +47,8 @@ export default {
   domain: "messenger.com",
   description: "Your Messenger chats, for your agents: read, search and send",
   connector: true,
-  needs: "Needs Computer Use on one of your servers",
-  instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in an agent computer's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
+  needs: "Needs Agent Devices on one of your servers",
+  instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in an agent device's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
   uses: { sidecars: ["messenger"] },
   vault: VAULT,
 
@@ -90,7 +90,7 @@ export default {
     },
     sign_in: {
       description: "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, to sign in there themselves. The default profile's again when none is given.",
-      input: {"properties": {"profile": {"description": "the browser profile, like Personal or PTC; agent-computers_profiles lists them", "type": "string"}}, "type": "object"},
+      input: {"properties": {"profile": {"description": "the browser profile, like Personal or PTC; agent-devices_profiles lists them", "type": "string"}}, "type": "object"},
       run: (ctx, input) => sidecar(ctx, "sign_in", input),
     },
     sign_out: {
@@ -166,7 +166,7 @@ async function pick(accounts) {
     const profile = select.value || name.value.trim();
     if (!profile) return name.focus();
     e.target.disabled = true;
-    e.target.textContent = "Opening a computer…";
+    e.target.textContent = "Opening a device…";
     try { signingIn(await one.call("sign_in", { profile })); }
     catch (err) { document.getElementById("err").textContent = err.message; e.target.disabled = false; e.target.textContent = "Sign in to Messenger"; }
   };
@@ -174,7 +174,7 @@ async function pick(accounts) {
 
 function signingIn(r) {
   const c = document.getElementById("connect");
-  c.innerHTML = \`<ol><li><a href="\${one.esc(r.url)}">Open the computer</a>: its browser is on messenger.com, in the \${one.esc(r.profile)} profile.</li>
+  c.innerHTML = \`<ol><li><a href="\${one.esc(r.url)}">Open the device</a>: its browser is on messenger.com, in the \${one.esc(r.profile)} profile.</li>
     <li>Sign in there, and tick Keep me signed in.</li><li>Come back and press Done.</li></ol>
     <button class="primary" id="done">Done</button><div id="err" class="error small"></div>\`;
   document.getElementById("done").onclick = async (e) => {

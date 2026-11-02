@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// browser is the browser in a computer borrowed from the agent-computers sidecar,
+// browser is the browser in a device borrowed from the agent-devices sidecar,
 // through this device's node, starting with a copy of a browser profile
 // signed in to messenger.com.
 type browser struct {
@@ -21,8 +21,8 @@ type browser struct {
 	profile string // the browser profile
 
 	mu       sync.Mutex
-	computer string // the borrowed computer; given back when idle
-	session  string // the computer's tools keep a browser in a session
+	device string // the borrowed device; given back when idle
+	session  string // the device's tools keep a browser in a session
 	target   string
 	tab      string
 	used     time.Time
@@ -31,19 +31,19 @@ type browser struct {
 
 const (
 	home = "https://www.messenger.com/"
-	// idle is how long a borrowed computer is kept without a call.
+	// idle is how long a borrowed device is kept without a call.
 	idle = 5 * time.Minute
 )
 
 var errNotSignedIn = errors.New("Messenger isn't signed in on that browser profile. Ask the person to sign in again: messenger_sign_in with the profile gives them a link, where they sign in at messenger.com (with Keep me signed in), then save the profile")
 
-// computers runs one of Agent Computers' operations: those with a browser
+// devices runs one of Agent Devices' operations: those with a browser
 // profile (whose Vault item only the app's calls may use) the app's, the rest
 // its sidecar's, wherever it runs.
-func (b *browser) computers(op string, input map[string]any) (any, error) {
-	call := map[string]any{"app": "agent-computers", "op": op, "input": input}
+func (b *browser) devices(op string, input map[string]any) (any, error) {
+	call := map[string]any{"app": "agent-devices", "op": op, "input": input}
 	if !slices.Contains([]string{"borrow", "give_back", "profiles", "sign_in", "save_profile", "add_profile"}, op) {
-		call["sidecar"] = "agent-computers"
+		call["sidecar"] = "agent-devices"
 	}
 	body, _ := json.Marshal(call)
 	client := &http.Client{Timeout: 3 * time.Minute}
@@ -58,51 +58,51 @@ func (b *browser) computers(op string, input map[string]any) (any, error) {
 		Error string `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &reply); err != nil {
-		return nil, fmt.Errorf("agent computers %s: %s", op, raw)
+		return nil, fmt.Errorf("agent devices %s: %s", op, raw)
 	}
 	if reply.Error != "" || resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("agent computers %s: %s", op, reply.Error)
+		return nil, fmt.Errorf("agent devices %s: %s", op, reply.Error)
 	}
 	return reply.OK, nil
 }
 
-// borrow takes a computer with the profile, unless one is borrowed: one with
+// borrow takes a device with the profile, unless one is borrowed: one with
 // no screen, since nobody watches it read.
 func (b *browser) borrow() error {
-	if b.computer != "" {
+	if b.device != "" {
 		return nil
 	}
-	got, err := b.computers("borrow", map[string]any{"for": "Reading Messenger", "by": "messenger", "profile": b.profile, "screen": false})
+	got, err := b.devices("borrow", map[string]any{"for": "Reading Messenger", "by": "messenger", "profile": b.profile, "screen": false})
 	if err != nil {
 		return err
 	}
 	m, _ := got.(map[string]any)
-	b.computer, _ = m["computer"].(string)
+	b.device, _ = m["device"].(string)
 	b.target, b.tab = "", ""
 	b.session = fmt.Sprintf("messenger-%d", time.Now().UnixNano())
-	if b.computer == "" {
-		return errors.New("couldn't borrow a computer")
+	if b.device == "" {
+		return errors.New("couldn't borrow a device")
 	}
 	return nil
 }
 
-// giveBack returns the computer once it's been idle a while; run under mu.
+// giveBack returns the device once it's been idle a while; run under mu.
 func (b *browser) giveBack() {
-	if b.computer == "" || time.Since(b.used) < idle {
+	if b.device == "" || time.Since(b.used) < idle {
 		return
 	}
-	b.computers("give_back", map[string]any{"computer": b.computer})
-	b.computer = ""
+	b.devices("give_back", map[string]any{"device": b.device})
+	b.device = ""
 }
 
-// tool runs one of the computer's tools and returns its structured answer,
-// borrowing a computer again if the last one was given back.
+// tool runs one of the device's tools and returns its structured answer,
+// borrowing a device again if the last one was given back.
 func (b *browser) tool(name string, in map[string]any) (map[string]any, error) {
 	b.used = time.Now()
 	out, err := b.try(name, in)
-	// The computer was given back, as after 15 minutes without a call.
-	if gone := b.computer; err != nil && gone != "" && strings.Contains(err.Error(), gone) {
-		b.computer = ""
+	// The device was given back, as after 15 minutes without a call.
+	if gone := b.device; err != nil && gone != "" && strings.Contains(err.Error(), gone) {
+		b.device = ""
 		if name != "browser_prepare" {
 			if err := b.open(); err != nil {
 				return nil, err
@@ -121,13 +121,13 @@ func (b *browser) try(name string, in map[string]any) (map[string]any, error) {
 	var got any
 	var err error
 	if name == "list_windows" {
-		got, err = b.computers("use", map[string]any{"computer": b.computer, "tool": name, "args": in})
+		got, err = b.devices("use", map[string]any{"device": b.device, "tool": name, "args": in})
 	} else {
-		in["computer"] = b.computer
+		in["device"] = b.device
 		if b.target != "" && name != "browser_prepare" {
 			in["target_id"], in["tab_id"] = b.target, b.tab
 		}
-		got, err = b.computers(name, in)
+		got, err = b.devices(name, in)
 	}
 	if err != nil {
 		return nil, err
@@ -140,7 +140,7 @@ func (b *browser) try(name string, in map[string]any) (map[string]any, error) {
 	return data, nil
 }
 
-// structured is a tool's structured answer: the agent-computers sidecar gives it as
+// structured is a tool's structured answer: the agent-devices sidecar gives it as
 // its content's last text.
 func structured(got any) map[string]any {
 	m, _ := got.(map[string]any)
@@ -156,7 +156,7 @@ func structured(got any) map[string]any {
 	return map[string]any{}
 }
 
-// open starts the computer's browser on the profile and attaches to its tab.
+// open starts the device's browser on the profile and attaches to its tab.
 func (b *browser) open() error {
 	b.target, b.tab = "", ""
 	prepared, err := b.tool("browser_prepare", map[string]any{"allow_launch": true, "profile": map[string]any{"mode": "isolated_named", "name": b.profile}})
@@ -319,8 +319,8 @@ func (b *browser) list() (page, error) {
 			}
 			if p.signedOut() {
 				// Its copy of the profile stays signed out: borrow afresh next time, after the person signed in.
-				b.computers("give_back", map[string]any{"computer": b.computer})
-				b.computer = ""
+				b.devices("give_back", map[string]any{"device": b.device})
+				b.device = ""
 				return page{}, errNotSignedIn
 			}
 			if len(p.chats()) > 0 {

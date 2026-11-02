@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// A size is how much of its server a computer may use, offered by name.
+// A size is how much of its server a device may use, offered by name.
 type size struct {
 	Name string
 	CPUs int
@@ -42,14 +42,14 @@ func sizesText() string {
 	return strings.Join(names, ", ")
 }
 
-// limit is what a computer may use, as its container says.
+// limit is what a device may use, as its container says.
 type limit struct {
 	CPUs    float64 // 0: no limit
 	Memory  int64   // bytes; 0: no limit
 	Restart bool    // started again when the server restarts
 }
 
-// sizeOf names a computer's limits; computers made before sizes, with only a
+// sizeOf names a device's limits; devices made before sizes, with only a
 // memory limit, are named by their memory.
 func (l limit) sizeOf() string {
 	for _, s := range sizes {
@@ -60,7 +60,7 @@ func (l limit) sizeOf() string {
 	return "custom"
 }
 
-// usage is what a computer uses now: CPU in percent of one core, memory in
+// usage is what a device uses now: CPU in percent of one core, memory in
 // bytes.
 type usage struct {
 	CPU    float64

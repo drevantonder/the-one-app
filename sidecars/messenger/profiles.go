@@ -1,6 +1,6 @@
 package main
 
-// Messenger's accounts are the agent computers' browser profiles it's linked to:
+// Messenger's accounts are the agent devices' browser profiles it's linked to:
 // each profile signed in to messenger.com is one
 // account, read through a browser of its own.
 
@@ -158,12 +158,12 @@ func (m *messenger) run(op string, raw json.RawMessage) (any, error) {
 		return m.signIn(strings.TrimSpace(cmpOr(in.Profile, in.Account)))
 	case "sign_out":
 		return m.signOut(in.Account)
-	case "_profiles": // the agent computers' profiles, for the settings screen to pick one
+	case "_profiles": // the agent devices' profiles, for the settings screen to pick one
 		b := &browser{node: m.node}
-		return b.computers("profiles", map[string]any{})
+		return b.devices("profiles", map[string]any{})
 	case "_save": // the settings screen's Done: saves the profile signed in
 		b := &browser{node: m.node}
-		if _, err := b.computers("save_profile", map[string]any{"profile": in.Profile}); err != nil {
+		if _, err := b.devices("save_profile", map[string]any{"profile": in.Profile}); err != nil {
 			return nil, err
 		}
 		m.found(in.Profile, nil)
@@ -192,11 +192,11 @@ func (m *messenger) signIn(profile string) (any, error) {
 	}
 	m.mu.Unlock()
 	b := &browser{node: m.node}
-	got, err := b.computers("sign_in", map[string]any{"profile": profile, "url": home})
+	got, err := b.devices("sign_in", map[string]any{"profile": profile, "url": home})
 	if err != nil && strings.Contains(err.Error(), "No browser profile") {
 		// A new one: added to the Vault first.
-		if _, err = b.computers("add_profile", map[string]any{"profile": profile}); err == nil {
-			got, err = b.computers("sign_in", map[string]any{"profile": profile, "url": home})
+		if _, err = b.devices("add_profile", map[string]any{"profile": profile}); err == nil {
+			got, err = b.devices("sign_in", map[string]any{"profile": profile, "url": home})
 		}
 	}
 	if err != nil {
@@ -212,7 +212,7 @@ func (m *messenger) signIn(profile string) (any, error) {
 	err = m.save()
 	m.mu.Unlock()
 	return map[string]any{
-		"profile": profile, "url": url, "computer": r["computer"], "server": r["server"],
+		"profile": profile, "url": url, "device": r["device"], "server": r["server"],
 		"text": fmt.Sprintf("Give the person this link: %s\nThey sign in to Messenger there, in the %s browser profile (tick Keep me signed in), then press Done on Messenger's settings, or Done Signing In on the profile in the Vault; it's saved by itself after 30 minutes otherwise.", url, profile),
 	}, err
 }
@@ -231,11 +231,11 @@ func (m *messenger) signOut(account string) (string, error) {
 	delete(m.out, profile)
 	if b := m.browsers[profile]; b != nil {
 		b.mu.Lock()
-		if b.computer != "" {
-			b.computers("give_back", map[string]any{"computer": b.computer})
+		if b.device != "" {
+			b.devices("give_back", map[string]any{"device": b.device})
 		}
 		b.mu.Unlock()
 		delete(m.browsers, profile)
 	}
-	return fmt.Sprintf("Messenger no longer reads the %s profile. The profile and its other sign-ins stay, on the Agent Computers page.", profile), m.save()
+	return fmt.Sprintf("Messenger no longer reads the %s profile. The profile and its other sign-ins stay, on the Agent Devices page.", profile), m.save()
 }

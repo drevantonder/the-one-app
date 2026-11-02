@@ -5,14 +5,14 @@ import ApplicationServices
 /// (github.com/trycua/cua). It runs as this app's child, embedded, so the Accessibility and Screen Recording
 /// permissions it needs are this app's, granted once, rather than Cua Driver's own. Its tools act in the background
 /// where they can, with an agent cursor of their own, so the person's pointer stays theirs. The node serves a sidecar
-/// only to its Mac's local user, so only the owner's agents reach it. Computer Use lists it beside the agent computers.
+/// only to its Mac's local user, so only the owner's agents reach it. Computer Use lists it beside the agent devices.
 struct ComputerApp: Sidecar {
     let app = "computer"
 
     var description: [String: Any] {
         ["title": "Computer Use", "icon": "cursor-click", "color": "#ff9500",
          "description": "Lets your own agents use this Mac's apps, keyboard and pointer, once you turn it on",
-         "instructions": "Agents use this Mac through Computer Use, as a computer named after this device.",
+         "instructions": "Agents use this Mac through Computer Use, as a device named after it.",
          "ops": [
             op("_status", "Whether agents may use this Mac, its name, the permissions macOS gave, and the agent using it now."),
             op("_allow", "Turns letting agents use this Mac on or off. Turning it on asks the person at the Mac first.", ["on": flag("on or off")], required: ["on"]),

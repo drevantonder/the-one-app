@@ -299,16 +299,16 @@ fn the_vault_fills_an_apps_requests_with_secrets_it_never_shows() {
     assert_eq!(fetch("gmail", "http://oauth2.googleapis.com/token", "x").0, 400);
 
     // A sidecar named among an item's hosts gets its field filled into what it sends on.
-    let key = json!({ "id": "00000000000000ff", "title": "Work browser", "hosts": ["agent-computers"], "apps": ["agent-computers"], "fields": { "key": { "generate": true } } });
+    let key = json!({ "id": "00000000000000ff", "title": "Work browser", "hosts": ["agent-devices"], "apps": ["agent-devices"], "fields": { "key": { "generate": true } } });
     assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": key })).0, 200);
-    let (_, filled) = v.ask(&token, "POST", "/fill", json!({ "app": "agent-computers", "host": "agent-computers", "text": "{{00000000000000ff:key}}" }));
+    let (_, filled) = v.ask(&token, "POST", "/fill", json!({ "app": "agent-devices", "host": "agent-devices", "text": "{{00000000000000ff:key}}" }));
     assert_eq!(filled["text"].as_str().unwrap().len(), 43, "a generated key: {filled}");
-    assert_eq!(v.ask(&token, "POST", "/fill", json!({ "app": "agent-computers", "host": "shell", "text": "{{00000000000000ff:key}}" })).0, 400);
+    assert_eq!(v.ask(&token, "POST", "/fill", json!({ "app": "agent-devices", "host": "shell", "text": "{{00000000000000ff:key}}" })).0, 400);
 
     // Each use is in Andre's record.
     let (_, record) = v.ask(&token, "GET", "/unseals", json!({}));
     let what: Vec<String> = record["unseals"].as_array().unwrap().iter().flat_map(|u| u["what"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_string())).collect();
-    assert!(what.contains(&format!("gmail used {id}")) && what.contains(&"agent-computers used 00000000000000ff".to_string()), "{what:?}");
+    assert!(what.contains(&format!("gmail used {id}")) && what.contains(&"agent-devices used 00000000000000ff".to_string()), "{what:?}");
 
     // Deleted, it fills nothing.
     assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": { "id": id, "deleted": true } })).0, 200);
