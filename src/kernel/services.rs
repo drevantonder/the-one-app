@@ -479,6 +479,18 @@ fn internal(url: &str, path: &str, kernel_secret: &str, body: Value) -> Result<V
     Ok(out)
 }
 
+/// Gives the vault the install's scope keys its nodes made before it had a kernel (`{ scope, key, people }` each, from
+/// a node that holds them), each sealed there to those of `people` who have keys: → who got each.
+pub fn give_keys(settings: &Settings, keys: &[Value]) -> Result<Vec<(String, Vec<String>)>> {
+    keys.iter()
+        .map(|k| {
+            let out = internal(&settings.vault_url, "scope-key", &settings.kernel_secret, json!({ "scope": k["scope"], "key": k["key"], "people": k["people"] }))?;
+            let granted = out["granted"].as_array().into_iter().flatten().filter_map(|u| u.as_str().map(str::to_string)).collect();
+            Ok((k["scope"].as_str().unwrap_or("").to_string(), granted))
+        })
+        .collect()
+}
+
 /// Everyone with keys in `settings`' install: `{ user, sealed }`, their key pair's secret half sealed to the recovery key.
 pub fn people(settings: &Settings) -> Result<Vec<Value>> {
     let out = internal(&settings.vault_url, "recovery", &settings.kernel_secret, json!({}))?;

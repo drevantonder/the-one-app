@@ -88,6 +88,7 @@ export class Vault extends DurableObject {
         case "POST /internal/forget-passkeys": return json(this.forgetPasskeys(body));
         case "POST /internal/recovery": return json(this.recovery());
         case "POST /internal/recover": return json(await this.recover(body));
+        case "POST /internal/scope-key": return json(await this.scopeKeyGiven(body));
         case "POST /internal/standing": return json(await this.standing(body));
         case "POST /internal/run": return json(await this.run(body));
       }
@@ -205,6 +206,29 @@ export class Vault extends DurableObject {
     if (!(Number(until) > Date.now())) refuse(400, "say until when it's kept");
     const held = { user, key, public: b64u.encode(person.public), scopes: null };
     return { id: await this.seal(secretOf(secret), { user, kind: "recovery", name: "Recovery", held, until: Number(until) }) };
+  }
+
+  /// A scope's key that the install's nodes made before it had a kernel, given by an admin's machine (`kernel keys`):
+  /// it's the scope's key from now on, sealed to the recovery key and to each of `people` who has keys here, in place
+  /// of one this vault made. Only while no key under the scope has been given out here, so nothing was sealed under
+  /// the one it replaces.
+  async scopeKeyGiven({ scope, key, people }) {
+    if (!SCOPE.test(scope || "")) refuse(400, `${scope} isn't a scope`);
+    const used = this.sql.exec("select count(*) n from unseals where what like ?", `%"${scope}/%`).one().n;
+    if (used) refuse(409, `keys under ${scope} were given out here already, so its key stays`);
+    const bytes = b64u.decode(String(key || ""));
+    if (bytes.length !== 32) refuse(400, "a scope's key is 32 bytes");
+    const recovery = b64u.decode(this.env.RECOVERY_KEY || refuse(503, "the vault has no recovery key"));
+    this.sql.exec("insert or replace into scopes (scope, recovery, made) values (?, ?, ?)", scope, await sealTo(recovery, bytes), Date.now());
+    this.sql.exec("delete from grants where scope = ?", scope);
+    const granted = [];
+    for (const user of Array.isArray(people) ? people : []) {
+      const [person] = this.sql.exec("select public from people where user = ?", String(user)).toArray();
+      if (!person) continue;
+      this.sql.exec("insert into grants (user, scope, sealed) values (?, ?, ?)", user, scope, await sealTo(person.public, bytes));
+      granted.push(user);
+    }
+    return { granted };
   }
 
   async makeScope(scope, user, publicKey) {

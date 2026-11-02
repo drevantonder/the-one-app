@@ -60,6 +60,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/driver", post(sidecar))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
+        .route("/v1/kernel/keys", post(kernel_keys))
         .route("/v1/storage", get(storage_get).post(storage_post))
         .route("/v1/storage/{op}", post(storage_post))
         .route("/v1/tunnel", get(tunnel_get).post(tunnel_post))
@@ -322,6 +323,11 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
 
 fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
     body[key].as_str().filter(|s| !s.trim().is_empty()).map(str::trim).ok_or_else(|| anyhow::anyhow!("give {key}").into())
+}
+
+/// The keys of the scopes this server holds, for this machine's admin to hand to the install's kernel.
+async fn kernel_keys(State(node): State<Node>) -> Reply {
+    Ok(Json(json!(node.keys_for_kernel(&local(&node)?).await?)))
 }
 
 async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Json<Value> {

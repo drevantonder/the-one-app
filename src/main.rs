@@ -81,6 +81,9 @@ Usage:
                                        passkey, as who they are in the install (--user, or this machine's person for
                                        the first), so nodes know them; nobody joins uninvited, the first person too.
                                        For someone who lost every passkey, --user them and pipe the recovery key
+  {CLI} kernel keys                    give the kernel's vault the keys of the scopes this machine's node holds, made
+                                       before the install had a kernel, so its serverless node opens the same data; only
+                                       before the vault has given out keys under them
   {CLI} serverless deploy [--account <id>]
                                        put the install's serverless node in the kernel's Cloudflare account (a node as
                                        a Worker, with the API token in CLOUDFLARE_API_TOKEN) and send the address's
@@ -376,6 +379,15 @@ fn run(args: Vec<String>) -> Result<()> {
             let web: Vec<(String, Vec<u8>)> = one::kernel::web_files().map(|(path, bytes)| (path.to_string(), bytes.to_vec())).collect();
             one::kernel::deploy(&cf, &settings, &modules, &web)?;
             print!("Deployed.\n{}", kernel_said(&settings));
+        }
+        ["kernel", "keys"] => {
+            let settings = one::kernel::Settings::load()?;
+            let keys = post("/v1/kernel/keys", json!({}))?;
+            let keys = keys.as_array().map(Vec::as_slice).unwrap_or_default();
+            for ((_, people), given) in one::kernel::give_keys(&settings, keys)?.into_iter().zip(keys) {
+                let names: Vec<&str> = people.iter().map(|u| given["names"][u].as_str().unwrap_or(u)).collect();
+                println!("{}: {}", given["title"].as_str().unwrap_or(""), if names.is_empty() { "no one with it has a passkey yet".to_string() } else { format!("opens for {}", names.join(", ")) });
+            }
         }
         ["serverless", "deploy"] => {
             let cf = cloudflare(&flags)?;

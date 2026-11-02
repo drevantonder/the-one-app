@@ -106,6 +106,8 @@ fn the_kernels_own_tests_pass() {
 struct Vault {
     _running: Running,
     url: String,
+    /// The stand-in bucket, at `<sites>/install/<name>`.
+    sites: String,
     auth: String,
     issuer: String,
     secret: String,
@@ -140,6 +142,7 @@ impl Vault {
         Vault {
             _running: running,
             url: format!("http://127.0.0.1:{vault}"),
+            sites: format!("http://127.0.0.1:{sites}"),
             auth: format!("http://127.0.0.1:{auth}"),
             issuer,
             secret,
@@ -232,6 +235,28 @@ fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
     let andre = vault.keys(&token, &[("global", "board", None)]).unwrap();
     assert_eq!(vault.keys(&sam, &[("global", "board", None)]).unwrap(), andre);
     assert!(vault.keys(&sam, &[(&format!("user:{ANDRE}"), "board", None)]).is_err());
+}
+
+#[test]
+fn the_vault_given_the_installs_keys_opens_what_its_nodes_wrote() {
+    let v = Vault::start();
+    let vault = kernel::Vault { url: v.url.clone() };
+    v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
+    let token = v.client(ANDRE, "andre's passkey prf output", "web");
+
+    // Before the install had a kernel, its nodes sealed the Board's key under Everyone's.
+    let (global, board): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
+    let agent: ureq::Agent = ureq::Agent::config_builder().build().into();
+    agent.put(format!("{}/install/global/board/_key", v.sites)).send(&kernel::seal_app_key(&global, "board", &board)[..]).unwrap();
+
+    // An admin's machine gives the vault Everyone's key, for Andre and for Sam, who has no keys here yet.
+    let (status, out) = v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&global), "people": [ANDRE, SAM] }));
+    assert_eq!((status, out["granted"].clone()), (200, json!([ANDRE])), "{out}");
+    let given = vault.keys(&token, &[("global", "board", Some("main"))]).unwrap();
+    assert_eq!(given[0].key, kernel::database_key(&board, "main"), "the vault opens the Board the nodes wrote");
+
+    // Once a key under it was given out, its key stays.
+    assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [ANDRE] })).0, 409);
 }
 
 fn url_query(url: &str) -> std::collections::BTreeMap<String, String> {

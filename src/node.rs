@@ -771,6 +771,28 @@ impl Node {
         })
     }
 
+    /// The key of each scope this server holds, with the people who may open it, for an admin handing them to the
+    /// install's kernel (`kernel keys`), so a serverless node opens what this one does.
+    pub async fn keys_for_kernel(&self, caller: &Caller) -> Result<Vec<Value>> {
+        let scopes = self.with(|i| {
+            let m = &i.r.members;
+            ensure!(members::manages_scope(m, &caller.user, &Scope::Global), "only admins give the kernel the install's keys");
+            let people = |s: &Scope| m.users.values().filter(|u| !u.removed && m.may_use(&u.id, s)).map(|u| (u.id.clone(), u.name.clone())).collect::<BTreeMap<_, _>>();
+            let title = |s: &Scope| match s {
+                Scope::Global => "Everyone".to_string(),
+                Scope::User(u) => m.users.get(u).map(|u| u.name.clone()).unwrap_or_default(),
+                Scope::Group(g) => m.groups.get(g).map(|g| g.name.clone()).unwrap_or_default(),
+            };
+            Ok(m.scopes().into_iter().filter(|s| i.r.holds(s)).map(|s| (s.clone(), title(&s), people(&s))).collect::<Vec<_>>())
+        })?;
+        let mut out = Vec::new();
+        for (scope, title, people) in scopes {
+            let key = self.scope_key(&scope).await?;
+            out.push(json!({ "scope": scope.to_string(), "title": title, "key": data_encoding::BASE64URL_NOPAD.encode(&key), "people": people.keys().collect::<Vec<_>>(), "names": people }));
+        }
+        Ok(out)
+    }
+
     /// Whether `user` is a person of the install.
     pub fn is_user(&self, user: &str) -> bool {
         self.with(|i| Ok(i.r.members.user(user).is_some())).unwrap_or(false)
