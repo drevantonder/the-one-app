@@ -131,7 +131,7 @@ const PAGE = `
 
   async function refresh() {
     try {
-      devices = ((await one.call("list", {})).devices || []).filter((c) => !c.spare || c.borrowed);
+      devices = ((await one.call("_list", {})).devices || []).filter((c) => !c.spare || c.borrowed);
     } catch (e) {
       grid.innerHTML = \`<div class="empty error" style="grid-column:1/-1">\${one.esc(e.message)}</div>\`;
       return;
@@ -196,7 +196,7 @@ const DEVICE = `
 
   async function look() {
     try {
-      const all = (await one.call("list", {})).devices || [];
+      const all = (await one.call("_list", {})).devices || [];
       const c = all.find((c) => c.name === at.device && (!at.server || c.server === at.server));
       if (!c) return shown && say("It's been given back.");
       shown = c;
@@ -251,7 +251,7 @@ export default {
   icon: "browsers",
   color: "#a2845e",
   description: "Devices your agents use: Linux with a browser, Windows, Android and iPhones",
-  instructions: "Agent Devices are devices on the person's servers that agents borrow through Computer Use (computer_borrow, computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where a server can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or PTC) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
+  instructions: "Agent Devices are devices on the person's servers that agents borrow (agent-devices_borrow, then agent-devices_give_back) and use through Computer Use (computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where a server can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or PTC) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
   uses: { sidecars: ["agent-devices"] },
   // Browser profiles live in the Vault: the person adds one there (add_profile), signs in to sites in it (sign_in, then
   // save_profile), renames and deletes it there.
@@ -422,7 +422,7 @@ export default {
       } },
       run: (ctx, { on, ...input }) => ctx.sidecars["agent-devices"].adopt({ ...input, here: true }, { server: on }),
     },
-    list: {
+    _list: {
       reads: true,
       description: "Every server's agent devices: each one's server and kind, whether it's running, paused or stopped, its size, the memory and CPU it uses now, who has borrowed it and what for, and of, for a throwaway copy, the lasting device it's a copy of.",
       input: { type: "object", properties: { here: { type: "boolean", description: "only this server's" } } },
