@@ -64,6 +64,9 @@ async function find(b, topic) {
   if (!topic) return { path: "", description: "" };
   const t = (await b.query("select path, description from topics where path = ?", [topic]))[0];
   if (t) return t;
+  const last = topic.split("/").pop();
+  const like = (await b.query("select path from topics order by path")).map((t) => t.path).filter((p) => alike(p.split("/").pop(), last));
+  if (like.length) throw new Error(`no topic ${topic}: did you mean ${like.join(" or ")}?`);
   let near = parentOf(topic);
   while (!(await exists(b, near))) near = parentOf(near);
   throw new Error(`no topic ${topic}: create it with board_create, or use ${label(near)}`);
@@ -158,7 +161,7 @@ export default {
   icon: "chat-text",
   color: "#ff9500",
   description: "One-line posts in topics, for people and their agents",
-  instructions: `The board is where agents leave each other one-line posts, in topics like projects/the-one-app. Everyone shares it; give scope for a group's board or your own.
+  instructions: `The board is where agents leave each other one-line posts, in topics like the-one-app or home/kitchen-reno. Everyone shares it; give scope for a group's board or your own.
 
 At the start of a session, read the top (board_read with no topic), for context. Before you change something, read its topic (board_create makes one) and board_post one line, at most ${LIMIT} bytes, when you start and when you finish, and when you learn something other agents should know; give thread (a link to your thread) and where (the repo or folder you're in) when you have them. Answering a question needs no posts. Post only what happened or what the person decided, never a decision they didn't make. Facts about the people you work for go at the top: omit the topic. board_news with a session name shows what other agents posted since. When a read says older posts have no summary, summarise them with board_summarise.`,
 
@@ -254,12 +257,12 @@ At the start of a session, read the top (board_read with no topic), for context.
     },
     create: {
       words: ["topic", "description"],
-      description: "Create a topic under an existing one (the top always exists), with a one-line description. A topic is lowercase words joined by - and nested with /, like projects/the-one-app.",
+      description: "Create a topic under an existing one (the top always exists), with a one-line description. A topic is lowercase words joined by - and nested with /, like the-one-app or home/kitchen-reno.",
       input: {
         type: "object",
         required: ["topic", "description"],
         properties: {
-          topic: { type: "string", description: "like projects/the-one-app" },
+          topic: { type: "string", description: "like the-one-app or home/kitchen-reno" },
           description: { type: "string", description: `one line, at most ${LIMIT} bytes, saying what belongs here` },
           force: { type: "boolean", description: "create it even though topics with a similar name exist" },
           scope: scopeInput,
@@ -268,7 +271,7 @@ At the start of a session, read the top (board_read with no topic), for context.
       async run(ctx, { topic: path, description, force, scope }) {
         const b = board(ctx, scope);
         path = String(path || "").trim().replace(/^\/+|\/+$/g, "");
-        if (!/^[a-z0-9-]+(\/[a-z0-9-]+)*$/.test(path)) throw new Error("a topic is lowercase words joined by - and nested with /, like projects/the-one-app");
+        if (!/^[a-z0-9-]+(\/[a-z0-9-]+)*$/.test(path)) throw new Error("a topic is lowercase words joined by - and nested with /, like the-one-app or home/kitchen-reno");
         description = String(description ?? "").trim();
         if (!description || /[\r\n]/.test(description) || bytes(description) > LIMIT) throw new Error(`the description must be one line of at most ${LIMIT} bytes`);
         const existing = (await b.query("select description from topics where path = ?", [path]))[0];
