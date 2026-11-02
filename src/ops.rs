@@ -31,6 +31,11 @@ fn node_apps() -> [Value; 3] {
     [one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app()]
 }
 
+/// Whether an app is one of the node's own tools, which run here, as the person: never on another device.
+pub fn node_app(app: &str) -> bool {
+    ["vault", "backups", "groups"].contains(&app)
+}
+
 /// `<CLI> <app> <op> [words] [--input value]...`: runs it and prints what it gives back.
 pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     let (words, mut flags) = split(args);
@@ -41,7 +46,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
         return Ok(());
     }
     let mut take = |k: &str| flags.remove(k).and_then(|v| v.into_iter().last().flatten());
-    let device = if own_device(o) { None } else { take("device") };
+    let device = if own_device(o) || node_app(app) { None } else { take("device") };
     let scopes = take("scopes").map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     let out = take("out");
     let confirmed = flags.remove("confirm").is_some() || flags.remove("yes").is_some();
@@ -63,7 +68,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     if o["confirm"] == true && !confirmed {
         ask(&format!("{CLI} {app} {op} sends or can't be undone. Go ahead?"), &format!("{CLI} {app} {op} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action"))?;
     }
-    let call = match node_apps().iter().any(|n| n["name"] == app) {
+    let call = match node_app(app) {
         true => crate::dispatch(&format!("{app}_{op}"), input, agent_from_env().as_deref(), "cli", Some(o.clone())).map(|ok| json!({ "ok": ok })),
         false => post("/v1/call", json!({ "device": device, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })),
     };
@@ -527,7 +532,7 @@ pub fn help(app: &Value, op: &Value) -> String {
         }
         rows.push((flag, about.join("; ")));
     }
-    if !own_device(op) {
+    if !own_device(op) && !node_app(app["name"].as_str().unwrap_or("")) {
         let about = if app["runs"] == "here" { "which of your devices runs it, by name; all for every one; default is this one" } else { "run it on that device (by name)" };
         rows.push(("--device <name>".into(), about.into()));
     }

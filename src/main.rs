@@ -302,6 +302,7 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("{user} is now {role}.");
         }
         ["groups"] | ["group"] | ["groups", "list"] => {
+            takes_only(&flags, &[])?;
             print!("{}", groups_said(&get("/v1/state")?));
             println!("\n{CLI} group create <name>, {CLI} group invite <group> <user> [--admin], {CLI} group accept <group> and {CLI} group remove <group> <user> change them.");
         }
@@ -564,12 +565,17 @@ fn run(args: Vec<String>) -> Result<()> {
                 println!("This device is putting what it holds there, and keeps the install's data there from now on. Do the same on each of your other devices.");
             }
         }
-        ["backups"] => print!("{}", backups_said(&get("/v1/backups")?)),
+        ["backups"] => {
+            takes_only(&flags, &[])?;
+            print!("{}", backups_said(&get("/v1/backups")?));
+        }
         ["backups", "now"] => {
+            takes_only(&flags, &[])?;
             post("/v1/backups/now", json!({}))?;
             println!("Backing up now. {CLI} backups says how it went.");
         }
         ["backups", "place", "add"] | ["backups", "place", "add", _] => {
+            takes_only(&flags, &["title", "endpoint"])?;
             let title = flags.get("title").cloned();
             let r = match (positional.get(3), flags.get("endpoint").and_then(Value::as_str)) {
                 (Some(path), None) => post("/v1/backups/place", json!({ "path": std::path::absolute(path)?, "title": title }))?,
@@ -589,12 +595,14 @@ fn run(args: Vec<String>) -> Result<()> {
             print!("{}", tried_said(&r));
         }
         ["backups", "place", "remove", place] => {
+            takes_only(&flags, &["confirm"])?;
             let places = get("/v1/backups")?["places"].as_array().cloned().unwrap_or_default();
             let p = places.iter().find(|p| p["id"] == *place || p["title"] == *place).with_context(|| format!("no place {place}; {CLI} backups lists them"))?;
             post("/v1/backups/place", json!({ "id": p["id"], "deleted": true }))?;
             println!("No longer backing up to {}. What's there stays.", p["title"].as_str().unwrap_or(""));
         }
         ["backups", "check"] => {
+            takes_only(&flags, &["folder"])?;
             let r = match flags.get("folder").and_then(Value::as_str) {
                 Some(folder) => check_folder(folder)?,
                 None => post("/v1/backups/check", json!({}))?,
@@ -604,12 +612,14 @@ fn run(args: Vec<String>) -> Result<()> {
             }
         }
         ["vault"] | ["vault", "list"] => {
+            takes_only(&flags, &["scope"])?;
             let scope = flags.get("scope").and_then(Value::as_str).map(|s| format!("?scope={s}")).unwrap_or_default();
             for it in get(&format!("/v1/vault{scope}"))?.as_array().into_iter().flatten() {
                 println!("{}", item_line(it));
             }
         }
         ["vault", "set", item, field] => {
+            takes_only(&flags, &["value", "scope", "hosts", "secret", "app"])?;
             let value = match flags.get("value").and_then(Value::as_str) {
                 Some(v) => v.to_string(),
                 None => {
@@ -628,10 +638,12 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("{}", vault_set(scope, item, field, &value, flags.get("secret").map(|_| true), hosts, flags.get("app").and_then(Value::as_str), agent_from_env().as_deref())?);
         }
         ["vault", "use", item, app] => {
+            takes_only(&flags, &["scope", "off"])?;
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             println!("{}", vault_use(scope, item, app, !flags.contains_key("off"), agent_from_env().as_deref())?);
         }
         ["vault", "fetch", url] => {
+            takes_only(&flags, &["method", "headers", "body"])?;
             let r = post("/v1/vault/fetch", json!({ "url": url, "method": flags.get("method"), "headers": flags.get("headers"), "body": flags.get("body"), "agent": agent_from_env() }))?;
             eprintln!("{}", r["status"]);
             match r["body"].as_str() {
@@ -643,10 +655,12 @@ fn run(args: Vec<String>) -> Result<()> {
             }
         }
         ["vault", "remove", item] | ["vault", "remove", item, _] => {
+            takes_only(&flags, &["scope", "confirm"])?;
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             println!("{}", vault_remove(scope, item, positional.get(3).map(String::as_str))?);
         }
         ["vault", "request", app @ ..] if app.len() < 2 => {
+            takes_only(&flags, &["scope", "need", "title", "fields", "secret-fields", "hosts", "why"])?;
             // With no app, it's for agents: the person's own, with vault fetch.
             let app = app.first().copied().unwrap_or("agents");
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
@@ -658,16 +672,19 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("Give the person this link: {}\nTell them; {CLI} vault status {} says how it went once they say they've done it.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""));
         }
         ["vault", "status", id] => {
+            takes_only(&flags, &[])?;
             let r = get(&format!("/v1/vault/requests?id={id}"))?;
             let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
             println!("{} for {} in {}: {}", r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope_name"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""));
         }
         ["vault", "requests"] => {
+            takes_only(&flags, &[])?;
             for r in get("/v1/vault/requests")?.as_array().into_iter().flatten() {
                 println!("{}  {} for {} in {}  {}  {}", r["id"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope_name"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""), r["why"].as_str().unwrap_or(""));
             }
         }
         ["vault", "answer", id] => {
+            takes_only(&flags, &["scope", "decline", "item"])?;
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             let mut body = json!({ "scope": scope, "id": id });
             if flags.contains_key("decline") {
@@ -872,6 +889,15 @@ fn command_help(words: &[String]) -> Option<String> {
         (true, true) => None,
         (false, true) => Some(format!("{text}\n")),
         (_, false) => Some(format!("Usage:\n{out}")),
+    }
+}
+
+/// Refuses a flag a command doesn't take, rather than running as if it weren't given: the Vault's, backups' and groups'
+/// commands run here, as the person, so `--device` among them.
+fn takes_only(flags: &Map<String, Value>, takes: &[&str]) -> Result<()> {
+    match flags.keys().find(|k| !takes.contains(&k.as_str())) {
+        Some(other) => bail!("--{other} isn't an input of this (see {CLI} help)"),
+        None => Ok(()),
     }
 }
 
@@ -1663,6 +1689,11 @@ fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
 /// only with confirm: true. `spec` is the operation, when the caller has it already.
 fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, client: &str, spec: Option<Value>) -> Result<Value> {
     let (app, op) = name.split_once('_').with_context(|| format!("no tool {name}"))?;
+    let spec = spec.or_else(|| ops::find(app, op).map(|(_, spec)| spec));
+    let device = if ops::node_app(app) || spec.as_ref().is_some_and(ops::own_device) { None } else { input.remove("device") };
+    if let Some(other) = spec.as_ref().and_then(|spec| input.keys().find(|k| *k != "confirm" && !ops::takes(&spec["input"], k))) {
+        anyhow::bail!("{other} isn't an input of {name}: see its inputSchema");
+    }
     if app == "vault" {
         return vault_tool(op, &input, agent);
     }
@@ -1672,13 +1703,8 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     if name == "groups_list" {
         return Ok(json!(groups_said(&get("/v1/state")?)));
     }
-    let spec = spec.or_else(|| ops::find(app, op).map(|(_, spec)| spec));
-    let device = if spec.as_ref().is_some_and(ops::own_device) { None } else { input.remove("device") };
     let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = spec {
-        if let Some(other) = input.keys().find(|k| !ops::takes(&spec["input"], k)) {
-            anyhow::bail!("{other} isn't an input of {name}: see its inputSchema");
-        }
         anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
         ops::mcp_files(&spec, &mut input)?;
     }
