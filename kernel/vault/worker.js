@@ -6,7 +6,7 @@
 // sealed under an access token, kept until the token expires or its client signs out. On an install whose people sign
 // in with Google (`SIGN_IN`), a person's first copy is sealed under a secret only the vault has (`VAULT_KEY`), which it
 // opens itself once the auth service says Google signed them in: so the kernel can open everyone's keys there. A try
-// install's kernel (`SIGN_IN` is "try", which only `one try` sets) does the same for its one person, with no Google.
+// install's kernel (`SIGN_IN` is "try", which only `one try` sets) does the same for its people, with no Google.
 // Each scope's key is sealed to the public half of every person who may open it, and to the install's recovery key. A
 // request that brings an access token gets the keys it names from its session.
 //
@@ -247,7 +247,7 @@ export class Vault extends DurableObject {
   }
 
   /// A copy for a client being added, on an install whose people sign in with Google, once the auth service says
-  /// Google signed `user` in (or a try install's, for its one person): opened with the vault's own key, and sealed
+  /// Google signed `user` in (or a try install's, for one of its people): opened with the vault's own key, and sealed
   /// under the client's authorization code (`to`) as `grant` seals it. Their first sign-in makes their keys, and opens
   /// Everyone's to them.
   async own({ user, to, name, client }) {
@@ -534,7 +534,7 @@ export class Vault extends DurableObject {
   /// for `kernel invite`: asked by an admin of the install (as the vault last heard who is), signed in. Everyone's key,
   /// as their session opens it, is kept sealed under the link's secret, for whoever joins with it (`welcome`).
   async invite(token, claims, { name }) {
-    if (opensItself(this.env)) refuse(403, "people here join by signing in, with no invite");
+    if (this.env.SIGN_IN === "google") refuse(403, "people here join by signing in, with no invite");
     if (token.startsWith("run.")) refuse(403, "work left running invites nobody");
     const { held } = await this.sessionOf(token);
     if (!this.sql.exec("select 1 from admins where scope = 'global' and user = ?", claims.sub).toArray().length) refuse(403, "only an admin invites someone");

@@ -176,20 +176,25 @@ function googlePage({ name, google }) {
   return page(`Sign in to ${name}`, body, script);
 }
 
-/// Signing in on a try install (`one try`): its one person, with no passkey, straight on, so a client being tested
-/// signs in with nobody there. The button is for a browser that won't go on to an app by itself.
+/// Signing in on a try install (`one try`), with no passkey, straight on, so a client being tested signs in with nobody
+/// there: as whoever this browser is signed in as here (its first person, or someone who joined in it), or, with
+/// `?as=<name>` and no client, as someone who joined, for a device's browser before its app signs in. The button is for
+/// a browser that won't go on to an app by itself.
 export function tryPage({ name, person }) {
   const body = `
     <h1 id="title">Sign in to ${escape(name)}</h1>
-    <p id="what">As ${escape(person)}, in a try install: no passkey here.</p>
+    <p id="what">In a try install: no passkey here.</p>
     <button class="primary" id="go">Sign In as ${escape(person)}</button>`;
   const script = `
     const oauth_query = location.search.slice(1);
+    const params = new URLSearchParams(oauth_query);
     const go = async () => {
       say();
       try {
-        await api("/api/auth/try/sign-in", {});
-        location.href = new URLSearchParams(oauth_query).get("client_id") ? (await api("/sign-in/accept", { oauth_query })).url : "/";
+        const { person } = await api("/api/auth/try/sign-in", params.get("as") ? { person: params.get("as") } : {});
+        document.getElementById("go").textContent = "Sign In as " + person;
+        if (params.get("as")) return void (document.getElementById("what").textContent = "This browser is signed in here as " + person + ".");
+        location.href = params.get("client_id") ? (await api("/sign-in/accept", { oauth_query })).url : "/";
       } catch (err) { say(err.message); }
     };
     document.getElementById("go").onclick = go;
@@ -197,22 +202,27 @@ export function tryPage({ name, person }) {
   return page(`Sign in to ${name}`, body, script);
 }
 
-export function invitePage({ name }) {
+/// Joining with an invite link: making a first passkey, or on a try install (`tried`), with nothing to make.
+export function invitePage({ name, tried }) {
   const body = `
     <section id="join">
       <h1 id="title">Join ${escape(name)}</h1>
-      <p id="what">Make a passkey to join. It's how you sign in, and the only thing that unlocks your data.</p>
+      ${tried
+        ? `<p id="what">In a try install: no passkey here.</p>
+      <button class="primary" id="passkey" disabled>Join</button>`
+        : `<p id="what">Make a passkey to join. It's how you sign in, and the only thing that unlocks your data.</p>
       <button class="primary" id="passkey" disabled>Make a Passkey</button>
-      <p class="note">${escape(WORKS)}</p>
+      <p class="note">${escape(WORKS)}</p>`}
     </section>
     <section id="done" hidden>
       <h1>You've joined ${escape(ours(name))}</h1>
-      <p class="callout">Add a second passkey, on another device or a security key, so losing this one doesn't lock you out.</p>
-      <a class="button primary" href="/passkeys">Add Another Passkey</a>
-      <a class="button" href="/">Open ${escape(name)}</a>
+      ${tried ? "" : `<p class="callout">Add a second passkey, on another device or a security key, so losing this one doesn't lock you out.</p>
+      <a class="button primary" href="/passkeys">Add Another Passkey</a>`}
+      <a class="button${tried ? " primary" : ""}" href="/">Open ${escape(name)}</a>
     </section>`;
   const script = `
     const token = location.hash.slice(1);
+    const tried = ${tried ? "true" : "false"};
     (async () => {
       try {
         const about = await api("/invite/about", { token });
@@ -225,8 +235,11 @@ export function invitePage({ name }) {
       try {
         // Whoever was signed in here before, the passkey is the invite's person's.
         await api("/api/auth/sign-out", {}).catch(() => {});
-        const { prf, credential } = await newPasskey(token);
-        await api("/invite/keys", { token, prf, credential });
+        if (tried) await api("/api/auth/try/join", { token });
+        else {
+          const { prf, credential } = await newPasskey(token);
+          await api("/invite/keys", { token, prf, credential });
+        }
         history.replaceState(null, "", "/invite");
         document.getElementById("join").hidden = true;
         document.getElementById("done").hidden = false;

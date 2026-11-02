@@ -18,10 +18,11 @@
 // says it's them. An invite there only says who someone with an email is in the install, for those who were in it
 // before it signed people in this way.
 //
-// A try install's kernel (`SIGN_IN` is "try") signs in its one person (`TRY_USER`, `TRY_NAME`) with no passkey and no
-// Google: its sign-in page goes straight on, and the vault opens their keys itself, as for Google. It's for testing
-// clients without a person: only `one try` turns it on (kernel::Settings::try_person), on a kernel that listens only
-// on its own machine, and `kernel deploy` refuses one, so no real install's kernel ever does this.
+// A try install's kernel (`SIGN_IN` is "try") signs in its first person (`TRY_USER`, `TRY_NAME`) with no passkey and
+// no Google: its sign-in page goes straight on, and the vault opens their keys itself, as for Google. Someone it
+// invites joins by opening their link, again with no passkey, and is then who that browser signs in as. It's for
+// testing clients without a person: only `one try` turns it on (kernel::Settings::try_person), on a kernel that
+// listens only on its own machine, and `kernel deploy` refuses one, so no real install's kernel ever does this.
 
 import { DurableObject } from "cloudflare:workers";
 import { oauthProvider } from "@better-auth/oauth-provider";
@@ -138,7 +139,7 @@ export class Auth extends DurableObject {
             // are in the install, so nodes know them by the same id. Signing in with Google, anyone at the domain
             // does, as who an invite for their email says, if there is one.
             async before(user) {
-              if (tried) return user.id === env.TRY_USER ? undefined : false;
+              if (tried) return user.id === env.TRY_USER || (self.admitting && user.id === self.admitting) ? undefined : false;
               if (!google) return self.admitting && user.id === self.admitting ? undefined : false;
               const email = String(user.email || "").toLowerCase();
               if (!user.emailVerified || !email.endsWith(`@${env.JOIN_DOMAIN}`)) return false;
@@ -174,7 +175,7 @@ export class Auth extends DurableObject {
       },
       plugins: [
         jwt({ jwks: { keyPairConfig: { alg: "EdDSA", crv: "Ed25519" } }, jwt: { issuer: `${url.origin}/api/auth`, expirationTime: "1h" } }),
-        ...(tried ? [tryInstall(env.TRY_USER, env.TRY_NAME)] : []),
+        ...(tried ? [tryInstall(self, env.TRY_USER, env.TRY_NAME)] : []),
         ...(google || tried ? [] : [passkey({
           rpID: url.hostname,
           rpName: env.NAME || "The One App",
@@ -255,10 +256,11 @@ export class Auth extends DurableObject {
         const body = await request.json();
         return json(await (tried ? this.acceptTry(request, body) : google ? this.acceptGoogle(request, body) : this.accept(request, body)));
       }
-      // Passkeys and invite links are only for an install whose people sign in with a passkey.
-      if (google || tried) return new Response("not found", { status: 404 });
-      if (path === "/invite" && request.method === "GET") return html(invitePage({ name }));
+      // Invite links are for an install whose people sign in with a passkey, or a try install's; passkeys only the former.
+      if (google) return new Response("not found", { status: 404 });
+      if (path === "/invite" && request.method === "GET") return html(invitePage({ name, tried }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
+      if (tried) return new Response("not found", { status: 404 });
       if (path === "/invite/keys" && request.method === "POST") return json(await this.inviteKeys(request, await request.json()));
       if (path === "/passkeys" && request.method === "GET") return html(passkeysPage({ name }));
       if (path === "/passkeys/add" && request.method === "POST") return json(await this.addPasskey(request, await request.json()));
@@ -490,7 +492,7 @@ export class Auth extends DurableObject {
       this.vault("own", { user: user.id, to: code, name: client.name || client.clientId, client: client.clientId }));
   }
 
-  /// Signing in to a client on a try install: its one person, with nothing to show, and the vault opens their keys.
+  /// Signing in to a client on a try install: whoever is signed in here, with nothing to show, and the vault opens their keys.
   async acceptTry(request, { oauth_query }) {
     const { user } = await this.session(request);
     return this.consent(request, user, oauth_query, (client, code) =>
@@ -534,16 +536,35 @@ export class Auth extends DurableObject {
   }
 }
 
-/// A try install's sign-in: signs its one person in here, making them the first time, with no passkey.
-function tryInstall(id, name) {
+/// A try install's sign-in, with no passkey: whoever is signed in here already (someone who joined in this browser),
+/// or `person` by name (someone who joined), or else its first person, made the first time; and joining with an
+/// invite link, which signs its person in here.
+function tryInstall(auth, id, name) {
+  const signIn = async (ctx, user) => {
+    await setSessionCookie(ctx, { session: await ctx.context.internalAdapter.createSession(user.id), user });
+    return ctx.json({ person: user.name });
+  };
+  const first = async (adapter) => (await adapter.findUserById(id)) || (await adapter.createUser({ id, name, email: `${id}@people.invalid`, emailVerified: false }));
   return {
     id: "try",
     endpoints: {
       signInToTry: createAuthEndpoint("/try/sign-in", { method: "POST" }, async (ctx) => {
         const adapter = ctx.context.internalAdapter;
-        const user = (await adapter.findUserById(id)) || (await adapter.createUser({ id, name, email: `${id}@people.invalid`, emailVerified: false }));
-        await setSessionCookie(ctx, { session: await adapter.createSession(user.id), user });
-        return ctx.json({ person: user.name });
+        const person = typeof ctx.body?.person === "string" ? ctx.body.person.trim().toLowerCase() : "";
+        if (person) {
+          const [row] = auth.ctx.storage.sql.exec("select id from user where lower(name) = ?", person).toArray();
+          if (!row && person !== name.toLowerCase()) refuse(404, `Nobody called ${ctx.body.person} has joined.`);
+          return signIn(ctx, row ? await adapter.findUserById(row.id) : await first(adapter));
+        }
+        const already = await getSessionFromCtx(ctx);
+        if (already) return ctx.json({ person: already.user.name });
+        return signIn(ctx, await first(adapter));
+      }),
+      joinTry: createAuthEndpoint("/try/join", { method: "POST" }, async (ctx) => {
+        const invite = await auth.openInvite(ctx.body?.token);
+        await auth.admit(invite, { id: invite.user });
+        auth.ctx.storage.sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
+        return signIn(ctx, await ctx.context.internalAdapter.findUserById(invite.user));
       }),
     },
   };

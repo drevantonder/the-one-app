@@ -1097,6 +1097,12 @@ fn only_a_try_installs_kernel_signs_its_person_in_with_nothing_to_show() {
     let k = Kernel::start(None);
     let (status, out) = k.browser().post("/api/auth/try/sign-in", json!({}));
     assert_eq!(status, 404, "a kernel people use signed someone in with no passkey: {out}");
+    let (status, out) = k.browser().post("/api/auth/try/sign-in", json!({ "person": "Andre" }));
+    assert_eq!(status, 404, "a kernel people use signed someone in by name: {out}");
+    // Nor does an invite link join anyone there without a passkey.
+    let invite = kernel::invite(&k.settings, "Sam", None, || None).unwrap();
+    let (status, out) = k.browser().post("/api/auth/try/join", json!({ "token": invite.link.split_once('#').unwrap().1 }));
+    assert_eq!(status, 404, "a kernel people use let someone join with no passkey: {out}");
     let (status, _) = post(&format!("{}/internal/own", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": "0123456789abcdef", "to": "a code", "client": "web" }));
     assert_eq!(status, 403, "the vault of a kernel people use opened someone's keys itself");
     // Only `one try` makes such settings, and nothing puts them where anyone but this machine reaches them.

@@ -1,9 +1,10 @@
 //! `try`: an install of its own, made as `create` makes every new one, by a node beside this machine's own with its own
 //! home and ports, so it touches nothing of the person's (src/agents.rs leaves the harnesses alone for a node given a
 //! home). There's one for each checkout (or folder) it's run in, so threads working in different ones each have their
-//! own. Its kernel runs beside it and signs in its one person with no passkey (kernel::Settings::try_person), so a
-//! client of this checkout's build, on a device borrowed for it (`try client`), signs in with nobody there. It keeps
-//! its data until `try stop`: left alone it stops, and `try` starts it again as it was.
+//! own. Its kernel runs beside it and signs in its first person with no passkey (kernel::Settings::try_person), so a
+//! client of this checkout's build, on a device borrowed for it (`try client`), signs in with nobody there; others join
+//! as anyone does, by an invite link the first makes, and again with no passkey (`try client <kind> --as <name>`). It
+//! keeps its data until `try stop`: left alone it stops, and `try` starts it again as it was.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -77,6 +78,7 @@ recovery key; its kernel's settings are in {}.
   {CLI} try <command>        any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
   {CLI} try mcp              its MCP server, for an agent: claude mcp add {CLI}-try -- {CLI} try mcp
   {CLI} try client <kind>    a signed-in client of this checkout's build: web, android or windows
+  {CLI} try client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
   {CLI} try stop             stop and delete it, and give back its devices; {CLI} try then starts a new one",
         dir.display(),
         kernel.display()
@@ -382,29 +384,125 @@ fn give_back(dir: &Path) {
     }
 }
 
-/// `try client <kind>`: a client of this checkout's build, signed in to the try install as its person, and how to see
-/// and use it. Again, it's the same client, with this checkout's build as it is now.
+/// `try client <kind> [--as <name>]`: a client of this checkout's build, signed in to the try install as its first
+/// person, or as someone else they invited, and how to see and use it. Again, it's the same client, with this
+/// checkout's build as it is now.
 fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &[String]) -> Result<()> {
     let started = Instant::now();
+    let person = match rest.iter().position(|a| a == "--as") {
+        Some(at) => Some(person_named(rest.get(at + 1).context("--as who? --as sam")?)?),
+        None => None,
+    };
+    // As its first person is as nobody else.
+    let first = settings.try_person.as_ref().map(|(_, name)| name.to_lowercase());
+    let person = person.filter(|name| Some(name.to_lowercase()) != first);
     match rest.first().map(String::as_str) {
-        Some("web") => web(dir, settings)?,
-        Some(kind @ ("android" | "windows")) => device_client(dir, checkout, settings, kind)?,
-        _ => bail!("which client? {CLI} try client web, android or windows"),
+        Some("web") => web(dir, settings, person.as_deref())?,
+        Some("windows") if person.is_some() => bail!("the Windows client signs in only as the try install's first person for now: --as works with web and android"),
+        Some(kind @ ("android" | "windows")) => {
+            if let Some(name) = &person {
+                // They join where anyone does, in a browser: the try install's own here.
+                joined(dir, settings, name)?;
+            }
+            device_client(dir, checkout, settings, kind, person.as_deref())?
+        }
+        _ => bail!("which client? {CLI} try client web, android or windows, with --as <name> for someone else"),
+    }
+    if let Some(name) = &person {
+        // As in any new install, its one server is its first person's, which keeps only their data.
+        let addr = std::fs::read_to_string(dir.join("addr"))?;
+        let state = crate::request(try_agent(dir).get(format!("http://{}/v1/state", addr.trim())).call())?;
+        let servers = state["install"]["servers"].as_array().cloned().unwrap_or_default();
+        if !servers.iter().any(|s| s["privileged"] == true) {
+            let server = servers.first().and_then(|s| s["name"].as_str()).unwrap_or("<server>");
+            println!("  As in a new install, no server keeps everyone's data, so what {name} writes (joining a group, say) won't count until one does: {CLI} try acl {server} --owners install");
+        }
     }
     println!("Ready in {}s.", started.elapsed().as_secs());
     Ok(())
 }
 
+/// Someone's name as `--as` gives it, as people write it: "sam" is Sam.
+fn person_named(given: &str) -> Result<String> {
+    let given = given.trim();
+    anyhow::ensure!(!given.is_empty() && given.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '-'), "--as takes a name, like --as sam");
+    let mut chars = given.chars();
+    Ok(chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default())
+}
+
+/// The web client's folder in the try install's, for its first person or someone else.
+fn web_folder(dir: &Path, person: Option<&str>) -> PathBuf {
+    match person {
+        None => dir.join("web"),
+        Some(name) => dir.join(format!("web-{}", name.to_lowercase().replace(' ', "-"))),
+    }
+}
+
 /// The web client, in a browser of the try install's own on this machine, with no window: drive it over the DevTools
-/// protocol. Its profile is kept with the try install, so it stays signed in.
-fn web(dir: &Path, settings: &one::kernel::Settings) -> Result<()> {
-    let web = dir.join("web");
+/// protocol. Its profile is kept with the try install, so it stays signed in. As someone else, they're invited first,
+/// by the try install's first person, and join in it.
+fn web(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Result<()> {
+    let (port, picture) = match person {
+        Some(name) => joined(dir, settings, name)?,
+        None => {
+            let port = browser(dir, settings, None)?;
+            let picture = dir.join("web.png");
+            web_script(dir, &["sign-in", &port.to_string(), &settings.address, &picture.display().to_string()])?;
+            (port, picture)
+        }
+    };
+    let who = person.map(|name| format!(" as {name}")).unwrap_or_default();
+    println!(
+        "The web client of this build is signed in to the try install{who}, in a browser of its own on this machine.
+  See it: {}
+  Use it: its DevTools are at http://127.0.0.1:{port} (Playwright's connectOverCDP, or chrome-devtools-mcp --browserUrl)
+  In any browser here: {}",
+        picture.display(),
+        settings.address
+    );
+    Ok(())
+}
+
+/// `name`'s web client, signed in: the first time, the try install's first person makes them an invite link with Add
+/// Someone, on their own web client, and they open it in their own browser, join, and sign in. Pictures of making
+/// the link, the invite and joining are kept beside theirs. → its DevTools port, and the picture of their first screen.
+fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u16, PathBuf)> {
+    let folder = web_folder(dir, Some(name));
+    let picture = folder.with_extension("png");
+    let port = browser(dir, settings, Some(name))?;
+    let mut args = vec!["sign-in".to_string(), port.to_string(), settings.address.clone(), picture.display().to_string()];
+    let marker = folder.join("joined");
+    if !marker.exists() {
+        let admin = browser(dir, settings, None)?;
+        web_script(dir, &["sign-in", &admin.to_string(), &settings.address, &dir.join("web.png").display().to_string()])?;
+        eprintln!("Inviting {name}…");
+        let made = picture.display().to_string().replace(".png", "-add-someone.png");
+        args.push(web_script(dir, &["invite", &admin.to_string(), &settings.address, name, &made])?);
+    }
+    web_script(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    std::fs::write(&marker, name)?;
+    Ok((port, picture))
+}
+
+/// Runs try_install.js with Bun: → what it printed.
+fn web_script(dir: &Path, args: &[&str]) -> Result<String> {
+    let script = dir.join("web.js");
+    std::fs::write(&script, include_str!("try_install.js"))?;
+    let out = std::process::Command::new(one::deploy::bun()?).arg(&script).args(args).output()?;
+    anyhow::ensure!(out.status.success(), "the web client didn't {}: {}", if args[0] == "invite" { "make an invite link" } else { "sign in" }, String::from_utf8_lossy(&out.stderr).trim());
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// The try install's browser for its first person or someone else, started if it isn't running: → its DevTools port.
+fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Result<u16> {
+    let web = web_folder(dir, person);
     std::fs::create_dir_all(&web)?;
     let port = std::fs::read_to_string(web.join("port")).ok().and_then(|p| p.trim().parse::<u16>().ok());
     let answers = |port: u16| agent().get(format!("http://127.0.0.1:{port}/json/version")).call().is_ok_and(|r| r.status().is_success());
     let port = match port.filter(|p| answers(*p)) {
         Some(port) => port,
         None => {
+            let log = format!("{}.log", web.file_name().unwrap().to_string_lossy());
             let chrome = one::deploy::chrome().context("the web client needs Chrome or Chromium on this machine: none was found (CHROME=<path> names one)")?;
             let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
             spawn(
@@ -419,36 +517,23 @@ fn web(dir: &Path, settings: &one::kernel::Settings) -> Result<()> {
                     "--hide-scrollbars",
                     &settings.address,
                 ]),
-                "web.log",
+                &log,
             )?;
             std::fs::write(web.join("port"), port.to_string())?;
             let start = Instant::now();
             while !answers(port) {
-                anyhow::ensure!(start.elapsed() < Duration::from_secs(30), "the try install's browser didn't start: {}", dir.join("web.log").display());
+                anyhow::ensure!(start.elapsed() < Duration::from_secs(30), "the try install's browser didn't start: {}", dir.join(&log).display());
                 std::thread::sleep(Duration::from_millis(250));
             }
             port
         }
     };
-    let script = web.join("sign-in.js");
-    std::fs::write(&script, include_str!("try_install.js"))?;
-    let picture = dir.join("web.png");
-    let out = std::process::Command::new(one::deploy::bun()?).arg(&script).args([&port.to_string(), &settings.address, &picture.display().to_string()]).output()?;
-    anyhow::ensure!(out.status.success(), "the web client didn't sign in: {}", String::from_utf8_lossy(&out.stderr).trim());
-    println!(
-        "The web client of this build is signed in to the try install, in a browser of its own on this machine.
-  See it: {}
-  Use it: its DevTools are at http://127.0.0.1:{port} (Playwright's connectOverCDP, or chrome-devtools-mcp --browserUrl)
-  In any browser here: {}",
-        picture.display(),
-        settings.address
-    );
-    Ok(())
+    Ok(port)
 }
 
 /// An Android or Windows client: on a throwaway copy of the person's lasting device, borrowed for the try install,
 /// which reaches the try install's address at the same address; this checkout's build installed there, and signed in.
-fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, kind: &str) -> Result<()> {
+fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, kind: &str, person: Option<&str>) -> Result<()> {
     let mut borrowed = devices(dir);
     let listed = post("/v1/call", json!({ "app": "computer", "op": "list", "input": {}, "client": "one try" })).map(|l| l["ok"].clone()).unwrap_or_default();
     let still = |name: &str| listed["devices"].as_array().into_iter().flatten().any(|d| d["name"] == name);
@@ -483,16 +568,17 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, 
         })
     };
     let built = match kind {
-        "android" => android(dir, checkout, &device, &settings.address),
+        "android" => android(dir, checkout, &device, settings, person),
         _ => windows(checkout, &device, &settings.address),
     };
     building.store(false, std::sync::atomic::Ordering::Relaxed);
     let _ = keep.join();
     built?;
     println!(
-        "The {kind} client of this build is signed in to the try install, on the device {device}, a throwaway copy borrowed for it.
+        "The {kind} client of this build is signed in to the try install{}, on the device {device}, a throwaway copy borrowed for it.
   See it: {CLI} computer screen --device {device} (computer_screen), or {CLI} computer view --device {device} for a link
-  Use it: computer_use with device {device} (computer_tools lists what it takes); {CLI} try stop gives it back"
+  Use it: computer_use with device {device} (computer_tools lists what it takes); {CLI} try stop gives it back",
+        person.map(|name| format!(" as {name}")).unwrap_or_default()
     );
     Ok(())
 }
@@ -506,17 +592,38 @@ fn build(checkout: &Path, script: &str, envs: &[(&str, &str)]) -> Result<String>
 }
 
 /// The Android app: built, installed over the one there, started, and signed in at `address` as a person would:
-/// typing it and tapping Sign In, then the try install's sign-in going straight on. Once signed in on a device (a
-/// file in the try install's folder says so), a new build keeps that sign-in.
-fn android(dir: &Path, checkout: &Path, device: &str, address: &str) -> Result<()> {
+/// typing it and tapping Sign In, then the try install's sign-in going straight on, as the try install's first person
+/// or `person`, whom the phone's browser signs in as first. Once signed in on a device as them (a file in the try
+/// install's folder says so), a new build keeps that sign-in.
+fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Settings, person: Option<&str>) -> Result<()> {
+    let address = settings.address.as_str();
     let apk = build(checkout, "android/build.sh", &[])?;
     let apk = checkout.join("android").join(apk.lines().last().unwrap_or_default());
     let package = format!("app.{CLI}.android");
     agent_devices("install", json!({ "device": device, "app": apk.display().to_string() }))?;
     let signed_in = dir.join(format!("signed-in-{device}"));
-    if !signed_in.exists() {
-        // A copy of the person's phone may have a build signed in elsewhere.
+    let first = settings.try_person.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
+    let who = person.unwrap_or(first);
+    let here = format!("{address}\n{who}");
+    let kept = std::fs::read_to_string(&signed_in).is_ok_and(|was| was == here);
+    if !kept {
+        // A copy of the person's phone may have a build signed in elsewhere, or as someone else.
         on_device(device, &format!("pm clear {package}"))?;
+        // The app signs in through the phone's browser, which then signs in as whoever it last did here.
+        let url = format!("{address}/sign-in?as={}", who.replace(' ', "%20"));
+        on_device(device, &format!("am start -W -a android.intent.action.VIEW -d '{url}'"))?;
+        let start = Instant::now();
+        loop {
+            anyhow::ensure!(start.elapsed() < Duration::from_secs(60), "the phone's browser didn't sign in as {who}: look at it with {CLI} computer screen --device {device}");
+            std::thread::sleep(Duration::from_secs(2));
+            let nodes = ui_nodes(&on_device(device, "uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; cat /sdcard/ui.xml")?);
+            if nodes.iter().any(|n| n.text.contains("is signed in here as")) {
+                break;
+            }
+            if let Some(button) = ["Accept & continue", "No thanks", "Use without an account", "Got it"].iter().find_map(|t| nodes.iter().find(|n| n.text == *t)) {
+                on_device(device, &format!("input tap {} {}", button.x, button.y))?;
+            }
+        }
     }
     on_device(device, &format!("am force-stop {package}; am start -W -n {package}/app.client.MainActivity"))?;
     let start = Instant::now();
@@ -549,8 +656,8 @@ fn android(dir: &Path, checkout: &Path, device: &str, address: &str) -> Result<(
                 pressed = true;
             }
             // Its home, once it signed in here, now or before.
-            None if ours && (pressed || signed_in.exists()) && !nodes.iter().any(|n| n.class == "android.widget.EditText" || n.text.starts_with("Can’t Reach")) => {
-                std::fs::write(&signed_in, address)?;
+            None if ours && (pressed || kept) && !nodes.iter().any(|n| n.class == "android.widget.EditText" || n.text.starts_with("Can’t Reach")) => {
+                std::fs::write(&signed_in, &here)?;
                 return Ok(());
             }
             None => {}
