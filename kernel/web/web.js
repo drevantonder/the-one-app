@@ -174,7 +174,9 @@ window.__one = {};
 
   const me = () => store.state?.user;
   const install = () => store.state?.install;
-  const config = () => store.state?.config || {};
+  // The white label's name and accent, as the gateway's index.html says them, until the install's state does.
+  const label = { name: document.querySelector('meta[name="application-name"]')?.content || "", accent: document.querySelector('meta[name="theme-color"]')?.content || "" };
+  const config = () => store.state?.config || label;
   const app = (name) => store.apps.find((a) => a.name === name);
   const label = (a) => a?.title || a?.name || "";
   const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");
@@ -647,7 +649,7 @@ window.__one = {};
   // MARK: Starting
 
   function showSignedOut(error) {
-    const name = store.state?.config?.name || "The One App";
+    const name = config().name;
     document.title = name;
     root.innerHTML = `<div class="welcome"><img class="welcome-mark" src="/logo.png" alt=""><h1>${esc(name)}</h1>` +
       `<button class="button primary big" data-signin>Sign In</button>${error ? `<div class="error welcome-error">${esc(error)}</div>` : ""}</div>`;
@@ -662,11 +664,12 @@ window.__one = {};
   }
 
   function showUnreachable(text) {
-    const name = store.state?.config?.name || "The One App";
+    const name = config().name;
     root.innerHTML = message(`Can’t Reach ${name}`, esc(text), `<div class="unavailable-text">It keeps trying.</div>`);
   }
 
   async function start() {
+    if (/^#[0-9a-f]{3,8}$/i.test(label.accent)) document.documentElement.style.setProperty("--accent", label.accent);
     schemed(document, appearance());
     if (location.pathname === "/callback") {
       try {
