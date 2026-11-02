@@ -1123,7 +1123,7 @@ impl Node {
 
     /// A database's key, `app`'s `database` in `scope`, as this server opens it with its own keys: from the app's key,
     /// in the bucket sealed under the scope's. A call that came with a token gets its keys from the vault instead
-    /// (`sessions`); this is for this server's own work, and installs with no kernel.
+    /// (`sessions`); this is for this server's own work.
     async fn database_key(&self, scope: &Scope, app: &str, database: &str) -> Result<[u8; 32]> {
         tracing::debug!("opening {scope}'s {app}/{database} with this server's own key");
         let scope_key = self.scope_key(scope).await?;
@@ -2159,7 +2159,7 @@ impl Node {
         })
     }
 
-    /// The Vault's routes, `/v1/vault…`, for the local API and clients alike; `body` is a GET's query or a POST's body.
+    /// The Vault's routes, `/v1/vault…`, for the local API; `body` is a GET's query or a POST's body.
     /// None for another path.
     pub async fn vault_route(&self, me: &Caller, method: &str, path: &str, body: &Value) -> Result<Option<Value>> {
         let scope = |default: Option<&str>| body["scope"].as_str().or(default).map(|s| self.scope_for(me, s)).transpose();

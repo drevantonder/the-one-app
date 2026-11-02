@@ -547,7 +547,7 @@ impl Node {
         Ok(json!(out))
     }
 
-    /// The backups' routes, `/v1/backups…`, for the local API and phones alike.
+    /// The backups' routes, `/v1/backups…`, for the local API.
     pub async fn backups_route(&self, me: &Caller, method: &str, path: &str, body: &Value) -> Result<Option<Value>> {
         let me = &Caller { agent: body["agent"].as_str().map(str::to_string).or(me.agent.clone()), ..me.clone() };
         Ok(Some(match (method, path) {

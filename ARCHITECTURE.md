@@ -88,11 +88,9 @@ A call that brings a token (the web, Android, Windows, the iPhone, MCP clients, 
   - *Built-in sidecars' records* (Shell's, Agents', Models'), synced every minute. Goes: the sync runs as a schedule of the owner's, through the schedules service.
   - *Backups*, sealed with each scope's key. Goes: backups run from the schedules service, as an admin's standing work, with the scope keys the vault gives each run.
   - *Making scopes' keys*: a group's, and a person's own scope the node touches before the vault made it. Goes: a vault route makes a group's key when it's made and grants it to its people, as the vault already does for a person at their first passkey; nodes then never make one.
-  - *Calls with no token*: this machine's own programs not signed in (the Mac app's window, `one` before `one sign-in`), and a scope the vault has no key for yet (a group made since `kernel keys`; the node says so in its log). Goes: the Mac app's window signs in as the other clients do; then on an install with a kernel a call with no token is refused, and the group route above ends the other.
+  - *Calls with no token*: this machine's own programs not signed in (the Mac app's window, `one` before `one sign-in`), and a scope the vault has no key for yet (a group made since `kernel keys`; the node says so in its log). Goes: the Mac app's window signs in as the other clients do; then a call with no token is refused, and the group route above ends the other.
 - **The Vault's items in the log**, whose secrets the node fills into apps' requests (`src/outbound.rs`). Goes: machine nodes fill through the vault's `/fetch` and `/fill`, as the serverless node does, and items move to the vault's own (`kernel/vault/items.js`), so the log carries none.
 - **The bucket's credentials**, which can delete: for all the above, the copy's fill, leases, moving the install's data and erasing an app. Goes last, once the node session reads and creates by URL, leases use create-only URLs, erasing is the vault's `/erase`, and moving storage is the kernel's.
-
-Installs with no kernel (PTC's) keep all of these as they are.
 
 ## Designed, not built
 

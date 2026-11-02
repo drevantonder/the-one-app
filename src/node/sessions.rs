@@ -72,7 +72,7 @@ impl Node {
         (claims.sub == user).then(|| token.to_string())
     }
 
-    /// The vault, for a call that came with a token, when the install has a kernel.
+    /// The vault, for a call that came with a token, once the install's kernel is set up.
     fn kernel_vault(&self, me: &Caller) -> Option<(String, crate::kernel::Vault)> {
         let token = me.token.clone()?;
         let (_, url) = self.kernel().ok()?;
@@ -81,7 +81,7 @@ impl Node {
 
     /// The keys of `want`'s databases, (scope, app, database) each, for a call that came with a token: from what the
     /// vault gave this server for it, asking for those it lacks at once. None for a call with no token, or with no
-    /// kernel to ask: this server's own programs, and installs with no kernel, open data with this server's keys.
+    /// kernel to ask yet: this server's own programs open data with this server's keys.
     pub(super) async fn session_keys(&self, me: &Caller, want: &[(Scope, &str, &str)]) -> Result<Option<Vec<[u8; 32]>>> {
         let Some((token, vault)) = self.kernel_vault(me) else { return Ok(None) };
         let id = hash(&token);
