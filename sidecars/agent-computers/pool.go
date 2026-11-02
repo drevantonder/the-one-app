@@ -209,8 +209,8 @@ func openPage(ctx context.Context, d computer, name, url string) error {
 	if url == "" {
 		url = "about:blank"
 	}
-	return sh(ctx, d, owned(name)+` && (runuser -u cua -- env DISPLAY=:1 HOME=`+home+` setsid chromium `+signInClass+
-		` --user-data-dir=`+profiles+name+` --password-store=basic --no-first-run --start-maximized `+quote(url)+` >/dev/null 2>&1 </dev/null &)`)
+	return sh(ctx, d, owned(name)+` && (runuser -u cua -- env DISPLAY=:1 HOME=`+home+` setsid google-chrome `+signInClass+
+		` --user-data-dir=`+profiles+name+` --password-store=basic --no-first-run --no-default-browser-check --start-maximized `+quote(url)+` >/dev/null 2>&1 </dev/null &)`)
 }
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
@@ -343,6 +343,16 @@ func (ds *computers) tend(ctx context.Context) {
 		}
 	}
 	free := spares(all, lent)
+	// A spare on an older image makes way for one on this week's.
+	img := imageFor(time.Now())
+	free = slices.DeleteFunc(free, func(d computer) bool {
+		if d.image == img {
+			return false
+		}
+		ds.drop(d.Name)
+		remove(ctx, d)
+		return true
+	})
 	slices.SortFunc(free, func(a, b computer) int { return strings.Compare(a.Name, b.Name) })
 	for _, d := range free[min(1, len(free)):] {
 		ds.drop(d.Name)

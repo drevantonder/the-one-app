@@ -85,8 +85,11 @@ func (a *appleRT) stopped(name string) string { return filepath.Join(a.dir, "sto
 
 type appleContainer struct {
 	Configuration struct {
-		ID        string            `json:"id"`
-		Labels    map[string]string `json:"labels"`
+		ID     string            `json:"id"`
+		Labels map[string]string `json:"labels"`
+		Image  struct {
+			Reference string `json:"reference"`
+		} `json:"image"`
 		Resources struct {
 			CPUs          float64 `json:"cpus"`
 			MemoryInBytes int64   `json:"memoryInBytes"`
@@ -119,7 +122,7 @@ func (a *appleRT) list(ctx context.Context) ([]computer, error) {
 		if !ok || l["one.token"] == "" {
 			continue
 		}
-		d := computer{Name: name, State: "stopped", Started: c.Status.StartedDate, token: l["one.token"], pool: l["one.pool"] != ""}
+		d := computer{Name: name, State: "stopped", Started: c.Status.StartedDate, token: l["one.token"], pool: l["one.pool"] != "", image: c.Configuration.Image.Reference}
 		if c.Status.State == "running" {
 			d.State = "running"
 		}
@@ -130,13 +133,13 @@ func (a *appleRT) list(ctx context.Context) ([]computer, error) {
 	return out, nil
 }
 
-func (a *appleRT) run(ctx context.Context, d computer, sz size) error {
+func (a *appleRT) run(ctx context.Context, d computer, sz size, image string) error {
 	c, vol := prefix+d.Name, prefix+d.Name+"-home"
 	if _, err := ctr(ctx, "volume", "create", vol); err != nil {
 		return err
 	}
 	// A new volume is empty: copy the image's home folder in first.
-	if _, err := ctr(ctx, "run", "--rm", "--entrypoint", "/bin/sh", "--volume", vol+":/mnt/home", cuaImage,
+	if _, err := ctr(ctx, "run", "--rm", "--entrypoint", "/bin/sh", "--volume", vol+":/mnt/home", image,
 		"-c", "cp -a "+home+"/. /mnt/home/ && rm -rf /mnt/home/lost+found && chown 1000:1000 /mnt/home"); err != nil {
 		return err
 	}
@@ -150,7 +153,7 @@ func (a *appleRT) run(ctx context.Context, d computer, sz size) error {
 		"--volume", vol+":"+home,
 		"--publish-socket", sock+":"+computerSocket,
 		"--shm-size", "1G", "--memory", fmt.Sprintf("%dG", sz.GB), "--cpus", strconv.Itoa(sz.CPUs),
-		cuaImage)...); err != nil {
+		image)...); err != nil {
 		return err
 	}
 	a.forward(d.Name, d.port)
@@ -205,6 +208,39 @@ func (a *appleRT) remove(ctx context.Context, d computer) error {
 	os.Remove(a.socket(d.Name))
 	os.Remove(a.stopped(d.Name))
 	return nil
+}
+
+func (a *appleRT) hasImage(ctx context.Context, image string) bool {
+	_, err := ctr(ctx, "image", "inspect", image)
+	return err == nil
+}
+
+func (a *appleRT) build(ctx context.Context, image, dir string) error {
+	_, err := ctr(ctx, "build", "--tag", image, dir)
+	return err
+}
+
+func (a *appleRT) images(ctx context.Context) ([]string, error) {
+	out, err := ctr(ctx, "image", "list", "--format", "json")
+	if err != nil {
+		return nil, err
+	}
+	var all []struct {
+		Reference string `json:"reference"`
+	}
+	if err := json.Unmarshal(out, &all); err != nil {
+		return nil, err
+	}
+	var refs []string
+	for _, i := range all {
+		refs = append(refs, i.Reference)
+	}
+	return refs, nil
+}
+
+func (a *appleRT) removeImage(ctx context.Context, image string) error {
+	_, err := ctr(ctx, "image", "delete", image)
+	return err
 }
 
 func (a *appleRT) pause(context.Context, computer) error   { return errCant }

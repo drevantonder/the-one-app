@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// A computer is a container running Cua's desktop image, named prefix+name,
+// A computer is a container running Cua's desktop image (image.go), named prefix+name,
 // its home folder on a volume of its own, so its sign-ins survive restarts
 // and image updates. Its server's port and token are labels on the container,
 // where the old app kept them too, so its computers carry on here. The
@@ -35,6 +35,7 @@ type computer struct {
 	State   string    `json:"state"` // running, paused or stopped
 	Started time.Time `json:"started,omitzero"`
 	pool    bool      // made to be borrowed (pool.go)
+	image   string    // the image it runs
 	port    int
 	token   string
 }
@@ -47,8 +48,9 @@ var validProfile = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,39}$`)
 // A containers runs computers' containers.
 type containers interface {
 	list(ctx context.Context) ([]computer, error)
-	// run makes the computer's container and home volume, and starts it.
-	run(ctx context.Context, d computer, sz size) error
+	// run makes the computer's container and home volume from the image,
+	// and starts it.
+	run(ctx context.Context, d computer, sz size, image string) error
 	// start starts a computer, and again after the server restarts; stop
 	// stops it until it's started again.
 	start(ctx context.Context, d computer) error
@@ -65,6 +67,11 @@ type containers interface {
 	limits(ctx context.Context, all []computer) (map[string]limit, error)
 	resize(ctx context.Context, d computer, sz size) error
 	stats(ctx context.Context) (map[string]usage, error)
+	hasImage(ctx context.Context, image string) bool
+	// build builds an image from the Containerfile in dir.
+	build(ctx context.Context, image, dir string) error
+	images(ctx context.Context) ([]string, error)
+	removeImage(ctx context.Context, image string) error
 }
 
 // rt is this server's.
@@ -139,6 +146,10 @@ func create(ctx context.Context, name string, sz size, pool, wait bool) (compute
 	if !validName.MatchString(name) {
 		return computer{}, fmt.Errorf("a computer's name is lowercase letters, digits and dashes")
 	}
+	img, err := ensureImage(ctx)
+	if err != nil {
+		return computer{}, err
+	}
 	creating.Lock()
 	defer creating.Unlock()
 	all, err := list(ctx)
@@ -151,7 +162,7 @@ func create(ctx context.Context, name string, sz size, pool, wait bool) (compute
 	b := make([]byte, 24)
 	rand.Read(b)
 	d := computer{Name: name, State: "running", pool: pool, port: nextPort(all), token: hex.EncodeToString(b)}
-	if err := rt.run(ctx, d, sz); err != nil {
+	if err := rt.run(ctx, d, sz, img); err != nil {
 		remove(context.WithoutCancel(ctx), d)
 		return computer{}, err
 	}

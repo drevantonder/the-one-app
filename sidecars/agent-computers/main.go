@@ -1,5 +1,5 @@
 // The Agent Computers sidecar: Linux computers for agents, each a Podman container
-// running Cua's desktop image (github.com/trycua/cua) with a browser that
+// running Cua's desktop image (github.com/trycua/cua) with Google Chrome, which
 // keeps its sign-ins, offered to the person's devices through this device's
 // node. The server inside each computer speaks MCP; its
 // browser tools become this app's operations.

@@ -52,6 +52,7 @@ func (podmanRT) list(ctx context.Context) ([]computer, error) {
 	}
 	var raw []struct {
 		Names     []string
+		Image     string
 		State     string
 		StartedAt int64
 		Labels    map[string]string
@@ -64,7 +65,7 @@ func (podmanRT) list(ctx context.Context) ([]computer, error) {
 		if len(r.Names) == 0 || !strings.HasPrefix(r.Names[0], prefix) {
 			continue
 		}
-		d := computer{Name: strings.TrimPrefix(r.Names[0], prefix), State: "stopped", token: r.Labels["one.token"], pool: r.Labels["one.pool"] != ""}
+		d := computer{Name: strings.TrimPrefix(r.Names[0], prefix), State: "stopped", token: r.Labels["one.token"], pool: r.Labels["one.pool"] != "", image: r.Image}
 		if r.State == "running" || r.State == "paused" {
 			d.State = r.State
 		}
@@ -77,20 +78,47 @@ func (podmanRT) list(ctx context.Context) ([]computer, error) {
 	return all, nil
 }
 
-func (podmanRT) run(ctx context.Context, d computer, sz size) error {
+func (podmanRT) run(ctx context.Context, d computer, sz size, image string) error {
 	c := prefix + d.Name
 	args := append([]string{"run", "--detach", "--name", c, "--restart=always"}, d.labels()...)
 	args = append(args, sz.limits()...)
 	_, err := podman(ctx, append(args,
 		"--env", "CUA_ENV_TOKEN="+d.token,
 		// The image says HOME=/root, which its computer user inherits; there
-		// Chromium can't keep crash reports, and won't start.
+		// Chrome can't keep crash reports, and won't start.
 		"--env", "HOME="+home,
 		"--publish", fmt.Sprintf("127.0.0.1:%d:3211", d.port),
 		// A new named volume starts as a copy of the image's home folder.
 		"--volume", c+"-home:"+home,
 		"--shm-size=1g",
-		cuaImage)...)
+		image)...)
+	return err
+}
+
+func (podmanRT) hasImage(ctx context.Context, image string) bool {
+	_, err := podman(ctx, "image", "inspect", image)
+	return err == nil
+}
+
+// build pulls Cua's image again first, and then deletes the one it replaced.
+// Docker's format keeps Cua's health check, which OCI's drops.
+func (podmanRT) build(ctx context.Context, image, dir string) error {
+	if _, err := podman(ctx, "build", "--pull=always", "--format", "docker", "--tag", image, dir); err != nil {
+		return err
+	}
+	if _, err := podman(ctx, "image", "prune", "--force", "--filter", "label=org.opencontainers.image.source=https://github.com/trycua/cua"); err != nil {
+		log.Print(err)
+	}
+	return nil
+}
+
+func (podmanRT) images(ctx context.Context) ([]string, error) {
+	out, err := podman(ctx, "images", "--format", "{{.Repository}}:{{.Tag}}")
+	return strings.Fields(string(out)), err
+}
+
+func (podmanRT) removeImage(ctx context.Context, image string) error {
+	_, err := podman(ctx, "image", "rm", image)
 	return err
 }
 

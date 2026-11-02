@@ -43,7 +43,7 @@ func TestHistorySites(t *testing.T) {
 		t.Skip("no python3")
 	}
 	db := filepath.Join(t.TempDir(), "History")
-	// Chromium's time: microseconds since 1601. 13406000000000000 is 2025-10-27.
+	// Chrome's time: microseconds since 1601. 13406000000000000 is 2025-10-27.
 	setup := `import sqlite3, sys
 c = sqlite3.connect(sys.argv[1])
 c.execute("create table urls (url text, last_visit_time integer)")

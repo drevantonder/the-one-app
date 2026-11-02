@@ -185,7 +185,7 @@ func (ds *computers) saved(ctx context.Context, s save) error {
 	return nil
 }
 
-// history reads a Chromium profile's History: each site's registrable domain
+// history reads a Chrome profile's History: each site's registrable domain
 // (example.com, example.com.au) with the day it was last used, newest first,
 // at most 30. Python's sqlite3 is in every computer, so this needs nothing
 // new; a short list of second-level labels stands in for the public suffix
