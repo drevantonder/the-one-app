@@ -1,0 +1,266 @@
+<style>
+  html, body { height: 100%; }
+  body { padding: 0; max-width: none; overflow: hidden; --w-card: var(--card); }
+  @media (prefers-color-scheme: dark) { body { --w-card: var(--card); } }
+  #pages { height: 100%; }
+  /* Side by side, a page each: swipe between them, scroll within one. */
+  .strip { display: flex; height: 100%; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .strip::-webkit-scrollbar { display: none; }
+  .one-page { flex: 0 0 100%; height: 100%; overflow-y: auto; scroll-snap-align: start; scroll-snap-stop: always; padding: 20px 20px calc(120px + env(safe-area-inset-bottom)); }
+  .one-page > * { max-width: 1100px; }
+  .header { padding: 0 4px 20px; }
+  .header h1 { font-size: 34px; font-weight: 700; margin: 0; line-height: 1.15; }
+  .header .subtitle { font-size: 15px; color: var(--muted); margin-top: 2px; }
+  .grid { display: grid; }
+  .tile { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; padding: 2px 0 0; border: 0; background: none; font: inherit; color: var(--text); cursor: pointer;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  .tile:active .tile-icon { opacity: 0.7; }
+  .tile-icon { position: relative; display: block; line-height: 0; }
+  .tile-icon > .app-icon, .tile-icon > .folder, .tile-icon > .avatar { --size: var(--icon, 60px) !important; width: var(--icon, 60px); height: var(--icon, 60px); }
+  .tile-icon > .avatar { font-size: calc(var(--icon, 60px) * 0.4); }
+  .tile-name { font-size: 13px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge { position: absolute; top: -7px; right: -7px; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; background: #ff3b30; color: white; font-size: 14px; font-weight: 600; line-height: 24px; text-align: center; font-variant-numeric: tabular-nums; }
+  /* Where a window draws screens at its smaller text (a zoom on the page), a widget keeps its own size. */
+  .widget { zoom: var(--unzoom, 1); user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .widget.opens { cursor: pointer; }
+  /* A page's Services folder: its services' icons, nine at most, small, on frosted glass. */
+  .folder { --size: 60px; --mini: calc(var(--size) * 0.62 / 3); flex: none; display: grid; grid-template-columns: repeat(3, var(--mini)); grid-auto-rows: var(--mini); gap: calc(var(--size) * 0.06);
+    padding: calc(var(--size) * 0.13); border-radius: calc(var(--size) * 0.225); background: rgba(128, 128, 128, 0.22); box-shadow: inset 0 0 0 0.5px rgba(128, 128, 128, 0.3); align-content: start; }
+  .folder > i { border-radius: calc(var(--mini) * 0.25); background: rgba(128, 128, 128, 0.18); }
+  .folder .app-icon { --size: var(--mini) !important; width: var(--mini); height: var(--mini); font-size: 0; }
+  .empty-page { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px; margin-bottom: 20px; border-radius: 24px; background: var(--card); text-align: center; }
+  .empty-page b { font-size: 17px; }
+  .empty-page .button { margin-top: 6px; }
+  /* Under the pages: the one shown's name, then a dot for each, with a cog for Settings. */
+  .dots { position: fixed; left: 0; right: 0; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+  .dots .name { font-size: 13px; font-weight: 600; color: var(--muted); max-width: 70%; text-align: center; }
+  .capsule { pointer-events: auto; display: flex; align-items: center; height: 44px; border-radius: 22px; background: color-mix(in srgb, var(--card) 92%, transparent);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14), 0 0 0 0.5px var(--line); }
+  .capsule button { height: 44px; border: 0; background: none; display: flex; align-items: center; gap: 6px; color: var(--faint); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .capsule .marks { padding: 0 6px 0 18px; }
+  .capsule .marks i { display: block; width: 7px; height: 7px; border-radius: 4px; background: var(--faint); transition: width 0.2s; }
+  .capsule .marks i.on { width: 16px; background: var(--text); }
+  .capsule .cog { position: relative; padding: 0 18px 0 6px; font-size: 18px; }
+  .capsule .cog.on { color: var(--text); }
+  .capsule .cog.attention::after { content: ""; position: absolute; top: 11px; right: 14px; width: 7px; height: 7px; border-radius: 4px; background: var(--danger); }
+</style>
+<div id="pages"></div>
+<script>
+  // Your pages, as a home screen: each a grid of the widgets you put there and its apps' icons, then its Services
+  // folder; Settings is a page of its items. With `scope`, that page alone (a window whose sidebar picks it; "settings"
+  // for Settings); with `swipe`, every page side by side then Settings, opened at `scope`, to swipe between (a phone).
+  // Touch and hold, or right-click, for what an icon or widget offers: its sizes, its settings, taking it off.
+  const { scope: chosen, swipe } = one.params || {};
+  const SETTINGS = "settings";
+  const CELLS = { small: [2, 2], medium: [4, 2], large: [4, 4], xl: [8, 4] };
+  const NAMES = { small: "Small", medium: "Medium", large: "Large", xl: "Extra Large" };
+  const esc = one.esc;
+  let at = chosen || "user";
+
+  const folder = (apps) => `<span class="folder">${apps.length ? apps.slice(0, 9).map((a) => one.appIcon(a, 15)).join("") : "<i></i>".repeat(9)}</span>`;
+  const badge = (n) => (n > 0 ? `<span class="badge">${n > 99 ? "99+" : n}</span>` : "");
+
+  function tile(name, icon, n, open, menu) {
+    const el = document.createElement("button");
+    el.className = "tile";
+    el.innerHTML = `<span class="tile-icon">${icon}${badge(n)}</span><span class="tile-name">${esc(name)}</span>`;
+    el.onclick = () => { one.tap(); open(); };
+    if (menu) held(el, menu);
+    return { el, span: [1, 1] };
+  }
+
+  /// Touch and hold, or a right-click: `fn(event)`.
+  function held(el, fn) {
+    el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      one.tap("medium");
+      fn(e);
+    });
+  }
+
+  /// What a page's widgets act through: their app's operations, and their links.
+  const widgetHost = (p) => ({
+    async run(app, op, input) {
+      try {
+        await home.call(app, op, input);
+      } catch (err) {
+        return err.message;
+      }
+      await home.loadWidgets();
+      draw();
+    },
+    follow(link, w) {
+      if (typeof link === "string") return void (/^https?:/i.test(link) && one.link(link));
+      if (link?.screen) one.open(link.screen, link.params || {}, w.app, { scope: p.scope });
+    },
+  });
+
+  function widget(w, kept, p) {
+    const a = home.app(w.app), size = w.size || "medium";
+    const make = (size) => {
+      const el = oneWidgets.card({ ...w, title: w.title || home.label(a) || w.widget }, widgetHost(p), home.tree(w, size));
+      el.classList.add("widget");
+      // A widget without a link of its own opens its app.
+      if (!home.tree(w, size)?.link && a && home.hasScreens(a)) {
+        el.classList.add("opens");
+        el.addEventListener("click", (e) => { if (!e.defaultPrevented && !e.target.closest("button, input, label, a")) home.open(a, p)(); });
+      }
+      held(el, (e) => home.menu(widgetActions(w, kept, p, size), e));
+      return el;
+    };
+    return { el: make(size), span: CELLS[size] || CELLS.medium, widget: w, refit: make };
+  }
+
+  /// What touching and holding a widget offers: its sizes, then Copy What Went Wrong if it broke, and Remove Widget.
+  function widgetActions(w, kept, p, size) {
+    const out = home.supported(w).map((s) => ({ title: NAMES[s], checked: s === size, run: () => s !== size && arrange(p, (item) => (item.id === kept.id ? { ...item, size: s } : item)) }));
+    if (w.error) out.push({ title: "Copy What Went Wrong", run: () => one.copy(w.error) });
+    out.push({ title: "Remove Widget", danger: true, run: () => arrange(p, (item) => (item.id === kept.id ? null : item)) });
+    return out;
+  }
+
+  /// Keeps a page in its person's order with `edit` applied to each item (null takes it off), then draws it again.
+  async function arrange(p, edit) {
+    const state = home.data.state;
+    const kept = home.items(p).map((i) => (i.app ? { app: i.app.name } : i.kept)).map(edit).filter(Boolean);
+    const hidden = state.arrangements?.[p.scope]?.hidden || [];
+    state.arrangements = { ...(state.arrangements || {}), [p.scope]: { items: kept, hidden } };
+    draw();
+    try {
+      await one.api("POST", "/v1/arrange", { page: p.scope, items: kept, hidden });
+    } catch (err) {
+      home.failed(err);
+    }
+  }
+
+  /// A page: its title (alone in a window), then one grid, as a home screen's.
+  function drawPage(el, p) {
+    const empty = !home.appsOn(p).length && !home.widgetsOn(p).length;
+    const arrange = home.canArrange(p.scope);
+    el.innerHTML = (swipe ? "" : `<div class="header"><h1>${esc(p.title)}</h1><div class="subtitle">${esc(p.subtitle)}</div></div>`) +
+      (empty ? `<div class="empty-page"><b>Nothing here yet</b><div class="muted">${arrange ? `Apps you add to ${esc(p.title)} show up here.` : `When its admins add apps to ${esc(p.title)}, they show up here.`}</div>` +
+        `${arrange && home.store() ? `<button class="button primary" data-store>Open the App Store</button>` : ""}</div>` : "") +
+      `<div class="grid"></div>`;
+    el.querySelector("[data-store]")?.addEventListener("click", home.openStore);
+    const list = home.items(p).map((item) => {
+      if (item.widget) return widget(item.widget, item.kept, p);
+      const a = item.app;
+      return tile(home.label(a), one.appIcon(a, 60), home.badge(a.name, p), home.open(a, p), (e) => home.menu(home.actions(a, p), e));
+    });
+    list.push(tile("Services", folder(home.servicesOn(p)), 0, () => one.open("services", { scope: p.scope }, undefined, { sheet: true })));
+    lay(el.querySelector(".grid"), list);
+  }
+
+  /// Settings, as a page: its items' icons, you first, as your picture.
+  function drawSettings(el) {
+    const me = home.me();
+    el.innerHTML = (swipe ? "" : `<div class="header"><h1>Settings</h1><div class="subtitle">${esc(home.install()?.name || "")}</div></div>`) + `<div class="grid"></div>`;
+    const list = (home.data.state.settings_items || []).map((item) => {
+      const icon = item.name === "account" && me ? one.avatar(me.id, me.name) : one.appIcon({ name: item.name, title: item.title, icon: item.icon, color: item.color }, 60);
+      // An item with an app (the App Store) opens that app.
+      return tile(item.title, icon, item.badge || 0, () => (item.app ? one.open("main", {}, item.app) : one.open(item.name)));
+    });
+    lay(el.querySelector(".grid"), list);
+  }
+
+  /// Lays a grid out as a home screen does: square cells an icon wide, four across a phone, as many as fit wider;
+  /// each item in the first place it fits, row by row, widgets starting on an even column; a widget wider than there's
+  /// room for is large.
+  function lay(grid, list) {
+    grid.__items = list;
+    grid.replaceChildren(...list.map((i) => i.el));
+    fit(grid);
+  }
+
+  function fit(grid) {
+    document.documentElement.style.setProperty("--unzoom", 1 / (parseFloat(getComputedStyle(document.documentElement).zoom) || 1));
+    const width = grid.clientWidth;
+    if (!width) return;
+    const narrow = width < 500;
+    const gap = narrow ? 14 : 18;
+    const cell = narrow ? (width - gap * 3) / 4 : 104;
+    const columns = narrow ? 4 : Math.max(4, Math.floor((width + gap) / (cell + gap)));
+    Object.assign(grid.style, { gap: `${gap}px`, gridAutoRows: `${cell}px`, gridTemplateColumns: `repeat(${columns}, ${cell}px)` });
+    grid.style.setProperty("--icon", `${Math.round(Math.max(44, Math.min(68, cell - 24)))}px`);
+    const taken = [];
+    for (const item of grid.__items) {
+      let [w, h] = item.span;
+      if (item.widget && w > columns) {
+        [w, h] = CELLS.large;
+        item.el.replaceWith(item.el = item.refit("large"));
+      }
+      for (let y = 0; ; y++) {
+        let found = -1;
+        for (let x = 0; x <= columns - w; x += w > 1 ? 2 : 1) {
+          let free = true;
+          for (let row = y; row < y + h && free; row++) for (let col = x; col < x + w; col++) if (taken[row]?.[col]) { free = false; break; }
+          if (free) { found = x; break; }
+        }
+        if (found < 0) continue;
+        for (let row = y; row < y + h; row++) for (let col = found; col < found + w; col++) (taken[row] ||= [])[col] = true;
+        item.el.style.gridColumn = `${found + 1} / span ${w}`;
+        item.el.style.gridRow = `${y + 1} / span ${h}`;
+        break;
+      }
+    }
+  }
+  new ResizeObserver(() => document.querySelectorAll(".grid").forEach(fit)).observe(document.documentElement);
+
+  // MARK: Drawing
+
+  const positions = () => (swipe ? [...home.pages().map((p) => p.scope), SETTINGS] : [chosen || "user"]);
+  const titleOf = (scope) => (scope === SETTINGS ? "Settings" : home.page(scope)?.title || "");
+
+  function draw() {
+    const root = document.getElementById("pages");
+    const scopes = positions();
+    let strip = root.querySelector(".strip");
+    if (!strip || strip.dataset.scopes !== scopes.join(" ")) {
+      root.innerHTML = `<div class="strip">${scopes.map((s) => `<section class="one-page" data-scope="${esc(s)}"></section>`).join("")}</div>` + (swipe ? `<nav class="dots"></nav>` : "");
+      strip = root.querySelector(".strip");
+      strip.dataset.scopes = scopes.join(" ");
+      if (swipe) {
+        strip.addEventListener("scroll", () => {
+          const i = Math.round(strip.scrollLeft / Math.max(1, strip.clientWidth));
+          if (scopes[i] && scopes[i] !== at) { at = scopes[i]; drawDots(); }
+        }, { passive: true });
+        if (!scopes.includes(at)) at = "user";
+        strip.scrollLeft = scopes.indexOf(at) * strip.clientWidth;
+      }
+    }
+    for (const el of strip.children) {
+      const scope = el.dataset.scope;
+      if (scope === SETTINGS) drawSettings(el);
+      else if (home.page(scope)) drawPage(el, home.page(scope));
+      else el.innerHTML = one.empty({ icon: "eye-slash", title: "Nothing Here", text: "This device was let into none of this page. Sign out in Settings and sign in again to choose it." });
+    }
+    if (swipe) drawDots();
+    home.data.redrawn?.();
+  }
+
+  function drawDots() {
+    const scopes = positions(), dots = document.querySelector(".dots");
+    const attention = (home.data.state.settings_items || []).some((i) => i.badge);
+    dots.innerHTML = `<div class="name">${esc(titleOf(at))}</div><div class="capsule"><button class="marks" aria-label="Pages">` +
+      scopes.slice(0, -1).map((s) => `<i class="${s === at ? "on" : ""}"></i>`).join("") +
+      `</button><button class="cog${at === SETTINGS ? " on" : ""}${attention ? " attention" : ""}" aria-label="Settings">${one.icon("gear-six-fill")}</button></div>`;
+    dots.querySelector(".marks").onclick = (e) => home.menu(scopes.map((s) => ({ title: titleOf(s), checked: s === at, run: () => go(s) })), e.currentTarget);
+    dots.querySelector(".cog").onclick = () => go(SETTINGS);
+  }
+
+  function go(scope) {
+    const strip = document.querySelector(".strip");
+    strip.scrollTo({ left: positions().indexOf(scope) * strip.clientWidth, behavior: "smooth" });
+  }
+
+  one.title("");
+  let watching = false;
+  one.render("#pages", async () => {
+    await home.load();
+    setTimeout(() => {
+      draw();
+      if (!watching) home.watch(draw), (watching = true);
+    });
+    return undefined;
+  });
+</script>

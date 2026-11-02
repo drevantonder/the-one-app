@@ -1,5 +1,5 @@
-// Widgets drawn from their trees (`GET /v1/widgets`), in a web page: the web client's pages and `one mcp`'s view in
-// chats. The Apple shells draw the same trees natively (apple/Shared/Views/WidgetTree.swift). Nodes it doesn't know
+// Widgets drawn from their trees (`GET /v1/widgets`), in a web page: the pages screen (pages.html) and `one mcp`'s view
+// in chats. The Apple shells draw the same trees natively (apple/Shared/Views/WidgetTree.swift). Nodes it doesn't know
 // draw nothing. Its styles come with it. `host` is what buttons, toggles and links act through: `run(app, op, input)` → the error's text if it
 // failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`.
 window.oneWidgets = (() => {

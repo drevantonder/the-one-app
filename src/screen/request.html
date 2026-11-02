@@ -1,0 +1,105 @@
+<style>
+  .lists { display: flex; flex-direction: column; gap: 20px; }
+  .who .title { font-weight: 600; }
+  .lists .footer { margin-top: -14px; }
+  button.row { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+  .check { color: var(--accent); font-weight: 600; }
+  .new { width: 36px; text-align: center; font-size: 24px; font-weight: 300; color: var(--accent); flex: none; }
+  .fields .row { gap: 12px; }
+  .fields .name { flex: none; width: 110px; color: var(--muted); }
+  .fields input { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 2px 0; }
+  .row.decline { color: var(--danger); justify-content: center; }
+  .allow { display: flex; justify-content: flex-end; }
+  .allow .button { min-width: 120px; padding: 11px 20px; font-size: 17px; }
+</style>
+<div id="request"></div>
+<script>
+  // A request for an item an app may use: who asks and why, then the person's items that have the fields it wants, to
+  // pick one, or a new one, whose values go to the node and nowhere else. The asker never sees a secret. It closes
+  // itself with whether it was allowed, as it is when it's answered somewhere else (another device, an agent's CLI).
+  const { scope, id } = one.params || {};
+  const esc = one.esc;
+  let request, apps = [], picked = null, error = "", busy = false;
+  const values = {};
+  one.title("Vault");
+
+  /// A field's name as a person reads it: "api_key" → "API key".
+  function fieldLabel(name) {
+    const words = String(name).replace(/[_-]+/g, " ").trim().split(/\s+/);
+    return words.map((w, i) => (/^(api|url|id|ssh|pem|aws|s3|ip)$/i.test(w) ? w.toUpperCase() : i ? w.toLowerCase() : w[0].toUpperCase() + w.slice(1).toLowerCase())).join(" ");
+  }
+
+  function draw() {
+    const el = document.getElementById("request");
+    const a = apps.find((x) => x.name === request.app);
+    const wanted = request.fields || [];
+    const what = request.title || "";
+    const asker = request.agent || request.by;
+    const icon = (title) => one.appIcon({ name: title, title }, 36);
+    let html = `<div class="list"><div class="row who">${one.appIcon(a || { name: request.app }, 44)}<div class="main"><div class="title"><span>${esc(a ? `${a.title || a.name} wants ${what}` : what)}</span></div>` +
+      `${request.why ? `<div class="sub wrap">${esc(request.why)}</div>` : ""}</div></div></div><div class="footer">${esc(request.agent ? `${asker} · ${request.scope_name}` : request.scope_name)}</div>`;
+    if (request.state === "waiting") {
+      html += `<div class="list">${(request.matches || []).map((m) => `<button class="row" data-pick="${esc(m.id)}">${icon(m.title)}<div class="main"><div class="title"><span>${esc(m.title)}</span></div>` +
+        `${m.type ? `<div class="sub">${esc(m.type)}</div>` : ""}</div>${picked === m.id ? `<span class="check">✓</span>` : ""}</button>`).join("")}` +
+        `<button class="row" data-pick=""><span class="new">+</span><div class="main"><div class="title"><span>New Item</span></div></div>${picked === null ? `<span class="check">✓</span>` : ""}</button></div>`;
+      if (picked === null) {
+        html += `<div class="list fields"><label class="row plain"><span class="name">Title</span><input data-title value="${esc(values._title ?? what)}"></label>` +
+          wanted.map((f) => `<label class="row plain"><span class="name">${esc(fieldLabel(f.name))}</span><input data-field="${esc(f.name)}" type="${f.secret ? "password" : "text"}" autocomplete="${f.secret ? "new-password" : "off"}" spellcheck="false" value="${esc(values[f.name] || "")}"></label>`).join("") +
+          `</div>${request.hosts?.length ? `<div class="footer">Sent only to ${esc(request.hosts.join(", "))}</div>` : ""}`;
+      }
+      html += `<div class="list"><button class="row plain decline" data-decline>Decline</button></div>`;
+      if (error) html += `<div class="error">${esc(error)}</div>`;
+      html += `<div class="allow"><button class="button primary" data-allow>Allow</button></div>`;
+    } else {
+      html += `<div class="list"><div class="row plain muted">${esc(request.state === "set" ? "Allowed." : request.state === "declined" ? "Declined." : `This request expired. Ask ${asker} to ask again.`)}</div></div>`;
+    }
+    el.innerHTML = `<div class="lists">${html}</div>`;
+    el.querySelectorAll("[data-pick]").forEach((x) => (x.onclick = () => { picked = x.dataset.pick || null; draw(); }));
+    el.querySelectorAll("[data-field], [data-title]").forEach((x) => (x.oninput = () => { values[x.dataset.field ?? "_title"] = x.value; ready(); }));
+    const allow = el.querySelector("[data-allow]");
+    const ready = () => { if (allow) allow.disabled = busy || (picked === null && !wanted.every((f) => values[f.name])); };
+    ready();
+    if (allow) allow.onclick = () => answer(false);
+    el.querySelector("[data-decline]")?.addEventListener("click", () => answer(true));
+  }
+
+  async function answer(declined) {
+    if (busy) return;
+    busy = true;
+    error = "";
+    draw();
+    const body = { scope: request.scope, id: request.id };
+    if (declined) body.declined = true;
+    else if (picked) body.item = picked;
+    else {
+      const { _title, ...fields } = values;
+      if (_title?.trim()) body.title = _title.trim();
+      body.fields = fields;
+    }
+    try {
+      await one.api("POST", "/v1/vault/answer", body);
+      for (const k of Object.keys(values)) delete values[k];
+      one.tap(declined ? "selection" : "success");
+      one.close(!declined);
+    } catch (err) {
+      error = err.message;
+      busy = false;
+      draw();
+    }
+  }
+
+  const find = () => one.api("GET", `/v1/vault/requests?scope=${encodeURIComponent(scope || "")}&id=${encodeURIComponent(id || "")}`).then((l) => l[0]);
+  one.render("#request", async () => {
+    [request, apps] = await Promise.all([find(), one.api("GET", "/v1/apps").catch(() => [])]);
+    if (!request) throw new Error("Can’t find this request: it isn’t for you, or it’s from another install.");
+    picked = request.matches?.[0]?.id ?? null;
+    setTimeout(draw);
+    return undefined;
+  });
+  // Answered somewhere else: the sheet goes.
+  setInterval(async () => {
+    if (busy || request?.state !== "waiting") return;
+    const now = await find().catch(() => null);
+    if (now && now.state !== "waiting") one.close(now.state === "set");
+  }, 2100);
+</script>

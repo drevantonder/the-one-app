@@ -6,12 +6,10 @@
   --window: #f5f5f7;
   --hover: rgba(0, 0, 0, 0.05);
   --selected: rgba(0, 0, 0, 0.09);
-  --w-card: rgba(0, 0, 0, 0.05);
-  --w-muted: #6e6e73;
   font-size: 13px;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --sidebar: #2c2c2c; --window: #282828; --hover: rgba(255, 255, 255, 0.05); --selected: rgba(255, 255, 255, 0.1); --w-card: rgba(255, 255, 255, 0.07); --w-muted: #98989d; --card: #2c2c2e; }
+  :root { --sidebar: #2c2c2c; --window: #282828; --hover: rgba(255, 255, 255, 0.05); --selected: rgba(255, 255, 255, 0.1); --card: #2c2c2e; }
 }
 html, body { height: 100%; }
 body { padding: 0; max-width: none; margin: 0; background: var(--window); font-size: 13px; overflow: hidden; }
@@ -37,8 +35,6 @@ a { color: inherit; }
 .folder { --size: 20px; --mini: calc(var(--size) * 0.62 / 3); width: var(--size); height: var(--size); flex: none; display: grid; grid-template-columns: repeat(3, var(--mini)); grid-auto-rows: var(--mini); gap: calc(var(--size) * 0.06); padding: calc(var(--size) * 0.13); border-radius: calc(var(--size) * 0.225); background: rgba(128, 128, 128, 0.22); box-shadow: inset 0 0 0 0.5px rgba(128, 128, 128, 0.3); align-content: start; }
 .folder > i { border-radius: calc(var(--mini) * 0.25); background: rgba(128, 128, 128, 0.18); }
 .folder .app-icon { --size: var(--mini) !important; font-size: 0; }
-/* On a page, icons are as big as its grid's cells leave room for. */
-.grid .tile-icon > .app-icon, .grid .tile-icon > .folder, .grid .tile-icon > .avatar { --size: var(--icon, 60px) !important; }
 /* Your own icon in Settings: your avatar, round. */
 .tile-avatar { width: var(--size); height: var(--size); font-size: calc(var(--size) * 0.4); line-height: 1; }
 
@@ -53,72 +49,21 @@ a { color: inherit; }
 .bar-end { margin-left: auto; }
 .scroll { flex: 1; overflow-y: auto; min-height: 0; }
 
-/* A page: its large title, then one grid, as the Home Screen's. */
-.page { padding: 4px 20px 96px; max-width: 1100px; }
-.page-header { padding: 4px 4px 0; }
-.page-header h1 { font-size: 26px; font-weight: 700; margin: 0; line-height: 1.2; }
-.page-subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; }
-.page .page-header + .grid, .page .empty-page + .grid { margin-top: 20px; }
-.page-header + .empty-page { margin-top: 20px; }
-.grid { display: grid; grid-auto-rows: 82px; gap: 14px; grid-template-columns: repeat(4, 82px); }
-.tile { display: flex; flex-direction: column; align-items: center; gap: 6px; text-decoration: none; color: var(--text); min-width: 0; padding-top: 2px; }
-.tile-icon { position: relative; display: block; line-height: 0; }
-.tile-name { font-size: 11px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.badge { position: absolute; top: -7px; right: -7px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: #ff3b30; color: white; font-size: 12px; font-weight: 600; line-height: 22px; text-align: center; font-variant-numeric: tabular-nums; }
-.widget { cursor: default; }
-.widget.w-linked, a.tile { cursor: pointer; }
-.empty-page { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px; border-radius: 12px; background: var(--w-card); text-align: center; }
-.empty-page-title { font-weight: 600; font-size: 13px; }
-.empty-page-text { color: var(--muted); font-size: 12px; }
-.empty-page .button { margin-top: 6px; }
-
-/* Services: a section per app with accounts, then the rest. */
-.services-view { padding: 0 20px 48px; max-width: 900px; }
-.services-view .list { margin-bottom: 24px; background: var(--w-card); }
-.services-view .row, .sheet .row { font-size: 14px; padding: 9px 14px; }
-.services-view .row .sub { font-size: 12px; }
-.services-view .row .title { font-weight: 400; }
-button.row { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
-button.row:disabled { opacity: 0.6; }
-button.row.still { cursor: default; }
-.service-head { display: flex; align-items: center; gap: 10px; padding: 8px 4px 8px; }
-.service-title { flex: 1; font-size: 15px; font-weight: 700; }
-.more { border: 1.5px solid var(--accent); color: var(--accent); background: none; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; line-height: 1; padding: 0; cursor: pointer; }
-.status { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.status.ok { background: #34c759; }
-.status.off { background: #ff9f0a; }
-.row.add { color: var(--accent); }
-.plus, .new-item { width: 20px; text-align: center; font-size: 18px; font-weight: 300; color: var(--accent); flex: none; }
-.row .check { color: var(--accent); font-weight: 600; }
-.row.muted { color: var(--muted); gap: 8px; }
-.warn-text { color: #ff9f0a; }
-.none { padding: 12px 4px; }
-.row .chev { font-size: 18px; }
-.row.decline { color: var(--danger); }
-
-/* A small menu, as a ⋯ button's. */
-.menu { position: fixed; z-index: 60; min-width: 200px; padding: 5px; border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25), 0 0 0 0.5px var(--line); }
+/* A small menu, as a ⋯ button's, over a backdrop that takes a click anywhere else. */
+.menu-backdrop { position: fixed; inset: 0; z-index: 59; }
+.menu { outline: none; position: fixed; z-index: 60; min-width: 200px; padding: 5px; border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25), 0 0 0 0.5px var(--line); }
 .menu-item { display: block; width: 100%; text-align: left; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text); padding: 5px 10px; border-radius: 5px; cursor: pointer; }
 .menu-item:hover { background: var(--accent); color: white; }
 .menu-item.danger { color: var(--danger); }
 .menu-item.danger:hover { background: var(--danger); color: white; }
+.menu-check { display: inline-block; width: 16px; }
 
-/* Sheets: the kit's, as wide as the Mac app's. */
+/* Sheets: the kit's, as wide as the Mac app's; a screen in one fills it. */
 .sheet { --sheet-bg: var(--window); font-size: 14px; }
-.services-sheet { max-width: 460px; height: min(560px, 88vh); }
-.services-sheet .services-view { padding: 0; }
-.vault-sheet { max-width: 460px; }
-.sheet .list { background: var(--w-card); margin-bottom: 12px; }
-.sheet .footer { margin: -6px 14px 14px; font-size: 12px; }
-.sheet-sub { color: var(--muted); font-size: 12px; text-align: center; margin: 0 0 14px; }
+.screen-sheet { max-width: 480px; height: min(620px, 88vh); display: flex; flex-direction: column; padding-bottom: 0; overflow: hidden; }
+.screen-sheet .sheet-body { flex: 1; min-height: 0; }
 .sheet-text { margin: 4px 4px 16px; color: var(--muted); }
-.sheet-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.fields .row { gap: 12px; }
-.field-name { flex: none; width: 110px; color: var(--muted); }
-.fields input { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 2px 0; }
-.sheet .row .title { font-weight: 400; }
-.sheet .vault-who .title { font-weight: 600; }
-.vault-error { margin: 0 4px 12px; font-size: 13px; }
+.sheet-actions { display: flex; justify-content: flex-end; gap: 8px; padding-bottom: 8px; }
 
 /* An app screen fills what's open, under its bar. */
 .screen { flex: 1; position: relative; min-height: 0; }
@@ -142,5 +87,4 @@ button.row.still { cursor: default; }
   .nav-label, .nav-count { display: none; }
   .nav-head { font-size: 9px; text-align: center; padding: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bar { padding: 0 14px; }
-  .page, .services-view { padding-left: 14px; padding-right: 14px; }
 }

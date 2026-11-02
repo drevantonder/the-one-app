@@ -300,7 +300,7 @@ struct HTTPNode: NodeTransport {
     }
 
     func settingsPage(_ name: String, params: String) async throws -> String {
-        let html = try await send("GET", "v1/settings-screens/\(name)", body: try JSONEncoder().encode(["params": params]), timeout: 10)
+        let html = try await send("GET", "v1/client-screens/\(name)", body: try JSONEncoder().encode(["params": params]), timeout: 10)
         return String(decoding: html, as: UTF8.self)
     }
 

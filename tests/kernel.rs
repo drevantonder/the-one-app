@@ -729,9 +729,9 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert!(["users", "install", "backups"].iter().all(|i| items(&andres).iter().any(|n| n == i)), "{:?}", items(&andres));
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
     let page = |path: &str| agent.get(format!("{api}{path}")).header("authorization", format!("Bearer {sams}")).call().unwrap().body_mut().read_to_string().unwrap();
-    let vault = page("/v1/settings-screens/vault");
+    let vault = page("/v1/client-screens/vault");
     assert!(vault.contains(&format!("\"user\":\"{sam}\"")), "the page is Sam's: {vault}");
-    assert!(page("/v1/settings-screens/nothing").contains("one.notFound()"));
+    assert!(page("/v1/client-screens/nothing").contains("one.notFound()"));
 
     // What only admins may do, Sam can't; Andre can, signed in as on his Mac.
     let setting = json!({ "name": "made_here", "value": "Ours" });

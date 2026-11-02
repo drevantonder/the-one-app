@@ -542,3 +542,27 @@ fn the_address_lists_the_android_app_by_its_package() {
     assert!(gradle.contains(r#"applicationId = "app.$cli.android""#), "android/app/build.gradle.kts names the app's package otherwise: change one::kernel::android_package too");
     assert_eq!(one::kernel::android_package(), format!("app.{}.android", one::config::CLI));
 }
+
+/// Every message a screen sends its host (`messages`, in src/screen/bridge.js) is one each host names, answering it
+/// or refusing it: the web client's page and a chat's view, which answer frames, and the shells' web views.
+#[test]
+fn every_host_answers_each_message_of_the_bridge() {
+    let bridge = read("src/screen/bridge.js");
+    let list = &bridge[bridge.find("const messages = [").expect("bridge.js lists its messages") + 18..];
+    let messages: Vec<&str> = list[..list.find(']').unwrap()].split(',').map(|m| m.trim().trim_matches('"')).filter(|m| !m.is_empty()).collect();
+    assert!(messages.len() > 10 && messages.contains(&"menu"), "{messages:?}");
+    // What a host names: `case "x"` (JavaScript, C#, Swift) or a `when` arm, `"x", "y" ->` (Kotlin).
+    let named = |src: &str| -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for line in src.lines().map(str::trim) {
+            let arm = line.strip_prefix("case ").or_else(|| line.starts_with('"').then(|| &line[..line.find("->").unwrap_or(0)])).unwrap_or("");
+            out.extend(arm.split('"').skip(1).step_by(2).map(String::from));
+        }
+        out
+    };
+    for path in ["kernel/web/web.js", "src/mcp_view.html"] {
+        let names = named(&read(path));
+        let missing: Vec<_> = messages.iter().filter(|m| !names.contains(**m)).collect();
+        assert!(missing.is_empty(), "{path} doesn't answer the bridge's {missing:?}");
+    }
+}

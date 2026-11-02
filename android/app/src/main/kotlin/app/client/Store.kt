@@ -112,7 +112,7 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
     suspend fun screen(r: Route.Screen): String = String(api("/v1/screens/${enc(r.app)}/${enc(r.screen)}", query = mapOf("params" to r.params, "scope" to r.scope)))
 
     /** A Settings screen's page. */
-    suspend fun settingsScreen(r: Route.Setting): String = String(api("/v1/settings-screens/${enc(r.name)}", query = mapOf("params" to r.params)))
+    suspend fun settingsScreen(r: Route.Setting): String = String(api("/v1/client-screens/${enc(r.name)}", query = mapOf("params" to r.params)))
 
     suspend fun blob(hash: String): ByteArray = api("/v1/blobs/${enc(hash)}")
 

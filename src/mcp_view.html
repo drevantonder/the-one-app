@@ -99,11 +99,20 @@
     const reply = (ok, error) => frame.contentWindow.postMessage({ oneReply: m.id, ok, error }, "*");
     const msg = m.one;
     try {
-      if (msg.type === "call") return reply(await call(`${shown.app}_${msg.op}`, msg.input || {}));
-      if (msg.type === "open") { show({ structuredContent: await call("screens_open", { app: shown.app, screen: msg.screen, params: msg.params || {} }) }); return; }
-      if (msg.type === "copy") { await navigator.clipboard.writeText(msg.text); return reply(null); }
-      if (msg.type === "link") { await request("ui/open-link", { url: msg.url }); return reply(null); }
-      reply(null);
+      switch (msg.type) {
+        case "call": return reply(await call(`${shown.app}_${msg.op}`, msg.input || {}));
+        // Another screen of the app takes this one's place: a chat has no stack of screens, or sheets.
+        case "open": return show({ structuredContent: await call("screens_open", { app: msg.app || shown.app, screen: msg.screen, params: msg.params || {} }) });
+        case "copy": await navigator.clipboard.writeText(msg.text); return reply(null);
+        case "link": await request("ui/open-link", { url: msg.url }); return reply(null);
+        case "alert": return reply(msg.action ? confirm([msg.title, msg.text].filter(Boolean).join("\n\n")) : null);
+        case "close": case "title": case "icon": case "haptic": return reply(null);
+        case "menu": case "save": case "preview": case "scan": case "vault": case "icons":
+          return reply(undefined, "Open this in the app to do that.");
+        case "request": case "api": case "signOut": case "appearance": case "device":
+          return reply(undefined, "Only Settings can do that.");
+        default: return reply(undefined, "Unknown message");
+      }
     } catch (err) {
       reply(undefined, err.message);
     }

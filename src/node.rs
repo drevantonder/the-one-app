@@ -2438,14 +2438,9 @@ impl Node {
         self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body)
     }
 
-    /// A Settings screen (src/screen/settings/<name>.html) as a whole page, like an app's but no app's: the clients'
-    /// own, which act through `one.api` as the person looking, and which each client answers only for these.
-    pub fn settings_screen(&self, viewer: Caller, name: &str, params: Value) -> Result<String> {
-        let body = match SETTINGS_SCREENS.iter().find(|(n, _)| *n == name) {
-            Some((_, html)) => html.to_string(),
-            None => "<div id=\"missing\"></div><script>missing.innerHTML = one.notFound()</script>".into(),
-        };
-        self.page(&viewer, json!({ "screen": name, "params": params }), &body)
+    /// A client's own screen (`crate::screen::client_screen`) as a whole page, like an app's but no app's.
+    pub fn client_screen(&self, viewer: Caller, name: &str, params: Value) -> Result<String> {
+        self.page(&viewer, json!({ "screen": name, "params": params }), crate::screen::client_screen(name))
     }
 
     /// A screen's page: its body with the design kit, the bridge, and `window.__one`, which is `context` and who's
@@ -3193,7 +3188,7 @@ impl Node {
                 self.set_use(me, body["server"].as_str().unwrap_or(""), body["use"].as_str().unwrap_or("")).await?;
                 json!({})
             }
-            ("GET", p) if p.starts_with("/v1/settings-screens/") => json!({ "html": self.settings_screen(me.clone(), &p["/v1/settings-screens/".len()..], body["params"].clone())? }),
+            ("GET", p) if p.starts_with("/v1/client-screens/") => json!({ "html": self.client_screen(me.clone(), &p["/v1/client-screens/".len()..], body["params"].clone())? }),
             ("GET", p) if p.starts_with("/v1/blobs/") => {
                 let hash = &p["/v1/blobs/".len()..];
                 ensure!(self.blob_named_for(hash, &me.user)?, "no such blob for you");
@@ -4165,17 +4160,4 @@ pub fn qr(text: &str) -> Result<String> {
     Ok(qrcode::QrCode::new(text)?.render::<qrcode::render::svg::Color>().quiet_zone(false).build())
 }
 
-/// The Settings screens, by name: each client's own (src/screen/settings/<name>.html), the same on every one.
-const SETTINGS_SCREENS: &[(&str, &str)] = &[
-    ("account", include_str!("screen/settings/account.html")),
-    ("appearance", include_str!("screen/settings/appearance.html")),
-    ("vault", include_str!("screen/settings/vault.html")),
-    ("requests", include_str!("screen/settings/requests.html")),
-    ("groups", include_str!("screen/settings/groups.html")),
-    ("users", include_str!("screen/settings/users.html")),
-    ("install", include_str!("screen/settings/install.html")),
-    ("backups", include_str!("screen/settings/backups.html")),
-    ("devices", include_str!("screen/settings/devices.html")),
-    ("agents", include_str!("screen/settings/agents.html")),
-];
 

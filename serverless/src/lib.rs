@@ -158,6 +158,12 @@ pub fn screen(context: &str, body: &str) -> Result<String, JsError> {
     Ok(one::screen::page(&serde_json::from_str(context)?, body))
 }
 
+/// A client's own screen's page (`src/screen.rs`), from what the screen is told (JSON) and its name.
+#[wasm_bindgen]
+pub fn client_screen(context: &str, name: &str) -> Result<String, JsError> {
+    Ok(one::screen::page(&serde_json::from_str(context)?, one::screen::client_screen(name)))
+}
+
 /// The white label this node is: `{ name, cli, accent }`.
 #[wasm_bindgen]
 pub fn config() -> String {

@@ -32,7 +32,14 @@
     });
   }
 
+  // Every message a screen sends its host, and every host (the shells, the web client, a chat's view) answers each,
+  // or refuses it by name (tests/contracts.rs checks). Anything a person touches natively is one of these: menus,
+  // alerts, sheets, files, scanning, links.
+  const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
+    "icons", "icon", "haptic", "api", "signOut", "appearance", "device"];
+
   async function host(message) {
+    if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
     if (shell) return shell.postMessage(message);
     if (ctx.host) return ctx.host(message);
     if (framed) {
@@ -89,8 +96,24 @@
     // The page the shell opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
     scope: ctx.scope ?? null,
     call: (op, input = {}) => host({ type: "call", app: ctx.app, op, input }),
-    // Opens one of this app's screens; or with `app`, another app's (a notification's link, say).
-    open: (screen, params = {}, app) => host({ type: "open", screen, params, ...(app && app !== ctx.app ? { app } : {}) }),
+    // Opens one of this app's screens; or with `app`, another app's (a notification's link, say). `scope` is the page
+    // it's opened for (else this screen's). With `sheet`, it slides up over this one, and this resolves once it's gone,
+    // to what it gave `close`; otherwise it's pushed on top, with Back.
+    open: (screen, params = {}, app, { scope, sheet } = {}) =>
+      host({ type: "open", screen, params, ...(app && app !== ctx.app ? { app } : {}), ...(scope ? { scope } : {}), ...(sheet ? { sheet: true } : {}) }),
+    // Closes this screen: a sheet goes, giving `value` to who opened it; a pushed screen goes back.
+    close: (value = null) => host({ type: "close", value }),
+    // The shell's own menu, at `at` ({ x, y } in this page, or the element it's for), of `items`, each
+    // `{ title, danger, checked }` → the index of the one chosen, or null.
+    menu: (items, at) => {
+      if (at instanceof Element) at = (({ left, right, bottom }) => ({ x: (left + right) / 2, y: bottom }))(at.getBoundingClientRect());
+      return host({ type: "menu", items: items.map((i) => ({ title: String(i.title), danger: !!i.danger, checked: !!i.checked })), x: Math.round(at?.x || 0), y: Math.round(at?.y || 0) });
+    },
+    // The shell's own alert: `title` and `text`, then OK; with `action` (its button's name; `danger` if it can't be
+    // undone), Cancel and that → whether it was chosen.
+    alert: ({ title = "", text = "", action, danger = false }) => host({ type: "alert", title, text, ...(action ? { action, danger } : {}) }).then((ok) => !!ok),
+    // Opens a web page's address in the browser.
+    link: (url) => host({ type: "link", url: String(url) }),
     title: (text) => host({ type: "title", text }),
     // Files, as `{ name, type, base64 }` or `{ name, type, blob }`: save (or share) one, or show it (Quick Look,
     // Preview, a tab).

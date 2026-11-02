@@ -16,7 +16,7 @@
 // deployed, is the shim; `icons.json` is the icons every device draws.
 
 import { RpcTarget } from "cloudflare:workers";
-import { initSync, verify, open, query, write, close, statements, screen, config, prefix, following as after, read_log, groups, install, bundle } from "./one_serverless.js";
+import { initSync, verify, open, query, write, close, statements, screen, client_screen, config, prefix, following as after, read_log, groups, install, bundle } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
 import icons from "./icons.json";
@@ -597,10 +597,17 @@ async function route(request, env, ctx) {
   // A scheduled run answers once it's run, as a call does.
   const r = await fromMachine(request, env, path === "/v1/events" ? 5_000 : path === "/v1/kernel/run" ? 120_000 : 8_000);
   if (r) return r;
-  if (request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events"].includes(path)) {
+  const own = request.method === "GET" && path.startsWith("/v1/client-screens/");
+  if (own || (request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events"].includes(path))) {
     const who = await whom(request, env);
     if (path === "/v1/events") return quietEvents();
     const run = new Run(env, ctx, who, await installFor(env, who));
+    if (own) {
+      const name = decodeURIComponent(path.slice("/v1/client-screens/".length));
+      const params = JSON.parse(url.searchParams.get("params") || "{}");
+      const context = { screen: name, params, me: run.view.me, config: { name: CONFIG.name, cli: CONFIG.cli, api: env.ADDRESS, made_here: null } };
+      return new Response(client_screen(JSON.stringify(context), name), { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
     const page = url.searchParams.get("scope");
     if (path === "/v1/state") return json(run.view.state);
     if (path === "/v1/apps") return json(await run.apps());

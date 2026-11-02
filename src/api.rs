@@ -83,7 +83,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/blobs/{hash}", get(blob))
         .route("/v1/events", get(events))
         .route("/v1/screens/{app}/{screen}", get(screen))
-        .route("/v1/settings-screens/{name}", get(settings_screen))
+        .route("/v1/client-screens/{name}", get(client_screen))
         .route("/hooks/{app}/{name}", post(hook))
         .route("/v1/sidecars/{app}", post(register))
         .route("/v1/sidecars/{app}/calls", get(next_call))
@@ -112,7 +112,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/icons",
     "/v1/screens/{app}/{screen}",
     "/v1/blobs",
-    "/v1/settings-screens/{name}",
+    "/v1/client-screens/{name}",
     "/v1/blobs/{hash}",
     "/v1/events",
     "/v1/arrange",
@@ -752,10 +752,10 @@ async fn screen(State(node): State<Node>, me: Me, Path((app, name)): Path<(Strin
     Ok(axum::response::Html(html).into_response())
 }
 
-/// A Settings screen as a page (see `Node::settings_screen`).
-async fn settings_screen(State(node): State<Node>, me: Me, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
+/// A client's own screen as a page (see `Node::client_screen`).
+async fn client_screen(State(node): State<Node>, me: Me, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    Ok(axum::response::Html(node.settings_screen(me.caller, &name, params)?).into_response())
+    Ok(axum::response::Html(node.client_screen(me.caller, &name, params)?).into_response())
 }
 
 async fn events(State(node): State<Node>) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {

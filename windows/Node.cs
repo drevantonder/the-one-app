@@ -106,7 +106,7 @@ public static class Node
     /// A Settings screen, as its page.
     public static async Task<string> SettingsScreen(string name, string parameters)
     {
-        using var r = await Send(HttpMethod.Get, $"/v1/settings-screens/{Uri.EscapeDataString(name)}", new() { ["params"] = parameters }, timeout: TimeSpan.FromSeconds(20));
+        using var r = await Send(HttpMethod.Get, $"/v1/client-screens/{Uri.EscapeDataString(name)}", new() { ["params"] = parameters }, timeout: TimeSpan.FromSeconds(20));
         return await r.Content.ReadAsStringAsync();
     }
 
