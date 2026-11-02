@@ -173,7 +173,7 @@ func ownOps() []map[string]any {
 	return []map[string]any{
 		{"name": "list", "description": "Every server's devices: each one's server, whether it's running, paused or stopped, its size, the memory and CPU it uses now, and who has borrowed it and what for (or that it's the spare kept for borrowing).",
 			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only this server's"}})},
-		{"name": "kinds", "description": "The kinds of device each server runs (linux, windows, android, iphone), with what input each takes, and its memory to spare in GB.",
+		{"name": "kinds", "description": "The kinds of device each server runs (linux, windows, android, iphone), with what input each takes, whether it has room for another and how many lasting ones nobody has borrowed, and its memory to spare in GB.",
 			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only this server's"}})},
 		{"name": "adopt", "description": "Make something already on this server a lasting device: a Windows VM's folder, an Android Virtual Device, or a simulator.",
 			"input": object(map[string]any{"device": str("its name"), "kind": kindArg, "dir": str("windows: its folder"), "id": str("android: its AVD; iphone: its simulator's UDID"),
@@ -194,7 +194,7 @@ func ownOps() []map[string]any {
 		{"name": "save_profile", "description": "Save a browser profile from the device signing in to it (closing that device), or from the device named.",
 			"input": object(map[string]any{"device": str("the device's name"), "profile": prof})},
 		{"name": "signing_in", "description": "The browser profiles being signed in to on each server: item, profile, device, server and until.", "input": object(map[string]any{})},
-		{"name": "create", "description": "Create a lasting device and start it, for the person: Linux with a browser of its own unless kind says another. Takes a minute. Agents borrow instead.",
+		{"name": "create", "description": "Create a lasting device and start it, for the person, on the first server in Where Things Run (Settings > Devices) that runs its kind and has room: Linux with a browser of its own unless kind says another. Takes a minute. Agents borrow instead.",
 			"input": object(map[string]any{"device": str("its name: lowercase letters, digits and dashes"), "kind": kindArg, "size": sizeArg}, "device")},
 		{"name": "resize", "description": "Change how much CPU and memory a device may use, at once, without restarting it.",
 			"input": object(map[string]any{"device": str("the device's name"), "size": sizeArg}, "device", "size")},

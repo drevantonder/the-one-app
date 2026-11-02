@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -69,6 +71,13 @@ func cmpOr(a, b string) string {
 // servers are this server's name and the other online servers that run
 // devices, as the node says.
 func (ds *devices) servers(ctx context.Context) (me string, others []string, err error) {
+	me, all, err := ds.ordered(ctx)
+	return me, slices.DeleteFunc(all, func(s string) bool { return s == me }), err
+}
+
+// ordered is this server's name and every online server that runs devices,
+// this one too, in where things run first (the install's order).
+func (ds *devices) ordered(ctx context.Context) (me string, all []string, err error) {
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, ds.node+"/v1/state", nil)
 	if err != nil {
 		return "", nil, err
@@ -78,26 +87,27 @@ func (ds *devices) servers(ctx context.Context) (me string, others []string, err
 		return "", nil, err
 	}
 	defer resp.Body.Close()
+	type server struct {
+		Name     string
+		Here     bool
+		Online   bool
+		Sidecars []string
+		Order    int
+	}
 	var st struct {
 		Me      struct{ Name string }
-		Install struct {
-			Servers []struct {
-				Name     string
-				Here     bool
-				Online   bool
-				Sidecars []string
-			}
-		}
+		Install struct{ Servers []server }
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 		return "", nil, err
 	}
+	slices.SortStableFunc(st.Install.Servers, func(a, b server) int { return cmp.Compare(a.Order, b.Order) })
 	for _, s := range st.Install.Servers {
-		if !s.Here && s.Online && slices.Contains(s.Sidecars, app) {
-			others = append(others, s.Name)
+		if s.Here || s.Online && slices.Contains(s.Sidecars, app) {
+			all = append(all, s.Name)
 		}
 	}
-	return st.Me.Name, others, nil
+	return st.Me.Name, all, nil
 }
 
 // everywhere runs op on every other server that runs devices, at once,
@@ -228,25 +238,65 @@ func (ds *devices) located(ctx context.Context, name string) string {
 	return ""
 }
 
-// borrowElsewhere runs op (borrow or sign_in) on another server that runs
-// devices, for a server that shouldn't make one itself; nil if none could.
-func (ds *devices) borrowElsewhere(ctx context.Context, op string, input map[string]any) json.RawMessage {
-	_, others, err := ds.servers(ctx)
+// first runs op (create, borrow or sign_in) of a kind on the first server
+// that runs it and has room, in where things run first; for a borrow, one
+// with a lasting device of the kind nobody has borrowed comes before those.
+// done is false when it's this server's turn, for it to run op itself, or
+// when no other server runs the kind.
+func (ds *devices) first(ctx context.Context, op, kind, name string, in map[string]any) (r json.RawMessage, done bool, err error) {
+	me, all, err := ds.ordered(ctx)
 	if err != nil {
-		return nil
+		return nil, false, nil
 	}
-	in := map[string]any{"here": true}
-	for k, v := range input {
-		in[k] = v
+	got, _ := ds.everywhere(ctx, "kinds", nil)
+	got[me], _ = json.Marshal(map[string]any{"kinds": ds.kindsHere()})
+	lend := op == "borrow" && in["copy"] != true
+	// How ready each server that runs the kind is: 0 a lasting one to lend, 1 room for one, 2 neither.
+	ready := map[string]int{}
+	for s, r := range got {
+		var theirs struct {
+			Kinds []struct {
+				Kind       string
+				Room       *bool
+				Unborrowed int
+			}
+		}
+		json.Unmarshal(r, &theirs)
+		for _, k := range theirs.Kinds {
+			switch {
+			case k.Kind != kind:
+			case lend && k.Unborrowed > 0:
+				ready[s] = 0
+			case k.Room == nil || *k.Room: // nil: a server too old to say
+				ready[s] = 1
+			default:
+				ready[s] = 2
+			}
+		}
 	}
-	for _, s := range others {
-		r, err := ds.callNode(ctx, s, op, in)
+	can := slices.DeleteFunc(all, func(s string) bool { _, ok := ready[s]; return !ok })
+	slices.SortStableFunc(can, func(a, b string) int { return cmp.Compare(ready[a], ready[b]) })
+	pass := map[string]any{"here": true}
+	maps.Copy(pass, in)
+	if name != "" {
+		pass["device"] = name
+	}
+	var tried []string
+	for _, s := range can {
+		if s == me {
+			return nil, false, nil
+		}
+		r, err := ds.callNode(ctx, s, op, pass)
 		if err == nil {
-			return r
+			return r, true, nil
 		}
 		log.Printf("%s on %s: %v", op, s, err)
+		tried = append(tried, s+": "+err.Error())
 	}
-	return nil
+	if len(tried) > 0 {
+		return nil, true, errors.New(strings.Join(tried, "; "))
+	}
+	return nil, false, nil
 }
 
 // signingIn reports whether a device here is signing in to the profile.

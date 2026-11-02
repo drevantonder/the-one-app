@@ -2989,7 +2989,7 @@ impl Node {
             let list = |ps: Vec<Principal>| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
             let here_sidecars = self.sidecars_here(i);
             let set = rank::set(&m.settings);
-            let servers: Vec<Value> = m
+            let mut servers: Vec<Value> = m
                 .servers()
                 .map(|s| {
                     let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
@@ -3021,6 +3021,15 @@ impl Node {
                     })
                 })
                 .collect();
+            // Each server's place in where things run first, 0 first, for sidecars that pick one themselves.
+            let mut by_order: Vec<usize> = (0..servers.len()).collect();
+            by_order.sort_by_cached_key(|&n| {
+                let s = &servers[n];
+                (rank::order(&set, s["key"].as_str().unwrap_or(""), s["kind"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase())
+            });
+            for (place, n) in by_order.into_iter().enumerate() {
+                servers[n]["order"] = json!(place);
+            }
             let clients: Vec<Value> = m
                 .clients()
                 .map(|c| json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "me": Some(c.key) == device, "asked": i.asked.get(&c.key) }))

@@ -347,7 +347,7 @@ export default {
       },
     },
     create: {
-      description: "Create a lasting device and start it, for the person, on a server that runs its kind: Linux with a browser of its own (the default), or Android or an iPhone, a new one. Takes a minute or two. Agents borrow instead.",
+      description: "Create a lasting device and start it, for the person, on the first server in Where Things Run (Settings > Devices) that runs its kind and has room: Linux with a browser of its own (the default), or Android or an iPhone, a new one. Takes a minute or two. Agents borrow instead.",
       input: {"properties": {"device": {"description": "its name: lowercase letters, digits and dashes", "type": "string"}, "kind": kindArg, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "required": ["device"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "create", input),
     },
@@ -393,7 +393,7 @@ export default {
     },
     kinds: {
       reads: true,
-      description: "The kinds of device each of your servers runs (linux, windows, android, iphone), with what input each kind takes, and how much memory each server has to spare, in GB.",
+      description: "The kinds of device each of your servers runs (linux, windows, android, iphone), with what input each kind takes, whether it has room for another and how many lasting ones nobody has borrowed, and how much memory each server has to spare, in GB.",
       input: { type: "object", properties: {} },
       run: (ctx, input) => sidecar(ctx, "kinds", input),
     },

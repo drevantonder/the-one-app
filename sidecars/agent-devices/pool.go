@@ -400,15 +400,8 @@ func (ds *devices) tend(ctx context.Context) {
 
 // keepsSpare reports whether this server keeps a spare device: a Linux one
 // with room for it. A Mac's memory is its person's; it makes devices only
-// when asked, and passes borrowing on to a server with a spare.
+// when asked.
 func keepsSpare() bool { return runtime.GOOS != "darwin" && roomForOne() }
-
-// makesHere reports whether a borrow here would be quick, or this server is
-// the one to make a device for it.
-func (ds *devices) makesHere(ctx context.Context) bool {
-	all, err := list(ctx)
-	return err == nil && len(spares(all, ds.loans())) > 0 || keepsSpare()
-}
 
 // roomForOne reports whether another small device fits: as much memory
 // available as it may use.

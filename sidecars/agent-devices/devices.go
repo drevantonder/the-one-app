@@ -311,6 +311,11 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		if err != nil {
 			return nil, err
 		}
+		if !here {
+			if r, done, err := ds.first(ctx, op, linuxKind, name, in); done {
+				return r, err
+			}
+		}
 		if ds.vmNamed(name) != nil {
 			return nil, fmt.Errorf("there's already a device named %s", name)
 		}
@@ -417,9 +422,9 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		if err != nil {
 			return nil, err
 		}
-		if !here && !ds.makesHere(ctx) {
-			if r := ds.borrowElsewhere(ctx, op, in); r != nil {
-				return r, nil
+		if !here {
+			if r, done, err := ds.first(ctx, op, linuxKind, "", in); done {
+				return r, err
 			}
 		}
 		d, err := ds.borrow(ctx, loan{By: cmpOr(text("by"), caller(ctx)), For: why, NoScreen: in["screen"] == false}, p)
@@ -452,9 +457,9 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		if err != nil || p == nil {
 			return nil, cmp.Or(err, errors.New("which browser profile? the app gives it"))
 		}
-		if !here && !ds.makesHere(ctx) && !ds.signingIn(p.Item) {
-			if r := ds.borrowElsewhere(ctx, op, in); r != nil {
-				return r, nil
+		if !here && !ds.signingIn(p.Item) {
+			if r, done, err := ds.first(ctx, op, linuxKind, "", in); done {
+				return r, err
 			}
 		}
 		minutes := int(signInFor.Minutes())

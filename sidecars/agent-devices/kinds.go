@@ -101,14 +101,22 @@ func kindNamed(name string) (kind, error) {
 }
 
 // kindsHere are the kinds this machine runs, each with its title and what input it takes.
-func kindsHere() []map[string]any {
+func (ds *devices) kindsHere() []map[string]any {
 	var out []map[string]any
+	lent := ds.loans()
 	if rt != nil {
-		out = append(out, map[string]any{"kind": linuxKind, "title": "Linux with a browser", "copies": true})
+		all, _ := list(context.Background())
+		out = append(out, map[string]any{"kind": linuxKind, "title": "Linux with a browser", "copies": true, "room": len(spares(all, lent)) > 0 || roomForOne()})
 	}
 	for _, k := range runtimes {
 		if k.can() == "" {
-			out = append(out, map[string]any{"kind": k.name(), "title": k.title(), "input": k.limits()})
+			unborrowed := 0
+			for _, v := range ds.vms() {
+				if _, ok := lent[v.Name]; v.Kind == k.name() && v.Of == "" && !ok {
+					unborrowed++
+				}
+			}
+			out = append(out, map[string]any{"kind": k.name(), "title": k.title(), "input": k.limits(), "room": roomFor(gbOf(nil)), "unborrowed": unborrowed})
 		}
 	}
 	return out
@@ -555,7 +563,7 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 	case "kinds":
 		me, _, _ := ds.servers(ctx)
 		free, _ := memory()
-		mine := map[string]any{"server": me, "kinds": kindsHere(), "free_gb": free >> 30}
+		mine := map[string]any{"server": me, "kinds": ds.kindsHere(), "free_gb": free >> 30}
 		if here {
 			return mine, true, nil
 		}
@@ -585,12 +593,13 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		if err != nil {
 			return nil, true, err
 		}
-		if why := k.can(); why != "" {
-			if here {
-				return nil, true, errors.New(why)
+		if v == nil && !here {
+			if r, done, err := ds.first(ctx, op, k.name(), name, in); done {
+				return r, true, err
 			}
-			r, err := ds.onAnother(ctx, op, k, in, name)
-			return r, true, err
+		}
+		if why := k.can(); why != "" {
+			return nil, true, fmt.Errorf("none of your servers runs %s devices (here: %s)", k.title(), why)
 		}
 		if op == "create" {
 			if name == "" {
@@ -706,36 +715,6 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		return r, true, err
 	}
 	return nil, true, fmt.Errorf("%s is a %s device: %s works on Linux devices only, for now", v.Name, k.title(), op)
-}
-
-// onAnother runs op (create or borrow) of a kind this machine can't run on another server that can, with room.
-func (ds *devices) onAnother(ctx context.Context, op string, k kind, in map[string]any, name string) (any, error) {
-	got, _ := ds.everywhere(ctx, "kinds", nil)
-	var tried []string
-	for _, s := range slices.Sorted(maps.Keys(got)) {
-		var theirs struct {
-			Kinds []struct{ Kind string }
-			Free  int `json:"free_gb"`
-		}
-		json.Unmarshal(got[s], &theirs)
-		if !slices.ContainsFunc(theirs.Kinds, func(x struct{ Kind string }) bool { return x.Kind == k.name() }) {
-			continue
-		}
-		pass := map[string]any{"here": true}
-		maps.Copy(pass, in)
-		if name != "" {
-			pass["device"] = name
-		}
-		r, err := ds.callNode(ctx, s, op, pass)
-		if err == nil {
-			return r, nil
-		}
-		tried = append(tried, s+": "+err.Error())
-	}
-	if len(tried) > 0 {
-		return nil, errors.New(strings.Join(tried, "; "))
-	}
-	return nil, fmt.Errorf("none of your servers runs %s devices (here: %s)", k.title(), k.can())
 }
 
 // adopt makes something already on this machine a lasting device: a Windows VM's folder (its disk.qcow2,
