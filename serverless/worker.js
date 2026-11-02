@@ -215,7 +215,7 @@ const modules = new Map();
 
 function moduleOf(env, who, hash) {
   if (!modules.has(hash)) {
-    const got = keyOf(env, who, "global", "node", "bundles").then((key) => bundle(new Bucket(env, who), key, hash));
+    const got = keyOf(env, who, "global", "node", "blobs").then((key) => bundle(new Bucket(env, who), key, hash));
     modules.set(hash, got);
     got.catch(() => modules.delete(hash));
   }

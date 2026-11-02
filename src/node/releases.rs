@@ -25,7 +25,7 @@ impl Node {
                 self.0.released.notified().await;
                 continue;
             };
-            match self.apply(&r, author).await {
+            match self.apply(&r).await {
                 Ok(exe) => {
                     // The servers taking a release take it from the one that published it first: it gives them a moment.
                     if author == self.0.id {
@@ -52,15 +52,11 @@ impl Node {
         (release::wanted(&r, crate::config::BUILD, crate::config::COMMITTED) && !taken).then_some((r, author))
     }
 
-    pub(super) async fn apply(&self, r: &Release, author: Key) -> Result<PathBuf> {
+    pub(super) async fn apply(&self, r: &Release) -> Result<PathBuf> {
         let path = release::blob_path(&self.0.dir, &r.blob)?;
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
-            Err(_) => {
-                let mut peers = vec![author];
-                peers.extend(self.peers().into_iter().filter(|p| *p != author));
-                self.fetch_from(peers, &r.blob, r.size).await?
-            }
+            Err(_) => self.blob(&r.blob).await?,
         };
         release::verify(crate::config::RELEASE_KEY, &bytes, &r.signature)?;
         release::install(r, &bytes)

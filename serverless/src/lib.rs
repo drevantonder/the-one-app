@@ -359,12 +359,12 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
     json!({ "state": state, "apps": apps, "me": me_ })
 }
 
-/// A deploy's bundle from the bucket (`bundle::bucket_name`), opened with the key of the node's `bundles` database in
+/// A deploy's bundle from the bucket (`bucket::blob_name`), opened with the key of the node's `blobs` database in
 /// `global` and checked against its hash: → the app's module.
 #[wasm_bindgen]
 pub async fn bundle(bucket: JsValue, key: String, hash: String) -> Result<String, JsError> {
     let key = one::kernel::decode_key(&key).map_err(thrown)?;
-    let name = one::bundle::bucket_name(&hash);
+    let name = one::bucket::blob_name("global", &hash);
     let sealed = Js(bucket).get(&name).await.map_err(thrown)?.ok_or_else(|| JsError::new(&format!("{name} isn't in the bucket yet: a node on one of your machines puts it there")))?;
     let bytes = one::db::open(&key, &name, &sealed.bytes).map_err(thrown)?;
     if blake3::hash(&bytes).to_hex().as_str() != hash {

@@ -1,4 +1,5 @@
-//! Blobs: keeping them, reading the ones a person may, and fetching them from other servers.
+//! Blobs: keeping them here and in the bucket, reading the ones a person may, and fetching them from other servers
+//! (`one/blob/1`) that haven't put them in the bucket yet.
 
 use super::*;
 
@@ -8,12 +9,77 @@ impl Node {
         release::put_blob(&self.0.dir, bytes)
     }
 
-    /// A blob from this server, else from a server it syncs with.
+    /// A blob from this server, else from the bucket, in a scope whose entries name it, else from a server it syncs with.
     pub async fn blob(&self, hash: &str) -> Result<Vec<u8>> {
         if let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) {
             return Ok(bytes);
         }
+        use crate::bucket::Bucket;
+        let bucket = self.bucket()?;
+        for scope in self.scopes_naming(hash)? {
+            let name = crate::bucket::blob_name(&scope.to_string(), hash);
+            let Some(sealed) = Bucket::get(&bucket.place, &name).await? else { continue };
+            let key = self.database_key(&scope, members::APP, crate::bucket::BLOBS).await?;
+            let bytes = crate::db::open(&key, &name, &sealed.bytes)?;
+            ensure!(blake3::hash(&bytes).to_hex().as_str() == hash, "the blob kept as {hash} isn't it");
+            release::put_blob(&self.0.dir, &bytes)?;
+            return Ok(bytes);
+        }
         self.fetch_from(self.peers(), hash, 1 << 30).await
+    }
+
+    /// Puts a blob this server has in the bucket, in `scope`, sealed with that scope's key, unless it has already.
+    pub(super) async fn share_blob(&self, scope: &Scope, hash: &str) -> Result<()> {
+        use crate::bucket::Bucket;
+        let marker = format!("{scope} {hash}");
+        if self.0.shared.lock().unwrap().contains(&marker) {
+            return Ok(());
+        }
+        let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) else { return Ok(()) };
+        let key = self.database_key(scope, members::APP, crate::bucket::BLOBS).await?;
+        let name = crate::bucket::blob_name(&scope.to_string(), hash);
+        Bucket::create(&self.bucket()?.place, &name, &crate::db::seal(&key, &name, &bytes)).await?;
+        self.0.shared.lock().unwrap().insert(marker.clone());
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(self.install_dir().join("shared"))?;
+        std::io::Write::write_all(&mut file, format!("{marker}\n").as_bytes())?;
+        Ok(())
+    }
+
+    /// Puts in the bucket each blob this server has that an entry it holds names, and it hasn't put there yet: those
+    /// from before blobs were kept in the bucket.
+    pub(super) async fn share_blobs(self) {
+        let shared = std::fs::read_to_string(self.install_dir().join("shared")).unwrap_or_default();
+        self.0.shared.lock().unwrap().extend(shared.lines().map(str::to_string));
+        let Ok(named) = self.with(|i| {
+            let mut named = Vec::new();
+            for log in i.r.store.logs()? {
+                let Ok(scope) = Scope::parse(&log) else { continue };
+                for e in i.r.store.scope(&log)? {
+                    named.extend(e.content.blobs.iter().map(|b| (scope.clone(), b.clone())));
+                }
+            }
+            Ok(named)
+        }) else {
+            return;
+        };
+        for (scope, hash) in named {
+            if let Err(err) = self.share_blob(&scope, &hash).await {
+                tracing::debug!("putting blob {} in the bucket: {err:#}", &hash[..12.min(hash.len())]);
+            }
+        }
+    }
+
+    /// The scopes this server holds whose entries name a blob.
+    fn scopes_naming(&self, hash: &str) -> Result<Vec<Scope>> {
+        self.with(|i| {
+            let mut out = Vec::new();
+            for log in i.r.store.logs()? {
+                if i.r.store.scope(&log)?.iter().any(|e| e.content.blobs.iter().any(|b| b == hash)) {
+                    out.extend(Scope::parse(&log));
+                }
+            }
+            Ok(out)
+        })
     }
 
     /// Keeps `bytes` as a blob a sign-in put, which its person may then read back.

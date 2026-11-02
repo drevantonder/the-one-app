@@ -32,14 +32,6 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) -> Result<()>
     Ok(())
 }
 
-/// Where a bundle is kept in the bucket, by its hash: under `global`'s node folder, sealed with the key of the node's
-/// database `bundles` there.
-pub fn bucket_name(hash: &str) -> String {
-    format!("{}/{}/{DATABASE}/{hash}", crate::bucket::folder("global"), crate::members::APP)
-}
-
-pub const DATABASE: &str = "bundles";
-
 /// The built module a bundle holds.
 pub fn module(bundle: &[u8]) -> Result<String> {
     let (_, bytes) = unpack(bundle)?.into_iter().find(|(path, _)| path == "app.js").context("the bundle has no app.js")?;

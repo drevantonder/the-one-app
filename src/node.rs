@@ -347,7 +347,7 @@ pub struct Inner {
     written: Mutex<HashMap<Scope, u64>>,
     /// The step of each scope's entries this server last moved their newest hint on to, by scope.
     hinted: Mutex<HashMap<String, u64>>,
-    /// The bundles this server has put in the bucket, or found there.
+    /// The blobs this server has put in the bucket, as `<scope> <hash>`, kept in `install/shared` too.
     shared: Mutex<std::collections::HashSet<String>>,
     /// What the vault gave this server for the sign-ins its calls came with.
     sessions: sessions::Sessions,
@@ -477,6 +477,7 @@ impl Node {
                 if let Err(err) = reader.read_logs().await {
                     tracing::warn!("reading the bucket: {err:#}");
                 }
+                reader.share_blobs().await;
             });
         }
         let router = Router::builder(endpoint)
@@ -634,6 +635,10 @@ impl Node {
         let _write = self.0.writes.lock().await;
         // What's in the bucket first, so the entry comes after all of it.
         self.read_log_now(scope).await?;
+        // Its blobs first, so a server that reads the entry finds them.
+        for blob in &content.blobs {
+            self.share_blob(scope, blob).await?;
+        }
         let entry = self.with(|i| i.r.make(scope, user, by, content, now_ms()))?;
         self.put_entry(scope, &entry).await?;
         let handled = self.with(|i| i.r.add_own(&entry))?;
@@ -715,7 +720,6 @@ impl Node {
                 Err(err) => tracing::warn!("{app}'s deploy: {err:#}"),
             }
         }
-        tokio::spawn(self.clone().share_bundles(wanted.values().cloned().collect()));
         let changed: Vec<String> = {
             let bundles = self.0.bundles.lock().unwrap();
             modules.iter().map(|(a, _)| a.clone()).filter(|a| bundles.get(a) != wanted.get(a)).collect()
@@ -734,25 +738,6 @@ impl Node {
             self.say(&Scope::Global, status::Said::Build { server: self.0.id, build: crate::config::BUILD.into(), target: crate::config::TARGET.into() }).await?;
         }
         Ok(())
-    }
-
-    /// Puts each of `bundles` in the bucket that this server hasn't since it started (`bundle::bucket_name`), so a node
-    /// with no other way to get an app's latest deploy reads it there.
-    async fn share_bundles(self, bundles: Vec<String>) {
-        use crate::bucket::Bucket;
-        let Ok(bucket) = self.bucket() else { return };
-        let Ok(key) = self.database_key(&Scope::Global, members::APP, crate::bundle::DATABASE).await else { return };
-        for hash in bundles {
-            if self.0.shared.lock().unwrap().contains(&hash) {
-                continue;
-            }
-            let Ok(bytes) = self.blob(&hash).await else { continue };
-            let name = crate::bundle::bucket_name(&hash);
-            match Bucket::create(&bucket, &name, &crate::db::seal(&key, &name, &bytes)).await {
-                Ok(_) => drop(self.0.shared.lock().unwrap().insert(hash)),
-                Err(err) => tracing::debug!("{name}: {err:#}"),
-            }
-        }
     }
 
     /// Whether this server is ready to run calls: it's a server of the install, and has read every scope it holds
