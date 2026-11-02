@@ -163,19 +163,60 @@ pub fn app_skill(app: &Value) -> Skill {
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().filter(|t| !t.is_empty()).unwrap_or(app["name"].as_str().unwrap_or("")));
     let about = app["description"].as_str().map(|d| d.trim().trim_end_matches('.')).filter(|d| !d.is_empty()).map(|d| format!(": {d}")).unwrap_or_default();
     let description: String = format!("{title} in {NAME}{about}. Use when the person asks about {title}, and before using its tools ({name}_...).").chars().take(1024).collect();
+    let ops: Vec<&Value> = app["ops"].as_array().into_iter().flatten().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).collect();
+    // The guide names operations as tools; a harness with only the command line reads each as its command too.
+    let mut guide = app["instructions"].as_str().unwrap_or("").trim().to_string();
+    let mut by_length: Vec<&str> = ops.iter().filter_map(|o| o["name"].as_str()).collect();
+    by_length.sort_by_key(|o| std::cmp::Reverse(o.len()));
+    for op in by_length {
+        let tool = format!("{name}_{op}");
+        let mut out = String::new();
+        let mut rest = guide.as_str();
+        while let Some(i) = rest.find(&tool) {
+            let after = &rest[i + tool.len()..];
+            let whole = !rest[..i].ends_with(|c: char| c.is_alphanumeric() || c == '_' || c == '`' || c == '-') && !after.starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '`');
+            out.push_str(&rest[..i]);
+            out.push_str(&if whole { format!("`{CLI} {name} {op}` ({tool})") } else { tool.clone() });
+            rest = after;
+        }
+        out.push_str(rest);
+        guide = out;
+    }
     let mut body = format!(
-        "# {title}\n\n{}\n\n## Operations\n\nEach is the command `{CLI} {name} <op>` (`--help` says more) and the MCP tool `{name}_<op>`. Never ask for a password, key or token in the chat: vault_request gives the person a link. What sends or can't be undone takes `confirm: true` (`--confirm`), given only once the person agreed to that very action. Post to the board only when the person asked, or when you changed something.\n",
-        app["instructions"].as_str().unwrap_or("").trim(),
+        "# {title}\n\n{}\n\n## Operations\n\nEach is the command `{CLI} {name} <op>` (`--help` says more) and the MCP tool `{name}_<op>`. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the person a link. What sends or can't be undone takes `confirm: true` (`--confirm`), given only once the person agreed to that very action. Post to the board only when the person asked, or when you changed something.\n",
+        guide,
     );
-    for op in app["ops"].as_array().into_iter().flatten().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')) {
+    for op in ops {
         let mark = match (op["reads"] == true, op["confirm"] == true) {
             (true, _) => " It only reads.",
             (_, true) => " Needs `confirm: true`.",
             _ => "",
         };
-        body.push_str(&format!("\n- `{name}_{}({})`: {}{mark}", op["name"].as_str().unwrap_or(""), ts(&op["input"]), op["description"].as_str().unwrap_or("").trim()));
+        let o = op["name"].as_str().unwrap_or("");
+        body.push_str(&format!("\n- `{}` · `{name}_{o}({})`: {}{mark}", command(name, op), ts(&op["input"]), op["description"].as_str().unwrap_or("").trim()));
     }
     Skill { name: skill_name(name), description, body, files: vec![] }
+}
+
+/// An operation as a command: `one board post [<topic>] <text>`, its words as --help shows them, then its other
+/// required inputs as flags.
+fn command(app: &str, op: &Value) -> String {
+    let required: Vec<&str> = op["input"]["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let words: Vec<&str> = match op["words"].as_array() {
+        Some(w) => w.iter().filter_map(Value::as_str).collect(),
+        None => required.clone(),
+    };
+    let mut line = format!("{CLI} {app} {}", op["name"].as_str().unwrap_or(""));
+    for w in &words {
+        line.push_str(&match required.contains(w) {
+            true => format!(" <{}>", w.replace('_', "-")),
+            false => format!(" [<{}>]", w.replace('_', "-")),
+        });
+    }
+    for r in required.iter().filter(|r| !words.contains(r)) {
+        line.push_str(&format!(" --{} <{}>", r.replace('_', "-"), r.replace('_', "-")));
+    }
+    line
 }
 
 /// How the Vault's tools are explained, as an app's guide is.
