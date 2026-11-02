@@ -1,11 +1,12 @@
 // The bridge every app screen gets as `one`. Inside a shell, the shell answers it (WKWebView's
-// `one` message handler, WebView2's `chrome.webview`); in a sandboxed frame (the web client's, a chat's), the page
+// `one` message handler, or `__oneShell.postMessage` where another web view puts one, as Android's does); in a sandboxed frame (the web client's, a chat's), the page
 // holding the frame answers its messages; in a plain browser on the device it talks to the node directly. A screen
 // never knows which. The web client's own page loads it too, for the kit, answering it itself (`__one.host`).
 (() => {
   const ctx = window.__one;
   const handlers = { changed: [] };
-  const shell = window.webkit?.messageHandlers?.one;
+  // Either answers each message with a promise of its reply.
+  const shell = window.webkit?.messageHandlers?.one || (window.__oneShell?.postMessage ? window.__oneShell : null);
   const framed = !shell && window.parent !== window;
 
   // Framed: each message goes up as `{ one: message, id }`, answered with `{ oneReply: id, ok }` or `{ oneReply: id,
