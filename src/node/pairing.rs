@@ -19,11 +19,12 @@ impl Node {
             ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.server_name());
             Ok(())
         })?;
+        let address = self.with(|i| Ok(i.r.members.settings.get("address").cloned()))?.context("a computer joins through your One App's address, and it has none yet: an admin sets it with kernel use")?;
         let joins_as = user.clone().unwrap_or_else(|| asker.user.clone());
         let secret: [u8; 16] = rand::random();
         let by = (asker.key != self.0.id).then(|| hex(&asker.key));
         self.add_pairing(secret, Pairing { user: asker.user.clone(), by, admits: user, until: now_ms() + PAIRING_LIFE })?;
-        let code = PairingCode { from: self.0.endpoint.addr(), secret };
+        let code = PairingCode { address, from: self.0.id, secret };
         let mut bytes = Vec::new();
         ciborium::into_writer(&code, &mut bytes)?;
         Ok((data_encoding::BASE32_NOPAD.encode(&bytes).to_lowercase(), joins_as))
@@ -55,11 +56,8 @@ impl Node {
         let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).context("that isn't a pairing code")?;
         let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
         self.ensure_no_install()?;
-        let conn = self.0.endpoint.connect(code.from.clone(), JOIN_ALPN).await.context("couldn't reach the device that made the pairing code")?;
-        let (mut send, mut recv) = conn.open_bi().await?;
-        send.write_all(&serde_json::to_vec(&JoinRequest { secret: code.secret, name: self.server_name(), as_: "server".into() })?).await?;
-        send.finish()?;
-        let reply: Value = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
+        let request = JoinRequest { secret: code.secret, name: self.server_name(), as_: "server".into() };
+        let reply = self.ask_relay_once(&code.address, code.from, json!({ "join": request })).await.context("couldn't reach the device that made the pairing code")?;
         if let Some(err) = reply.get("error") {
             bail!("{}", err.as_str().unwrap_or("the pairing code was refused"));
         }
@@ -78,20 +76,6 @@ impl Node {
             }
         });
         self.emit(Event::Install);
-        Ok(())
-    }
-
-    pub(super) async fn accept_join(&self, conn: Connection) -> Result<()> {
-        let remote = *conn.remote_id().as_bytes();
-        let (mut send, mut recv) = conn.accept_bi().await?;
-        let request: JoinRequest = serde_json::from_slice(&recv.read_to_end(1 << 16).await?)?;
-        let reply = match self.admit(remote, request).await {
-            Ok(reply) => serde_json::to_value(reply)?,
-            Err(err) => json!({ "error": format!("{err:#}") }),
-        };
-        send.write_all(&serde_json::to_vec(&reply)?).await?;
-        send.finish()?;
-        conn.closed().await;
         Ok(())
     }
 

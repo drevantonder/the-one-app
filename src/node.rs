@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use iroh::endpoint::{Connection, presets};
 use iroh::protocol::{AcceptError, ProtocolHandler, Router};
-use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey};
+use iroh::{Endpoint, EndpointId, SecretKey};
 use p2panda_core::{Hash, SigningKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -34,6 +34,7 @@ mod calls;
 mod databases;
 mod logs;
 mod pairing;
+mod relay;
 mod releases;
 mod scheduled;
 mod screens;
@@ -45,7 +46,6 @@ mod storage;
 mod tunnel;
 mod vault;
 
-const JOIN_ALPN: &[u8] = b"one/join/1";
 const CALL_ALPN: &[u8] = b"one/call/1";
 const BLOB_ALPN: &[u8] = b"one/blob/1";
 /// How long a call may run before it's stopped.
@@ -177,7 +177,9 @@ const PAIRING_LIFE: u64 = 7 * 86_400_000;
 
 #[derive(Serialize, Deserialize)]
 struct PairingCode {
-    from: EndpointAddr,
+    /// The install's address, whose relay reaches the server that made it.
+    address: String,
+    from: Key,
     secret: [u8; 16],
 }
 
@@ -349,6 +351,8 @@ pub struct Inner {
     shared: Mutex<std::collections::HashSet<String>>,
     /// What the vault gave this server for the sign-ins its calls came with.
     sessions: sessions::Sessions,
+    /// This server's socket to the relay.
+    relay: relay::Relay,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -456,6 +460,7 @@ impl Node {
             hinted: Mutex::new(HashMap::new()),
             shared: Mutex::new(Default::default()),
             sessions: Default::default(),
+            relay: Default::default(),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -469,6 +474,7 @@ impl Node {
             node.keep_alone_here()?;
             node.follow_storage();
             node.follow_tunnel();
+            node.follow_relay();
             node.read_all_status();
             let reader = node.clone();
             tokio::spawn(async move {
@@ -479,7 +485,6 @@ impl Node {
             });
         }
         let router = Router::builder(endpoint)
-            .accept(JOIN_ALPN, JoinHandler(node.clone()))
             .accept(CALL_ALPN, CallHandler(node.clone()))
             .accept(BLOB_ALPN, BlobHandler(node.clone()))
             .spawn();
@@ -680,6 +685,7 @@ impl Node {
         if handled.members || handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
             self.follow_storage();
             self.follow_tunnel();
+            self.follow_relay();
         }
         let forgotten: Vec<String> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| e.content.data["blob"].as_str().map(str::to_string)).collect();
         self.emit(Event::Changed { apps: Vec::new() });
@@ -1036,8 +1042,6 @@ fn hostname() -> String {
 }
 
 #[derive(Clone, Debug)]
-struct JoinHandler(Node);
-#[derive(Clone, Debug)]
 struct CallHandler(Node);
 #[derive(Clone, Debug)]
 struct BlobHandler(Node);
@@ -1052,14 +1056,8 @@ impl ProtocolHandler for BlobHandler {
     }
 }
 
-impl ProtocolHandler for JoinHandler {
-    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
-        self.0.accept_join(conn).await.map_err(accept_err)
-    }
-}
-
 impl ProtocolHandler for CallHandler {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
-        self.0.accept_call(conn).await.map_err(accept_err)
+        self.0.accept_call_over_iroh(conn).await.map_err(accept_err)
     }
 }

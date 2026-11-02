@@ -17,7 +17,7 @@ pub const SERVICES: &[(&str, &str, Option<&str>)] = &[
     ("auth", "auth/worker.js", Some("Auth")),
     ("vault", "vault/worker.js", Some("Vault")),
     ("schedules", "schedules/worker.js", Some("Schedules")),
-    ("gateway", "gateway/worker.js", None),
+    ("gateway", "gateway/worker.js", Some("Relay")),
 ];
 
 /// How an install's kernel is set up, wherever it runs: kept in `<home>/kernel/settings.json`, with its secrets in

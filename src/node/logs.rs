@@ -111,6 +111,8 @@ impl Node {
         if let Some((app, database, at)) = wrote {
             input = json!({ "scope": scope.to_string(), "app": app, "database": database, "at": at });
         }
+        self.notify(&servers, &input);
+        // Over iroh too, to servers not connected to the relay.
         let req = CallRequest { app: members::APP.into(), op: "changed".into(), input, ..Default::default() };
         for server in servers {
             let (node, req, me) = (self.clone(), req.clone(), me.clone());

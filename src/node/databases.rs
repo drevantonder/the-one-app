@@ -101,16 +101,6 @@ impl Node {
         });
     }
 
-    /// What a node that tells no other server what it wrote (the serverless one) said it wrote, as someone who may use
-    /// `scope`: step `at` of `app`'s `database`, which this server takes as another server's word, and passes on to the
-    /// others that hold the scope as if it wrote it.
-    pub async fn written_elsewhere(&self, me: &Caller, scope: &Scope, app: &str, database: &str, at: u64) -> Result<()> {
-        ensure!(self.with(|i| Ok(i.r.members.may_use(&me.user, scope)))?, "you can't use {scope}");
-        self.changed_there(scope, Some((app, database, at)));
-        self.ping(scope, Some((app, database, at)));
-        Ok(())
-    }
-
     /// Brings a database up to date for a call that reads it, as far as this server's copy goes: a notice of another
     /// server's write fetches its step into the copy, and `fill_copies` keeps up with the bucket. Only while a notice's
     /// step isn't here yet is the bucket asked first, and if it doesn't answer, the copy is read as it is: behind,

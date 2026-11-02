@@ -36,7 +36,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/state", get(state))
         .route("/v1/apps", get(apps))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
-        .route("/v1/changed", post(changed))
         .route("/v1/widgets", get(widgets))
         .route("/v1/badges", get(badges))
         .route("/v1/icons", get(icons))
@@ -107,7 +106,6 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/state",
     "/v1/apps",
     "/v1/call",
-    "/v1/changed",
     "/v1/widgets",
     "/v1/badges",
     "/v1/icons",
@@ -448,13 +446,6 @@ async fn call(State(node): State<Node>, me: Me, Json(mut req): Json<CallRequest>
         req = node.for_sign_in(req)?;
     }
     Ok(Json(json!({ "ok": node.call_as(req, me.caller).await? })))
-}
-
-/// What a node that sends no pings (the serverless one) wrote for this person: `{ scope, app, database, at }`.
-async fn changed(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let scope = crate::entry::Scope::parse(text(&body, "scope")?)?;
-    node.written_elsewhere(&me.caller, &scope, text(&body, "app")?, text(&body, "database")?, body["at"].as_u64().unwrap_or(0)).await?;
-    done()
 }
 
 #[derive(Deserialize)]

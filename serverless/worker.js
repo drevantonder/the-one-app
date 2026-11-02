@@ -257,8 +257,8 @@ const needsDevice = (d, name) => `${d?.title || name} runs on your devices, and 
 
 /// A call's databases, opened from the bucket as it first reaches each, and closed when it's done.
 class Call {
-  constructor(env, ctx, who, app, scopes) {
-    Object.assign(this, { env, ctx, who, app, scopes, bucket: new Bucket(env, who), dbs: new Map() });
+  constructor(env, ctx, who, app, scopes, view) {
+    Object.assign(this, { env, ctx, who, app, scopes, view, bucket: new Bucket(env, who), dbs: new Map() });
   }
 
   db(scope) {
@@ -283,7 +283,7 @@ class Call {
     const each = JSON.parse(statements(JSON.stringify(appends), JSON.stringify(this.scopes)));
     for (const [scope, list] of Object.entries(each)) {
       const at = await write(await this.db(scope), this.bucket, JSON.stringify(list));
-      if (at) this.ctx.waitUntil(changed(this.env, this.who, { scope, app: this.app.name, database: "main", at }));
+      if (at) this.ctx.waitUntil(changed(this.env, this.view, { scope, app: this.app.name, database: "main", at }));
     }
     return Object.keys(each).map((scope) => prefix(scope, this.app.name, "main"));
   }
@@ -316,7 +316,7 @@ class Run {
     if (d.uses?.sidecars?.length) refuse(503, needsDevice(d, app.name));
     if (!scopes.length) refuse(403, `${d.title || app.name} isn't on any of your pages`);
     const writes = what === "call";
-    const call = new Call(this.env, this.ctx, this.who, app, scopes.map((h) => h.id));
+    const call = new Call(this.env, this.ctx, this.who, app, scopes.map((h) => h.id), this.view);
     let finished;
     const done = new Promise((resolve) => (finished = resolve));
     let later = false;
@@ -532,16 +532,13 @@ async function fromMachine(request, env, wait = 15_000) {
   }
 }
 
-/// Tells a node on a machine that this node wrote step `at` of a database, for the person it wrote as, so it reads it
-/// from the bucket and tells the other servers that hold the scope now, not at their next look. Only a hint: when
-/// none answers, they find it in the bucket anyway.
-async function changed(env, who, wrote) {
-  if (!env.MACHINE && !env.MACHINE_URL) return;
-  const sent = { method: "POST", headers: { authorization: `Bearer ${who.token}`, "content-type": "application/json" }, body: JSON.stringify(wrote) };
-  const path = "/v1/changed";
+/// Tells the servers of the install, through the gateway's relay, that this node wrote step `at` of a database, so
+/// those that hold the scope read it from the bucket now, not at their next look. Only a hint.
+async function changed(env, view, wrote) {
+  if (!env.RELAY) return;
+  const to = view.state.install.servers.map((s) => s.key);
   try {
-    const r = env.MACHINE ? await env.MACHINE.fetch(`http://${new URL(env.ADDRESS).host}${path}`, sent) : await fetch(`${env.MACHINE_URL}${path}`, sent);
-    if (!r.ok) console.log(JSON.stringify({ changed: wrote.scope, said: r.status }));
+    await env.RELAY.get(env.RELAY.idFromName("relay")).fetch("http://relay/notice", { method: "POST", body: JSON.stringify({ to, notice: { changed: wrote } }) });
   } catch (err) {
     console.log(JSON.stringify({ changed: wrote.scope, why: String(err?.message ?? err) }));
   }

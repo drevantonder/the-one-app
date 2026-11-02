@@ -44,7 +44,12 @@ getrandom = { version = "0.2", features = ["js"] }
 # What only a node on a machine uses: the rest of the node (src/lib.rs keeps the shared modules apart).
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 axum = "0.8"
+# Servers reach each other through the relay at the install's address (src/node/relay.rs), over one WebSocket each:
+# tokio-tungstenite is that WebSocket, over the rustls ureq already builds, and futures-util (which axum already
+# builds) its Sink and Stream.
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 iroh = "1.4"
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 # Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
 jiff = "0.2"
 # So workerd dies with its node on Linux (prctl PR_SET_PDEATHSIG).

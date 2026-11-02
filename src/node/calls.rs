@@ -130,17 +130,20 @@ impl Node {
         req
     }
 
-    /// Asks another server to run a call.
+    /// Asks another server to run a call: through the relay, or over iroh to one that isn't connected to the relay.
     pub(super) async fn ask_server(&self, server: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
-        let conn = tokio::time::timeout(Duration::from_secs(10), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, CALL_ALPN)).await.context("timed out")??;
-        if let Some(rtt) = conn.paths().iter().find(|p| p.is_selected()).map(|p| p.rtt()) {
-            let _ = self.with(|i| Ok(i.far.insert(server, rtt)));
-        }
-        let (mut send, mut recv) = conn.open_bi().await?;
         let request = json!({ "app": req.app, "sidecar": req.sidecar, "driver": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": me.token } });
+        let limit = self.limit(req).await + Duration::from_secs(5);
+        match self.ask_relay(server, json!({ "call": request }), limit).await {
+            Ok(reply) => return Ok(Reply::from_json(reply)),
+            Err(err) if !err.is::<relay::NotThere>() => return Err(err),
+            Err(err) => tracing::info!("asking {} over iroh: {err}", self.name_of(&server)),
+        }
+        let conn = tokio::time::timeout(Duration::from_secs(10), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, CALL_ALPN)).await.context("timed out")??;
+        let (mut send, mut recv) = conn.open_bi().await?;
         send.write_all(&serde_json::to_vec(&request)?).await?;
         send.finish()?;
-        let reply = tokio::time::timeout(self.limit(req).await + Duration::from_secs(5), recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
+        let reply = tokio::time::timeout(limit, recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
         Ok(Reply::from_json(serde_json::from_slice(&reply)?))
     }
 
@@ -721,29 +724,36 @@ impl Node {
         })
     }
 
-    pub(super) async fn accept_call(&self, conn: Connection) -> Result<()> {
+    pub(super) async fn accept_call_over_iroh(&self, conn: Connection) -> Result<()> {
         let remote = *conn.remote_id().as_bytes();
         let (mut send, mut recv) = conn.accept_bi().await?;
         let request: Value = serde_json::from_slice(&recv.read_to_end(MESSAGE_LIMIT).await?)?;
-        let reply = match self.check_caller(remote, &request) {
-            Ok(mut me) => {
-                // A sign-in's token goes along with its call: one that isn't the caller's is taken as none.
-                if let Some(token) = request["me"]["token"].as_str() {
-                    me.token = self.token_of(token, &me.user).await;
-                }
-                let mut req: CallRequest = serde_json::from_value(request)?;
-                // Only a server says an app made a call (whose items fill it in), and how deep it is.
-                if !self.with(|i| Ok(i.r.members.trusts(&me.user, &remote)))? {
-                    (req.from, req.depth) = (None, 0);
-                }
-                self.run(&req, &me).await
-            }
-            Err(err) => Reply::Error(format!("{err:#}")),
-        };
+        let reply = self.accept_call(remote, &request).await;
         send.write_all(&serde_json::to_vec(&reply.json())?).await?;
         send.finish()?;
         conn.closed().await;
         Ok(())
+    }
+
+    /// Runs a call another server, `remote`, asked for.
+    pub(super) async fn accept_call(&self, remote: Key, request: &Value) -> Reply {
+        let mut me = match self.check_caller(remote, request) {
+            Ok(me) => me,
+            Err(err) => return Reply::Error(format!("{err:#}")),
+        };
+        // A sign-in's token goes along with its call: one that isn't the caller's is taken as none.
+        if let Some(token) = request["me"]["token"].as_str() {
+            me.token = self.token_of(token, &me.user).await;
+        }
+        let mut req: CallRequest = match serde_json::from_value(request.clone()) {
+            Ok(req) => req,
+            Err(err) => return Reply::Error(format!("{err:#}")),
+        };
+        // Only a server says an app made a call (whose items fill it in), and how deep it is.
+        if !self.with(|i| Ok(i.r.members.trusts(&me.user, &remote))).unwrap_or(false) {
+            (req.from, req.depth) = (None, 0);
+        }
+        self.run(&req, &me).await
     }
 
     /// A call is taken only as a user from one of their clients or a server they trust.

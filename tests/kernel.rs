@@ -551,9 +551,9 @@ impl Passkey {
 }
 
 /// The real kernel services, as an install runs them: people reach them at its address, the gateway's.
-struct Kernel {
+pub(crate) struct Kernel {
     _running: Running,
-    address: String,
+    pub(crate) address: String,
     vault: String,
     secret: String,
     /// The recovery key, as its holder keeps it.
@@ -566,7 +566,7 @@ const RESOURCE: &str = "https://node.test/mcp";
 impl Kernel {
     /// Runs them as `one kernel serve` does, from new settings, with the stand-in sites as the bucket, the gateway
     /// sending `/v1/` to `node_url` and serving a web client of two pages.
-    fn start(node_url: Option<String>) -> Kernel {
+    pub(crate) fn start(node_url: Option<String>) -> Kernel {
         let gateway = port();
         let (mut settings, recovery) = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), port(), port(), gateway];

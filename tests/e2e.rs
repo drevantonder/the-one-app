@@ -1,4 +1,4 @@
-//! Real nodes on this machine, talking over iroh (needs the internet for discovery and relays).
+//! Real nodes on this machine, reaching each other through the relay of a real kernel's gateway.
 
 use std::time::{Duration, Instant};
 
@@ -15,6 +15,14 @@ async fn start(name: &str) -> (Node, iroh::protocol::Router) {
     let dir = temp(name);
     std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
     Node::start(&dir, one::sidecars::built_in()).await.unwrap()
+}
+
+/// A kernel whose gateway's relay the servers of `a`'s install reach each other through: `a` says it's the install's.
+async fn relay(a: &Node) -> crate::kernel::Kernel {
+    let k = tokio::task::block_in_place(|| crate::kernel::Kernel::start(None));
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    a.set_setting(&me, "address", Some(&k.address)).await.unwrap();
+    k
 }
 
 async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
@@ -58,6 +66,8 @@ async fn servers_share_a_deployed_board() {
     assert!(listed["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == "post")), "{listed}");
     assert_eq!(a.call(board("post", json!({ "text": "from a" }))).await.unwrap(), "Posted as #1 in the top.");
 
+    assert!(a.pair().is_err(), "a computer joins through the install's address, which it has none of yet");
+    let _relay = relay(&a).await;
     b.join(&a.pair().unwrap()).await.unwrap();
     assert_eq!(b.user().unwrap(), a.user().unwrap(), "a pairing code from a's user makes another of their servers");
     eventually("b to run the board and see a's post", async || sees(&b, "global", "from a").await).await;
@@ -257,6 +267,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let (a, _ra) = start("backup-a").await;
     let (b, _rb) = start("backup-b").await;
     let recovery = a.create("Home", "Andre").await.unwrap();
+    let _relay = relay(&a).await;
     b.join(&a.pair().unwrap()).await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     eventually("the board to run", async || a.call(board("post", json!({ "text": "before the backup" }))).await.is_ok()).await;

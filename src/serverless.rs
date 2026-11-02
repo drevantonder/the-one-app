@@ -30,8 +30,8 @@ pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
     ])
 }
 
-/// Its bindings: the kernel's auth and vault, Worker Loader, the install's address and name, and the node on a
-/// machine that what needs one goes on to.
+/// Its bindings: the kernel's auth and vault, Worker Loader, the install's address and name, the gateway's relay, and
+/// the node on a machine that what needs one goes on to.
 pub fn metadata(settings: &Settings) -> Value {
     let mut bindings = vec![
         json!({ "type": "service", "name": "AUTH", "service": worker_name("auth") }),
@@ -39,6 +39,8 @@ pub fn metadata(settings: &Settings) -> Value {
         json!({ "type": "worker_loader", "name": "LOADER" }),
         json!({ "type": "plain_text", "name": "ADDRESS", "text": settings.address }),
         json!({ "type": "plain_text", "name": "NAME", "text": settings.name }),
+        // The gateway's relay, which tells servers what this node wrote.
+        json!({ "type": "durable_object_namespace", "name": "RELAY", "class_name": "Relay", "script_name": worker_name("gateway") }),
     ];
     if settings.node_url.is_some() {
         bindings.push(match settings.machine("MACHINE") {
