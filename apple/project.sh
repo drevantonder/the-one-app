@@ -8,6 +8,10 @@ art() { echo "$(dirname "$config")/$(field "$1")"; }
 # The commit the shells are built from, which Settings shows at its foot.
 export BUILD_COMMIT=$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 export CONFIG_NAME=$(field name) CONFIG_CLI=$(field cli) CONFIG_PORT=$(field port) CONFIG_ACCENT=$(field accent)
+# What a person calls the install where they read: a workplace's white label, which its people join with their work
+# email (join_domain), is shared, "the PTC App"; anyone else's is "your One App".
+if [ -n "$(field join_domain)" ]; then CONFIG_YOURS=${CONFIG_NAME/#The /the }; else CONFIG_YOURS="your ${CONFIG_NAME#The }"; fi
+export CONFIG_YOURS
 # The iPhone app signs with the team of this Mac's Apple Development certificate, unless APPLE_TEAM names one.
 export APPLE_TEAM=${APPLE_TEAM:-$(security find-certificate -c "Apple Development" -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p')}
 

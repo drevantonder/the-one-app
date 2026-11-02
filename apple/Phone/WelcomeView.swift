@@ -12,6 +12,12 @@ struct WelcomeView: View {
 
     private var given: String { address.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    /// "Your One App", or a workplace's, "The PTC App" (project.sh).
+    private var whose: String {
+        let yours = Bundle.main.object(forInfoDictionaryKey: "Yours") as? String ?? ""
+        return yours.prefix(1).uppercased() + yours.dropFirst()
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 36) {
@@ -46,7 +52,7 @@ struct WelcomeView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 13)
                         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
-                    Text("Your One App’s address, or the invite link you were sent.")
+                    Text("\(whose)’s address, or the invite link you were sent.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 16)

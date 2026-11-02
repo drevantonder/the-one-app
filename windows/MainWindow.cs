@@ -270,9 +270,10 @@ public sealed class MainWindow : Window
 
         if (Auth.Shared.Address == null)
         {
+            var whose = char.ToUpperInvariant(Brand.Yours[0]) + Brand.Yours[1..];
             var address = new TextBox { PlaceholderText = "one.example.com, or an invite link", Width = 340, HorizontalAlignment = HorizontalAlignment.Center, IsSpellCheckEnabled = false };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(address, "Your One App’s address or invite link");
-            panel.Children.Add(new TextBlock { Text = "Your One App’s address, or the invite link you were sent.", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords });
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(address, $"{whose}’s address or invite link");
+            panel.Children.Add(new TextBlock { Text = $"{whose}’s address, or the invite link you were sent.", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords });
             panel.Children.Add(address);
             void Go()
             {
@@ -338,7 +339,7 @@ public sealed class MainWindow : Window
             panel.Children.Add(new TextBlock { Text = new Uri(Auth.Shared.Address).Host, FontSize = 12, Foreground = Look.Tertiary, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 16, 0, 0) });
             if (string.IsNullOrEmpty(Brand.Address))
             {
-                var other = Look.Link("Use another One App…", () =>
+                var other = Look.Link("Use another address…", () =>
                 {
                     Auth.Shared.Leave();
                     Welcome(null);

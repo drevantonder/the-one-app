@@ -4,6 +4,8 @@
 # Links to the white label's address open the app; for one that asks where, give the addresses whose links should:
 # LINKS=https://one.example.com ./build.sh. Each address lists the app's certificate with `kernel set android`.
 set -eu
+# Gradle reads it too, from another folder: so wherever it was given from, the same file.
+if [ -n "${CONFIG:-}" ]; then CONFIG="$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")"; export CONFIG; fi
 cd "$(dirname "$0")"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 ./gradlew --quiet assembleRelease

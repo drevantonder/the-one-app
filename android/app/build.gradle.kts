@@ -25,6 +25,9 @@ fun quoted(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "
 val commit = providers.exec { commandLine("git", "-C", repo.path, "rev-parse", "--short=12", "HEAD"); isIgnoreExitValue = true }
     .standardOutput.asText.get().trim().ifEmpty { "unknown" }
 val cli = field("cli")
+// What a person calls the install where they read: a workplace's white label, which its people join with their work
+// email (join_domain), is shared, "the PTC App"; anyone else's is "your One App".
+val yours = field("name").let { if (field("join_domain").isNotEmpty()) it.replaceFirst(Regex("^The "), "the ") else "your " + it.removePrefix("The ") }
 
 // The launcher icon from the config's, and the logo the app shows; and Phosphor's icons, which apps name, as every
 // device draws them.
@@ -111,6 +114,7 @@ android {
         versionName = commit
         buildConfigField("String", "NAME", quoted(field("name")))
         buildConfigField("String", "CLI", quoted(cli))
+        buildConfigField("String", "YOURS", quoted(yours))
         buildConfigField("String", "ACCENT", quoted(field("accent")))
         // A white label with one install signs in there; otherwise the first screen asks where.
         buildConfigField("String", "ADDRESS", quoted(field("address")))

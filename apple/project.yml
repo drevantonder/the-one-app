@@ -70,6 +70,7 @@ targets:
         CFBundleDisplayName: ${CONFIG_NAME}
         Accent: ${CONFIG_ACCENT}
         CLI: ${CONFIG_CLI}
+        Yours: ${CONFIG_YOURS}
         BuildCommit: ${BUILD_COMMIT}
         AppGroup: group.app.${CONFIG_CLI}.phone
         # <cli>://signed-in/: back from signing in; <cli>://vault?id=…&scope=…: an agent's request for a Vault item.

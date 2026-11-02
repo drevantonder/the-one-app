@@ -183,7 +183,7 @@ private fun Welcome(store: Store) {
         if (!fixed) {
             Spacer(Modifier.height(32.dp))
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Your One App’s address, or an invite link", style = Type.footnote, color = p.secondary, modifier = Modifier.padding(horizontal = 16.dp))
+                Text("${BuildConfig.YOURS.replaceFirstChar { it.uppercase() }}’s address, or an invite link", style = Type.footnote, color = p.secondary, modifier = Modifier.padding(horizontal = 16.dp))
                 TextField(
                     address, { address = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("one.example.com", color = p.tertiary) },
                     shape = RoundedCornerShape(16.dp),
