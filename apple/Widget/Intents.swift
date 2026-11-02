@@ -1,7 +1,7 @@
 import AppIntents
 import Foundation
 
-/// What runs a home-screen widget's operations: the app sets it, since only the app reaches a server.
+/// What runs a home-screen widget's operations: the app sets it, since only the app reaches a device.
 @MainActor
 enum WidgetActions {
     static var run: (@MainActor @Sendable (_ app: String, _ op: String, _ input: Data, _ scope: String?) async throws -> Void)?

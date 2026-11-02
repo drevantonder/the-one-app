@@ -12,16 +12,16 @@
 <div id="list"></div>
 <div class="card" id="connect"></div>
 <script>
-// Each account is a phone linked to one of your servers, as WhatsApp Desktop is linked.
+// Each account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
 let shown = 0;
 async function show() {
   const accounts = await one.call("accounts");
   shown = accounts.length;
   document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => `<div class="row plain"><span class="dot${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">${one.esc(a.account)}</div><div class="sub">${one.esc(a.ok ? `Linked on ${a.server}${i ? "" : " · used first"}` : a.why || "Needs linking again")}</div></div><button class="plain" data-out="${one.esc(a.account)}">Sign out</button></div>`).join("") + "</div>"
+    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => `<div class="row plain"><span class="dot${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">${one.esc(a.account)}</div><div class="sub">${one.esc(a.ok ? `Linked on ${a.device}${i ? "" : " · used first"}` : a.why || "Needs linking again")}</div></div><button class="plain" data-out="${one.esc(a.account)}">Sign out</button></div>`).join("") + "</div>"
     : '<p class="muted">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => {
-    await one.confirm("#connect", { title: `Sign out of ${b.dataset.out}?`, detail: "This server is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
+    await one.confirm("#connect", { title: `Sign out of ${b.dataset.out}?`, detail: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
       action: "Sign Out", danger: true, run: () => one.call("sign_out", { account: b.dataset.out }) });
     show();
   };

@@ -311,19 +311,19 @@ async fn api(addr: &str, token: &str, method: &str, path: &str, body: Value) -> 
 async fn the_apps_decode_what_the_node_sends() {
     let swift = read("apple/Shared/Node.swift") + &read("apple/Shared/Views/WidgetTree.swift");
     let structs = swift_structs(&swift);
-    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "WidgetNode", "VaultItem", "VaultRequest", "Arrangement.Item", "SettingsItem"] {
+    for name in ["NodeState", "Install", "Device", "AppInfo", "WidgetInfo", "WidgetNode", "VaultItem", "VaultRequest", "Arrangement.Item", "SettingsItem"] {
         assert!(structs.get(name).is_some_and(|f| !f.is_empty()), "the test reads Swift's {name}: {:?}", structs.keys());
     }
     assert!(structs["VaultItem"].iter().any(|f| f.key == "scope_name" && !f.required) && structs["VaultItem"].iter().any(|f| f.key == "title" && f.required));
     assert!(structs["NodeState"].iter().any(|f| f.key == "me" && f.required), "CodingKeys rename fields");
     let classes = kotlin_classes(&read("android/app/src/main/kotlin/app/client/Node.kt"));
-    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "WidgetNode"] {
+    for name in ["NodeState", "Install", "Device", "AppInfo", "WidgetInfo", "WidgetNode"] {
         assert!(classes.get(name).is_some_and(|f| !f.is_empty()), "the test reads Kotlin's {name}: {:?}", classes.keys());
     }
     assert!(classes["NodeState"].iter().any(|f| f.key == "me" && f.required), "@SerialName renames fields");
     assert!(classes["AppInfo"].iter().any(|f| f.key == "screens" && f.ty == "[AppScreenInfo]" && !f.required), "{:?}", classes["AppInfo"]);
     let windows_classes = csharp_classes(&read("windows/Models.cs"));
-    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "SettingsItem"] {
+    for name in ["NodeState", "Install", "Device", "AppInfo", "WidgetInfo", "SettingsItem"] {
         assert!(windows_classes.get(name).is_some_and(|f| !f.is_empty()), "the test reads C#'s {name}: {:?}", windows_classes.keys());
     }
     assert!(windows_classes["NodeState"].iter().any(|f| f.key == "settings_items" && f.ty == "[SettingsItem]" && !f.required), "{:?}", windows_classes["NodeState"]);

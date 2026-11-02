@@ -1,8 +1,8 @@
 // AI for apps: read a photo or PDF with a prompt, and ask a decision model typed questions. It reads with the user's
-// local models (the models sidecar, on the server that has them) or with Gemini once the person's Vault has a Gemini
+// local models (the models sidecar, on the device that has them) or with Gemini once the person's Vault has a Gemini
 // key item for it (its secret field `gemini_key`). Apps use it as ctx.apps.ai.read and ctx.apps.ai.decide, so none of them holds a key.
 
-const DEFAULTS = { provider: "local", local_server: null, read_model: "gemma4:12b", decide_model: "clef-flash", gemini_model: "gemini-3.5-flash-lite" };
+const DEFAULTS = { provider: "local", local_device: null, read_model: "gemma4:12b", decide_model: "clef-flash", gemini_model: "gemini-3.5-flash-lite" };
 const GEMINI = "generativelanguage.googleapis.com";
 
 const kinds = ["user", "global"];
@@ -55,7 +55,7 @@ export default {
 
   ops: {
     settings: {
-      description: "Which AI answers: provider (local or gemini), local_server (the device with the local models), and the models for reading and deciding.",
+      description: "Which AI answers: provider (local or gemini), local_device (the device with the local models), and the models for reading and deciding.",
       input: { type: "object", properties: {} },
       run: (ctx) => settings(ctx),
     },
@@ -65,7 +65,7 @@ export default {
         type: "object",
         properties: {
           provider: { type: "string", enum: ["local", "gemini"] },
-          local_server: { type: "string", description: "the device whose local models answer, by name" },
+          local_device: { type: "string", description: "the device whose local models answer, by name" },
           read_model: { type: "string" }, decide_model: { type: "string" }, gemini_model: { type: "string" },
           scope: { type: "string", description: "user (the default) or global" },
         },
@@ -114,7 +114,7 @@ export default {
           options: { temperature: 0, num_predict: max_tokens },
           messages: [{ role: "user", content: prompt, images: files.map((f) => f.data) }],
           ...(json_schema ? { format: json_schema } : {}),
-        }, { device: s.local_server || undefined });
+        }, { device: s.local_device || undefined });
         return { text: String(reply ?? ""), provider: "local", cut: false };
       },
     },
@@ -127,7 +127,7 @@ export default {
       },
       async run(ctx, { state = {}, questions, images }) {
         const s = await settings(ctx);
-        return ctx.sidecars.models.decide({ model: s.decide_model, state, questions, ...(images?.length ? { images: images.map((i) => i.base64 ?? i) } : {}) }, { device: s.local_server || undefined });
+        return ctx.sidecars.models.decide({ model: s.decide_model, state, questions, ...(images?.length ? { images: images.map((i) => i.base64 ?? i) } : {}) }, { device: s.local_device || undefined });
       },
     },
   },

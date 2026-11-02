@@ -99,7 +99,7 @@ func next(client *http.Client, node string) (*call, error) {
 	return nil, fmt.Errorf("%s: %s", resp.Status, body)
 }
 
-// elsewhere is an error saying the call should go to another server, as
+// elsewhere is an error saying the call should go to another device, as
 // when WhatsApp isn't linked here; the node then tries the next.
 type elsewhere string
 
@@ -140,10 +140,10 @@ func request(client *http.Client, url string, body any) ([]byte, error) {
 }
 
 // callOn runs one of this sidecar's operations on another of the user's
-// servers, through this server's node, and decodes its result into out.
-func callOn(node, server, op string, input, out any) error {
+// devices, through this device's node, and decodes its result into out.
+func callOn(node, device, op string, input, out any) error {
 	body, err := request(&http.Client{Timeout: 28 * time.Second, Transport: toNode}, node+"/v1/call",
-		map[string]any{"app": app, "sidecar": app, "op": op, "input": input, "server": server})
+		map[string]any{"app": app, "sidecar": app, "op": op, "input": input, "device": device})
 	if err != nil {
 		return err
 	}
@@ -179,14 +179,14 @@ var describe = map[string]any{
 	"icon":        "whatsapp-logo",
 	"color":       "#25d366",
 	"domain":      "whatsapp.com",
-	"instructions": "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their servers, as WhatsApp Desktop is linked; calls find the server. whatsapp_accounts lists them; the others take account, the first by default. " +
+	"instructions": "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their devices, as WhatsApp Desktop is linked; calls find the device. whatsapp_accounts lists them; the others take account, the first by default. " +
 		"whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: " +
 		"send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. " +
-		"whatsapp_move moves a link to another server; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
+		"whatsapp_move moves a link to another device; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
 	"ops": []map[string]any{
-		{"name": "accounts", "reads": true, "description": "The WhatsApp accounts linked on any of your servers, this one's first: each { account, ok, server }, with why when ok is false.",
+		{"name": "accounts", "reads": true, "description": "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, device }, with why when ok is false.",
 			"input": object(map[string]any{})},
-		{"name": "status", "reads": true, "description": "Which accounts are linked and connected here, and how many messages each keeps; or on which of your servers WhatsApp is linked.",
+		{"name": "status", "reads": true, "description": "Which accounts are linked and connected here, and how many messages each keeps; or on which of your devices WhatsApp is linked.",
 			"input": object(map[string]any{})},
 		{"name": "sign_in", "description": "Link a WhatsApp account here, or another one, as WhatsApp Desktop is linked: returns a QR code to scan on the phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code is on the phone itself.",
 			"input": object(map[string]any{"phone": str("the account's number with its country code, e.g. +61 400 000 000, for a code to type on the phone")})},
@@ -202,9 +202,9 @@ var describe = map[string]any{
 		{"name": "send", "description": "Send a WhatsApp message, as the linked account, to a chat, a contact or a phone number. This sends a real message to a real person.",
 			"input": object(map[string]any{"chat": str("the chat's name, a part of it only one chat has, a contact's exact name, a phone number with its country code, or a JID"),
 				"text": str("the message"), "account": account}, "chat", "text")},
-		{"name": "move", "description": "Move a WhatsApp link, with its kept messages, from the server it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted here once the other server has it.",
-			"input": object(map[string]any{"to": str("the server to move it to, by name"), "account": account}, "to")},
-		{"name": "sign_out", "confirm": true, "description": "Unlink a WhatsApp account: removes this server from its linked devices and deletes the messages kept here. Destructive: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
+		{"name": "move", "description": "Move a WhatsApp link, with its kept messages, from the device it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted here once the other device has it.",
+			"input": object(map[string]any{"to": str("the device to move it to, by name"), "account": account}, "to")},
+		{"name": "sign_out", "confirm": true, "description": "Unlink a WhatsApp account: removes this device from its linked devices and deletes the messages kept here. Destructive: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
 			"input": object(map[string]any{"account": str("the account's number; needed when several are linked here")})},
 	},
 	"screens": []map[string]any{{"name": "settings", "title": "WhatsApp"}},

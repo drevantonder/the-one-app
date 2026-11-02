@@ -1,5 +1,5 @@
-// Devices: every server in the install and how loaded it is (memory, CPU, GPU, disk), with the containers each one
-// hosts listed under it; and where things run first (ctx.order, src/rank.rs), which admins change in Settings > Devices, and agents with devices_use. Each server measures itself and says so when it syncs; this app only draws what
+// Devices: every device in the install and how loaded it is (memory, CPU, GPU, disk), with the containers each one
+// hosts listed under it; and where things run first (ctx.order, src/rank.rs), which admins change in Settings > Devices, and agents with devices_use. Each device measures itself and says so when it syncs; this app only draws what
 // ctx.devices() gives it.
 
 const GB = 1e9;
@@ -19,21 +19,21 @@ const mem = (b) => size(b, GiB);
 /// A container's memory, out of its limit, or its host's memory if it has none.
 const share = (m, host) => (m ? { used: m.used, total: m.total || host?.total || 0 } : null);
 
-/// Every server, each container that is a server itself right after its host, then the host's other containers.
+/// Every device, each container that is a device itself right after its host, then the host's other containers.
 async function devices(ctx) {
-  const servers = await ctx.devices();
-  const byName = new Map(servers.map((s) => [s.name, s]));
+  const all = await ctx.devices();
+  const byName = new Map(all.map((s) => [s.name, s]));
   const host = new Map();
-  for (const s of servers) for (const c of s.load?.containers || []) if (byName.has(c.name) && c.name !== s.name) host.set(c.name, s.name);
+  for (const s of all) for (const c of s.load?.containers || []) if (byName.has(c.name) && c.name !== s.name) host.set(c.name, s.name);
   const device = (s, on) => ({
     name: s.name, os: os(s), online: !!s.online, here: !!s.me, host: on || null, build: s.build || null,
     memory: s.online ? s.load?.memory || null : null, disk: s.online ? s.load?.disk || null : null,
     cpu: s.online ? s.load?.cpu || [] : [], gpu: s.online ? s.load?.gpu || [] : [],
   });
   const out = [];
-  for (const s of servers.filter((s) => !host.has(s.name)).sort((a, b) => b.me - a.me || b.online - a.online || a.name.localeCompare(b.name))) {
+  for (const s of all.filter((s) => !host.has(s.name)).sort((a, b) => b.me - a.me || b.online - a.online || a.name.localeCompare(b.name))) {
     out.push(device(s));
-    // Containers that are servers themselves first, then the rest.
+    // Containers that are devices themselves first, then the rest.
     const guests = [...((s.online && s.load?.containers) || [])].sort((a, b) => (host.get(b.name) === s.name) - (host.get(a.name) === s.name));
     for (const c of guests) {
       const self = byName.get(c.name);
@@ -227,13 +227,13 @@ function icon(d, w) {
   return { t: "icon", path: ICONS[kind] || ICONS.desktop, w, ...(LOGOS[os] ? { badge: LOGOS[os] } : {}) };
 }
 
-/// "This device · On linux", "Not updated yet" when it runs another build than most servers, or "Offline".
+/// "This device · On linux", "Not updated yet" when it runs another build than most devices, or "Offline".
 function detail(d, latest) {
   if (!d.online) return "Offline";
   return [d.here && "This device", d.host && `On ${d.host}`, d.kind && (d.kind === "podman" ? "Podman" : "Container"), d.build && latest && d.build !== latest && "Not updated yet"].filter(Boolean).join(" · ");
 }
 
-/// The build most online servers run.
+/// The build most online devices run.
 function usual(list) {
   const n = {};
   for (const d of list) if (d.online && d.build) n[d.build] = (n[d.build] || 0) + 1;
@@ -242,7 +242,7 @@ function usual(list) {
 
 function table(list, size) {
   const k = COLUMNS[size] || COLUMNS.medium;
-  // A medium widget fits only the servers, a line each; larger ones show every container, and a line under each name.
+  // A medium widget fits only the devices, a line each; larger ones show every container, and a line under each name.
   const rows = size === "medium" ? list.filter((d) => !d.kind) : list;
   const details = size !== "medium";
   const latest = usual(list);
@@ -273,7 +273,7 @@ const spread = (nodes) => nodes.length < 4
   ? [{ t: "col", gap: 8, c: nodes }, { t: "col", grow: true, gap: 0, c: [] }]
   : nodes.flatMap((n, i) => (i ? [{ t: "col", grow: true, gap: 0, c: [] }, n] : [n]));
 
-/// What needs looking at: a disk or memory nearly full, or a server offline; or that nothing does.
+/// What needs looking at: a disk or memory nearly full, or a device offline; or that nothing does.
 function warning(list) {
   const worst = [];
   for (const d of list) {
@@ -290,7 +290,7 @@ function warning(list) {
   return { t: "row", gap: 6, c: [{ t: "icon", name: "warning-fill", tone, size: "xs" }, { t: "text", text: worst.map((w) => w[1]).join(" · "), size: "xs", tone, lines: 1 }] };
 }
 
-/// A small widget: each server's name cut short, its memory ring, CPU and disk.
+/// A small widget: each device's name cut short, its memory ring, CPU and disk.
 function compact(list) {
   const short = (name) => (name.length > 4 ? name.slice(0, 3) : name);
   const row = (d) => ({

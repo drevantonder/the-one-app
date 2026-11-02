@@ -27,10 +27,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// link is this server's link to the account: whatsmeow's client, and the
+// link is this device's link to the account: whatsmeow's client, and the
 // database it shares with the messages.
 type link struct {
-	node string // this server's node, through which it asks the user's other servers
+	node string // this device's node, through which it asks the user's other devices
 	path string
 
 	mu        sync.Mutex
@@ -174,15 +174,15 @@ func (l *link) status() (string, error) {
 	var chats, msgs int
 	_ = l.db.QueryRow(`SELECT (SELECT count(*) FROM chats), (SELECT count(*) FROM messages)`).Scan(&chats, &msgs)
 	kept := fmt.Sprintf("%d messages in %d chats are kept here.", msgs, chats)
-	s, err := l.servers()
+	s, err := l.devices()
 	if err != nil {
 		return "", err
 	}
 	if c.Store.ID == nil {
-		if server, phone := l.linkedElsewhere(s); server != "" {
-			return fmt.Sprintf("Not linked here, on %s: WhatsApp is linked on %s, as +%s. %s", s.here, server, phone, kept), nil
+		if device, phone := l.linkedElsewhere(s); device != "" {
+			return fmt.Sprintf("Not linked here, on %s: WhatsApp is linked on %s, as +%s. %s", s.here, device, phone, kept), nil
 		}
-		return fmt.Sprintf("Not linked here, on %s, nor on any other server of yours that answered: whatsapp_sign_in links it. %s", s.here, kept), nil
+		return fmt.Sprintf("Not linked here, on %s, nor on any other device of yours that answered: whatsapp_sign_in links it. %s", s.here, kept), nil
 	}
 	state := "connected"
 	if !c.IsConnected() || !c.IsLoggedIn() {
@@ -276,7 +276,7 @@ func (l *link) signIn(ctx context.Context, number string) (string, error) {
 		"or scan this QR code there within 20 seconds (sign_in again for new ones).", code) + after, nil
 }
 
-// signOut unlinks this server from the account and deletes what it kept.
+// signOut unlinks this device from the account and deletes what it kept.
 func (l *link) signOut(ctx context.Context) (string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -289,7 +289,7 @@ func (l *link) signOut(ctx context.Context) (string, error) {
 	if err := l.forget(); err != nil {
 		return "", fmt.Errorf("unlinked, but deleting the messages kept here failed: %w", err)
 	}
-	return "Signed out: this server is no longer one of WhatsApp's linked devices, and the messages it kept are deleted.", nil
+	return "Signed out: this device is no longer one of WhatsApp's linked devices, and the messages it kept are deleted.", nil
 }
 
 func (l *link) handle(evt any) {

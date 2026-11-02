@@ -1,7 +1,7 @@
 <!-- The Windows app: packaged as MSIX (signed with the certificate build.ps1 names), since the Widgets board takes
      widgets only from a packaged app, and on the Windows App SDK's runtime package rather than a copy of it, whose
      registration is what lets the board reach the widgets (Customize, Done). .NET comes with it. build.sh writes
-     Brand.g.cs, Package.appxmanifest's details and Assets/ from config.toml before building. -->
+     WhiteLabel.g.cs, Package.appxmanifest's details and Assets/ from config.toml before building. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>

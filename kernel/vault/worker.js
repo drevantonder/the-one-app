@@ -369,7 +369,7 @@ export class Vault extends DurableObject {
   }
 
   /// A group's key, made as the group is (`{ group }`, a new id), sealed to whoever makes it, its first admin, and
-  /// settled at once: → `{ key }`, for the server that makes it to keep its own work under. Refused for a scope the
+  /// settled at once: → `{ key }`, for the device that makes it to keep its own work under. Refused for a scope the
   /// vault or the bucket has a key for already.
   async group(token, claims, { group }) {
     if (token.startsWith("run.")) refuse(403, "work left running makes no group");

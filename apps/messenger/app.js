@@ -1,8 +1,8 @@
 // Messenger: the person's Facebook Messenger, read through messenger.com in an agent device's browser. The messenger sidecar
-// drives the browser, on each server whose owner installed it; this app is what people and agents use, and a
+// drives the browser, on each device whose owner installed it; this app is what people and agents use, and a
 // connector: each account is a browser profile signed in to Messenger.
 
-/// Runs one of the messenger sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the messenger sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
 async function sidecar(ctx, op, input) {
   try {
@@ -15,7 +15,7 @@ async function sidecar(ctx, op, input) {
 
 const NEEDS = "Messenger needs Agent Devices, and none of your devices runs it yet: whoever owns a device installs it there, and the App Store's Agent Devices page shows where. Then messenger_sign_in signs in.";
 
-/// The caller's online servers that run the sidecar, by name.
+/// The caller's online devices that run the sidecar, by name.
 async function running(ctx) {
   return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("messenger")).map((s) => s.name);
 }
@@ -57,7 +57,7 @@ export default {
       reads: true,
       description: "The browser profiles Messenger reads, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
       input: {"properties": {}, "type": "object"},
-      // A connector lists no accounts, rather than failing, where no server runs its sidecar; its settings say why.
+      // A connector lists no accounts, rather than failing, where no device runs its sidecar; its settings say why.
       async run(ctx, input) {
         if (!(await running(ctx)).length) return [];
         const listed = await sidecar(ctx, "accounts", input);
@@ -117,7 +117,7 @@ export default {
       reads: true,
       description: "Which of your devices it runs on, for the screens to say when none does.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => ({ servers: await running(ctx), needs: NEEDS }),
+      run: async (ctx) => ({ devices: await running(ctx), needs: NEEDS }),
     },
   },
 
@@ -190,8 +190,8 @@ show().then(() => { if (one.params.add) document.getElementById("start").click()
 </script>
 <div class="card" id="needs" hidden></div>
 <script>
-one.call("_running").then(({ servers, needs }) => {
-  if (servers.length) return;
+one.call("_running").then(({ devices, needs }) => {
+  if (devices.length) return;
   const n = document.getElementById("needs");
   n.textContent = needs;
   n.hidden = false;

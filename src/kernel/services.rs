@@ -592,7 +592,7 @@ pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
 }
 
 /// A kernel service as one workerd runs it: its name, module, Durable Object class, the address it listens on, and its
-/// bindings: (name, a text, or `service:<name>` for another server).
+/// bindings: (name, a text, or `service:<name>` for another service).
 pub struct Served {
     pub name: String,
     pub module: Vec<u8>,
@@ -608,17 +608,17 @@ pub struct Served {
 /// The internet, this machine and its private networks, as an outbound.
 pub const NEARBY: &str = "nearby";
 
-/// Writes the workerd config that runs `servers` into `dir` (their modules beside it, their storage in `dir/data`),
+/// Writes the workerd config that runs `served` into `dir` (their modules beside it, their storage in `dir/data`),
 /// readable only by its owner, since bindings hold the kernel's secrets.
-pub fn write_config(dir: &Path, servers: &[Served]) -> Result<PathBuf> {
+pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
     let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"));
     let mut services = Vec::new();
-    if servers.iter().any(|s| s.outbound.as_deref() == Some(NEARBY)) {
+    if served.iter().any(|s| s.outbound.as_deref() == Some(NEARBY)) {
         services.push(format!("(name = {}, network = (allow = [\"public\", \"private\", \"local\"]))", quote(NEARBY)));
     }
     let mut sockets = Vec::new();
     let mut workers = Vec::new();
-    for (i, s) in servers.iter().enumerate() {
+    for (i, s) in served.iter().enumerate() {
         ensure!(s.name.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "a kernel service's name is lowercase");
         std::fs::write(dir.join(format!("{}.js", s.name)), &s.module)?;
         let data = dir.join("data").join(&s.name);

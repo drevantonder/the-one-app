@@ -1,7 +1,7 @@
-// Shell: commands run on the person's own servers. The shell sidecar, built into every server's node, runs them for
+// Shell: commands run on the person's own devices. The shell sidecar, built into every device's node, runs them for
 // its local user and logs each where only they can read it; this app is what people and agents use.
 
-/// Runs one of the shell sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the shell sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
 async function sidecar(ctx, op, input) {
   try {
@@ -22,7 +22,7 @@ export default {
   description: "Run commands on your own devices",
   connector: true,
   needs: "Needs one of your devices",
-  instructions: "Run a shell command on one of your own devices with shell_run; give server (a device's name) to choose which. Every command is logged where only you can read it.",
+  instructions: "Run a shell command on one of your own devices with shell_run; give device (a device's name) to choose which. Every command is logged where only you can read it.",
   uses: { sidecars: ["shell"] },
 
   ops: {

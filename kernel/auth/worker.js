@@ -359,7 +359,7 @@ export class Auth extends DurableObject {
     return row && row.query === (await hash(query.toString())) && row.made <= signedIn ? id : null;
   }
 
-  // Signing in with a code, for a client with no browser of its own (the CLI on a server): it makes an authorization
+  // Signing in with a code, for a client with no browser of its own (the CLI on a device with no screen): it makes an authorization
   // request coming back to /sign-in/code/done and gets a short code for it; the person opens /sign-in/code on any
   // device, types the code (or follows its link), and signs in there with their passkey; the client takes the
   // authorization code by its state and turns it into tokens with its PKCE verifier, which only it has.

@@ -1,6 +1,6 @@
 // Google Calendar: the person's own Google calendars, through Google's API. Signing in is the same in every
 // Google app: see "signing in" below. (The Apple Calendar on a Mac is the `calendar` sidecar; this is Google's own,
-// from any server.)
+// from any device.)
 
 const APP = "google-calendar";
 const TITLE = "Google Calendar";

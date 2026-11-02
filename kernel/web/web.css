@@ -78,7 +78,7 @@ a { color: inherit; }
 .screen-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; }
 .screen-status { position: absolute; inset: 0; display: grid; place-items: center; }
 
-/* Before the window: signing in, starting, and a server that doesn't answer. */
+/* Before the window: signing in, starting, and a device that doesn't answer. */
 .welcome, .unavailable, .starting { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px; text-align: center; }
 .welcome h1 { font-size: 28px; font-weight: 600; margin: 10px 0 16px; }
 .welcome-mark { width: 120px; height: 120px; }

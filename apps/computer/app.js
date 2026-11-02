@@ -1,10 +1,10 @@
 // Computer Use: the devices agents can use, and the tools they use them with. Agent devices are Linux devices with a
-// browser on the person's servers, which the agent-devices sidecar runs (Podman, or a Mac's containers); the person's own
+// browser on the person's devices, which the agent-devices sidecar runs (Podman, or a Mac's containers); the person's own
 // devices are here too once they let agents use them, through the computer sidecar the Mac app hosts. Use,
 // tools and screen go to a device when one is named; this app keeps who used which device when, as `session`
 // entries in the person's own scope. Agent Devices (apps/agent-devices) is the person's page for them.
 
-/// Runs one of the agent-devices sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the agent-devices sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
 async function sidecar(ctx, op, input) {
   try {
@@ -17,29 +17,29 @@ async function sidecar(ctx, op, input) {
 
 const NEEDS = "No device of yours lets agents use it yet. Agents use your Mac once you turn on Let Agents Use This Mac in the Mac app's menu bar; agent devices, each with a browser, need Agent Devices on a Linux device with Podman, or a Mac.";
 
-/// The caller's online servers that run the sidecar, by name.
+/// The caller's online devices that run the sidecar, by name.
 async function running(ctx) {
   return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("agent-devices")).map((s) => s.name);
 }
 
-/// The caller's devices whose computer sidecar serves them, by server name: `{ server, on, title, kind, using,
-/// permissions, missing }`, or `{ server, why }` for one that didn't answer.
+/// The caller's devices whose computer sidecar serves them, by device name: `{ device, on, title, kind, using,
+/// permissions, missing }`, or `{ device, why }` for one that didn't answer.
 async function devices(ctx) {
   const mine = (s) => {
     const d = (s.installed_sidecars || []).find((d) => d.name === "computer");
     return d ? !d.users || d.users.includes(ctx.me.user_name) : (s.sidecars || []).includes("computer");
   };
-  const servers = (await ctx.devices()).filter((s) => s.online && mine(s));
-  return Promise.all(servers.map(async (s) => {
+  const theirs = (await ctx.devices()).filter((s) => s.online && mine(s));
+  return Promise.all(theirs.map(async (s) => {
     try {
-      return { server: s.name, ...(await ctx.sidecars.computer._status({}, { device: s.name })) };
+      return { device: s.name, ...(await ctx.sidecars.computer._status({}, { device: s.name })) };
     } catch (err) {
-      return { server: s.name, on: false, why: err.message };
+      return { device: s.name, on: false, why: err.message };
     }
   }));
 }
 
-/// The device of the person's a name means, if it's one: a server of the caller's running the computer sidecar for them.
+/// The device of the person's a name means, if it's one: a device of the caller's running the computer sidecar for them.
 async function device(ctx, name) {
   if (!name) return null;
   const n = String(name).toLowerCase();
@@ -48,7 +48,7 @@ async function device(ctx, name) {
 }
 
 /// A device of the person's as the list shows it among the agent devices.
-const asListed = (d) => ({ name: d.server, server: d.server, own: true, kind: d.kind, title: d.title, state: d.on ? "running" : "off", using: d.using || null });
+const asListed = (d) => ({ name: d.device, on: d.device, own: true, kind: d.kind, title: d.title, state: d.on ? "running" : "off", using: d.using || null });
 
 // The page: the person's own devices agents may use, each with a switch, a live picture while an agent uses it, and the
 // recent sessions when there are any.
@@ -71,7 +71,7 @@ const PAGE = `
 <script>
   one.title("Computer Use");
   const grid = document.getElementById("grid");
-  const pics = {}; // by server: a data URL
+  const pics = {}; // by device: a data URL
   const asking = new Set(); // devices this page is asking to let agents in
   let devs = [], sessions = [];
   const host = (s) => String(s || "").split(".")[0];
@@ -81,14 +81,14 @@ const PAGE = `
   function tile(d) {
     const allowed = d.permissions ? d.permissions.accessibility && d.permissions.screen_recording : true;
     const line = d.why ? "Not answering"
-      : asking.has(d.server) || d.asking ? "Asking on the device…"
+      : asking.has(d.device) || d.asking ? "Asking on the device…"
       : !d.on ? (d.missing || "")
       : d.using ? \`\${d.using.agent} is using it\`
       : allowed ? "" : "Allow it in System Settings on the device";
-    const pic = d.on && d.using && pics[d.server] ? \`<img src="\${pics[d.server]}" alt="">\` : laptop;
-    const off = d.why || d.missing || asking.has(d.server);
-    return \`<div><div class="pic">\${pic}</div><div class="head"><div class="name">\${one.esc(d.title || d.server)}</div>\` +
-      \`<input type="checkbox" class="switch" data-device="\${one.esc(d.server)}" aria-label="Let agents use it"\${d.on ? " checked" : ""}\${off ? " disabled" : ""}></div>\` +
+    const pic = d.on && d.using && pics[d.device] ? \`<img src="\${pics[d.device]}" alt="">\` : laptop;
+    const off = d.why || d.missing || asking.has(d.device);
+    return \`<div><div class="pic">\${pic}</div><div class="head"><div class="name">\${one.esc(d.title || d.device)}</div>\` +
+      \`<input type="checkbox" class="switch" data-device="\${one.esc(d.device)}" aria-label="Let agents use it"\${d.on ? " checked" : ""}\${off ? " disabled" : ""}></div>\` +
       \`<div class="sub">\${one.esc(line)}</div></div>\`;
   }
 
@@ -101,15 +101,15 @@ const PAGE = `
       \`<div class="sub small">\${one.esc(s.title || s.device)} · \${one.esc(one.ago(s.time, { long: true }))}\${s.came_from ? " · asked from " + one.esc(host(s.came_from)) : ""}</div></div></div>\`).join("");
   }
 
-  async function allow(server, on) {
-    if (on) asking.add(server);
+  async function allow(device, on) {
+    if (on) asking.add(device);
     draw();
     try {
-      await one.call("_allow", { device: server, on });
+      await one.call("_allow", { device, on });
     } catch (err) {
       alert(err.message);
     } finally {
-      asking.delete(server);
+      asking.delete(device);
       await refresh();
     }
   }
@@ -124,9 +124,9 @@ const PAGE = `
     draw();
     await Promise.all(devs.filter((d) => d.on && d.using).map(async (d) => {
       try {
-        const r = await one.call("screen", { device: d.server, width: 480 });
+        const r = await one.call("screen", { device: d.device, width: 480 });
         const img = (r.content || []).find((c) => c.type === "image");
-        if (img) pics[d.server] = \`data:\${img.mimeType};base64,\${img.data}\`;
+        if (img) pics[d.device] = \`data:\${img.mimeType};base64,\${img.data}\`;
       } catch {}
     }));
     draw();
@@ -151,7 +151,7 @@ export default {
   description: "Devices your agents can use: agent devices with a browser, and your own devices when you let them",
   connector: true,
   needs: "Needs a Linux device with Podman, or a Mac",
-  instructions: "Computer Use is the devices agents can use: agent devices (Linux, on the person's own devices, each with a browser) and the person's own devices once they let agents use them. To browse, borrow an agent device of your own: agent-devices_borrow with for (what it's for, in a few words: the person sees it) gives you one whose browser starts with a copy of a browser profile, signed in to its sites (default unless you pass profile; agent-devices_profiles lists them, like Personal or PTC, with the sites each was used on); pass its name as device to the other tools, and give it back with agent-devices_give_back when done: it's deleted, with anything it did to the profile. One left 15 minutes without a call is given back for you. In it: computer_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":\"default\"} (the profile's name, as agent-devices_borrow gives it) launches the browser; computer_use with tool list_windows gives its window_id; computer_get_browser_state with that pid and window_id gives target_id and tab_id; then computer_browser_navigate, computer_browser_click and computer_browser_type act, and computer_get_browser_state reads the page. A browser left idle for 5 minutes closes; prepare it again. computer_screen shows the device. When a site needs the person to sign in, agent-devices_sign_in with the profile and the site's url gives them a link to sign in there themselves. For a challenge in your own device, give them computer_view's link. Never sign in or submit forms for them unless they asked. Everything else on a device (apps, windows, keyboard, mouse): computer_tools lists the tools and computer_use runs one. For Windows, Android or an iPhone, borrow with kind (agent-devices_borrow kind windows): you get the person's lasting device, to leave as you found it, or with copy true a throwaway copy; computer_tools on it lists what it takes (screenshot, click, type_text, press_key, swipe, open_url, install_app, run_command), and computer_screen and computer_view work as on Linux. An iPhone takes no clicks or typing. computer_list shows the agent devices on all of their devices, who has borrowed which and what for; to act on one on another of their devices, pass server (that device's name) too. A lasting device nobody calls or watches for 30 minutes is paused, and unpaused by the next call. computer_list also lists the person's own devices they let agents use (own: true, like their Mac), by their device's name: computer_tools, computer_use and computer_screen work on one as on an agent device, acting in the background where they can, but there's nothing to borrow and no view link. The person sees in their menu bar while you use their device and can stop you. Use one only for what they asked of that device, and never their messages, mail, browser sessions or files unless they asked.",
+  instructions: "Computer Use is the devices agents can use: agent devices (Linux, on the person's own devices, each with a browser) and the person's own devices once they let agents use them. To browse, borrow an agent device of your own: agent-devices_borrow with for (what it's for, in a few words: the person sees it) gives you one whose browser starts with a copy of a browser profile, signed in to its sites (default unless you pass profile; agent-devices_profiles lists them, like Personal or PTC, with the sites each was used on); pass its name as device to the other tools, and give it back with agent-devices_give_back when done: it's deleted, with anything it did to the profile. One left 15 minutes without a call is given back for you. In it: computer_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":\"default\"} (the profile's name, as agent-devices_borrow gives it) launches the browser; computer_use with tool list_windows gives its window_id; computer_get_browser_state with that pid and window_id gives target_id and tab_id; then computer_browser_navigate, computer_browser_click and computer_browser_type act, and computer_get_browser_state reads the page. A browser left idle for 5 minutes closes; prepare it again. computer_screen shows the device. When a site needs the person to sign in, agent-devices_sign_in with the profile and the site's url gives them a link to sign in there themselves. For a challenge in your own device, give them computer_view's link. Never sign in or submit forms for them unless they asked. Everything else on a device (apps, windows, keyboard, mouse): computer_tools lists the tools and computer_use runs one. For Windows, Android or an iPhone, borrow with kind (agent-devices_borrow kind windows): you get the person's lasting device, to leave as you found it, or with copy true a throwaway copy; computer_tools on it lists what it takes (screenshot, click, type_text, press_key, swipe, open_url, install_app, run_command), and computer_screen and computer_view work as on Linux. An iPhone takes no clicks or typing. computer_list shows the agent devices on all of their devices, who has borrowed which and what for; to act on one on another of their devices, pass device (that device's name) too. A lasting device nobody calls or watches for 30 minutes is paused, and unpaused by the next call. computer_list also lists the person's own devices they let agents use (own: true, like their Mac), by their device's name: computer_tools, computer_use and computer_screen work on one as on an agent device, acting in the background where they can, but there's nothing to borrow and no view link. The person sees in their menu bar while you use their device and can stop you. Use one only for what they asked of that device, and never their messages, mail, browser sessions or files unless they asked.",
   uses: { sidecars: ["agent-devices", "computer"] },
 
   schema: {

@@ -37,7 +37,7 @@ data class Config(
 data class NodeState(
     val config: Config,
     @SerialName("me") val machine: Machine,
-    @SerialName("server") val host: Machine? = null,
+    @SerialName("device") val host: Machine? = null,
     val user: Person? = null,
     val install: Install? = null,
 )
@@ -58,7 +58,7 @@ data class Person(
 data class Install(
     val name: String,
     val groups: List<GroupInfo>,
-    val servers: List<Server>,
+    val devices: List<Device>,
 )
 
 @Serializable
@@ -74,7 +74,7 @@ data class GroupMember(
 )
 
 @Serializable
-data class Server(
+data class Device(
     val key: String,
     val name: String,
     val build: String? = null,

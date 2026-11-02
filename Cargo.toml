@@ -25,7 +25,7 @@ anyhow = "1"
 aes-gcm = "0.10"
 curve25519-dalek = "4.1"
 data-encoding = "2"
-# The kernel's access tokens are signed with Ed25519 (src/kernel.rs checks them), and servers sign what they send each
+# The kernel's access tokens are signed with Ed25519 (src/kernel.rs checks them), and devices sign what they send each
 # other through the relay with it (src/node/relay.rs).
 ed25519-dalek = "3"
 # The kernel derives keys with HKDF-SHA256, because that's what WebCrypto in workerd has (src/kernel.rs).
@@ -49,7 +49,7 @@ getrandom = { version = "0.2", features = ["js"] }
 # What only a node on a machine uses: the rest of the node (src/lib.rs keeps the shared modules apart).
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 axum = "0.8"
-# Servers reach each other through the relay at the install's address (src/node/relay.rs), over one WebSocket each:
+# Devices reach each other through the relay at the install's address (src/node/relay.rs), over one WebSocket each:
 # tokio-tungstenite is that WebSocket, over the rustls ureq already builds, and futures-util (which axum already
 # builds) its Sink and Stream.
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }

@@ -193,8 +193,8 @@ fun Shell(store: Store) {
 private fun Starting(store: Store) {
     val p = LocalPalette.current
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (store.phase == Store.Phase.Unreachable) Unavailable("Can’t Reach Your Servers", (store.failure ?: "") + "\nIt keeps trying.")
-        else if (store.state != null && store.install == null) Unavailable("Nothing Here Yet", "This server isn’t in an install yet.")
+        if (store.phase == Store.Phase.Unreachable) Unavailable("Can’t Reach Your Devices", (store.failure ?: "") + "\nIt keeps trying.")
+        else if (store.state != null && store.install == null) Unavailable("Nothing Here Yet", "It isn’t set up yet. Set it up from the ${BuildConfig.NAME} app on one of your devices.")
         else CircularProgressIndicator(color = p.secondary)
     }
 }
@@ -639,7 +639,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
             "api" -> {
                 val path = str(m, "path") ?: ""
                 val bare = Uri.parse(path).path ?: ""
-                if (!bare.startsWith("/v1/") || ".." in bare) throw NodeError("That isn’t your server’s.")
+                if (!bare.startsWith("/v1/") || ".." in bare) throw NodeError("That isn’t on your devices.")
                 val method = (str(m, "method") ?: "GET").uppercase()
                 var body = m["body"]?.takeIf { it !is JsonNull && method != "GET" } ?: if (method == "GET") null else JsonObject(emptyMap())
                 if (bare == "/v1/call" && body is JsonObject) body = JsonObject(body + ("client" to JsonPrimitive("android")))
@@ -654,8 +654,8 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                 return JsonPrimitive(store.appearance.name.lowercase())
             }
             "device" -> {
-                val server = store.install?.servers?.firstOrNull { it.key == store.state?.host?.key }
-                val build = "${store.config?.name ?: BuildConfig.NAME}, app ${BuildConfig.COMMIT}" + (server?.build?.let { "\n${server.name} runs $it" } ?: "")
+                val device = store.install?.devices?.firstOrNull { it.key == store.state?.host?.key }
+                val build = "${store.config?.name ?: BuildConfig.NAME}, app ${BuildConfig.COMMIT}" + (device?.build?.let { "\n${device.name} runs $it" } ?: "")
                 return obj("name" to SignIn.deviceName(context), "build" to build, "signOut" to true)
             }
             else -> throw NodeError("Unknown message")

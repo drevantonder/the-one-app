@@ -27,9 +27,9 @@ public sealed class Auth
 
     static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(30) };
     /// Where this app keeps what isn't secret: the install's address and its client id there.
-    static string Kept => Path.Combine(Brand.Folder, "sign-in.json");
+    static string Kept => Path.Combine(WhiteLabel.Folder, "sign-in.json");
     /// The Credential Locker's name for this app's refresh token.
-    static string Locker => $"{Brand.Name} sign-in";
+    static string Locker => $"{WhiteLabel.Name} sign-in";
 
     readonly SemaphoreSlim refreshing = new(1, 1);
     string? access;
@@ -50,12 +50,12 @@ public sealed class Auth
             clientFor = kept?["client_for"]?.GetValue<string>();
         }
         catch { }
-        if (!string.IsNullOrEmpty(Brand.Address)) Address = Brand.Address;
+        if (!string.IsNullOrEmpty(WhiteLabel.Address)) Address = WhiteLabel.Address;
     }
 
     void Save()
     {
-        Directory.CreateDirectory(Brand.Folder);
+        Directory.CreateDirectory(WhiteLabel.Folder);
         File.WriteAllText(Kept, new JsonObject { ["address"] = Address, ["client"] = client, ["client_for"] = clientFor }.ToJsonString());
     }
 
@@ -84,7 +84,7 @@ public sealed class Auth
     {
         Forget();
         access = null;
-        Address = string.IsNullOrEmpty(Brand.Address) ? null : Brand.Address;
+        Address = string.IsNullOrEmpty(WhiteLabel.Address) ? null : WhiteLabel.Address;
         client = null;
         clientFor = null;
         Save();
@@ -145,7 +145,7 @@ public sealed class Auth
         if (client != null && clientFor == Address) return client;
         var body = new JsonObject
         {
-            ["client_name"] = $"{Brand.Name} on {Environment.MachineName}",
+            ["client_name"] = $"{WhiteLabel.Name} on {Environment.MachineName}",
             ["redirect_uris"] = new JsonArray(Redirect),
             ["token_endpoint_auth_method"] = "none",
             ["grant_types"] = new JsonArray("authorization_code", "refresh_token"),
@@ -210,7 +210,7 @@ public sealed class Auth
             var target = line.Split(' ').Length > 1 ? line.Split(' ')[1] : "";
             var callback = target.StartsWith("/callback?");
             var page = callback
-                ? $"<!doctype html><meta charset=utf-8><title>{WebUtility.HtmlEncode(Brand.Name)}</title><meta name=color-scheme content=\"light dark\"><body style=\"font:15px system-ui;display:grid;place-items:center;height:90vh;color:GrayText\"><p>You’re signed in. Go back to {WebUtility.HtmlEncode(Brand.Name)}.</p><script>location.href = \"{Brand.Cli}://signed-in\"</script>"
+                ? $"<!doctype html><meta charset=utf-8><title>{WebUtility.HtmlEncode(WhiteLabel.Name)}</title><meta name=color-scheme content=\"light dark\"><body style=\"font:15px system-ui;display:grid;place-items:center;height:90vh;color:GrayText\"><p>You’re signed in. Go back to {WebUtility.HtmlEncode(WhiteLabel.Name)}.</p><script>location.href = \"{WhiteLabel.Cli}://signed-in\"</script>"
                 : "";
             var bytes = Encoding.UTF8.GetBytes(page);
             var head = Encoding.ASCII.GetBytes($"HTTP/1.1 {(callback ? "200 OK" : "404 Not Found")}\r\ncontent-type: text/html; charset=utf-8\r\ncontent-length: {bytes.Length}\r\nconnection: close\r\n\r\n");
@@ -282,10 +282,10 @@ public sealed class Auth
     /// This app's processes' lock on refreshing: a file only one may have open.
     static async Task<IDisposable> Held()
     {
-        Directory.CreateDirectory(Brand.Folder);
+        Directory.CreateDirectory(WhiteLabel.Folder);
         for (var tries = 0; ; tries++)
         {
-            try { return new FileStream(Path.Combine(Brand.Folder, "sign-in.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            try { return new FileStream(Path.Combine(WhiteLabel.Folder, "sign-in.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
             catch (IOException) when (tries < 300) { await Task.Delay(100); }
         }
     }

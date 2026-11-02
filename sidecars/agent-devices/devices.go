@@ -288,7 +288,7 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 	here, _ := in["here"].(bool)
 	delete(in, "here")
 	if name != "" && !here && (!slices.Contains(local, op) || op == "borrow") && ds.vmNamed(name) == nil {
-		// A device on another server: pass the call on to it.
+		// An agent device on another of the person's devices: pass the call on to it.
 		if _, err := find(ctx, name); err != nil {
 			if s := ds.located(ctx, name); s != "" {
 				in["device"], in["here"] = name, true
@@ -431,8 +431,8 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		if err != nil {
 			return nil, err
 		}
-		me, _, _ := ds.servers(ctx)
-		out := map[string]any{"device": d.Name, "server": me}
+		me, _, _ := ds.hosts(ctx)
+		out := map[string]any{"device": d.Name, "on": me}
 		msg := fmt.Sprintf("Borrowed device %s: pass device %q to the other tools.", d.Name, d.Name)
 		if p != nil {
 			out["profile"] = p.Name
@@ -475,8 +475,8 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 			return nil, err
 		}
 		msg := fmt.Sprintf("Sign in to sites in the %s profile here:\n%s\nIt's saved in %d minutes, or as soon as it's saved (save_profile).", p.Name, url, minutes)
-		me, _, _ := ds.servers(ctx)
-		return map[string]any{"device": d.Name, "server": me, "profile": p.Name, "url": url, "until": until, "text": msg}, nil
+		me, _, _ := ds.hosts(ctx)
+		return map[string]any{"device": d.Name, "on": me, "profile": p.Name, "url": url, "until": until, "text": msg}, nil
 	case "save_profile":
 		// The device signing in to the profile, or the one named, with the profile the app gives (and its key).
 		p, err := profileIn(in)
@@ -524,12 +524,12 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		}
 		return fmt.Sprintf("Saved device %s's browser as the %s profile: devices borrowed with it start signed in to the same sites.", d.Name, p.Name), nil
 	case "signing_in":
-		// Which profiles are being signed in to here: their items, with the device and its server.
-		me, _, _ := ds.servers(ctx)
+		// Which profiles are being signed in to here: their items, with the agent device and the device it's on.
+		me, _, _ := ds.hosts(ctx)
 		out := []map[string]any{}
 		for n, l := range ds.loans() {
 			if l.SigningIn {
-				out = append(out, map[string]any{"item": l.Item, "profile": l.Profile, "device": n, "server": me, "until": l.Until})
+				out = append(out, map[string]any{"item": l.Item, "profile": l.Profile, "device": n, "on": me, "until": l.Until})
 			}
 		}
 		return map[string]any{"signing_in": out}, nil
@@ -542,7 +542,7 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		if err != nil {
 			return nil, err
 		}
-		return reply{ok: map[string]any{"backup": rec, "text": fmt.Sprintf("Backed up device %s (%s). Restore it on any server with restore.", d.Name, bytesText(rec.Bytes))},
+		return reply{ok: map[string]any{"backup": rec, "text": fmt.Sprintf("Backed up device %s (%s). Restore it on any of your devices with restore.", d.Name, bytesText(rec.Bytes))},
 			blobs: []string{rec.Blob}}, nil
 	case "backups":
 		if here {
@@ -573,19 +573,19 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 	case "move":
 		to := text("to")
 		if to == "" {
-			return nil, errors.New("move it to which server? pass to")
+			return nil, errors.New("move it to which of your devices? pass to")
 		}
 		d, err := ds.running(ctx, name)
 		if err != nil {
 			return nil, err
 		}
 		if _, ok := ds.loans()[d.Name]; ok {
-			return nil, errors.New("a borrowed device can't be moved: borrow one on the other server")
+			return nil, errors.New("a borrowed device can't be moved: borrow one on the device you'd move it to")
 		}
 		closeBrowsers(ctx, d, true)
 		// Backed up through the node, so the entry naming the backup's blob is
-		// written before the other server asks for it.
-		me, _, err := ds.servers(ctx)
+		// written before the other device asks for it.
+		me, _, err := ds.hosts(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -724,11 +724,11 @@ func viewURL(ctx context.Context, d device, minutes int) (string, error) {
 	return fmt.Sprintf("https://%s:%s%s", strings.TrimSuffix(st.Self.DNSName, "."), port, path), nil
 }
 
-// local are the operations that act on this server even when given a
+// local are the operations that act on this device even when given a
 // device it doesn't have.
 var local = []string{"list", "kinds", "adopt", "create", "borrow", "sign_in", "signing_in", "backups", "restore", "refresh_tools"}
 
-// reply is a result with blobs the caller's scope keeps, so its servers can fetch them.
+// reply is a result with blobs the caller's scope keeps, so its devices can fetch them.
 type reply struct {
 	ok    any
 	blobs []string

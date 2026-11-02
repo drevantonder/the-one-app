@@ -52,7 +52,7 @@ type containers interface {
 	// run makes the device's container and home volume from the image,
 	// and starts it.
 	run(ctx context.Context, d device, sz size, image string) error
-	// start starts a device, and again after the server restarts; stop
+	// start starts an agent device, and again after the device it's on restarts; stop
 	// stops it until it's started again.
 	start(ctx context.Context, d device) error
 	stop(ctx context.Context, d device) error
@@ -77,7 +77,7 @@ type containers interface {
 
 var rt containers
 
-// rt is this server's, or nil where it has none: then it runs no Linux devices, only devices of other kinds.
+// rt is this device's, or nil where it has none: then it runs no Linux devices, only devices of other kinds.
 func setup(dir string) {
 	userSystemd()
 	var err error
@@ -165,7 +165,7 @@ func create(ctx context.Context, name string, sz size, pool, wait bool) (device,
 		return device{}, fmt.Errorf("a device's name is lowercase letters, digits and dashes")
 	}
 	if rt == nil {
-		return device{}, errors.New("this server runs no Linux devices: it has no Podman (or, on a Mac, Apple's container)")
+		return device{}, errors.New("this device runs no Linux agent devices: it has no Podman (or, on a Mac, Apple's container)")
 	}
 	img, err := ensureImage(ctx)
 	if err != nil {
@@ -202,7 +202,7 @@ func (d device) labels() []string {
 	return l
 }
 
-// start starts a device, and again after the server restarts.
+// start starts an agent device, and again after the device it's on restarts.
 func start(ctx context.Context, d device) error {
 	if err := rt.start(ctx, d); err != nil {
 		return err
@@ -210,7 +210,7 @@ func start(ctx context.Context, d device) error {
 	return ready(ctx, d)
 }
 
-// stop stops a device until it's started again, restarts of the server too.
+// stop stops an agent device until it's started again, restarts of the device it's on too.
 func stop(ctx context.Context, d device) error {
 	if d.State == "paused" {
 		if err := unpause(ctx, d); err != nil {

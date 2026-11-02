@@ -194,7 +194,7 @@ final class Store {
         guard let install, let me else { return [] }
         let mine = install.groups.filter { $0.role(of: me.id) != nil }
             .sorted { (pageOrder.firstIndex(of: "group:\($0.id)") ?? .max, $0.name) < (pageOrder.firstIndex(of: "group:\($1.id)") ?? .max, $1.name) }
-        let devices = install.servers.filter { $0.user == me.id }.count + install.clients.filter { $0.user == me.id }.count
+        let devices = install.devices.filter { $0.user == me.id }.count + install.clients.filter { $0.user == me.id }.count
         var pages = [Page(scope: "user", title: String(localized: "You"),
                           subtitle: devices == 1 ? String(localized: "Just you · 1 device") : String(localized: "Just you · \(devices) devices"))]
         pages += mine.map { group in
@@ -287,7 +287,7 @@ final class Store {
 
     // MARK: Arranging
 
-    /// How this user arranged each page, as their server last said, with what changed here since that it hasn't yet.
+    /// How this user arranged each page, as their device last said, with what changed here since that it hasn't yet.
     private(set) var arrangements: [String: Arrangement] = [:]
     private var unsaved: [String: Arrangement] = [:]
     private var saving: Task<Void, Never>?
@@ -406,7 +406,7 @@ final class Store {
     /// widgets it showed there, at the sizes it showed them, as if chosen.
     private var showedPagesBefore = !UserDefaults.standard.bool(forKey: "pagesArranged")
         && ["selection", "widgetSizes", "pageHiddenWidgets"].contains { UserDefaults.standard.object(forKey: $0) != nil }
-    /// The pages whose widgets came from their server, the last time they were asked for.
+    /// The pages whose widgets came from their device, the last time they were asked for.
     private var loadedWidgets = Set<String>()
 
     private func keepWidgetsShownBefore() {
@@ -497,7 +497,7 @@ final class Store {
 
     func settingsItem(_ name: String) -> SettingsItem? { settingsItems.first { $0.name == name } }
 
-    /// What waits for this user: invites, servers to trust and items asked for.
+    /// What waits for this user: invites, devices to trust and items asked for.
     var requests: Int { settingsItem("requests")?.badge ?? 0 }
 
     /// The count on Settings' icon: every item's, the requests waiting and backups' problem.

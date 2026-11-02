@@ -1,7 +1,7 @@
 // Calendar: Calendar on the person's Mac. The calendar sidecar lives in the Mac app, which macOS lets reach Calendar;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the calendar sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the calendar sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
 async function sidecar(ctx, op, input) {
   try {

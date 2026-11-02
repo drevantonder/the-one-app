@@ -1,11 +1,11 @@
-// Agent Devices: the devices agents use, on the person's servers, which the agent-devices sidecar runs: Linux with a
+// Agent Devices: the devices agents use, on the person's own devices, which the agent-devices sidecar runs: Linux with a
 // browser (Podman, or a Mac's containers), with a screen or without one, and Windows, Android and iPhones where a
-// server can run them (the sidecar says which kinds each one can). Its page shows them;
+// device can run them (the sidecar says which kinds each one can). Its page shows them;
 // Computer Use (apps/computer) is what agents use them with. A browser profile a device starts with is a Vault item
 // of type Browser profile: the sidecar keeps it as an encrypted blob, and only it, never this app, holds its key,
 // which the node fills into the calls this app makes ({{<item id>:_profile_key}}).
 
-/// Runs one of the agent-devices sidecar's operations, wherever it runs for the caller. When none of their servers
+/// Runs one of the agent-devices sidecar's operations, wherever it runs for the caller. When none of their devices
 /// runs it, says what's needed instead of how the call failed.
 async function sidecar(ctx, op, input) {
   try {
@@ -19,7 +19,7 @@ async function sidecar(ctx, op, input) {
 const NEEDS = "Agent Devices needs a device with Podman, or a Mac, and none of yours runs it.";
 const TYPE = "Browser profile";
 
-/// The caller's online servers that run the sidecar, by name.
+/// The caller's online devices that run the sidecar, by name.
 async function running(ctx) {
   return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("agent-devices")).map((s) => s.name);
 }
@@ -68,11 +68,11 @@ const PAGE = `
 <script>
   one.title("Agent Devices");
   const grid = document.getElementById("grid");
-  const pics = {}; // by server/name: a data URL
+  const pics = {}; // by the device it's on/name: a data URL
   let devices = [];
 
-  const key = (c) => \`\${c.server || ""}/\${c.name}\`;
-  const at = (c) => (c.server ? { device: c.name, server: c.server } : { device: c.name });
+  const key = (c) => \`\${c.on || ""}/\${c.name}\`;
+  const at = (c) => (c.on ? { device: c.name, on: c.on } : { device: c.name });
   const host = (s) => String(s || "").split(".")[0];
   const paused = (c) => c.state !== "running";
   const screenless = (c) => c.borrowed?.no_screen;
@@ -88,11 +88,11 @@ const PAGE = `
     : '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>';
 
   // Its name says what it's doing, else what it's called; its line, who's using it, or that it's paused, and where,
-  // when the devices are on more than one server.
-  function tile(c, servers) {
+  // when they're on more than one of the person's devices.
+  function tile(c, hosts) {
     const b = c.borrowed;
     const name = b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : named(c);
-    const line = [b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : paused(c) ? off(c) : "", servers > 1 ? host(c.server) : ""].filter(Boolean).join(" · ");
+    const line = [b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : paused(c) ? off(c) : "", hosts > 1 ? host(c.on) : ""].filter(Boolean).join(" · ");
     const k = key(c);
     const pic = pics[k] ? \`<img src="\${pics[k]}" alt=""\${phone(c) ? ' class="phone"' : ""}>\` : glyph(screenless(c), c);
     // A phone or Windows opens even when off: it starts for whoever opens it.
@@ -105,10 +105,10 @@ const PAGE = `
       grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">None yet. Agents make one when they need a browser.</div>\`;
       return;
     }
-    const servers = new Set(devices.map((c) => c.server)).size;
+    const hosts = new Set(devices.map((c) => c.on)).size;
     const order = (c) => (c.borrowed ? 0 : paused(c) ? 2 : 1);
     const shown = [...devices].sort((a, b) => order(a) - order(b) || (Date.parse(a.borrowed?.since) || 0) - (Date.parse(b.borrowed?.since) || 0) || a.name.localeCompare(b.name));
-    grid.innerHTML = shown.map((c) => tile(c, servers)).join("");
+    grid.innerHTML = shown.map((c) => tile(c, hosts)).join("");
   }
 
   // A device with a screen opens to watch and use, here in the app.
@@ -150,8 +150,8 @@ const PAGE = `
   tick();
   setInterval(tick, 5000);
   document.addEventListener("visibilitychange", tick);
-  one.call("_running").then(({ servers, needs }) => {
-    if (!servers.length) grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">\${one.esc(needs)}</div>\`;
+  one.call("_running").then(({ devices, needs }) => {
+    if (!devices.length) grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">\${one.esc(needs)}</div>\`;
   });
 </script>`;
 
@@ -171,7 +171,7 @@ const DEVICE = `
 <div class="bar" id="bar" hidden><div class="what sub" id="what"></div><button class="button primary" id="done" hidden>Done Signing In</button></div>
 <div class="empty" id="note">Opening…</div>
 <script>
-  const at = one.params.server ? { device: one.params.device, server: one.params.server } : { device: one.params.device };
+  const at = one.params.on ? { device: one.params.device, on: one.params.on } : { device: one.params.device };
   const bar = document.getElementById("bar"), what = document.getElementById("what"), done = document.getElementById("done"), note = document.getElementById("note");
   let shown = null; // the device as last listed
   let frame = null;
@@ -197,7 +197,7 @@ const DEVICE = `
   async function look() {
     try {
       const all = (await one.call("_list", {})).devices || [];
-      const c = all.find((c) => c.name === at.device && (!at.server || c.server === at.server));
+      const c = all.find((c) => c.name === at.device && (!at.on || c.on === at.on));
       if (!c) return shown && say("It's been given back.");
       shown = c;
       describe(c);
@@ -304,7 +304,7 @@ export default {
       run: async (ctx, input) => {
         const p = await profile(ctx, input.item || input.profile || "default");
         const r = await sidecar(ctx, "sign_in", { profile: given(p), ...(input.url ? { url: input.url } : {}), ...(input.minutes ? { minutes: input.minutes } : {}) });
-        return { ...r, screen: { screen: "device", params: { device: r.device, server: r.server } }, then: { op: "save_profile", title: "Done Signing In" } };
+        return { ...r, screen: { screen: "device", params: { device: r.device, on: r.on } }, then: { op: "save_profile", title: "Done Signing In" } };
       },
     },
     save_profile: {
@@ -449,7 +449,7 @@ export default {
       reads: true,
       description: "Which of your devices it runs on, for the page to say when none does.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => ({ servers: await running(ctx), needs: NEEDS }),
+      run: async (ctx) => ({ devices: await running(ctx), needs: NEEDS }),
     },
   },
 

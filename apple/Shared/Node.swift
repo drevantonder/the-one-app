@@ -13,28 +13,28 @@ struct Config: Codable, Sendable, Equatable {
 /// `GET /v1/state`: this machine, its user and the install.
 struct NodeState: Decodable, Sendable, Equatable {
     var config: Config
-    /// The machine this shell runs on: this server, or a phone.
+    /// The machine this shell runs on: this device, or a phone.
     var machine: Machine
-    /// The server that answered: this one, or for a phone, the server acting for it.
+    /// The device that answered: this one, or for a phone, the device acting for it.
     var host: Machine?
     /// The user this machine was admitted for, once it is in an install.
     var user: Person?
     var install: Install?
     /// How many requests for a Vault item wait for this user.
     var vaultRequests: Int?
-    /// How this user arranged each page, by scope; nil from a server too old to keep arrangements.
+    /// How this user arranged each page, by scope; nil from a device too old to keep arrangements.
     var arrangements: [String: Arrangement]?
     /// What's wrong with backups, for an admin; nil while they work.
     var backups: Backups.Problem?
-    /// What Settings shows this user, in order; nil from a server too old to say.
+    /// What Settings shows this user, in order; nil from a device too old to say.
     var settingsItems: [SettingsItem]?
-    /// What to paste into an agent so it connects itself; nil from a server too old to say.
+    /// What to paste into an agent so it connects itself; nil from a device too old to say.
     var agentPrompt: String?
 
     var waitingRequests: Int { vaultRequests ?? 0 }
 
     enum CodingKeys: String, CodingKey {
-        case config, machine = "me", host = "server", user, install, vaultRequests = "vault_requests", arrangements, backups
+        case config, machine = "me", host = "device", user, install, vaultRequests = "vault_requests", arrangements, backups
         case settingsItems = "settings_items", agentPrompt = "agent_prompt"
     }
 }
@@ -84,9 +84,9 @@ struct Install: Codable, Sendable, Equatable {
     var name: String
     var users: [Person]
     var groups: [GroupInfo]
-    var servers: [Server]
+    var devices: [Device]
     var clients: [ClientInfo]
-    /// Whether the server that answered is in the install yet: a new one isn't until its admit reaches it.
+    /// Whether the device that answered is in the install yet: a new one isn't until its admit reaches it.
     var member: Bool?
     /// The install's settings, as its admins set them over the white label's defaults.
     var settings: [String: String]?
@@ -112,7 +112,7 @@ struct GroupInfo: Codable, Sendable, Equatable, Identifiable {
     var admins: [String] { members.filter { $0.role == "admin" }.map(\.user) }
 }
 
-struct Server: Codable, Sendable, Equatable, Identifiable {
+struct Device: Codable, Sendable, Equatable, Identifiable {
     var key: String
     var name: String
     /// The user it was admitted for.
@@ -462,7 +462,7 @@ enum Backups {
 /// The local API, typed, over whichever transport reaches a node.
 struct NodeClient: Sendable {
     var transport: any NodeTransport
-    /// What the node credits this shell's calls to, for apps' insights; a phone's server labels it itself.
+    /// What the node credits this shell's calls to, for apps' insights; a phone's device labels it itself.
     var client: String?
 
     private func json(_ fields: [String: Any?]) throws -> Data {
@@ -512,7 +512,7 @@ struct NodeClient: Sendable {
     }
 
     /// A Settings screen's `one.api`: `path` is the node's /v1 API's, its query's fields going in the body as every
-    /// request's do (a server that a phone asks matches bare paths). → its JSON reply.
+    /// request's do (a device that a phone asks matches bare paths). → its JSON reply.
     func api(_ method: String, _ path: String, body: Any?) async throws -> Any {
         var parts = URLComponents(string: path)
         guard let bare = parts?.path, bare.hasPrefix("/v1/"), !bare.contains("..") else { throw NodeError("That isn't your device's.") }

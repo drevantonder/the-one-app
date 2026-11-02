@@ -15,7 +15,7 @@ import (
 
 // Devices run Cua's image with Google Chrome in place of its Chromium, so
 // the person can sign in to the browser as their Google account. Chrome's
-// terms don't let us pass it on, so each server builds the image itself,
+// terms don't let us pass it on, so each device builds the image itself,
 // downloading Chrome from Google, and builds it again each week for Chrome's
 // security fixes. Cua's image turns browser sign-in and sync off for
 // Chromium; Chrome's policies here leave them to the person.
@@ -49,7 +49,7 @@ func imageFor(now time.Time) string {
 
 var building sync.Mutex
 
-// ensureImage builds this week's image if this server hasn't yet, then
+// ensureImage builds this week's image if this device hasn't yet, then
 // deletes the older ones no device uses.
 func ensureImage(ctx context.Context) (string, error) {
 	building.Lock()

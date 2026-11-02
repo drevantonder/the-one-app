@@ -1,8 +1,8 @@
-// WhatsApp: the person's WhatsApp accounts, each a phone linked to one of their servers as WhatsApp Desktop is linked.
-// The whatsapp sidecar links the phone and keeps its messages, on each server whose owner installed it; this app is
+// WhatsApp: the person's WhatsApp accounts, each a phone linked to one of their devices as WhatsApp Desktop is linked.
+// The whatsapp sidecar links the phone and keeps its messages, on each device whose owner installed it; this app is
 // what people and agents use, and a connector.
 
-/// Runs one of the whatsapp sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the whatsapp sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
 async function sidecar(ctx, op, input) {
   try {
@@ -15,30 +15,31 @@ async function sidecar(ctx, op, input) {
 
 const NEEDS = "WhatsApp isn't on any of your devices yet, so there's no phone to link: whoever owns a device installs it there, and the App Store's WhatsApp page shows where. Then whatsapp_sign_in links your phone.";
 
-/// The caller's online servers that run the sidecar, by name.
+/// The caller's online devices that run the sidecar, by name.
 async function running(ctx) {
   return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("whatsapp")).map((s) => s.name);
 }
 
-// Each account is a Vault item too, so the person's Vault lists it: its number and the server it's linked on, plain,
-// with no secret, since the link itself stays in the sidecar on that server. Linking finishes on the phone after
-// sign_in returns, so listing the accounts makes the items of new ones, and lets go of those whose server, online,
+// Each account is a Vault item too, so the person's Vault lists it: its number and the device it's linked on, plain,
+// with no secret, since the link itself stays in the sidecar on that device. Linking finishes on the phone after
+// sign_in returns, so listing the accounts makes the items of new ones, and lets go of those whose device, online,
 // no longer has them.
 const TYPE = "WhatsApp account";
 const VAULT = {
-  account: { title: TYPE, type: TYPE, domain: "whatsapp.com", accounts: true, fields: { phone: { label: "Number" }, server: { label: "Linked on" } } },
+  account: { title: TYPE, type: TYPE, domain: "whatsapp.com", accounts: true, fields: { phone: { label: "Number" }, device: { label: "Linked on" } } },
 };
 
-async function keep(ctx, listed, servers) {
+async function keep(ctx, listed, devices) {
   if (!ctx.user) return;
   const items = (await ctx.vault.items()).filter((i) => i.type === TYPE && i.scope === ctx.user.id);
   for (const a of listed) {
     const item = items.find((i) => i.fields.phone?.value === a.account);
-    if (!item) await ctx.vault.create({ title: a.account, type: TYPE, domain: "whatsapp.com", hosts: [], same: "phone", fields: { phone: { value: a.account }, server: { value: a.server } } });
-    else if (item.fields.server?.value !== a.server) ctx.vault.update(item.id, { fields: { server: { value: a.server } } });
+    if (!item) await ctx.vault.create({ title: a.account, type: TYPE, domain: "whatsapp.com", hosts: [], same: "phone", fields: { phone: { value: a.account }, device: { value: a.device } } });
+    // `server: null`: until 2026-11-02's rename has reached every account's item, which said server.
+    else if (item.fields.device?.value !== a.device) ctx.vault.update(item.id, { fields: { device: { value: a.device }, server: null } });
   }
   for (const item of items) {
-    if (servers.includes(item.fields.server?.value) && !listed.some((a) => a.account === item.fields.phone?.value)) ctx.vault.release(item.id);
+    if (devices.includes(item.fields.device?.value) && !listed.some((a) => a.account === item.fields.phone?.value)) ctx.vault.release(item.id);
   }
 }
 
@@ -58,14 +59,14 @@ export default {
   ops: {
     accounts: {
       reads: true,
-      description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, server }, with why when ok is false.",
+      description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, device }, with why when ok is false.",
       input: {"properties": {}, "type": "object"},
-      // A connector lists no accounts, rather than failing, where no server runs its sidecar; its settings say why.
+      // A connector lists no accounts, rather than failing, where no device runs its sidecar; its settings say why.
       async run(ctx, input) {
-        const servers = await running(ctx);
-        if (!servers.length) return [];
+        const devices = await running(ctx);
+        if (!devices.length) return [];
         const listed = await sidecar(ctx, "accounts", input);
-        await keep(ctx, listed, servers).catch(() => {}); // a call that only reads lists them all the same
+        await keep(ctx, listed, devices).catch(() => {}); // a call that only reads lists them all the same
         return listed;
       },
     },
@@ -115,8 +116,8 @@ export default {
       input: {"properties": {"account": {"description": "the account's number; needed when several are linked here", "type": "string"}}, "type": "object"},
       async run(ctx, input) {
         const out = await sidecar(ctx, "sign_out", input);
-        const servers = await running(ctx);
-        await keep(ctx, await sidecar(ctx, "accounts", {}), servers);
+        const devices = await running(ctx);
+        await keep(ctx, await sidecar(ctx, "accounts", {}), devices);
         return out;
       },
     },
@@ -130,7 +131,7 @@ export default {
       reads: true,
       description: "Which of your devices it runs on, for the screens to say when none does.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => ({ servers: await running(ctx), needs: NEEDS }),
+      run: async (ctx) => ({ devices: await running(ctx), needs: NEEDS }),
     },
   },
 
@@ -152,13 +153,13 @@ export default {
 <div id="list"></div>
 <div class="card" id="connect"></div>
 <script>
-// Each account is a phone linked to one of your servers, as WhatsApp Desktop is linked.
+// Each account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
 let shown = 0;
 async function show() {
   const accounts = await one.call("accounts");
   shown = accounts.length;
   document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? \`Linked on \${a.server}\${i ? "" : " · used first"}\` : a.why || "Needs linking again")}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? \`Linked on \${a.device}\${i ? "" : " · used first"}\` : a.why || "Needs linking again")}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
     : '<p class="muted">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => {
     await one.confirm("#connect", { title: \`Sign out of \${b.dataset.out}?\`, detail: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
@@ -205,8 +206,8 @@ show().then(() => { if (one.params.add) document.getElementById("phone").focus()
 </script>
 <div class="card" id="needs" hidden></div>
 <script>
-one.call("_running").then(({ servers, needs }) => {
-  if (servers.length) return;
+one.call("_running").then(({ devices, needs }) => {
+  if (devices.length) return;
   const n = document.getElementById("needs");
   n.textContent = needs;
   n.hidden = false;

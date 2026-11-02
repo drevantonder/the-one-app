@@ -125,7 +125,7 @@ final class Mac {
         defer { signingIn = false }
         do {
             if let invite = try Auth.take(typed) { return invite }
-            let name = displayName(store.server?.name ?? Host.current().localizedName ?? "Mac")
+            let name = displayName(store.device?.name ?? Host.current().localizedName ?? "Mac")
             // In a session of its own: the browser keeps nothing, and asks no "wants to use … to sign in" before the passkey.
             let signedIn = try await Auth.shared.signIn(name: "\(appName) on \(name)") { url in
                 try await session.authenticate(using: url, callback: .customScheme(Auth.cli), preferredBrowserSession: .ephemeral, additionalHeaderFields: [:])

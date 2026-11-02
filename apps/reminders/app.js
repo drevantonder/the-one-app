@@ -1,7 +1,7 @@
 // Reminders: Reminders on the person's Mac. The reminders sidecar lives in the Mac app, which macOS lets reach Reminders;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the reminders sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the reminders sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
 async function sidecar(ctx, op, input) {
   try {

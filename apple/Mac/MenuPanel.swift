@@ -22,16 +22,16 @@ struct MenuPanel: View {
                 .padding(.bottom, 8)
 
                 SectionTitle("Your Devices")
-                ForEach(install.servers.filter { $0.user == store.me?.id }) { server in
+                ForEach(install.devices.filter { $0.user == store.me?.id }) { device in
                     HStack(spacing: 8) {
                         Circle()
-                            .fill(server.isOnline ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
+                            .fill(device.isOnline ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
                             .frame(width: 7, height: 7)
-                        Text(displayName(server.name))
+                        Text(displayName(device.name))
                         Spacer()
-                        if server.key == store.server?.key {
+                        if device.key == store.device?.key {
                             Text("This device").foregroundStyle(.secondary)
-                        } else if !server.isOnline {
+                        } else if !device.isOnline {
                             Text("Offline").foregroundStyle(.tertiary)
                         }
                     }

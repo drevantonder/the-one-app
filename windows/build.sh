@@ -37,11 +37,11 @@ cp "$(art logo)" "$stage/Assets/Logo.png"
 cp "$root/vendor/phosphor/icons.json" "$stage/Assets/icons.json"
 # C#'s string literals, from the config's text.
 quote() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
-cat > "$stage/Brand.g.cs" <<CS
+cat > "$stage/WhiteLabel.g.cs" <<CS
 // Written by build.sh from $(basename "$config"): the white label this build is.
 namespace One;
 
-public static class Brand
+public static class WhiteLabel
 {
     public const string Name = $(quote "$name");
     public const string Cli = $(quote "$cli");

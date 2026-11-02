@@ -45,7 +45,7 @@ public static class Node
             }
             catch (Exception) when (!cancel.IsCancellationRequested)
             {
-                throw new NodeException("Your server isn’t answering.");
+                throw new NodeException("Your devices aren’t answering.");
             }
             if (r.StatusCode == HttpStatusCode.Unauthorized && tries == 0)
             {
@@ -59,7 +59,7 @@ public static class Node
             r.Dispose();
             string? error = null;
             try { error = JsonNode.Parse(text)?["error"]?.GetValue<string>(); } catch { }
-            throw new NodeException(error ?? ((int)r.StatusCode >= 500 ? "Your server isn’t answering." : $"It didn’t work ({(int)r.StatusCode})."));
+            throw new NodeException(error ?? ((int)r.StatusCode >= 500 ? "Your devices aren’t answering." : $"It didn’t work ({(int)r.StatusCode})."));
         }
     }
 
@@ -112,7 +112,7 @@ public static class Node
     {
         var address = new Uri(Auth.Shared.Address!);
         var url = new Uri(address, path);
-        if (url.Authority != address.Authority || !url.AbsolutePath.StartsWith("/v1/")) throw new NodeException("That isn’t your server’s.");
+        if (url.Authority != address.Authority || !url.AbsolutePath.StartsWith("/v1/")) throw new NodeException("That isn’t on your devices.");
         var get = method.Equals("GET", StringComparison.OrdinalIgnoreCase);
         body = get ? null : body ?? new JsonObject();
         var call = url.AbsolutePath == "/v1/call";

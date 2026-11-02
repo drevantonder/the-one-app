@@ -73,7 +73,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
     static readonly SemaphoreSlim reading = new(1, 1);
     static List<WidgetCache.Item>? items;
     static DateTime readAt;
-    /// Why there's nothing to show: signed out, or the servers aren't answering.
+    /// Why there's nothing to show: signed out, or the devices aren't answering.
     static string? away;
     static Timer? timer;
 
@@ -95,7 +95,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
                 // Those pinned before it started, as they were left; the board's calls come only once it's registered.
                 foreach (var info in WidgetManager.GetDefault().GetWidgetInfos())
                     pinned.TryAdd(info.WidgetContext.Id, Pinned.Of(info.WidgetContext, info.CustomState));
-                Marshal.ThrowExceptionForHR(CoRegisterClassObject(Guid.Parse(Brand.WidgetClass), new Factory(), 0x4 /* local server */, 0x1 /* multiple use */, out var cookie));
+                Marshal.ThrowExceptionForHR(CoRegisterClassObject(Guid.Parse(WhiteLabel.WidgetClass), new Factory(), 0x4 /* local server */, 0x1 /* multiple use */, out var cookie));
                 done.Wait();
                 CoRevokeClassObject(cookie);
             }
@@ -284,7 +284,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
     {
         // Signed out in the window since they were read: none of the person's widgets are drawn again.
         if (!Auth.Shared.SignedIn) (items, away) = (null, "signed out");
-        Send(id, p, items, Store.Shared.Config?.Accent ?? Brand.Accent, away);
+        Send(id, p, items, Store.Shared.Config?.Accent ?? WhiteLabel.Accent, away);
     }
 
     /// What a pinned widget shows, sent to the board.
@@ -294,9 +294,9 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
         // One never chosen shows the first, as the iPhone's does.
         var item = p.Chosen == null ? list?.FirstOrDefault() : list?.FirstOrDefault(i => i.Id == p.Chosen);
         if (why == "signed out")
-            card = WidgetCard.Saying($"Sign in to {Brand.Name} to see your pages.");
+            card = WidgetCard.Saying($"Sign in to {WhiteLabel.Name} to see your pages.");
         else if (list == null)
-            card = WidgetCard.Saying(why == null ? "Getting your widgets…" : $"Can’t reach {Brand.Name} right now. This tries again by itself.");
+            card = WidgetCard.Saying(why == null ? "Getting your widgets…" : $"Can’t reach {WhiteLabel.Name} right now. This tries again by itself.");
         else if (p.Choosing)
             card = WidgetCard.Chooser(list, p.Chosen);
         else if (item != null)
@@ -304,7 +304,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
         else if (p.Chosen != null && list.Count > 0)
             card = WidgetCard.Saying($"{p.Title ?? "This widget"} isn’t on your pages any more. Choose another with Customize, in this widget’s menu.");
         else
-            card = WidgetCard.Saying($"Open {Brand.Name} to see your pages.");
+            card = WidgetCard.Saying($"Open {WhiteLabel.Name} to see your pages.");
         p.Problem = null;
         try
         {
@@ -334,7 +334,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
     }
 
     /// From the window, as the person signs out: every pinned widget says to sign in, at once.
-    public static void SignedOut() => Each(_ => true, (id, p) => Send(id, p, null, Brand.Accent, "signed out"));
+    public static void SignedOut() => Each(_ => true, (id, p) => Send(id, p, null, WhiteLabel.Accent, "signed out"));
 
     static void Each(Func<Pinned, bool> which, Action<string, Pinned> send)
     {

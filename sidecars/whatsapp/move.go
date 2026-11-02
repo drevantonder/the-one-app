@@ -1,10 +1,10 @@
 package main
 
-// Moving the link: this sidecar on the server that holds it hands its
+// Moving the link: this sidecar on the device that holds it hands its
 // database (the link's keys and the messages kept) to the same sidecar on
-// another of the user's servers, in calls through the nodes, end-to-end
+// another of the user's devices, in calls through the nodes, end-to-end
 // encrypted between them. Nothing is written anywhere else, so once the
-// other server has it and this one deletes its copy, there is one copy.
+// other device has it and this one deletes its copy, there is one copy.
 
 import (
 	"bytes"
@@ -31,7 +31,7 @@ import (
 // call may carry, even through older nodes (2 MB).
 var partSize = 1 << 20
 
-// holding is what one server's sidecar tells another about its links: the
+// holding is what one device's sidecar tells another about its links: the
 // first, as when there could be only one, and all of them.
 type holding struct {
 	Phone     string    `json:"phone,omitempty"` // the linked number, if linked there
@@ -39,7 +39,7 @@ type holding struct {
 	All       []holding `json:"all,omitempty"`
 }
 
-// all is every link a server holds, from a server before several too.
+// all is every link a device holds, from a device before several too.
 func (h holding) all() []holding {
 	if h.All != nil {
 		return h.All
@@ -50,7 +50,7 @@ func (h holding) all() []holding {
 	return nil
 }
 
-// has says whether a server holds a link as number.
+// has says whether a device holds a link as number.
 func (h holding) has(number string) bool {
 	return slices.ContainsFunc(h.all(), func(o holding) bool { return o.Phone == number })
 }
@@ -64,18 +64,18 @@ func (l *link) holder() holding {
 	return holding{}
 }
 
-// servers is this server's name, and the user's other servers that run
+// devices is this device's name, and the user's other devices that run
 // WhatsApp and are online.
-type servers struct {
+type devices struct {
 	here   string
 	others []string
 }
 
-func (l *link) servers() (servers, error) {
+func (l *link) devices() (devices, error) {
 	var state struct {
-		Server  struct{ Key, Name string }
+		Device  struct{ Key, Name string }
 		Install struct {
-			Servers []struct {
+			Devices []struct {
 				Key, Name string
 				Online    bool
 				Sidecars  []string
@@ -87,20 +87,20 @@ func (l *link) servers() (servers, error) {
 		err = json.Unmarshal(body, &state)
 	}
 	if err != nil {
-		return servers{}, fmt.Errorf("asking this server's node: %w", err)
+		return devices{}, fmt.Errorf("asking this device's node: %w", err)
 	}
-	s := servers{here: state.Server.Name}
-	for _, o := range state.Install.Servers {
-		if o.Key != state.Server.Key && o.Online && slices.Contains(o.Sidecars, app) {
+	s := devices{here: state.Device.Name}
+	for _, o := range state.Install.Devices {
+		if o.Key != state.Device.Key && o.Online && slices.Contains(o.Sidecars, app) {
 			s.others = append(s.others, o.Name)
 		}
 	}
 	return s, nil
 }
 
-// linkedElsewhere is the other server that holds the link, and as which
+// linkedElsewhere is the other device that holds the link, and as which
 // number; "" if none of those that answered does.
-func (l *link) linkedElsewhere(s servers) (server, phone string) {
+func (l *link) linkedElsewhere(s devices) (device, phone string) {
 	for _, name := range s.others {
 		var h holding
 		if err := callOn(l.node, name, "_holder", map[string]any{}, &h); err == nil && h.Phone != "" {
@@ -113,9 +113,9 @@ func (l *link) linkedElsewhere(s servers) (server, phone string) {
 func (l *link) move(to string) (string, error) {
 	to = strings.TrimSpace(to)
 	if to == "" {
-		return "", errors.New("give to: the server to move WhatsApp to")
+		return "", errors.New("give to: the device to move WhatsApp to")
 	}
-	s, err := l.servers()
+	s, err := l.devices()
 	if err != nil {
 		return "", err
 	}
@@ -137,7 +137,7 @@ func (l *link) move(to string) (string, error) {
 		return "", errors.New("WhatsApp isn't linked here")
 	}
 	number := l.client.Store.ID.User
-	l.client.Disconnect() // so the link is never connected from two servers
+	l.client.Disconnect() // so the link is never connected from two devices
 	session, err := snapshot(l.db, filepath.Dir(l.path))
 	if err != nil {
 		l.reconnect()
@@ -201,8 +201,8 @@ func snapshot(db *sql.DB, dir string) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// take receives the link another server moves here, part by part, and
-// links this server with it once it has every part.
+// take receives the link another device moves here, part by part, and
+// links this device with it once it has every part.
 func (l *link) take(from string, part, parts int, data string) (holding, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

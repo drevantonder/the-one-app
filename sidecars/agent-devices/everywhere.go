@@ -17,22 +17,22 @@ import (
 	"time"
 )
 
-// This sidecar reaches the same sidecar on the user's other servers through
+// This sidecar reaches the same sidecar on the user's other devices through
 // its own node's local API, as any app would: list and backups show every
-// server's, and move restores a device on another. Calls passed on carry
+// device's agent devices, and move restores one on another. Calls passed on carry
 // here: true, so they go no further.
 
-// callNode runs op on server (by name; "" for wherever the node picks) and
+// callNode runs op on the device on (by name; "" for wherever the node picks) and
 // returns its result.
-func (ds *devices) callNode(ctx context.Context, server, op string, input map[string]any) (json.RawMessage, error) {
+func (ds *devices) callNode(ctx context.Context, on, op string, input map[string]any) (json.RawMessage, error) {
 	req := map[string]any{"app": app, "sidecar": app, "op": op, "input": input}
-	if server != "" {
-		req["server"] = server
+	if on != "" {
+		req["device"] = on
 	}
 	return ds.post(ctx, req)
 }
 
-// callApp calls one of the app's operations, on this server's node.
+// callApp calls one of the app's operations, on this device's node.
 func (ds *devices) callApp(ctx context.Context, op string, input any) (json.RawMessage, error) {
 	return ds.post(ctx, map[string]any{"app": app, "op": op, "input": input})
 }
@@ -68,14 +68,14 @@ func cmpOr(a, b string) string {
 	return b
 }
 
-// servers are this server's name and the other online servers that run
-// devices, as the node says.
-func (ds *devices) servers(ctx context.Context) (me string, others []string, err error) {
+// hosts are this device's name and the person's other online devices that run
+// agent devices, as the node says.
+func (ds *devices) hosts(ctx context.Context) (me string, others []string, err error) {
 	me, all, err := ds.ordered(ctx)
 	return me, slices.DeleteFunc(all, func(s string) bool { return s == me }), err
 }
 
-// ordered is this server's name and every online server that runs devices,
+// ordered is this device's name and every online device that runs agent devices,
 // this one too, in where things run first (the install's order).
 func (ds *devices) ordered(ctx context.Context) (me string, all []string, err error) {
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, ds.node+"/v1/state", nil)
@@ -87,7 +87,7 @@ func (ds *devices) ordered(ctx context.Context) (me string, all []string, err er
 		return "", nil, err
 	}
 	defer resp.Body.Close()
-	type server struct {
+	type host struct {
 		Name     string
 		Here     bool
 		Online   bool
@@ -96,13 +96,13 @@ func (ds *devices) ordered(ctx context.Context) (me string, all []string, err er
 	}
 	var st struct {
 		Me      struct{ Name string }
-		Install struct{ Servers []server }
+		Install struct{ Devices []host }
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 		return "", nil, err
 	}
-	slices.SortStableFunc(st.Install.Servers, func(a, b server) int { return cmp.Compare(a.Order, b.Order) })
-	for _, s := range st.Install.Servers {
+	slices.SortStableFunc(st.Install.Devices, func(a, b host) int { return cmp.Compare(a.Order, b.Order) })
+	for _, s := range st.Install.Devices {
 		if s.Here || s.Online && slices.Contains(s.Sidecars, app) {
 			all = append(all, s.Name)
 		}
@@ -110,13 +110,13 @@ func (ds *devices) ordered(ctx context.Context) (me string, all []string, err er
 	return st.Me.Name, all, nil
 }
 
-// everywhere runs op on every other server that runs devices, at once,
+// everywhere runs op on every other device that runs agent devices, at once,
 // giving each one's result, or why it couldn't.
 func (ds *devices) everywhere(ctx context.Context, op string, input map[string]any) (map[string]json.RawMessage, map[string]string) {
-	_, others, err := ds.servers(ctx)
+	_, others, err := ds.hosts(ctx)
 	got, failed := map[string]json.RawMessage{}, map[string]string{}
 	if err != nil {
-		failed["this server"] = err.Error()
+		failed["this device"] = err.Error()
 		return got, failed
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -146,7 +146,7 @@ func (ds *devices) everywhere(ctx context.Context, op string, input map[string]a
 // listed is a device as list shows it.
 type listed struct {
 	Name        string    `json:"name"`
-	Server      string    `json:"server"`
+	On          string    `json:"on"`
 	Kind        string    `json:"kind"`
 	Of          string    `json:"of,omitempty"` // the lasting device it's a throwaway copy of
 	State       string    `json:"state"`        // running, paused or stopped
@@ -161,9 +161,9 @@ type listed struct {
 	LastCall    time.Time `json:"last_call,omitzero"`
 }
 
-// listHere is this server's devices.
+// listHere is the agent devices on this device.
 func (ds *devices) listHere(ctx context.Context) ([]listed, error) {
-	me, _, err := ds.servers(ctx)
+	me, _, err := ds.hosts(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +182,7 @@ func (ds *devices) listHere(ctx context.Context) ([]listed, error) {
 	ds.poolMu.Unlock()
 	out := []listed{}
 	for _, d := range all {
-		l := listed{Name: d.Name, Server: me, Kind: linuxKind, State: d.State, Started: d.Started, Size: lims[d.Name].sizeOf(),
+		l := listed{Name: d.Name, On: me, Kind: linuxKind, State: d.State, Started: d.Started, Size: lims[d.Name].sizeOf(),
 			CPUs: lims[d.Name].CPUs, MemoryLimit: lims[d.Name].Memory, Memory: use[d.Name].Memory, CPU: use[d.Name].CPU, LastCall: used[d.Name]}
 		if b, ok := lent[d.Name]; ok {
 			l.Borrowed = &b
@@ -194,7 +194,7 @@ func (ds *devices) listHere(ctx context.Context) ([]listed, error) {
 	return append(out, ds.listVMs(ctx, me, lent)...), nil
 }
 
-// listAll is every server's devices, this one's first.
+// listAll is the agent devices on every device, this one's first.
 func (ds *devices) listAll(ctx context.Context) (map[string]any, error) {
 	all, err := ds.listHere(ctx)
 	if err != nil {
@@ -223,7 +223,7 @@ func (ds *devices) listAll(ctx context.Context) (map[string]any, error) {
 	return out, nil
 }
 
-// located is the other server that has the device named, or "".
+// located is the other device that has the agent device named, or "".
 func (ds *devices) located(ctx context.Context, name string) string {
 	got, _ := ds.everywhere(ctx, "list", nil)
 	for s, r := range got {
@@ -238,11 +238,11 @@ func (ds *devices) located(ctx context.Context, name string) string {
 	return ""
 }
 
-// first runs op (create, borrow or sign_in) of a kind on the first server
+// first runs op (create, borrow or sign_in) of a kind on the first device
 // that runs it and has room, in where things run first; for a borrow, one
 // with a lasting device of the kind nobody has borrowed comes before those.
-// done is false when it's this server's turn, for it to run op itself, or
-// when no other server runs the kind.
+// done is false when it's this device's turn, for it to run op itself, or
+// when no other device runs the kind.
 func (ds *devices) first(ctx context.Context, op, kind, name string, in map[string]any) (r json.RawMessage, done bool, err error) {
 	me, all, err := ds.ordered(ctx)
 	if err != nil {
@@ -251,7 +251,7 @@ func (ds *devices) first(ctx context.Context, op, kind, name string, in map[stri
 	got, _ := ds.everywhere(ctx, "kinds", nil)
 	got[me], _ = json.Marshal(map[string]any{"kinds": ds.kindsHere()})
 	lend := op == "borrow" && in["copy"] != true
-	// How ready each server that runs the kind is: 0 a lasting one to lend, 1 room for one, 2 neither.
+	// How ready each device that runs the kind is: 0 a lasting one to lend, 1 room for one, 2 neither.
 	ready := map[string]int{}
 	for s, r := range got {
 		var theirs struct {
@@ -267,7 +267,7 @@ func (ds *devices) first(ctx context.Context, op, kind, name string, in map[stri
 			case k.Kind != kind:
 			case lend && k.Unborrowed > 0:
 				ready[s] = 0
-			case k.Room == nil || *k.Room: // nil: a server too old to say
+			case k.Room == nil || *k.Room: // nil: a device too old to say
 				ready[s] = 1
 			default:
 				ready[s] = 2
@@ -309,7 +309,7 @@ func (ds *devices) signingIn(item string) bool {
 	return false
 }
 
-// signingInElsewhere is the other server with a device signing in to the
+// signingInElsewhere is the other device with an agent device signing in to the
 // profile, or "".
 func (ds *devices) signingInElsewhere(ctx context.Context, item string) string {
 	got, _ := ds.everywhere(ctx, "signing_in", nil)

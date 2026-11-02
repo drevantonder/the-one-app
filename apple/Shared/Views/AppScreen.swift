@@ -323,7 +323,7 @@ private struct ScreenWebView: Representable {
                 #if os(iOS)
                 return (["name": UIDevice.current.name, "build": store.build, "signOut": true], nil)
                 #else
-                return (["name": displayName(store.server?.name ?? store.state?.machine.name ?? ""), "build": store.build, "signOut": Auth.signedIn], nil)
+                return (["name": displayName(store.device?.name ?? store.state?.machine.name ?? ""), "build": store.build, "signOut": Auth.signedIn], nil)
                 #endif
             case "request":
                 do {
@@ -619,17 +619,17 @@ extension Store {
     }
     #endif
 
-    /// The server this app talks to: this Mac's own, or the one a phone reaches.
-    var server: Server? {
+    /// The device this app talks to: this Mac's own, or the one a phone reaches.
+    var device: Device? {
         let host = state?.host ?? state?.machine
-        return install?.servers.first { $0.key == host?.key }
+        return install?.devices.first { $0.key == host?.key }
     }
 
     /// This app's build and the node's, for telling which build a device runs.
     var build: String {
         let app = "\(config?.name ?? appName), app \(Bundle.main.infoDictionary?["BuildCommit"] as? String ?? "")"
-        guard let build = server?.build else { return app }
-        return "\(app)\n\(displayName(server?.name ?? "")) runs \(build)"
+        guard let build = device?.build else { return app }
+        return "\(app)\n\(displayName(device?.name ?? "")) runs \(build)"
     }
 }
 

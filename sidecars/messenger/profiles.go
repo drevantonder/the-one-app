@@ -212,7 +212,7 @@ func (m *messenger) signIn(profile string) (any, error) {
 	err = m.save()
 	m.mu.Unlock()
 	return map[string]any{
-		"profile": profile, "url": url, "device": r["device"], "server": r["server"],
+		"profile": profile, "url": url, "device": r["device"], "on": r["on"],
 		"text": fmt.Sprintf("Give the person this link: %s\nThey sign in to Messenger there, in the %s browser profile (tick Keep me signed in), then press Done on Messenger's settings, or Done Signing In on the profile in the Vault; it's saved by itself after 30 minutes otherwise.", url, profile),
 	}, err
 }

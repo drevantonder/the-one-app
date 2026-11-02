@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// A size is how much of its server a device may use, offered by name.
+// A size is how much of the device it's on an agent device may use, offered by name.
 type size struct {
 	Name string
 	CPUs int
@@ -46,7 +46,7 @@ func sizesText() string {
 type limit struct {
 	CPUs    float64 // 0: no limit
 	Memory  int64   // bytes; 0: no limit
-	Restart bool    // started again when the server restarts
+	Restart bool    // started again when the device it's on restarts
 }
 
 // sizeOf names a device's limits; devices made before sizes, with only a

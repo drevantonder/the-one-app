@@ -30,7 +30,7 @@ public static class Look
     /// The window's theme, for what's drawn outside it (sheets), which otherwise take Windows' own.
     public static ElementTheme Theme => Dark ? ElementTheme.Dark : ElementTheme.Light;
 
-    public static Color Accent => Hex(Store.Shared.Config?.Accent ?? Brand.Accent, Dark);
+    public static Color Accent => Hex(Store.Shared.Config?.Accent ?? WhiteLabel.Accent, Dark);
     public static SolidColorBrush AccentBrush => new(Accent);
 
     // Fluent's text fills, as its light and dark themes have them: its own brushes keep the theme the window started
@@ -238,7 +238,7 @@ public static class Look
 /// Light, Dark or Automatic, as chosen on this computer.
 public static class Appearance
 {
-    static string File => Path.Combine(Brand.Folder, "appearance");
+    static string File => Path.Combine(WhiteLabel.Folder, "appearance");
 
     public static string Chosen
     {
@@ -253,7 +253,7 @@ public static class Appearance
 
     public static void Choose(string a, MainWindow window)
     {
-        Directory.CreateDirectory(Brand.Folder);
+        Directory.CreateDirectory(WhiteLabel.Folder);
         System.IO.File.WriteAllText(File, a);
         window.Restyle();
     }

@@ -51,7 +51,7 @@ struct ScreenFile {
 }
 
 extension NodeClient {
-    /// A blob's bytes: a server's local API gives them as they are, a phone's client as `{ blob }`, base64.
+    /// A blob's bytes: a device's local API gives them as they are, a phone's client as `{ blob }`, base64.
     func blob(_ hash: String) async throws -> Data {
         let data = try await transport.send("GET", "v1/blobs/\(hash)", body: nil, timeout: 60)
         if let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let text = reply["blob"] as? String,

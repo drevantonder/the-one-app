@@ -136,7 +136,7 @@ struct AppTile: View {
 
     nonisolated(unsafe) private static let pictures = NSCache<NSString, Picture>()
 
-    /// An app's picture, from the data URL its server gives.
+    /// An app's picture, from the data URL its device gives.
     private static func picture(_ url: String) -> Picture? {
         if let picture = pictures.object(forKey: url as NSString) { return picture }
         guard let comma = url.firstIndex(of: ","), let data = Data(base64Encoded: String(url[url.index(after: comma)...])),

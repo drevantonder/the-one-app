@@ -1,8 +1,8 @@
-// Models: the local AI models on the person's servers. The models sidecar, built into every server's node, asks the
-// ones on its machine, and a call goes on to the next server when a model isn't there; this app is what people,
+// Models: the local AI models on the person's devices. The models sidecar, built into every device's node, asks the
+// ones on its machine, and a call goes on to the next device when a model isn't there; this app is what people,
 // agents and other apps use.
 
-/// Runs one of the models sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the models sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
 async function sidecar(ctx, op, input) {
   try {
@@ -23,7 +23,7 @@ export default {
   description: "AI models on your own devices",
   connector: true,
   needs: "Needs a device with a GPU",
-  instructions: "Local models run on the device that has them. models_here lists this device's models; give server \"all\" for every device's, and which are loaded. models_chat asks one and returns its answer, on whichever of your devices has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
+  instructions: "Local models run on the device that has them. models_here lists this device's models; give device \"all\" for every device's, and which are loaded. models_chat asks one and returns its answer, on whichever of your devices has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
   uses: { sidecars: ["models"] },
 
   ops: {
@@ -44,7 +44,7 @@ export default {
     },
     here: {
       reads: true,
-      description: "This device's local models, and whether each is loaded; give server \"all\" for every device's.",
+      description: "This device's local models, and whether each is loaded; give device \"all\" for every device's.",
       input: {"properties": {}, "type": "object"},
       run: (ctx, input) => sidecar(ctx, "here", input),
     },

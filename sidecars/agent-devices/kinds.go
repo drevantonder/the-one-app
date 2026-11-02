@@ -406,7 +406,7 @@ func connected(ctx context.Context, ports ...int) bool {
 func (ds *devices) listVMs(ctx context.Context, me string, lent map[string]loan) []listed {
 	var out []listed
 	for _, v := range ds.vms() {
-		l := listed{Name: v.Name, Server: me, Kind: v.Kind, State: v.state(ctx), Of: v.Of, CPUs: float64(v.CPUs), MemoryLimit: int64(v.GB) << 30}
+		l := listed{Name: v.Name, On: me, Kind: v.Kind, State: v.state(ctx), Of: v.Of, CPUs: float64(v.CPUs), MemoryLimit: int64(v.GB) << 30}
 		if b, ok := lent[v.Name]; ok {
 			l.Borrowed = &b
 		}
@@ -589,9 +589,9 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 	}
 	switch op {
 	case "kinds":
-		me, _, _ := ds.servers(ctx)
+		me, _, _ := ds.hosts(ctx)
 		free, _ := memory()
-		mine := map[string]any{"server": me, "kinds": ds.kindsHere(), "free_gb": free >> 30}
+		mine := map[string]any{"device": me, "kinds": ds.kindsHere(), "free_gb": free >> 30}
 		if here {
 			return mine, true, nil
 		}
@@ -602,7 +602,7 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 			json.Unmarshal(got[s], &m)
 			all = append(all, m)
 		}
-		out := map[string]any{"servers": all}
+		out := map[string]any{"devices": all}
 		if len(failed) > 0 {
 			out["unreachable"] = failed
 		}
@@ -627,7 +627,7 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 			}
 		}
 		if why := k.can(); why != "" {
-			return nil, true, fmt.Errorf("none of your servers runs %s devices (here: %s)", k.title(), why)
+			return nil, true, fmt.Errorf("none of your devices runs %s agent devices (here: %s)", k.title(), why)
 		}
 		if op == "create" {
 			if name == "" {
@@ -651,7 +651,7 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		if err != nil {
 			return nil, true, err
 		}
-		me, _, _ := ds.servers(ctx)
+		me, _, _ := ds.hosts(ctx)
 		what := fmt.Sprintf("%s, the person's lasting %s device: leave it as you found it", got.Name, k.title())
 		if got.Of != "" || strings.HasPrefix(got.Name, poolPrefix) {
 			what = fmt.Sprintf("%s, a throwaway %s device of your own, deleted with everything in it when you give it back", got.Name, k.title())
@@ -661,7 +661,7 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		}
 		msg := fmt.Sprintf("Borrowed %s. Pass device %q to computer_screen and computer_use (computer_tools says what it takes: %s). Give it back with give_back when done.",
 			what, got.Name, k.limits())
-		return map[string]any{"device": got.Name, "server": me, "kind": got.Kind, "copy": got.Of != "", "text": msg}, true, nil
+		return map[string]any{"device": got.Name, "on": me, "kind": got.Kind, "copy": got.Of != "", "text": msg}, true, nil
 	}
 	if v == nil {
 		if slices.Contains([]string{"open", "install", "run"}, op) {

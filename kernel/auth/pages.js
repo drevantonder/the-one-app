@@ -315,7 +315,7 @@ export function passkeysPage(look) {
   return page(look, `Passkeys`, body, script);
 }
 
-/// Signing in with a code another device shows (the CLI on a server): typing it here goes on to signing in with a
+/// Signing in with a code another device shows (the CLI on one with no screen): typing it here goes on to signing in with a
 /// passkey (or Google); `done` says how that went, once it's back.
 export function codePage(look) {
   const { name, google, error = "", done } = look;

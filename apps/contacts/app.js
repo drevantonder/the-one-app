@@ -1,7 +1,7 @@
 // Contacts: Contacts on the person's Mac. The contacts sidecar lives in the Mac app, which macOS lets reach Contacts;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the contacts sidecar's operations, wherever it runs for the caller. When none of their servers runs it,
+/// Runs one of the contacts sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
 async function sidecar(ctx, op, input) {
   try {

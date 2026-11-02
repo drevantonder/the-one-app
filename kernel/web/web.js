@@ -481,7 +481,7 @@ window.__one = {};
           if (m.value != null) setAppearance(String(m.value));
           return reply(appearance());
         case "device":
-          return reply({ name: browserName(), build: serverBuild(), signOut: true });
+          return reply({ name: browserName(), build: deviceBuild(), signOut: true });
         case "request":
           return reply((await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true);
         case "vault": {
@@ -638,9 +638,9 @@ window.__one = {};
     return api(url.pathname + url.search, { method, body });
   }
 
-  /// "linux runs 3157ba4": what the server that answers runs, for telling builds apart.
-  function serverBuild() {
-    const s = install()?.servers.find((x) => x.key === store.state?.server?.key);
+  /// "linux runs 3157ba4": what the device that answers runs, for telling builds apart.
+  function deviceBuild() {
+    const s = install()?.devices.find((x) => x.key === store.state?.device?.key);
     return s?.build ? `${s.name} runs ${s.build}` : null;
   }
 

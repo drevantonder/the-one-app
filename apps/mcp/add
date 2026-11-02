@@ -59,7 +59,7 @@ if [ $new = yes ] || ! deployed app.js || ! deployed server.json; then
 fi
 [ $new = no ] || $one install "$name" --scope "$scope"
 
-tries=0 # a deploy takes a moment to reach the servers, and restarts their runtimes
+tries=0 # a deploy takes a moment to reach the devices, and restarts their runtimes
 until $one "$name" refresh_tools >"$dir/tools.next" 2>"$dir/error"; do
   tries=$((tries + 1))
   if [ $tries -ge 15 ] || ! grep -qE "latest deploy|disconnected|restart" "$dir/error"; then

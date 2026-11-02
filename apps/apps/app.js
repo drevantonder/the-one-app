@@ -27,7 +27,7 @@ function placeOf(ctx, given) {
 
 const placeInput = { type: "string", description: "user (you), global (everyone) or a group's name" };
 
-/// Whether the caller acts for an owner (an app's, a server's): it's theirs, a group's they're an admin of, or admins'
+/// Whether the caller acts for an owner (an app's, a device's): it's theirs, a group's they're an admin of, or admins'
 /// or the install's and they're an admin.
 function mine(ctx, owner) {
   if (owner === `user:${ctx.me.user}`) return true;
@@ -84,17 +84,17 @@ async function isService(ctx, a) {
   return !/\bmain:\s*\{/.test(code) && !/\bwidgets:\s*\{\s*[\w"]/.test(code);
 }
 
-/// Where a service runs, in a few words, and what each of the caller's servers offers for it: "Runs on linux, mac",
-/// or what it needs (its `needs`) when none of their servers runs it; the servers they own it may be installed on (where
-/// an owner removed it) or removed from; and whether they own none, so they ask an owner instead. Its server parts are the
+/// Where a service runs, in a few words, and what each of the caller's devices offers for it: "Runs on linux, mac",
+/// or what it needs (its `needs`) when none of their devices runs it; the devices they own it may be installed on (where
+/// an owner removed it) or removed from; and whether they own none, so they ask an owner instead. Its device parts are the
 /// sidecars it uses, by their names.
 async function where(ctx, a) {
-  const servers = await ctx.devices();
+  const devices = await ctx.devices();
   const parts = a.uses?.sidecars || [];
   if (!parts.length) return null;
   const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
-  const runs = servers.filter((s) => (s.sidecars || []).some((d) => parts.includes(d)));
-  const removed = servers.filter((s) => !runs.includes(s) && (s.removed_sidecars || []).some((d) => parts.includes(d.name)));
+  const runs = devices.filter((s) => (s.sidecars || []).some((d) => parts.includes(d)));
+  const removed = devices.filter((s) => !runs.includes(s) && (s.removed_sidecars || []).some((d) => parts.includes(d.name)));
   const line = runs.length ? "Runs on " + runs.map((s) => s.name).join(", ") : a.needs || "Runs on none of your devices";
   return {
     line, runs: runs.map((s) => s.name), needs: a.needs || null,
@@ -285,7 +285,7 @@ export default {
         return `${schedule} is ${on ? "on" : "off"}.`;
       },
     },
-    servers: {
+    devices: {
       reads: true,
       description: "Where a service runs (\"Runs on linux, mac\"), or what it needs when none of your devices runs it; the devices you own it may be installed on or removed from; and ask: true when you own none of those, so you ask a device's owner to install it.",
       input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
@@ -296,22 +296,22 @@ export default {
     },
     install_on: {
       description: "Install a service on a device you own, where an owner removed it: it runs there again.",
-      input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the device, by name" } } },
-      async run(ctx, { app, server }) {
+      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string" }, device: { type: "string", description: "the device, by name" } } },
+      async run(ctx, { app, device }) {
         const a = await find(ctx, app);
-        for (const part of a.uses?.sidecars || []) ctx.sidecar(part, server, true);
-        return `${a.title || app} is installed on ${server}.`;
+        for (const part of a.uses?.sidecars || []) ctx.sidecar(part, device, true);
+        return `${a.title || app} is installed on ${device}.`;
       },
     },
     remove_from: {
       confirm: true,
       description: "Remove a service from a device you own: it stops running there, and goes on running on your other devices that have it. What it keeps on that device stays, and install_on puts it back.",
-      input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the device, by name" } } },
-      async run(ctx, { app, server }) {
+      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string" }, device: { type: "string", description: "the device, by name" } } },
+      async run(ctx, { app, device }) {
         const a = await find(ctx, app);
-        const there = (await ctx.devices()).find((s) => s.name === server);
-        for (const part of a.uses?.sidecars || []) if ((there?.sidecars || []).includes(part)) ctx.sidecar(part, server, false);
-        return `${a.title || app} is removed from ${server}.`;
+        const there = (await ctx.devices()).find((s) => s.name === device);
+        for (const part of a.uses?.sidecars || []) if ((there?.sidecars || []).includes(part)) ctx.sidecar(part, device, false);
+        return `${a.title || app} is removed from ${device}.`;
       },
     },
     code: {
@@ -436,13 +436,13 @@ const sections = [
       \${tag ? '<div class="tag">' + one.esc(tag) + "</div>" : ""}<div class="act">\${act}</div></div></div>
       \${a.description ? '<div class="about">' + one.esc(a.description) + "</div>" : ""}\`;
   },
-  // A service's servers, under what it needs: those it runs on, with Remove for their owners, then those of theirs an
+  // A service's devices, under what it needs: those it runs on, with Remove for their owners, then those of theirs an
   // owner removed it from, to install it again.
   function needs({ where }) {
     if (!where) return "";
-    const server = (name, op) => '<div class="row plain"><div class="main"><div class="title"><span>' + one.esc(name) + "</span></div></div>"
-      + (op ? '<button class="button' + (op === "install_on" ? " primary" : "") + '" data-op="' + op + '" data-server="' + one.esc(name) + '">' + (op === "install_on" ? "Install" : "Remove") + "</button>" : "") + "</div>";
-    const rows = [...where.runs.map((s) => server(s, where.remove.includes(s) && "remove_from")), ...where.install.map((s) => server(s, "install_on"))];
+    const device = (name, op) => '<div class="row plain"><div class="main"><div class="title"><span>' + one.esc(name) + "</span></div></div>"
+      + (op ? '<button class="button' + (op === "install_on" ? " primary" : "") + '" data-op="' + op + '" data-device="' + one.esc(name) + '">' + (op === "install_on" ? "Install" : "Remove") + "</button>" : "") + "</div>";
+    const rows = [...where.runs.map((s) => device(s, where.remove.includes(s) && "remove_from")), ...where.install.map((s) => device(s, "install_on"))];
     if (!rows.length) return '<div class="needs">' + one.esc(where.line) + "</div>";
     return '<h2 class="section">' + one.esc(where.needs || "Runs On") + '</h2><div class="list">' + rows.join("") + "</div>";
   },
@@ -529,14 +529,14 @@ function link(x) {
 }
 
 async function show() {
-  const [list, code, health, where] = await Promise.all([one.call("list", { full: true }), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("servers", { app: name }).catch(() => null)]);
+  const [list, code, health, where] = await Promise.all([one.call("list", { full: true }), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("devices", { app: name }).catch(() => null)]);
   data = list;
   const a = list.apps.find((x) => x.name === name);
   if (!a) return (document.getElementById("app").innerHTML = one.notFound({ title: name + " was erased.", text: "It's gone from every list.", home: "Back to the App Store" }));
   document.getElementById("app").innerHTML = sections.map((s) => s({ a, apps: list.apps, places: list.places, admin: list.admin, code, health, where })).join("");
   new IntersectionObserver(([e]) => one.title(e.isIntersecting ? "" : a.title)).observe(document.querySelector(".hero h1"));
   document.querySelector("[data-add]")?.addEventListener("click", () => addTo(name, data));
-  for (const b of document.querySelectorAll("[data-op]")) b.onclick = () => place(b, b.dataset.op, b.dataset.server);
+  for (const b of document.querySelectorAll("[data-op]")) b.onclick = () => place(b, b.dataset.op, b.dataset.device);
 }
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 /// "just now", "5 min ago".
@@ -574,12 +574,12 @@ async function switchIt(box, { schedule, scope }) {
   }
   show();
 }
-/// Installs a service on a server, or removes it from one, then shows where it runs now.
-async function place(button, op, server) {
+/// Installs a service on a device, or removes it from one, then shows where it runs now.
+async function place(button, op, device) {
   button.disabled = true;
   document.getElementById("error").textContent = "";
   try {
-    await one.call(op, { app: name, server, confirm: true });
+    await one.call(op, { app: name, device, confirm: true });
   } catch (err) {
     document.getElementById("error").textContent = one.plain(err).title;
   }
@@ -604,7 +604,7 @@ const sections = [
   },
   function runs({ activity }) {
     const row = (r) => \`<div class="row plain"><div class="main"><div class="title"><span>\${r.ok ? "" : '<span class="error">✕</span> '}\${one.esc(r.schedule)}</span><span class="when">\${one.ago(r.time)}</span></div>
-        <div class="sub\${r.ok ? "" : " error"}">\${r.ok ? one.esc(r.server || "") + " · " + (r.ms < 1000 ? r.ms + " ms" : (r.ms / 1000).toFixed(1) + " s") : one.esc(r.error || "Failed")}</div></div></div>\`;
+        <div class="sub\${r.ok ? "" : " error"}">\${r.ok ? one.esc(r.device || "") + " · " + (r.ms < 1000 ? r.ms + " ms" : (r.ms / 1000).toFixed(1) + " s") : one.esc(r.error || "Failed")}</div></div></div>\`;
     return activity?.length ? '<h2 class="section">Runs</h2><div class="list">' + activity.slice(0, 12).map(row).join("") + "</div>" : "";
   },
   function usedBy({ insights }) {

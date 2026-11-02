@@ -269,7 +269,7 @@ public sealed class AppScreen : Grid
     /// light and dark, and on a computer, Windows' size of text (a page's widgets keep their own size).
     static string Fitted()
     {
-        var accent = Store.Shared.Config?.Accent ?? Brand.Accent;
+        var accent = Store.Shared.Config?.Accent ?? WhiteLabel.Accent;
         string Css(bool dark)
         {
             var c = Look.Hex(accent, dark);
@@ -349,8 +349,8 @@ public sealed class AppScreen : Grid
                 case "device":
                     {
                         var store = Store.Shared;
-                        var server = store.Install?.Servers.FirstOrDefault(s => s.Key == store.State?.Server?.Key);
-                        var build = $"{Brand.Name}, app {Brand.Commit}" + (server?.Build is { } b ? $"\n{server.Name} runs {b}" : "");
+                        var device = store.Install?.Devices.FirstOrDefault(s => s.Key == store.State?.Device?.Key);
+                        var build = $"{WhiteLabel.Name}, app {WhiteLabel.Commit}" + (device?.Build is { } b ? $"\n{device.Name} runs {b}" : "");
                         Reply(id, new JsonObject { ["name"] = Environment.MachineName, ["build"] = build, ["signOut"] = true });
                         return;
                     }
@@ -458,7 +458,7 @@ public sealed class AppScreen : Grid
 
     /// Where the client's own screens keep what they ask to (`one.cache`), by key; forgotten when it signs out. (Not
     /// "Screens", the web views' own folder, which is the same name on Windows.)
-    public static string Kept => Path.Combine(Brand.Folder, "Kept for screens");
+    public static string Kept => Path.Combine(WhiteLabel.Folder, "Kept for screens");
 
     static string? KeptFile(string key) => key.Length is > 0 and <= 40 && key.All(c => char.IsAsciiLetterOrDigit(c) || c == '-') ? Path.Combine(Kept, key + ".json") : null;
 
@@ -579,7 +579,7 @@ public sealed class AppScreen : Grid
         if (file != null) await Windows.Storage.FileIO.WriteBytesAsync(file, bytes);
     }
 
-    static string Previewed => Path.Combine(Path.GetTempPath(), Brand.Cli);
+    static string Previewed => Path.Combine(Path.GetTempPath(), WhiteLabel.Cli);
 
     /// What screens kept on this computer, gone: their copies, what they asked to keep and the files they showed.
     public static void Forget()
@@ -605,7 +605,7 @@ public sealed class AppScreen : Grid
 /// the person signs out.
 static class ScreenCopies
 {
-    static string Dir => Path.Combine(Brand.Folder, "Screen copies");
+    static string Dir => Path.Combine(WhiteLabel.Folder, "Screen copies");
 
     static string FileOf(Route r)
     {

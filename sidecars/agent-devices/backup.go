@@ -16,15 +16,15 @@ import (
 )
 
 // A backup is a copy of a device's home folder, without caches, as a blob in
-// the install: any server can fetch it, so a device can be restored on
-// another (move). Each server keeps an index of its own backups on disk, and
+// the install: any of the person's devices can fetch it, so an agent device can
+// be restored on another (move). Each keeps an index of its own backups on disk, and
 // each backup is an entry in the user's log too. These aren't kept off-site:
-// a blob lives on the servers that have fetched it, and a backup to a bucket
+// a blob lives on the devices that have fetched it, and a backup to a bucket
 // isn't built yet.
 
 type backupRecord struct {
 	Device string    `json:"device"`
-	Server string    `json:"server"`
+	On     string    `json:"on"`
 	Blob   string    `json:"blob"`
 	Bytes  int64     `json:"bytes"`
 	Size   string    `json:"size"` // the device's
@@ -46,7 +46,7 @@ func (ds *devices) backupsHere() []backupRecord {
 // backup packs the device's home folder into a blob and records it, keeping
 // the newest few in the index.
 func (ds *devices) backup(ctx context.Context, d device) (backupRecord, error) {
-	me, _, err := ds.servers(ctx)
+	me, _, err := ds.hosts(ctx)
 	if err != nil {
 		return backupRecord{}, err
 	}
@@ -84,7 +84,7 @@ func (ds *devices) backup(ctx context.Context, d device) (backupRecord, error) {
 	if resp.StatusCode != http.StatusOK || put.Blob == "" {
 		return backupRecord{}, fmt.Errorf("storing the backup: %s", cmpOr(put.Error, resp.Status))
 	}
-	rec := backupRecord{Device: d.Name, Server: me, Blob: put.Blob, Bytes: put.Size, Size: lims[d.Name].sizeOf(), At: time.Now().UTC()}
+	rec := backupRecord{Device: d.Name, On: me, Blob: put.Blob, Bytes: put.Size, Size: lims[d.Name].sizeOf(), At: time.Now().UTC()}
 	ds.backupMu.Lock()
 	defer ds.backupMu.Unlock()
 	all := append(ds.backupsHere(), rec)
@@ -108,7 +108,7 @@ func (ds *devices) backup(ctx context.Context, d device) (backupRecord, error) {
 	return rec, nil
 }
 
-// backupsAll are every server's backups, of one device or all, newest first.
+// backupsAll are the backups on every one of the person's devices, of one agent device or all, newest first.
 func (ds *devices) backupsAll(ctx context.Context, device string) ([]backupRecord, map[string]string) {
 	all := ds.backupsHere()
 	got, failed := ds.everywhere(ctx, "backups", nil)
@@ -128,13 +128,13 @@ func (ds *devices) backupsAll(ctx context.Context, device string) ([]backupRecor
 }
 
 // restore makes a device from a backup: a new one, its home folder unpacked
-// from the blob, fetched from whichever server has it.
+// from the blob, fetched from whichever device has it.
 func (ds *devices) restore(ctx context.Context, name string, rec backupRecord, sz size) (device, error) {
 	if _, err := find(ctx, name); err == nil {
 		return device{}, fmt.Errorf("device %s already exists", name)
 	}
 	var resp *http.Response
-	// Another server serves the blob once the entry naming it reaches it,
+	// Another device serves the blob once the entry naming it reaches it,
 	// which takes a moment after a backup.
 	for try := 0; ; try++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ds.node+"/v1/blobs/"+rec.Blob, nil)
@@ -190,7 +190,7 @@ func (ds *devices) findBackup(ctx context.Context, device, blob string) (backupR
 	}
 	msg := fmt.Sprintf("no backup of device %s", device)
 	if len(failed) > 0 {
-		msg += fmt.Sprintf(" (couldn't ask %d servers)", len(failed))
+		msg += fmt.Sprintf(" (couldn't ask %d devices)", len(failed))
 	}
 	return backupRecord{}, errors.New(msg)
 }

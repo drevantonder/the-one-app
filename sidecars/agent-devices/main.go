@@ -158,9 +158,9 @@ func num(description string) map[string]any {
 
 var deviceArg = str("which device, by name; default the only one")
 
-var kindArg = str("linux (with a browser; the default), windows, android or iphone: kinds lists what each server runs")
+var kindArg = str("linux (with a browser; the default), windows, android or iphone: kinds lists what each of your devices runs")
 
-const instructions = "Devices for agents on this server: Linux with a browser, and Windows, Android and iPhones where this machine runs them (kinds). Agents use them through Computer Use (computer_*), and the person sees them on the Agent Devices page."
+const instructions = "Devices for agents on your devices: Linux with a browser, and Windows, Android and iPhones where this machine runs them (kinds). Agents use them through Computer Use (computer_*), and the person sees them on the Agent Devices page."
 
 // browsing are the device's tools offered as operations of their own; the
 // rest are reached through use.
@@ -171,11 +171,11 @@ func ownOps() []map[string]any {
 	sizeArg := str("small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small")
 	prof := map[string]any{"type": "object", "description": "a browser profile, as the app gives it from its Vault item: item, name, key (filled in by the node), blob and salt"}
 	return []map[string]any{
-		{"name": "list", "description": "Every server's devices: each one's server, whether it's running, paused or stopped, its size, the memory and CPU it uses now, and who has borrowed it and what for (or that it's the spare kept for borrowing).",
-			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only this server's"}})},
-		{"name": "kinds", "description": "The kinds of device each server runs (linux, windows, android, iphone), with what input each takes, whether it has room for another and how many lasting ones nobody has borrowed, and its memory to spare in GB.",
-			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only this server's"}})},
-		{"name": "adopt", "description": "Make something already on this server a lasting device: a Windows VM's folder, an Android Virtual Device, or a simulator.",
+		{"name": "list", "description": "The agent devices on every one of your devices: the device each is on, whether it's running, paused or stopped, its size, the memory and CPU it uses now, and who has borrowed it and what for (or that it's the spare kept for borrowing).",
+			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only those on this device"}})},
+		{"name": "kinds", "description": "The kinds of device each of your devices runs (linux, windows, android, iphone), with what input each takes, whether it has room for another and how many lasting ones nobody has borrowed, and its memory to spare in GB.",
+			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only those on this device"}})},
+		{"name": "adopt", "description": "Make something already on this device a lasting agent device: a Windows VM's folder, an Android Virtual Device, or a simulator.",
 			"input": object(map[string]any{"device": str("its name"), "kind": kindArg, "dir": str("windows: its folder"), "id": str("android: its AVD; iphone: its simulator's UDID"),
 				"port": num("windows: its SSH port here; android: its console port"), "display": num("windows: its VNC display"), "cpus": num("windows: its CPUs"), "gb": num("windows: its memory")}, "device", "kind")},
 		{"name": "open", "description": "Open a URL in a device's browser.", "input": object(map[string]any{"device": str("the device's name"), "url": str("the URL")}, "device", "url")},
@@ -195,12 +195,12 @@ func ownOps() []map[string]any {
 			"input": object(map[string]any{"profile": prof, "url": str("the page to open, e.g. a site's sign-in page"), "minutes": num("how long until it's saved and closed; default 30, at most 240")}, "profile")},
 		{"name": "save_profile", "description": "Save a browser profile from the device signing in to it (closing that device), or from the device named.",
 			"input": object(map[string]any{"device": str("the device's name"), "profile": prof})},
-		{"name": "signing_in", "description": "The browser profiles being signed in to on each server: item, profile, device, server and until.", "input": object(map[string]any{})},
-		{"name": "create", "description": "Create a lasting device and start it, for the person, on the first server in Where Things Run (Settings > Devices) that runs its kind and has room: Linux with a browser of its own unless kind says another. Takes a minute. Agents borrow instead.",
+		{"name": "signing_in", "description": "The browser profiles being signed in to on each of your devices: item, profile, device, on and until.", "input": object(map[string]any{})},
+		{"name": "create", "description": "Create a lasting device and start it, for the person, on the first of your devices in Where Things Run (Settings > Devices) that runs its kind and has room: Linux with a browser of its own unless kind says another. Takes a minute. Agents borrow instead.",
 			"input": object(map[string]any{"device": str("its name: lowercase letters, digits and dashes"), "kind": kindArg, "size": sizeArg}, "device")},
 		{"name": "resize", "description": "Change how much CPU and memory a device may use, at once, without restarting it.",
 			"input": object(map[string]any{"device": str("the device's name"), "size": sizeArg}, "device", "size")},
-		{"name": "start", "description": "Start a stopped (or paused) device. It starts again after the server restarts.", "input": name},
+		{"name": "start", "description": "Start a stopped (or paused) device. It starts again after the device it's on restarts.", "input": name},
 		{"name": "stop", "description": "Stop a device. Its files and sign-ins stay; it stays stopped until started.", "input": name},
 		{"name": "delete", "description": "Delete a device and everything in it, its sign-ins too. Only when the person asked.", "input": name},
 		{"name": "view", "description": "A link to watch and use a device in a browser, for the person: to solve a challenge, or to see what an agent is doing. Works on their own devices.",
@@ -212,12 +212,12 @@ func ownOps() []map[string]any {
 		{"name": "refresh_tools", "description": "Read the devices' tools again from a running device, as after its image was updated.", "input": object(map[string]any{})},
 		{"name": "use", "description": "Run one of the device's tools, as computer_tools lists them, e.g. list_windows, launch_app, click, type_text, get_guide.",
 			"input": object(map[string]any{"device": deviceArg, "tool": str("the tool's name"), "args": map[string]any{"type": "object", "description": "the tool's input"}}, "tool")},
-		{"name": "backup", "description": "Back up a device's home folder (its files and sign-ins, without caches) as a blob any server can fetch, keeping the newest 5. Not off-site: backups to a bucket aren't built yet.", "input": name},
-		{"name": "backups", "description": "Every server's backups of devices, newest first.",
-			"input": object(map[string]any{"device": str("only this device's"), "here": map[string]any{"type": "boolean", "description": "only this server's"}})},
-		{"name": "restore", "description": "Make a device on this server from a backup: the newest of the device named, from any server, or the one with blob.",
+		{"name": "backup", "description": "Back up a device's home folder (its files and sign-ins, without caches) as a blob any of your devices can fetch, keeping the newest 5. Not off-site: backups to a bucket aren't built yet.", "input": name},
+		{"name": "backups", "description": "The backups of agent devices on every one of your devices, newest first.",
+			"input": object(map[string]any{"device": str("only this device's"), "here": map[string]any{"type": "boolean", "description": "only those on this device"}})},
+		{"name": "restore", "description": "Make an agent device on this device from a backup: the newest of the one named, from any of your devices, or the one with blob.",
 			"input": object(map[string]any{"device": str("the backed-up device's name"), "blob": str("a particular backup's blob"), "as": str("the new device's name; default the same"), "size": sizeArg})},
-		{"name": "move", "description": "Move a device to another server: backs it up, restores it there and stops it here, kept until you delete it. Takes a few minutes.",
-			"input": object(map[string]any{"device": str("the device's name"), "to": str("the server to move it to")}, "device", "to")},
+		{"name": "move", "description": "Move an agent device to another of your devices: backs it up, restores it there and stops it here, kept until you delete it. Takes a few minutes.",
+			"input": object(map[string]any{"device": str("the device's name"), "to": str("which of your devices to move it to")}, "device", "to")},
 	}
 }

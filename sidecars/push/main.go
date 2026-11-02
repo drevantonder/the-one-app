@@ -1,8 +1,8 @@
 // The push sidecar: sends notifications to phones through Apple's push
-// service (APNs), for every user its server serves, so an app or an agent can
+// service (APNs), for every user its device serves, so an app or an agent can
 // reach someone who isn't looking. Phones register their tokens with it; a push
 // goes to the caller's own phones, says which app sent it, and opens that app's
-// screen when tapped. It runs on a privileged server, and the white label's APNs
+// screen when tapped. It runs on a privileged device, and the white label's APNs
 // key is a Vault item on Everyone switched on for push, which the node fills in
 // for each call (see load); its folder keeps devices.json, the phones
 // registered. It says whether APNs accepted a push, never whether anyone saw it.

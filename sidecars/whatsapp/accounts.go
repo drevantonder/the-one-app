@@ -23,7 +23,7 @@ import (
 //go:embed settings.html
 var settingsHTML string
 
-// whatsapp is every link this server keeps, the first first.
+// whatsapp is every link this device keeps, the first first.
 type whatsapp struct {
 	node, dir string
 
@@ -85,7 +85,7 @@ func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any
 		return l.signIn(ctx, in.Phone)
 	case "_pairing": // the settings screen's QR code and phone code, while one is pairing
 		return w.pairing(), nil
-	case "_holder": // the sidecar's own, between the user's servers
+	case "_holder": // the sidecar's own, between the user's devices
 		return w.holding(), nil
 	case "_take":
 		l, err := w.spare()
@@ -131,7 +131,7 @@ func (w *whatsapp) linked() []*link {
 
 // pick is the account named, by its number, or the first when none is
 // named; elsewhere when it isn't linked here, so the call goes on to the
-// user's other servers. With named, an account must be named when there
+// user's other devices. With named, an account must be named when there
 // are several, as for signing one out.
 func (w *whatsapp) pick(account string, named bool) (*link, error) {
 	all := w.linked()
@@ -190,7 +190,7 @@ func (w *whatsapp) drop(l *link) {
 	}
 }
 
-// holding is the first account linked here, as servers told each other when
+// holding is the first account linked here, as devices told each other when
 // there could be only one, and every account.
 func (w *whatsapp) holding() holding {
 	var h holding
@@ -204,18 +204,18 @@ func (w *whatsapp) holding() holding {
 	return h
 }
 
-// accounts lists every account linked on any of the user's servers that
+// accounts lists every account linked on any of the user's devices that
 // answered, this one's first.
 func (w *whatsapp) accounts() ([]map[string]any, error) {
-	s, err := w.links[0].servers()
+	s, err := w.links[0].devices()
 	if err != nil {
 		return nil, err
 	}
 	out := []map[string]any{}
-	add := func(h holding, server string) {
-		a := map[string]any{"account": "+" + h.Phone, "ok": h.Connected, "server": server}
+	add := func(h holding, device string) {
+		a := map[string]any{"account": "+" + h.Phone, "ok": h.Connected, "device": device}
 		if !h.Connected {
-			a["why"] = "Not connected on " + server + " right now: it reconnects by itself, unless the phone unlinked it"
+			a["why"] = "Not connected on " + device + " right now: it reconnects by itself, unless the phone unlinked it"
 		}
 		out = append(out, a)
 	}

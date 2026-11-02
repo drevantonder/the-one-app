@@ -31,7 +31,7 @@ struct WidgetInfo: Codable, Sendable, Equatable, Identifiable {
     /// The widget itself, whichever copy this is.
     var kind: String { "\(app).\(widget)" }
 
-    /// The sizes it draws, smallest first: every size, from a server that renders each widget once.
+    /// The sizes it draws, smallest first: every size, from a device that renders each widget once.
     var supported: [String] { WidgetSize.all.filter { sizes?[$0] != nil || sizes == nil } }
 
     /// Its tree at `size`, or at its own size if it doesn't draw that one.

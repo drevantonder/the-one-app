@@ -162,7 +162,7 @@ func (ds *devices) borrow(ctx context.Context, l loan, p *profile) (device, erro
 		d = free[0]
 	} else if !roomForOne() {
 		ds.take.Unlock()
-		return device{}, errors.New("this server has no memory to spare for another device: give back one you're done with")
+		return device{}, errors.New("this device has no memory to spare for another agent device: give back one you're done with")
 	} else if d, err = create(ctx, newPoolName(), sizes[0], true, false); err != nil {
 		ds.take.Unlock()
 		return device{}, err
@@ -269,7 +269,7 @@ func (ds *devices) giveBack(ctx context.Context, name, why string) error {
 // recorded on its Vault item by the app.
 func (ds *devices) saveProfile(ctx context.Context, d device, p *profile) error {
 	if p == nil {
-		return errors.New("its profile's key is gone, as after this server restarted: save it with save_profile")
+		return errors.New("its profile's key is gone, as after this device restarted: save it with save_profile")
 	}
 	if d.State == "paused" {
 		unpause(ctx, d)
@@ -398,7 +398,7 @@ func (ds *devices) tend(ctx context.Context) {
 	ds.pauseIdle(ctx, all, lent)
 }
 
-// keepsSpare reports whether this server keeps a spare device: a Linux one
+// keepsSpare reports whether this device keeps a spare agent device: a Linux one
 // with room for it. A Mac's memory is its person's; it makes devices only
 // when asked.
 func keepsSpare() bool { return runtime.GOOS != "darwin" && roomForOne() }
@@ -410,7 +410,7 @@ func roomForOne() bool {
 	return free >= int64(sizes[0].GB)<<30
 }
 
-// memory is this server's available and total memory, in bytes: available less the swap in use.
+// memory is this device's available and total memory, in bytes: available less the swap in use.
 func memory() (free, total int64) {
 	if runtime.GOOS == "darwin" {
 		return macMemory()
