@@ -364,10 +364,31 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
     failed || !deployed
 }
 
-/// This device's `after-update`, running beside the update that started it.
+/// This device's `after-update`, running beside the update that started it: what it said is shown when it's done,
+/// however the update ends.
 struct After {
-    child: std::process::Child,
+    child: Option<std::process::Child>,
     log: PathBuf,
+}
+
+impl After {
+    /// Waits for it to finish, and shows what it said: → whether it succeeded.
+    fn wait(&mut self) -> bool {
+        let Some(mut child) = self.child.take() else { return true };
+        let status = child.wait();
+        println!("{} said:", one::home().join("after-update").display());
+        print!("{}", std::fs::read_to_string(&self.log).unwrap_or_default());
+        let _ = std::fs::remove_file(&self.log);
+        status.is_ok_and(|s| s.success())
+    }
+}
+
+impl Drop for After {
+    fn drop(&mut self) {
+        if self.child.is_some() && !self.wait() {
+            println!("after-update failed");
+        }
+    }
 }
 
 /// Starts this device's `after-update`, if it has one, for an update that sends something out: it builds from main as
@@ -377,21 +398,16 @@ fn after_update() -> Result<Option<After>> {
     if !script.exists() {
         return Ok(None);
     }
-    println!("Running {} beside this", script.display());
     let log = cache().join(format!("after-update-{}.log", std::process::id()));
+    println!("Running {} beside this, saying what it does in {}", script.display(), log.display());
     let out = std::fs::File::create(&log)?;
     let child = Command::new("sh").arg(&script).stdin(std::process::Stdio::null()).stdout(out.try_clone()?).stderr(out).spawn()?;
-    Ok(Some(After { child, log }))
+    Ok(Some(After { child: Some(child), log }))
 }
 
 /// Waits for `after-update` to finish, and shows what it said.
 fn finish(after: Option<After>) -> Result<()> {
-    let Some(mut after) = after else { return Ok(()) };
-    let status = after.child.wait()?;
-    println!("{} said:", one::home().join("after-update").display());
-    print!("{}", std::fs::read_to_string(&after.log).unwrap_or_default());
-    let _ = std::fs::remove_file(&after.log);
-    ensure!(status.success(), "after-update failed");
+    ensure!(after.is_none_or(|mut after| after.wait()), "after-update failed");
     Ok(())
 }
 
