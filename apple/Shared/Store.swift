@@ -604,6 +604,17 @@ final class Store {
         }
     }
 
+    /// Shows an app's screen in the window, over whatever was open: on the Mac in place of the page, on the iPhone
+    /// pushed onto the page.
+    func show(_ screen: ScreenRoute) {
+        sheet = nil
+        #if os(macOS)
+        selection = .screen(screen)
+        #else
+        path = [.screen(screen)]
+        #endif
+    }
+
     /// `<cli>://vault?id=…&scope=…` (or `<cli>://secret?…`, as agents gave it before), which an agent gives a person
     /// to answer a request for an item. Whether it was one.
     @discardableResult

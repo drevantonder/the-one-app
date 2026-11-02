@@ -50,10 +50,11 @@ const PAGE = `
   body { max-width: 1120px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 40vw), 1fr)); gap: 22px 14px; margin-top: 6px; }
   .tile { display: block; color: inherit; text-decoration: none; min-width: 0; }
+  .tile.opens { cursor: pointer; }
   .pic { aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: var(--card); border: 0.5px solid var(--line); display: grid; place-items: center; color: var(--faint); }
   .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .tile.paused .pic img { filter: grayscale(0.9) brightness(0.5); }
-  a.tile:hover .pic { border-color: var(--accent); }
+  .tile.opens:hover .pic { border-color: var(--accent); }
   .name { font-weight: 600; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sub { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.3em; }
 </style>
@@ -62,7 +63,6 @@ const PAGE = `
   one.title("Agent Computers");
   const grid = document.getElementById("grid");
   const pics = {}; // by server/name: a data URL
-  const links = {}; // by server/name: { url, until }
   let computers = [];
 
   const key = (c) => \`\${c.server || ""}/\${c.name}\`;
@@ -83,8 +83,8 @@ const PAGE = `
     const line = [b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : paused(c) ? "Paused" : "", servers > 1 ? host(c.server) : ""].filter(Boolean).join(" · ");
     const k = key(c);
     const pic = pics[k] ? \`<img src="\${pics[k]}" alt="">\` : glyph(screenless(c));
-    const tag = links[k] && !paused(c) ? \`a href="\${one.esc(links[k].url)}" target="_blank" rel="noopener"\` : "div";
-    return \`<\${tag} class="tile\${paused(c) ? " paused" : ""}" title="\${one.esc(c.name)}"><div class="pic">\${pic}</div><div class="name">\${one.esc(name)}</div><div class="sub">\${one.esc(line)}</div></\${tag.split(" ")[0]}>\`;
+    const opens = !paused(c) && !screenless(c);
+    return \`<div class="tile\${paused(c) ? " paused" : ""}\${opens ? " opens" : ""}" data-k="\${one.esc(k)}" title="\${one.esc(c.name)}"><div class="pic">\${pic}</div><div class="name">\${one.esc(name)}</div><div class="sub">\${one.esc(line)}</div></div>\`;
   }
 
   function draw() {
@@ -98,7 +98,13 @@ const PAGE = `
     grid.innerHTML = shown.map((c) => tile(c, servers)).join("");
   }
 
-  // A picture of each running computer with a screen, and a link to open it, kept until shortly before it stops working.
+  // A computer with a screen opens to watch and use, here in the app.
+  grid.addEventListener("click", (e) => {
+    const c = computers.find((c) => key(c) === e.target.closest(".tile.opens")?.dataset.k);
+    if (c) one.open("computer", at(c));
+  });
+
+  // A picture of each running computer with a screen.
   async function pictures() {
     await Promise.all(computers.filter((c) => !paused(c) && !screenless(c)).map(async (c) => {
       const k = key(c);
@@ -107,13 +113,6 @@ const PAGE = `
         const img = (r.content || []).find((x) => x.type === "image");
         if (img) pics[k] = \`data:\${img.mimeType};base64,\${img.data}\`;
       } catch {}
-      if (!links[k] || links[k].until < Date.now()) {
-        try {
-          const r = await one.call("_view", { ...at(c), minutes: 60 });
-          const url = typeof r === "string" ? r.split("\\n")[0] : r.url;
-          if (url) links[k] = { url, until: Date.now() + 50 * 60_000 };
-        } catch {}
-      }
     }));
   }
 
@@ -141,6 +140,96 @@ const PAGE = `
   one.call("_running").then(({ servers, needs }) => {
     if (!servers.length) grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">\${one.esc(needs)}</div>\`;
   });
+</script>`;
+
+// One computer, to watch and use: its viewer fills the screen, titled with what it's doing, under a line saying whose
+// it is, with Done Signing In while it's signing in to a profile.
+const COMPUTER = `
+<style>
+  body { max-width: none; padding: 0; }
+  [hidden] { display: none !important; }
+  .bar { display: flex; align-items: center; gap: 12px; padding: 0 16px; height: 52px; box-sizing: border-box; }
+  .bar .what { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar .sub { color: var(--muted); }
+  iframe { position: fixed; left: 0; right: 0; bottom: 0; top: 0; width: 100%; height: 100%; border: 0; background: #000; color-scheme: dark; }
+  .bar:not([hidden]) ~ iframe { top: 52px; height: calc(100% - 52px); }
+  .empty { margin: 40px 16px; }
+</style>
+<div class="bar" id="bar" hidden><div class="what sub" id="what"></div><button class="button primary" id="done" hidden>Done Signing In</button></div>
+<div class="empty" id="note">Opening…</div>
+<script>
+  const at = one.params.server ? { computer: one.params.computer, server: one.params.server } : { computer: one.params.computer };
+  const bar = document.getElementById("bar"), what = document.getElementById("what"), done = document.getElementById("done"), note = document.getElementById("note");
+  let shown = null; // the computer as last listed
+  let frame = null;
+
+  function say(text, error) {
+    frame?.remove();
+    frame = null;
+    note.hidden = false;
+    note.className = "empty" + (error ? " error" : "");
+    note.textContent = text;
+  }
+
+  function describe(c) {
+    const b = c.borrowed;
+    const name = b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : c.name.charAt(0).toUpperCase() + c.name.slice(1);
+    const line = b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : "";
+    one.title(name);
+    what.textContent = line;
+    done.hidden = !b?.signing_in || !b.item;
+    bar.hidden = !line && done.hidden;
+  }
+
+  async function look() {
+    try {
+      const all = (await one.call("list", {})).computers || [];
+      const c = all.find((c) => c.name === at.computer && (!at.server || c.server === at.server));
+      if (!c) return shown && say("It's been given back.");
+      shown = c;
+      describe(c);
+      if (!frame) await open();
+    } catch (e) {
+      say(e.message, true);
+    }
+  }
+
+  async function open() {
+    const r = await one.call("_view", { ...at, minutes: 240 });
+    const url = typeof r === "string" ? r.split("\\n")[0] : r.url;
+    if (!url || frame) return;
+    note.hidden = true;
+    frame = document.createElement("iframe");
+    frame.allow = "clipboard-read; clipboard-write; fullscreen; microphone; keyboard-map";
+    frame.src = url;
+    document.body.append(frame);
+    unzoom();
+    frame.focus();
+  }
+
+  // The shell zooms its screens to its text size; the computer's screen shows as it is, filling the window.
+  function unzoom() {
+    if (frame) frame.style.zoom = String(1 / (parseFloat(getComputedStyle(document.documentElement).zoom) || 1));
+  }
+  addEventListener("resize", unzoom);
+
+  done.addEventListener("click", async () => {
+    done.disabled = true;
+    try {
+      await one.call("save_profile", { item: shown.borrowed.item });
+      done.hidden = true;
+      say(\`Saved: the \${shown.borrowed.profile || "browser"} profile has your sign-ins now.\`);
+      shown = null;
+      clearInterval(timer);
+    } catch (e) {
+      say(e.message, true);
+    } finally {
+      done.disabled = false;
+    }
+  });
+
+  look();
+  const timer = setInterval(look, 5000);
 </script>`;
 
 export default {
@@ -197,7 +286,7 @@ export default {
       run: async (ctx, input) => {
         const p = await profile(ctx, input.item || input.profile || "default");
         const r = await sidecar(ctx, "sign_in", { profile: given(p), ...(input.url ? { url: input.url } : {}), ...(input.minutes ? { minutes: input.minutes } : {}) });
-        return { ...r, then: { op: "save_profile", title: "Done Signing In" } };
+        return { ...r, screen: { screen: "computer", params: { computer: r.computer, server: r.server } }, then: { op: "save_profile", title: "Done Signing In" } };
       },
     },
     save_profile: {
@@ -311,6 +400,10 @@ export default {
     main: {
       title: "Agent Computers",
       html: PAGE,
+    },
+    computer: {
+      title: "Computer",
+      html: COMPUTER,
     },
   },
 };

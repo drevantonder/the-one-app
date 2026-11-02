@@ -265,9 +265,10 @@ struct VaultItemView: View {
     @State private var error: String?
     @Environment(\.openURL) private var openURL
 
-    /// What an action left open: a link to it, and the op that finishes it.
+    /// What an action left open: the app's screen for it, or a link to it, and the op that finishes it.
     struct Following {
         var app: String
+        var screen: ScreenRoute?
         var url: URL?
         var op: String
         var title: String
@@ -296,7 +297,11 @@ struct VaultItemView: View {
             if !actions.isEmpty {
                 Section {
                     if let following {
-                        if let url = following.url { Button("Open Again") { openURL(url) } }
+                        if let screen = following.screen {
+                            Button("Open Again") { store.show(screen) }
+                        } else if let url = following.url {
+                            Button("Open Again") { openURL(url) }
+                        }
                         Button(following.title) { Task { await finish(following) } }.disabled(running != nil)
                     } else {
                         ForEach(actions) { action in
@@ -398,7 +403,8 @@ struct VaultItemView: View {
         }
     }
 
-    /// Runs an app's action on the item, opening the link it gives; one that leaves something open says how to finish it.
+    /// Runs an app's action on the item, opening the app's screen it gives, or else its link; one that leaves something
+    /// open says how to finish it.
     private func run(_ action: ItemAction) async {
         running = action
         defer { running = nil }
@@ -407,11 +413,16 @@ struct VaultItemView: View {
             let data = try await store.node.call(app: action.app, op: action.op, input: try JSONSerialization.data(withJSONObject: ["item": item.id]), timeout: 300)
             let reply = try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) as? [String: Any] ?? [:]
             let url = (reply["url"] as? String).flatMap(URL.init(string:))
-            if let url { openURL(url) }
+            let screen = (reply["screen"] as? [String: Any]).map { s in
+                ScreenRoute(app: action.app, screen: s["screen"] as? String ?? "main",
+                            params: (try? JSONSerialization.data(withJSONObject: s["params"] ?? [:])).map { String(decoding: $0, as: UTF8.self) } ?? "{}",
+                            scope: item.scope)
+            }
             if let then = reply["then"] as? [String: Any], let op = then["op"] as? String {
-                following = Following(app: action.app, url: url, op: op, title: then["title"] as? String ?? String(localized: "Done"))
+                following = Following(app: action.app, screen: screen, url: url, op: op, title: then["title"] as? String ?? String(localized: "Done"))
             }
             await refresh()
+            if let screen { store.show(screen) } else if let url { openURL(url) }
         } catch {
             self.error = error.localizedDescription
         }
