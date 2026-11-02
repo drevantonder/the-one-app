@@ -349,7 +349,8 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
       if (!(event.apps || []).length) await refreshState();
       await refreshApps();
     }
-    if (store.sheet?.kind === "services") drawSheet();
+    // An app's own change (a sign-in finished on its settings screen) lists its accounts again.
+    if (event.type === "changed") redrawServices(event.apps?.length ? event.apps : undefined);
   }
 
   // MARK: Where the window is
@@ -478,10 +479,14 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     const key = JSON.stringify(r);
     // An open screen stays as it is while the rest of the window redraws around it.
     if (r.kind === "screen" && shown === key && $(".screen-frame", detail)) return;
+    const again = shown === key;
     shown = key;
     if (r.kind === "page") drawPage(detail, page(r.scope) || page("user"));
     else if (r.kind === "services") {
       const p = page(r.scope);
+      // Drawn again in place, keeping the accounts it listed, as what's on the page changes.
+      const there = again && $(".services-view", detail);
+      if (there && p) return void drawServices(there, p);
       detail.innerHTML = bar("Services", p?.whose) + `<div class="scroll"><div class="services-view"></div></div>`;
       if (p) drawServices($(".services-view", detail), p);
     } else if (r.kind === "settings") drawSettings(detail, r.setting);
@@ -675,7 +680,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
       for (const n of names || Object.keys(el.__accounts || {})) el.__stale.add(n);
     }
     if (store.sheet?.kind === "services") drawSheet();
-    else if (route().kind === "services") drawServices($(".detail .services-view", root), page(route().scope));
+    else if (route().kind === "services" && $(".detail .services-view", root) && page(route().scope)) drawServices($(".detail .services-view", root), page(route().scope));
   }
 
   /// What an app's ⋯ menu offers: its settings, its page in the App Store, taking it off this page, and deleting it.
