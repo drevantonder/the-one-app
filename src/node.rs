@@ -29,6 +29,7 @@ use crate::vault;
 mod backups;
 mod status;
 mod storage;
+mod tunnel;
 
 const JOIN_ALPN: &[u8] = b"one/join/1";
 const CALL_ALPN: &[u8] = b"one/call/1";
@@ -320,6 +321,8 @@ pub struct Inner {
     scope_keys: Mutex<HashMap<Scope, [u8; 32]>>,
     /// Whether this server is moving to the install's new storage now.
     moving: Mutex<bool>,
+    /// This server's connector for the install's tunnel, with the token it runs with.
+    tunnel: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
     /// Held while this server makes or finds a scope's key.
     making_keys: tokio::sync::Mutex<()>,
     /// The last position this server wrote an entry of each scope at.
@@ -423,6 +426,7 @@ impl Node {
             dbs: Mutex::new(HashMap::new()),
             scope_keys: Mutex::new(HashMap::new()),
             moving: Mutex::new(false),
+            tunnel: Mutex::new(None),
             making_keys: tokio::sync::Mutex::new(()),
             written: Mutex::new(HashMap::new()),
         }));
@@ -437,6 +441,7 @@ impl Node {
             node.replay_all().await?;
             node.keep_alone_here()?;
             node.follow_storage();
+            node.follow_tunnel();
             node.read_all_status();
             let reader = node.clone();
             tokio::spawn(async move {
@@ -664,8 +669,9 @@ impl Node {
             self.emit(Event::Servers);
             self.give_keys();
         }
-        if handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
+        if handled.members || handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
             self.follow_storage();
+            self.follow_tunnel();
         }
         let forgotten: Vec<String> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| e.content.data["blob"].as_str().map(str::to_string)).collect();
         self.emit(Event::Changed { apps: Vec::new() });

@@ -43,6 +43,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/bucket.rs`: objects by name in a place, a folder or S3-compatible storage: created only if absent and replaced only while unchanged, for an install's own bucket; S3's requests go by presigned URL.
 - `src/node/status.rs`: how things went, as rows of each scope's node database; a schedule's slot runs once, on the server that takes its lease in the bucket.
 - `src/node/storage.rs`: where the install keeps its data, and moving it to S3-compatible storage that every server reaches.
+- `src/node/tunnel.rs`: the install's Cloudflare Tunnel, which the gateway reaches nodes through with no public address: every server runs a connector for it, so the address reaches whichever is up.
 - `src/backups.rs`, `src/node/backups.rs`: backups, each scope's entries and blobs encrypted with its key and a copy of its folder in the bucket, sent to a place, a folder or S3-compatible storage, that's a Vault item; and which server backs up what, when. A scope's key is in the bucket, sealed to each server that holds the scope and to the recovery key.
 - `src/schedules.rs`: apps' schedules, and which server runs each.
 - `src/deploy.rs`, `src/bundle.rs`: `one deploy`, building an app with a pinned Bun into a bundle that keeps its source.

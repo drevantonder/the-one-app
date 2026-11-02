@@ -62,6 +62,7 @@ pub fn router(node: Node) -> Router {
         .route("/v1/source/{app}", get(source))
         .route("/v1/storage", get(storage_get).post(storage_post))
         .route("/v1/storage/{op}", post(storage_post))
+        .route("/v1/tunnel", get(tunnel_get).post(tunnel_post))
         .route("/v1/backups", get(backups_get))
         .route("/v1/backups/{op}", post(backups_post))
         .route("/v1/vault", get(vault_get).post(vault_post))
@@ -545,6 +546,15 @@ async fn storage_get(State(node): State<Node>, uri: axum::http::Uri) -> Reply {
 
 async fn storage_post(State(node): State<Node>, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
     Ok(Json(node.storage_route(&local(&node)?, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
+}
+
+/// The install's tunnel, `/v1/tunnel`.
+async fn tunnel_get(State(node): State<Node>) -> Reply {
+    Ok(Json(node.tunnel_route(&local(&node)?, "GET", &json!({})).await?))
+}
+
+async fn tunnel_post(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    Ok(Json(node.tunnel_route(&local(&node)?, "POST", &body).await?))
 }
 
 /// Backups' routes, `/v1/backups…`.

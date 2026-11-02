@@ -87,6 +87,10 @@ Usage:
                                        comma-separated) or bucket (its JSON object piped, with - as its value)
   {CLI} kernel use <address> <vault> <schedules>
                                        point this install at its kernel: its nodes take sign-ins made at the address
+  {CLI} kernel tunnel                  whether this server runs a connector for the install's Cloudflare Tunnel, which
+                                       the address reaches nodes through (node-url cloudflare:<id>): piped the
+                                       tunnel's token, it keeps it in Everyone's Vault, and every server runs one, so
+                                       the address reaches whichever is up
   {CLI} storage                        where the install's data is kept
   {CLI} storage move --endpoint <url>  move it to S3-compatible storage (R2, S3, GCS, MinIO), which every server
                                        reaches: piped a JSON object of bucket, key_id and secret (and region) it tries
@@ -410,6 +414,23 @@ fn run(args: Vec<String>) -> Result<()> {
                 post("/v1/settings", json!({ "name": name, "value": url.trim_end_matches('/') }))?;
             }
             println!("This install is at {address}: its nodes take sign-ins made there.");
+        }
+        ["kernel", "tunnel"] => {
+            let mut token = String::new();
+            if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut token)?;
+            }
+            if token.trim().is_empty() {
+                let t = get("/v1/tunnel")?;
+                match (t["set"] == true, t["running"] == true) {
+                    (false, _) => println!("This install has no tunnel: pipe its token into {CLI} kernel tunnel, and every server runs a connector for it."),
+                    (true, true) => println!("{} runs a connector for the install's tunnel, as every server does.", t["server"].as_str().unwrap_or("")),
+                    (true, false) => println!("{} runs no connector for the install's tunnel now: cloudflared.log in its folder says why.", t["server"].as_str().unwrap_or("")),
+                }
+                return Ok(());
+            }
+            let r = post("/v1/tunnel", json!({ "token": token.trim(), "agent": agent_from_env() }))?;
+            println!("Kept tunnel {}'s token in Everyone's Vault: every server runs a connector for it now.", r["tunnel"].as_str().unwrap_or(""));
         }
         ["storage"] => {
             let s = get("/v1/storage")?;
