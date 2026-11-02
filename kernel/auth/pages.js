@@ -2,28 +2,28 @@
 // passkeys. Plain HTML with a little script, served from the auth service at the install's address, so passkeys
 // belong to its name.
 
+import kit from "../web/screen/kit.css" with { type: "text" };
+
 const escape = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-const style = `
-  :root { color-scheme: light dark; --accent: #0a84ff; font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
-  main { width: min(360px, calc(100vw - 48px)); }
-  h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; }
-  p { margin: 0 0 20px; opacity: .7; }
-  button, input, a.button { box-sizing: border-box; display: block; text-align: center; text-decoration: none; width: 100%; font: inherit; padding: 12px 14px; border-radius: 12px; margin: 0 0 10px; }
-  input { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); background: transparent; color: inherit; }
-  button { border: 0; background: color-mix(in srgb, CanvasText 8%, transparent); color: inherit; cursor: pointer; }
-  a.button { background: color-mix(in srgb, CanvasText 8%, transparent); color: inherit; }
-  button:disabled { opacity: .5; cursor: default; }
-  button.primary, a.button.primary { background: var(--accent); color: white; font-weight: 600; }
-  .note { font-size: 14px; opacity: .6; margin-top: 18px; }
-  .callout { opacity: 1; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
-  ul.passkeys { list-style: none; margin: 0 0 20px; padding: 0; }
-  ul.passkeys li { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid color-mix(in srgb, CanvasText 10%, transparent); }
-  ul.passkeys li:last-child { border-bottom: 0; }
-  ul.passkeys span { flex: 1; } ul.passkeys small { display: block; opacity: .6; font-size: 14px; }
-  ul.passkeys button { width: auto; margin: 0; padding: 6px 12px; font-size: 14px; }
-  .error { color: #d70015; min-height: 1.4em; margin-top: 8px; opacity: 1; }
+// The look of the web client's welcome: the screens' design kit (src/screen/kit.css, which the kernel is built with),
+// the white label's logo and accent, light or dark with the system. Inline, as the page's policy allows nothing else.
+const style = `${kit}
+  :root { --window: #f5f5f7; }
+  @media (prefers-color-scheme: dark) { :root { --window: #282828; --card: #2c2c2e; } }
+  body { max-width: none; min-height: 100vh; padding: 40px 24px; display: grid; place-items: center; background: var(--window); }
+  main { width: min(380px, 100%); text-align: center; }
+  .mark { display: block; width: 88px; height: 88px; margin: 0 auto 18px; }
+  h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; text-wrap: balance; }
+  p { margin: 0 0 22px; color: var(--muted); }
+  main .button { display: flex; width: 100%; font-size: 17px; padding: 11px 16px; margin: 0 0 10px; border-radius: 12px; }
+  main .button:not(.primary) { background: var(--card); }
+  input { display: block; width: 100%; font: inherit; text-align: center; padding: 11px 16px; margin: 0 0 10px; border-radius: 12px; border: 0.5px solid var(--line); background: var(--card); color: var(--text); }
+  .note { font-size: 13px; margin: 8px 0 0; }
+  .callout { color: var(--text); text-align: left; padding: 12px 16px; border-radius: 12px; background: var(--card); }
+  .list { text-align: left; margin: 0 0 22px; }
+  .list .button { width: auto; font-size: 15px; padding: 6px 12px; margin: 0; background: var(--window); }
+  .error { color: var(--danger); min-height: 1.4em; margin: 8px 0 0; }
   [hidden] { display: none !important; }
 `;
 
@@ -97,8 +97,13 @@ const acts = `
   }
 `;
 
-const page = (title, body, script) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escape(title)}</title><style>${style}</style></head><body><main>${body}<p class="error"></p></main><script>${webauthn}${script}</script></body></html>`;
+/// A page of `look`'s, the white label's `{ name, accent }`.
+const page = (look, title, body, script) => {
+  const accent = /^#[0-9a-f]{3,8}$/i.test(look.accent || "") ? look.accent : "#007aff";
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="${accent}"><title>${escape(title)}</title><style>:root { --accent: ${accent}; }${style}</style></head>
+<body><main><img class="mark" src="/logo.png" alt="">${body}<p class="error"></p></main><script>${webauthn}${script}</script></body></html>`;
+};
 
 /// What a person joins, in their words: "your One App".
 const ours = (name) => `your ${name.replace(/^The /, "")}`;
@@ -109,12 +114,13 @@ const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a s
 /// Signing in, to the install or, sent here by a client's authorization (\`oauth_query\`), to that client: the client
 /// is the person, with everything they can use, so the passkey is all it asks for. With Google (\`google\`, the
 /// install's domain), it's signing in with Google, each time.
-export function signInPage({ name, google }) {
-  if (google) return googlePage({ name, google });
+export function signInPage(look) {
+  const { name, google } = look;
+  if (google) return googlePage(look);
   const body = `
     <h1 id="title">Sign in to ${escape(name)}</h1>
     <p id="what">With your passkey: it's what unlocks your data.</p>
-    <button class="primary" id="passkey">Sign In with a Passkey</button>
+    <button class="button primary" id="passkey">Sign In with a Passkey</button>
     <p class="note">No passkey here yet? Use one from another device, or ask whoever runs ${escape(name)} for an invite link.</p>`;
   const script = `${acts}
     const oauth_query = location.search.slice(1);
@@ -136,14 +142,15 @@ export function signInPage({ name, google }) {
         location.href = client_id ? (await api("/sign-in/accept", { oauth_query, prf, credential })).url : "/";
       } catch (err) { quietly(err); }
     };`;
-  return page(`Sign in to ${name}`, body, script);
+  return page(look, `Sign in to ${name}`, body, script);
 }
 
-function googlePage({ name, google }) {
+function googlePage(look) {
+  const { name, google } = look;
   const body = `
     <h1 id="title">Sign in to ${escape(name)}</h1>
     <p id="what">With your Google account at ${escape(google)}.</p>
-    <button class="primary" id="google">Sign In with Google</button>`;
+    <button class="button primary" id="google">Sign In with Google</button>`;
   const script = `${acts}
     // Google's answer comes back here, with an error added to the query if it said no.
     const raw = location.search.slice(1);
@@ -173,18 +180,19 @@ function googlePage({ name, google }) {
         location.href = out.url;
       } catch (err) { say(err.message); }
     };`;
-  return page(`Sign in to ${name}`, body, script);
+  return page(look, `Sign in to ${name}`, body, script);
 }
 
 /// Signing in on a try install (`one try`), with no passkey, straight on, so a client being tested signs in with nobody
 /// there: as whoever this browser is signed in as here (its first person, or someone who joined in it), or, with
 /// `?as=<name>` and no client, as someone who joined, for a device's browser before its app signs in. The button is for
 /// a browser that won't go on to an app by itself.
-export function tryPage({ name, person }) {
+export function tryPage(look) {
+  const { name, person } = look;
   const body = `
     <h1 id="title">Sign in to ${escape(name)}</h1>
     <p id="what">In a try install: no passkey here.</p>
-    <button class="primary" id="go">Sign In as ${escape(person)}</button>`;
+    <button class="button primary" id="go">Sign In as ${escape(person)}</button>`;
   const script = `
     const oauth_query = location.search.slice(1);
     const params = new URLSearchParams(oauth_query);
@@ -199,19 +207,20 @@ export function tryPage({ name, person }) {
     };
     document.getElementById("go").onclick = go;
     go();`;
-  return page(`Sign in to ${name}`, body, script);
+  return page(look, `Sign in to ${name}`, body, script);
 }
 
 /// Joining with an invite link: making a first passkey, or on a try install (`tried`), with nothing to make.
-export function invitePage({ name, tried }) {
+export function invitePage(look) {
+  const { name, tried } = look;
   const body = `
     <section id="join">
       <h1 id="title">Join ${escape(name)}</h1>
       ${tried
         ? `<p id="what">In a try install: no passkey here.</p>
-      <button class="primary" id="passkey" disabled>Join</button>`
+      <button class="button primary" id="passkey" disabled>Join</button>`
         : `<p id="what">Make a passkey to join. It's how you sign in, and the only thing that unlocks your data.</p>
-      <button class="primary" id="passkey" disabled>Make a Passkey</button>
+      <button class="button primary" id="passkey" disabled>Make a Passkey</button>
       <p class="note">${escape(WORKS)}</p>`}
     </section>
     <section id="done" hidden>
@@ -245,18 +254,19 @@ export function invitePage({ name, tried }) {
         document.getElementById("done").hidden = false;
       } catch (err) { quietly(err); }
     };`;
-  return page(`Join ${name}`, body, script);
+  return page(look, `Join ${name}`, body, script);
 }
 
-export function passkeysPage({ name }) {
+export function passkeysPage(look) {
+  const { name } = look;
   const body = `
     <h1>Passkeys</h1>
     <p id="what">Each one signs you in to ${escape(name)} and unlocks your data.</p>
-    <button class="primary" id="signin" hidden>Sign In with a Passkey</button>
+    <button class="button primary" id="signin" hidden>Sign In with a Passkey</button>
     <section id="mine" hidden>
-      <ul class="passkeys" id="list"></ul>
+      <div class="list" id="list"></div>
       <p class="callout" id="suggest" hidden>Add a second passkey, on another device or a security key. If you lose every passkey, only the install's recovery key gets you back in, with the help of whoever holds it.</p>
-      <button class="primary" id="add">Add a Passkey</button>
+      <button class="button primary" id="add">Add a Passkey</button>
       <p class="note">${escape(WORKS)} Adding one asks first for a passkey you have, then makes the new one.</p>
     </section>`;
   const script = `
@@ -274,8 +284,8 @@ export function passkeysPage({ name }) {
       document.getElementById("signin").hidden = true;
       document.getElementById("mine").hidden = false;
       document.getElementById("suggest").hidden = list.length > 1;
-      document.getElementById("list").innerHTML = list.map((p) => '<li><span>' + esc(p.name || "Passkey") + '<small>Added ' + esc(when(p.createdAt)) + '</small></span>' +
-        (list.length > 1 ? '<button data-id="' + esc(p.id) + '">Remove</button>' : '') + '</li>').join("");
+      document.getElementById("list").innerHTML = list.map((p) => '<div class="row plain"><div class="main"><div class="title"><span>' + esc(p.name || "Passkey") + '</span></div><div class="sub">Added ' + esc(when(p.createdAt)) + '</div></div>' +
+        (list.length > 1 ? '<button class="button" data-id="' + esc(p.id) + '">Remove</button>' : '') + '</div>').join("");
     }
     show();
     document.getElementById("signin").onclick = async () => {
@@ -302,23 +312,24 @@ export function passkeysPage({ name }) {
       if (!id || !confirm("Remove this passkey? It won't sign you in or unlock your data again.")) return;
       try { await api("/api/auth/passkey/delete-passkey", { id }); await show(); } catch (err) { say(err.message); }
     };`;
-  return page(`Passkeys`, body, script);
+  return page(look, `Passkeys`, body, script);
 }
 
 /// Signing in with a code another device shows (the CLI on a server): typing it here goes on to signing in with a
 /// passkey (or Google); `done` says how that went, once it's back.
-export function codePage({ name, google, error = "", done }) {
+export function codePage(look) {
+  const { name, google, error = "", done } = look;
   if (done !== undefined) {
     const body = done
       ? `<h1>You're signed in</h1><p>Go back to where you got the code: it carries on by itself.</p>`
       : `<h1>That didn't sign in</h1><p>Start signing in again where you got the code.</p>`;
-    return page(`Sign in to ${name}`, body, "");
+    return page(look, `Sign in to ${name}`, body, "");
   }
   const body = `
     <h1>Sign in with a code</h1>
     <p>Type the code you were shown, then sign in with ${google ? "Google" : "your passkey"}. Only use a code you got yourself, on your own device.</p>
     <form id="form"><input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BCDF-GHJK" aria-label="Code">
-    <button class="primary">Continue</button></form>`;
+    <button class="button primary">Continue</button></form>`;
   const script = `
     say(${JSON.stringify(error).replaceAll("<", "\\u003c")});
     document.getElementById("code").focus();
@@ -326,5 +337,5 @@ export function codePage({ name, google, error = "", done }) {
       e.preventDefault();
       location.href = "/sign-in/code?c=" + encodeURIComponent(document.getElementById("code").value);
     };`;
-  return page(`Sign in to ${name}`, body, script);
+  return page(look, `Sign in to ${name}`, body, script);
 }

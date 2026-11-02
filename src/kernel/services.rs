@@ -347,6 +347,7 @@ impl Settings {
                 plain("VAULT", "service:vault".into());
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
+                plain("ACCENT", crate::config::ACCENT.into());
                 if let Some((id, name)) = &self.try_person {
                     plain("SIGN_IN", "try".into());
                     plain("TRY_USER", id.clone());

@@ -241,16 +241,18 @@ export class Auth extends DurableObject {
         return new Response(meta.body, { status: meta.status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" } });
       }
       const name = this.auth.options.appName;
+      // What its pages look like: the white label's name and accent.
+      const look = { name, accent: this.env.ACCENT };
       if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp") return this.protectedResource(path, name);
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
       const tried = this.env.SIGN_IN === "try";
-      if (path === "/sign-in" && request.method === "GET") return html(tried ? tryPage({ name, person: this.env.TRY_NAME }) : signInPage({ name, google }));
+      if (path === "/sign-in" && request.method === "GET") return html(tried ? tryPage({ ...look, person: this.env.TRY_NAME }) : signInPage({ ...look, google }));
       if (path === "/internal/invite" && request.method === "POST") return json(await this.invite(request, await request.json()));
       if (path === "/sign-in/about") return json(await this.about(request, url.searchParams));
       if (path === "/sign-in/google" && request.method === "POST" && google) return await this.startGoogle(request, await request.json());
       if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
-      if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), name, google);
-      if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ name, google, done: await this.codeDone(url.searchParams) }));
+      if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), look, google);
+      if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ ...look, google, done: await this.codeDone(url.searchParams) }));
       if (path === "/sign-in/code/take" && request.method === "POST") return this.codeTaken(await request.json());
       if (path === "/sign-in/accept" && request.method === "POST") {
         const body = await request.json();
@@ -258,11 +260,11 @@ export class Auth extends DurableObject {
       }
       // Invite links are for an install whose people sign in with a passkey, or a try install's; passkeys only the former.
       if (google) return new Response("not found", { status: 404 });
-      if (path === "/invite" && request.method === "GET") return html(invitePage({ name, tried }));
+      if (path === "/invite" && request.method === "GET") return html(invitePage({ ...look, tried }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
       if (tried) return new Response("not found", { status: 404 });
       if (path === "/invite/keys" && request.method === "POST") return json(await this.inviteKeys(request, await request.json()));
-      if (path === "/passkeys" && request.method === "GET") return html(passkeysPage({ name }));
+      if (path === "/passkeys" && request.method === "GET") return html(passkeysPage(look));
       if (path === "/passkeys/add" && request.method === "POST") return json(await this.addPasskey(request, await request.json()));
       return new Response("not found", { status: 404 });
     } catch (err) {
@@ -381,11 +383,11 @@ export class Auth extends DurableObject {
   }
 
   /// The page a code is typed into, or with one (`c`), on to its sign-in.
-  codeOpened(typed, name, google) {
-    if (typed == null) return html(codePage({ name, google }));
+  codeOpened(typed, look, google) {
+    if (typed == null) return html(codePage({ ...look, google }));
     const code = String(typed).toUpperCase().replace(/[^A-Z]/g, "");
     const [row] = this.ctx.storage.sql.exec("select query from codes where code = ? and until > ? and back is null", code, Date.now()).toArray();
-    if (!row) return html(codePage({ name, google, error: "That code doesn't work: it may have expired. Start signing in again where you got it." }));
+    if (!row) return html(codePage({ ...look, google, error: "That code doesn't work: it may have expired. Start signing in again where you got it." }));
     return Response.redirect(`${new URL(this.env.ADDRESS).origin}/api/auth/oauth2/authorize?${row.query}`, 302);
   }
 

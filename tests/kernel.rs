@@ -7,7 +7,7 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use one::kernel::{self, Served};
 use serde_json::{Value, json};
 
-/// The kernel's files as they are in this checkout, tests and all.
+/// The kernel's files as they are in this checkout, tests and all, with the screens' design kit where build.rs puts it.
 fn files() -> Vec<(String, Vec<u8>)> {
     fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
         for entry in std::fs::read_dir(dir).unwrap().flatten() {
@@ -26,6 +26,10 @@ fn files() -> Vec<(String, Vec<u8>)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
     let mut out = Vec::new();
     walk(&root, &root, &mut out);
+    let screen = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/screen");
+    let mut kit = Vec::new();
+    walk(&screen, &screen, &mut kit);
+    out.extend(kit.into_iter().map(|(path, bytes)| (format!("web/screen/{path}"), bytes)));
     out
 }
 
