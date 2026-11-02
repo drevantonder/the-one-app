@@ -279,6 +279,8 @@ pub struct Inner {
     writes: tokio::sync::Mutex<()>,
     /// Wakes the task that loads deploys and announces this server.
     changed: tokio::sync::Notify,
+    /// Wakes the task that updates this node to a newer release.
+    released: tokio::sync::Notify,
     /// The bundle each app runs here.
     bundles: Mutex<BTreeMap<String, String>>,
     /// The bundle of each app this release has built in, kept as a blob: any install may add them.
@@ -400,6 +402,7 @@ impl Node {
             events,
             writes: tokio::sync::Mutex::new(()),
             changed: tokio::sync::Notify::new(),
+            released: tokio::sync::Notify::new(),
             bundles: Mutex::new(BTreeMap::new()),
             built_in,
             images: Mutex::new(HashMap::new()),
@@ -451,6 +454,7 @@ impl Node {
         tokio::spawn(node.clone().presence_loop());
         tokio::spawn(node.clone().schedule_loop());
         tokio::spawn(node.clone().backup_loop());
+        tokio::spawn(node.clone().update_loop());
         let worker = node.clone();
         tokio::spawn(async move {
             loop {
@@ -461,7 +465,6 @@ impl Node {
             }
         });
         if node.has_install() {
-            node.consider_update();
             for sidecar in node.0.built_in_sidecars.iter().filter(|n| n.sync.is_some()) {
                 node.sync_built_in(sidecar.name);
             }
@@ -654,7 +657,7 @@ impl Node {
         // A scope this server no longer holds: it forgets what it read of it.
         self.0.dbs.lock().unwrap().retain(|(scope, _), _| !handled.dropped.contains(&scope.to_string()));
         if handled.new.iter().any(|e| e.content.app == release::APP && e.content.kind == "node-release") {
-            self.consider_update();
+            self.0.released.notify_one();
         }
         if handled.members {
             self.0.changed.notify_one();
@@ -3713,26 +3716,35 @@ impl Node {
         Ok(r)
     }
 
-    /// Updates this node if a newer build for its platform was published, signed with the release key.
-    fn consider_update(&self) {
-        let latest = self.with(|i| Ok(release::latest(crate::config::RELEASE_KEY, &i.r.store.scope("global")?, crate::config::TARGET)));
-        let Ok(Some((r, author))) = latest else { return };
-        let marker = self.0.dir.join("release");
-        if !release::wanted(&r, crate::config::BUILD, crate::config::COMMITTED) || std::fs::read_to_string(&marker).is_ok_and(|m| m.trim() == r.blob) {
-            return;
-        }
-        let node = self.clone();
-        tokio::spawn(async move {
-            match node.apply(&r, author).await {
+    /// Updates this node whenever a newer build for its platform is published, signed with the release key. A download
+    /// that drops, or a release that fails to install, is tried again, waiting twice as long each time up to ten minutes.
+    async fn update_loop(self) {
+        let mut wait = Duration::from_secs(10);
+        loop {
+            let Some((r, author)) = self.wanted_release() else {
+                wait = Duration::from_secs(10);
+                self.0.released.notified().await;
+                continue;
+            };
+            match self.apply(&r, author).await {
                 Ok(exe) => {
-                    let _ = std::fs::write(&marker, &r.blob);
+                    let _ = std::fs::write(self.0.dir.join("release"), &r.blob);
                     tracing::info!("updated {} to {}; restarting", exe.display(), r.commit);
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     std::process::exit(0);
                 }
-                Err(err) => tracing::warn!("ignoring the release of {}: {err:#}", r.commit),
+                Err(err) => tracing::warn!("couldn't take the release of {}, trying again in {}s: {err:#}", r.commit, wait.as_secs()),
             }
-        });
+            let _ = tokio::time::timeout(wait, self.0.released.notified()).await;
+            wait = (wait * 2).min(Duration::from_secs(600));
+        }
+    }
+
+    /// The newest release for this node's platform, if it's one this node should take and hasn't yet.
+    fn wanted_release(&self) -> Option<(Release, Key)> {
+        let (r, author) = self.with(|i| Ok(release::latest(crate::config::RELEASE_KEY, &i.r.store.scope("global")?, crate::config::TARGET))).ok()??;
+        let taken = std::fs::read_to_string(self.0.dir.join("release")).is_ok_and(|m| m.trim() == r.blob);
+        (release::wanted(&r, crate::config::BUILD, crate::config::COMMITTED) && !taken).then_some((r, author))
     }
 
     async fn apply(&self, r: &Release, author: Key) -> Result<PathBuf> {
