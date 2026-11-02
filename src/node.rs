@@ -349,6 +349,8 @@ pub struct Inner {
     hinted: Mutex<HashMap<String, u64>>,
     /// The blobs this server has put in the bucket, as `<scope> <hash>`, kept in `install/shared` too.
     shared: Mutex<std::collections::HashSet<String>>,
+    /// The blobs of entries this server wrote that the bucket didn't take then, tried again each minute.
+    unshared: Mutex<Vec<(Scope, String)>>,
     /// What the vault gave this server for the sign-ins its calls came with.
     sessions: sessions::Sessions,
     /// This server's socket to the relay.
@@ -459,6 +461,7 @@ impl Node {
             written: Mutex::new(HashMap::new()),
             hinted: Mutex::new(HashMap::new()),
             shared: Mutex::new(Default::default()),
+            unshared: Mutex::new(Vec::new()),
             sessions: Default::default(),
             relay: Default::default(),
         }));
@@ -638,9 +641,13 @@ impl Node {
         let _write = self.0.writes.lock().await;
         // What's in the bucket first, so the entry comes after all of it.
         self.read_log_now(scope).await?;
-        // Its blobs first, so a server that reads the entry finds them.
+        // Its blobs first, so a server that reads the entry finds them; one the bucket doesn't take now is tried again
+        // each minute.
         for blob in &content.blobs {
-            self.share_blob(scope, blob).await?;
+            if let Err(err) = self.share_blob(scope, blob).await {
+                tracing::warn!("putting blob {} in the bucket, to try again: {err:#}", &blob[..12.min(blob.len())]);
+                self.0.unshared.lock().unwrap().push((scope.clone(), blob.clone()));
+            }
         }
         let entry = self.with(|i| i.r.make(scope, user, by, content, now_ms()))?;
         self.put_entry(scope, &entry).await?;
@@ -687,7 +694,7 @@ impl Node {
             self.follow_tunnel();
             self.follow_relay();
         }
-        let forgotten: Vec<String> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| e.content.data["blob"].as_str().map(str::to_string)).collect();
+        let forgotten: Vec<(String, String)> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| Some((e.log().to_string(), e.content.data["blob"].as_str()?.to_string()))).collect();
         self.emit(Event::Changed { apps: Vec::new() });
         if !forgotten.is_empty() {
             self.delete_forgotten(forgotten);
@@ -768,6 +775,7 @@ impl Node {
                 self.read_all_status();
             }
             if tick % 6 == 0 && self.has_install() {
+                self.share_unshared().await;
                 for sidecar in self.0.built_in_sidecars.iter().filter(|n| n.sync.is_some()) {
                     self.sync_built_in(sidecar.name);
                 }

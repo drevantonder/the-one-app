@@ -40,16 +40,40 @@ impl Node {
         let name = crate::bucket::blob_name(&scope.to_string(), hash);
         Bucket::create(&self.bucket()?.place, &name, &crate::db::seal(&key, &name, &bytes)).await?;
         self.0.shared.lock().unwrap().insert(marker.clone());
+        self.note_shared(&marker)
+    }
+
+    /// Notes in `install/shared` a blob put in the bucket, `<scope> <hash>`, or with `- ` before it, one taken out.
+    fn note_shared(&self, line: &str) -> Result<()> {
         let mut file = std::fs::OpenOptions::new().create(true).append(true).open(self.install_dir().join("shared"))?;
-        std::io::Write::write_all(&mut file, format!("{marker}\n").as_bytes())?;
+        std::io::Write::write_all(&mut file, format!("{line}\n").as_bytes())?;
         Ok(())
+    }
+
+    /// Tries again to put in the bucket the blobs it didn't take when their entries were written.
+    pub(super) async fn share_unshared(&self) {
+        let unshared = std::mem::take(&mut *self.0.unshared.lock().unwrap());
+        for (scope, hash) in unshared {
+            if let Err(err) = self.share_blob(&scope, &hash).await {
+                tracing::debug!("putting blob {} in the bucket: {err:#}", &hash[..12.min(hash.len())]);
+                self.0.unshared.lock().unwrap().push((scope, hash));
+            }
+        }
     }
 
     /// Puts in the bucket each blob this server has that an entry it holds names, and it hasn't put there yet: those
     /// from before blobs were kept in the bucket.
     pub(super) async fn share_blobs(self) {
-        let shared = std::fs::read_to_string(self.install_dir().join("shared")).unwrap_or_default();
-        self.0.shared.lock().unwrap().extend(shared.lines().map(str::to_string));
+        let noted = std::fs::read_to_string(self.install_dir().join("shared")).unwrap_or_default();
+        {
+            let mut shared = self.0.shared.lock().unwrap();
+            for line in noted.lines() {
+                match line.strip_prefix("- ") {
+                    Some(gone) => drop(shared.remove(gone)),
+                    None => drop(shared.insert(line.to_string())),
+                }
+            }
+        }
         let Ok(named) = self.with(|i| {
             let mut named = Vec::new();
             for log in i.r.store.logs()? {
@@ -150,10 +174,27 @@ impl Node {
         })
     }
 
-    /// Deletes the blobs here that scopes forgot, once no entry this server holds still needs them.
-    pub(super) fn delete_forgotten(&self, hashes: Vec<String>) {
-        for hash in hashes {
-            if self.0.built_in.values().any(|b| *b == hash) || self.blob_named(&hash, |_| true).unwrap_or(true) {
+    /// Takes from the bucket each blob a scope forgot that no entry of that scope still needs, and deletes the blobs
+    /// here that no entry this server holds still needs: `(scope, hash)`s.
+    pub(super) fn delete_forgotten(&self, forgotten: Vec<(String, String)>) {
+        for (log, hash) in forgotten {
+            if self.0.built_in.values().any(|b| *b == hash) {
+                continue;
+            }
+            if !self.blob_named(&hash, |s| s.to_string() == log).unwrap_or(true) {
+                let marker = format!("{log} {hash}");
+                self.0.shared.lock().unwrap().remove(&marker);
+                let _ = self.note_shared(&format!("- {marker}"));
+                if let Ok(bucket) = self.bucket() {
+                    let name = crate::bucket::blob_name(&log, &hash);
+                    tokio::task::spawn_blocking(move || {
+                        if let Err(err) = bucket.place.delete(&name) {
+                            tracing::warn!("taking forgotten {name} from the bucket: {err:#}");
+                        }
+                    });
+                }
+            }
+            if self.blob_named(&hash, |_| true).unwrap_or(true) {
                 continue;
             }
             if let Ok(path) = release::blob_path(&self.0.dir, &hash) {
