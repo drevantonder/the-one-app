@@ -167,22 +167,18 @@ function card(d, guests) {
   return \`<div class="dev\${d.online ? "" : " off"}\${d.host ? " sub" : ""}"><header><h3>\${one.esc(d.name)}</h3><span class="os">\${d.online ? sub : "Offline"}</span></header>
     \${stats ? '<div class="stats">' + stats + "</div>" : ""}\${rows ? '<div class="guests">' + rows + "</div>" : ""}</div>\`;
 }
-async function show() {
-  try {
-    const { devices } = await one.call("list", { history: true });
-    let html = "";
-    for (let i = 0; i < devices.length; i++) {
-      const d = devices[i];
-      if (d.kind) continue;
-      const guests = [];
-      for (let j = i + 1; j < devices.length && devices[j].host === d.name; j++) if (devices[j].kind) guests.push(devices[j]);
-      html += card(d, guests);
-    }
-    document.getElementById("list").innerHTML = html || '<div class="empty">No devices yet</div>';
-  } catch (err) {
-    document.getElementById("list").innerHTML = \`<div class="empty error">\${one.esc(err.message)}</div>\`;
+const show = () => one.render("#list", async () => {
+  const { devices } = await one.call("list", { history: true });
+  let html = "";
+  for (let i = 0; i < devices.length; i++) {
+    const d = devices[i];
+    if (d.kind) continue;
+    const guests = [];
+    for (let j = i + 1; j < devices.length && devices[j].host === d.name; j++) if (devices[j].kind) guests.push(devices[j]);
+    html += card(d, guests);
   }
-}
+  return html || '<div class="empty">No devices yet</div>';
+});
 show();
 setInterval(show, 5000);
 </script>`,
