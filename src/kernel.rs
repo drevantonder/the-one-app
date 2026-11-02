@@ -287,6 +287,8 @@ pub struct Served {
     pub class: Option<String>,
     pub listen: String,
     pub bindings: Vec<(String, String)>,
+    /// The service its own requests go to, if not the internet (a test's stand-in sites).
+    pub outbound: Option<String>,
 }
 
 /// Writes the workerd config that runs `servers` into `dir` (their modules beside it, their storage in `dir/data`),
@@ -321,10 +323,11 @@ pub fn write_config(dir: &Path, servers: &[Served]) -> Result<PathBuf> {
             None => String::new(),
         };
         workers.push(format!(
-            "const w{i} :Workerd.Worker = (\n  modules = [(name = \"worker.js\", esModule = embed {})],\n  compatibilityDate = \"{}\",\n  bindings = [{}],\n{objects});",
+            "const w{i} :Workerd.Worker = (\n  modules = [(name = \"worker.js\", esModule = embed {})],\n  compatibilityDate = \"{}\",\n  bindings = [{}],\n{objects}{});",
             quote(&format!("{}.js", s.name)),
             crate::apps::COMPATIBILITY_DATE,
             bindings.join(", "),
+            s.outbound.as_ref().map(|o| format!("  globalOutbound = {},\n", quote(o))).unwrap_or_default(),
         ));
     }
     let config = format!(

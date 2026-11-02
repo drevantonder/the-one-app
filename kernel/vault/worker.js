@@ -12,6 +12,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { appKey, b64u, databaseKey, idOf, keyPair, openSealed, openUnder, random, sealTo, sealUnder } from "../shared/crypto.js";
 import { bucketUrls } from "../shared/s3.js";
+import { Items, schema } from "./items.js";
 import { bearer, verify } from "../shared/token.js";
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -57,6 +58,8 @@ export class Vault extends DurableObject {
       create table if not exists unseals (at integer not null, user text not null, client text, what text not null);
       create index if not exists unseals_user on unseals (user, at);
     `);
+    this.sql.exec(schema);
+    this.items = new Items(this.sql, this);
   }
 
   async fetch(request) {
@@ -90,6 +93,10 @@ export class Vault extends DurableObject {
       case "POST /keys": return json(await this.keys(token, claims, body));
       case "POST /urls": return json(await this.urls(token, claims, body));
       case "POST /share": return json(await this.share(token, claims, body));
+      case "GET /items": return json(this.items.list((await this.sessionOf(token)).held, url.searchParams.get("scope")));
+      case "POST /items": return json(await this.items.set((await this.sessionOf(token)).held, body));
+      case "POST /fetch": return json(await this.fetchFor(token, claims, body));
+      case "POST /fill": return json(await this.fillFor(token, claims, body));
       case "GET /copies": return json(this.copies(claims.sub));
       case "GET /unseals": return json(this.unseals(claims.sub, Number(url.searchParams.get("before")) || Date.now() + 1));
     }
@@ -270,13 +277,33 @@ export class Vault extends DurableObject {
     return { keys: out, until: row.until };
   }
 
+  /// Makes an app's request with its Vault fields filled in (see items.js), recording the items it used.
+  async fetchFor(token, claims, body) {
+    const { row, held } = await this.sessionOf(token);
+    if (!NAME.test(body.app || "")) refuse(400, "name the app whose request it is");
+    const used = new Set();
+    const out = await this.items.fetch(held, body, used).catch((err) => refuse(400, err.message));
+    if (used.size) this.record(held.user, row.client || claims.azp, [...used].map((id) => `${body.app} used ${id}`));
+    return out;
+  }
+
+  /// Fills `text` for a sidecar of the app `app` to send to `host` itself.
+  async fillFor(token, claims, { app, host, text }) {
+    const { row, held } = await this.sessionOf(token);
+    if (!NAME.test(app || "") || typeof host !== "string" || typeof text !== "string") refuse(400, "give app, host and text");
+    const used = new Set();
+    const filled = await this.items.fill(held, app, text, host.toLowerCase(), used).catch((err) => refuse(400, err.message));
+    if (used.size) this.record(held.user, row.client || claims.azp, [...used].map((id) => `${app} used ${id}`));
+    return { text: filled };
+  }
+
   record(user, client, what) {
-    this.sql.exec("insert into unseals (at, user, client, what) values (?, ?, ?, ?)", Date.now(), user, client || null, what.join(" "));
+    this.sql.exec("insert into unseals (at, user, client, what) values (?, ?, ?, ?)", Date.now(), user, client || null, JSON.stringify(what));
   }
 
   unseals(user, before) {
     const rows = this.sql.exec("select at, client, what from unseals where user = ? and at < ? order by at desc limit 100", user, before).toArray();
-    return { unseals: rows.map((r) => ({ ...r, what: r.what.split(" ") })) };
+    return { unseals: rows.map((r) => ({ ...r, what: JSON.parse(r.what) })) };
   }
 
   /// Presigned URLs to read and create objects, and to replace a database's `newest` (only while it's still the

