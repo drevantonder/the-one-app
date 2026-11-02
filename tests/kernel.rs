@@ -242,16 +242,28 @@ fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
     assert!(vault.urls(&token, &["log/00aa/000000000001"], &["log/00aa/000000000002"], &[]).is_ok());
     assert!(vault.urls(&token, &["global/board/main/newest"], &[], &[]).is_ok());
 
-    // Once Andre shares Everyone with Sam, Sam's clients may reach it too.
-    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-    let shared = agent.post(format!("{}/share", v.url)).header("authorization", format!("Bearer {token}")).send_json(json!({ "scope": "global", "user": SAM })).unwrap();
-    assert_eq!(shared.status(), 200);
+    // Once an admin's machine says, from the install's log, that Sam may open Everyone, Sam's clients may reach it too.
+    let global = B64U.encode(&rand::random::<[u8; 32]>());
+    assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": global, "people": [ANDRE, SAM] })).0, 200);
     v.internal("grant", json!({ "user": SAM, "from": "sam's own passkey prf output", "to": "sam's authorization code", "client": "iphone" }));
     let (sam, until) = v.token(SAM, "iphone");
     v.internal("rekey", json!({ "from": "sam's authorization code", "to": "sam's refresh token", "token": sam, "until": until }));
     let andre = vault.keys_until(&token, &[("global", "board", None)]).map(|k| k.0).unwrap();
     assert_eq!(vault.keys_until(&sam, &[("global", "board", None)]).map(|k| k.0).unwrap(), andre);
     assert!(vault.keys_until(&sam, &[(&format!("user:{ANDRE}"), "board", None)]).is_err());
+    // Nobody opens a scope to anyone else on their own.
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    let shared = agent.post(format!("{}/share", v.url)).header("authorization", format!("Bearer {token}")).send_json(json!({ "scope": format!("user:{ANDRE}"), "user": SAM })).unwrap();
+    assert_eq!(shared.status(), 404);
+
+    // Once the log says Sam may not, it's taken away: his sessions get no key and no URL under it, while Andre's do.
+    assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": global, "people": [ANDRE] })).0, 200);
+    assert!(vault.keys_until(&sam, &[("global", "board", None)]).is_err());
+    assert!(vault.urls(&sam, &["global/board/main/newest"], &[], &[]).is_err());
+    assert_eq!(vault.keys_until(&token, &[("global", "board", None)]).map(|k| k.0).unwrap(), andre);
+    // Saying so never replaces the key it was settled with.
+    assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [ANDRE, SAM] })).0, 409);
+    assert!(vault.keys_until(&sam, &[("global", "board", None)]).is_err());
 }
 
 #[test]

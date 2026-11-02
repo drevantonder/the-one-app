@@ -73,6 +73,8 @@ export class Vault extends DurableObject {
         this.sql.exec("drop table unseals");
       }
     }
+    // A hash of each scope's key, so `kernel keys` can say who may open it again without replacing it.
+    if (!this.sql.exec("select name from pragma_table_info('scopes') where name = 'hash'").toArray().length) this.sql.exec("alter table scopes add column hash text");
     this.items = new Items(this.sql, this);
   }
 
@@ -112,7 +114,6 @@ export class Vault extends DurableObject {
       case "GET /session": return json(await this.sessionAbout(token));
       case "POST /keys": return json(await this.keys(token, claims, body));
       case "POST /urls": return json(await this.urls(token, claims, body));
-      case "POST /share": return json(await this.share(token, claims, body));
       case "POST /erase": return json(await this.erase(token, claims, body));
       case "GET /items": return json(this.items.list((await this.sessionOf(token)).held, url.searchParams.get("scope")));
       case "POST /items": return json(await this.items.set((await this.sessionOf(token)).held, body).catch((err) => refuse(err.status || 400, err.message)));
@@ -260,32 +261,38 @@ export class Vault extends DurableObject {
     return { id: await this.seal(secretOf(secret), { user, kind: "recovery", name: "Recovery", held, until: Number(until) }) };
   }
 
-  /// A scope's key that the install's nodes made before it had a kernel, given by an admin's machine (`kernel keys`):
-  /// it's the scope's key from now on, sealed to the recovery key and to each of `people` who has keys here, in place
-  /// of one this vault made. Only while the scope's key isn't settled, so nothing was sealed under the one it replaces.
+  /// A scope's key and who may open it, as the install's log says, given by an admin's machine (`kernel keys`): it's
+  /// sealed to each of `people` who has keys here, and nobody else opens it here any more. A key the install's nodes
+  /// made before it had a kernel replaces one this vault made while the scope's key isn't settled, so nothing was
+  /// sealed under the one it replaces; after that, only the scope's own key is taken.
   async scopeKeyGiven({ scope, key, people }) {
     if (!SCOPE.test(scope || "")) refuse(400, `${scope} isn't a scope`);
-    const [had] = this.sql.exec("select given from scopes where scope = ?", scope).toArray();
-    if (had?.given) refuse(409, `keys under ${scope} were given out here already, so its key stays`);
     const bytes = b64u.decode(String(key || ""));
     if (bytes.length !== 32) refuse(400, "a scope's key is 32 bytes");
-    const recovery = b64u.decode(this.env.RECOVERY_KEY || refuse(503, "the vault has no recovery key"));
-    this.sql.exec("insert or replace into scopes (scope, recovery, made, given) values (?, ?, ?, ?)", scope, await sealTo(recovery, bytes), Date.now(), Date.now());
-    this.sql.exec("delete from grants where scope = ?", scope);
-    const granted = [];
+    const hash = await keyHash(bytes);
+    const [had] = this.sql.exec("select given, hash from scopes where scope = ?", scope).toArray();
+    if (had?.given && !had.hash) refuse(409, `nobody has opened ${scope} here since the vault learnt to check its key: sign in, and run kernel keys again`);
+    if (had?.given && had.hash !== hash) refuse(409, `${scope}'s key was settled here already, and it isn't that one`);
+    if (!had?.given) {
+      const recovery = b64u.decode(this.env.RECOVERY_KEY || refuse(503, "the vault has no recovery key"));
+      this.sql.exec("insert or replace into scopes (scope, recovery, made, given, hash) values (?, ?, ?, ?, ?)", scope, await sealTo(recovery, bytes), Date.now(), Date.now(), hash);
+    }
+    const may = new Map();
     for (const user of Array.isArray(people) ? people : []) {
       const [person] = this.sql.exec("select public from people where user = ?", String(user)).toArray();
-      if (!person) continue;
-      this.sql.exec("insert into grants (user, scope, sealed) values (?, ?, ?)", user, scope, await sealTo(person.public, bytes));
-      granted.push(user);
+      if (person) may.set(String(user), person.public);
     }
-    return { granted };
+    for (const { user } of this.sql.exec("select user from grants where scope = ?", scope).toArray()) {
+      if (!may.has(user)) this.sql.exec("delete from grants where user = ? and scope = ?", user, scope);
+    }
+    for (const [user, publicKey] of may) this.sql.exec("insert or replace into grants (user, scope, sealed) values (?, ?, ?)", user, scope, await sealTo(publicKey, bytes));
+    return { granted: [...may.keys()] };
   }
 
   async makeScope(scope, user, publicKey) {
     const key = random(32);
     const recovery = b64u.decode(this.env.RECOVERY_KEY);
-    this.sql.exec("insert into scopes (scope, recovery, made) values (?, ?, ?)", scope, await sealTo(recovery, key), Date.now());
+    this.sql.exec("insert into scopes (scope, recovery, made, hash) values (?, ?, ?, ?)", scope, await sealTo(recovery, key), Date.now(), await keyHash(key));
     this.sql.exec("insert into grants (user, scope, sealed) values (?, ?, ?)", user, scope, await sealTo(publicKey, key));
   }
 
@@ -382,7 +389,9 @@ export class Vault extends DurableObject {
     if (held.scopes && !held.scopes.includes(scope)) refuse(403, `this may not use ${scope}`);
     const grant = this.sql.exec("select sealed from grants where user = ? and scope = ?", held.user, scope).toArray()[0];
     if (!grant) refuse(403, `${scope} isn't open to this person`);
-    return openSealed({ secret: b64u.decode(held.key), public: b64u.decode(held.public) }, grant.sealed);
+    const key = await openSealed({ secret: b64u.decode(held.key), public: b64u.decode(held.public) }, grant.sealed);
+    if (!this.sql.exec("select hash from scopes where scope = ?", scope).toArray()[0]?.hash) this.sql.exec("update scopes set hash = ? where scope = ?", await keyHash(key), scope);
+    return key;
   }
 
   /// The keys a call names: `{ keys: [{ scope, app, database? }] }` → each with its `key`, and until when the
@@ -496,21 +505,15 @@ export class Vault extends DurableObject {
     }
     return { ...(await bucketUrls(bucket, { read, create, replace }, URLS)), until: Date.now() + URLS * 1000 };
   }
-
-  /// Opens a scope to another person: `{ scope, user }`, by someone whose session opens it.
-  async share(token, claims, { scope, user }) {
-    const { held } = await this.sessionOf(token);
-    const key = await this.scopeKey(held, scope);
-    const person = this.sql.exec("select public from people where user = ?", user).toArray()[0] || refuse(404, "that person has no keys yet");
-    this.sql.exec("insert or replace into grants (user, scope, sealed) values (?, ?, ?)", user, scope, await sealTo(person.public, key));
-    return {};
-  }
 }
 
 /// Refuses unless a session may use `app` (standing work may use only the apps it was let run).
 function mayUse(held, app) {
   if (held.apps && !held.apps.includes(app)) refuse(403, `this may not use ${app}`);
 }
+
+/// A scope's key's hash, which says whether a key given is it.
+const keyHash = async (key) => b64u.encode(await hkdf(key, "one/scope-key-hash"));
 
 const pick = ({ scope, app, database }) => (database === undefined ? { scope, app } : { scope, app, database });
 

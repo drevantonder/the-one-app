@@ -406,9 +406,13 @@ fn run(args: Vec<String>) -> Result<()> {
             let settings = one::kernel::Settings::load()?;
             let keys = post("/v1/kernel/keys", json!({}))?;
             let keys = keys.as_array().map(Vec::as_slice).unwrap_or_default();
-            for ((_, people), given) in one::kernel::give_keys(&settings, keys)?.into_iter().zip(keys) {
-                let names: Vec<&str> = people.iter().map(|u| given["names"][u].as_str().unwrap_or(u)).collect();
-                println!("{}: {}", given["title"].as_str().unwrap_or(""), if names.is_empty() { "no one with it has signed in yet".to_string() } else { format!("opens for {}", names.join(", ")) });
+            for (people, given) in one::kernel::give_keys(&settings, keys).into_iter().zip(keys) {
+                let said = match people {
+                    Err(err) => format!("{err:#}"),
+                    Ok(people) if people.is_empty() => "no one with it has signed in yet".to_string(),
+                    Ok(people) => format!("opens for {}", people.iter().map(|u| given["names"][u].as_str().unwrap_or(u)).collect::<Vec<_>>().join(", ")),
+                };
+                println!("{}: {said}", given["title"].as_str().unwrap_or(""));
             }
         }
         ["serverless", "deploy"] => {
