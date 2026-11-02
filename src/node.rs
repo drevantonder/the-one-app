@@ -280,6 +280,8 @@ impl Reply {
 
 pub struct Inner {
     dir: PathBuf,
+    /// What this machine's own programs send to say they are: `api::LOCAL_TOKEN`, a file only its user reads.
+    local_token: String,
     key: SigningKey,
     id: Key,
     name: Mutex<String>,
@@ -421,6 +423,7 @@ impl Node {
         }
         let node = Node(Arc::new(Inner {
             dir: dir.to_path_buf(),
+            local_token: load_local_token(dir)?,
             key,
             id,
             name: Mutex::new(server.name),
@@ -517,6 +520,11 @@ impl Node {
 
     pub fn id(&self) -> Key {
         self.0.id
+    }
+
+    /// What this machine's own programs send to say they are (`api::LOCAL_TOKEN`).
+    pub fn local_token(&self) -> &str {
+        &self.0.local_token
     }
 
     /// Runs `f` on this server's install.
@@ -1041,6 +1049,20 @@ fn load_server(dir: &Path) -> Result<ServerFile> {
     let file = ServerFile { secret: hex(&rand::random::<[u8; 32]>()), name: hostname() };
     write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
     Ok(file)
+}
+
+/// This machine's own programs' token, made once: only its user reads the file, which a program in a VM or emulator
+/// here, or a page, can't.
+fn load_local_token(dir: &Path) -> Result<String> {
+    let path = dir.join(crate::api::LOCAL_TOKEN);
+    match std::fs::read_to_string(&path) {
+        Ok(token) if !token.trim().is_empty() => Ok(token.trim().to_string()),
+        _ => {
+            let token = hex(&rand::random::<[u8; 32]>());
+            write_private(&path, token.as_bytes())?;
+            Ok(token)
+        }
+    }
 }
 
 fn hostname() -> String {

@@ -28,7 +28,7 @@ type call struct {
 }
 
 func main() {
-	node := "http://" + cmp.Or(os.Getenv("ONE_ADDR"), "127.0.0.1:4747")
+	node := "http://" + nodeAddr()
 	home, _ := os.UserHomeDir()
 	m, err := load(node, cmp.Or(os.Getenv("MESSENGER_DATA"), filepath.Join(home, ".local", "share", "one", "messenger")))
 	if err != nil {

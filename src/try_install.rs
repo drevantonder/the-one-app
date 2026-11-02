@@ -59,12 +59,10 @@ pub fn try_install(rest: &[String]) -> Result<()> {
         let settings = load_kernel(&dir)?;
         return client(&dir, &checkout, &settings, &rest[1..]);
     }
-    // Before any thread starts: the CLI has none.
+    // Before any thread starts: the CLI has none. Its home, so the CLI asks its node with its token, as nobody signed in,
+    // and its kernel's settings are its own kernel's.
     unsafe { std::env::set_var(addr_var(), &addr) };
-    if rest.first().map(String::as_str) == Some("kernel") {
-        // Its kernel's settings, not this machine's own kernel's.
-        unsafe { std::env::set_var(format!("{}_HOME", CLI.to_uppercase()), &dir) };
-    }
+    unsafe { std::env::set_var(format!("{}_HOME", CLI.to_uppercase()), &dir) };
     if !rest.is_empty() {
         return crate::run(rest.to_vec());
     }
@@ -130,7 +128,7 @@ fn start_new(dir: &Path) -> Result<String> {
     eprintln!("Starting a new try install for this checkout…");
     stop(dir, true)?;
     // Called what the person is called in their own install, if this machine is in one.
-    let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).build().into();
+    let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(one::api::as_this_machine).build().into();
     let mine = quick.get(format!("http://{}/v1/state", crate::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<Value>().ok());
     let me = mine.and_then(|s| s["user"]["name"].as_str().or(s["me"]["name"].as_str()).map(String::from));
     let me = me.or_else(|| std::env::var("USER").ok()).unwrap_or_else(|| "You".into());
@@ -139,6 +137,7 @@ fn start_new(dir: &Path) -> Result<String> {
     let bucket = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
     std::fs::write(dir.join("bucket-addr"), &bucket)?;
     let addr = spawn_node(dir, free.as_deref())?;
+    let agent = || try_agent(dir);
     let on = |path: &str| format!("http://{addr}{path}");
     let created = crate::request(agent().post(on("/v1/create")).send_json(json!({ "name": "Try", "user_name": me })))?;
     let recovery = created["recovery"].as_str().context("the try install gave no recovery key")?;
@@ -194,8 +193,20 @@ fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     )?;
     std::fs::write(dir.join("pid"), pid.to_string())?;
     std::fs::write(dir.join("addr"), &addr)?;
-    wait_for(&format!("http://{addr}/v1/state"), &dir.join("node.log"))?;
+    wait_for(&try_agent(dir), &format!("http://{addr}/v1/state"), &dir.join("node.log"))?;
     Ok(addr)
+}
+
+/// A client asking the try install's node as one of this machine's programs: with the token in its home.
+fn try_agent(dir: &Path) -> ureq::Agent {
+    let dir = dir.to_path_buf();
+    let with_token = move |mut req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext| {
+        if let Some(token) = one::api::local_token(&dir).and_then(|t| t.parse().ok()) {
+            req.headers_mut().insert(one::api::LOCAL_TOKEN_HEADER, token);
+        }
+        next.handle(req)
+    };
+    ureq::Agent::config_builder().http_status_as_error(false).middleware(with_token).build().into()
 }
 
 /// Starts the try install's kernel, and waits for its address to answer.
@@ -204,12 +215,12 @@ fn spawn_kernel(dir: &Path, settings: &one::kernel::Settings) -> Result<()> {
         anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the try install's kernel's port {port} is taken now: {CLI} try stop, then {CLI} try for a new one");
     }
     spawn(dir, std::process::Command::new(std::env::current_exe()?).args(["kernel", "serve"]), "kernel.log")?;
-    wait_for(&format!("{}/.well-known/oauth-authorization-server", settings.address), &dir.join("kernel.log"))
+    wait_for(&agent(), &format!("{}/.well-known/oauth-authorization-server", settings.address), &dir.join("kernel.log"))
 }
 
-fn wait_for(url: &str, log: &Path) -> Result<()> {
+fn wait_for(agent: &ureq::Agent, url: &str, log: &Path) -> Result<()> {
     let start = Instant::now();
-    while !agent().get(url).call().is_ok_and(|r| r.status().is_success()) {
+    while !agent.get(url).call().is_ok_and(|r| r.status().is_success()) {
         anyhow::ensure!(start.elapsed() < Duration::from_secs(120), "the try install didn't start: {}", log.display());
         std::thread::sleep(Duration::from_millis(250));
     }

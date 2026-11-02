@@ -289,13 +289,13 @@ async fn start(name: &str) -> (one::node::Node, iroh::protocol::Router) {
 }
 
 /// GETs or POSTs the node's local API, as the Mac app does.
-async fn api(addr: &str, method: &str, path: &str, body: Value) -> Value {
+async fn api(addr: &str, token: &str, method: &str, path: &str, body: Value) -> Value {
     let url = format!("http://{addr}{path}");
-    let method = method.to_string();
+    let (method, token) = (method.to_string(), token.to_string());
     tokio::task::spawn_blocking(move || {
         let mut reply = match method.as_str() {
-            "GET" => ureq::get(&url).call(),
-            _ => ureq::post(&url).send_json(&body),
+            "GET" => ureq::get(&url).header(one::api::LOCAL_TOKEN_HEADER, &token).call(),
+            _ => ureq::post(&url).header(one::api::LOCAL_TOKEN_HEADER, &token).send_json(&body),
         }
         .unwrap_or_else(|e| panic!("{url}: {e}"));
         reply.body_mut().read_json::<Value>().unwrap()
@@ -334,7 +334,8 @@ async fn the_apps_decode_what_the_node_sends() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     let router = one::api::router(node.clone());
-    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    tokio::spawn(one::api::serve(listener, router));
+    let token = node.local_token().to_string();
 
     // An app with everything a shell shows: operations, a screen, a widget, a Vault need; on a page, arranged.
     let source = r##"export default {
@@ -352,27 +353,27 @@ async fn the_apps_decode_what_the_node_sends() {
     node.member("app", json!({ "name": "lamps", "owner": format!("user:{}", me.user) })).await.unwrap();
     node.deploy(&me, "lamps", &blob).await.unwrap();
     node.member("app", json!({ "name": "lamps", "owner": format!("user:{}", me.user), "source": "https://example.com/lamps" })).await.unwrap();
-    api(&addr, "POST", "/v1/install", json!({ "app": "lamps", "scope": "user", "installed": true })).await;
-    api(&addr, "POST", "/v1/arrange", json!({ "page": "user", "items": [{ "app": "lamps", "widget": "glance", "id": "w1", "size": "small", "options": { "room": "kitchen" } }, { "app": "lamps" }], "hidden": [] })).await;
-    api(&addr, "POST", "/v1/group", json!({ "name": "Home" })).await;
-    api(&addr, "POST", "/v1/vault", json!({ "scope": "user", "title": "Hub", "fields": { "user": { "value": "andre" }, "token": { "value": "s3cret", "secret": true } }, "hosts": ["hub.example.com"], "apps": ["lamps"] })).await;
-    api(&addr, "POST", "/v1/vault/request", json!({ "scope": "user", "app": "lamps", "need": "hub", "why": "To reach the hub" })).await;
+    api(&addr, &token, "POST", "/v1/install", json!({ "app": "lamps", "scope": "user", "installed": true })).await;
+    api(&addr, &token, "POST", "/v1/arrange", json!({ "page": "user", "items": [{ "app": "lamps", "widget": "glance", "id": "w1", "size": "small", "options": { "room": "kitchen" } }, { "app": "lamps" }], "hidden": [] })).await;
+    api(&addr, &token, "POST", "/v1/group", json!({ "name": "Home" })).await;
+    api(&addr, &token, "POST", "/v1/vault", json!({ "scope": "user", "title": "Hub", "fields": { "user": { "value": "andre" }, "token": { "value": "s3cret", "secret": true } }, "hosts": ["hub.example.com"], "apps": ["lamps"] })).await;
+    api(&addr, &token, "POST", "/v1/vault/request", json!({ "scope": "user", "app": "lamps", "need": "hub", "why": "To reach the hub" })).await;
 
     let mut problems = vec![];
     for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]"), ("/v1/vault", "[VaultItem]"), ("/v1/vault/requests", "[VaultRequest]")] {
-        let sent = api(&addr, "GET", path, Value::Null).await;
+        let sent = api(&addr, &token, "GET", path, Value::Null).await;
         assert!(sent.as_array().is_none_or(|l| !l.is_empty()), "{path} sent nothing to check");
         check(&structs, "", ty, &sent, path, &mut problems);
     }
     let mut android = vec![];
     for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]")] {
-        check(&classes, "", ty, &api(&addr, "GET", path, Value::Null).await, path, &mut android);
+        check(&classes, "", ty, &api(&addr, &token, "GET", path, Value::Null).await, path, &mut android);
     }
     let mut windows = vec![];
     for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]"), ("/v1/badges?scope=user", "[String: Int32]")] {
-        check(&windows_classes, "", ty, &api(&addr, "GET", path, Value::Null).await, path, &mut windows);
+        check(&windows_classes, "", ty, &api(&addr, &token, "GET", path, Value::Null).await, path, &mut windows);
     }
-    let state = api(&addr, "GET", "/v1/state", Value::Null).await;
+    let state = api(&addr, &token, "GET", "/v1/state", Value::Null).await;
     assert!(!state["install"]["groups"].as_array().unwrap().is_empty() && state["arrangements"]["user"].is_object(), "{state}");
     assert!(problems.is_empty(), "the Apple apps can't decode what the node sends:\n{}", problems.join("\n"));
     assert!(android.is_empty(), "the Android app can't decode what the node sends:\n{}", android.join("\n"));
@@ -650,4 +651,22 @@ fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
     // As an app's screen, the same runs (so the policy is what stops it).
     assert_ne!(title("app", own, false), "ours ran, then nothing", "without the policy, this page does run what's put in it");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// This machine's own programs in every language send its node the token from the file it keeps it in, in the header
+/// it reads it from (`api::LOCAL_TOKEN`, `api::LOCAL_TOKEN_HEADER`): each sidecar, with the same code, and the Mac app.
+#[test]
+fn every_program_on_a_machine_sends_its_node_the_token_where_it_looks() {
+    let go = read("sidecars/agent-devices/node.go");
+    for dir in std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sidecars")).unwrap().flatten().filter(|d| d.path().join("main.go").exists()) {
+        let name = dir.file_name().to_string_lossy().to_string();
+        assert_eq!(read(&format!("sidecars/{name}/node.go")), go, "sidecars/{name}/node.go differs from agent-devices'");
+        assert!(read(&format!("sidecars/{name}/main.go")).contains("nodeAddr()"), "sidecars/{name} asks the node without its token");
+    }
+    let swift = read("apple/Shared/Node.swift");
+    for (language, source) in [("Go", &go), ("Swift", &swift)] {
+        for name in [one::api::LOCAL_TOKEN, one::api::LOCAL_TOKEN_HEADER] {
+            assert!(source.contains(&format!("\"{name}\"")), "{language} doesn't name {name} as the node does");
+        }
+    }
 }

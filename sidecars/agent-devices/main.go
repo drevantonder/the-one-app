@@ -40,7 +40,7 @@ func main() {
 	home, _ := os.UserHomeDir()
 	dir := cmp.Or(os.Getenv("AGENT_DEVICES_DATA"), filepath.Join(home, ".local", "share", "one", "agent-devices"))
 	dataDir = dir
-	node := "http://" + cmp.Or(os.Getenv("ONE_ADDR"), "127.0.0.1:4747")
+	node := "http://" + nodeAddr()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Fatal(err)
 	}

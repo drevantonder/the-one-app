@@ -114,39 +114,57 @@ async fn echo() -> u16 {
     port
 }
 
-/// An app's screen opened in a browser at the node's own address is that app's code, not this machine's own programs:
-/// whatever a page asks there is refused, and nothing the node answers runs as script at its address.
+/// Only this machine's own programs use the local API as this machine: over its loopback, with the token in the node's
+/// home. A program in a VM or emulator here reaches 127.0.0.1 through QEMU and names any host it likes, but has no
+/// token; a connection from elsewhere has none to show. An app's screen opened in a browser at the node's own address
+/// is that app's code: whatever a page asks there is refused, and nothing the node answers runs as script there.
 #[tokio::test(flavor = "multi_thread")]
-async fn no_page_uses_the_local_api_as_this_machine() {
+async fn only_this_machines_own_programs_use_the_local_api() {
     let (a, _ra) = start("pages").await;
     a.create("Pages", "Andre").await.unwrap();
     deploy_module(&a, "lamps", r#"export default { name: "lamps", ops: {}, screens: { main: { title: "Lamps", html: "<p>Lamps</p>" } } };"#).await;
+    let token = a.local_token().to_string();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let at = format!("http://{}", listener.local_addr().unwrap());
-    tokio::spawn(async move { axum::serve(listener, one::api::router(a)).await.unwrap() });
+    tokio::spawn(one::api::serve(listener, one::api::router(a.clone())));
+    // The same API, over a connection from another machine.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let elsewhere = format!("http://{}", listener.local_addr().unwrap());
+    let from = |mut req: axum::extract::Request| async move {
+        req.extensions_mut().insert(axum::extract::ConnectInfo(std::net::SocketAddr::from(([10, 0, 2, 15], 50000))));
+        req
+    };
+    tokio::spawn(async move { axum::serve(listener, one::api::router(a).layer(axum::middleware::map_request(from))).await.unwrap() });
     let own = at.clone();
     tokio::task::spawn_blocking(move || {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-        let get = |path: &str, headers: &[(&str, &str)]| {
-            let mut req = agent.get(format!("{own}{path}"));
+        let get_at = |at: &str, path: &str, headers: &[(&str, &str)]| {
+            let mut req = agent.get(format!("{at}{path}"));
             for (k, v) in headers {
                 req = req.header(*k, *v);
             }
             req.call().unwrap()
         };
-        // This machine's own programs, a shell fetching a screen among them, send no browser's headers.
+        let mine = (one::api::LOCAL_TOKEN_HEADER, token.as_str());
+        let get = |path: &str, headers: &[(&str, &str)]| get_at(&own, path, &[&[mine][..], headers].concat());
+        // This machine's own programs, a shell fetching a screen among them, send the token and no browser's headers.
         assert_eq!(get("/v1/vault", &[]).status(), 200);
         let screen = get("/v1/screens/lamps/main", &[]);
         assert_eq!(screen.status(), 200);
         assert_eq!(screen.headers()["content-security-policy"], "sandbox", "a screen opened in a browser runs no script at the node's address");
+        // A program in a VM here: this machine's address, and its own Host, but no token, or a wrong one.
+        for headers in [&[][..], &[("host", "127.0.0.1")], &[("host", "localhost:4747")], &[(one::api::LOCAL_TOKEN_HEADER, "00")]] {
+            assert_eq!(get_at(&own, "/v1/vault", headers).status(), 403, "{headers:?}");
+            assert_eq!(get_at(&own, "/v1/state", headers).status(), 403, "{headers:?}");
+        }
+        // From another machine, even with the token.
+        assert_eq!(get_at(&elsewhere, "/v1/vault", &[mine, ("host", "127.0.0.1")]).status(), 403);
         // What a page at the node's own address asks, a same-origin GET (Sec-Fetch-Site only) or anything with an Origin.
         for headers in [&[("sec-fetch-site", "same-origin")][..], &[("origin", own.as_str())], &[("origin", "null")]] {
             assert_eq!(get("/v1/vault", headers).status(), 403, "{headers:?}");
         }
-        let call = agent.post(format!("{own}/v1/call")).header("origin", own.as_str()).header("sec-fetch-site", "same-origin").send_json(json!({ "app": "board", "op": "topics", "input": {} })).unwrap();
+        let call = agent.post(format!("{own}/v1/call")).header(mine.0, mine.1).header("origin", own.as_str()).header("sec-fetch-site", "same-origin").send_json(json!({ "app": "board", "op": "topics", "input": {} })).unwrap();
         assert_eq!(call.status(), 403);
-        // What the person opens themselves, a link to a file the node keeps, say, is theirs.
-        assert_eq!(get("/v1/state", &[("sec-fetch-site", "none")]).status(), 200);
     })
     .await
     .unwrap();

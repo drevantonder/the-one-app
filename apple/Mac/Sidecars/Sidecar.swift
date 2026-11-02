@@ -60,7 +60,9 @@ enum Sidecars {
 
     /// The node's next call; nil if there was none for 25 seconds.
     private static func next(_ url: URL) async throws -> Call? {
-        let (data, response) = try await session.data(for: URLRequest(url: url.appending(path: "calls"), timeoutInterval: 40))
+        var request = URLRequest(url: url.appending(path: "calls"), timeoutInterval: 40)
+        LocalToken.add(to: &request)
+        let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode
         if status == 204 { return nil }
         guard status == 200, let call = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -74,6 +76,7 @@ enum Sidecars {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        LocalToken.add(to: &request)
         let (_, response) = try await session.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
     }

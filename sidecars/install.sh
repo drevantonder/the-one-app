@@ -16,7 +16,7 @@ if [ -n "$config" ]; then
 	upper=$(echo "$cli" | tr a-z A-Z)
 	home=$(on "systemctl show -p Environment $cli 2>/dev/null | tr ' ' '\n' | sed -n 's/^${upper}_HOME=//p'")
 	home=${home:-'$HOME'/.local/share/$cli}
-	env="ONE_ADDR=127.0.0.1:$(field port) ONE_CLI=$cli $(echo "$sidecar" | tr a-z- A-Z_)_DATA=$home/$sidecar"
+	env="ONE_ADDR=127.0.0.1:$(field port) ONE_CLI=$cli ONE_HOME=$home $(echo "$sidecar" | tr a-z- A-Z_)_DATA=$home/$sidecar"
 fi
 # Installed by the server's owner who runs this, and allowed there if an owner removed it before.
 allow() { on "~/.local/bin/$node sidecars add $sidecar" || echo "$node sidecars add $sidecar failed: the sidecar serves once an owner allows it there" >&2; }

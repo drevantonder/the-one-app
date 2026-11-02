@@ -244,6 +244,22 @@ protocol NodeTransport: Sendable {
     var unreachable: String { get }
 }
 
+/// What this machine's own programs send its node to say they are: the token in the node's home, which only this
+/// machine's user can read (src/api.rs's `LOCAL_TOKEN`). Only a Mac has a node of its own.
+enum LocalToken {
+    static func add(to request: inout URLRequest) {
+        #if os(macOS)
+        let env = ProcessInfo.processInfo.environment
+        let cli = Auth.cli
+        let data = env["XDG_DATA_HOME"].map { URL(filePath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: ".local/share")
+        let home = env["\(cli.uppercased())_HOME"].map { URL(filePath: $0) } ?? data.appending(path: cli)
+        if let token = try? String(contentsOf: home.appending(path: "local-token"), encoding: .utf8) {
+            request.setValue(token.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "x-one-local-token")
+        }
+        #endif
+    }
+}
+
 /// The node's HTTP API: this machine's own node, or the install's address; with `auth`, as the person signed in.
 struct HTTPNode: NodeTransport {
     var base: URL
@@ -255,10 +271,12 @@ struct HTTPNode: NodeTransport {
         here ? "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." : String(localized: "Your devices aren’t answering.")
     }
 
-    /// A request as the person signed in, if they are: a refused token is renewed once.
+    /// A request as the person signed in, if they are: a refused token is renewed once. To this Mac's own node, it's
+    /// also one of this Mac's own programs.
     private func signed(_ request: URLRequest) async throws -> (URLRequest, String?) {
-        guard let auth else { return (request, nil) }
         var request = request
+        if here { LocalToken.add(to: &request) }
+        guard let auth else { return (request, nil) }
         let token = try await auth.token()
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         return (request, token)

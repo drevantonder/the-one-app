@@ -149,7 +149,9 @@ class Install:
                 git("init", "-q")
                 git("add", "-A")
                 git("commit", "-qm", "First version")
-                git("push", "-q", f"http://{self.addr}/repos/{repo}.git", "main")
+                # As this machine's own program, with the node's token, before the node includes it in git's config.
+                token = (self.home / ".local/share" / CLI / "local-token").read_text().strip()
+                git("-c", f"http.extraHeader=x-one-local-token: {token}", "push", "-q", f"http://{self.addr}/repos/{repo}.git", "main")
         # Wait for the node to write the harness, as it does on every device.
         agents = self.home / ".config/opencode/AGENTS.md"
         for _ in range(150):

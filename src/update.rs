@@ -648,7 +648,7 @@ fn await_mac(mac: &Value) -> Result<(Vec<(String, String)>, Vec<String>)> {
 }
 
 fn blob(hash: &str) -> Result<Vec<u8>> {
-    let mut resp = ureq::get(format!("http://{}/v1/blobs/{hash}", crate::addr())).call()?;
+    let mut resp = crate::agent().get(format!("http://{}/v1/blobs/{hash}", crate::addr())).call()?;
     Ok(resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)
 }
 

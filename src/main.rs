@@ -902,7 +902,7 @@ fn connection() -> String {
 }
 
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder().http_status_as_error(false).build().into()
+    api::agent()
 }
 
 fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
@@ -1131,7 +1131,7 @@ async fn serve(is_try: bool) -> Result<()> {
             unsafe { libc::kill(0, libc::SIGTERM) };
         });
     }
-    let http = axum::serve(listener, routes);
+    let http = api::serve(listener, routes);
     tokio::select! {
         r = http => r?,
         _ = tokio::signal::ctrl_c() => {}

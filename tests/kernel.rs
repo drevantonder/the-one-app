@@ -882,7 +882,7 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = format!("http://{}", listener.local_addr().unwrap());
         let app = one::api::router(node.clone());
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        tokio::spawn(one::api::serve(listener, app));
         (node, router, api)
     });
     // Andre made the install; Sam is a member. The server is the install's, so both use it; it takes sign-ins made
@@ -951,7 +951,7 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert_eq!(get(&sams, &theirs), 400, "a sign-in reads a file nobody gave it");
     let put = |token: &str, forwarded: bool| {
         let req = agent.post(format!("{api}/v1/blobs")).header("authorization", format!("Bearer {token}"));
-        let mut resp = if forwarded { req.header("forwarded", "host=\"one.example\"") } else { req }.send(&b"Sam's file"[..]).unwrap();
+        let mut resp = if forwarded { req.header("forwarded", "host=\"one.example\"") } else { req.header(one::api::LOCAL_TOKEN_HEADER, node.local_token()) }.send(&b"Sam's file"[..]).unwrap();
         (resp.status().as_u16(), resp.body_mut().read_json::<Value>().ok().and_then(|b| b["blob"].as_str().map(str::to_string)))
     };
     assert_eq!(put(&sams, true).0, 403, "a sign-in from elsewhere puts no files here");

@@ -205,7 +205,7 @@ pub fn sync(records: &[Record]) {
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(60));
                 // The person's apps, for their skills: asked here, where waiting for an answer holds nothing up.
-                let apps = ureq::get(&format!("http://{}/v1/apps", crate::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<Value>().ok());
+                let apps = crate::api::agent().get(&format!("http://{}/v1/apps", crate::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<Value>().ok());
                 if let Some(apps) = apps.and_then(|a| a.as_array().cloned()) {
                     *APPS.lock().unwrap_or_else(|e| e.into_inner()) = Some(apps);
                 }
@@ -272,13 +272,17 @@ const HOOK_PATH: &str = "/hooks/board/news";
 /// instructions reach it in AGENTS.md and the MCP server's.
 const PI_EXTENSION: &str = r#"// Installed by {{name}}'s Board: adds to each prompt what other
 // agents have posted since this session last looked.
+import { readFileSync } from "node:fs"
+
 const url = "http://{{addr}}/hooks/board/news"
+// Asked as one of this machine's own programs: with the token only its user can read.
+const token = () => readFileSync({{token}}, "utf8").trim()
 
 export default function (pi: any) {
   pi.on("before_agent_start", async (event: any, ctx: any) => {
     if (event.messageType !== "user") return
     try {
-      const res = await fetch(url, { method: "POST", headers: { connection: "close" }, body: JSON.stringify({ session_id: "pi:" + ctx.sessionManager.getSessionId() }), signal: AbortSignal.timeout(3000) })
+      const res = await fetch(url, { method: "POST", headers: { connection: "close", "{{header}}": token() }, body: JSON.stringify({ session_id: "pi:" + ctx.sessionManager.getSessionId() }), signal: AbortSignal.timeout(3000) })
       const text = res.ok ? (await res.text()).trim() : ""
       if (text) return { message: { customType: "{{cli}}-board", content: text, display: true } }
     } catch {}
@@ -305,7 +309,9 @@ fn harnesses(home: &Path, written: &mut Written) {
     let config = dir("XDG_CONFIG_HOME", home.join(".config"));
     let pi = dir("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
     let addr = crate::api::addr();
-    let hook = format!("curl -sf --max-time 3 --data-binary @- http://{addr}{HOOK_PATH} || true");
+    // Asked as one of this machine's own programs: with the token only its user can read.
+    let token = crate::home().join(crate::api::LOCAL_TOKEN);
+    let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{HOOK_PATH} || true", crate::api::LOCAL_TOKEN_HEADER, token.display());
     // Another white label's node on this machine has a hook of its own, on its own port.
     let port = format!(":{}{HOOK_PATH}", addr.rsplit(':').next().unwrap_or_default());
     let server = crate::skills::server_name();
@@ -317,7 +323,11 @@ fn harnesses(home: &Path, written: &mut Written) {
         Some(exe) if installed.canonicalize().ok() != Some(exe.clone()) => exe.to_string_lossy().to_string(),
         _ => installed.to_string_lossy().to_string(),
     };
-    let plugin = |text: &str| text.replace("{{name}}", crate::config::NAME).replace("{{cli}}", crate::config::CLI).replace("{{addr}}", &addr);
+    let token = serde_json::to_string(&token.to_string_lossy()).unwrap_or_default();
+    let plugin = |text: &str| {
+        let text = text.replace("{{name}}", crate::config::NAME).replace("{{cli}}", crate::config::CLI).replace("{{addr}}", &addr);
+        text.replace("{{header}}", crate::api::LOCAL_TOKEN_HEADER).replace("{{token}}", &token)
+    };
     let s = |v: &str| CstInputValue::String(v.to_string());
     let args = |harness: &str| mcp_args(harness).iter().map(|a| s(a)).collect::<Vec<_>>();
     if claude.is_dir() {
@@ -344,6 +354,30 @@ fn harnesses(home: &Path, written: &mut Written) {
     }
     if pi.is_dir() {
         written.write(&pi.join("extensions").join(format!("{}-board.ts", crate::config::CLI)), &plugin(PI_EXTENSION));
+    }
+    git(&addr);
+}
+
+/// Git reaches Repos at the node (`git clone http://localhost:<port>/repos/<repo>.git`) as one of this machine's own
+/// programs: the person's git config includes one of the node's, which only they can read, sending its token there.
+fn git(addr: &str) {
+    let Some(token) = crate::api::local_token(&crate::home()) else { return };
+    let port = addr.rsplit(':').next().unwrap_or_default();
+    let file = crate::home().join("git-config");
+    let text: String = ["localhost", "127.0.0.1"].iter().map(|host| format!("[http \"http://{host}:{port}/\"]\n\textraHeader = {}: {token}\n", crate::api::LOCAL_TOKEN_HEADER)).collect();
+    if std::fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let wrote = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&file).and_then(|mut f| f.write_all(text.as_bytes()));
+        if let Err(err) = wrote {
+            once(format!("couldn't write {}: {err}", file.display()));
+            return;
+        }
+    }
+    let path = file.to_string_lossy().to_string();
+    let Ok(out) = std::process::Command::new("git").args(["config", "--global", "--get-all", "include.path"]).output() else { return };
+    if !String::from_utf8_lossy(&out.stdout).lines().any(|l| l == path) {
+        let _ = std::process::Command::new("git").args(["config", "--global", "--add", "include.path", &path]).status();
     }
 }
 
