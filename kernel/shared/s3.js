@@ -1,0 +1,54 @@
+// Presigned URLs for the install's S3-compatible bucket (AWS Signature Version 4, in the query), so compute servers
+// read and create objects without holding the bucket's credentials. A create URL signs `If-None-Match: *` in, so the
+// request must send it and can only make an object that isn't there; a replace URL signs `If-Match: <ETag>` in, so it
+// changes only the version it names. Nothing a compute server does deletes data.
+
+const text = new TextEncoder();
+const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+
+async function hmac(key, data) {
+  const k = await crypto.subtle.importKey("raw", typeof key === "string" ? text.encode(key) : key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, text.encode(data)));
+}
+
+/// RFC 3986 encoding, as Signature Version 4 wants it.
+function encode(s) {
+  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+}
+
+/// A presigned URL for `method` on `https://<host><path>`, good for `expires` seconds from `date`. `headers` are
+/// signed in, so the request must send them as given.
+export async function presign({ method, host, path, region, keyId, secret, expires, date = new Date(), headers = {} }) {
+  const stamp = date.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const day = stamp.slice(0, 8);
+  const scope = `${day}/${region}/s3/aws4_request`;
+  const signed = { host, ...Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), String(v).trim()])) };
+  const names = Object.keys(signed).sort();
+  const query = {
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Credential": `${keyId}/${scope}`,
+    "X-Amz-Date": stamp,
+    "X-Amz-Expires": String(expires),
+    "X-Amz-SignedHeaders": names.join(";"),
+  };
+  const canonicalQuery = Object.keys(query).sort().map((k) => `${encode(k)}=${encode(query[k])}`).join("&");
+  const canonicalPath = path.split("/").map(encode).join("/");
+  const canonical = [method, canonicalPath, canonicalQuery, names.map((n) => `${n}:${signed[n]}\n`).join(""), names.join(";"), "UNSIGNED-PAYLOAD"].join("\n");
+  const toSign = ["AWS4-HMAC-SHA256", stamp, scope, hex(await crypto.subtle.digest("SHA-256", text.encode(canonical)))].join("\n");
+  let key = await hmac(`AWS4${secret}`, day);
+  for (const part of [region, "s3", "aws4_request"]) key = await hmac(key, part);
+  return `https://${host}${canonicalPath}?${canonicalQuery}&X-Amz-Signature=${hex(await hmac(key, toSign))}`;
+}
+
+/// URLs to read objects, to create them, and to replace them while they're the version an ETag names, in a bucket
+/// `{ endpoint, bucket, region, key_id, secret }` (a Backup place's fields), path-style, good for `expires` seconds.
+export async function bucketUrls(bucket, { read = [], create = [], replace = [] }, expires = 900) {
+  const endpoint = new URL(bucket.endpoint.includes("://") ? bucket.endpoint : `https://${bucket.endpoint}`);
+  const common = { host: endpoint.host, region: bucket.region || "auto", keyId: bucket.key_id, secret: bucket.secret, expires, date: new Date() };
+  const at = (name) => `${endpoint.pathname.replace(/\/$/, "")}/${bucket.bucket}/${name}`;
+  const out = { read: {}, create: {}, replace: {} };
+  for (const name of read) out.read[name] = await presign({ ...common, method: "GET", path: at(name) });
+  for (const name of create) out.create[name] = await presign({ ...common, method: "PUT", path: at(name), headers: { "if-none-match": "*" } });
+  for (const { name, etag } of replace) out.replace[name] = await presign({ ...common, method: "PUT", path: at(name), headers: { "if-match": etag } });
+  return out;
+}

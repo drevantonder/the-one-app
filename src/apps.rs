@@ -28,7 +28,7 @@ const PACKAGES: &[(&str, &str, &str)] = &[
     ("aarch64-apple-darwin", "darwin-arm64", "rN2OJjYA9DiHJPub+J1D1TCTw0+g40M+hfMUsD4sPm1qBSWyqG/H9M40ww2IKB16F8m+/0O9GmdlzYI932GduA=="),
     ("x86_64-apple-darwin", "darwin-64", "qjXbqX7J50hqThWbYzT2c5yxr5Ymq6m6WETgPGqOAbIY+aZ11NQhnEV1Vsd/3Ljt97ctApQ1v8aCwX4Fa16nYQ=="),
 ];
-const COMPATIBILITY_DATE: &str = "2026-10-01";
+pub const COMPATIBILITY_DATE: &str = "2026-10-01";
 /// How long an app may take to answer before its runtime is restarted.
 const TIME_LIMIT: Duration = Duration::from_secs(30);
 
@@ -399,7 +399,7 @@ fn stop_previous(dir: &Path) {
 }
 
 /// The workerd binary for this platform, downloaded once into the cache and checked against its pinned hash.
-fn workerd() -> Result<PathBuf> {
+pub fn workerd() -> Result<PathBuf> {
     let (_, package, integrity) = PACKAGES
         .iter()
         .find(|(target, _, _)| *target == crate::config::TARGET)

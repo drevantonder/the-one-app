@@ -44,5 +44,6 @@ pub mod outbound;
 pub mod release;
 pub mod schedules;
 pub mod sidecars;
+pub mod kernel;
 pub mod vault;
 pub mod shell;

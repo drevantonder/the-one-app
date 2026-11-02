@@ -355,3 +355,57 @@ fn go_sidecars_read_the_calls_the_node_hands_them() {
     }
     assert!(read >= 10, "the test read the Go sidecars' calls ({read} fields)");
 }
+
+/// The kernel's servers (JavaScript, `kernel/shared/crypto.js`) and compute servers (`src/kernel.rs`) derive the same
+/// keys from a scope's key, and each opens what the other seals.
+#[test]
+fn the_kernel_and_compute_servers_agree_on_keys_and_seals() {
+    use data_encoding::BASE64URL_NOPAD as B64U;
+    use one::kernel;
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
+    let files = ["shared/crypto.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
+    let dir = std::env::temp_dir().join(format!("one-formats-{}", rand::random::<u64>()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let addr = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
+    let served = kernel::Served { name: "formats".into(), module: kernel::module_from(files.to_vec(), "test/formats.js").unwrap(), class: None, listen: addr.clone(), bindings: vec![] };
+    let mut child = kernel::start(&kernel::write_config(&dir, &[served]).unwrap()).unwrap();
+    let started = std::time::Instant::now();
+    while std::net::TcpStream::connect(&addr).is_err() {
+        assert!(started.elapsed().as_secs() < 30, "workerd didn't start");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let js = |body: Value| -> Value {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        agent.post(format!("http://{addr}")).send_json(body).unwrap().body_mut().read_json().unwrap()
+    };
+    let b = |v: &Value| B64U.decode(v.as_str().unwrap().as_bytes()).unwrap();
+
+    let scope: [u8; 32] = rand::random();
+    let derived = js(json!({ "op": "derive", "scopeKey": B64U.encode(&scope), "app": "board", "database": "main" }));
+    let app = kernel::app_key(&scope, "board");
+    assert_eq!(b(&derived["app"]), app, "an app's key");
+    assert_eq!(b(&derived["database"]), kernel::database_key(&app, "main"), "a database's key");
+
+    // Sealed to a key pair: JavaScript's pair, sealed in Rust; Rust's pair (the recovery key's twin), sealed in JavaScript.
+    let pair = js(json!({ "op": "keyPair" }));
+    assert_eq!(kernel::public_of(&b(&pair["secret"]).try_into().unwrap()).to_vec(), b(&pair["public"]), "a key pair's public half");
+    let sealed = kernel::seal_to(&b(&pair["public"]).try_into().unwrap(), &scope).unwrap();
+    let opened = js(json!({ "op": "openSealed", "secret": pair["secret"], "public": pair["public"], "sealed": B64U.encode(&sealed) }));
+    assert_eq!(b(&opened["plain"]), scope, "JavaScript opens what Rust sealed to it");
+    let (secret, public) = kernel::twin(&rand::random());
+    let sealed = js(json!({ "op": "sealTo", "to": B64U.encode(&public), "plain": B64U.encode(&scope) }));
+    assert_eq!(kernel::open_sealed(&secret, &b(&sealed["sealed"])).unwrap(), scope, "Rust opens what JavaScript sealed to it");
+
+    // Sealed under a secret, with the id it's kept by.
+    let under = js(json!({ "op": "sealUnder", "secret": "a refresh token, as text", "plain": B64U.encode(&scope) }));
+    assert_eq!(under["id"], kernel::id_of(b"a refresh token, as text"), "a copy's id");
+    assert_eq!(kernel::open_under(b"a refresh token, as text", &b(&under["sealed"])).unwrap(), scope, "Rust opens a copy JavaScript sealed");
+    let sealed = kernel::seal_under(b"a code from the recovery key", &scope);
+    let opened = js(json!({ "op": "openUnder", "secret": "a code from the recovery key", "sealed": B64U.encode(&sealed) }));
+    assert_eq!(b(&opened["plain"]), scope, "JavaScript opens a copy Rust sealed");
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -25,6 +25,10 @@ blake3 = "1"
 axum = "0.8"
 ciborium = "0.2"
 data-encoding = "2"
+# The kernel's access tokens are signed with Ed25519 (src/kernel.rs checks them); iroh already builds it.
+ed25519-dalek = "3"
+# The kernel derives keys with HKDF-SHA256, because that's what WebCrypto in workerd has (src/kernel.rs).
+hkdf = "0.13"
 iroh = "1.4"
 # Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
 jiff = "0.2"

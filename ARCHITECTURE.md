@@ -46,6 +46,8 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/git.rs`: `git-remote-one`, for the Repos app.
 - `src/load.rs`, `src/logos.rs`: how loaded a machine is, and the logos of the sites apps connect to.
 - `src/update.rs`, `src/release.rs`: building, signing and publishing the node; tooling, not protocol.
+- `kernel/`: the kernel servers, JavaScript for workerd, each one Worker with one Durable Object: `vault/` (every scope's keys, sealed; keys and bucket URLs for what a call names). `shared/crypto.js` is the formats compute servers read too.
+- `src/kernel.rs`: the kernel as compute servers meet it: the same formats, checking access tokens, asking the vault, and building the servers with the pinned Bun and running them in workerd.
 - `client/`: the library phones link. `apple/`: the Mac app (a server's node inside, and the Apple sidecars) and the iPhone app and widget (a client).
 - `apps/`: the built-in apps, which every release ships and any install's admins may add. Everything else is deployed by an install's own people.
 - `config.toml`: the white label: its name, CLI, port, accent, icons, release key and starter apps. Nothing else names the product.

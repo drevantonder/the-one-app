@@ -74,6 +74,16 @@ fn main() {
         starters.push_str(&format!("{name:?},"));
     }
     let out = format!("{out}pub const BUILT_IN: &[(&str, &[(&str, &[u8])])] = &[{apps}];\npub const STARTERS: &[&str] = &[{starters}];\n");
+    // The kernel servers' sources, built with the pinned Bun when they're run or deployed (src/kernel.rs), so a
+    // release deploys exactly the kernel it was signed with. Their tests stay in the repo.
+    let kernel = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("kernel");
+    println!("cargo:rerun-if-changed={}", kernel.display());
+    let mut files = Vec::new();
+    collect(&kernel, &kernel, &mut files);
+    files.retain(|(rel, _)| !rel.starts_with("test/"));
+    files.sort();
+    let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
+    let out = format!("{out}pub const KERNEL: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
     // The apps every agent needs from the start: their guide is in MCP's instructions, and code mode keeps their tools.
     let always_on: String = config.get("always_on").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()).map(|n| format!("{n:?},")).collect();
     let out = format!("{out}pub const ALWAYS_ON: &[&str] = &[{always_on}];\n");
