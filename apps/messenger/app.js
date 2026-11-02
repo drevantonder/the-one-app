@@ -17,7 +17,7 @@ const NEEDS = "Messenger needs Agent Devices, and none of your devices runs it y
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
-  return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("messenger")).map((s) => s.name);
+  return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("messenger")).map((s) => s.name);
 }
 
 // Each account is a Vault item too, so the person's Vault lists it: the browser profile, plain, with no secret, since

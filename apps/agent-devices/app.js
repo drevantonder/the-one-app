@@ -21,7 +21,7 @@ const TYPE = "Browser profile";
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
-  return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("agent-devices")).map((s) => s.name);
+  return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("agent-devices")).map((s) => s.name);
 }
 
 /// The browser profiles: the Vault items of their type this app is switched on for.
@@ -425,7 +425,7 @@ export default {
         port: { type: "integer", description: "windows: its SSH port on the device it's on; android: its console port, like 5554" }, display: { type: "integer", description: "windows: its VNC display" },
         cpus: { type: "integer", description: "windows: CPUs it starts with" }, gb: { type: "integer", description: "windows: memory it starts with, in GB" },
       } },
-      run: (ctx, { on, ...input }) => ctx.sidecars["agent-devices"].adopt({ ...input, here: true }, { server: on }),
+      run: (ctx, { on, ...input }) => ctx.sidecars["agent-devices"].adopt({ ...input, here: true }, { device: on }),
     },
     _list: {
       reads: true,

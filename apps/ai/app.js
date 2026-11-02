@@ -114,7 +114,7 @@ export default {
           options: { temperature: 0, num_predict: max_tokens },
           messages: [{ role: "user", content: prompt, images: files.map((f) => f.data) }],
           ...(json_schema ? { format: json_schema } : {}),
-        }, { server: s.local_server || undefined });
+        }, { device: s.local_server || undefined });
         return { text: String(reply ?? ""), provider: "local", cut: false };
       },
     },
@@ -127,7 +127,7 @@ export default {
       },
       async run(ctx, { state = {}, questions, images }) {
         const s = await settings(ctx);
-        return ctx.sidecars.models.decide({ model: s.decide_model, state, questions, ...(images?.length ? { images: images.map((i) => i.base64 ?? i) } : {}) }, { server: s.local_server || undefined });
+        return ctx.sidecars.models.decide({ model: s.decide_model, state, questions, ...(images?.length ? { images: images.map((i) => i.base64 ?? i) } : {}) }, { device: s.local_server || undefined });
       },
     },
   },

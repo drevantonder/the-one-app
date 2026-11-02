@@ -19,7 +19,7 @@ const NEEDS = "No device of yours lets agents use it yet. Agents use your Mac on
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
-  return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("agent-devices")).map((s) => s.name);
+  return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("agent-devices")).map((s) => s.name);
 }
 
 /// The caller's devices whose computer sidecar serves them, by server name: `{ server, on, title, kind, using,
@@ -29,10 +29,10 @@ async function devices(ctx) {
     const d = (s.installed_sidecars || []).find((d) => d.name === "computer");
     return d ? !d.users || d.users.includes(ctx.me.user_name) : (s.sidecars || []).includes("computer");
   };
-  const servers = (await ctx.servers()).filter((s) => s.online && mine(s));
+  const servers = (await ctx.devices()).filter((s) => s.online && mine(s));
   return Promise.all(servers.map(async (s) => {
     try {
-      return { server: s.name, ...(await ctx.sidecars.computer._status({}, { server: s.name })) };
+      return { server: s.name, ...(await ctx.sidecars.computer._status({}, { device: s.name })) };
     } catch (err) {
       return { server: s.name, on: false, why: err.message };
     }
@@ -43,7 +43,7 @@ async function devices(ctx) {
 async function device(ctx, name) {
   if (!name) return null;
   const n = String(name).toLowerCase();
-  const s = (await ctx.servers()).find((s) => s.name.toLowerCase() === n && (s.sidecars || []).includes("computer"));
+  const s = (await ctx.devices()).find((s) => s.name.toLowerCase() === n && (s.sidecars || []).includes("computer"));
   return s ? s.name : null;
 }
 
@@ -164,14 +164,14 @@ export default {
       reads: true,
       description: "The devices of yours that agents can use the agent devices on: each { account, ok }, the device's name.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.servers()).filter((s) => (s.sidecars || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
       confirm: true,
       description: "Stop agents using the agent devices on one of your devices: removes Computer Use from that device, for one of its owners. Its agent devices and backups stay there.",
       input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device, by name" } } },
       run: async (ctx, { account }) => {
-        for (const d of ["agent-devices", "computer"]) if ((await ctx.servers()).some((s) => s.name === account && (s.sidecars || []).includes(d))) ctx.sidecar(d, account, false);
+        for (const d of ["agent-devices", "computer"]) if ((await ctx.devices()).some((s) => s.name === account && (s.sidecars || []).includes(d))) ctx.sidecar(d, account, false);
         return `Computer Use is removed from ${account}.`;
       },
     },
@@ -202,7 +202,7 @@ export default {
       input: {"properties": {"device": {"description": "which device, by name; default the only one", "type": "string"}, "width": {"description": "the picture's width in pixels; default 640, at most 1920", "type": "integer"}}, "type": "object"},
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (d) return ctx.sidecars.computer._screen({ width: input.width }, { server: d });
+        if (d) return ctx.sidecars.computer._screen({ width: input.width }, { device: d });
         return sidecar(ctx, "screen", input);
       },
     },
@@ -211,7 +211,7 @@ export default {
       input: {"properties": {"device": {"description": "which device, by name; default the only one", "type": "string"}, "name": {"description": "a tool's name", "type": "string"}}, "type": "object"},
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (d) return ctx.sidecars.computer._tools(input.name ? { name: input.name } : {}, { server: d });
+        if (d) return ctx.sidecars.computer._tools(input.name ? { name: input.name } : {}, { device: d });
         return sidecar(ctx, "tools", input);
       },
     },
@@ -226,7 +226,7 @@ export default {
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (!d) return sidecar(ctx, "use", input);
-        const r = await ctx.sidecars.computer._use({ tool: input.tool, args: input.args || {} }, { server: d });
+        const r = await ctx.sidecars.computer._use({ tool: input.tool, args: input.args || {} }, { device: d });
         if (r.started) {
           const id = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
           ctx.user.exec("insert or replace into sessions values (?, ?, ?, ?, ?, ?)", [id, d, r.title || null, ctx.me.agent || ctx.me.name, ctx.me.name, ctx.now()]);
@@ -288,7 +288,7 @@ export default {
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (!d) throw new Error(`${input.device} can't be used by agents: no sidecar for it runs there.`);
-        return ctx.sidecars.computer._allow({ on: !!input.on }, { server: d });
+        return ctx.sidecars.computer._allow({ on: !!input.on }, { device: d });
       },
     },
   },

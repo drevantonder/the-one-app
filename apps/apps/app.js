@@ -89,7 +89,7 @@ async function isService(ctx, a) {
 /// an owner removed it) or removed from; and whether they own none, so they ask an owner instead. Its server parts are the
 /// sidecars it uses, by their names.
 async function where(ctx, a) {
-  const servers = await ctx.servers();
+  const servers = await ctx.devices();
   const parts = a.uses?.sidecars || [];
   if (!parts.length) return null;
   const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
@@ -309,7 +309,7 @@ export default {
       input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the device, by name" } } },
       async run(ctx, { app, server }) {
         const a = await find(ctx, app);
-        const there = (await ctx.servers()).find((s) => s.name === server);
+        const there = (await ctx.devices()).find((s) => s.name === server);
         for (const part of a.uses?.sidecars || []) if ((there?.sidecars || []).includes(part)) ctx.sidecar(part, server, false);
         return `${a.title || app} is removed from ${server}.`;
       },

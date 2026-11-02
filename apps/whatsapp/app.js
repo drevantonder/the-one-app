@@ -17,7 +17,7 @@ const NEEDS = "WhatsApp isn't on any of your devices yet, so there's no phone to
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
-  return (await ctx.servers()).filter((s) => s.online && (s.sidecars || []).includes("whatsapp")).map((s) => s.name);
+  return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("whatsapp")).map((s) => s.name);
 }
 
 // Each account is a Vault item too, so the person's Vault lists it: its number and the server it's linked on, plain,

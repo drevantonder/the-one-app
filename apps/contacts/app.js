@@ -30,7 +30,7 @@ export default {
       reads: true,
       description: "The Macs it runs on: each { account, ok }, the device’s name, ok while it’s online.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.servers()).filter((s) => (s.sidecars || []).includes("contacts")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).includes("contacts")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
       confirm: true,

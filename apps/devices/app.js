@@ -1,6 +1,6 @@
 // Devices: every server in the install and how loaded it is (memory, CPU, GPU, disk), with the containers each one
 // hosts listed under it; and where things run first (ctx.order, src/rank.rs), which admins change in Settings > Devices, and agents with devices_use. Each server measures itself and says so when it syncs; this app only draws what
-// ctx.servers() gives it.
+// ctx.devices() gives it.
 
 const GB = 1e9;
 const GiB = 2 ** 30;
@@ -21,7 +21,7 @@ const share = (m, host) => (m ? { used: m.used, total: m.total || host?.total ||
 
 /// Every server, each container that is a server itself right after its host, then the host's other containers.
 async function devices(ctx) {
-  const servers = await ctx.servers();
+  const servers = await ctx.devices();
   const byName = new Map(servers.map((s) => [s.name, s]));
   const host = new Map();
   for (const s of servers) for (const c of s.load?.containers || []) if (byName.has(c.name) && c.name !== s.name) host.set(c.name, s.name);
