@@ -195,6 +195,7 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
         path.clear()
         sheets.forEach { it.close(null) }
         phase = Phase.SignedOut
+        ScreenCache.forget()
     }
 
     suspend fun refreshState() {
@@ -249,6 +250,17 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
             } catch (_: Exception) {
             }
             delay(3000)
+        }
+    }
+
+    /** Back in front: what changed while it wasn't, which events may have missed, for every open screen and the
+     *  home screen's widgets, as the iPhone reads it all again once it's active. */
+    fun resumed() {
+        if (phase != Phase.Ready) return
+        scope.launch {
+            runCatching { refreshState() }
+            events.tryEmit("""{"type":"install"}""")
+            runCatching { refreshWidgets() }
         }
     }
 

@@ -25,7 +25,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -62,12 +65,15 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -79,6 +85,7 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -114,7 +121,7 @@ private const val ORIGIN = "https://screen.invalid"
 
 /** Before the page's scripts: the bridge's way out (`__oneShell.postMessage`, src/screen/bridge.js), one JSON message
  *  each way with an id, and the look that makes the page sit in the app as its own. */
-private fun shim(accent: String, dark: Boolean, scan: Boolean) = """
+private fun shim(accent: String, dark: Boolean, scan: Boolean, zoom: Float) = """
 (() => {
   const port = window.oneShell;
   if (!port) return;
@@ -137,6 +144,15 @@ private fun shim(accent: String, dark: Boolean, scan: Boolean) = """
     :root:root { --accent: ${css(accent, dark)}; }`;
   document.documentElement.appendChild(style);
   addEventListener("DOMContentLoaded", () => document.querySelector('meta[name="viewport"]')?.setAttribute("content", "width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"));
+  // The kit is sized for the phone's usual text: at a larger or smaller font size, the page is zoomed to it, as an
+  // iPhone's follows Dynamic Type, though never to less than the 320 CSS pixels wide phone layouts are made for.
+  const zoom = $zoom;
+  if (zoom !== 1) {
+    const fit = () => { document.documentElement.style.zoom = String(innerWidth ? Math.min(zoom, innerWidth / 320) : zoom); };
+    addEventListener("resize", fit);
+    addEventListener("DOMContentLoaded", fit);
+    addEventListener("load", fit);
+  }
 })();
 """
 
@@ -249,29 +265,22 @@ private fun ScreenView(store: Store, route: Route, sheet: Sheet? = null, pushed:
     // Drawn again in this app's light or dark, once it changes: a web view takes the scheme its theme says.
     val dark = palette.dark
     var loaded by remember(route, dark) { mutableStateOf(false) }
-    var failure by remember(route, dark) { mutableStateOf<String?>(null) }
     val accent = store.config?.accent ?: BuildConfig.ACCENT
     val bridge = remember(route, dark) { Bridge(context, store, route, sheet, pushed, setTitle) }
     DisposableEffect(bridge) { onDispose { bridge.close() } }
 
     key(dark) { Box(Modifier.fillMaxSize()) {
         AndroidView(
-            modifier = Modifier.fillMaxSize().alpha(if (loaded) 1f else 0f),
+            // Below the bar saying it's offline, while it is.
+            modifier = Modifier.fillMaxSize().padding(top = if (bridge.offline != null) 64.dp else 0.dp).alpha(if (loaded) 1f else 0f),
             factory = { ctx ->
                 val themed = android.view.ContextThemeWrapper(ctx, if (dark) android.R.style.Theme_DeviceDefault else android.R.style.Theme_DeviceDefault_Light)
-                bridge.make(themed, shim(accent, dark, Scanner.available(ctx))) { loaded = true }.also { web ->
-                    bridge.scope.launch {
-                        try {
-                            web.loadDataWithBaseURL("$ORIGIN/", store.screen(route), "text/html", "utf-8", null)
-                        } catch (e: Exception) {
-                            failure = e.message
-                        }
-                    }
-                }
+                bridge.make(themed, shim(accent, dark, Scanner.available(ctx), ctx.resources.configuration.fontScale)) { loaded = true }.also { bridge.load() }
             },
         )
-        failure?.let { Unavailable("Can’t Open This", it) }
-        if (!loaded && failure == null) {
+        bridge.failure?.let { Unavailable("Can’t Open This", it) }
+        bridge.offline?.let { Offline(it, bridge::tryNow) }
+        if (!loaded && bridge.failure == null) {
             var slow by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) { delay(400); slow = true }
             if (slow) CircularProgressIndicator(Modifier.align(Alignment.Center), color = palette.secondary)
@@ -279,6 +288,36 @@ private fun ScreenView(store: Store, route: Route, sheet: Sheet? = null, pushed:
         bridge.menu?.let { Menu(it) }
         bridge.alert?.let { Alert(it) }
     } }
+}
+
+/** Over a screen shown as it last looked: since when, and when it's tried again, or Try Now. */
+@Composable
+private fun BoxScope.Offline(offline: Bridge.Offline, tryNow: () -> Unit) {
+    val p = LocalPalette.current
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(offline) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1000)
+        }
+    }
+    val ago = if (now - offline.kept < 60_000) "just now"
+    else android.text.format.DateUtils.getRelativeTimeSpanString(offline.kept, now, android.text.format.DateUtils.MINUTE_IN_MILLIS).toString()
+    Row(
+        Modifier.align(Alignment.TopCenter).padding(8.dp).shadow(6.dp, RoundedCornerShape(50)).background(p.card, RoundedCornerShape(50)).padding(start = 14.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Symbol("wifi-slash", p.secondary, 16.dp)
+        Text("Offline: this is how it looked ${ago.replaceFirstChar { it.lowercase() }}.", style = Type.footnote, fontWeight = FontWeight.Medium, color = p.secondary, modifier = Modifier.weight(1f, fill = false))
+        val next = offline.next
+        if (next != null) {
+            Text("Reconnecting in ${maxOf(1, ((next - now + 999) / 1000).toInt())}s", style = Type.footnote, color = p.tertiary)
+            TextButton(tryNow) { Text("Try Now", style = Type.footnote, fontWeight = FontWeight.SemiBold, color = p.accent) }
+        } else {
+            CircularProgressIndicator(Modifier.size(14.dp), color = p.secondary, strokeWidth = 2.dp)
+            Text("Reconnecting…", style = Type.footnote, color = p.tertiary, modifier = Modifier.padding(end = 12.dp, top = 14.dp, bottom = 14.dp))
+        }
+    }
 }
 
 /** `one.menu`: the items at the point the page asked for (CSS pixels are dp, at the scale screens are drawn). */
@@ -333,6 +372,59 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
     var alert by mutableStateOf<AlertAsk?>(null)
         private set
 
+    /** Why the screen can't be shown, with no copy of it to show instead. */
+    var failure by mutableStateOf<String?>(null)
+        private set
+
+    /** An app's screen shown as it last looked, since `kept`, while the node can't be reached: asked again at `next`. */
+    data class Offline(val kept: Long, val next: Long?)
+    var offline by mutableStateOf<Offline?>(null)
+        private set
+    /** The node's tries since it last answered, for the wait before the next: 2, 4, 8, 16, then every 30 seconds. */
+    private var misses = 0
+    private var loading: Job? = null
+
+    /** Loads the screen's page; offline, an app's screen shows its last copy, saying so, and asks again and again,
+     *  waiting longer each time, as the iPhone's does. */
+    fun load() {
+        val web = web ?: return
+        loading?.cancel()
+        loading = scope.launch {
+            val page = try {
+                store.screen(route)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val app = app
+                val kept = offline?.kept ?: app?.let { ScreenCache.last(it) }?.let { (html, time) ->
+                    web.loadDataWithBaseURL("$ORIGIN/", html, "text/html", "utf-8", null)
+                    time
+                }
+                if (kept == null || (e as? NodeError)?.signedOut == true) {
+                    failure = e.message ?: "Can’t reach ${store.signIn.address}."
+                    return@launch
+                }
+                misses++
+                val wait = minOf(30, 1 shl minOf(misses, 5)) * 1000L
+                offline = Offline(kept, System.currentTimeMillis() + wait)
+                delay(wait)
+                offline = Offline(kept, null)
+                load()
+                return@launch
+            }
+            web.loadDataWithBaseURL("$ORIGIN/", page, "text/html", "utf-8", null)
+            app?.let { ScreenCache.keep(it, page) }
+            misses = 0
+            offline = null
+        }
+    }
+
+    fun tryNow() {
+        val o = offline ?: return
+        offline = Offline(o.kept, null)
+        load()
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     fun make(ctx: Context, shim: String, loaded: () -> Unit): WebView {
         val web = WebView(ctx)
@@ -349,6 +441,8 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
             javaScriptCanOpenWindowsAutomatically = false
             setGeolocationEnabled(false)
             mediaPlaybackRequiresUserGesture = true
+            // The page zooms as a whole to the phone's font size (shim), not its text alone, which overflows its boxes.
+            textZoom = 100
         }
         val rules = setOf(ORIGIN)
         check(WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
@@ -587,5 +681,27 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
 
     companion object {
         private var asked = 0
+    }
+}
+
+/** The last copy of each app screen this phone showed, which stands in while the node can't be reached; gone once
+ *  the person signs out. */
+object ScreenCache {
+    lateinit var dir: File
+
+    private fun file(r: Route.App) = File(dir, "${steadyHash(listOf(r.app, r.screen, r.params, r.scope ?: "").joinToString("\u0001"))}-${r.app.length + r.screen.length + r.params.length}.html")
+
+    fun keep(r: Route.App, html: String) {
+        runCatching {
+            dir.mkdirs()
+            file(r).writeText(html)
+        }
+    }
+
+    /** Its page and when it was kept. */
+    fun last(r: Route.App): Pair<String, Long>? = file(r).takeIf { it.isFile }?.let { runCatching { it.readText() to it.lastModified() }.getOrNull() }
+
+    fun forget() {
+        dir.deleteRecursively()
     }
 }

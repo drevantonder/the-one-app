@@ -68,17 +68,26 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) intent?.data?.let(::open)
     }
 
+    private var started = false
+
+    override fun onStart() {
+        super.onStart()
+        if (started) store.resumed()
+        started = true
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         intent.data?.let(::open)
     }
 
     /** `<cli>://signed-in/?code=…`: back from signing in; `<cli>://open/…`: a home-screen widget, tapped; a link to the
-     *  install's address (Links). */
+     *  install's address (Links), or the same as `<cli>://<path>`. */
     private fun open(uri: Uri) {
-        if (uri.scheme == "https") return Links.open(this, store, uri)
-        if (uri.scheme == BuildConfig.CLI && uri.host == "open") return app.client.widget.HomeWidgets.open(store, uri)
-        if (uri.scheme != BuildConfig.CLI || uri.host != "signed-in") return
+        if (uri.scheme == "https" || uri.scheme == "http") return Links.open(this, store, uri)
+        if (uri.scheme != BuildConfig.CLI) return
+        if (uri.host == "open") return app.client.widget.HomeWidgets.open(store, uri)
+        if (uri.host != "signed-in") return Links.own(store, uri)
         welcomeError = null
         store.signInFinished(uri) { welcomeError = it }
     }
@@ -94,6 +103,7 @@ class ClientApp : android.app.Application() {
 
     override fun onCreate() {
         super.onCreate()
+        ScreenCache.dir = java.io.File(cacheDir, "screens")
         app.client.widget.HomeWidgets.start(this)
     }
 }

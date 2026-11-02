@@ -26,24 +26,39 @@ object Links {
             return
         }
         if (store.phase == Store.Phase.SignedOut || at != store.signIn.address || path.isEmpty()) return SignIn.openInTab(activity, uri)
-        val known = when (path[0]) {
-            "vault" -> query(uri, "scope") != null && query(uri, "id") != null
-            "page", "services", "app" -> path.size > 1
-            "settings" -> true
-            else -> false
+        if (!known(uri, path)) return SignIn.openInTab(activity, uri)
+        later(store, uri, path)
+    }
+
+    /** `<cli>://vault?id=…&scope=…`, `<cli>://page?scope=…` (with `folder=services`, its Services) and
+     *  `<cli>://settings[/<item>]`, as the iPhone takes them: the same as the address's own link. */
+    fun own(store: Store, uri: Uri) {
+        val scope = query(uri, "scope")
+        val path = when {
+            uri.host == "page" && scope != null -> listOf(if (query(uri, "folder") == "services") "services" else "page", scope)
+            else -> listOfNotNull(uri.host) + uri.pathSegments
         }
-        if (!known) return SignIn.openInTab(activity, uri)
-        // Once the pages are there, so the page it names is one of them.
+        if (store.phase != Store.Phase.SignedOut && path.isNotEmpty() && known(uri, path)) later(store, uri, path)
+    }
+
+    private fun known(uri: Uri, path: List<String>) = when (path[0]) {
+        "vault" -> query(uri, "scope") != null && query(uri, "id") != null
+        "page", "services", "app" -> path.size > 1
+        "settings" -> true
+        else -> false
+    }
+
+    /** Once the pages are there, so the page it names is one of them. */
+    private fun later(store: Store, uri: Uri, path: List<String>) {
         MainScope().launch {
             snapshotFlow { store.phase }.first { it == Store.Phase.Ready || it == Store.Phase.SignedOut }
-            if (store.phase == Store.Phase.Ready) go(store, uri)
+            if (store.phase == Store.Phase.Ready) go(store, uri, path)
         }
     }
 
     private fun query(uri: Uri, name: String) = uri.getQueryParameter(name)?.ifEmpty { null }
 
-    private suspend fun go(store: Store, uri: Uri) {
-        val path = uri.pathSegments
+    private suspend fun go(store: Store, uri: Uri, path: List<String>) {
         val scope = query(uri, "scope")
         val params = query(uri, "params") ?: "{}"
         when (path[0]) {
