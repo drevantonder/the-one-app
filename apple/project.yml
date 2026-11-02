@@ -82,6 +82,33 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
 
+  # The iPhone app with every client's screens as its home (ScreensHome.swift), beside it to try them by hand:
+  # build-phone.sh's SCREENS=1. No widgets, push or links of its own, which stay the iPhone app's.
+  Screens:
+    type: application
+    platform: iOS
+    sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Phone.xcassets, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
+    settings:
+      base:
+        PRODUCT_NAME: Screens
+        PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.phone.screens
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SCREENS
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${APPLE_TEAM}
+    info:
+      path: build/Screens-Info.plist
+      properties:
+        CFBundleDisplayName: Screens
+        Accent: ${CONFIG_ACCENT}
+        CLI: ${CONFIG_CLI}
+        Yours: ${CONFIG_YOURS}
+        BuildCommit: ${BUILD_COMMIT}
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+
   Widgets:
     type: app-extension
     platform: iOS

@@ -60,6 +60,7 @@ struct PagesView: View {
                 }
             }
         }
+        .screenSheets()
         .sheet(item: $store.sheet) { sheet in
             switch sheet {
             case .pages: PagesEditor()

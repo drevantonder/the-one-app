@@ -9,6 +9,8 @@ struct AppScreen: View {
     @Environment(Store.self) private var store
     var route: ScreenRoute
     var settings = false
+    /// For a screen in a sheet: closes it, with what the screen gave `one.close`.
+    var dismiss: ((Any?) -> Void)?
     @State private var title: String?
     @State private var loaded = false
     @State private var slow = false
@@ -19,7 +21,7 @@ struct AppScreen: View {
     @State private var tries = 0
 
     var body: some View {
-        ScreenWebView(route: route, settings: settings, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline, tries: tries)
+        ScreenWebView(route: route, settings: settings, dismiss: dismiss, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline, tries: tries)
             .opacity(loaded ? 1 : 0)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let offline {
@@ -87,6 +89,7 @@ private typealias Representable = UIViewRepresentable
 private struct ScreenWebView: Representable {
     var route: ScreenRoute
     var settings: Bool
+    var dismiss: ((Any?) -> Void)?
     var store: Store
     @Binding var title: String?
     @Binding var loaded: Bool
@@ -123,6 +126,9 @@ private struct ScreenWebView: Representable {
         // What this shell can do beyond the bridge's basics, for screens to offer it only where it works.
         config.userContentController.addUserScript(WKUserScript(source: "window.__oneShell = { scan: \(ShellFiles.canScan) };", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.addUserScript(WKUserScript(source: Self.noZoom, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        #if os(iOS)
+        config.userContentController.addUserScript(WKUserScript(source: ShellMenus.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        #endif
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
         web.uiDelegate = context.coordinator
@@ -134,6 +140,8 @@ private struct ScreenWebView: Representable {
         web.backgroundColor = .clear
         web.scrollView.backgroundColor = .clear
         web.scrollView.keyboardDismissMode = .interactive
+        context.coordinator.menus.web = web
+        web.addInteraction(UIContextMenuInteraction(delegate: context.coordinator.menus))
         #endif
         context.coordinator.load(into: web)
         return web
@@ -198,6 +206,9 @@ private struct ScreenWebView: Representable {
     final class Coordinator: NSObject, WKScriptMessageHandlerWithReply, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
         var view: ScreenWebView
         private weak var web: WKWebView?
+        #if os(iOS)
+        let menus = ShellMenus()
+        #endif
 
         init(view: ScreenWebView) {
             self.view = view
@@ -267,9 +278,9 @@ private struct ScreenWebView: Representable {
         private var host: NSView? { web }
         #endif
 
-        /// The bridge: `{ type: "call" | "open" | "title" | "icons" | "icon" | "copy" | "haptic" | "save" | "preview" | "scan" | "vault", … }`,
-        /// and for Settings screens alone, `"api" | "signOut" | "appearance" | "device" | "request"`. A page only ever
-        /// calls its own app, but may open another's screens.
+        /// The bridge (src/screen/bridge.js's list; tests/contracts.rs holds this to it), and for Settings screens alone,
+        /// `"api" | "signOut" | "appearance" | "device" | "request"`. A page only ever calls its own app, but may open
+        /// another's screens.
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
             guard let body = message.body as? [String: Any] else { return (nil, "Not a message") }
             let route = view.route, store = view.store
@@ -306,10 +317,6 @@ private struct ScreenWebView: Representable {
                 }
             case "call" where view.settings:
                 return (nil, "Settings has no app to call.")
-            case "open" where view.settings && (body["app"] as? String ?? "").isEmpty:
-                let params = (try? JSONSerialization.data(withJSONObject: body["params"] ?? [:])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-                store.path.append(.setting(body["screen"] as? String ?? "", params: params))
-                return (nil, nil)
             case "call":
                 do {
                     let input = try JSONSerialization.data(withJSONObject: body["input"] ?? [:], options: .fragmentsAllowed)
@@ -319,10 +326,42 @@ private struct ScreenWebView: Representable {
                     return (nil, error.localizedDescription)
                 }
             case "open":
+                // One of the client's own screens (Settings', Services, a request) from one of its own; else an app's.
                 let params = (try? JSONSerialization.data(withJSONObject: body["params"] ?? [:])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-                let app = (body["app"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? route.app
-                view.store.path.append(.screen(ScreenRoute(app: app, screen: body["screen"] as? String ?? "main", params: params, scope: route.scope)))
+                let other = (body["app"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                let screen = body["screen"] as? String ?? "main"
+                let scope = (body["scope"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? route.scope
+                let to: Route = if view.settings, other == nil { .setting(screen, params: params) } else { .screen(ScreenRoute(app: other ?? route.app, screen: screen, params: params, scope: scope)) }
+                #if os(iOS)
+                if body["sheet"] as? Bool == true { return (await store.present(to), nil) }
+                // From a sheet, the sheet goes and it opens over the pages.
+                view.dismiss?(nil)
+                #endif
+                store.path.append(to)
                 return (nil, nil)
+            case "close":
+                if let dismiss = view.dismiss { dismiss(body["value"].flatMap { $0 is NSNull ? nil : $0 }) } else if !store.path.isEmpty { store.path.removeLast() }
+                return (nil, nil)
+            case "menu":
+                let items = ShellMenuItem.from(body["items"])
+                let point = CGPoint(x: body["x"] as? Double ?? 0, y: body["y"] as? Double ?? 0)
+                #if os(iOS)
+                return (await menus.show(items, at: point), nil)
+                #else
+                return (shellMenu(items, at: point, in: web), nil)
+                #endif
+            case "alert":
+                let action = (body["action"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                return (await shellAlert(title: body["title"] as? String ?? "", text: body["text"] as? String ?? "", action: action,
+                                         danger: body["danger"] as? Bool ?? false, from: web), nil)
+            case "link":
+                if let url = URL(string: body["url"] as? String ?? ""), ["http", "https", "mailto", "tel"].contains(url.scheme ?? "") { Self.openOutside(url) }
+                return (nil, nil)
+            #if os(iOS)
+            case "held":
+                menus.held(body["rect"])
+                return (nil, nil)
+            #endif
             case "save", "preview":
                 do {
                     let file = try await ScreenFile.from(body["file"], node: view.store.node)
@@ -374,6 +413,8 @@ private struct ScreenWebView: Representable {
                 return (nil, nil)
             case "haptic":
                 #if os(iOS)
+                // A hold's haptic is the system's own, as it lifts.
+                if menus.holding { return (nil, nil) }
                 switch body["style"] as? String {
                 case "medium": UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 case "success": UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -523,6 +564,12 @@ extension Store {
     /// A request for a Vault item, in the Vault's sheet: whether it was allowed, once the sheet is gone, or once it's
     /// answered somewhere else (another device, an agent's CLI), which closes the sheet.
     func ask(scope: String, id: String) async throws -> Bool {
+        #if SCREENS
+        // The request's screen, every client's, which closes once it's answered here or anywhere else.
+        let params = (try? JSONSerialization.data(withJSONObject: ["scope": scope, "id": id])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+        _ = await present(.setting("request", params: params))
+        return try await node.vaultRequests(scope: scope, id: id).first?.state == "set"
+        #else
         let sheet = Sheet.vault(scope: scope, id: id)
         self.sheet = sheet
         var waited = 0
@@ -534,7 +581,26 @@ extension Store {
             }
         }
         return try await node.vaultRequests(scope: scope, id: id).first?.state == "set"
+        #endif
     }
+
+    #if os(iOS)
+    /// Slides a screen up over the others, as the bridge's `open` with `sheet` does: once it's gone, what it gave
+    /// `one.close`.
+    func present(_ route: Route) async -> Any? {
+        let sheet = ScreenSheet(route: route)
+        screenSheets.append(sheet)
+        while screenSheets.contains(where: { $0 === sheet }) { try? await Task.sleep(for: .milliseconds(50)) }
+        return sheet.value
+    }
+
+    /// Closes a sheet, with what it gave, and any slid up over it.
+    func dismiss(_ sheet: ScreenSheet, value: Any? = nil) {
+        guard let at = screenSheets.firstIndex(where: { $0 === sheet }) else { return }
+        sheet.value = value
+        screenSheets.removeSubrange(at...)
+    }
+    #endif
 
     /// The server this app talks to: this Mac's own, or the one a phone reaches.
     var server: Server? {
@@ -580,3 +646,58 @@ enum ScreenCache {
         return (String(decoding: data, as: UTF8.self), time)
     }
 }
+
+#if os(iOS)
+extension View {
+    /// The screens slid up over this one (`Store.screenSheets`) from `level` on, each presenting the next.
+    func screenSheets(from level: Int = 0) -> some View { modifier(ScreenSheets(level: level)) }
+}
+
+private struct ScreenSheets: ViewModifier {
+    @Environment(Store.self) private var store
+    var level: Int
+
+    func body(content: Content) -> some View {
+        content.sheet(item: Binding(
+            get: { store.screenSheets.indices.contains(level) ? store.screenSheets[level] : nil },
+            set: { if $0 == nil, store.screenSheets.indices.contains(level) { store.dismiss(store.screenSheets[level]) } }
+        )) { sheet in
+            ScreenSheetView(sheet: sheet, level: level)
+        }
+    }
+}
+
+/// A screen in a sheet: its title, and Done, or Cancel for a request, which closes itself once it's answered.
+private struct ScreenSheetView: View {
+    @Environment(Store.self) private var store
+    var sheet: ScreenSheet
+    var level: Int
+
+    var body: some View {
+        NavigationStack {
+            screen
+                .navigationBarTitleDisplayMode(.inline)
+                .background(Color(.systemGroupedBackground))
+                .toolbar {
+                    if case .setting("request", _) = sheet.route {
+                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { store.dismiss(sheet) } }
+                    } else {
+                        ToolbarItem(placement: .confirmationAction) { Button("Done") { store.dismiss(sheet) } }
+                    }
+                }
+        }
+        .screenSheets(from: level + 1)
+    }
+
+    @ViewBuilder private var screen: some View {
+        switch sheet.route {
+        case .setting(let name, let params):
+            AppScreen(route: ScreenRoute(app: "", screen: name, params: params), settings: true) { store.dismiss(sheet, value: $0) }
+        case .screen(let route):
+            AppScreen(route: route) { store.dismiss(sheet, value: $0) }
+        case .page, .settings, .services:
+            EmptyView()
+        }
+    }
+}
+#endif

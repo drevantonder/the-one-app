@@ -563,7 +563,13 @@ fn every_host_answers_each_message_of_the_bridge() {
         }
         out
     };
-    for path in ["kernel/web/web.js", "src/mcp_view.html", "android/app/src/main/kotlin/app/client/Screens.kt", "windows/AppScreen.cs"] {
+    for path in [
+        "kernel/web/web.js",
+        "src/mcp_view.html",
+        "android/app/src/main/kotlin/app/client/Screens.kt",
+        "windows/AppScreen.cs",
+        "apple/Shared/Views/AppScreen.swift",
+    ] {
         let names = named(&read(path));
         let missing: Vec<_> = messages.iter().filter(|m| !names.contains(**m)).collect();
         assert!(missing.is_empty(), "{path} doesn't answer the bridge's {missing:?}");

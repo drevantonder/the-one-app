@@ -77,6 +77,18 @@ enum Sheet: Hashable, Identifiable {
     var id: Self { self }
 }
 
+#if os(iOS)
+/// A screen slid up over the others (the bridge's `open` with `sheet`), and what it gave `one.close`.
+@MainActor
+final class ScreenSheet: Identifiable {
+    let id = UUID()
+    let route: Route
+    var value: Any?
+
+    init(route: Route) { self.route = route }
+}
+#endif
+
 extension Notification.Name {
     /// Each node event, as JSON in `object`, for the app screens that are open.
     static let nodeEvent = Notification.Name("nodeEvent")
@@ -123,6 +135,10 @@ final class Store {
     /// The iPhone's current page: a scope.
     var current = "user"
     var sheet: Sheet?
+    #if os(iOS)
+    /// Screens slid up over the others, by the bridge's `open` with `sheet`, each over the one before.
+    var screenSheets: [ScreenSheet] = []
+    #endif
 
     /// The order this user put their group pages in, and the ones they hid, on this machine.
     private(set) var pageOrder = UserDefaults.standard.stringArray(forKey: "pageOrder") ?? []
