@@ -27,11 +27,13 @@ impl Node {
         bail!("no device has put that blob in the bucket")
     }
 
-    /// Puts a blob this device has in the bucket, in `scope`, sealed with that scope's key, unless it has already.
-    pub(super) async fn share_blob(&self, scope: &Scope, hash: &str) -> Result<()> {
+    /// Puts a blob this device has in the bucket, in `scope`, sealed with that scope's key, where it isn't: for a new
+    /// entry, always, since another device may have taken it out after a scope forgot it; else (`noted`) unless this
+    /// device notes it put it there.
+    pub(super) async fn share_blob(&self, scope: &Scope, hash: &str, noted: bool) -> Result<()> {
         use crate::bucket::Bucket;
         let marker = format!("{scope} {hash}");
-        if self.0.shared.lock().unwrap().contains(&marker) {
+        if noted && self.0.shared.lock().unwrap().contains(&marker) {
             return Ok(());
         }
         let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) else { return Ok(()) };
@@ -53,7 +55,7 @@ impl Node {
     pub(super) async fn share_unshared(&self) {
         let unshared = std::mem::take(&mut *self.0.unshared.lock().unwrap());
         for (scope, hash) in unshared {
-            if let Err(err) = self.share_blob(&scope, &hash).await {
+            if let Err(err) = self.share_blob(&scope, &hash, false).await {
                 tracing::debug!("putting blob {} in the bucket: {err:#}", &hash[..12.min(hash.len())]);
                 self.0.unshared.lock().unwrap().push((scope, hash));
             }
@@ -86,7 +88,7 @@ impl Node {
             return;
         };
         for (scope, hash) in named {
-            if let Err(err) = self.share_blob(&scope, &hash).await {
+            if let Err(err) = self.share_blob(&scope, &hash, true).await {
                 tracing::debug!("putting blob {} in the bucket: {err:#}", &hash[..12.min(hash.len())]);
             }
         }
@@ -138,26 +140,29 @@ impl Node {
         })
     }
 
-    /// Takes from the bucket each blob a scope forgot that no entry of that scope still needs, and deletes the blobs
-    /// here that no entry this device holds still needs: `(scope, hash)`s.
+    /// Takes from the bucket each blob a scope forgot that no entry of that scope still needs ten minutes later, by
+    /// when an entry another device wrote naming it again is read here, and deletes the blobs here that no entry this
+    /// device holds still needs: `(scope, hash)`s.
     pub(super) fn delete_forgotten(&self, forgotten: Vec<(String, String)>) {
         for (log, hash) in forgotten {
             if self.0.built_in.values().any(|b| *b == hash) {
                 continue;
             }
-            if !self.blob_named(&hash, |s| s.to_string() == log).unwrap_or(true) {
-                let marker = format!("{log} {hash}");
-                self.0.shared.lock().unwrap().remove(&marker);
-                let _ = self.note_shared(&format!("- {marker}"));
-                if let Ok(bucket) = self.bucket() {
-                    let name = crate::bucket::blob_name(&log, &hash);
-                    tokio::task::spawn_blocking(move || {
-                        if let Err(err) = bucket.place.delete(&name) {
-                            tracing::warn!("taking forgotten {name} from the bucket: {err:#}");
-                        }
-                    });
+            let (node, scope_log, blob) = (self.clone(), log.clone(), hash.clone());
+            tokio::spawn(async move {
+                tokio::time::sleep(FORGOTTEN_KEPT).await;
+                if node.blob_named(&blob, |s| s.to_string() == scope_log).unwrap_or(true) {
+                    return;
                 }
-            }
+                let marker = format!("{scope_log} {blob}");
+                node.0.shared.lock().unwrap().remove(&marker);
+                let _ = node.note_shared(&format!("- {marker}"));
+                let Ok(bucket) = node.bucket() else { return };
+                let name = crate::bucket::blob_name(&scope_log, &blob);
+                if let Err(err) = tokio::task::spawn_blocking(move || bucket.place.delete(&name)).await.map_err(anyhow::Error::from).and_then(|r| r) {
+                    tracing::warn!("taking a forgotten blob from the bucket: {err:#}");
+                }
+            });
             if self.blob_named(&hash, |_| true).unwrap_or(true) {
                 continue;
             }

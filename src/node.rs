@@ -67,6 +67,8 @@ const STOPPED_FOR: u64 = 15 * 60_000;
 const TICK: Duration = Duration::from_secs(10);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
+/// How long a blob a scope forgot stays in the bucket, in case an entry another device wrote names it again.
+const FORGOTTEN_KEPT: Duration = Duration::from_secs(600);
 /// How long a call's work may carry on after it returns (`ctx.waitUntil`).
 const LATER_LIMIT: Duration = Duration::from_secs(600);
 /// How many of an app's failures a device records an hour; the rest are only counted on the next hour's.
@@ -639,7 +641,7 @@ impl Node {
         // Its blobs first, so a device that reads the entry finds them; one the bucket doesn't take now is tried again
         // each minute.
         for blob in &content.blobs {
-            if let Err(err) = self.share_blob(scope, blob).await {
+            if let Err(err) = self.share_blob(scope, blob, false).await {
                 tracing::warn!("putting blob {} in the bucket, to try again: {err:#}", &blob[..12.min(blob.len())]);
                 self.0.unshared.lock().unwrap().push((scope.clone(), blob.clone()));
             }
