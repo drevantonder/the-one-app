@@ -46,7 +46,7 @@ export default {
   icon: "sparkle",
   color: "#af52de",
   description: "Reads photos and PDFs and answers questions, for your apps",
-  instructions: "AI for apps: ai_read reads photos and PDFs with a prompt, ai_decide asks a decision model typed questions. ai_settings shows which models answer (local models on one of your servers, or Gemini once the person's Vault has a Gemini key for it: ask with vault_request, app ai, need gemini); ai_set changes them.",
+  instructions: "AI for apps: ai_read reads photos and PDFs with a prompt, ai_decide asks a decision model typed questions. ai_settings shows which models answer (local models on one of your devices, or Gemini once the person's Vault has a Gemini key for it: ask with vault_request, app ai, need gemini); ai_set changes them.",
   uses: { sidecars: ["models"] },
   vault: {
     gemini: { title: "Gemini key", type: "API key", domain: "aistudio.google.com", hosts: ["generativelanguage.googleapis.com"], fields: { gemini_key: { label: "API key", secret: true } } },
@@ -55,7 +55,7 @@ export default {
 
   ops: {
     settings: {
-      description: "Which AI answers: provider (local or gemini), local_server (the server with the local models), and the models for reading and deciding.",
+      description: "Which AI answers: provider (local or gemini), local_server (the device with the local models), and the models for reading and deciding.",
       input: { type: "object", properties: {} },
       run: (ctx) => settings(ctx),
     },
@@ -65,7 +65,7 @@ export default {
         type: "object",
         properties: {
           provider: { type: "string", enum: ["local", "gemini"] },
-          local_server: { type: "string", description: "the server whose local models answer, by name" },
+          local_server: { type: "string", description: "the device whose local models answer, by name" },
           read_model: { type: "string" }, decide_model: { type: "string" }, gemini_model: { type: "string" },
           scope: { type: "string", description: "user (the default) or global" },
         },

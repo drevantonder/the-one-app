@@ -25,7 +25,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
     if let Some(tag) = tag {
         ensure!(version_tag(tag), "a release is named like v1.2.3");
-        ensure!(installer_is_ours(), "install.sh installs another white label, so {NAME} isn't released on GitHub; {CLI} update runs main on its servers");
+        ensure!(installer_is_ours(), "install.sh installs another white label, so {NAME} isn't released on GitHub; {CLI} update runs main on its devices");
         ensure!(quiet(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     }
     // Updates here take turns: they share one checkout, and each would test one commit and send out another.

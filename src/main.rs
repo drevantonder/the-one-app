@@ -17,25 +17,25 @@ fn help() -> String {
         "{NAME}: your machines, and your team's, as one place for apps and agents.
 
 Usage:
-  {CLI} serve                          run this machine's server
-  {CLI} status                         this server, its install, its users, groups and servers
+  {CLI} serve                          run this machine as one of your devices
+  {CLI} status                         this device, its install, its users, groups and devices
   {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
                                        your devices; {CLI} and {CLI} mcp here then act as you
   {CLI} sign-out                       sign this machine out
   {CLI} create <name> --as <your name> create an install, with you as its first admin
   {CLI} pair [--user <name>]           a pairing code for another of your machines (or, for admins, someone else's)
   {CLI} join <code>                    join an install with a pairing code
-  {CLI} rename <name>                  rename this server
-  {CLI} remove <server|client> | --user <user>
+  {CLI} rename <name>                  rename this device
+  {CLI} remove <device> | --user <user>
   {CLI} role <user> admin|member       (admins)
   {CLI} settings [<name> <value>|--default]   the install's settings (admins set them)
   {CLI} group create <name>            a group, with you as its admin
   {CLI} group invite <group> <user> [--admin]
   {CLI} group accept <group>
   {CLI} group remove <group> <user>    or leave it, giving yourself
-  {CLI} acl <server> --owners a,b --users c,d
-                                       who owns and uses a server: user or group names, or install
-  {CLI} trust <server> | untrust <server>
+  {CLI} acl <device> --owners a,b --users c,d
+                                       who owns and uses a device: user or group names, or install
+  {CLI} trust <device> | untrust <device>
   {CLI} apps                           every app and its operations
   {CLI} deploy <dir> [--name <app>] [--owner <owner>]
                                        build the app in <dir> (app.ts or app.js, and its npm packages) with Bun and
@@ -100,19 +100,19 @@ Usage:
                                        with, comma-separated, or -: links to the address open the app)
   {CLI} kernel use <address> <vault> <schedules>
                                        point this install at its kernel: its nodes take sign-ins made at the address
-  {CLI} kernel tunnel                  whether this server runs a connector for the install's Cloudflare Tunnel, which
+  {CLI} kernel tunnel                  whether this device runs a connector for the install's Cloudflare Tunnel, which
                                        the address reaches nodes through (node-url cloudflare:<id>): piped the
-                                       tunnel's token, it keeps it in Everyone's Vault, and every server runs one, so
+                                       tunnel's token, it keeps it in Everyone's Vault, and every device runs one, so
                                        the address reaches whichever is up
   {CLI} storage                        where the install's data is kept
-  {CLI} storage move --endpoint <url>  move it to S3-compatible storage (R2, S3, GCS, MinIO), which every server
+  {CLI} storage move --endpoint <url>  move it to S3-compatible storage (R2, S3, GCS, MinIO), which every device
                                        reaches: piped a JSON object of bucket, key_id and secret (and region) it tries
-                                       it, and every server moves there; otherwise it asks the person for them, with a
+                                       it, and every device moves there; otherwise it asks the person for them, with a
                                        link to a sheet on their device
   {CLI} backups                        how backups are going: each place, its last backup, what's failing
   {CLI} backups now                    back up now, without waiting for the hour
   {CLI} backups place add <folder> [--title t]
-                                       back up to a folder on this server, like a USB disk's: tried before it's added
+                                       back up to a folder on this device, like a USB disk's: tried before it's added
   {CLI} backups place add --endpoint <url> [--title t]
                                        back up to S3-compatible storage (R2, B2, MinIO): piped a JSON object of
                                        bucket, key_id and secret (and region) it tries and adds it; otherwise it asks
@@ -124,10 +124,10 @@ Usage:
                                        the recovery key on stdin, with or without an install here
   {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
-  {CLI} sidecars                       the server sidecars on each server: version, and who installed them
+  {CLI} sidecars                       the sidecars on each of your devices: version, and who installed them
   {CLI} sidecars remove|add <name> [--server <name>]
-                                       remove a sidecar from a server you own (here by default), or allow it there
-                                       again; sidecars/install.sh <name> [server] installs one and allows it
+                                       remove a sidecar from a device you own (here by default), or allow it there
+                                       again; sidecars/install.sh <name> [device] installs one and allows it
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's operations
@@ -135,15 +135,15 @@ Usage:
                                        run an operation, e.g. {CLI} board post \"hi there\" --topic x; --help says
                                        what it takes. Required inputs may be words, lists repeat a flag, inputs not
                                        given are read as JSON from stdin, --file <input>=<path> gives a file and
-                                       --out <path> saves what it gives back. --server <name> runs it there
+                                       --out <path> saves what it gives back. --server <name> runs it on that device
   {CLI} try [<command>]                a new install, on this machine beside yours, with only what every new install
                                        starts with: to look around and test in. {CLI} try <command> runs a command in
                                        it ({CLI} try mcp for an agent), and {CLI} try stop deletes it
   {CLI} update                         test and build main's tip on this machine and the Macs, and run it everywhere
   {CLI} release <vX.Y.Z>               the same, signed off and published on GitHub for the installer
-  {CLI} publish [binary]               sign and publish a build you made; every server on its platform updates
+  {CLI} publish [binary]               sign and publish a build you made; every device on its platform updates
   {CLI} file put <file>                keep a file in the install, for apps and agents; prints its hash
-  {CLI} file get <hash> <file>         get a kept file from this server or another
+  {CLI} file get <hash> <file>         get a kept file from this device or another
   {CLI} version                        this build
   {CLI} skills [<name> [<file>]]       the skills agents load: {NAME}'s own (how to connect, the rules, which MCP to
                                        add; also {CLI} guide, and /llms.txt), and each area's and app's
@@ -304,7 +304,7 @@ fn run(args: Vec<String>) -> Result<()> {
         ["deploy", app] if flags.contains_key("version") => {
             let version = flags["version"].as_str().context("give --version <hash>")?;
             post("/v1/deploy", json!({ "app": app, "bundle": version }))?;
-            println!("Deployed {app} ({version}) again. Every server runs it now.");
+            println!("Deployed {app} ({version}) again. Every device runs it now.");
         }
         ["deploy", dir] => deploy(std::path::Path::new(dir), &flags)?,
         ["deploys", app] => {
@@ -495,21 +495,21 @@ fn run(args: Vec<String>) -> Result<()> {
             if token.trim().is_empty() {
                 let t = get("/v1/tunnel")?;
                 match (t["set"] == true, t["running"] == true) {
-                    (false, _) => println!("This install has no tunnel: pipe its token into {CLI} kernel tunnel, and every server runs a connector for it."),
-                    (true, true) => println!("{} runs a connector for the install's tunnel, as every server does.", t["server"].as_str().unwrap_or("")),
+                    (false, _) => println!("This install has no tunnel: pipe its token into {CLI} kernel tunnel, and every device runs a connector for it."),
+                    (true, true) => println!("{} runs a connector for the install's tunnel, as every device does.", t["server"].as_str().unwrap_or("")),
                     (true, false) => println!("{} runs no connector for the install's tunnel now: cloudflared.log in its folder says why.", t["server"].as_str().unwrap_or("")),
                 }
                 return Ok(());
             }
             let r = post("/v1/tunnel", json!({ "token": token.trim(), "agent": agent_from_env() }))?;
-            println!("Kept tunnel {}'s token in Everyone's Vault: every server runs a connector for it now.", r["tunnel"].as_str().unwrap_or(""));
+            println!("Kept tunnel {}'s token in Everyone's Vault: every device runs a connector for it now.", r["tunnel"].as_str().unwrap_or(""));
         }
         ["storage"] => {
             let s = get("/v1/storage")?;
             match s["kind"].as_str() {
-                Some("folder") => println!("The install's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other servers join: {CLI} storage move --endpoint <url>.", s["server"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
+                Some("folder") => println!("The install's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other devices join: {CLI} storage move --endpoint <url>.", s["server"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
                 Some(_) => println!("The install's data is kept in {} at {}.", s["where"].as_str().unwrap_or(""), s["endpoint"].as_str().unwrap_or("")),
-                None => println!("This server can't reach the install's data: an admin moves it to S3-compatible storage with {CLI} storage move."),
+                None => println!("This device can't reach the install's data: an admin moves it to S3-compatible storage with {CLI} storage move."),
             }
         }
         ["storage", "move"] => {
@@ -524,10 +524,10 @@ fn run(args: Vec<String>) -> Result<()> {
             let r = post("/v1/storage", body)?;
             print!("{}", tried_said(&r));
             if r["id"].is_string() {
-                println!("Every server moves the install's data there now.");
+                println!("Every device moves the install's data there now.");
             }
             if r["moving"] == true {
-                println!("This server is putting what it holds there, and keeps the install's data there from now on. Do the same on each of the install's other servers.");
+                println!("This device is putting what it holds there, and keeps the install's data there from now on. Do the same on each of your other devices.");
             }
         }
         ["backups"] => print!("{}", backups_said(&get("/v1/backups")?)),
@@ -737,7 +737,7 @@ fn run(args: Vec<String>) -> Result<()> {
         ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
         ["rename", name @ ..] if !name.is_empty() => {
             post("/v1/name", json!({ "name": name.join(" ") }))?;
-            println!("This server is now {}.", name.join(" "));
+            println!("This device is now {}.", name.join(" "));
         }
         [app] if !app.starts_with('-') => {
             let apps = get("/v1/apps")?;
@@ -778,7 +778,7 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
     }
     let signature = one::release::sign(key, &std::fs::read(path)?)?;
     let r = post("/v1/node-release", json!({ "path": path, "commit": commit, "target": target, "committed": committed, "signature": signature }))?;
-    println!("Published {} for {}. Every server on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
+    println!("Published {} for {}. Every device on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
     Ok(())
 }
 
@@ -801,7 +801,7 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
         post("/v1/app", json!({ "name": name, "owner": owner }))?;
     }
     post("/v1/deploy", json!({ "app": name, "bundle": blob }))?;
-    println!("Deployed {name} ({}). Every server runs it now.", &blob[..12]);
+    println!("Deployed {name} ({}). Every device runs it now.", &blob[..12]);
     Ok(())
 }
 
@@ -833,7 +833,7 @@ fn parse(args: &[String]) -> (Vec<String>, Map<String, Value>) {
 /// Whether a server runs here, and which install it's in, for the bare command.
 fn connection() -> String {
     let Ok(state) = get("/v1/state") else { return format!("{NAME} isn't running here: start it with {CLI} serve.") };
-    let server = state["server"]["name"].as_str().unwrap_or("this server");
+    let server = state["server"]["name"].as_str().unwrap_or("this device");
     let i = &state["install"];
     if i.is_null() {
         return format!("{server} is in no install yet: {CLI} create <name> --as <your name>, or {CLI} join <code>.");
@@ -841,7 +841,7 @@ fn connection() -> String {
     let install = i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("an install (still joining)");
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("");
     let ready = if state["server"]["ready"] == true { "" } else { ", catching up" };
-    format!("Connected to {install} as {me}, on {server}{ready}. {CLI} status shows its servers; {CLI} apps what you can run.")
+    format!("Connected to {install} as {me}, on {server}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.")
 }
 
 fn agent() -> ureq::Agent {
@@ -942,7 +942,7 @@ fn status(state: &Value) {
             println!("  {}  {}", g["name"].as_str().unwrap_or(""), members.join(", "));
         }
     }
-    println!("\nServers");
+    println!("\nDevices");
     for s in i["servers"].as_array().into_iter().flatten() {
         let dot = if s["online"] == true { "●" } else { "○" };
         let here = if s["here"] == true { " (this one)" } else { "" };

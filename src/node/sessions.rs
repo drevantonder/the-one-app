@@ -219,7 +219,7 @@ fn signer(vault: crate::kernel::Vault, token: String, urls: Arc<Mutex<HashMap<St
             _ => kept.get(&id).map(|(url, _)| url.clone()),
         }
         .context("the vault didn't sign that")?;
-        ensure!(url.starts_with(&base), "the vault signs for another bucket than the install's, which this server uses");
+        ensure!(url.starts_with(&base), "the vault signs for another bucket than the install's, which this device uses");
         Ok(url)
     })
 }

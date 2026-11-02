@@ -221,7 +221,7 @@ export default {
         },
       },
       async run(ctx, { code, account: name, client_id, client_secret }) {
-        if (!ctx.user) throw new Error("this server doesn't keep your data: sign in on one of your own servers");
+        if (!ctx.user) throw new Error("this device doesn't keep your data: sign in on one of your own devices");
         if (code) return finish(ctx, code, name);
         let unauthorized;
         try {

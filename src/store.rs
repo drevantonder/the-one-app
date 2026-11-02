@@ -173,7 +173,7 @@ impl Store {
 
     /// Deletes every entry of a scope.
     pub fn delete(&self, log: &str) -> Result<()> {
-        ensure!(log != "global", "every server holds global");
+        ensure!(log != "global", "every device holds global");
         self.db.execute("delete from entries where log = ?", [log])?;
         self.db.execute("delete from positions where log = ?", [log])?;
         Ok(())

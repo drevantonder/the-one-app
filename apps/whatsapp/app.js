@@ -8,12 +8,12 @@ async function sidecar(ctx, op, input) {
   try {
     return await ctx.sidecars.whatsapp[op](input);
   } catch (err) {
-    if (String(err.message).includes("no server runs whatsapp for you")) throw new Error(NEEDS);
+    if (String(err.message).includes("no device runs whatsapp for you")) throw new Error(NEEDS);
     throw err;
   }
 }
 
-const NEEDS = "WhatsApp needs one of your servers to link your phone to, and none of them runs it. Ask an owner of one to install it.";
+const NEEDS = "WhatsApp needs one of your devices to link your phone to, and none of them runs it. Ask an owner of one to install it.";
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
@@ -50,15 +50,15 @@ export default {
   domain: "whatsapp.com",
   description: "Your WhatsApp chats, for your agents: read, search and send",
   connector: true,
-  needs: "Needs a server of yours to link your phone to",
-  instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their servers, as WhatsApp Desktop is linked; calls find the server. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another server; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
+  needs: "Needs a device of yours to link your phone to",
+  instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their devices, as WhatsApp Desktop is linked; calls find the device. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another of their devices; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
   uses: { sidecars: ["whatsapp"] },
   vault: VAULT,
 
   ops: {
     accounts: {
       reads: true,
-      description: "The WhatsApp accounts linked on any of your servers, this one's first: each { account, ok, server }, with why when ok is false.",
+      description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, server }, with why when ok is false.",
       input: {"properties": {}, "type": "object"},
       // A connector lists no accounts, rather than failing, where no server runs its sidecar; its settings say why.
       async run(ctx, input) {
@@ -71,7 +71,7 @@ export default {
     },
     status: {
       reads: true,
-      description: "Which accounts are linked and connected here, and how many messages each keeps; or on which of your servers WhatsApp is linked.",
+      description: "Which accounts are linked and connected here, and how many messages each keeps; or on which of your devices WhatsApp is linked.",
       input: {"properties": {}, "type": "object"},
       run: (ctx, input) => sidecar(ctx, "status", input),
     },
@@ -105,13 +105,13 @@ export default {
       run: (ctx, input) => sidecar(ctx, "send", input),
     },
     move: {
-      description: "Move a WhatsApp link, with its kept messages, from the server it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted here once the other server has it.",
-      input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "to": {"description": "the server to move it to, by name", "type": "string"}}, "required": ["to"], "type": "object"},
+      description: "Move a WhatsApp link, with its kept messages, from the device it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted here once the other device has it.",
+      input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "to": {"description": "the device to move it to, by name", "type": "string"}}, "required": ["to"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "move", input),
     },
     sign_out: {
       confirm: true,
-      description: "Unlink a WhatsApp account: removes this server from its linked devices and deletes the messages kept here. Destructive: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
+      description: "Unlink a WhatsApp account: removes this device from its linked devices and deletes the messages kept here. Destructive: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
       input: {"properties": {"account": {"description": "the account's number; needed when several are linked here", "type": "string"}}, "type": "object"},
       async run(ctx, input) {
         const out = await sidecar(ctx, "sign_out", input);
@@ -128,7 +128,7 @@ export default {
     },
     _running: {
       reads: true,
-      description: "Which of your servers it runs on, for the screens to say when none does.",
+      description: "Which of your devices it runs on, for the screens to say when none does.",
       input: { type: "object", properties: {} },
       run: async (ctx) => ({ servers: await running(ctx), needs: NEEDS }),
     },
@@ -161,7 +161,7 @@ async function show() {
     ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? \`Linked on \${a.server}\${i ? "" : " · used first"}\` : a.why || "Needs linking again")}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
     : '<p class="muted">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => {
-    await one.confirm("#connect", { title: \`Sign out of \${b.dataset.out}?\`, detail: "This server is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
+    await one.confirm("#connect", { title: \`Sign out of \${b.dataset.out}?\`, detail: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
       action: "Sign Out", danger: true, run: () => one.call("sign_out", { account: b.dataset.out }) });
     show();
   };

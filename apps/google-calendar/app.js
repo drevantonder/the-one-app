@@ -44,7 +44,7 @@ async function accountItems(ctx) {
 }
 
 async function accounts(ctx) {
-  if (!ctx.user) throw new Error("this server doesn't keep your data, so it can't reach your accounts: use one of your own servers");
+  if (!ctx.user) throw new Error("this device doesn't keep your data, so it can't reach your accounts: use one of your own devices");
   return (await accountItems(ctx)).map((i) => i.fields.email.value);
 }
 
@@ -164,7 +164,7 @@ const signInOps = {
       account: { type: "string", description: "the account's address, to suggest it to Google" },
     } },
     async run(ctx, { code, account }) {
-      if (!ctx.user) throw new Error("this server doesn't keep your data: use one of your own servers");
+      if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
       if (code) return finishSignIn(ctx, code);
       return `Open this link in a browser on any device and sign in. The browser then fails to load a 127.0.0.1 page: copy that page's whole address and pass it to ${APP}_finish_sign_in.\n\n${await startSignIn(ctx, account)}`;
     },
@@ -299,7 +299,7 @@ export default {
   title: "Google Calendar",
   icon: "calendar",
   color: "#4285f4",
-  description: "Your Google calendars, from any of your servers: events, and adding and changing them.",
+  description: "Your Google calendars, from any of your devices: events, and adding and changing them.",
   instructions: `Google Calendar is the person's Google calendars (the Mac's Apple Calendar is the calendar app). ${APP}_events lists events in a time range (default the coming week); ${APP}_event shows one. ${APP}_create_event, ${APP}_update_event and ${APP}_delete_event change the calendar: do them only when the person asked. Guests are told only with notify. With several accounts, each operation takes account.`,
   vault: VAULT,
   schema: signInSchema,

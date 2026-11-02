@@ -19,9 +19,9 @@
   one.plain = (err) => {
     let msg = String(err?.message ?? err ?? "").replace(/^(Uncaught )?\w*Error:\s*/, "").trim();
     if (/failed to fetch|load failed|networkerror|not connected|offline|unreachable|no route|connection (refused|reset|lost)/i.test(msg))
-      return { title: "Couldn't reach your server.", safe: "Nothing was lost.", next: "Check your connection, then try again." };
+      return { title: "Couldn't reach your device.", safe: "Nothing was lost.", next: "Check your connection, then try again." };
     if (/timed? ?out|took too long/i.test(msg))
-      return { title: "Your server took too long to answer.", safe: "Nothing was lost.", next: "Try again in a moment." };
+      return { title: "Your device took too long to answer.", safe: "Nothing was lost.", next: "Try again in a moment." };
     if (!msg || msg.length > 200 || /something went wrong|internal (server )?error|unexpected|\b5\d\d\b|undefined|null|is not a function|\[object/i.test(msg))
       return { title: "This app could not complete your request.", safe: "Nothing was lost.", next: "Try again in a moment." };
     msg = msg[0].toUpperCase() + msg.slice(1);

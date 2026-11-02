@@ -85,7 +85,7 @@ async function where(ctx, a) {
   const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
   const runs = servers.filter((s) => (s.sidecars || []).some((d) => parts.includes(d)));
   const removed = servers.filter((s) => !runs.includes(s) && (s.removed_sidecars || []).some((d) => parts.includes(d.name)));
-  const line = runs.length ? "Runs on " + runs.map((s) => s.name).join(", ") : a.needs || "Runs on none of your servers";
+  const line = runs.length ? "Runs on " + runs.map((s) => s.name).join(", ") : a.needs || "Runs on none of your devices";
   return {
     line, runs: runs.map((s) => s.name), needs: a.needs || null,
     install: removed.filter(owns).map((s) => s.name), remove: runs.filter(owns).map((s) => s.name),
@@ -272,7 +272,7 @@ export default {
     },
     servers: {
       reads: true,
-      description: "Where a service runs (\"Runs on linux, mac\"), or what it needs when none of your servers runs it; the servers you own it may be installed on or removed from; and ask: true when you own none of those, so you ask a server's owner to install it.",
+      description: "Where a service runs (\"Runs on linux, mac\"), or what it needs when none of your devices runs it; the devices you own it may be installed on or removed from; and ask: true when you own none of those, so you ask a device's owner to install it.",
       input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
       async run(ctx, { app }) {
         const a = await find(ctx, app);
@@ -280,8 +280,8 @@ export default {
       },
     },
     install_on: {
-      description: "Install a service on a server you own, where an owner removed it: it runs there again.",
-      input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
+      description: "Install a service on a device you own, where an owner removed it: it runs there again.",
+      input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the device, by name" } } },
       async run(ctx, { app, server }) {
         const a = await find(ctx, app);
         for (const part of a.uses?.sidecars || []) ctx.sidecar(part, server, true);
@@ -290,8 +290,8 @@ export default {
     },
     remove_from: {
       confirm: true,
-      description: "Remove a service from a server you own: it stops running there, and goes on running on your other servers that have it. What it keeps on that server stays, and install_on puts it back.",
-      input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the server, by name" } } },
+      description: "Remove a service from a device you own: it stops running there, and goes on running on your other devices that have it. What it keeps on that device stays, and install_on puts it back.",
+      input: { type: "object", required: ["app", "server"], properties: { app: { type: "string" }, server: { type: "string", description: "the device, by name" } } },
       async run(ctx, { app, server }) {
         const a = await find(ctx, app);
         const there = (await ctx.servers()).find((s) => s.name === server);
@@ -594,7 +594,7 @@ const sections = [
   },
   function usedBy({ insights }) {
     const list = insights?.usage || [];
-    const what = { cli: "CLI", mcp: "Agent", phone: "iPhone", mac: "Mac", browser: "Browser", schedule: "Schedule", app: "Another app", node: "The server", api: "A program on the server" };
+    const what = { cli: "CLI", mcp: "Agent", phone: "iPhone", mac: "Mac", browser: "Browser", schedule: "Schedule", app: "Another app", node: "The device", api: "A program on the device" };
     const row = (u) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(u.user)}</span><span class="when">\${one.ago(u.last)}</span></div>
         <div class="sub">\${one.esc(u.agent || what[u.client] || u.client)}</div></div></div>\`;
     return list.length ? '<h2 class="section">Used By</h2><div class="list">' + list.slice(0, 20).map(row).join("") + "</div>" : "";

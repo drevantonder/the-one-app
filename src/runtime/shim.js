@@ -167,7 +167,7 @@ function context(ask, body, appends, later) {
       async create({ scope = "user", same, ...item }) {
         if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
         const at = scope === "user" ? scopes.find((s) => s.id.startsWith("user:"))?.id : scope;
-        if (!at) throw new Error("this server doesn't keep your data: use one of your own servers");
+        if (!at) throw new Error("this device doesn't keep your data: use one of your own devices");
         let id = null;
         if (same) id = (await (await ask("vault/match", { method: "POST", body: JSON.stringify({ scope: at, type: item.type ?? "", field: same, value: item.fields?.[same]?.value }) })).json()).id;
         id ||= [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");

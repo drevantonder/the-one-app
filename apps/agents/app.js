@@ -7,12 +7,12 @@ async function sidecar(ctx, op, input) {
   try {
     return await ctx.sidecars.agents[op](input);
   } catch (err) {
-    if (String(err.message).includes("no server runs agents for you")) throw new Error(NEEDS);
+    if (String(err.message).includes("no device runs agents for you")) throw new Error(NEEDS);
     throw err;
   }
 }
 
-const NEEDS = "AGENTS.md runs on your servers, and none of them is online.";
+const NEEDS = "AGENTS.md runs on your devices, and none of them is online.";
 
 export default {
   name: "agents",

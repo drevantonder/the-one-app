@@ -14,10 +14,10 @@ use crate::sidecars::{Answer, Record, Reply};
 pub fn describe() -> Value {
     json!({
         "name": "shell", "title": "Shell", "icon": "terminal-window", "color": "#3a3a3c", "runs": "here", "prefer": "here", "description": "Runs commands on your own devices",
-        "instructions": "Run a shell command on one of your own servers with shell_run; give server to choose which. Every command is logged where only you can read it.",
+        "instructions": "Run a shell command on one of your own devices with shell_run; give server (a device's name) to choose which. Every command is logged where only you can read it.",
         "ops": [{
             "name": "run",
-            "description": "Run a shell command on this server (or the server given) and return its exit code and output. Every command is logged.",
+            "description": "Run a shell command on this device (or the device given) and return its exit code and output. Every command is logged.",
             "input": { "type": "object", "required": ["command"], "properties": {
                 "command": { "type": "string", "description": "run by sh -c" },
                 "dir": { "type": "string", "description": "working directory; default is the home directory" },

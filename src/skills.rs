@@ -178,7 +178,7 @@ pub fn app_skill(app: &Value) -> Skill {
 }
 
 /// How the Vault's tools are explained, as an app's guide is.
-const VAULT_GUIDE: &str = "The Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat, and never paste one yourself. To keep one, call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. To use one yourself, ask with app agents, then call vault_fetch with {{<field>}} where it goes: your server fills it in, only for the item's sites, and you get the answer. If someone pastes a secret anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.";
+const VAULT_GUIDE: &str = "The Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat, and never paste one yourself. To keep one, call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. To use one yourself, ask with app agents, then call vault_fetch with {{<field>}} where it goes: your device fills it in, only for the item's sites, and you get the answer. If someone pastes a secret anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.";
 
 /// The Vault's tools as an app's operations, as search, scripts and its skill see them.
 pub fn vault_app() -> Value {
@@ -186,7 +186,7 @@ pub fn vault_app() -> Value {
 }
 
 /// How backups' tools are explained, as an app's guide is.
-const BACKUPS_GUIDE: &str = "Each server backs up the install's data it holds, every hour that something changed, to each place: a folder on a server's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only the install's servers and its recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; backups_check restores the newest backup into a throwaway copy and says what came back.";
+const BACKUPS_GUIDE: &str = "Each device backs up the install's data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; backups_check restores the newest backup into a throwaway copy and says what came back.";
 
 /// Backups' tools as an app's operations.
 pub fn backups_app() -> Value {

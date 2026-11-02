@@ -142,7 +142,7 @@ fn cloudflared() -> Result<PathBuf> {
     let (_, file, sha256) = DOWNLOADS
         .iter()
         .find(|(target, _, _)| *target == crate::config::TARGET)
-        .ok_or_else(|| anyhow!("this server can't run a tunnel connector: cloudflared has no build for {}", crate::config::TARGET))?;
+        .ok_or_else(|| anyhow!("this device can't run a tunnel connector: cloudflared has no build for {}", crate::config::TARGET))?;
     let dir = crate::cache().join(format!("cloudflared-{CLOUDFLARED}"));
     let path = dir.join("cloudflared");
     if path.exists() {

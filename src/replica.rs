@@ -58,12 +58,12 @@ impl Replica {
 
     /// Makes an entry for this server's log of `scope`, timed after everything it has seen, to write to the bucket.
     pub fn make(&self, scope: &Scope, user: &str, by: Option<Key>, content: Content, now: u64) -> Result<Entry> {
-        ensure!(self.holds(scope), "this server doesn't hold {scope}");
+        ensure!(self.holds(scope), "this device doesn't hold {scope}");
         let log = scope.to_string();
         let head = self.store.own_head(&self.id, &log)?;
         let held = self.store.last(&self.id, &log)?.map(|e| e.seq());
         // A server that holds a scope again writes there only once it has its own log back, so no seq is written twice.
-        ensure!(head.map(|h| h.0) == held, "this server is still getting its own entries in {scope} back");
+        ensure!(head.map(|h| h.0) == held, "this device is still getting its own entries in {scope} back");
         let time = now.max(self.store.max_time()? + 1);
         Ok(Entry::create(&self.key, Ext { log, time, user: user.into(), by }, head, content))
     }

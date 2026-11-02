@@ -7,7 +7,7 @@ async function sidecar(ctx, op, input) {
   try {
     return await ctx.sidecars.contacts[op](input);
   } catch (err) {
-    if (String(err.message).includes("no server runs contacts for you")) throw new Error(NEEDS);
+    if (String(err.message).includes("no device runs contacts for you")) throw new Error(NEEDS);
     throw err;
   }
 }
@@ -28,14 +28,14 @@ export default {
   ops: {
     accounts: {
       reads: true,
-      description: "The Macs it runs on: each { account, ok }, the server’s name, ok while it’s online.",
+      description: "The Macs it runs on: each { account, ok }, the device’s name, ok while it’s online.",
       input: { type: "object", properties: {} },
       run: async (ctx) => (await ctx.servers()).filter((s) => (s.sidecars || []).includes("contacts")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
       confirm: true,
-      description: "Stop using Contacts on one of your servers: removes it from that server, for one of its owners.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the server, by name" } } },
+      description: "Stop using Contacts on one of your devices: removes it from that device, for one of its owners.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device, by name" } } },
       run: (ctx, { account }) => {
         ctx.sidecar("contacts", account, false);
         return `Contacts is removed from ${account}.`;

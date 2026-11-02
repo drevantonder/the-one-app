@@ -532,7 +532,7 @@ impl Node {
     /// Runs `f` on this server's install.
     fn with<R>(&self, f: impl FnOnce(&mut Install) -> Result<R>) -> Result<R> {
         let mut install = self.0.install.lock().unwrap();
-        f(install.as_mut().context("this server is in no install yet: create one, or join with a pairing code")?)
+        f(install.as_mut().context("this device is in no install yet: create one, or join with a pairing code")?)
     }
 
     pub fn has_install(&self) -> bool {
@@ -547,7 +547,7 @@ impl Node {
     /// Refuses a second install: a white label holds one install, and another context is another white label.
     fn ensure_no_install(&self) -> Result<()> {
         if self.has_install() {
-            bail!("this server already belongs to an install, and {} holds one; for another, install that context's own app", crate::config::NAME);
+            bail!("this device already belongs to an install, and {} holds one; for another, install that context's own app", crate::config::NAME);
         }
         Ok(())
     }
@@ -887,15 +887,15 @@ impl Node {
             }
         }
         if why.is_empty() {
-            bail!("no server runs {} for you", req.app);
+            bail!("no device runs {} for you", req.app);
         }
-        bail!("no server could run it ({})", why.join("; "))
+        bail!("no device could run it ({})", why.join("; "))
     }
 
     /// Runs a sidecar's call on every server that runs it for the caller, one at a time: `{ <server>: answer }`, or
     /// `{ error }` for one that failed. Only for sidecars: an app's call runs once.
     async fn everywhere(&self, req: CallRequest, me: Caller) -> Result<Value> {
-        ensure!(req.sidecar.is_some(), "{} is an app: its calls run once, on one server", req.app);
+        ensure!(req.sidecar.is_some(), "{} is an app: its calls run once, on one device", req.app);
         let req = CallRequest { server: None, ..req };
         let mut out = serde_json::Map::new();
         for server in self.candidates(&req, &me)? {
@@ -910,7 +910,7 @@ impl Node {
             };
             out.insert(self.name_of(&server), answer);
         }
-        ensure!(!out.is_empty(), "no server runs {} for you", req.app);
+        ensure!(!out.is_empty(), "no device runs {} for you", req.app);
         Ok(Value::Object(out))
     }
 
@@ -1085,7 +1085,7 @@ impl Node {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);
             let lease = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
             if !reads && !crate::bucket::Bucket::create(&self.call_bucket(me)?, &lease, hex(&self.0.id).as_bytes()).await? {
-                return Ok(Reply::Error("it ran on another server already, whose answer was lost: look before trying again".into()));
+                return Ok(Reply::Error("it ran on another device already, whose answer was lost: look before trying again".into()));
             }
         }
         let mut ctx = ctx;
@@ -1117,7 +1117,7 @@ impl Node {
 
     /// The install's bucket, as this server reaches it, with its copy of the databases' steps.
     fn bucket(&self) -> Result<Copied> {
-        let place = self.with(|i| i.bucket.as_ref().map(|(p, _)| p.clone()).context("this server can't reach the install's bucket, where apps keep their data: use another server"))?;
+        let place = self.with(|i| i.bucket.as_ref().map(|(p, _)| p.clone()).context("this device can't reach the install's bucket, where apps keep their data: use another device"))?;
         Ok(Copied::moving(place, self.install_dir().join("copy"), self.0.moved.clone()))
     }
 
@@ -1167,7 +1167,7 @@ impl Node {
                     }
                     match found {
                         Some(o) => crate::backups::unseal(self.0.key.as_bytes(), &o.bytes)?,
-                        None => bail!("{} doesn't have {scope}'s key yet: a server that has it gives it when it's next on", self.server_name()),
+                        None => bail!("{} doesn't have {scope}'s key yet: a device that has it gives it when it's next on", self.server_name()),
                     }
                 } else {
                     key
@@ -1899,7 +1899,7 @@ impl Node {
         ensure!(matches!(uri.scheme_str(), Some("https" | "http")), "only http and https addresses");
         let host = uri.host().context("the address has no host")?.trim_start_matches('[').trim_end_matches(']').to_lowercase();
         let port = uri.port_u16().unwrap_or(if uri.scheme_str() == Some("https") { 443 } else { 80 });
-        ensure!(!crate::outbound::own_port(self, &host, port), "that's this server's own port");
+        ensure!(!crate::outbound::own_port(self, &host, port), "that's this device's own port");
         ensure!(!self.names_app(&host), "{host} is an app's name, not a site's");
         let used = std::sync::Mutex::new(Vec::<String>::new());
         let fill = |text: &str| {
@@ -2573,7 +2573,7 @@ impl Node {
         self.with(|i| {
             let m = &i.r.members;
             ensure!(members::manages_scope(m, &caller.user, scope), "you can't install apps in {scope}");
-            ensure!(i.r.holds(scope), "this server doesn't hold {scope}");
+            ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
             let here = i.views.get(&scope.to_string()).map(|(_, s)| s.installed.clone()).unwrap_or_default();
             let mut out = Vec::new();
             for (n, name) in wanted.iter().enumerate().rev() {
@@ -2604,7 +2604,7 @@ impl Node {
         let scope = Scope::User(caller.user.clone());
         let content = self.with(|i| {
             ensure!(members::valid_page(page), "a page is user, group:<id> or global");
-            ensure!(i.r.holds(&scope), "this server doesn't hold your data");
+            ensure!(i.r.holds(&scope), "this device doesn't hold your data");
             Ok(members::node("arrange", json!({ "page": page, "items": items, "hidden": if hidden.is_null() { json!([]) } else { hidden } })))
         })?;
         let by = (caller.key != self.0.id).then_some(caller.key);
@@ -2949,7 +2949,7 @@ impl Node {
         let user = user.map(|u| self.find_user(u)).transpose()?;
         self.with(|i| {
             let m = &i.r.members;
-            ensure!(m.server(&self.0.id).is_some(), "this server isn't in the install yet");
+            ensure!(m.server(&self.0.id).is_some(), "this device isn't in the install yet");
             ensure!(user.as_ref().is_none_or(|u| *u == asker.user) || m.is_admin(&asker.user), "only admins pair other people's machines");
             ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.server_name());
             Ok(())
@@ -2990,7 +2990,7 @@ impl Node {
         let bytes = data_encoding::BASE32_NOPAD.decode(code.trim().to_uppercase().as_bytes()).context("that isn't a pairing code")?;
         let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
         self.ensure_no_install()?;
-        let conn = self.0.endpoint.connect(code.from.clone(), JOIN_ALPN).await.context("couldn't reach the server that made the pairing code")?;
+        let conn = self.0.endpoint.connect(code.from.clone(), JOIN_ALPN).await.context("couldn't reach the device that made the pairing code")?;
         let (mut send, mut recv) = conn.open_bi().await?;
         send.write_all(&serde_json::to_vec(&JoinRequest { secret: code.secret, name: self.server_name(), as_: "server".into() })?).await?;
         send.finish()?;
@@ -3038,7 +3038,7 @@ impl Node {
         let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no install")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
         let admit = members::admit(&key, &user, &request.name, true, None);
-        self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, "admit", admit.data).await.context("this server can no longer admit that machine")?;
+        self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, "admit", admit.data).await.context("this device can no longer admit that machine")?;
         Ok(JoinReply { root, user, bucket })
     }
 
@@ -3236,8 +3236,8 @@ impl Node {
         let found: Vec<Key> = self.with(|i| Ok(i.r.members.servers().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
         match found.as_slice() {
             [one] => Ok(*one),
-            [] => bail!("no server called {name}"),
-            _ => bail!("several servers match {name}"),
+            [] => bail!("no device called {name}"),
+            _ => bail!("several devices match {name}"),
         }
     }
 
@@ -3246,8 +3246,8 @@ impl Node {
         let found: Vec<Key> = self.with(|i| Ok(i.r.members.machines.values().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).map(|m| m.key).collect()))?;
         match found.as_slice() {
             [one] => Ok(*one),
-            [] => bail!("no server or client called {name}"),
-            _ => bail!("several servers or clients match {name}"),
+            [] => bail!("no device called {name}"),
+            _ => bail!("several devices match {name}"),
         }
     }
 
@@ -3487,7 +3487,7 @@ fn installed_sidecars(m: &Members, server: &members::Machine, sidecars: &[Sideca
 /// register there again; for someone acting for one of the server's owners.
 fn sidecar_entry(m: &Members, user: &str, server: &str, name: &str, installed: bool) -> Result<Content> {
     let found: Vec<&members::Machine> = m.servers().filter(|s| s.name.eq_ignore_ascii_case(server) || (!server.is_empty() && hex(&s.key).starts_with(server))).collect();
-    let [s] = found.as_slice() else { bail!("no one server called {server}") };
+    let [s] = found.as_slice() else { bail!("no one device called {server}") };
     ensure!(m.owners(&s.key).iter().any(|o| m.acts_for(user, o)), "only someone acting for one of {}'s owners installs or removes its sidecars", s.name);
     Ok(members::node("sidecar", json!({ "server": hex(&s.key), "name": name, "blob": null, "local": installed })))
 }
@@ -3507,7 +3507,7 @@ fn runs_as(m: &Members, state: &ScopeState, scope: &Scope, app: &str, schedule: 
 fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, schedule: &str, on: bool) -> Result<Content> {
     ensure!(members::manages_scope(&i.r.members, user, scope), "you can't switch schedules in {scope}");
     ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{app} isn't installed in {scope}");
-    ensure!(i.r.holds(scope), "this server doesn't hold {scope}");
+    ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
     Ok(members::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
 }
 
@@ -3515,7 +3515,7 @@ fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, schedule: &st
 fn item_entry(i: &Install, user: &str, scope: &Scope, data: Value) -> Result<Content> {
     let m = &i.r.members;
     ensure!(members::manages_scope(m, user, scope), "you can't change the Vault in {scope}");
-    ensure!(i.r.holds(scope), "this server doesn't hold {scope}");
+    ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
     let mut items = i.views.get(&scope.to_string()).map(|(_, s)| s.items.clone()).unwrap_or_default();
     vault::apply(&mut items, &data, user, now_ms(), |a| !m.apps.get(a).is_some_and(|a| a.erased))?;
     Ok(members::node("item", data))
@@ -3681,7 +3681,7 @@ impl Node {
 
     /// Fetches a blob from the first of `peers` that has it, and keeps it.
     async fn fetch_from(&self, peers: Vec<Key>, hash: &str, size: u64) -> Result<Vec<u8>> {
-        let mut last = anyhow!("no server had it");
+        let mut last = anyhow!("no device had it");
         for peer in peers {
             match self.fetch_blob(peer, hash, size).await {
                 Ok(bytes) => {
@@ -3788,7 +3788,7 @@ impl Node {
     async fn accept_blob(&self, conn: Connection) -> Result<()> {
         let remote = *conn.remote_id().as_bytes();
         let m = self.with(|i| Ok(i.r.members.clone()))?;
-        ensure!(m.server(&remote).is_some(), "not a server of this install");
+        ensure!(m.server(&remote).is_some(), "not a device of this install");
         let (mut send, mut recv) = conn.accept_bi().await?;
         let hash = String::from_utf8(recv.read_to_end(64).await?)?;
         ensure!(self.blob_named(&hash, |s| m.holds(&remote, s))?, "no such blob for you");

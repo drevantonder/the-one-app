@@ -102,7 +102,7 @@ impl Node {
         let schedule = self.0.apps.describe(&run.app).await.ok().and_then(|d| Schedule::all(&d).into_iter().filter_map(Result::ok).find(|s| s.name == run.schedule));
         let schedule = schedule.with_context(|| format!("{}'s latest deploy has no schedule {}", run.app, run.schedule))?;
         self.with(|i| {
-            let state = i.views.get(&scope.to_string()).map(|(_, s)| s).with_context(|| format!("this server doesn't hold {scope}"))?;
+            let state = i.views.get(&scope.to_string()).map(|(_, s)| s).with_context(|| format!("this device doesn't hold {scope}"))?;
             ensure!(state.installed.contains(&run.app), "{} isn't installed in {scope}", run.app);
             ensure!(runs_as(&i.r.members, state, &scope, &run.app, &run.schedule).as_deref() == Some(me.user.as_str()), "{} doesn't run as you in {scope} any more", run.schedule);
             Ok(())

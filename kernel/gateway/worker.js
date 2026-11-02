@@ -50,7 +50,7 @@ async function toNode(request, env, url) {
     // machine's.
     resp = env.NODE ? await env.NODE.fetch(`http://${url.host}${url.pathname}${url.search}`, init) : await fetch(`${env.NODE_URL}${url.pathname}${url.search}`, init);
   } catch {
-    return refuse(502, "Your servers aren't answering.");
+    return refuse(502, "Your devices aren't answering.");
   }
   const out = new Headers();
   for (const name of FROM_NODE) if (resp.headers.has(name)) out.set(name, resp.headers.get(name));

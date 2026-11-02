@@ -65,7 +65,7 @@ async function accountItems(ctx) {
 }
 
 async function accounts(ctx) {
-  if (!ctx.user) throw new Error("this server doesn't keep your data, so it can't reach your accounts: use one of your own servers");
+  if (!ctx.user) throw new Error("this device doesn't keep your data, so it can't reach your accounts: use one of your own devices");
   return (await accountItems(ctx)).map((i) => i.fields.email.value);
 }
 
@@ -185,7 +185,7 @@ const signInOps = {
       account: { type: "string", description: "the account's address, to suggest it to Google" },
     } },
     async run(ctx, { code, account }) {
-      if (!ctx.user) throw new Error("this server doesn't keep your data: use one of your own servers");
+      if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
       if (code) return finishSignIn(ctx, code);
       return `Open this link in a browser on any device and sign in. The browser then fails to load a 127.0.0.1 page: copy that page's whole address and pass it to ${APP}_finish_sign_in.\n\n${await startSignIn(ctx, account)}`;
     },

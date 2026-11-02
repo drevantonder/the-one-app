@@ -153,7 +153,7 @@ impl<B: Bucket> Bucket for Copied<B> {
 
     async fn create(&self, name: &str, bytes: &[u8]) -> Result<bool> {
         if !self.reach {
-            bail!("this server's copy of the bucket is only read");
+            bail!("this device's copy of the bucket is only read");
         }
         tracing::trace!(target: "bucket", "create {name}");
         let moved = self.moved.read().await;
@@ -168,7 +168,7 @@ impl<B: Bucket> Bucket for Copied<B> {
 
     async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
         if !self.reach {
-            bail!("this server's copy of the bucket is only read");
+            bail!("this device's copy of the bucket is only read");
         }
         tracing::trace!(target: "bucket", "replace {name}");
         let moved = self.moved.read().await;

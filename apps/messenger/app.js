@@ -8,12 +8,12 @@ async function sidecar(ctx, op, input) {
   try {
     return await ctx.sidecars.messenger[op](input);
   } catch (err) {
-    if (String(err.message).includes("no server runs messenger for you")) throw new Error(NEEDS);
+    if (String(err.message).includes("no device runs messenger for you")) throw new Error(NEEDS);
     throw err;
   }
 }
 
-const NEEDS = "Messenger needs Agent Devices on one of your servers, and none of them runs it. Ask an owner of one to install it.";
+const NEEDS = "Messenger needs Agent Devices on one of your devices, and none of them runs it. Ask an owner of one to install it.";
 
 /// The caller's online servers that run the sidecar, by name.
 async function running(ctx) {
@@ -47,7 +47,7 @@ export default {
   domain: "messenger.com",
   description: "Your Messenger chats, for your agents: read, search and send",
   connector: true,
-  needs: "Needs Agent Devices on one of your servers",
+  needs: "Needs Agent Devices on one of your devices",
   instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in an agent device's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
   uses: { sidecars: ["messenger"] },
   vault: VAULT,
@@ -115,7 +115,7 @@ export default {
     },
     _running: {
       reads: true,
-      description: "Which of your servers it runs on, for the screens to say when none does.",
+      description: "Which of your devices it runs on, for the screens to say when none does.",
       input: { type: "object", properties: {} },
       run: async (ctx) => ({ servers: await running(ctx), needs: NEEDS }),
     },

@@ -60,8 +60,8 @@ export default {
   title: "Devices",
   icon: "monitor",
   color: "#30b0c7",
-  description: "How loaded each server is: memory, CPU, GPU and disk, with its containers",
-  instructions: "Your One App runs each thing on the first device in its order that can run it, is on and has room: Use First, then When Needed, then Last Resort (Cloudflare among them, once there is one), a device far from the others only when it's nearer. devices_order shows that order; devices_use moves a device, for an admin, only when the person asks. devices_list shows every server in the install, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU and GPU (percent busy, a sample every 5 seconds over the last two minutes, oldest first) and disk, and the containers each hosts under it. Use it to pick a server with room for a desktop, a model or a build.",
+  description: "How loaded each device is: memory, CPU, GPU and disk, with its containers",
+  instructions: "Your One App runs each thing on the first device in its order that can run it, is on and has room: Use First, then When Needed, then Last Resort (Cloudflare among them, once there is one), a device far from the others only when it's nearer. devices_order shows that order; devices_use moves a device, for an admin, only when the person asks. devices_list shows every one of your devices, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU and GPU (percent busy, a sample every 5 seconds over the last two minutes, oldest first) and disk, and the containers each hosts under it. Use it to pick a device with room for a desktop, a model or a build.",
 
   ops: {
     order: {
@@ -89,7 +89,7 @@ export default {
       },
     },
     list: {
-      description: "List every server, online or not, with its memory, disk (bytes), CPU and GPU (percent busy, every 5 s over two minutes, oldest first), and each one's containers under it (host).",
+      description: "List every device, online or not, with its memory, disk (bytes), CPU and GPU (percent busy, every 5 s over two minutes, oldest first), and each one's containers under it (host).",
       input: { type: "object", properties: {} },
       reads: true,
       async run(ctx) {
@@ -179,7 +179,7 @@ async function show() {
       for (let j = i + 1; j < devices.length && devices[j].host === d.name; j++) if (devices[j].kind) guests.push(devices[j]);
       html += card(d, guests);
     }
-    document.getElementById("list").innerHTML = html || '<div class="empty">No servers yet</div>';
+    document.getElementById("list").innerHTML = html || '<div class="empty">No devices yet</div>';
   } catch (err) {
     document.getElementById("list").innerHTML = \`<div class="empty error">\${one.esc(err.message)}</div>\`;
   }

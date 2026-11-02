@@ -11,12 +11,12 @@ async function sidecar(ctx, op, input) {
   try {
     return await ctx.sidecars["agent-devices"][op](input);
   } catch (err) {
-    if (String(err.message).includes("no server runs agent-devices for you")) throw new Error(NEEDS);
+    if (String(err.message).includes("no device runs agent-devices for you")) throw new Error(NEEDS);
     throw err;
   }
 }
 
-const NEEDS = "Agent Devices needs a server with Podman, or a Mac, and none of yours runs it.";
+const NEEDS = "Agent Devices needs a device with Podman, or a Mac, and none of yours runs it.";
 const TYPE = "Browser profile";
 
 /// The caller's online servers that run the sidecar, by name.
@@ -43,7 +43,7 @@ async function profile(ctx, name) {
 /// A profile as the sidecar takes it: its key is a placeholder the node fills in, for the sidecar only.
 const given = (p) => ({ item: p.id, name: p.title, key: `{{${p.id}:_profile_key}}`, blob: p.fields._blob?.value || "", salt: p.fields._salt?.value || "" });
 
-const kindArg = { type: "string", enum: ["linux", "windows", "android", "iphone"], description: "linux (with a browser; the default), windows, android or iphone: kinds says which servers run each" };
+const kindArg = { type: "string", enum: ["linux", "windows", "android", "iphone"], description: "linux (with a browser; the default), windows, android or iphone: kinds says which of your devices run each" };
 const deviceArg = { type: "string", description: "the device's name" };
 
 const named = { type: "string", description: "a browser profile's name, like Personal or PTC: a Browser profile in the person's Vault" };
@@ -251,7 +251,7 @@ export default {
   icon: "browsers",
   color: "#a2845e",
   description: "Devices your agents use: Linux with a browser, Windows, Android and iPhones",
-  instructions: "Agent Devices are devices on the person's servers that agents borrow (agent-devices_borrow, then agent-devices_give_back) and use through Computer Use (computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where a server can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or PTC) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
+  instructions: "Agent Devices are devices, on the person's own devices, that agents borrow (agent-devices_borrow, then agent-devices_give_back) and use through Computer Use (computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where one of their devices can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or PTC) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
   uses: { sidecars: ["agent-devices"] },
   // Browser profiles live in the Vault: the person adds one there (add_profile), signs in to sites in it (sign_in, then
   // save_profile), renames and deletes it there.
@@ -265,7 +265,7 @@ export default {
 
   ops: {
     borrow: {
-      description: "Borrow a device for as long as you need it. Linux (the default kind): one of your own, quick, its browser starting with a copy of a browser profile (the one called default, unless you name one; \"\" for none). Windows, Android or iPhone: the person's lasting device, one agent at a time (others see who has it and what for), or with copy, a throwaway copy of it, made too when the lasting one is busy and its server has room. Give it back with give_back when done; a throwaway one is deleted then, or after 15 minutes without a call, with anything in it.",
+      description: "Borrow a device for as long as you need it. Linux (the default kind): one of your own, quick, its browser starting with a copy of a browser profile (the one called default, unless you name one; \"\" for none). Windows, Android or iPhone: the person's lasting device, one agent at a time (others see who has it and what for), or with copy, a throwaway copy of it, made too when the lasting one is busy and the device it's on has room. Give it back with give_back when done; a throwaway one is deleted then, or after 15 minutes without a call, with anything in it.",
       input: { type: "object", required: ["for"], properties: {
         for: { type: "string", description: "what you need it for, in a few words, e.g. Reading Messenger; the person sees it" },
         kind: kindArg,
@@ -347,7 +347,7 @@ export default {
       },
     },
     create: {
-      description: "Create a lasting device and start it, for the person, on the first server in Where Things Run (Settings > Devices) that runs its kind and has room: Linux with a browser of its own (the default), or Android or an iPhone, a new one. Takes a minute or two. Agents borrow instead.",
+      description: "Create a lasting device and start it, for the person, on the first of their devices in Where Things Run (Settings > Devices) that runs its kind and has room: Linux with a browser of its own (the default), or Android or an iPhone, a new one. Takes a minute or two. Agents borrow instead.",
       input: {"properties": {"device": {"description": "its name: lowercase letters, digits and dashes", "type": "string"}, "kind": kindArg, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "required": ["device"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "create", input),
     },
@@ -357,7 +357,7 @@ export default {
       run: (ctx, input) => sidecar(ctx, "resize", input),
     },
     start: {
-      description: "Start a stopped (or paused) device. It starts again after the server restarts.",
+      description: "Start a stopped (or paused) device. It starts again after the device it's on restarts.",
       input: {"properties": {"device": {"description": "the device's name", "type": "string"}}, "required": ["device"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "start", input),
     },
@@ -372,28 +372,28 @@ export default {
       run: (ctx, input) => sidecar(ctx, "delete", input),
     },
     backup: {
-      description: "Back up a device's home folder (its files and sign-ins, without caches) as a blob any server can fetch, keeping the newest 5. Not off-site: backups to a bucket aren't built yet.",
+      description: "Back up a device's home folder (its files and sign-ins, without caches) as a blob any of your devices can fetch, keeping the newest 5. Not off-site: backups to a bucket aren't built yet.",
       input: {"properties": {"device": {"description": "the device's name", "type": "string"}}, "required": ["device"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "backup", input),
     },
     backups: {
-      description: "Every server's backups of devices, newest first.",
-      input: {"properties": {"device": {"description": "only this device's", "type": "string"}, "here": {"description": "only this server's", "type": "boolean"}}, "type": "object"},
+      description: "Backups of agent devices, from all of your devices, newest first.",
+      input: {"properties": {"device": {"description": "only this device's", "type": "string"}, "here": {"description": "only the backups on this device", "type": "boolean"}}, "type": "object"},
       run: (ctx, input) => sidecar(ctx, "backups", input),
     },
     restore: {
-      description: "Make a device on this server from a backup: the newest of the device named, from any server, or the one with blob.",
+      description: "Make an agent device here from a backup: the newest of the one named, from any of your devices, or the one with blob.",
       input: {"properties": {"as": {"description": "the new device's name; default the same", "type": "string"}, "blob": {"description": "a particular backup's blob", "type": "string"}, "device": {"description": "the backed-up device's name", "type": "string"}, "size": {"description": "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small", "type": "string"}}, "type": "object"},
       run: (ctx, input) => sidecar(ctx, "restore", input),
     },
     move: {
-      description: "Move a device to another server: backs it up, restores it there and stops it here, kept until you delete it. Takes a few minutes.",
-      input: {"properties": {"device": {"description": "the device's name", "type": "string"}, "to": {"description": "the server to move it to", "type": "string"}}, "required": ["device", "to"], "type": "object"},
+      description: "Move a device to another of your devices: backs it up, restores it there and stops it here, kept until you delete it. Takes a few minutes.",
+      input: {"properties": {"device": {"description": "the device's name", "type": "string"}, "to": {"description": "the device to move it to", "type": "string"}}, "required": ["device", "to"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "move", input),
     },
     kinds: {
       reads: true,
-      description: "The kinds of device each of your servers runs (linux, windows, android, iphone), with what input each kind takes, whether it has room for another and how many lasting ones nobody has borrowed, and how much memory each server has to spare, in GB.",
+      description: "The kinds of device each of your devices runs (linux, windows, android, iphone), with what input each kind takes, whether it has room for another and how many lasting ones nobody has borrowed, and how much memory each of those has to spare, in GB.",
       input: { type: "object", properties: {} },
       run: (ctx, input) => sidecar(ctx, "kinds", input),
     },
@@ -403,7 +403,7 @@ export default {
       run: (ctx, input) => sidecar(ctx, "open", input),
     },
     install: {
-      description: "Install an app on a device: a file on its server or a URL (an .apk on Android, an .msi, .msix or .exe on Windows, a simulator .app on an iPhone, a .deb on Linux), or a package's name (a winget id on Windows, an apt package on Linux; on Android it opens the Play Store page).",
+      description: "Install an app on a device: a file on the device it's on, or a URL (an .apk on Android, an .msi, .msix or .exe on Windows, a simulator .app on an iPhone, a .deb on Linux), or a package's name (a winget id on Windows, an apt package on Linux; on Android it opens the Play Store page).",
       input: { type: "object", required: ["device", "app"], properties: { device: deviceArg, app: { type: "string" } } },
       run: (ctx, input) => sidecar(ctx, "install", input),
     },
@@ -413,19 +413,19 @@ export default {
       run: (ctx, input) => sidecar(ctx, "run", input),
     },
     adopt: {
-      description: "For the person: make something already on one of their servers a lasting device: a Windows VM's folder (its disk.qcow2, OVMF_VARS.fd, tpm and monitor.sock), an Android Virtual Device, or an iPhone simulator.",
+      description: "For the person: make something already on one of their devices a lasting device: a Windows VM's folder (its disk.qcow2, OVMF_VARS.fd, tpm and monitor.sock), an Android Virtual Device, or an iPhone simulator.",
       input: { type: "object", required: ["device", "kind", "on"], properties: {
-        device: { type: "string", description: "its name: lowercase letters, digits and dashes" }, kind: kindArg, on: { type: "string", description: "the server it's on" },
+        device: { type: "string", description: "its name: lowercase letters, digits and dashes" }, kind: kindArg, on: { type: "string", description: "the device it's on, by name" },
         dir: { type: "string", description: "windows: its folder" }, id: { type: "string", description: "android: its AVD's name; iphone: its simulator's UDID" },
-        port: { type: "integer", description: "windows: its SSH port on the server; android: its console port, like 5554" }, display: { type: "integer", description: "windows: its VNC display" },
+        port: { type: "integer", description: "windows: its SSH port on the device it's on; android: its console port, like 5554" }, display: { type: "integer", description: "windows: its VNC display" },
         cpus: { type: "integer", description: "windows: CPUs it starts with" }, gb: { type: "integer", description: "windows: memory it starts with, in GB" },
       } },
       run: (ctx, { on, ...input }) => ctx.sidecars["agent-devices"].adopt({ ...input, here: true }, { server: on }),
     },
     _list: {
       reads: true,
-      description: "Every server's agent devices: each one's server and kind, whether it's running, paused or stopped, its size, the memory and CPU it uses now, who has borrowed it and what for, and of, for a throwaway copy, the lasting device it's a copy of.",
-      input: { type: "object", properties: { here: { type: "boolean", description: "only this server's" } } },
+      description: "The agent devices on all of your devices: the device each is on and its kind, whether it's running, paused or stopped, its size, the memory and CPU it uses now, who has borrowed it and what for, and of, for a throwaway copy, the lasting device it's a copy of.",
+      input: { type: "object", properties: { here: { type: "boolean", description: "only the ones on this device" } } },
       run: (ctx, input) => sidecar(ctx, "list", input),
     },
     _screen: {
@@ -442,7 +442,7 @@ export default {
     },
     _running: {
       reads: true,
-      description: "Which of your servers it runs on, for the page to say when none does.",
+      description: "Which of your devices it runs on, for the page to say when none does.",
       input: { type: "object", properties: {} },
       run: async (ctx) => ({ servers: await running(ctx), needs: NEEDS }),
     },

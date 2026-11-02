@@ -148,7 +148,7 @@ window.__one = {};
       if (r.status === 401) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
       if (raw && r.ok) return r;
       const out = await r.json().catch(() => null);
-      if (!r.ok || out?.error) throw new NodeError(out?.error || (r.status >= 500 ? "Your server isn't answering." : `It didn't work (${r.status}).`));
+      if (!r.ok || out?.error) throw new NodeError(out?.error || (r.status >= 500 ? "Your device isn't answering." : `It didn't work (${r.status}).`));
       return out;
     }
   }
@@ -296,7 +296,7 @@ window.__one = {};
 
   function render() {
     if (!store.state) return;
-    if (!install()) return void (root.innerHTML = message("Nothing Here Yet", `This server isn't in an install yet. Set it up from the ${esc(config().name || "app")} app on one of your devices.`));
+    if (!install()) return void (root.innerHTML = message("Nothing Here Yet", `This device isn't set up yet. Set it up from the ${esc(config().name || "app")} app on one of your devices.`));
     if (!$(".window", root)) root.innerHTML = `<div class="window"><nav class="sidebar"></nav><main class="detail"></main></div>`;
     drawSidebar();
     drawDetail();
@@ -598,7 +598,7 @@ window.__one = {};
   /// `one.api` for a client's own screen: the node's /v1 at this origin, as this person; nothing else here.
   async function clientApi(m) {
     const url = new URL(String(m.path || ""), location.origin);
-    if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn't your server's.");
+    if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn't your device's.");
     const method = String(m.method || "GET").toUpperCase();
     const body = method === "GET" ? undefined : m.body ?? {};
     if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = "web";

@@ -402,9 +402,9 @@ pub fn help(app: &Value, op: &Value) -> String {
         rows.push((flag, about.join("; ")));
     }
     if app["runs"] == "here" {
-        rows.push(("--server <name>".into(), "which of your servers runs it, by name; all for every one; default is this one".into()));
+        rows.push(("--server <name>".into(), "which of your devices runs it, by name; all for every one; default is this one".into()));
     } else {
-        rows.push(("--server <name>".into(), "run it on that server".into()));
+        rows.push(("--server <name>".into(), "run it on that device (by name)".into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
     if op["confirm"] == true {
@@ -482,7 +482,7 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
         }
     }
     if app["runs"] == "here" {
-        schema["properties"]["server"] = json!({ "type": "string", "description": "which of your servers, by name, or all for every one; default is this one" });
+        schema["properties"]["server"] = json!({ "type": "string", "description": "which of your devices, by name, or all for every one; default is this one" });
     }
     if op["confirm"] == true {
         schema["properties"]["confirm"] = json!({ "type": "boolean", "description": "true once the person has agreed: this can't be undone" });

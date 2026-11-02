@@ -386,25 +386,25 @@ impl Members {
             }
             "acl" => {
                 let server = key_of("server")?;
-                ensure!(self.server(&server).is_some(), "no such server");
-                ensure!(self.owners(&server).iter().any(|o| self.acts_for(&w, o)), "only someone acting for an owner changes a server's ACL");
+                ensure!(self.server(&server).is_some(), "no such device");
+                ensure!(self.owners(&server).iter().any(|o| self.acts_for(&w, o)), "only someone acting for an owner changes a device's ACL");
                 let list = |key: &str| -> Result<Vec<Principal>> {
                     data[key].as_array().context("no list")?.iter().map(|p| Principal::parse(p.as_str().unwrap_or(""))).collect()
                 };
                 let (owners, users) = (list("owners")?, list("users")?);
-                ensure!(!owners.is_empty(), "a server needs an owner");
-                ensure!(!owners.contains(&Principal::Admins) && !users.contains(&Principal::Admins), "servers are owned by users, groups or the install");
+                ensure!(!owners.is_empty(), "a device needs an owner");
+                ensure!(!owners.contains(&Principal::Admins) && !users.contains(&Principal::Admins), "devices are owned by users, groups or the install");
                 ensure!(!owners.contains(&Principal::Install) || self.is_admin(&w), "only admins make the install an owner");
                 self.acls.insert(server, Acl { owners, users });
             }
             "trust" => {
                 let server = key_of("server")?;
-                ensure!(self.server(&server).is_some(), "no such server");
+                ensure!(self.server(&server).is_some(), "no such device");
                 self.trusted.insert((w, server));
             }
             "untrust" => {
                 let server = key_of("server")?;
-                ensure!(!self.privileged(&server), "nobody untrusts a privileged server");
+                ensure!(!self.privileged(&server), "nobody untrusts a privileged device");
                 self.trusted.remove(&(w, server));
             }
             "role" => {
@@ -542,8 +542,8 @@ impl Members {
                 let server = key_of("server")?;
                 let name = text("name")?;
                 ensure!(valid_app_name(&name), "sidecar names are lowercase words joined by -");
-                ensure!(self.server(&server).is_some(), "no such server");
-                ensure!(self.owners(&server).iter().any(|o| self.acts_for(&w, o)), "only someone acting for one of a server's owners installs or removes its sidecars");
+                ensure!(self.server(&server).is_some(), "no such device");
+                ensure!(self.owners(&server).iter().any(|o| self.acts_for(&w, o)), "only someone acting for one of a device's owners installs or removes its sidecars");
                 let blob = data["blob"].as_str().map(str::to_string);
                 ensure!(blob.as_ref().is_none_or(|b| e.content.blobs.contains(b)), "a sidecar names its executable among its blobs");
                 self.sidecars.insert((server, name), SidecarInstall { blob, local: data["local"] == true, by: w, time: e.time() });

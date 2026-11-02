@@ -67,7 +67,7 @@ fn disk(dir: &std::path::Path, err: std::io::Error) -> anyhow::Error {
     let said = match err.kind() {
         ReadOnlyFilesystem => "is read-only".to_string(),
         StorageFull | QuotaExceeded => "is full".to_string(),
-        PermissionDenied => format!("won't let this server write to {}", dir.display()),
+        PermissionDenied => format!("won't let this device write to {}", dir.display()),
         _ => format!("couldn't be used: {}", err.to_string().split(" (os error").next().unwrap_or_default().to_lowercase()),
     };
     Failed(Trouble::Disk, said).into()
