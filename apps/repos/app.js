@@ -83,6 +83,10 @@ const asWriter = (ctx) => ({
   groups: Object.fromEntries(ctx.groups.map((g) => [g.id.slice(6), g.role])),
 });
 
+/// Where git reaches a repo on this computer, http://localhost:<port>/repos/<repo>.git; null where there's no computer
+/// (the serverless node).
+const address = (ctx, repo) => (ctx.port ? `http://localhost:${ctx.port}/repos/${repo}.git` : null);
+
 export default {
   name: "repos",
   title: "Repos",
@@ -124,7 +128,7 @@ export default {
     },
     get: {
       reads: true,
-      description: "A repo: its owner, branches with their heads, forks, and the packs that hold its objects, oldest first.",
+      description: "A repo: its address for git on this computer, its owner, branches with their heads, forks, and the packs that hold its objects, oldest first.",
       input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
       async run(ctx, { repo }) {
         const g = global(ctx);
@@ -134,7 +138,7 @@ export default {
         const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [repo])).map((p) => p.hash);
         const forks = (await g.query(`select name from repos where "from" = ? order by name`, [repo])).map((f) => f.name);
         const pushes = await g.query("select * from pushes where repo = ? order by time desc limit 30", [repo]);
-        return { ...r, owner_name: ownerName(ctx, r.owner), branches, packs, forks, pushes };
+        return { ...r, address: address(ctx, repo), owner_name: ownerName(ctx, r.owner), branches, packs, forks, pushes };
       },
     },
     tree: {
@@ -197,7 +201,7 @@ export default {
         if (await repoOf(g, name)) throw new Error(`${name} already exists`);
         if (!actsFor(asWriter(ctx), owner)) throw new Error(`you don't act for ${owner}`);
         newRepo(ctx, g, { name, owner });
-        return `Created ${name}.`;
+        return address(ctx, name) ? `Created ${name}: git push ${address(ctx, name)} main` : `Created ${name}.`;
       },
     },
     fork: {
