@@ -276,16 +276,17 @@ At the start of a session, read the top (board_read with no topic), for context.
         if (!description || /[\r\n]/.test(description) || bytes(description) > LIMIT) throw new Error(`Not created: the description must be one line of at most ${LIMIT} bytes`);
         const existing = (await b.query("select description from topics where path = ?", [path]))[0];
         if (existing) throw new Error(`Not created: ${path} already exists: ${existing.description}`);
-        if (!force) {
-          // A topic like this one elsewhere, not one of its own parents.
-          const like = (await b.query("select path, description from topics order by path"))
-            .filter((t) => !path.startsWith(`${t.path}/`) && alike(t.path.split("/").pop(), path.split("/").pop()));
-          if (like.length)
-            throw new Error(["Not created: these topics look like the same thing.", ...like.map((t) => `  ${t.path} — ${t.description}`), "Use one of them, or call board_create again with force true if yours is different."].join("\n"));
-        }
         // Its parents are made too, where they're missing: home for home/kitchen-reno.
         const made = [];
         for (let parent = parentOf(path); parent && !(await exists(b, parent)); parent = parentOf(parent)) made.unshift(parent);
+        if (!force) {
+          // A topic like it or a parent it makes, elsewhere: not one of that one's own parents.
+          const like = (await b.query("select path, description from topics order by path")).filter((t) =>
+            [...made, path].some((p) => !p.startsWith(`${t.path}/`) && alike(t.path.split("/").pop(), p.split("/").pop())),
+          );
+          if (like.length)
+            throw new Error(["Not created: these topics look like the same thing.", ...like.map((t) => `  ${t.path} — ${t.description}`), "Use one of them, or call board_create again with force true if yours is different."].join("\n"));
+        }
         for (const parent of made) b.exec("insert or ignore into topics values (?, ?, ?, ?)", [parent, `Topics under ${parent}`, ctx.now(), ctx.me.name]);
         b.exec("insert or ignore into topics values (?, ?, ?, ?)", [path, description, ctx.now(), ctx.me.name]);
         return made.length ? `Created ${[...made, path].join(" and ")}. Post to ${path} with board_post.` : `Created ${path}. Post to it with board_post.`;
