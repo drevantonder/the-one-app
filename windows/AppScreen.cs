@@ -329,14 +329,14 @@ public sealed class AppScreen : Grid
                         if (!m.ContainsKey("value"))
                         {
                             JsonNode? kept = null;
-                            try { if (file != null && File.Exists(file)) kept = JsonNode.Parse(await File.ReadAllTextAsync(file)); } catch { }
+                            try { if (file != null && System.IO.File.Exists(file)) kept = JsonNode.Parse(await System.IO.File.ReadAllTextAsync(file)); } catch { }
                             Reply(id, kept);
                             return;
                         }
                         if (file != null)
                         {
                             Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-                            await File.WriteAllTextAsync(file, m["value"]?.ToJsonString() ?? "null");
+                            await System.IO.File.WriteAllTextAsync(file, m["value"]?.ToJsonString() ?? "null");
                         }
                         Reply(id, null);
                         return;
