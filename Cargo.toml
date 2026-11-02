@@ -14,6 +14,12 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 publish = false
+# The tests are one binary (tests/main.rs), so the crate links into one, not one per file.
+autotests = false
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
 
 [dependencies]
 anyhow = "1"
