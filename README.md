@@ -6,7 +6,7 @@
 
 <p align="center"><i>
 One app to rule them all, one app to find them,<br>
-one app to bring them all, and on your machines bind them.
+one app to bring them all, and in the network bind them.
 </i></p>
 
 ```sh
