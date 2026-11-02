@@ -18,14 +18,13 @@ function encode(s) {
 
 /// A presigned URL for `method` on `https://<host><path>`, good for `expires` seconds from `date`. `headers` are
 /// signed in, so the request must send them as given.
-export async function presign({ method, host, path, region, keyId, secret, expires, date = new Date(), headers = {}, params = {} }) {
+export async function presign({ method, host, path, region, keyId, secret, expires, date = new Date(), headers = {} }) {
   const stamp = date.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
   const day = stamp.slice(0, 8);
   const scope = `${day}/${region}/s3/aws4_request`;
   const signed = { host, ...Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), String(v).trim()])) };
   const names = Object.keys(signed).sort();
   const query = {
-    ...params,
     "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
     "X-Amz-Credential": `${keyId}/${scope}`,
     "X-Amz-Date": stamp,
@@ -57,15 +56,3 @@ export async function bucketUrls(bucket, { read = [], create = [], replace = [],
   return out;
 }
 
-/// A URL listing the folders directly in `prefix` (which ends in /), as ListObjectsV2 does with a delimiter.
-export async function bucketList(bucket, prefix, expires = 60) {
-  const endpoint = new URL(bucket.endpoint.includes("://") ? bucket.endpoint : `https://${bucket.endpoint}`);
-  const path = `${endpoint.pathname.replace(/\/$/, "")}/${bucket.bucket}`;
-  const params = { "list-type": "2", prefix, delimiter: "/" };
-  return presign({ method: "GET", host: endpoint.host, path, region: bucket.region || "auto", keyId: bucket.key_id, secret: bucket.secret, expires, params });
-}
-
-/// The folders' names in a ListObjectsV2 answer, without the prefix or the trailing /.
-export function listedFolders(xml, prefix) {
-  return [...xml.matchAll(/<CommonPrefixes>\s*<Prefix>([^<]*)<\/Prefix>/g)].map((m) => m[1].slice(prefix.length).replace(/\/$/, ""));
-}

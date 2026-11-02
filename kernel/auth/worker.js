@@ -3,8 +3,9 @@
 // and MCP clients like Claude Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at
 // /api/auth/jwks, so nodes and the vault check them offline.
 //
-// Keys open only with a passkey. A client is added at its consent screen: the person's passkey (its PRF output)
-// opens their keys at the vault, which seals a copy for the client under its authorization code; each time the
+// Keys open only with a passkey. Every client is its person, with everything they can use, so the only question is
+// who: signing in to a client with a passkey, its PRF output opens the person's keys at the vault, which seals a copy
+// for the client under its authorization code; each time the
 // client swaps a code or refresh token for new tokens, the vault moves the copy to the new refresh token and opens a
 // session under the new access token. Better Auth keeps refresh tokens only as hashes, so its database opens nothing.
 //
@@ -19,7 +20,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
-import { NO_PRF, consentPage, invitePage, passkeysPage, signInPage } from "./pages.js";
+import { NO_PRF, invitePage, passkeysPage, signInPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
 
 const json = (v, status = 200) => Response.json(v, { status });
@@ -136,8 +137,9 @@ export class Auth extends DurableObject {
           },
         }),
         oauthProvider({
+          // Signed in or not, a client's authorization is the sign-in page: its passkey is what gives the client keys.
           loginPage: "/sign-in",
-          consentPage: "/consent",
+          consentPage: "/sign-in",
           scopes: ["openid", "profile", "offline_access"],
           allowDynamicClientRegistration: true,
           allowUnauthenticatedClientRegistration: true,
@@ -177,15 +179,13 @@ export class Auth extends DurableObject {
       }
       const name = this.auth.options.appName;
       if (path === "/sign-in" && request.method === "GET") return html(signInPage({ name }));
-      if (path === "/consent" && request.method === "GET") return html(consentPage({ name }));
       if (path === "/invite" && request.method === "GET") return html(invitePage({ name }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
       if (path === "/invite/keys" && request.method === "POST") return json(await this.inviteKeys(request, await request.json()));
       if (path === "/passkeys" && request.method === "GET") return html(passkeysPage({ name }));
       if (path === "/passkeys/add" && request.method === "POST") return json(await this.addPasskey(request, await request.json()));
-      if (path === "/consent/about") return json(await this.about(request, url.searchParams.get("client_id")));
-      if (path === "/consent/scopes" && request.method === "POST") return json(await this.scopes(request, await request.json()));
-      if (path === "/consent/accept" && request.method === "POST") return json(await this.accept(request, await request.json()));
+      if (path === "/sign-in/about") return json(await this.about(request, url.searchParams.get("client_id")));
+      if (path === "/sign-in/accept" && request.method === "POST") return json(await this.accept(request, await request.json()));
       if (path === "/internal/invite" && request.method === "POST") return json(await this.invite(request, await request.json()));
       return new Response("not found", { status: 404 });
     } catch (err) {
@@ -209,29 +209,21 @@ export class Auth extends DurableObject {
     return client;
   }
 
-  /// What the consent screen shows before the passkey: the client's name, and the person's.
+  /// What signing in to a client says: its name (the install's, for the web client, which is at its address), and
+  /// the person's, if they're signed in here already.
   async about(request, clientId) {
-    const { user } = await this.session(request);
+    const session = await this.auth.api.getSession({ headers: request.headers });
     const client = await this.client(clientId);
-    return { client: client.name || client.clientId, person: user.name };
+    const origin = new URL(this.env.ADDRESS).origin;
+    const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
+    const web = uris.length > 0 && uris.every((u) => URL.canParse(u) && new URL(u).origin === origin);
+    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, person: session?.user.name || null };
   }
 
   /// One of the person's passkeys, by its credential id: → its row, or a refusal.
   passkeyOf(user, credential) {
     const [row] = this.ctx.storage.sql.exec("select id, name, credentialID from passkey where userId = ? and credentialID = ?", user, String(credential || "")).toArray();
     return row || refuse(403, "That passkey isn't yours.");
-  }
-
-  /// The scopes the person's passkey opens, with the apps that have data in each.
-  async scopes(request, { prf, credential }) {
-    const { user } = await this.session(request);
-    this.passkeyOf(user.id, credential);
-    try {
-      return await this.vault("scopes", { user: user.id, secret: prf });
-    } catch (err) {
-      if (err.status === 403) refuse(403, "This passkey doesn't open your keys yet: add it on your Passkeys page with one that does.");
-      throw err;
-    }
   }
 
   /// The invite a link's secret opens, while it works.
@@ -283,29 +275,30 @@ export class Auth extends DurableObject {
     return {};
   }
 
-  /// Consent: the client gets a code, and a copy of the person's keys sealed under it, for the scopes they chose, the
-  /// apps (every one, if not given), and only to read if they said so.
-  async accept(request, { oauth_query, prf, scopes, apps, read_only, accept }) {
+  /// Signing in to a client with a passkey: the client gets a code, and a copy of the person's keys sealed under it.
+  async accept(request, { oauth_query, prf, credential }) {
     const { user } = await this.session(request);
+    this.passkeyOf(user.id, credential);
     const query = new URLSearchParams(oauth_query || "");
     const client = await this.client(query.get("client_id"));
-    if (accept) await this.vault("scopes", { user: user.id, secret: prf });
     const headers = new Headers(request.headers);
     headers.set("content-type", "application/json");
     headers.set("accept", "application/json");
-    const resp = await this.auth.handler(new Request(new URL("/api/auth/oauth2/consent", request.url), { method: "POST", headers, body: JSON.stringify({ accept: !!accept, oauth_query }) }));
+    const resp = await this.auth.handler(new Request(new URL("/api/auth/oauth2/consent", request.url), { method: "POST", headers, body: JSON.stringify({ accept: true, oauth_query }) }));
     const out = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw Object.assign(new Error(out.error_description || out.message || "the consent failed"), { status: resp.status });
-    const redirect = out.url;
-    // Every authorization asks for the passkey at its consent screen, since that's what gives a client keys: no
-    // consent is kept for next time.
+    if (!resp.ok) throw Object.assign(new Error(out.error_description || out.message || "signing in didn't work"), { status: resp.status });
+    // Every authorization asks for the passkey, since that's what gives a client keys: none is kept for next time.
     this.ctx.storage.sql.exec("delete from oauthConsent where clientId = ? and userId = ?", client.clientId, user.id);
-    if (accept) {
-      const code = new URL(redirect).searchParams.get("code");
-      if (!code) throw Object.assign(new Error("the consent gave no code"), { status: 500 });
-      await this.vault("grant", { user: user.id, from: prf, to: code, name: client.name || client.clientId, client: client.clientId, scopes, apps, read_only });
+    const code = new URL(out.url).searchParams.get("code");
+    if (!code) throw Object.assign(new Error("signing in gave no code"), { status: 500 });
+    // A passkey that opens no keys gets the client nothing: its code, never handed over, is never used.
+    try {
+      await this.vault("grant", { user: user.id, from: prf, to: code, name: client.name || client.clientId, client: client.clientId });
+    } catch (err) {
+      if (err.status === 403) refuse(403, "This passkey doesn't open your keys yet: add it on your Passkeys page with one that does.");
+      throw err;
     }
-    return { url: redirect };
+    return { url: out.url };
   }
 
   /// An invite for `name` (only a label), as `user` (their id in the install; a new one if not given): → the secret its

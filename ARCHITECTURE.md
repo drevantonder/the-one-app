@@ -35,7 +35,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/replica.rs`: what a server holds and knows: the entries of each scope it holds, as the bucket gives them, and the members they add up to. No clock or I/O.
 - `src/store.rs`: every log of every scope a server holds, and how far it has read each from the bucket.
 - `src/node.rs`: the only place with state and I/O: reading and writing the bucket, pairing, calls, `open`, hooks, blobs, deploys.
-- `src/api.rs`: the local HTTP API every shell, the CLI, MCP and sidecars use, and what phones ask over iroh. A request to `/<app>/…` is the app's `_http` operation, its body a blob: how stock git reaches Repos. A request with a kernel access token (a browser's, through the gateway) is its person's, for what their sign-in opens; anything else passed on from elsewhere (by the gateway, a tunnel or a proxy) is refused.
+- `src/api.rs`: the local HTTP API every shell, the CLI, MCP and sidecars use, and what phones ask over iroh. A request to `/<app>/…` is the app's `_http` operation, its body a blob: how stock git reaches Repos. A request with a kernel access token (a browser's, through the gateway) is its person's; anything else passed on from elsewhere (by the gateway, a tunnel or a proxy) is refused.
 - `src/apps.rs`, `src/runtime/`: workerd, which runs every app; `src/runtime/shim.js` is what an app's `ctx` is.
 - `src/sidecars.rs`: server sidecars: the ones built in (`src/shell.rs`, `src/agents.rs`, `src/models.rs`), and those that register over the local API (`sidecars/`, in Go, and the Mac app's, `apple/Mac/Sidecars`).
 - `src/vault.rs`, `src/outbound.rs`: the Vault's items, and filling them into apps' and sidecars' requests on the way out.

@@ -193,36 +193,6 @@ const ANDRE: &str = "00000000000000a1";
 const SAM: &str = "00000000000000b2";
 
 #[test]
-fn a_client_let_only_read_some_apps_gets_only_that() {
-    let v = Vault::start();
-    let vault = kernel::Vault { url: v.url.clone() };
-    let me = format!("user:{ANDRE}");
-    v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
-    let full = v.client(ANDRE, "andre's passkey prf output", "iphone");
-    vault.keys(&full, &[(&me, "board", None), (&me, "gmail", None)]).unwrap();
-
-    // The consent screen offers each scope with the apps that have data there.
-    let (_, offered) = v.internal("scopes", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
-    assert_eq!(offered["apps"][&me], json!(["board", "gmail"]), "{offered}");
-
-    // He lets Claude Code only read, and only the Board.
-    let code = "claude code's authorization code";
-    let (status, _) = v.internal("grant", json!({ "user": ANDRE, "from": "andre's passkey prf output", "to": code, "client": "claude-code", "scopes": [me], "apps": ["board"], "read_only": true }));
-    assert_eq!(status, 200);
-    let (token, until) = v.token(ANDRE, "claude-code");
-    assert_eq!(v.internal("rekey", json!({ "from": code, "to": "claude code's refresh token", "token": token, "until": until })).1["moved"], true);
-    let session = vault.session(&token).unwrap();
-    assert_eq!((session.apps.clone(), session.read_only), (Some(vec!["board".to_string()]), true));
-    assert!(vault.keys(&token, &[(&me, "board", None)]).is_ok());
-    assert!(vault.keys(&token, &[(&me, "gmail", None)]).is_err(), "only the Board");
-    let name = format!("{}/board/main/newest", one::backups::folder(&me));
-    assert!(vault.urls(&token, &[&name], &[], &[]).is_ok(), "it reads");
-    assert!(vault.urls(&token, &[], &[&name], &[]).unwrap_err().to_string().contains("only read"), "and writes nothing");
-    assert_eq!(v.ask(&token, "POST", "/erase", json!({ "scope": me, "app": "board" })).0, 403);
-    assert_eq!(v.ask(&token, "POST", "/fetch", json!({ "app": "board", "url": "https://example.com/send", "method": "POST" })).0, 403, "nor sends");
-}
-
-#[test]
 fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
     let v = Vault::start();
     let vault = kernel::Vault { url: v.url.clone() };
@@ -262,11 +232,6 @@ fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
     let andre = vault.keys(&token, &[("global", "board", None)]).unwrap();
     assert_eq!(vault.keys(&sam, &[("global", "board", None)]).unwrap(), andre);
     assert!(vault.keys(&sam, &[(&format!("user:{ANDRE}"), "board", None)]).is_err());
-    // A client limited to Sam's own scope can't reach the install's log.
-    v.internal("grant", json!({ "user": SAM, "from": "sam's own passkey prf output", "to": "sam's second code here", "client": "mac", "scopes": [format!("user:{SAM}")] }));
-    let (mac, until) = v.token(SAM, "mac");
-    v.internal("rekey", json!({ "from": "sam's second code here", "to": "sam's mac refresh token", "token": mac, "until": until }));
-    assert!(vault.urls(&mac, &["log/00aa/000000000001"], &[], &[]).is_err());
 }
 
 fn url_query(url: &str) -> std::collections::BTreeMap<String, String> {
@@ -504,7 +469,7 @@ fn joins_with(k: &Kernel, browser: &mut Browser, token: &str) -> (Passkey, Strin
 fn someone_who_lost_every_passkey_joins_again_with_a_link_that_carries_their_keys() {
     let k = Kernel::start(None);
     let (lost, andre) = joins(&k, &mut k.browser(), "Andre", None);
-    let (_, held) = post(&format!("{}/internal/scopes", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": andre, "secret": lost.prf() }));
+    assert_eq!(opens(&k, &andre, &lost.prf()), 200);
 
     // He has keys, so his new link must carry them: only the recovery key opens them.
     let err = kernel::invite(&k.settings, "Andre", Some(&andre), || None).err().unwrap().to_string();
@@ -517,15 +482,18 @@ fn someone_who_lost_every_passkey_joins_again_with_a_link_that_carries_their_key
     let mut browser = k.browser();
     let (passkey, user) = joins_with(&k, &mut browser, invite.link.split_once('#').unwrap().1);
     assert_eq!(user, andre);
-    let (status, scopes) = browser.post("/consent/scopes", json!({ "prf": passkey.prf(), "credential": B64U.encode(&passkey.id) }));
-    assert_eq!(status, 200, "{scopes}");
-    assert_eq!(scopes["scopes"], held["scopes"]);
+    assert_eq!(opens(&k, &andre, &passkey.prf()), 200);
 
-    // Someone new's link carries nothing, and needs no recovery key.
+    // Someone new's link carries nothing, and needs no recovery key; their passkey opens only their own keys.
     let (sam, sam_id) = joins(&k, &mut k.browser(), "Sam", None);
     assert_ne!(sam_id, andre);
-    let (_, theirs) = post(&format!("{}/internal/scopes", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": sam_id, "secret": sam.prf() }));
-    assert_eq!(theirs["scopes"], json!([format!("user:{sam_id}")]), "{theirs}");
+    assert_eq!(opens(&k, &sam_id, &sam.prf()), 200);
+    assert_eq!(opens(&k, &andre, &sam.prf()), 403);
+}
+
+/// Whether a passkey's PRF output opens `user`'s keys at the vault, as signing in to a client asks: → its status.
+fn opens(k: &Kernel, user: &str, prf: &str) -> u16 {
+    post(&format!("{}/internal/grant", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": user, "from": prf, "to": "a code that no client is given" })).0
 }
 
 /// Asks `url` as a browser's script would: → (status, headers, body).

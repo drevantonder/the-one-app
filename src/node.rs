@@ -233,10 +233,6 @@ pub struct CallRequest {
     /// What made it, for its app's insights: `cli`, `mcp`, `mac`, `phone`, `browser`, `schedule` or `app`.
     #[serde(default)]
     pub client: Option<String>,
-    /// Whether it may only read, as a sign-in let only read may. Only this server says so and it's never sent, so such
-    /// a call runs here.
-    #[serde(skip)]
-    pub read_only: bool,
 }
 
 /// What a server says to a call.
@@ -748,34 +744,12 @@ impl Node {
         self.route(req, me).await
     }
 
-    /// Keeps a call to the scopes a kernel sign-in opens, to its apps if it's limited to some, and to reading if it may
-    /// only read: the scopes it names must be among them, and by default it touches only those its app reaches.
-    /// Nothing someone opened for them, and none of the node's own operations.
-    pub fn keep_to(&self, req: CallRequest, me: &Caller, scopes: &[String], apps: Option<&[String]>, read_only: bool) -> Result<CallRequest> {
-        let mut req = self.resolve(req);
+    /// A call from a kernel sign-in, which is its person's in every way but one: the node's own operations are its
+    /// servers' to ask, and a sign-in's caller has this server's key.
+    pub fn for_sign_in(&self, req: CallRequest) -> Result<CallRequest> {
+        let req = self.resolve(req);
         ensure!(req.app != members::APP, "a sign-in can't ask that");
-        ensure!(req.as_user.is_none(), "a sign-in can't use what someone opened for you");
-        ensure!(!read_only || req.sidecar.is_none(), "this sign-in may only read, and {} can't be held to that", req.app);
-        req.read_only = read_only;
-        if let Some(apps) = apps {
-            ensure!(apps.contains(&req.app), "this sign-in may not use {}", req.app);
-        }
-        let named: Vec<String> = match &req.scopes {
-            Some(named) => named.iter().map(|s| self.scope_for(me, s).map(|s| s.to_string())).collect::<Result<_>>()?,
-            None if req.sidecar.is_some() => vec![Scope::User(me.user.clone()).to_string()],
-            None => self.with(|i| Ok(reachable(i, &req.app, &me.user)))?.iter().map(|s| s.to_string()).filter(|s| scopes.contains(s)).collect(),
-        };
-        if let Some(s) = named.iter().find(|s| !scopes.contains(s)) {
-            bail!("this sign-in doesn't open {s}");
-        }
-        ensure!(!named.is_empty(), "this sign-in opens none of the scopes {} is in for you", req.app);
-        req.scopes = Some(named);
         Ok(req)
-    }
-
-    /// Every scope `user` is in.
-    pub fn scopes_of(&self, user: &str) -> Result<Vec<Scope>> {
-        self.with(|i| Ok([Scope::User(user.into())].into_iter().chain(i.r.members.groups_of(user).keys().map(|g| Scope::Group(g.clone()))).chain([Scope::Global]).collect()))
     }
 
     /// Where the install's kernel is, for nodes to take its sign-ins: (the install's address, the vault's).
@@ -801,7 +775,7 @@ impl Node {
             return self.everywhere(req, me).await;
         }
         let mut why = Vec::new();
-        for server in self.candidates(&req, &me)?.into_iter().filter(|s| !req.read_only || *s == self.0.id) {
+        for server in self.candidates(&req, &me)? {
             let started = Instant::now();
             let reply = match server == self.0.id {
                 true => Ok(self.run(&req, &me).await),
@@ -3506,7 +3480,7 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("{} doesn't hold {s}", node.server_name())));
     }
-    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: req.read_only, token: String::new(), from: None };
+    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None };
     Ok(Ok((ctx, scopes)))
 }
 

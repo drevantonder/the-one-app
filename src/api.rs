@@ -255,37 +255,11 @@ fn local(node: &Node) -> Result<Caller, Error> {
     Ok(Caller { key: node.id(), user: node.user()?, agent: None })
 }
 
-/// Who asked: this machine's own user, or someone signed in with the kernel, whom this server acts for, limited to
-/// the scopes their sign-in opens (and its apps, if it's limited to some).
+/// Who asked: this machine's own user, or someone signed in with the kernel, whom this server acts for.
 #[derive(Clone)]
 struct Me {
     caller: Caller,
-    scopes: Option<Vec<String>>,
-    apps: Option<Vec<String>>,
-    read_only: bool,
-}
-
-impl Me {
-    /// Refuses a change if their sign-in may only read.
-    fn may_change(&self) -> Result<(), Error> {
-        match self.read_only {
-            true => Err(anyhow::anyhow!("this sign-in may only read").into()),
-            false => Ok(()),
-        }
-    }
-
-    /// Refuses a scope their sign-in doesn't open; `None` is every scope they're in.
-    fn may_use(&self, node: &Node, scope: Option<&str>) -> Result<(), Error> {
-        let Some(opens) = &self.scopes else { return Ok(()) };
-        let wanted = match scope {
-            Some(scope) => vec![node.scope_for(&self.caller, scope)?],
-            None => node.scopes_of(&self.caller.user)?,
-        };
-        match wanted.iter().find(|s| !opens.contains(&s.to_string())) {
-            Some(s) => Err(anyhow::anyhow!("this sign-in doesn't open {s}").into()),
-            None => Ok(()),
-        }
-    }
+    signed_in: bool,
 }
 
 impl axum::extract::FromRequestParts<Node> for Me {
@@ -294,7 +268,7 @@ impl axum::extract::FromRequestParts<Node> for Me {
     async fn from_request_parts(parts: &mut axum::http::request::Parts, node: &Node) -> Result<Me, Error> {
         match parts.extensions.get::<Me>() {
             Some(me) => Ok(me.clone()),
-            None => Ok(Me { caller: local(node)?, scopes: None, apps: None, read_only: false }),
+            None => Ok(Me { caller: local(node)?, signed_in: false }),
         }
     }
 }
@@ -329,7 +303,7 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     })
     .await??;
     anyhow::ensure!(node.is_user(&claims.sub), "you aren't a person of this install yet: an admin lets you in with {} kernel invite", crate::config::CLI);
-    let me = Me { caller: Caller { key: node.id(), user: claims.sub.clone(), agent: None }, scopes: Some(session.scopes), apps: session.apps, read_only: session.read_only };
+    let me = Me { caller: Caller { key: node.id(), user: claims.sub.clone(), agent: None }, signed_in: true };
     let mut kept = SIGNED_INS.lock().unwrap();
     kept.retain(|_, (_, until)| now < *until);
     kept.insert(hash, (me.clone(), (claims.exp * 1000).min(session.until)));
@@ -342,12 +316,7 @@ fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
 
 async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Json<Value> {
     Json(match signed_in {
-        // With what the sign-in opens, so a client shows only those pages and apps.
-        Some(me) => {
-            let mut state = node.state_for(&me.caller);
-            state["sign_in"] = json!({ "scopes": me.scopes, "apps": me.apps, "read_only": me.read_only });
-            state
-        }
+        Some(me) => node.state_for(&me.caller),
         None => node.state(),
     })
 }
@@ -365,16 +334,12 @@ async fn sidecar(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 
 /// `{ app, how }`: deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`).
 async fn retire(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    me.may_use(&node, None)?;
-    me.may_change()?;
     node.retire(&me.caller, text(&body, "app")?, text(&body, "how")?).await?;
     done()
 }
 
 /// `{ page, items, hidden }`: how the local user arranges one of their pages.
 async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    me.may_use(&node, None)?;
-    me.may_change()?;
     node.arrange(&me.caller, text(&body, "page")?, body["items"].clone(), body["hidden"].clone()).await?;
     done()
 }
@@ -389,8 +354,8 @@ async fn schedule(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 async fn call(State(node): State<Node>, me: Me, Json(mut req): Json<CallRequest>) -> Reply {
     // Only the node says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);
-    if let Some(scopes) = &me.scopes {
-        req = node.keep_to(req, &me.caller, scopes, me.apps.as_deref(), me.read_only)?;
+    if me.signed_in {
+        req = node.for_sign_in(req)?;
     }
     Ok(Json(json!({ "ok": node.call_as(req, me.caller).await? })))
 }
@@ -401,12 +366,10 @@ struct WidgetsQuery {
 }
 
 async fn badges(State(node): State<Node>, me: Me, Query(q): Query<WidgetsQuery>) -> Reply {
-    me.may_use(&node, q.scope.as_deref())?;
     Ok(Json(node.badges(me.caller, q.scope.as_deref()).await?))
 }
 
 async fn widgets(State(node): State<Node>, me: Me, Query(q): Query<WidgetsQuery>) -> Reply {
-    me.may_use(&node, q.scope.as_deref())?;
     Ok(Json(json!(node.widgets(me.caller, q.scope.as_deref()).await?)))
 }
 
@@ -551,8 +514,6 @@ async fn source(State(node): State<Node>, Path(app): Path<String>, Query(q): Que
 /// `{ app, scope, installed }`: `scope` is `user`, `group:<id>` (or a group's name) or `global`.
 /// Installing an app also installs the apps it uses.
 async fn install(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    me.may_use(&node, Some(text(&body, "scope")?))?;
-    me.may_change()?;
     let scope = node.scope_for(&me.caller, text(&body, "scope")?)?;
     node.install(&me.caller, text(&body, "app")?, &scope, body["installed"] != false).await?;
     done()
@@ -589,14 +550,11 @@ async fn backups_post(State(node): State<Node>, uri: axum::http::Uri, Json(body)
 /// The Vault's routes, `/v1/vault…` and their earlier names `/v1/secrets…`: a GET's query goes to the node as a
 /// POST's body does.
 async fn vault_get(State(node): State<Node>, me: Me, uri: axum::http::Uri, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
-    me.may_use(&node, q.get("scope").map(String::as_str))?;
     let input: serde_json::Map<String, Value> = q.into_iter().map(|(k, v)| (k, json!(v))).collect();
     Ok(Json(node.vault_route(&me.caller, "GET", uri.path(), &json!(input)).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
 async fn vault_post(State(node): State<Node>, me: Me, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
-    me.may_use(&node, Some(body["scope"].as_str().unwrap_or("user")))?;
-    me.may_change()?;
     Ok(Json(node.vault_route(&me.caller, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
@@ -683,7 +641,6 @@ struct ScreenQuery {
 
 /// An app screen as a page, for shells' web views and for a browser on this machine.
 async fn screen(State(node): State<Node>, me: Me, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
-    me.may_use(&node, q.scope.as_deref())?;
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
     let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref()).await?;
     Ok(axum::response::Html(html).into_response())

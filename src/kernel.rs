@@ -229,18 +229,12 @@ pub struct Urls {
     pub until: u64,
 }
 
-/// What a token's session at the vault opens.
+/// A token's session at the vault: whose it is.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Session {
     pub user: String,
     /// The client it's for: an OAuth client's id, or `schedules` for a scheduled run.
     pub client: Option<String>,
-    pub scopes: Vec<String>,
-    /// The apps it may use, if it's limited to some (as a scheduled run is).
-    pub apps: Option<Vec<String>>,
-    /// Whether it was let only read: it gets keys and read URLs, and changes and sends nothing.
-    #[serde(default)]
-    pub read_only: bool,
     pub until: u64,
 }
 
@@ -273,7 +267,7 @@ impl Vault {
         Ok(out)
     }
 
-    /// What a token opens: a node asks before it runs anything as its person.
+    /// Whose a token is, while its session lasts: a node asks before it runs anything as its person.
     pub fn session(&self, token: &str) -> Result<Session> {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
         let mut resp = agent.get(format!("{}/session", self.url.trim_end_matches('/'))).header("authorization", format!("Bearer {token}")).call()?;

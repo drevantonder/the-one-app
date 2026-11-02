@@ -1,5 +1,5 @@
 // The web client: the Mac app's window, in a browser. It signs in as an OAuth client of the install's auth service
-// (PKCE, and a passkey at its consent page), keeps its refresh token in this browser, and calls a node's `/v1` on its
+// (PKCE, and the person's passkey at its sign-in page), keeps its refresh token in this browser, and calls a node's `/v1` on its
 // own origin with the access token; the gateway sends each on. App screens are untrusted: each runs in a sandboxed
 // frame, and this page answers its bridge as the Mac app's web view does, making each call itself. Nothing is cached.
 
@@ -49,7 +49,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
       return out.client_id;
     },
 
-    /// Off to the auth service's sign-in and consent, coming back to /callback, then to where this was.
+    /// Off to the auth service's sign-in, coming back to /callback, then to where this was.
     async start() {
       const meta = await auth.meta();
       const client = await auth.client(meta);
@@ -58,17 +58,17 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
       sessionStorage.setItem("one.pkce", JSON.stringify({ verifier, state, back: location.pathname + location.search }));
       const q = new URLSearchParams({
         response_type: "code", client_id: client, redirect_uri: `${location.origin}/callback`, scope: "openid profile offline_access",
-        code_challenge: challenge, code_challenge_method: "S256", state, prompt: "consent",
+        code_challenge: challenge, code_challenge_method: "S256", state,
       });
       location.href = `${meta.authorization_endpoint}?${q}`;
     },
 
-    /// Back from consent: the code becomes tokens. → where to go now.
+    /// Back from signing in: the code becomes tokens. → where to go now.
     async finish() {
       const q = new URLSearchParams(location.search);
       const pkce = JSON.parse(sessionStorage.getItem("one.pkce") || "null");
       sessionStorage.removeItem("one.pkce");
-      if (q.get("error")) throw new Error(q.get("error") === "access_denied" ? "You didn't let this browser in." : q.get("error_description") || q.get("error"));
+      if (q.get("error")) throw new Error(q.get("error_description") || q.get("error"));
       if (!pkce || q.get("state") !== pkce.state || !q.get("code")) throw new Error("That sign-in didn't start here. Sign in again.");
       const meta = await auth.meta();
       const client = JSON.parse(localStorage.getItem(CLIENT) || "null")?.id;
@@ -120,7 +120,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     },
   };
 
-  /// What the consent page calls this browser: "Chrome on Mac".
+  /// What the person's signed-in clients call this browser: "Chrome on Mac".
   function browserName() {
     const ua = navigator.userAgent;
     const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "A browser";
@@ -206,9 +206,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
       out.push({ scope: `group:${g.id}`, title: g.name, subtitle: `${people(g.members.length)} · ${chosenBy(admins)}`, whose: `For ${g.name}`, group: g.id });
     }
     out.push({ scope: "global", title: "Everyone", subtitle: `${people(i.users.length)} · ${chosenBy(i.users.filter((x) => x.role === "admin").map((x) => x.id))}`, whose: "For everyone" });
-    // Only those this browser's sign-in opens.
-    const opens = store.state?.sign_in?.scopes;
-    return opens ? out.filter((p) => opens.includes(p.scope === "user" ? `user:${u.id}` : p.scope)) : out;
+    return out;
   }
   const page = (scope) => pages().find((p) => p.scope === scope);
 
@@ -220,10 +218,8 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     return g?.members.some((m) => m.user === me()?.id && m.role === "admin") || false;
   }
 
-  /// Whether this browser's sign-in opens an app: every app, unless it was let use only some.
-  const opened = (a) => !store.state?.sign_in?.apps || store.state.sign_in.apps.includes(a.name);
-  const appsOn = (p) => store.apps.filter((a) => hasScreens(a) && opened(a) && scopes(a).includes(p.scope));
-  const servicesOn = (p) => store.apps.filter((a) => isService(a) && opened(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
+  const appsOn = (p) => store.apps.filter((a) => hasScreens(a) && scopes(a).includes(p.scope));
+  const servicesOn = (p) => store.apps.filter((a) => isService(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
   const appBadge = (name, p) => Math.max(0, store.badges[p.scope]?.[name] || 0);
 
   function owns(a) {
@@ -618,7 +614,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
   /// The install's App Store, if it's on a page this browser's sign-in opens.
   function storeApp() {
     const s = app(config().store);
-    return s && hasScreens(s) && opened(s) && pages().some((p) => scopes(s).includes(p.scope)) ? s : null;
+    return s && hasScreens(s) && pages().some((p) => scopes(s).includes(p.scope)) ? s : null;
   }
 
   function openStore() {
