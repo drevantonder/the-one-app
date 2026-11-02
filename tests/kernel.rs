@@ -876,14 +876,14 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let dir = std::env::temp_dir().join(format!("one-kernel-node-{}", rand::random::<u64>()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "node" }).to_string()).unwrap();
-    let (node, _router, api) = rt.block_on(async {
-        let (node, router) = one::node::Node::start(&dir, one::sidecars::built_in()).await.unwrap();
+    let (node, api) = rt.block_on(async {
+        let node = one::node::Node::start(&dir, one::sidecars::built_in()).await.unwrap();
         node.create("Test", "Andre").await.unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = format!("http://{}", listener.local_addr().unwrap());
         let app = one::api::router(node.clone());
         tokio::spawn(one::api::serve(listener, app));
-        (node, router, api)
+        (node, api)
     });
     // Andre made the install; Sam is a member. The server is the install's, so both use it; it takes sign-ins made
     // at the install's address.

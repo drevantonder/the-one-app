@@ -17,11 +17,12 @@ path = "tests/main.rs"
 [dependencies]
 anyhow = "1"
 # Backups encrypt what leaves for a place with AES-256-GCM, and seal each scope's key to the recovery key with X25519
-# (src/backups.rs). Both were already built, through iroh.
+# (src/backups.rs).
 aes-gcm = "0.10"
 curve25519-dalek = "4.1"
 data-encoding = "2"
-# The kernel's access tokens are signed with Ed25519 (src/kernel.rs checks them); iroh already builds it.
+# The kernel's access tokens are signed with Ed25519 (src/kernel.rs checks them), and servers sign what they send each
+# other through the relay with it (src/node/relay.rs).
 ed25519-dalek = "3"
 # The kernel derives keys with HKDF-SHA256, because that's what WebCrypto in workerd has (src/kernel.rs).
 hkdf = "0.13"
@@ -48,7 +49,6 @@ axum = "0.8"
 # tokio-tungstenite is that WebSocket, over the rustls ureq already builds, and futures-util (which axum already
 # builds) its Sink and Stream.
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-iroh = "1.4"
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 # Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
 jiff = "0.2"

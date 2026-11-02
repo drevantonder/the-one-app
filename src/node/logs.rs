@@ -95,31 +95,20 @@ impl Node {
     }
 
     /// Tells the servers that hold `scope` it changed, so they read it now rather than at their next look: its entries,
-    /// or with `wrote`, step `at` of an app's database. In the background, and only a hint: each reads what changed from
-    /// the bucket.
+    /// or with `wrote`, step `at` of an app's database, through the relay. Only a hint: each reads what changed from the
+    /// bucket.
     pub(super) fn ping(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
-        let Ok((servers, me)) = self.with(|i| {
+        let Ok(servers) = self.with(|i| {
             let m = &i.r.members;
-            Ok((m.servers().filter(|s| s.key != self.0.id && m.holds(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>(), Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }))
+            Ok(m.servers().filter(|s| s.key != self.0.id && m.holds(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>())
         }) else {
             return;
         };
-        if servers.is_empty() {
-            return;
-        }
         let mut input = json!({ "scope": scope.to_string() });
         if let Some((app, database, at)) = wrote {
             input = json!({ "scope": scope.to_string(), "app": app, "database": database, "at": at });
         }
         self.notify(&servers, &input);
-        // Over iroh too, to servers not connected to the relay.
-        let req = CallRequest { app: members::APP.into(), op: "changed".into(), input, ..Default::default() };
-        for server in servers {
-            let (node, req, me) = (self.clone(), req.clone(), me.clone());
-            tokio::spawn(async move {
-                let _ = node.ask_server(server, &req, &me).await;
-            });
-        }
     }
 
     /// What another server said changed in `scope`, which this server holds: its entries, which it reads now, or with
@@ -166,7 +155,8 @@ impl Node {
         }
     }
 
-    /// Says hello to every other server: as now and then, and when this server's sidecars change.
+    /// Says hello to every other server: as now and then, and when this server's sidecars change. How long each takes
+    /// to answer is how far it is.
     pub(super) fn say_hello(&self) {
         let Ok((servers, me, sidecars)) = self.with(|i| {
             let servers: Vec<Key> = i.r.members.servers().map(|s| s.key).filter(|k| *k != self.0.id).collect();
@@ -178,7 +168,10 @@ impl Node {
         for server in servers {
             let (node, req, me) = (self.clone(), req.clone(), me.clone());
             tokio::spawn(async move {
-                let _ = node.ask_server(server, &req, &me).await;
+                let asked = Instant::now();
+                if node.ask_server(server, &req, &me).await.is_ok() {
+                    let _ = node.with(|i| Ok(i.far.insert(server, asked.elapsed())));
+                }
             });
         }
     }

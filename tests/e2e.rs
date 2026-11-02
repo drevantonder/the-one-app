@@ -11,7 +11,7 @@ fn temp(name: &str) -> std::path::PathBuf {
     dir
 }
 
-async fn start(name: &str) -> (Node, iroh::protocol::Router) {
+async fn start(name: &str) -> Node {
     let dir = temp(name);
     std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
     Node::start(&dir, one::sidecars::built_in()).await.unwrap()
@@ -54,8 +54,8 @@ async fn sees(node: &Node, scope: &str, text: &str) -> bool {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn servers_share_a_deployed_board() {
-    let (a, _ra) = start("a").await;
-    let (b, _rb) = start("b").await;
+    let a = start("a").await;
+    let b = start("b").await;
 
     let recovery = a.create("Test", "Andre").await.unwrap();
     assert_eq!(recovery.len(), 64, "creating gives the recovery key's secret once");
@@ -120,7 +120,7 @@ async fn echo() -> u16 {
 /// is that app's code: whatever a page asks there is refused, and nothing the node answers runs as script there.
 #[tokio::test(flavor = "multi_thread")]
 async fn only_this_machines_own_programs_use_the_local_api() {
-    let (a, _ra) = start("pages").await;
+    let a = start("pages").await;
     a.create("Pages", "Andre").await.unwrap();
     deploy_module(&a, "lamps", r#"export default { name: "lamps", ops: {}, screens: { main: { title: "Lamps", html: "<p>Lamps</p>" } } };"#).await;
     let token = a.local_token().to_string();
@@ -172,7 +172,7 @@ async fn only_this_machines_own_programs_use_the_local_api() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn agents_ask_for_items_and_never_see_them() {
-    let (a, _ra) = start("asks").await;
+    let a = start("asks").await;
     a.create("Asks", "Andre").await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: Some("Claude Code".into()), token: None };
     let mine = one::entry::Scope::User(me.user.clone());
@@ -214,7 +214,7 @@ async fn agents_ask_for_items_and_never_see_them() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn apps_use_only_the_items_they_are_switched_on_for() {
-    let (a, _ra) = start("vault").await;
+    let a = start("vault").await;
     a.create("Vault", "Andre").await.unwrap();
     let port = echo().await;
     let module = |name: &str| format!(r#"export default {{
@@ -282,8 +282,8 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alone() {
-    let (a, _ra) = start("backup-a").await;
-    let (b, _rb) = start("backup-b").await;
+    let a = start("backup-a").await;
+    let b = start("backup-b").await;
     let recovery = a.create("Home", "Andre").await.unwrap();
     let _relay = relay(&a).await;
     b.join(&a.pair().unwrap()).await.unwrap();

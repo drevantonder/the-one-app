@@ -130,21 +130,11 @@ impl Node {
         req
     }
 
-    /// Asks another server to run a call: through the relay, or over iroh to one that isn't connected to the relay.
+    /// Asks another server to run a call, through the relay.
     pub(super) async fn ask_server(&self, server: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
         let request = json!({ "app": req.app, "sidecar": req.sidecar, "driver": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": me.token } });
-        let limit = self.limit(req).await + Duration::from_secs(5);
-        match self.ask_relay(server, json!({ "call": request }), limit).await {
-            Ok(reply) => return Ok(Reply::from_json(reply)),
-            Err(err) if !err.is::<relay::NotThere>() => return Err(err),
-            Err(err) => tracing::info!("asking {} over iroh: {err}", self.name_of(&server)),
-        }
-        let conn = tokio::time::timeout(Duration::from_secs(10), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, CALL_ALPN)).await.context("timed out")??;
-        let (mut send, mut recv) = conn.open_bi().await?;
-        send.write_all(&serde_json::to_vec(&request)?).await?;
-        send.finish()?;
-        let reply = tokio::time::timeout(limit, recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
-        Ok(Reply::from_json(serde_json::from_slice(&reply)?))
+        let reply = self.ask_relay(server, json!({ "call": request }), self.limit(req).await + Duration::from_secs(5)).await?;
+        Ok(Reply::from_json(reply))
     }
 
     /// Runs a call here, for `me`, or says why it can't.
@@ -722,17 +712,6 @@ impl Node {
             }
             _ => bail!("the node has no {method} {path}"),
         })
-    }
-
-    pub(super) async fn accept_call_over_iroh(&self, conn: Connection) -> Result<()> {
-        let remote = *conn.remote_id().as_bytes();
-        let (mut send, mut recv) = conn.accept_bi().await?;
-        let request: Value = serde_json::from_slice(&recv.read_to_end(MESSAGE_LIMIT).await?)?;
-        let reply = self.accept_call(remote, &request).await;
-        send.write_all(&serde_json::to_vec(&reply.json())?).await?;
-        send.finish()?;
-        conn.closed().await;
-        Ok(())
     }
 
     /// Runs a call another server, `remote`, asked for.

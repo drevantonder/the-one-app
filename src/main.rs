@@ -1096,12 +1096,12 @@ static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0
 #[tokio::main]
 async fn serve(is_try: bool) -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn,iroh=error,noq_proto=error".into()))
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
     let dir = one::home();
     let listener = listen(&dir).await?;
     std::fs::write(dir.join("pid"), std::process::id().to_string())?;
-    let (node, router) = Node::start(&dir, one::sidecars::built_in()).await?;
+    let node = Node::start(&dir, one::sidecars::built_in()).await?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
     let routes = api::routes().route("/mcp", axum::routing::post(mcp_http));
@@ -1136,7 +1136,6 @@ async fn serve(is_try: bool) -> Result<()> {
         r = http => r?,
         _ = tokio::signal::ctrl_c() => {}
     }
-    router.shutdown().await.ok();
     Ok(())
 }
 

@@ -281,7 +281,7 @@ fn check(structs: &BTreeMap<String, Vec<Field>>, within: &str, ty: &str, value: 
     }
 }
 
-async fn start(name: &str) -> (one::node::Node, iroh::protocol::Router) {
+async fn start(name: &str) -> one::node::Node {
     let dir = std::env::temp_dir().join(format!("one-contracts-{name}-{}", rand::random::<u32>()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
@@ -329,7 +329,7 @@ async fn the_apps_decode_what_the_node_sends() {
     }
     assert!(windows_classes["NodeState"].iter().any(|f| f.key == "settings_items" && f.ty == "[SettingsItem]" && !f.required), "{:?}", windows_classes["NodeState"]);
 
-    let (node, _router) = start("contracts").await;
+    let node = start("contracts").await;
     node.create("Contracts", "Andre").await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();

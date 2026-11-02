@@ -1,4 +1,5 @@
-//! A node: this server's install (a white label holds one), its replica and views, its iroh endpoint, and where calls run.
+//! A node: this server's install (a white label holds one), its replica and views, its socket to the relay, and where
+//! calls run.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -6,9 +7,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use iroh::endpoint::{Connection, presets};
-use iroh::protocol::{AcceptError, ProtocolHandler, Router};
-use iroh::{Endpoint, EndpointId, SecretKey};
 use p2panda_core::{Hash, SigningKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -46,14 +44,10 @@ mod storage;
 mod tunnel;
 mod vault;
 
-const CALL_ALPN: &[u8] = b"one/call/1";
-const BLOB_ALPN: &[u8] = b"one/blob/1";
 /// How long a call may run before it's stopped.
 const CALL_LIMIT: Duration = Duration::from_secs(30);
 /// A sidecar's call may take longer, as a browser or a desktop starts: as long as a sidecar is waited for.
 const SIDECAR_LIMIT: Duration = Duration::from_secs(600);
-/// The most a call or a client's request (or its answer) may carry: an email of a claim's receipts, base64, fits.
-const MESSAGE_LIMIT: usize = 64 << 20;
 /// How many app-to-app calls deep a call may be: a person's call of A, A's of B, B's of C, C's of D.
 pub const MAX_DEPTH: u32 = 3;
 /// How many calls an app may make of other apps, or runs of its schedules, a minute on one server.
@@ -137,7 +131,7 @@ struct Install {
     views: HashMap<String, (Order, ScopeState)>,
     /// How long each server took to answer a call lately.
     nearest: HashMap<Key, Duration>,
-    /// How far each server is: its connection's round trip, when this server last asked it something.
+    /// How far each server is: how long it took to answer this server's last hello.
     far: HashMap<Key, Duration>,
     /// Whether this server has read every scope it holds from the bucket since it woke.
     read: bool,
@@ -285,7 +279,6 @@ pub struct Inner {
     key: SigningKey,
     id: Key,
     name: Mutex<String>,
-    endpoint: Endpoint,
     apps: Apps,
     built_in_sidecars: Vec<crate::sidecars::BuiltIn>,
     pub sidecars: crate::sidecars::Sidecars,
@@ -407,13 +400,12 @@ impl std::fmt::Debug for Node {
 
 impl Node {
     /// Starts this server's node, with the built-in sidecars this build has.
-    pub async fn start(dir: &Path, built_in_sidecars: Vec<crate::sidecars::BuiltIn>) -> Result<(Node, Router)> {
+    pub async fn start(dir: &Path, built_in_sidecars: Vec<crate::sidecars::BuiltIn>) -> Result<Node> {
         std::fs::create_dir_all(dir)?;
         let server = load_server(dir)?;
         let secret = unhex(&server.secret)?;
         let key = SigningKey::from(secret);
         let id = *key.verifying_key().as_bytes();
-        let endpoint = Endpoint::builder(presets::N0).secret_key(SecretKey::from_bytes(&secret)).bind().await?;
         let outbound = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let apps = Apps::start(dir.join("runtime"), outbound.local_addr()?.port()).await?;
         let (events, _) = broadcast::channel(256);
@@ -427,7 +419,6 @@ impl Node {
             key,
             id,
             name: Mutex::new(server.name),
-            endpoint: endpoint.clone(),
             apps,
             built_in_sidecars,
             sidecars: Default::default(),
@@ -493,10 +484,6 @@ impl Node {
                 reader.share_blobs().await;
             });
         }
-        let router = Router::builder(endpoint)
-            .accept(CALL_ALPN, CallHandler(node.clone()))
-            .accept(BLOB_ALPN, BlobHandler(node.clone()))
-            .spawn();
         tokio::spawn(node.clone().presence_loop());
         tokio::spawn(node.clone().tick_loop());
         tokio::spawn(node.clone().backup_loop());
@@ -515,7 +502,7 @@ impl Node {
                 node.sync_built_in(sidecar.name);
             }
         }
-        Ok((node, router))
+        Ok(node)
     }
 
     pub fn id(&self) -> Key {
@@ -1072,25 +1059,4 @@ fn hostname() -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "server".into())
-}
-
-#[derive(Clone, Debug)]
-struct CallHandler(Node);
-#[derive(Clone, Debug)]
-struct BlobHandler(Node);
-
-fn accept_err(err: anyhow::Error) -> AcceptError {
-    AcceptError::from_boxed(err.into())
-}
-
-impl ProtocolHandler for BlobHandler {
-    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
-        self.0.accept_blob(conn).await.map_err(accept_err)
-    }
-}
-
-impl ProtocolHandler for CallHandler {
-    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
-        self.0.accept_call_over_iroh(conn).await.map_err(accept_err)
-    }
 }
