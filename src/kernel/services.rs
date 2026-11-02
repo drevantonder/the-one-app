@@ -45,6 +45,10 @@ pub struct Settings {
     pub serverless: bool,
     /// The local ports each service listens on, in `SERVICES`' order, when this machine runs them.
     pub ports: [u16; 4],
+    /// The install's devices' public keys (hex), from the node on this machine when the kernel is deployed or served:
+    /// the relay takes only them, those they admit since, and a computer joining with a pairing code one made.
+    #[serde(skip)]
+    pub devices: Vec<String>,
     /// The secret only the kernel's services share, for asking each other.
     #[serde(default, skip_serializing)]
     pub kernel_secret: String,
@@ -252,6 +256,7 @@ impl Settings {
             vault_key: if google() { secret() } else { String::new() },
             google: None,
             cloudflare_token: None,
+            devices: vec![],
             try_person: None,
         };
         (settings, data_encoding::HEXLOWER.encode(&seed))
@@ -337,7 +342,12 @@ impl Settings {
                 true => ("NODE".into(), format!("service:{}", crate::serverless::SERVICE), false),
                 false => self.machine("NODE"),
             };
-            return vec![("AUTH".into(), "service:auth".into(), false), node];
+            let mut out = vec![("AUTH".into(), "service:auth".into(), false), node];
+            if !self.devices.is_empty() {
+                let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                out.push(("DEVICES".into(), json!({ "keys": self.devices, "at": at }).to_string(), false));
+            }
+            return out;
         }
         let issuer = format!("{}/api/auth", self.address);
         let mut out = vec![("KERNEL_SECRET".into(), self.kernel_secret.clone(), true)];

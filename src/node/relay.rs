@@ -18,6 +18,8 @@ const FRESH: u64 = 5 * 60_000;
 const MESSAGE_LIMIT: usize = 64 << 20;
 /// A message bigger than this goes to the relay in pieces of it, each passed on as it comes.
 const PIECE: usize = 512 << 10;
+/// The most the pieces of messages on their way may hold here at once.
+const PIECES_HELD: usize = 3 * MESSAGE_LIMIT;
 
 type Socket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
@@ -35,11 +37,13 @@ pub(super) struct Relay {
     seen: Mutex<HashMap<(Key, u64), u64>>,
     /// The pieces of each big message on its way, by who sent it and its id: when the first came, and those here.
     pieces: Mutex<HashMap<(String, u64), (Instant, Vec<Option<String>>)>>,
+    /// What this device tells the relay itself (a device it admitted, a pairing code it made), sent once it's connected.
+    told: Mutex<Vec<String>>,
 }
 
 impl Relay {
     pub(super) fn new() -> Relay {
-        Relay { started: now_ms(), task: Default::default(), out: Default::default(), asks: Default::default(), seen: Default::default(), pieces: Default::default() }
+        Relay { started: now_ms(), task: Default::default(), out: Default::default(), asks: Default::default(), seen: Default::default(), pieces: Default::default(), told: Default::default() }
     }
 }
 
@@ -92,9 +96,11 @@ impl Node {
     }
 
     /// Opens a socket to the relay as this device, and proves its key there.
-    async fn open_relay(&self, address: &str) -> Result<Socket> {
+    /// A computer joining gives the `ticket` of its pairing code, as the relay takes only the install's devices.
+    async fn open_relay(&self, address: &str, ticket: Option<&str>) -> Result<Socket> {
         let base = address.trim_end_matches('/').replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
-        let (mut ws, _) = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(format!("{base}/relay?key={}", hex(&self.0.id)))).await.context("timed out")??;
+        let pairing = ticket.map(|t| format!("&pairing={t}")).unwrap_or_default();
+        let (mut ws, _) = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(format!("{base}/relay?key={}{pairing}", hex(&self.0.id)))).await.context("timed out")??;
         let challenge = next_said(&mut ws).await?;
         let challenge = challenge["challenge"].as_str().context("the relay sent no challenge")?;
         let signature = self.0.key.sign(format!("relay:{challenge}").as_bytes()).to_hex();
@@ -105,8 +111,11 @@ impl Node {
 
     /// Runs one socket to the relay until it closes: passing on what this device sends, and taking what it's sent.
     async fn use_relay(&self, address: &str) -> Result<()> {
-        let mut ws = self.open_relay(address).await?;
+        let mut ws = self.open_relay(address, None).await?;
         let (tx, mut rx) = mpsc::unbounded_channel();
+        for told in std::mem::take(&mut *self.0.relay.told.lock().unwrap()) {
+            let _ = tx.send(told);
+        }
         *self.0.relay.out.lock().unwrap() = Some(tx);
         tracing::info!("this device is reached through the relay at {address}");
         let mut ping = tokio::time::interval(SILENT / 2);
@@ -189,15 +198,24 @@ impl Node {
         }
     }
 
-    /// Keeps a piece of a big message: → the message, once every piece of it is here.
+    /// Keeps a piece of a big message from another device of the install: → the message, once every piece of it is
+    /// here. What pieces hold here at once is capped: past it, new ones are dropped.
     fn piece(&self, from: &str, msg: &Value) -> Option<Value> {
         let (id, n, of) = (msg["id"].as_u64()?, msg["piece"]["n"].as_u64()? as usize, msg["piece"]["of"].as_u64()? as usize);
         let text = msg["piece"]["text"].as_str()?;
         if of > MESSAGE_LIMIT * 2 / PIECE || n >= of || text.len() > PIECE {
             return None;
         }
+        let sender = unhex(from).ok()?;
+        if !self.with(|i| Ok(i.r.members.device(&sender).is_some())).unwrap_or(false) {
+            return None;
+        }
         let mut pieces = self.0.relay.pieces.lock().unwrap();
         pieces.retain(|_, (first, _)| first.elapsed() < Duration::from_secs(120));
+        let held: usize = pieces.values().flat_map(|(_, got)| got.iter().flatten()).map(String::len).sum();
+        if held + text.len() > PIECES_HELD {
+            return None;
+        }
         let (_, got) = pieces.entry((from.to_string(), id)).or_insert_with(|| (Instant::now(), vec![None; of]));
         if got.len() != of {
             return None;
@@ -317,9 +335,29 @@ impl Node {
         }
     }
 
-    /// Asks a device at `address` once, on a socket of its own, as a device not yet in the install does to join.
-    pub(super) async fn ask_relay_once(&self, address: &str, to: Key, ask: Value) -> Result<Value> {
-        let mut ws = self.open_relay(address).await?;
+    /// Tells the relay itself something, once this device is connected: a device it admitted (`admitted`), or a
+    /// pairing code it made (`pairing`, the hash of its ticket, and `until`).
+    pub(super) fn tell_relay(&self, what: Value) {
+        let msg = json!({ "relay": what }).to_string();
+        let out = self.0.relay.out.lock().unwrap().clone();
+        match out {
+            Some(out) if out.send(msg.clone()).is_ok() => {}
+            _ => self.0.relay.told.lock().unwrap().push(msg),
+        }
+    }
+
+    /// Asks a device at `address` once, on a socket of its own, as a computer joining with a pairing code's `ticket`
+    /// does. The device that made it may not have told the relay of it yet: it's tried for a few seconds.
+    pub(super) async fn ask_relay_once(&self, address: &str, ticket: &str, to: Key, ask: Value) -> Result<Value> {
+        let mut tried = 0;
+        let mut ws = loop {
+            match self.open_relay(address, Some(ticket)).await {
+                Ok(ws) => break ws,
+                Err(_) if tried < 10 => tried += 1,
+                Err(err) => return Err(err),
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        };
         let id = new_message_id();
         ws.send(Message::text(self.sealed_for(&to, "ask", id, &ask)?.to_string())).await?;
         let answer = tokio::time::timeout(Duration::from_secs(30), async {
@@ -340,6 +378,18 @@ impl Node {
         let _ = ws.close(None).await;
         answer
     }
+}
+
+/// What a computer joining shows the relay for a pairing code's `secret`: not the secret, which admits it.
+pub(super) fn pairing_ticket(secret: &[u8; 16]) -> String {
+    use sha2::Digest;
+    data_encoding::HEXLOWER.encode(&sha2::Sha256::new().chain_update(b"relay pairing:").chain_update(secret).finalize())
+}
+
+/// What a device that made a pairing code tells the relay of it: the hash of its ticket.
+pub(super) fn ticket_hash(ticket: &str) -> String {
+    use sha2::Digest;
+    data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(ticket.as_bytes()))
 }
 
 /// What a message is bound to: its kind, who sends it to whom, its id and when.

@@ -13,9 +13,10 @@ async fn start(name: &str) -> Node {
     Node::start(&dir, one::sidecars::built_in()).await.unwrap()
 }
 
-/// A kernel whose gateway's relay the devices of `a`'s install reach each other through: `a` says it's the install's.
+/// A kernel whose gateway's relay the devices of `a`'s install reach each other through, taking only `a` and those it
+/// admits: `a` says it's the install's.
 async fn relay(a: &Node) -> crate::kernel::Kernel {
-    let k = tokio::task::block_in_place(|| crate::kernel::Kernel::start(None));
+    let k = tokio::task::block_in_place(|| crate::kernel::Kernel::for_devices(vec![one::entry::hex(&a.id())]));
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     a.set_setting(&me, "address", Some(&k.address)).await.unwrap();
     k
@@ -63,7 +64,13 @@ async fn devices_share_a_deployed_board() {
     assert_eq!(a.call(board("post", json!({ "text": "from a" }))).await.unwrap(), "Posted as #1 in the top.");
 
     assert!(a.pair().is_err(), "a computer joins through the install's address, which it has none of yet");
-    let _relay = relay(&a).await;
+    let relay = relay(&a).await;
+    // A key that isn't one of the install's devices isn't let in, so it can't take the relay's room.
+    let stranger = format!("{}/relay?key={}", relay.address.replacen("http://", "ws://", 1), one::entry::hex(&rand::random::<[u8; 32]>()));
+    match tokio_tungstenite::connect_async(stranger).await {
+        Err(tokio_tungstenite::tungstenite::Error::Http(r)) => assert_eq!(r.status(), 403),
+        other => panic!("a stranger's key reached the relay: {:?}", other.map(|_| ())),
+    }
     b.join(&a.pair().unwrap()).await.unwrap();
     assert_eq!(b.user().unwrap(), a.user().unwrap(), "a pairing code from a's user makes another of their devices");
     eventually("b to run the board and see a's post", async || sees(&b, "global", "from a").await).await;

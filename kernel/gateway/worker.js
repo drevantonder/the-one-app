@@ -76,22 +76,41 @@ async function toWeb(request, env, url) {
 }
 
 // The relay: how nodes reach each other, with no address of their own. Each node keeps one WebSocket here, as the key
-// it proves it holds; what one sends `to` another key is passed to that node's socket, with `from` saying who sent it,
-// and nothing is kept. It's blind: what nodes send each other is sealed to the receiver's key and signed by the sender
-// (src/node/relay.rs), so it reads, changes and passes off nothing; it can only drop it.
+// it proves it holds; what one sends `to` another key is passed to that node's socket, with `from` saying who sent it.
+// It's blind: what nodes send each other is sealed to the receiver's key and signed by the sender (src/node/relay.rs),
+// so it reads, changes and passes off nothing; it can only drop it. It takes only the install's devices: those the
+// kernel's deploy said (`DEVICES`, public keys from the install's log), those a device of them admitted since, and a
+// computer joining with a pairing code a device made, for that once.
 
 /// What a node signs to prove its key: this, then the challenge.
 const PROVE = "relay:";
-/// The most sockets the relay keeps, the most nodes one message goes to, the most messages a socket sends a minute
-/// (a big one goes in pieces of half a megabyte), and how long a socket may wait before proving its key.
-const SOCKETS = 256;
+/// The most nodes one message goes to, the most messages a socket sends a minute (a big one goes in pieces of half a
+/// megabyte), how long a socket may wait before proving its key, and how many unproven sockets one address may hold.
 const RECIPIENTS = 64;
 const PER_MINUTE = 3000;
 const PROVE_WITHIN = 30_000;
+const UNPROVEN_PER_ADDRESS = 8;
+
+const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+const sha256 = async (text) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
 
 export class Relay {
-  constructor(ctx) {
+  constructor(ctx, env) {
     this.ctx = ctx;
+    this.env = env;
+  }
+
+  /// The install's devices, as the deploy said them (`{ keys, at }`) and the devices admitted since (`added`: key →
+  /// when), with the pairing codes made since (`pairings`: hash of its ticket → until when). None at all: anyone.
+  async devices() {
+    const said = this.env.DEVICES ? JSON.parse(this.env.DEVICES) : null;
+    let known = (await this.ctx.storage.get("devices")) || { keys: [], at: 0, added: {}, pairings: {} };
+    if (said && said.at > known.at) {
+      const added = Object.fromEntries(Object.entries(known.added).filter(([, t]) => t > said.at));
+      known = { keys: said.keys, at: said.at, added, pairings: known.pairings };
+      await this.ctx.storage.put("devices", known);
+    }
+    return known;
   }
 
   async fetch(request) {
@@ -103,17 +122,28 @@ export class Relay {
     }
     const key = url.searchParams.get("key") || "";
     if (request.headers.get("upgrade") !== "websocket" || !/^[0-9a-f]{64}$/.test(key)) return refuse(426, "the relay takes a node's WebSocket, with its key");
-    // Sockets that never proved their key go first.
+    const known = await this.devices();
     const now = Date.now();
+    let joining = null;
+    if ((known.keys.length || Object.keys(known.added).length) && !known.keys.includes(key) && !(key in known.added)) {
+      const ticket = url.searchParams.get("pairing") || "";
+      const until = /^[0-9a-f]{64}$/.test(ticket) && known.pairings[await sha256(ticket)];
+      if (!until || until < now) return refuse(403, "the relay takes only your One App's devices");
+      joining = await sha256(ticket);
+    }
+    const address = request.headers.get("cf-connecting-ip") || "";
+    let unproven = 0;
     for (const ws of this.ctx.getWebSockets()) {
       const said = ws.deserializeAttachment();
-      if (!said.proven && now - said.at > PROVE_WITHIN) ws.close(1008, "it never proved its key");
+      if (said.proven) continue;
+      if (now - said.at > PROVE_WITHIN) ws.close(1008, "it never proved its key");
+      else if (said.address === address) unproven++;
     }
-    if (this.ctx.getWebSockets().length >= SOCKETS) return refuse(503, "the relay has as many nodes as it takes");
+    if (unproven >= UNPROVEN_PER_ADDRESS) return refuse(429, "too many sockets from there that haven't proved their key");
     const [client, server] = Object.values(new WebSocketPair());
-    const challenge = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const challenge = hex(crypto.getRandomValues(new Uint8Array(16)));
     this.ctx.acceptWebSocket(server, [key]);
-    server.serializeAttachment({ key, challenge, proven: false, at: now });
+    server.serializeAttachment({ key, challenge, proven: false, at: now, address, joining });
     server.send(JSON.stringify({ challenge }));
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -130,6 +160,12 @@ export class Relay {
       if (!(await proves(said.key, said.challenge, msg.signature))) return ws.close(1008, "that signature isn't the key's");
       // The newest socket of a key is the one it's reached at.
       for (const other of this.ctx.getWebSockets(said.key)) if (other !== ws) other.close(1000, "the node connected again");
+      // A pairing code lets one computer in, once.
+      if (said.joining) {
+        const known = await this.devices();
+        delete known.pairings[said.joining];
+        await this.ctx.storage.put("devices", known);
+      }
       ws.serializeAttachment({ ...said, proven: true, minute: Date.now(), sent: 0 });
       return ws.send(JSON.stringify({ ready: true }));
     }
@@ -138,6 +174,17 @@ export class Relay {
     const sent = fresh ? 1 : said.sent + 1;
     if (sent > PER_MINUTE) return ws.close(1008, `more than ${PER_MINUTE} messages in a minute`);
     ws.serializeAttachment({ ...said, minute: fresh ? now : said.minute, sent });
+    // What a device of the install tells the relay itself: a device it admitted, or a pairing code it made.
+    if (msg.relay !== undefined) {
+      if (said.joining) return;
+      const known = await this.devices();
+      if (typeof msg.relay.admitted === "string" && /^[0-9a-f]{64}$/.test(msg.relay.admitted)) known.added[msg.relay.admitted] = now;
+      if (typeof msg.relay.pairing === "string" && /^[0-9a-f]{64}$/.test(msg.relay.pairing) && msg.relay.until > now) {
+        for (const [hash, until] of Object.entries(known.pairings)) if (until < now) delete known.pairings[hash];
+        known.pairings[msg.relay.pairing] = Math.min(msg.relay.until, now + 7 * 86_400_000);
+      }
+      return this.ctx.storage.put("devices", known);
+    }
     const missed = this.pass(said.key, msg);
     // An ask of a node that isn't here is answered now, rather than waited on.
     if (msg.kind === "ask" && missed.length) ws.send(JSON.stringify({ from: missed[0], id: msg.id, gone: true }));

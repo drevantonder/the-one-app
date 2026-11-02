@@ -603,15 +603,20 @@ impl Kernel {
     /// Runs them as `one kernel serve` does, from new settings, with the stand-in sites as the bucket, the gateway
     /// sending `/v1/` to `node_url` and serving a web client of two pages.
     pub(crate) fn start(node_url: Option<String>) -> Kernel {
-        Kernel::start_as(node_url, false)
+        Kernel::start_as(node_url, false, vec![])
+    }
+
+    /// As `start`, its relay taking only `devices` (public keys, hex) and those they admit.
+    pub(crate) fn for_devices(devices: Vec<String>) -> Kernel {
+        Kernel::start_as(None, false, devices)
     }
 
     /// As `start`, for an install whose people sign in with Google at test.example, the stand-in sites as Google.
     fn google() -> Kernel {
-        Kernel::start_as(None, true)
+        Kernel::start_as(None, true, vec![])
     }
 
-    fn start_as(node_url: Option<String>, google: bool) -> Kernel {
+    fn start_as(node_url: Option<String>, google: bool, devices: Vec<String>) -> Kernel {
         let gateway = port();
         let (mut settings, recovery) = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), port(), port(), gateway];
@@ -619,6 +624,7 @@ impl Kernel {
         (settings.vault_url, settings.schedules_url) = (format!("http://127.0.0.1:{}", settings.ports[1]), format!("http://127.0.0.1:{}", settings.ports[2]));
         settings.resources = vec![RESOURCE.into()];
         settings.node_url = node_url;
+        settings.devices = devices;
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let modules = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();
         let sites = port();

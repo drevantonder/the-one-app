@@ -216,7 +216,9 @@ fn spawn_kernel(dir: &Path, settings: &one::kernel::Settings) -> Result<()> {
     for port in settings.ports {
         anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the try install's kernel's port {port} is taken now: {CLI} try stop, then {CLI} try for a new one");
     }
-    spawn(dir, std::process::Command::new(std::env::current_exe()?).args(["kernel", "serve"]), "kernel.log")?;
+    // Beside its node, which it asks for the install's devices, for its relay to take only them.
+    let node = settings.node_url.as_deref().unwrap_or("").trim_start_matches("http://");
+    spawn(dir, std::process::Command::new(std::env::current_exe()?).args(["kernel", "serve"]).env(addr_var(), node), "kernel.log")?;
     wait_for(&agent(), &format!("{}/.well-known/oauth-authorization-server", settings.address), &dir.join("kernel.log"))
 }
 
