@@ -48,7 +48,7 @@ one group create Family                  # share data with others: one group inv
 
 For agents: `claude mcp add --scope user one -- one mcp`.
 
-On a Mac, `apple/build.sh` builds the app with the node and the Apple sidecars inside it.
+On a Mac, `apple/build.sh` builds the app with the node and the Apple sidecars inside it. On Linux, `android/build.sh` builds the Android app (the Android SDK in `~/Android/Sdk`, or `$ANDROID_HOME`).
 
 ## Make it yours
 

@@ -1,0 +1,193 @@
+package app.client
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+
+class MainActivity : ComponentActivity() {
+    private val store get() = (application as ClientApp).store
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge(SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
+        super.onCreate(savedInstanceState)
+        Glyphs.load(this)
+        val store = store
+        if (store.phase != Store.Phase.SignedOut) store.run()
+        setContent {
+            Theme(store.config?.accent ?: BuildConfig.ACCENT, store.appearance) {
+                CompositionLocalProvider(LocalStore provides store) { Root(store) }
+            }
+        }
+        intent?.data?.let(::open)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.data?.let(::open)
+    }
+
+    /** `<cli>://signed-in/?code=…`: back from signing in. */
+    private fun open(uri: Uri) {
+        if (uri.scheme != BuildConfig.CLI || uri.host != "signed-in") return
+        welcomeError = null
+        store.signInFinished(uri) { welcomeError = it }
+    }
+
+    companion object {
+        var welcomeError by mutableStateOf<String?>(null)
+    }
+}
+
+/** The app's process: one store, however many times the activity comes and goes. */
+class ClientApp : android.app.Application() {
+    val store by lazy { Store(SignIn(this), getSharedPreferences("app", MODE_PRIVATE)) }
+}
+
+@Composable
+private fun Root(store: Store) {
+    val p = LocalPalette.current
+    Box(Modifier.fillMaxSize().background(p.background)) {
+        if (store.phase == Store.Phase.SignedOut) Welcome(store) else PagesView(store)
+    }
+}
+
+/** Signing in: where the install is (unless this build knows), or an invite link to it, then the passkey. */
+@Composable
+private fun Welcome(store: Store) {
+    val p = LocalPalette.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    var address by remember { mutableStateOf(store.signIn.address ?: "") }
+    var busy by remember { mutableStateOf(false) }
+    var invited by remember { mutableStateOf(false) }
+    val fixed = BuildConfig.ADDRESS.isNotEmpty()
+    val error = MainActivity.welcomeError
+    val name = BuildConfig.NAME
+
+    fun signIn() {
+        keyboard?.hide()
+        val given = address.trim()
+        // An invite link: its address, and its page, where the person makes their passkey first.
+        val invite = Regex("^(https?://[^/]+)/invite#.+").find(given)
+        val at = invite?.groupValues?.get(1) ?: normal(given)
+        if (at == null) {
+            MainActivity.welcomeError = "That isn’t an address. It looks like one.example.com."
+            return
+        }
+        store.signIn.address = at
+        MainActivity.welcomeError = null
+        if (invite != null) {
+            invited = true
+            address = at
+            SignIn.openInTab(context, Uri.parse(given))
+            return
+        }
+        busy = true
+        scope.launch {
+            try {
+                store.signIn.start(context as android.app.Activity)
+            } catch (e: Exception) {
+                MainActivity.welcomeError = e.message
+            }
+            busy = false
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).imePadding().padding(horizontal = 28.dp, vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.weight(1f))
+        Image(painterResource(R.drawable.logo), null, Modifier.size(116.dp).clip(RoundedCornerShape(26.dp)))
+        Spacer(Modifier.height(28.dp))
+        Text("Welcome to $name", fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, color = p.label, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(12.dp))
+        Text(
+            if (invited) "Made your passkey? Sign in with it." else "Your devices, and your team’s, as one place for apps and agents.",
+            style = Type.body, color = p.secondary, textAlign = TextAlign.Center,
+        )
+        if (!fixed) {
+            Spacer(Modifier.height(32.dp))
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Your install’s address, or an invite link", style = Type.footnote, color = p.secondary, modifier = Modifier.padding(horizontal = 16.dp))
+                TextField(
+                    address, { address = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("one.example.com", color = p.tertiary) },
+                    shape = RoundedCornerShape(16.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),
+                    keyboardActions = KeyboardActions(onGo = { signIn() }),
+                    colors = TextFieldDefaults.colors(focusedContainerColor = p.card, unfocusedContainerColor = p.card, focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent, cursorColor = p.accent),
+                )
+            }
+        }
+        error?.let {
+            Spacer(Modifier.height(16.dp))
+            Text(it, style = Type.subheadline, color = p.red, textAlign = TextAlign.Center)
+        }
+        Spacer(Modifier.weight(1.4f))
+        Prominent(if (invited || address.isEmpty() || !address.contains("/invite#")) "Sign In" else "Open Invite", Modifier.fillMaxWidth().height(56.dp), enabled = !busy && (fixed || address.isNotBlank())) { signIn() }
+        Box(Modifier.height(48.dp), contentAlignment = Alignment.Center) {
+            if (busy) CircularProgressIndicator(Modifier.size(20.dp), color = p.secondary, strokeWidth = 2.dp)
+            else if (invited) TextButton({ invited = false }) { Text("Use Another Address", color = p.accent) }
+        }
+    }
+}
+
+/** An address as the app keeps it: https unless it's this device's own. → nil if it isn't one. */
+private fun normal(given: String): String? {
+    val text = given.trimEnd('/')
+    if (text.isEmpty() || text.contains(' ')) return null
+    val url = if (text.contains("://")) text else if (text.startsWith("localhost") || text.startsWith("127.0.0.1")) "http://$text" else "https://$text"
+    val uri = Uri.parse(url)
+    if (uri.host.isNullOrEmpty() || uri.scheme !in listOf("http", "https")) return null
+    if (uri.scheme == "http" && uri.host !in listOf("localhost", "127.0.0.1")) return null
+    return "${uri.scheme}://${uri.authority}"
+}

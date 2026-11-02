@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light or dark with the phone (screens' web views follow it too), drawn edge to edge by Compose. -->
+    <style name="Client" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+</resources>

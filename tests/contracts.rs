@@ -1,4 +1,4 @@
-//! Where code in two languages must agree (the node sends, the Mac and iPhone apps, the Go sidecars, the screens'
+//! Where code in two languages must agree (the node sends, the Mac, iPhone and Android apps, the Go sidecars, the screens'
 //! bridge and the chat view read), a test reads both and checks they do, so neither can drift from the other.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -113,6 +113,78 @@ fn swift_structs(src: &str) -> BTreeMap<String, Vec<Field>> {
     out
 }
 
+/// The `@Serializable data class`es in Kotlin source, by name, each with the fields it reads: its JSON key (its
+/// `@SerialName`, or its name), its type written as Swift's are, and whether decoding fails without it (no default,
+/// and not nullable).
+fn kotlin_classes(src: &str) -> BTreeMap<String, Vec<Field>> {
+    // Comments go first: a doc comment may sit between two fields.
+    let mut text = String::new();
+    let mut rest = src;
+    while let Some(at) = rest.find("/*") {
+        text.push_str(&rest[..at]);
+        rest = rest[at..].split_once("*/").map(|(_, r)| r).unwrap_or("");
+    }
+    text.push_str(rest);
+    let text: String = text.lines().map(|l| l.split(" //").next().unwrap()).collect::<Vec<_>>().join("\n");
+    fn swifty(ty: &str) -> String {
+        let ty = ty.trim().trim_end_matches('?');
+        let inner = |t: &str, prefix: &str| t.strip_prefix(prefix).and_then(|t| t.strip_suffix('>')).map(str::to_string);
+        if let Some(of) = inner(ty, "List<") {
+            return format!("[{}]", swifty(&of));
+        }
+        if let Some(kv) = inner(ty, "Map<") {
+            let (k, v) = kv.split_once(',').unwrap();
+            return format!("[{}: {}]", swifty(k), swifty(v));
+        }
+        match ty {
+            "Int" | "Long" => "Int",
+            "Double" | "Float" => "Double",
+            "Boolean" => "Bool",
+            other => other,
+        }
+        .to_string()
+    }
+    let mut out = BTreeMap::new();
+    for chunk in text.split("@Serializable").skip(1) {
+        let chunk = chunk.trim_start();
+        let chunk = if chunk.starts_with('(') { chunk.split_once(')').map(|(_, r)| r.trim_start()).unwrap_or("") } else { chunk };
+        let Some(rest) = chunk.strip_prefix("data class ") else { continue };
+        let name = word(rest).to_string();
+        let Some(open) = rest.find('(') else { continue };
+        // Its parameters, split at the commas between them, not those in a type or a default.
+        let (mut depth, mut params, mut current) = (0, vec![], String::new());
+        for c in rest[open + 1..].chars() {
+            match c {
+                '(' | '<' | '{' | '[' => depth += 1,
+                ')' | '>' | '}' | ']' if depth > 0 => depth -= 1,
+                ')' => break,
+                ',' if depth == 0 => {
+                    params.push(std::mem::take(&mut current));
+                    continue;
+                }
+                _ => {}
+            }
+            current.push(c);
+        }
+        params.push(current);
+        let fields = params
+            .iter()
+            .filter_map(|p| {
+                let key = p.split_once("@SerialName(\"").and_then(|(_, k)| k.split_once('"')).map(|(k, _)| k.to_string());
+                let decl = p.split_once("val ").or_else(|| p.split_once("var "))?.1;
+                let (field, ty) = decl.split_once(':')?;
+                let (ty, default) = match ty.split_once('=') {
+                    Some((ty, _)) => (ty, true),
+                    None => (ty, false),
+                };
+                Some(Field { key: key.unwrap_or_else(|| field.trim().to_string()), ty: swifty(ty), required: !default && !ty.trim().ends_with('?') })
+            })
+            .collect();
+        out.insert(name, fields);
+    }
+    out
+}
+
 /// What's wrong with `value` as Swift's `ty` would decode it, from inside struct `within`: each problem by its path.
 fn check(structs: &BTreeMap<String, Vec<Field>>, within: &str, ty: &str, value: &Value, path: &str, problems: &mut Vec<String>) {
     let ty = ty.trim().trim_end_matches('?');
@@ -129,7 +201,7 @@ fn check(structs: &BTreeMap<String, Vec<Field>>, within: &str, ty: &str, value: 
             outer = outer.rsplit_once('.').map(|(o, _)| o.to_string()).unwrap_or_default();
         }
     };
-    let wrong = |what: &str| format!("{path}: Swift reads {ty}, the node sent {what}");
+    let wrong = |what: &str| format!("{path}: the app reads {ty}, the node sent {what}");
     if let Some(inner) = ty.strip_prefix('[').and_then(|t| t.strip_suffix(']')) {
         match inner.split_once(':') {
             Some((_, of)) => match value.as_object() {
@@ -153,7 +225,7 @@ fn check(structs: &BTreeMap<String, Vec<Field>>, within: &str, ty: &str, value: 
                 for f in &structs[&name] {
                     match value.get(&f.key).filter(|v| !v.is_null()) {
                         Some(v) => check(structs, &name, &f.ty, v, &format!("{path}.{}", f.key), problems),
-                        None if f.required => problems.push(format!("{path}.{}: Swift's {name} needs it, the node left it out", f.key)),
+                        None if f.required => problems.push(format!("{path}.{}: the app's {name} needs it, the node left it out", f.key)),
                         None => {}
                     }
                 }
@@ -192,11 +264,12 @@ async fn api(addr: &str, method: &str, path: &str, body: Value) -> Value {
     .unwrap()
 }
 
-/// Every payload the Mac and iPhone apps decode from the local API decodes with the structs they decode it into: each
-/// field they need is there, and each field they read has the type they read it as. A shell built before still
-/// decodes what a newer server sends, so a field leaves the payload only once no shell needs it.
+/// Every payload the Mac, iPhone and Android apps decode from a node decodes with the structs (Kotlin's data classes,
+/// in android/…/Node.kt) they decode it into: each field they need is there, and each field they read has the type
+/// they read it as. A shell built before still decodes what a newer server sends, so a field leaves the payload only
+/// once no shell needs it.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_apple_apps_decode_what_the_node_sends() {
+async fn the_apple_and_android_apps_decode_what_the_node_sends() {
     let swift = read("apple/Shared/Node.swift") + &read("apple/Shared/Views/WidgetTree.swift");
     let structs = swift_structs(&swift);
     for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "WidgetNode", "VaultItem", "VaultRequest", "Arrangement.Item", "Backups", "Backups.Place", "Backups.Snapshot"] {
@@ -204,6 +277,12 @@ async fn the_apple_apps_decode_what_the_node_sends() {
     }
     assert!(structs["VaultItem"].iter().any(|f| f.key == "scope_name" && !f.required) && structs["VaultItem"].iter().any(|f| f.key == "title" && f.required));
     assert!(structs["NodeState"].iter().any(|f| f.key == "me" && f.required), "CodingKeys rename fields");
+    let classes = kotlin_classes(&read("android/app/src/main/kotlin/app/client/Node.kt"));
+    for name in ["NodeState", "Install", "Server", "AppInfo", "WidgetInfo", "WidgetNode", "VaultItem", "VaultRequest", "ArrangementItem"] {
+        assert!(classes.get(name).is_some_and(|f| !f.is_empty()), "the test reads Kotlin's {name}: {:?}", classes.keys());
+    }
+    assert!(classes["NodeState"].iter().any(|f| f.key == "me" && f.required), "@SerialName renames fields");
+    assert!(classes["AppInfo"].iter().any(|f| f.key == "screens" && f.ty == "[AppScreenInfo]" && !f.required), "{:?}", classes["AppInfo"]);
 
     let (node, _router) = start("contracts").await;
     node.create("Contracts", "Andre").await.unwrap();
@@ -249,9 +328,14 @@ async fn the_apple_apps_decode_what_the_node_sends() {
         assert!(sent.as_array().is_none_or(|l| !l.is_empty()), "{path} sent nothing to check");
         check(&structs, "", ty, &sent, path, &mut problems);
     }
+    let mut android = vec![];
+    for (path, ty) in [("/v1/state", "NodeState"), ("/v1/apps", "[AppInfo]"), ("/v1/widgets?scope=user", "[WidgetInfo]"), ("/v1/badges?scope=user", "[String: Int]"), ("/v1/vault", "[VaultItem]"), ("/v1/vault/requests", "[VaultRequest]")] {
+        check(&classes, "", ty, &api(&addr, "GET", path, Value::Null).await, path, &mut android);
+    }
     let state = api(&addr, "GET", "/v1/state", Value::Null).await;
     assert!(!state["install"]["groups"].as_array().unwrap().is_empty() && state["arrangements"]["user"].is_object(), "{state}");
     assert!(problems.is_empty(), "the Apple apps can't decode what the node sends:\n{}", problems.join("\n"));
+    assert!(android.is_empty(), "the Android app can't decode what the node sends:\n{}", android.join("\n"));
     let _ = std::fs::remove_dir_all(disk);
 }
 

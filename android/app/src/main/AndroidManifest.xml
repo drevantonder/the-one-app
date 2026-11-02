@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Chrome, for the Custom Tab sign-in opens: passkeys with PRF work there. -->
+    <queries>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+    </queries>
+
+    <!-- Nothing is backed up: the sign-in's key stays in this device's keystore, so a copy elsewhere opens nothing. -->
+    <application
+        android:name=".ClientApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/no_backup"
+        android:networkSecurityConfig="@xml/network"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Client">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Back from signing in: <cli>://signed-in/?code=…&state=…; and the links the app opens itself. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="${scheme}" />
+            </intent-filter>
+        </activity>
+
+        <!-- Files a screen saves or shows, shared from the app's cache. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/files" />
+        </provider>
+    </application>
+</manifest>
