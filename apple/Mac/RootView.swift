@@ -129,7 +129,7 @@ private struct WelcomeView: View {
                 Image("Logo")
                     .resizable()
                     .frame(width: 112, height: 112)
-                Text("Welcome to \(store.config?.name ?? appName)")
+                Text(store.config?.name ?? appName)
                     .font(.largeTitle.weight(.semibold))
                 if SignIn.configured == nil {
                     Text("Start it here, or join from another device.")

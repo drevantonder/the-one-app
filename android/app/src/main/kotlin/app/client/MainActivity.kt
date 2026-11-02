@@ -156,7 +156,7 @@ private fun Welcome(store: Store) {
         Spacer(Modifier.weight(1f))
         Image(painterResource(R.drawable.logo), null, Modifier.size(116.dp).clip(RoundedCornerShape(26.dp)))
         Spacer(Modifier.height(28.dp))
-        Text("Welcome to $name", fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, color = p.label, textAlign = TextAlign.Center)
+        Text(name, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, color = p.label, textAlign = TextAlign.Center)
         if (invited) {
             Spacer(Modifier.height(12.dp))
             Text("Made your passkey? Sign in with it.", style = Type.body, color = p.secondary, textAlign = TextAlign.Center)

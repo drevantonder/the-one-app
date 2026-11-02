@@ -20,7 +20,7 @@ struct WelcomeView: View {
                         .resizable()
                         .frame(width: 120, height: 120)
                         .accessibilityHidden(true)
-                    Text("Welcome to \(appName)")
+                    Text(appName)
                         .font(.largeTitle.bold())
                     if invited {
                         Text("Made your passkey? Sign in with it.")
