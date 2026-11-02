@@ -129,7 +129,14 @@ pub fn none_said(app: &Value, op: &str, ok: &Value, cli: bool) -> Option<String>
     }
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
     let signs_in = app["ops"].as_array().into_iter().flatten().any(|o| o["name"] == "sign_in");
+    // One that needs a part on a device, with none of yours running it: signing in can't work yet.
+    let parts: Vec<&Value> = app["uses"]["sidecars"].as_array().into_iter().flatten().collect();
+    let on_none = || {
+        let state = get("/v1/state").unwrap_or_default();
+        !state["install"]["devices"].as_array().into_iter().flatten().any(|d| d["sidecars"].as_array().into_iter().flatten().any(|s| parts.contains(&s)))
+    };
     Some(match (signs_in, app["needs"].as_str()) {
+        (_, Some(needs)) if !parts.is_empty() && on_none() => format!("None: {title} isn't on any of your devices yet. {needs}."),
         (true, _) => format!("No account is signed in to {title} yet: {} signs one in.", named(name, "sign_in", cli)),
         (false, Some(needs)) => format!("None: {title} isn't on any of your devices yet. {needs}."),
         (false, None) => format!("None: {title} has no accounts yet."),
