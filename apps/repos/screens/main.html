@@ -18,7 +18,7 @@ function row(r) {
 function list() {
   if (!repos.length) {
     document.getElementById("find").hidden = true;
-    return one.empty({ icon: "book", title: "No Repos", text: `Push one from any of your computers:<br><code>git push ${esc(address("<name>"))} main</code>` });
+    return one.empty({ icon: "book", title: "No Repos", text: `${where}, push one:<br><code>git push ${esc(address("<name>"))} main</code>` });
   }
   document.getElementById("find").hidden = false;
   const q = query.toLowerCase();

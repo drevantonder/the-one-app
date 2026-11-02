@@ -25,6 +25,7 @@ code { font: 0.88em var(--mono); }
 .repo-head h1 { font-size: 24px; margin: 0; line-height: 1.15; }
 .clone { display: flex; align-items: center; gap: 6px; margin-top: 12px; padding: 4px 4px 4px 12px; background: var(--card); border-radius: 10px; border: 0.5px solid var(--line); }
 .clone code { flex: 1; overflow-x: auto; white-space: nowrap; font-size: 13px; }
+.clone-where { margin: 6px 0 0 12px; color: var(--muted); font-size: 13px; }
 .repo-links { margin-top: 16px; }
 .danger-list { margin-top: 28px; }
 .danger-row { color: var(--danger); justify-content: center; }

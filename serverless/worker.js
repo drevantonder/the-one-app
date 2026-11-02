@@ -477,7 +477,7 @@ async function machineCall(env, who, q, d) {
 async function screenOf(env, who, view, app, name, params, scope) {
   const reply = await appWorker(env, who, app).getEntrypoint("Call").run("screen", name, {}, null);
   const body = reply.ok ?? '<div id="missing"></div><script>missing.innerHTML = one.notFound()</script>';
-  const context = { app: app.name, screen: name, params, me: view.me, scope, config: { name: CONFIG.name, cli: CONFIG.cli, api: env.ADDRESS, made_here: null } };
+  const context = { app: app.name, screen: name, params, me: view.me, scope, config: { name: CONFIG.name, cli: CONFIG.cli, api: `http://localhost:${CONFIG.port}`, made_here: null } };
   return new Response(screen(JSON.stringify(context), body), { headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
@@ -606,7 +606,7 @@ async function route(request, env, ctx) {
     if (own) {
       const name = decodeURIComponent(path.slice("/v1/client-screens/".length));
       const params = JSON.parse(url.searchParams.get("params") || "{}");
-      const context = { screen: name, params, me: run.view.me, config: { name: CONFIG.name, cli: CONFIG.cli, api: env.ADDRESS, made_here: null } };
+      const context = { screen: name, params, me: run.view.me, config: { name: CONFIG.name, cli: CONFIG.cli, api: `http://localhost:${CONFIG.port}`, made_here: null } };
       return new Response(client_screen(JSON.stringify(context), name), { headers: { "content-type": "text/html; charset=utf-8" } });
     }
     const page = url.searchParams.get("scope");
