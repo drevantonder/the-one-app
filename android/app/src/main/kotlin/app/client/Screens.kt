@@ -729,8 +729,4 @@ object ScreenCache {
 
     /** Its page and when it was kept. */
     fun last(r: Route.App): Pair<String, Long>? = file(r).takeIf { it.isFile }?.let { runCatching { it.readText() to it.lastModified() }.getOrNull() }
-
-    fun forget() {
-        dir.deleteRecursively()
-    }
 }

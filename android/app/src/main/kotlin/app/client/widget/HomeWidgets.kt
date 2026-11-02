@@ -30,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -131,10 +132,11 @@ object HomeWidgets {
         }
     }
 
-    /** Signed out: the widgets say so, and forget what they showed. */
+    /** Signed out: the widgets say so, and forget what they showed and its images. */
     fun signedOut() {
         if (!::app.isInitialized) return
         file.delete()
+        images.deleteRecursively()
         shown.value = shown.value.copy(kept = null, signedIn = false)
         redraw()
     }
@@ -147,7 +149,7 @@ object HomeWidgets {
     suspend fun refresh() {
         val store = store
         if (!store.signIn.signedIn) {
-            if (shown.value.signedIn || shown.value.kept != null) signedOut()
+            if (shown.value.signedIn || shown.value.kept != null) withContext(Dispatchers.Main) { store.signedOut() }
             return
         }
         try {
@@ -156,7 +158,8 @@ object HomeWidgets {
             if (!first) store.refreshApps()
             store.refreshWidgets(always = true)
         } catch (e: NodeError) {
-            if (e.signedOut) signedOut()
+            // Signed out while the app was away: the app forgets what it kept too, not only the widgets.
+            if (e.signedOut) withContext(Dispatchers.Main) { store.signedOut(e.message) }
         } catch (_: Exception) {
         }
     }
@@ -185,10 +188,12 @@ object HomeWidgets {
 
     // MARK: Images
 
+    private val images get() = File(app.filesDir, "home-widget-images")
+
     /** Where an image a widget shows is saved: the home screen can't download. */
     fun imageFile(url: String): File {
         val name = MessageDigest.getInstance("SHA-256").digest(url.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
-        return File(File(app.filesDir, "home-widget-images").apply { mkdirs() }, name)
+        return File(images.apply { mkdirs() }, name)
     }
 
     /** Saves the images not saved yet → whether any were. */

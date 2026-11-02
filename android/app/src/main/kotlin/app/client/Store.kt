@@ -1,6 +1,9 @@
 package app.client
 
 import android.net.Uri
+import android.webkit.CookieManager
+import android.webkit.WebStorage
+import android.webkit.WebView
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -58,7 +61,7 @@ data class Page(val scope: String, val title: String)
 
 /** The node as this person sees it, through the install's address with their sign-in, and where the app is: the pages,
  *  what's pushed over them, and the sheets over everything. */
-class Store(val signIn: SignIn, private val prefs: android.content.SharedPreferences) {
+class Store(private val application: android.app.Application, val signIn: SignIn, private val prefs: android.content.SharedPreferences) {
     enum class Phase { Starting, SignedOut, Unreachable, Ready }
 
     /** Light, Dark or Automatic, as chosen in Settings on this phone. */
@@ -188,14 +191,30 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
     }
 
     /** Back to the first screen, saying `why` when the install turned this phone away rather than the person signing out. */
-    private fun signedOut(why: String? = null) {
+    fun signedOut(why: String? = null) {
         MainActivity.welcomeError = why
         running?.cancel()
         state = null
         path.clear()
         sheets.forEach { it.close(null) }
         phase = Phase.SignedOut
-        ScreenCache.forget()
+        apps = emptyList()
+        forget()
+    }
+
+    /** Nothing of the person's left on this phone: what screens kept (their copies, `one.cache`, the files they showed
+     *  or shared, scans, their web storage and cookies, the web view's cache) and what the home-screen widgets showed,
+     *  which say to sign in. */
+    private fun forget() {
+        prefs.edit().apply { prefs.all.keys.filter { it.startsWith("screen:") }.forEach(::remove) }.apply()
+        // All the app's cache but the web view's, cleared below, and what Android and WorkManager keep there.
+        application.cacheDir.listFiles()?.filter { it.name !in setOf("WebView", "data", "oat_primary") }?.forEach { it.deleteRecursively() }
+        scope.launch {
+            WebStorage.getInstance().deleteAllData()
+            CookieManager.getInstance().removeAllCookies(null)
+            WebView(application).apply { clearCache(true) }.destroy()
+        }
+        app.client.widget.HomeWidgets.signedOut()
     }
 
     suspend fun refreshState() {
@@ -292,16 +311,14 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
     fun kept(key: String): String? = prefs.getString("screen:$key", null)
 
     fun keep(key: String, value: String) {
-        if (key.isNotEmpty() && key.length <= 40) prefs.edit().putString("screen:$key", value).apply()
+        // A screen still open as the person signs out keeps nothing after.
+        if (key.isNotEmpty() && key.length <= 40 && signIn.signedIn) prefs.edit().putString("screen:$key", value).apply()
     }
 
     fun signOut() {
-        prefs.edit().apply { prefs.all.keys.filter { it.startsWith("screen:") }.forEach(::remove) }.apply()
         scope.launch {
             signIn.signOut()
             signedOut()
-            app.client.widget.HomeWidgets.signedOut()
-            apps = emptyList()
         }
     }
 

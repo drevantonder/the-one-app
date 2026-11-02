@@ -99,7 +99,7 @@ class MainActivity : ComponentActivity() {
 
 /** The app's process: one store, however many times the activity comes and goes. */
 class ClientApp : android.app.Application() {
-    val store by lazy { Store(SignIn(this), getSharedPreferences("app", MODE_PRIVATE)) }
+    val store by lazy { Store(this, SignIn(this), getSharedPreferences("app", MODE_PRIVATE)) }
 
     override fun onCreate() {
         super.onCreate()
