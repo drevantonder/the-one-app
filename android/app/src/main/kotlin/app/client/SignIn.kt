@@ -141,7 +141,7 @@ class SignIn(private val context: Context) {
         return refreshing.withLock {
             val kept = tokens
             if (fresh(kept)) return@withLock kept!!.access
-            val refresh = kept?.refresh ?: throw NodeError("Signed out.", signedOut = true)
+            val refresh = kept?.refresh ?: throw NodeError("Sign in again.", signedOut = true)
             try {
                 val meta = meta()
                 val next = grant(meta, mapOf("grant_type" to "refresh_token", "refresh_token" to refresh, "client_id" to (prefs.getString("client", null) ?: "")))

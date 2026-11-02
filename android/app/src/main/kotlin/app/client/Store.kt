@@ -87,8 +87,8 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
                 token = signIn.token(stale = token)
                 continue
             }
-            if (r.status == 401) throw NodeError("Signed out.", signedOut = true)
             val error = runCatching { (json.parseToJsonElement(r.text) as? JsonObject)?.get("error")?.let { (it as? JsonPrimitive)?.content } }.getOrNull()
+            if (r.status == 401) throw NodeError(error ?: "Sign in again.", signedOut = true)
             if (r.status !in 200..299 || error != null) {
                 throw NodeError(error ?: if (r.status >= 500) "Your server isn’t answering." else "It didn’t work (${r.status}).")
             }
@@ -129,7 +129,7 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
                     refreshState()
                     break
                 } catch (e: NodeError) {
-                    if (e.signedOut) return@launch signedOut()
+                    if (e.signedOut) return@launch signedOut(e.message)
                     unreachable(e.message)
                 } catch (e: Exception) {
                     unreachable("Can’t reach ${signIn.address}.")
@@ -148,7 +148,9 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
         if (state == null) phase = Phase.Unreachable
     }
 
-    private fun signedOut() {
+    /** Back to the first screen, saying `why` when the install turned this phone away rather than the person signing out. */
+    private fun signedOut(why: String? = null) {
+        MainActivity.welcomeError = why
         running?.cancel()
         state = null
         path.clear()
@@ -219,7 +221,7 @@ class Store(val signIn: SignIn, private val prefs: android.content.SharedPrefere
                     }
                 }
             } catch (e: NodeError) {
-                if (e.signedOut) return signedOut()
+                if (e.signedOut) return signedOut(e.message)
             } catch (_: Exception) {
             }
             delay(3000)

@@ -134,8 +134,10 @@ private fun Welcome(store: Store) {
         scope.launch {
             try {
                 store.signIn.start(context as android.app.Activity)
-            } catch (e: Exception) {
+            } catch (e: NodeError) {
                 MainActivity.welcomeError = e.message
+            } catch (e: Exception) {
+                MainActivity.welcomeError = "Can’t reach $at."
             }
             busy = false
         }

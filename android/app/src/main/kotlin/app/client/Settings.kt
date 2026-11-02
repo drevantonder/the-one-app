@@ -26,9 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Notifications
-import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -72,8 +70,8 @@ fun SettingsPage(store: Store) {
             SettingsRow("Devices", glyph = "monitor-fill", color = Color(0xFF8E8E93)) { store.path.add(Route.Devices) }
         }
         Section {
-            SettingsRow("Passkeys", icon = Icons.Rounded.Lock, color = Color(0xFF34C759)) { SignIn.openInTab(context, Uri.parse("${store.signIn.address}/passkeys")) }
-            SettingsRow("Appearance", icon = Icons.Rounded.Star, color = Color(0xFF5856D6), value = store.appearance.title) { store.path.add(Route.Appearance) }
+            SettingsRow("Passkeys", glyph = "key-fill", color = Color(0xFF34C759)) { SignIn.openInTab(context, Uri.parse("${store.signIn.address}/passkeys")) }
+            SettingsRow("Appearance", glyph = "circle-half-fill", color = Color(0xFF5856D6), value = store.appearance.title) { store.path.add(Route.Appearance) }
         }
         Text(
             "${store.config?.name ?: BuildConfig.NAME}, app ${BuildConfig.COMMIT}" + (store.signIn.address?.let { "\n" + Uri.parse(it).host } ?: ""),
