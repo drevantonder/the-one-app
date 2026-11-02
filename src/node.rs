@@ -1039,6 +1039,9 @@ fn load_device(dir: &Path) -> Result<DeviceFile> {
     if let Ok(bytes) = std::fs::read(&path) {
         return Ok(serde_json::from_slice(&bytes)?);
     }
+    // This device's key, from before devices were called devices: a new key would quietly make it a new device.
+    let was = dir.join("server.json");
+    ensure!(!was.exists(), "{} holds this device's key: rename it to device.json, then start again", was.display());
     let file = DeviceFile { secret: hex(&rand::random::<[u8; 32]>()), name: hostname() };
     write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
     Ok(file)

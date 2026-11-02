@@ -285,6 +285,16 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     assert!(a.call(call("one", "sign_out", json!({ "id": made }))).await.is_err(), "an app lets go only of what it uses");
 }
 
+/// A device whose key is still in server.json, from before devices were called devices, never quietly becomes a new one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_keeps_its_key_from_server_json() {
+    let dir = temp("server-json");
+    std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "old" }).to_string()).unwrap();
+    let refused = Node::start(&dir, one::sidecars::built_in()).await.err().expect("it doesn't start as a new device");
+    assert!(format!("{refused:#}").contains("rename it to device.json"), "{refused:#}");
+    assert!(!dir.join("device.json").exists());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alone() {
     let a = start("backup-a").await;
