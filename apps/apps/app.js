@@ -17,6 +17,16 @@ function places(ctx) {
   return out;
 }
 
+/// A place as given: its scope (user, group:<id>, global) or its name as places() gives it (You, a group's, Everyone).
+function placeOf(ctx, given) {
+  const want = String(given || "").trim();
+  const p = places(ctx).find((p) => [p.scope, p.id].includes(want) || p.name.toLowerCase() === want.toLowerCase());
+  if (!p) throw new Error(`no place ${want}: give user (you), global (everyone) or a group by its name (${places(ctx).filter((p) => p.id.startsWith("group:")).map((p) => p.name).join(", ") || "you're in no group"})`);
+  return p.scope;
+}
+
+const placeInput = { type: "string", description: "user (you), global (everyone) or a group's name" };
+
 /// Whether the caller acts for an owner (an app's, a server's): it's theirs, a group's they're an admin of, or admins'
 /// or the install's and they're an admin.
 function mine(ctx, owner) {
@@ -200,20 +210,20 @@ export default {
       },
     },
     add: {
-      description: "Install an app, and the apps it uses, in a place: user (you), group:<id> (a group you're an admin of) or global (everyone; admins only).",
-      input: { type: "object", required: ["app", "scope"], properties: { app: { type: "string" }, scope: { type: "string" } } },
+      description: "Install an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only).",
+      input: { type: "object", required: ["app", "scope"], properties: { app: { type: "string" }, scope: placeInput } },
       async run(ctx, { app, scope }) {
         await find(ctx, app);
-        ctx.install(app, scope);
+        ctx.install(app, placeOf(ctx, scope));
         return `Added ${app}.`;
       },
     },
     remove: {
       confirm: true,
-      description: "Uninstall an app from a place: user, group:<id> or global.",
-      input: { type: "object", required: ["app", "scope"], properties: { app: { type: "string" }, scope: { type: "string" } } },
+      description: "Uninstall an app from a place: user (you), a group (by its name) or global (everyone).",
+      input: { type: "object", required: ["app", "scope"], properties: { app: { type: "string" }, scope: placeInput } },
       async run(ctx, { app, scope }) {
-        ctx.install(app, scope, false);
+        ctx.install(app, placeOf(ctx, scope), false);
         return `Removed ${app}.`;
       },
     },
@@ -263,10 +273,10 @@ export default {
       },
     },
     switch: {
-      description: "Switch one of an app's schedules on or off in a place where it's installed (user, group:<id> or global); switched on, it runs as you.",
-      input: { type: "object", required: ["app", "schedule", "scope", "on"], properties: { app: { type: "string" }, schedule: { type: "string" }, scope: { type: "string" }, on: { type: "boolean" } } },
+      description: "Switch one of an app's schedules on or off in a place where it's installed (user, a group by its name, or global); switched on, it runs as you.",
+      input: { type: "object", required: ["app", "schedule", "scope", "on"], properties: { app: { type: "string" }, schedule: { type: "string" }, scope: placeInput, on: { type: "boolean" } } },
       async run(ctx, { app, schedule, scope, on }) {
-        ctx.schedule(app, schedule, scope, on);
+        ctx.schedule(app, schedule, placeOf(ctx, scope), on);
         return `${schedule} is ${on ? "on" : "off"}.`;
       },
     },

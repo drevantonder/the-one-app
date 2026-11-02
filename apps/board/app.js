@@ -253,22 +253,22 @@ At the start of every session, call board_read with no topic and do what the top
       },
     },
     create: {
-      words: ["path", "description"],
-      description: "Create a topic under an existing one (the top always exists), with a one-line description. Paths are lowercase words joined by - and nested with /, like projects/the-one-app.",
+      words: ["topic", "description"],
+      description: "Create a topic under an existing one (the top always exists), with a one-line description. A topic is lowercase words joined by - and nested with /, like projects/the-one-app.",
       input: {
         type: "object",
-        required: ["path", "description"],
+        required: ["topic", "description"],
         properties: {
-          path: { type: "string" },
+          topic: { type: "string", description: "like projects/the-one-app" },
           description: { type: "string", description: `one line, at most ${LIMIT} bytes, saying what belongs here` },
           force: { type: "boolean", description: "create it even though topics with a similar name exist" },
           scope: scopeInput,
         },
       },
-      async run(ctx, { path, description, force, scope }) {
+      async run(ctx, { topic: path, description, force, scope }) {
         const b = board(ctx, scope);
         path = String(path || "").trim().replace(/^\/+|\/+$/g, "");
-        if (!/^[a-z0-9-]+(\/[a-z0-9-]+)*$/.test(path)) throw new Error("paths are lowercase words joined by - and nested with /, like projects/the-one-app");
+        if (!/^[a-z0-9-]+(\/[a-z0-9-]+)*$/.test(path)) throw new Error("a topic is lowercase words joined by - and nested with /, like projects/the-one-app");
         description = String(description ?? "").trim();
         if (!description || /[\r\n]/.test(description) || bytes(description) > LIMIT) throw new Error(`the description must be one line of at most ${LIMIT} bytes`);
         const existing = (await b.query("select description from topics where path = ?", [path]))[0];
