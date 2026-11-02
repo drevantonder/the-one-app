@@ -74,13 +74,13 @@ pub struct Db {
 impl Db {
     /// Reads a database as its newest steps leave it: empty if it has none.
     pub async fn open(bucket: &impl Bucket, prefix: &str, key: [u8; 32]) -> Result<Db> {
-        let (at, copy) = match bucket.get(&format!("{prefix}/newest")).await? {
+        let (at, copy) = match bucket.get(&newest_name(prefix)).await? {
             Some(o) => newest(&o.bytes)?,
             None => (0, 0),
         };
         let mut conn = Connection::open_in_memory()?;
         if copy > 0 {
-            let name = format!("{prefix}/copy/{copy:012}");
+            let name = copy_name(prefix, copy);
             let sealed = bucket.get(&name).await?.with_context(|| format!("{name} is missing"))?;
             let bytes = open(&key, &name, &sealed.bytes)?;
             conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
@@ -181,18 +181,18 @@ impl Db {
     }
 
     fn step(&self, n: u64) -> String {
-        format!("{}/{n:012}", self.prefix)
+        step_name(&self.prefix, n)
     }
 
     /// After writing a step: a copy, if steps have piled up since the last, and the newest hint moved on.
     async fn written(&mut self, bucket: &impl Bucket) -> Result<()> {
         if self.at >= self.copy + COPY_EVERY {
-            let name = format!("{}/copy/{:012}", self.prefix, self.at);
+            let name = copy_name(&self.prefix, self.at);
             let bytes = self.conn.serialize("main")?.to_vec();
             bucket.create(&name, &seal(&self.key, &name, &bytes)).await?;
             self.copy = self.at;
         }
-        let name = format!("{}/newest", self.prefix);
+        let name = newest_name(&self.prefix);
         for _ in 0..TRIES {
             let current = bucket.get(&name).await?;
             let said = current.as_ref().map(|o| newest(&o.bytes)).transpose()?;
@@ -226,7 +226,21 @@ impl Db {
     }
 }
 
-fn newest(bytes: &[u8]) -> Result<(u64, u64)> {
+/// A database's objects in the bucket, by its prefix: its newest hint, step `n`, and its copy after step `n`.
+pub fn newest_name(prefix: &str) -> String {
+    format!("{prefix}/newest")
+}
+
+pub fn step_name(prefix: &str, n: u64) -> String {
+    format!("{prefix}/{n:012}")
+}
+
+pub fn copy_name(prefix: &str, n: u64) -> String {
+    format!("{prefix}/copy/{n:012}")
+}
+
+/// What a database's newest hint says: (its last step, its newest copy).
+pub fn newest(bytes: &[u8]) -> Result<(u64, u64)> {
     let v: Value = serde_json::from_slice(bytes)?;
     Ok((v["at"].as_u64().unwrap_or(0), v["copy"].as_u64().unwrap_or(0)))
 }

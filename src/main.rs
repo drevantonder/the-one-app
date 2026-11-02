@@ -74,6 +74,11 @@ Usage:
                                        comma-separated), bucket or google (its JSON object piped, with - as its value)
   {CLI} kernel use <auth> <vault> <schedules>
                                        point this install at its kernel's services
+  {CLI} storage                        where the install's data is kept
+  {CLI} storage move --endpoint <url>  move it to S3-compatible storage (R2, S3, GCS, MinIO), which every server
+                                       reaches: piped a JSON object of bucket, key_id and secret (and region) it tries
+                                       it, and every server moves there; otherwise it asks the person for them, with a
+                                       link to a sheet on their device
   {CLI} backups                        how backups are going: each place, its last backup, what's failing
   {CLI} backups now                    back up now, without waiting for the hour
   {CLI} backups place add <folder> [--title t]
@@ -350,6 +355,29 @@ fn run(args: Vec<String>) -> Result<()> {
                 post("/v1/settings", json!({ "name": name, "value": url.trim_end_matches('/') }))?;
             }
             println!("This install's kernel is at {auth}.");
+        }
+        ["storage"] => {
+            let s = get("/v1/storage")?;
+            match s["kind"].as_str() {
+                Some("folder") => println!("The install's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other servers join: {CLI} storage move --endpoint <url>.", s["server"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
+                Some(_) => println!("The install's data is kept in {} at {}.", s["where"].as_str().unwrap_or(""), s["endpoint"].as_str().unwrap_or("")),
+                None => println!("This server can't reach the install's data: an admin moves it to S3-compatible storage with {CLI} storage move."),
+            }
+        }
+        ["storage", "move"] => {
+            let endpoint = flags.get("endpoint").and_then(Value::as_str).context("give --endpoint, like https://<account>.r2.cloudflarestorage.com")?;
+            if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                let r = post("/v1/storage/request", json!({ "endpoint": endpoint, "agent": agent_from_env() }))?;
+                println!("Open this on your device to give the bucket and its key: {}\nIt's also waiting in Settings, under Requests.", r["link"].as_str().unwrap_or(""));
+                return Ok(());
+            }
+            let mut body: Value = serde_json::from_reader(std::io::stdin()).context("pipe a JSON object of bucket, key_id and secret")?;
+            body["endpoint"] = json!(endpoint);
+            let r = post("/v1/storage", body)?;
+            print!("{}", tried_said(&r));
+            if r["id"].is_string() {
+                println!("Every server moves the install's data there now.");
+            }
         }
         ["backups"] => print!("{}", backups_said(&get("/v1/backups")?)),
         ["backups", "now"] => {

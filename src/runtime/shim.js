@@ -1,8 +1,7 @@
 // Every app runs inside this shim, in workerd. The app module (./app.js) is the app's deployed code; this turns it
-// into a Worker with a store per scope (a Durable Object holding SQLite) that answers the node: replays, operations,
-// widgets, hooks and screens.
+// into a Worker that answers the node: operations, widgets, hooks and screens. Its databases, one per scope, are the
+// node's: a query asks the node, and a call's writes are handed to it when the call returns, as one write.
 import app from "./app.js";
-import { DurableObject } from "cloudflare:workers";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 // Every request goes out through the node (the Worker's global outbound), carrying the token of the call it's made
@@ -34,68 +33,9 @@ function describe() {
     // `drivers` is what `sidecars` was called first; apps that say it still use theirs.
     uses: { apps: app.uses?.apps || [], sidecars: [...(app.uses?.sidecars || []), ...(app.uses?.drivers || [])] },
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
+    // Each kind of scope's schema (user, group, global), as the changes that make it, oldest first.
+    schema: Object.fromEntries(Object.entries(app.schema || {}).map(([kind, sql]) => [kind, [].concat(sql)])),
   };
-}
-
-/// The SQL that makes an empty store of a scope: `user`, `group` or `global`.
-function schemaFor(scope) {
-  const kind = scope.split(":")[0];
-  return app.schema?.[kind] ?? null;
-}
-
-export class Store extends DurableObject {
-  constructor(ctx, env) {
-    super(ctx, env);
-    this.sql = ctx.storage.sql;
-    this.sql.exec("create table if not exists _one (key text primary key, value text)");
-  }
-
-  /// Empties the store and makes it again from the app's schema for its scope.
-  reset(scope) {
-    const tables = this.sql.exec("select name from sqlite_master where type = 'table' and name not like '\\_%' escape '\\'").toArray();
-    for (const { name } of tables) this.sql.exec(`drop table "${name.replaceAll('"', '""')}"`);
-    const schema = schemaFor(scope);
-    if (schema) this.sql.exec(schema);
-    this.sql.exec("insert or replace into _one values ('scope', ?)", scope);
-  }
-
-  ready(scope) {
-    if (!this.sql.exec("select 1 from _one where key = 'scope'").toArray().length) this.reset(scope);
-  }
-
-  query(scope, q, params = []) {
-    this.ready(scope);
-    if (!/^\s*(select|with)\b/i.test(q)) throw new Error("query only reads; `on` handlers write with db.exec");
-    return this.sql.exec(q, ...params).toArray();
-  }
-
-  /// Replays entries into the store. The `on` handlers see no clock and no randomness, so they make the same store on
-  /// every server.
-  replay(scope, fresh, entries) {
-    if (fresh) this.reset(scope);
-    else this.ready(scope);
-    if (!schemaFor(scope)) return;
-    const db = { exec: (q, params = []) => void this.sql.exec(q, ...params), query: (q, params) => this.query(scope, q, params) };
-    const saved = [Math.random, Date.now];
-    Math.random = () => { throw new Error("on handlers have no randomness: they must make the same store everywhere"); };
-    Date.now = () => { throw new Error("on handlers read the time from entry.time"); };
-    try {
-      for (const e of entries) {
-        try {
-          app.on?.[e.kind]?.(db, e);
-        } catch (err) {
-          console.warn(`${app.name} on ${e.kind} failed: ${err.message}`);
-        }
-      }
-    } finally {
-      [Math.random, Date.now] = saved;
-    }
-  }
-
-  /// Deletes the store: its server no longer holds its scope.
-  async drop() {
-    await this.ctx.storage.deleteAll();
-  }
 }
 
 /// Asks the node something for the call with `token`: other apps' and sidecars' operations, blobs, the install's apps.
@@ -105,7 +45,7 @@ async function askNode(token, path, init = {}) {
   return r;
 }
 
-/// After a call returned: waits for the work it left running (ctx.waitUntil), hands the node what that work appended,
+/// After a call returned: waits for the work it left running (ctx.waitUntil), hands the node what that work wrote,
 /// and says it's done.
 async function finish(token, later, appends) {
   let error = null;
@@ -146,12 +86,22 @@ async function widgetOptions(widget, ctx) {
 function context(env, body, appends, later) {
   const handle = (s) => ({
     id: s.id, name: s.name, role: s.role,
-    query: (q, params = []) => env.STORES.get(env.STORES.idFromName(s.id)).query(s.id, q, params),
-    append: (kind, data, blobs = []) => {
+    /// Reads this scope's database: the rows, each an object by column. It sees what the call writes only once the
+    /// call has returned.
+    query: async (q, params = []) => (await (await askNode(body.token, "query", { method: "POST", body: JSON.stringify({ scope: s.id, sql: q, params }) })).json()).ok,
+    /// Writes this scope's database once the call returns, with every other statement it ran, as one transaction;
+    /// `blobs` are blobs the scope keeps from now on.
+    exec: (q, params = [], blobs = []) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ scope: s.id, kind, data: data ?? null, blobs });
+      appends.push({ scope: s.id, exec: String(q), params, blobs });
     },
-    /// Says this scope no longer needs a blob its entries named: once no scope does, servers delete it.
+    /// Says the write holds only while a query's first value is true, as it runs: when it isn't (another call wrote
+    /// first), the call fails with `message` and writes nothing.
+    check: (q, params = [], message = "the data changed meanwhile: try again") => {
+      if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
+      appends.push({ scope: s.id, exec: String(q), params, check: String(message) });
+    },
+    /// Says this scope no longer needs a blob it kept: once no scope does, servers delete it.
     forget: (hash) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ forget: String(hash), scope: s.id });
@@ -192,7 +142,7 @@ function context(env, body, appends, later) {
       appends.push({ cost: { model: String(spent?.model ?? "?"), usd: Number(spent?.usd) || 0, input: Number(spent?.input) || 0, output: Number(spent?.output) || 0 } });
     },
     /// Keeps work going after the call returns (an AI read, a copy to Drive), up to 10 minutes: its requests and
-    /// calls still go out as this call's, and what it appends is written when it's done.
+    /// calls still go out as this call's, and what it writes is written when it's done.
     waitUntil: (promise) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       later.push(Promise.resolve(promise));
@@ -296,14 +246,6 @@ export default {
     }
     const body = await req.json();
     try {
-      if (what === "replay") {
-        await env.STORES.get(env.STORES.idFromName(body.scope)).replay(body.scope, body.fresh, body.entries);
-        return json({ ok: null });
-      }
-      if (what === "drop") {
-        await env.STORES.get(env.STORES.idFromName(body.scope)).drop();
-        return json({ ok: null });
-      }
       const appends = [];
       const later = [];
       const ctx = context(env, body, appends, later);

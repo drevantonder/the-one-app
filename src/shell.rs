@@ -8,9 +8,8 @@ use tokio::io::AsyncReadExt;
 use anyhow::bail;
 use serde_json::{Value, json};
 
-use crate::apps::{AppEntry, Me};
-use crate::entry::Content;
-use crate::sidecars::Reply;
+use crate::apps::Me;
+use crate::sidecars::{Answer, Record, Reply};
 
 pub fn describe() -> Value {
     json!({
@@ -29,7 +28,7 @@ pub fn describe() -> Value {
     })
 }
 
-pub fn call(op: String, input: Value, caller: Me, _entries: Vec<AppEntry>) -> Reply {
+pub fn call(op: String, input: Value, caller: Me, _records: Vec<Record>) -> Reply {
     Box::pin(async move {
         if op != "run" {
             bail!("shell has no operation {op}");
@@ -72,8 +71,8 @@ pub fn call(op: String, input: Value, caller: Me, _entries: Vec<AppEntry>) -> Re
         if stopped {
             stderr.push_str(&format!("{}(stopped after {timeout}s)", if stderr.is_empty() || stderr.ends_with('\n') { "" } else { "\n" }));
         }
-        let log = Content::new("shell", "ran", json!({ "command": command, "dir": dir, "exit": exit, "by": caller.name, "agent": caller.agent }));
-        Ok((json!({ "exit": exit, "stdout": stdout, "stderr": stderr }), vec![log]))
+        let ran = json!({ "command": command, "dir": dir, "exit": exit, "by": caller.name, "agent": caller.agent });
+        Ok(Answer { records: vec![("ran".into(), ran)], ..Answer::new(json!({ "exit": exit, "stdout": stdout, "stderr": stderr })) })
     })
 }
 
@@ -115,7 +114,7 @@ mod tests {
     fn run(command: &str, timeout: u64) -> Value {
         let me = Me { key: String::new(), user: String::new(), name: String::new(), role: None, user_name: String::new(), agent: None };
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(call("run".into(), json!({ "command": command, "timeout": timeout, "dir": "/" }), me, vec![])).unwrap().0
+        rt.block_on(call("run".into(), json!({ "command": command, "timeout": timeout, "dir": "/" }), me, vec![])).unwrap().ok
     }
 
     #[test]

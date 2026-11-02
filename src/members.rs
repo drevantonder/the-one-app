@@ -146,7 +146,7 @@ pub struct Members {
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
-const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "vault-request", "item", "forget", "used", "failed", "cost", "backup-key", "backup", "backup-alert"];
+const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "vault-request", "item", "keep", "forget", "used", "failed", "cost", "backup-key", "backup", "backup-alert"];
 
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
@@ -849,6 +849,8 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let place = e.content.data["place"].as_str().filter(|p| is_id(p)).context("no place")?.to_string();
             state.alerted.insert(place, e.time());
         }
+        // A blob the scope keeps, which its `blobs` names.
+        "keep" => {}
         "forget" => {
             let blob = e.content.data["blob"].as_str().filter(|b| b.len() == 64 && b.bytes().all(|c| c.is_ascii_hexdigit())).context("no blob")?;
             state.forgotten.insert(blob.to_string());

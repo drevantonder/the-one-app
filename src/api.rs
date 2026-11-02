@@ -57,6 +57,8 @@ pub fn router(node: Node) -> Router {
         .route("/v1/driver", post(sidecar))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
+        .route("/v1/storage", get(storage_get).post(storage_post))
+        .route("/v1/storage/{op}", post(storage_post))
         .route("/v1/backups", get(backups_get))
         .route("/v1/backups/{op}", post(backups_post))
         .route("/v1/vault", get(vault_get).post(vault_post))
@@ -417,6 +419,15 @@ async fn fork(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     };
     node.fork(&local(&node)?, text(&body, "app")?, text(&body, "name")?, owner.as_deref()).await?;
     done()
+}
+
+/// Where the install keeps its data, `/v1/storage…`.
+async fn storage_get(State(node): State<Node>, uri: axum::http::Uri) -> Reply {
+    Ok(Json(node.storage_route(&local(&node)?, "GET", uri.path(), &json!({})).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
+}
+
+async fn storage_post(State(node): State<Node>, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
+    Ok(Json(node.storage_route(&local(&node)?, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
 /// Backups' routes, `/v1/backups…`.

@@ -26,6 +26,11 @@ use sha2::{Digest, Sha512};
 use crate::bucket::Place;
 use crate::entry::{Entry, Key, hex};
 
+/// The object in a scope's folder in the bucket that names its key, by its id, and the folder of the key sealed to each
+/// server that holds the scope (by its key) and to the recovery key (`recovery`). No app has these names.
+pub const KEY_OBJECT: &str = "_key";
+pub const KEYS: &str = "_keys";
+
 /// The Vault item kind a place is: an item in Everyone, with a folder's `server` and `path`, or S3's `endpoint`,
 /// `bucket`, `region`, `key_id` and `secret`.
 pub const KIND: &str = "Backup place";
@@ -118,6 +123,9 @@ pub struct Snapshot {
     pub upto: u64,
     /// How big its objects are, in bytes.
     pub bytes: u64,
+    /// How far each of the scope's databases (`<app>/<database>`) is copied: its last step, and its newest copy.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub databases: BTreeMap<String, (u64, u64)>,
 }
 
 /// A snapshot as a place keeps it: its key's id, a random nonce, and the snapshot, encrypted.
@@ -196,19 +204,24 @@ pub struct Job<'a> {
     pub entries: Vec<Entry>,
     /// The blobs the scope's entries name, which the backup keeps.
     pub blobs: BTreeSet<String>,
+    /// The install's bucket, whose scope's folder the place keeps a copy of.
+    pub bucket: Option<&'a Place>,
 }
 
 /// Sends a scope what its backup lacks: its key, sealed, the first time; a pack of its new entries, its new blobs,
 /// and a snapshot. Returns the snapshot, or None when nothing new would be in it. `blob` reads a blob here.
 pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Option<Snapshot>> {
-    let Job { place, install, scope, key, recovery, server, now, previous, entries, blobs } = job;
+    let Job { place, install, scope, key, recovery, server, now, previous, entries, blobs, bucket } = job;
     let mut snap = previous.clone().unwrap_or_else(|| Snapshot { scope: scope.to_string(), ..Default::default() });
+    if let Some(bucket) = bucket {
+        copy_bucket(bucket, place, install, scope, &mut snap)?;
+    }
     let new: Vec<&Entry> = entries.iter().filter(|e| e.seq() >= snap.frontier.get(&hex(&e.author())).copied().unwrap_or(0)).collect();
     // Blobs the scope no longer keeps (a release that's been superseded, a blob its scope forgot) leave the snapshot,
     // and leave the place once no snapshot kept still has them.
     snap.blobs.retain(|hash, _| blobs.contains(hash));
     let new_blobs: Vec<&String> = blobs.iter().filter(|b| !snap.blobs.contains_key(*b)).collect();
-    if previous.as_ref().is_some_and(|p| p.blobs.len() == snap.blobs.len()) && new.is_empty() && new_blobs.is_empty() {
+    if previous.as_ref().is_some_and(|p| p.blobs.len() == snap.blobs.len() && p.databases == snap.databases) && new.is_empty() && new_blobs.is_empty() {
         return Ok(None);
     }
     let keys = format!("{install}/keys/{}/{}", folder(scope), key_id(&key));
@@ -238,13 +251,51 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
         snap.bytes += locked.len() as u64;
         snap.blobs.insert(hash.clone(), name);
     }
-    if previous.as_ref().is_some_and(|p| p.packs == snap.packs && p.blobs == snap.blobs) {
+    if previous.as_ref().is_some_and(|p| p.packs == snap.packs && p.blobs == snap.blobs && p.databases == snap.databases) {
         return Ok(None);
     }
     snap.time = now;
     snap.server = hex(&server);
     place.put(&format!("{install}/snapshots/{}/{}", folder(scope), snapshot_name(now, &server)), &lock_snapshot(&key, &snap))?;
     Ok(Some(snap))
+}
+
+/// Copies what a scope's folder in the install's bucket has that the place lacks, into `<install>/bucket/`, laid out
+/// as the bucket is: its key's id and the key sealed to each server and the recovery key, and each database's new steps
+/// and newest copy (sealed as they are), past what `snap` says it has.
+fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: &mut Snapshot) -> Result<()> {
+    let folder = folder(scope);
+    let mut copy = |name: &str, known: bool| -> Result<bool> {
+        if known && place.get(&format!("{install}/bucket/{name}"))?.is_some() {
+            return Ok(true);
+        }
+        let Some(bytes) = bucket.get(name)? else { return Ok(false) };
+        place.put(&format!("{install}/bucket/{name}"), &bytes)?;
+        snap.bytes += bytes.len() as u64;
+        Ok(true)
+    };
+    copy(&format!("{folder}/{KEY_OBJECT}"), true)?;
+    for name in bucket.list(&format!("{folder}/{KEYS}"))? {
+        copy(&format!("{folder}/{KEYS}/{name}"), true)?;
+    }
+    for app in bucket.list(&folder)?.into_iter().filter(|a| crate::members::valid_app_name(a) || a == crate::members::APP) {
+        for database in bucket.list(&format!("{folder}/{app}"))? {
+            let prefix = format!("{folder}/{app}/{database}");
+            let Some(hint) = bucket.get(&crate::db::newest_name(&prefix))? else { continue };
+            let (_, newest_copy) = crate::db::newest(&hint)?;
+            let (mut at, mut copied) = snap.databases.get(&format!("{app}/{database}")).copied().unwrap_or((0, 0));
+            if newest_copy > copied && copy(&crate::db::copy_name(&prefix, newest_copy), false)? {
+                copied = newest_copy;
+                at = at.max(newest_copy);
+            }
+            while copy(&crate::db::step_name(&prefix, at + 1), false)? {
+                at += 1;
+            }
+            place.put(&format!("{install}/bucket/{}", crate::db::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied }))?)?;
+            snap.databases.insert(format!("{app}/{database}"), (at, copied));
+        }
+    }
+    Ok(())
 }
 
 /// Whether the server `at` places down a scope's line backs it up itself: the scope's first change the place lacks
@@ -469,7 +520,7 @@ pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>
         }
         let r = restore(place, install, scope, keys)?;
         let added = import(&store, &r.entries)?;
-        scopes.push(serde_json::json!({ "scope": scope, "time": r.snapshot.time, "entries": added, "blobs": r.blobs.len() }));
+        scopes.push(serde_json::json!({ "scope": scope, "time": r.snapshot.time, "entries": added, "blobs": r.blobs.len(), "databases": r.snapshot.databases.len() }));
         all.extend(r.entries);
     }
     ensure!(!scopes.is_empty(), "nothing backed up there yet");
@@ -545,6 +596,7 @@ mod tests {
             previous,
             entries,
             blobs: [hash.clone()].into(),
+            bucket: None,
         };
         let first = back_up(job(None, all[..3].to_vec(), 10), |h| (h == hash).then(|| blob.clone())).unwrap().unwrap();
         assert_eq!((first.entries, first.packs.len(), first.blobs.len()), (3, 1, 1));
@@ -646,6 +698,7 @@ mod tests {
                 previous: previous.clone(),
                 entries: all[..n].to_vec(),
                 blobs: [release.0.clone(), repo.0.clone()].into(),
+                bucket: None,
             };
             let s = back_up(job, |h| [&release1, &release2, &repo].into_iter().find(|b| b.0 == h).map(|b| b.1.clone())).unwrap().unwrap();
             written.push(s.clone());

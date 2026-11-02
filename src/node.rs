@@ -14,7 +14,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::apps::{Append, AppEntry, Apps, Context, Me, Replay, ScopeHandle};
+use crate::apps::{Append, Apps, Context, Me, ScopeHandle};
+use crate::backups::{KEY_OBJECT, KEYS};
+use crate::bucket::Place;
+use crate::db::Db;
 use crate::entry::{Content, Entry, Key, Order, Scope, hex, new_id, short, unhex};
 use crate::members::{self, Members, Principal, Role, ScopeState};
 use crate::release::{self, Release};
@@ -24,6 +27,7 @@ use crate::sync::{self, Sidecar, Handled, Msg, Replica};
 use crate::vault;
 
 mod backups;
+mod storage;
 
 const JOIN_ALPN: &[u8] = b"one/join/1";
 const CALL_ALPN: &[u8] = b"one/call/1";
@@ -53,6 +57,12 @@ const FAILURES_KEPT: u32 = 30;
 const REQUEST_LIFE: u64 = 86_400_000;
 /// How long an app's page says a deploy changed or removed one of its schedules.
 const CHANGED_SHOWN: u64 = 14 * 86_400_000;
+/// The object in an install's bucket that says whose it is: the install's genesis.
+const INSTALL_OBJECT: &str = "install";
+/// What an app's own database is called: SQLite's name for a connection's first.
+const DATABASE: &str = "main";
+/// What a built-in sidecar's database of its records is called, under its name.
+const SIDECAR_DATABASE: &str = "sidecar";
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
@@ -73,6 +83,9 @@ struct InstallFile {
     /// The server whose pairing code this one joined with, to sync with until it sees itself admitted.
     #[serde(default)]
     paired_by: Option<String>,
+    /// The install's bucket, as a place's fields: a folder's `path`, or S3's. None if this server can't reach it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bucket: Option<BTreeMap<String, String>>,
 }
 
 struct Session {
@@ -89,6 +102,8 @@ struct Session {
 struct Install {
     r: Replica,
     user: String,
+    /// The install's bucket, and its fields, which a server joining is given.
+    bucket: Option<(Place, BTreeMap<String, String>)>,
     sessions: HashMap<Key, Session>,
     /// When each client last asked this server something.
     asked: HashMap<Key, u64>,
@@ -149,6 +164,9 @@ struct JoinRequest {
 struct JoinReply {
     root: String,
     user: String,
+    /// For a server: the install's bucket, as a place's fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bucket: Option<BTreeMap<String, String>>,
 }
 
 /// Who asked for something: this server or another, or a client, as one user.
@@ -274,6 +292,14 @@ pub struct Inner {
     backup_failed: Mutex<HashMap<String, u64>>,
     /// When this server last pruned each place, by its id.
     pruned: Mutex<HashMap<String, u64>>,
+    /// When this server last copied each (place, scope)'s databases from the bucket.
+    backup_looked: Mutex<HashMap<(String, String), u64>>,
+    /// Each database of each scope, by its app and name (`board/main`), as this server last read it.
+    dbs: Mutex<HashMap<(Scope, String), Arc<tokio::sync::Mutex<Db>>>>,
+    /// Each scope's key, once this server has it.
+    scope_keys: Mutex<HashMap<Scope, [u8; 32]>>,
+    /// Whether this server is moving to the install's new storage now.
+    moving: Mutex<bool>,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -296,6 +322,8 @@ pub struct Grant {
     pub read_only: bool,
     /// The blobs it kept, which it may read back before any entry names them.
     pub puts: Vec<String>,
+    /// The scopes whose databases it has brought up to date, which it reads as they are from then on.
+    pub caught_up: Vec<Scope>,
     /// How many app-to-app calls deep the call is.
     pub depth: u32,
     /// The app whose `ctx.apps` made the call, if one did.
@@ -367,6 +395,10 @@ impl Node {
             backed: Mutex::new(HashMap::new()),
             backup_failed: Mutex::new(HashMap::new()),
             pruned: Mutex::new(HashMap::new()),
+            backup_looked: Mutex::new(HashMap::new()),
+            dbs: Mutex::new(HashMap::new()),
+            scope_keys: Mutex::new(HashMap::new()),
+            moving: Mutex::new(false),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -377,6 +409,8 @@ impl Node {
         if dir.join("install").join("install.json").exists() {
             node.open_install().context("open the install")?;
             node.replay_all().await?;
+            node.keep_alone_here()?;
+            node.follow_storage();
         }
         let router = Router::builder(endpoint)
             .accept(sync::ALPN, SyncHandler(node.clone()))
@@ -479,9 +513,29 @@ impl Node {
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let paired_by = file.paired_by.and_then(|h| unhex(&h).ok());
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)), paired_by)?;
-        let install = Install { r, user: file.user, sessions: HashMap::new(), asked: HashMap::new(), builds: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), dialed: false };
+        let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((Place::from_fields(&f)?, f))).transpose()?;
+        let install = Install { r, user: file.user, bucket, sessions: HashMap::new(), asked: HashMap::new(), builds: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), dialed: false };
         *self.0.install.lock().unwrap() = Some(install);
         Ok(())
+    }
+
+    /// An install made before it kept its data in a bucket, with no server but this one: it keeps it in a folder here.
+    fn keep_alone_here(&self) -> Result<()> {
+        let alone = self.with(|i| Ok(i.bucket.is_none() && i.r.members.servers().all(|s| s.key == self.0.id)))?;
+        if !alone {
+            return Ok(());
+        }
+        let dir = self.install_dir();
+        let mut file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        let fields: BTreeMap<String, String> = [("path".to_string(), dir.join("bucket").display().to_string())].into();
+        let place = Place::from_fields(&fields)?;
+        place.create(INSTALL_OBJECT, file.root.as_bytes())?;
+        file.bucket = Some(fields.clone());
+        self.save_install(&file)?;
+        self.with(|i| {
+            i.bucket = Some((place, fields));
+            Ok(())
+        })
     }
 
     fn save_install(&self, file: &InstallFile) -> Result<()> {
@@ -510,7 +564,10 @@ impl Node {
         let genesis = members::genesis(name.trim(), &user, user_name.trim(), &self.server_name(), recovery.verifying_key().as_bytes());
         let time = now_ms();
         let entry = Entry::create(&self.0.key, crate::entry::Ext { log: "global".into(), time, user: user.clone(), by: None }, None, genesis);
-        self.save_install(&InstallFile { root: entry.hash().to_hex(), user: user.clone(), paired_by: None })?;
+        // Until it's moved to S3-compatible storage, the install's bucket is a folder here.
+        let bucket: BTreeMap<String, String> = [("path".to_string(), self.install_dir().join("bucket").display().to_string())].into();
+        Place::from_fields(&bucket)?.create(INSTALL_OBJECT, entry.hash().to_hex().as_bytes())?;
+        self.save_install(&InstallFile { root: entry.hash().to_hex(), user: user.clone(), paired_by: None, bucket: Some(bucket) })?;
         Store::open(&self.install_dir().join("entries.db"))?.insert_own(&entry, None)?;
         self.open_install()?;
         self.replay_all().await?;
@@ -538,12 +595,12 @@ impl Node {
         Ok(entry)
     }
 
-    /// Passes on new entries, follows what changed in the members, and replays the views.
+    /// Passes on new entries, follows what changed in the members, and brings each scope's state up to date.
     async fn after(&self, handled: Handled, from: Option<Key>) -> Result<()> {
         if handled.new.is_empty() && handled.dropped.is_empty() && !handled.members {
             return Ok(());
         }
-        let jobs = self.with(|i| {
+        self.with(|i| {
             for (peer, session) in &i.sessions {
                 if Some(*peer) != from {
                     if let Some(msg) = i.r.for_peer(peer, &handled.new) {
@@ -568,47 +625,38 @@ impl Node {
                 i.views.remove(log);
             }
             i.builds.extend(release::builds(&handled.new));
-            replay_jobs(i, &handled.new, &self.0.apps.names())
+            update_views(i, &handled.new)
         })?;
-        for log in &handled.dropped {
-            self.0.apps.drop_scope(log).await;
-        }
+        // A scope this server no longer holds: it forgets what it read of it.
+        self.0.dbs.lock().unwrap().retain(|(scope, _), _| !handled.dropped.contains(&scope.to_string()));
         if handled.new.iter().any(|e| e.content.app == release::APP && e.content.kind == "node-release") {
             self.consider_update();
         }
         if handled.members {
             self.0.changed.notify_one();
             self.emit(Event::Servers);
+            self.give_keys();
         }
-        for sidecar in &self.0.built_in_sidecars {
-            if sidecar.sync.is_some() && handled.new.iter().any(|e| e.content.app == sidecar.name) {
-                self.sync_built_in(sidecar.name);
-            }
+        if handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
+            self.follow_storage();
         }
         let forgotten: Vec<String> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| e.content.data["blob"].as_str().map(str::to_string)).collect();
-        let mut apps: Vec<String> = jobs.iter().map(|j| j.app.clone()).collect();
-        apps.extend(handled.new.iter().filter(|e| e.content.app != members::APP).map(|e| e.content.app.clone()));
-        apps.sort();
-        apps.dedup();
-        self.0.apps.replay(jobs).await;
-        self.emit(Event::Changed { apps });
+        self.emit(Event::Changed { apps: Vec::new() });
         if !forgotten.is_empty() {
             self.delete_forgotten(forgotten);
         }
         Ok(())
     }
 
-    /// Replays every scope's views from the start (when the node starts).
+    /// Replays every scope's state from the start (when the node starts).
     async fn replay_all(&self) -> Result<()> {
         let _write = self.0.writes.lock().await;
-        let jobs = self.with(|i| {
+        self.with(|i| {
             i.views.clear();
             i.builds = release::builds(&i.r.store.scope("global")?);
             let all = i.r.store.ordered()?;
-            replay_jobs(i, &all, &self.0.apps.names())
-        })?;
-        self.0.apps.replay(jobs).await;
-        Ok(())
+            update_views(i, &all)
+        })
     }
 
     /// Brings this server in line with the members: runs each app's latest deploy, fetching bundles it lacks, and
@@ -635,15 +683,12 @@ impl Node {
             modules.iter().map(|(a, _)| a.clone()).filter(|a| bundles.get(a) != wanted.get(a)).collect()
         };
         if !changed.is_empty() || modules.len() != self.0.apps.names().len() {
+            // Writes wait for the new deploys, so what's written next runs on them.
             let _write = self.0.writes.lock().await;
             self.0.apps.load(modules.clone()).await?;
             *self.0.bundles.lock().unwrap() = modules.iter().map(|(a, _)| (a.clone(), wanted[a].clone())).collect();
-            let jobs = self.with(|i| {
-                let all = i.r.store.ordered()?;
-                i.views.clear();
-                replay_jobs(i, &all, &changed)
-            })?;
-            self.0.apps.replay(jobs).await;
+            // Read again, so each is brought to its new deploy's schema.
+            self.0.dbs.lock().unwrap().retain(|(_, db), _| !changed.iter().any(|app| db.starts_with(&format!("{app}/"))));
             self.emit(Event::Changed { apps: changed });
         }
         let running = self.with(|i| Ok(i.builds.get(&self.0.id).map(|r| r.commit.clone())))?;
@@ -897,6 +942,109 @@ impl Node {
         Ok(Reply::Ok(outcome.result))
     }
 
+    // Databases.
+
+    /// The install's bucket, as this server reaches it.
+    fn bucket(&self) -> Result<Place> {
+        self.with(|i| i.bucket.as_ref().map(|(p, _)| p.clone()).context("this server can't reach the install's bucket, where apps keep their data: use another server"))
+    }
+
+    /// A database's key: `app`'s `database` in `scope`. The one place keys come from, until the kernel's vault gives
+    /// them: from the scope's key.
+    async fn database_key(&self, scope: &Scope, app: &str, database: &str) -> Result<[u8; 32]> {
+        let scope_key = self.scope_key(scope).await?;
+        Ok(crate::db::database_key(&crate::db::app_key(&scope_key, app), database))
+    }
+
+    /// A scope's key, which its databases and backups are sealed with. The first server to need one makes it, and the
+    /// bucket says whose is the scope's (its id), so two made at once can't both seal its data. Each server that
+    /// holds the scope finds it in the bucket sealed to its own key, as the recovery key does.
+    pub(crate) async fn scope_key(&self, scope: &Scope) -> Result<[u8; 32]> {
+        use crate::bucket::Bucket;
+        if let Some(key) = self.0.scope_keys.lock().unwrap().get(scope) {
+            return Ok(*key);
+        }
+        let bucket = self.bucket()?;
+        let folder = crate::backups::folder(&scope.to_string());
+        let key = match Bucket::get(&bucket, &format!("{folder}/{KEYS}/{}", hex(&self.0.id))).await? {
+            Some(o) => crate::backups::unseal(self.0.key.as_bytes(), &o.bytes)?,
+            None => {
+                // One its backups made before the bucket kept keys.
+                let earlier = self.with(|i| Ok(i.views.get(&scope.to_string()).and_then(|(_, s)| s.backup_key)))?;
+                let key = earlier.unwrap_or_else(rand::random);
+                let id = crate::backups::key_id(&key);
+                let name = format!("{folder}/{KEY_OBJECT}");
+                if !Bucket::create(&bucket, &name, id.as_bytes()).await? && Bucket::get(&bucket, &name).await?.is_none_or(|o| o.bytes != id.as_bytes()) {
+                    bail!("{} doesn't have {scope}'s key yet: a server that has it gives it when it's next on", self.server_name());
+                }
+                key
+            }
+        };
+        self.0.scope_keys.lock().unwrap().insert(scope.clone(), key);
+        self.give_key(scope, &key).await?;
+        Ok(key)
+    }
+
+    /// Seals a scope's key, in the bucket, to each server that holds the scope and to the recovery key, where it isn't
+    /// yet.
+    async fn give_key(&self, scope: &Scope, key: &[u8; 32]) -> Result<()> {
+        use crate::bucket::Bucket;
+        let bucket = self.bucket()?;
+        let folder = crate::backups::folder(&scope.to_string());
+        let to = self.with(|i| {
+            let m = &i.r.members;
+            let mut to: Vec<(String, Key)> = m.servers().filter(|s| m.holds(&s.key, scope)).map(|s| (hex(&s.key), s.key)).collect();
+            to.extend(m.recovery.map(|r| ("recovery".to_string(), r)));
+            Ok(to)
+        })?;
+        for (name, public) in to {
+            let name = format!("{folder}/{KEYS}/{name}");
+            if Bucket::get(&bucket, &name).await?.is_none() {
+                Bucket::create(&bucket, &name, &crate::backups::seal(&public, key)?).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Gives each scope's key this server has to the servers that hold the scope now.
+    fn give_keys(&self) {
+        let node = self.clone();
+        tokio::spawn(async move {
+            let keys: Vec<(Scope, [u8; 32])> = node.0.scope_keys.lock().unwrap().iter().map(|(s, k)| (s.clone(), *k)).collect();
+            for (scope, key) in keys {
+                if let Err(err) = node.give_key(&scope, &key).await {
+                    tracing::warn!("giving {scope}'s key: {err:#}");
+                }
+            }
+        });
+    }
+
+    /// `app`'s `database` of `scope`, opened from the bucket the first time and brought to `schema`, or else to the
+    /// app's deploy's.
+    async fn database(&self, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>) -> Result<Arc<tokio::sync::Mutex<Db>>> {
+        let id = (scope.clone(), format!("{app}/{database}"));
+        if let Some(db) = self.0.dbs.lock().unwrap().get(&id).cloned() {
+            return Ok(db);
+        }
+        let bucket = self.bucket()?;
+        let key = self.database_key(scope, app, database).await?;
+        let mut db = Db::open(&bucket, &format!("{}/{app}/{database}", crate::backups::folder(&scope.to_string())), key).await?;
+        let schema = match schema {
+            Some(schema) => schema,
+            None => {
+                let kind = match scope {
+                    Scope::Global => "global",
+                    Scope::Group(_) => "group",
+                    Scope::User(_) => "user",
+                };
+                serde_json::from_value(self.0.apps.describe(app).await?["schema"][kind].clone()).unwrap_or_default()
+            }
+        };
+        db.migrate(&bucket, &schema).await?;
+        let db = Arc::new(tokio::sync::Mutex::new(db));
+        Ok(self.0.dbs.lock().unwrap().entry(id).or_insert(db).clone())
+    }
+
     // Insights.
 
     /// Records, for an app's owners, a call that ran here: the first each day by each user from each client
@@ -1014,9 +1162,50 @@ impl Node {
             }
         }
         let (installs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
+        let (execs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Exec { .. }));
+        // Each scope's statements, in the order the call ran them, and the blobs they keep.
+        type Statement = (String, Vec<Value>, Option<String>);
+        let mut statements: Vec<(Scope, Vec<Statement>, Vec<String>)> = Vec::new();
+        for exec in execs {
+            let Append::Exec { scope, sql, params, blobs, check } = exec else { continue };
+            let scope = Scope::parse(&scope)?;
+            ensure!(scopes.contains(&scope), "the call didn't name {scope}");
+            ensure!(blobs.iter().all(|b| b.len() == 64 && b.bytes().all(|c| c.is_ascii_hexdigit())), "a blob is named by its hash");
+            match statements.iter_mut().find(|(s, _, _)| *s == scope) {
+                Some((_, list, kept)) => {
+                    list.push((sql, params, check));
+                    kept.extend(blobs);
+                }
+                None => statements.push((scope, vec![(sql, params, check)], blobs)),
+            }
+        }
         let mut writes = Vec::new();
         for append in appends {
             writes.push(self.with(|i| check_append(i, app, append, scopes, me))?);
+        }
+        let wrote = !statements.is_empty();
+        for (scope, list, kept) in statements {
+            let db = self.database(&scope, app, DATABASE, None).await?;
+            let bucket = self.bucket()?;
+            db.lock()
+                .await
+                .write(&bucket, |c| {
+                    for (sql, params, check) in &list {
+                        let rows = crate::db::execute(c, sql, params)?;
+                        if let Some(message) = check {
+                            let held = rows.first().and_then(|r| r.values().next()).is_some_and(|v| v.as_i64().is_some_and(|n| n != 0) || v == true);
+                            ensure!(held, "{message}");
+                        }
+                    }
+                    Ok(())
+                })
+                .await?;
+            if !kept.is_empty() {
+                writes.push((scope, Content { blobs: kept, ..members::node("keep", json!({})) }));
+            }
+        }
+        if wrote {
+            self.emit(Event::Changed { apps: vec![app.to_string()] });
         }
         for append in installs {
             if let Append::Install { app, scope, installed } = append {
@@ -1067,16 +1256,34 @@ impl Node {
             })?;
         }
         let built_in = self.0.built_in_sidecars.iter().find(|n| n.name == app);
-        let (mut result, appends) = match built_in {
-            Some(n) => (n.call)(op.to_string(), input, caller, if n.entries { self.app_entries(app)? } else { vec![] }).await?,
-            None => self.0.sidecars.call(app, op, input, caller, from).await?,
+        let mut answer = match built_in {
+            Some(n) => (n.call)(op.to_string(), input, caller.clone(), if n.records { self.records(app).await? } else { vec![] }).await?,
+            None => self.0.sidecars.call(app, op, input, caller.clone(), from).await?,
         };
-        vault::blot(&mut result, &used.into_inner().unwrap());
-        let by = (me.key != self.0.id).then_some(me.key);
-        for content in appends {
-            self.append_as(&Scope::User(user.clone()), &user, by, content).await?;
+        vault::blot(&mut answer.ok, &used.into_inner().unwrap());
+        let scope = Scope::User(user.clone());
+        if !answer.records.is_empty() {
+            let db = self.database(&scope, app, SIDECAR_DATABASE, Some(vec![crate::sidecars::RECORDS.into()])).await?;
+            let (time, by, device) = (now_ms(), caller.user_name.clone(), caller.name.clone());
+            db.lock()
+                .await
+                .write(&self.bucket()?, |c| {
+                    for (kind, data) in &answer.records {
+                        let row = [json!(kind), json!(data.to_string()), json!(time), json!(by), json!(device)];
+                        crate::db::execute(c, "insert into records (kind, data, time, by, device) values (?, ?, ?, ?, ?)", &row)?;
+                    }
+                    Ok(())
+                })
+                .await?;
+            if let Some(n) = built_in.filter(|n| n.sync.is_some()) {
+                self.sync_built_in(n.name);
+            }
         }
-        Ok(result)
+        if !answer.blobs.is_empty() {
+            let by = (me.key != self.0.id).then_some(me.key);
+            self.append_as(&scope, &user, by, Content { blobs: answer.blobs, ..members::node("keep", json!({})) }).await?;
+        }
+        Ok(answer.ok)
     }
 
     /// The node's own operations, which other servers ask for: `open`.
@@ -1119,8 +1326,14 @@ impl Node {
 
     /// Now and then, runs the schedules this server is next in line for.
     async fn schedule_loop(self) {
-        loop {
+        for tick in 1u64.. {
             tokio::time::sleep(SCHEDULE_TICK).await;
+            // What another server wrote of a built-in sidecar's records, every minute.
+            if tick % 6 == 0 && self.has_install() {
+                for sidecar in self.0.built_in_sidecars.iter().filter(|n| n.sync.is_some()) {
+                    self.sync_built_in(sidecar.name);
+                }
+            }
             if self.has_install() && self.ready() {
                 if let Err(err) = self.run_schedules().await {
                     tracing::warn!("schedules: {err:#}");
@@ -1293,7 +1506,7 @@ impl Node {
     fn grant(&self, app: &str, caller: &Caller, ctx: &mut Context, depth: u32) -> Granted {
         let token = hex(&rand::random::<[u8; 32]>());
         let scopes = ctx.scopes.iter().filter_map(|s| Scope::parse(&s.id).ok()).collect();
-        let grant = Grant { app: app.to_string(), caller: caller.clone(), scopes, read_only: ctx.read_only, puts: Vec::new(), depth, from: ctx.from.clone() };
+        let grant = Grant { app: app.to_string(), caller: caller.clone(), scopes, read_only: ctx.read_only, puts: Vec::new(), caught_up: Vec::new(), depth, from: ctx.from.clone() };
         self.0.grants.lock().unwrap().insert(token.clone(), grant);
         ctx.token = token.clone();
         Granted(self.clone(), token)
@@ -1551,12 +1764,12 @@ impl Node {
     /// its secret fields: what `app` declares as `need`, or `ask`'s `{ title, fields, hosts }`. → `{ id, link, scope }`.
     pub async fn request_item(&self, caller: &Caller, scope: &Scope, app: &str, need: Option<&str>, ask: &Value, why: &str) -> Result<Value> {
         let mut data = match need {
-            Some(need) => {
+            Some(need) if app != members::APP => {
                 let d = self.0.apps.describe(app).await.ok().map(|d| d["vault"][need].clone()).filter(|d| d.is_object()).with_context(|| format!("{app} asks the Vault for no {need}"))?;
                 let fields: serde_json::Map<String, Value> = d["fields"].as_object().into_iter().flatten().map(|(n, f)| (n.clone(), json!({ "secret": f["secret"] == true }))).collect();
                 json!({ "title": d["title"], "fields": fields, "hosts": d["hosts"], "need": need })
             }
-            None => json!({ "title": ask["title"], "fields": ask["fields"], "hosts": ask["hosts"] }),
+            _ => json!({ "title": ask["title"], "fields": ask["fields"], "hosts": ask["hosts"], "need": need }),
         };
         let id = new_id();
         data["id"] = json!(id);
@@ -1599,7 +1812,12 @@ impl Node {
                         fields.insert(name.clone(), json!({ "value": value, "secret": secret }));
                     }
                     let title = answer["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or(&r.title);
-                    json!({ "id": new_id(), "title": title, "fields": fields, "hosts": r.hosts, "apps": [r.app], "request": id })
+                    let mut data = json!({ "id": new_id(), "title": title, "fields": fields, "hosts": r.hosts, "apps": [r.app], "request": id });
+                    // What the node asked for itself (the install's storage) is an item of that type.
+                    if let Some(need) = r.need.as_ref().filter(|_| r.app == members::APP) {
+                        data["type"] = json!(need);
+                    }
+                    data
                 }
             };
             item_entry(i, &caller.user, scope, data)
@@ -2225,6 +2443,22 @@ impl Node {
                 let call = CallRequest { app: app.into(), sidecar: sidecar.then(|| app.into()), op: op.into(), input: req["input"].clone(), server, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
+            ("POST", "/query") => {
+                let req: Value = serde_json::from_slice(&body)?;
+                let scope = Scope::parse(req["scope"].as_str().unwrap_or(""))?;
+                ensure!(grant.scopes.contains(&scope), "the call didn't name {scope}");
+                let params = req["params"].as_array().cloned().unwrap_or_default();
+                let db = self.database(&scope, &grant.app, DATABASE, None).await?;
+                let mut db = db.lock().await;
+                // Once a call, so it reads one state of the scope throughout.
+                if !grant.caught_up.contains(&scope) {
+                    db.catch_up(&self.bucket()?).await?;
+                    if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
+                        g.caught_up.push(scope.clone());
+                    }
+                }
+                ok(json!({ "ok": db.query(req["sql"].as_str().unwrap_or(""), &params)? }))
+            }
             ("GET", "/vault") => ok(json!(self.vault_of(&grant.app, &grant.caller.user)?)),
             ("POST", "/vault/match") => {
                 // The item a sign-in would change rather than make: one of that type whose plain field has that value.
@@ -2260,7 +2494,7 @@ impl Node {
             ("POST", "/appends") => {
                 ensure!(self.0.later.lock().unwrap().contains_key(token), "only work a call left running after it returned hands in appends later");
                 let req: Value = serde_json::from_slice(&body)?;
-                let appends = crate::apps::appends(&grant.app, &req["appends"])?;
+                let appends = crate::apps::appends(&req["appends"])?;
                 self.write_appends(&grant.app, appends, &grant.scopes, &grant.caller, grant.from.as_deref()).await?;
                 ok(json!({}))
             }
@@ -2698,7 +2932,12 @@ impl Node {
         }
         let reply: JoinReply = serde_json::from_value(reply)?;
         let paired_by = *code.from.id.as_bytes();
-        self.save_install(&InstallFile { root: reply.root, user: reply.user, paired_by: Some(hex(&paired_by)) })?;
+        // A folder on another machine isn't here: the bucket is this install's only if it says so.
+        let bucket = reply.bucket.filter(|f| Place::from_fields(f).ok().and_then(|p| p.get(INSTALL_OBJECT).ok().flatten()).is_some_and(|r| r == reply.root.as_bytes()));
+        if bucket.is_none() {
+            tracing::warn!("this server can't reach the install's bucket: it keeps no app's data until the install moves to S3-compatible storage");
+        }
+        self.save_install(&InstallFile { root: reply.root, user: reply.user, paired_by: Some(hex(&paired_by)), bucket })?;
         self.open_install()?;
         let node = self.clone();
         tokio::spawn(async move {
@@ -2746,13 +2985,15 @@ impl Node {
                 };
                 ensure!(served, "this install has no server for you yet: a phone needs one of your own servers, or one the install shares with everyone");
             }
-            i.r.root.map(|r| r.to_hex()).context("no install")
+            let root = i.r.root.map(|r| r.to_hex()).context("no install")?;
+            Ok((root, i.bucket.as_ref().filter(|_| server).map(|(_, f)| f.clone())))
         })?;
+        let (root, bucket) = root;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
         let new_user = pairing.new_user.as_ref().map(|(name, role)| (name.as_str(), *role));
         let admit = members::admit(&key, &user, &request.name, server, new_user);
         self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None }, "admit", admit.data).await.context("this server can no longer admit that machine")?;
-        Ok(JoinReply { root, user })
+        Ok(JoinReply { root, user, bucket })
     }
 
     // Sync.
@@ -3001,8 +3242,10 @@ impl Node {
 /// Which views to replay for new entries: the new entries that count, onto each scope's views, or, where one sorts
 /// before what a scope's views have replayed (a member entry of `global` included), that whole scope again.
 /// Only `apps`' stores are replayed.
-fn replay_jobs(i: &mut Install, new: &[Entry], apps: &[String]) -> Result<Vec<Replay>> {
-    // An erase takes the app's secrets from every scope's view, as replaying the scope again would.
+/// Brings each scope's state up to date with new entries: from the ones after what it has, or from the start when one
+/// sorts before them or the members changed earlier.
+fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
+    // An erase takes the app's secrets from every scope's state, as replaying the scope again would.
     for e in new.iter().filter(|e| members::is_member_entry(e)) {
         for (_, state) in i.views.values_mut() {
             members::forget_erased(&i.r.members, state, e);
@@ -3015,7 +3258,6 @@ fn replay_jobs(i: &mut Install, new: &[Entry], apps: &[String]) -> Result<Vec<Re
     }
     logs.sort();
     logs.dedup();
-    let mut jobs = Vec::new();
     for log in logs {
         let Ok(scope) = Scope::parse(&log) else { continue };
         if !i.r.holds(&scope) {
@@ -3033,45 +3275,14 @@ fn replay_jobs(i: &mut Install, new: &[Entry], apps: &[String]) -> Result<Vec<Re
             false => (fresh, view.unwrap().1.clone()),
         };
         let Some(last) = entries.last().map(Entry::order) else { continue };
-        let mut counted: Vec<AppEntry> = Vec::new();
-        let (_, state) = members::replay_from(i.r.root, &i.r.member_entries, &entries, state, |e, m, _| {
-            if e.content.app != members::APP && apps.contains(&e.content.app) {
-                counted.push(app_entry(e, m));
-            }
-        });
+        let (_, state) = members::replay_from(i.r.root, &i.r.member_entries, &entries, state, |_, _, _| {});
         let position = match view {
             Some((pos, _)) if !rebuild => pos.clone().max(last),
             _ => last,
         };
         i.views.insert(log.clone(), (position, state));
-        for app in apps {
-            let entries: Vec<AppEntry> = counted.iter().filter(|e| &e.app == app).cloned().collect();
-            if rebuild || !entries.is_empty() {
-                jobs.push(Replay { app: app.clone(), scope: log.clone(), fresh: rebuild, entries });
-            }
-        }
     }
-    Ok(jobs)
-}
-
-/// An entry as apps see it, with the names and roles current when it was written.
-fn app_entry(e: &Entry, m: &Members) -> AppEntry {
-    let scope = e.scope();
-    let named = e.by().unwrap_or(e.author());
-    AppEntry {
-        app: e.content.app.clone(),
-        id: e.id(),
-        scope: e.log().to_string(),
-        kind: e.content.kind.clone(),
-        user: e.user().to_string(),
-        name: m.machines.get(&named).map(|k| k.name.clone()).unwrap_or_default(),
-        user_name: m.users.get(e.user()).map(|u| u.name.clone()).unwrap_or_default(),
-        role: m.role_in(e.user(), &scope),
-        groups: m.groups_of(e.user()),
-        time: e.time(),
-        data: e.content.data.clone(),
-        blobs: e.content.blobs.clone(),
-    }
+    Ok(())
 }
 
 /// The scopes a call of `app` as `user` may reach: their own if it's installed for them at all, each of their groups
@@ -3167,12 +3378,6 @@ fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
 /// the caller may set.
 fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &Caller) -> Result<(Scope, Content)> {
     Ok(match append {
-        Append::Entry { scope, content } => {
-            let scope = Scope::parse(&scope)?;
-            ensure!(scopes.contains(&scope), "the call didn't name {scope}");
-            ensure!(content.app != members::APP, "apps don't write the node's entries");
-            (scope, content)
-        }
         Append::Secret { scope, name, value, hosts } => {
             let scope = Scope::parse(&scope)?;
             ensure!(scopes.contains(&scope), "the call didn't name {scope}");
@@ -3211,7 +3416,7 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
         }
         Append::Sidecar { server, name, installed } => (Scope::Global, sidecar_entry(&i.r.members, &me.user, &server, &name, installed)?),
         Append::Vault { id, scope, data, same, release } => vault_entry(i, app, me, scopes, &id, scope, data, same, release)?,
-        Append::Install { .. } | Append::Cost { .. } => bail!("installs and costs are written on their own"),
+        Append::Install { .. } | Append::Cost { .. } | Append::Exec { .. } => bail!("installs, costs and statements are written on their own"),
     })
 }
 
@@ -3450,23 +3655,38 @@ impl Node {
     }
 
     /// Every entry a built-in sidecar has in the local user's scope, oldest first.
-    fn app_entries(&self, app: &str) -> Result<Vec<AppEntry>> {
-        self.with(|i| {
-            let mut out = Vec::new();
-            let scope = Scope::User(i.user.clone()).to_string();
-            members::replay(i.r.root, &i.r.member_entries, &i.r.store.scope(&scope)?, |e, m, _| {
-                if e.content.app == app {
-                    out.push(app_entry(e, m));
-                }
-            });
-            Ok(out)
-        })
+    /// A built-in sidecar's records, in its database of this server's local user, oldest first.
+    async fn records(&self, app: &str) -> Result<Vec<crate::sidecars::Record>> {
+        let user = self.user()?;
+        let db = self.database(&Scope::User(user), app, SIDECAR_DATABASE, Some(vec![crate::sidecars::RECORDS.into()])).await?;
+        let mut db = db.lock().await;
+        db.catch_up(&self.bucket()?).await?;
+        let rows = db.query("select * from records order by n", &[])?;
+        Ok(rows
+            .into_iter()
+            .map(|r| crate::sidecars::Record {
+                id: r["n"].to_string(),
+                kind: r["kind"].as_str().unwrap_or("").into(),
+                data: serde_json::from_str(r["data"].as_str().unwrap_or("null")).unwrap_or_default(),
+                time: r["time"].as_u64().unwrap_or(0),
+                by: r["by"].as_str().unwrap_or("").into(),
+                device: r["device"].as_str().unwrap_or("").into(),
+            })
+            .collect())
     }
 
+    /// Brings this machine in line with a built-in sidecar's records, in the background.
     fn sync_built_in(&self, app: &'static str) {
         let Some(sync) = self.0.built_in_sidecars.iter().find(|n| n.name == app).and_then(|n| n.sync) else { return };
-        let Ok(entries) = self.app_entries(app) else { return };
-        tokio::task::spawn_blocking(move || sync(&entries));
+        let node = self.clone();
+        tokio::spawn(async move {
+            match node.records(app).await {
+                Ok(records) => {
+                    let _ = tokio::task::spawn_blocking(move || sync(&records)).await;
+                }
+                Err(err) => tracing::debug!("{app}'s records: {err:#}"),
+            }
+        });
     }
 
     /// The servers this server syncs with now, then the rest.
@@ -3489,13 +3709,14 @@ impl Node {
         Ok(bytes)
     }
 
-    /// Whether an entry in a scope `holds` says yes to names the blob, and that scope still needs it: an app's entry's
-    /// blob stops counting once its scope forgets it; a node entry's (a deploy's bundle, a release's binary) never does.
+    /// Whether an entry in a scope `holds` says yes to names the blob, and that scope still needs it: a blob a scope
+    /// keeps stops counting once it forgets it; one another node entry names (a deploy's bundle, a release's binary)
+    /// never does.
     fn blob_named(&self, hash: &str, holds: impl Fn(&Scope) -> bool) -> Result<bool> {
         self.with(|i| {
             for log in i.r.store.logs()? {
                 let forgotten = i.views.get(&log).is_some_and(|(_, s)| s.forgotten.contains(hash));
-                let names = |e: &Entry| e.content.blobs.iter().any(|b| b == hash) && (!forgotten || e.content.app == members::APP);
+                let names = |e: &Entry| e.content.blobs.iter().any(|b| b == hash) && (!forgotten || (e.content.app == members::APP && e.content.kind != "keep"));
                 if Scope::parse(&log).is_ok_and(|s| holds(&s)) && i.r.store.scope(&log)?.iter().any(names) {
                     return Ok(true);
                 }

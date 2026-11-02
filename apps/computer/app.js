@@ -158,12 +158,6 @@ export default {
     user: `create table sessions (id text primary key, device text not null, title text, agent text not null, came_from text, time integer not null)`,
   },
 
-  on: {
-    // An agent started using one of the person's devices.
-    session(db, e) {
-      db.exec("insert or replace into sessions values (?, ?, ?, ?, ?, ?)", [e.id, e.data.device, e.data.title || null, e.data.agent, e.name, e.time]);
-    },
-  },
 
   ops: {
     accounts: {
@@ -243,7 +237,10 @@ export default {
         const d = await device(ctx, input.computer);
         if (!d) return sidecar(ctx, "use", input);
         const r = await ctx.sidecars.computer._use({ tool: input.tool, args: input.args || {} }, { server: d });
-        if (r.started) ctx.user.append("session", { device: d, title: r.title, agent: ctx.me.agent || ctx.me.name });
+        if (r.started) {
+          const id = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
+          ctx.user.exec("insert or replace into sessions values (?, ?, ?, ?, ?, ?)", [id, d, r.title || null, ctx.me.agent || ctx.me.name, ctx.me.name, ctx.now()]);
+        }
         return r.result;
       },
     },

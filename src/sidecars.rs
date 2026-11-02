@@ -15,10 +15,39 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::apps::{AppEntry, Me};
-use crate::entry::Content;
+use crate::apps::Me;
 
-pub type Reply = Pin<Box<dyn Future<Output = Result<(Value, Vec<Content>)>> + Send>>;
+pub type Reply = Pin<Box<dyn Future<Output = Result<Answer>> + Send>>;
+
+/// What a sidecar's call gives back: its answer; for a built-in one, records it keeps, each its kind and data; and
+/// blobs the caller's scope keeps.
+#[derive(Debug, Default)]
+pub struct Answer {
+    pub ok: Value,
+    pub records: Vec<(String, Value)>,
+    pub blobs: Vec<String>,
+}
+
+impl Answer {
+    pub fn new(ok: Value) -> Self {
+        Answer { ok, ..Default::default() }
+    }
+}
+
+/// What a built-in sidecar kept, in its own database of its server's local user: one thing it did or was told.
+#[derive(Clone, Debug)]
+pub struct Record {
+    pub id: String,
+    pub kind: String,
+    pub data: Value,
+    pub time: u64,
+    /// The person's name, and their device's.
+    pub by: String,
+    pub device: String,
+}
+
+/// The schema of a built-in sidecar's database.
+pub const RECORDS: &str = "create table records (n integer primary key, kind text not null, data text not null, time integer not null, by text not null, device text not null)";
 
 /// A sidecar's answer that it can't serve this call here (a model it lacks), so the call goes on to the next server.
 #[derive(Debug)]
@@ -36,20 +65,20 @@ impl std::error::Error for Elsewhere {}
 pub struct BuiltIn {
     pub name: &'static str,
     pub describe: fn() -> Value,
-    /// Whether `call` needs the app's entries (reading them all costs a pass over the log).
-    pub entries: bool,
-    /// Runs an operation, given every entry the app has in the local user's scope, oldest first.
-    pub call: fn(op: String, input: Value, caller: Me, entries: Vec<AppEntry>) -> Reply,
-    /// Brings this machine in line with the app's entries, after they change and when the node starts.
-    pub sync: Option<fn(entries: &[AppEntry])>,
+    /// Whether `call` needs its records (reading them all costs a pass over its database).
+    pub records: bool,
+    /// Runs an operation, given every record it kept, oldest first.
+    pub call: fn(op: String, input: Value, caller: Me, records: Vec<Record>) -> Reply,
+    /// Brings this machine in line with its records, after they change and when the node starts.
+    pub sync: Option<fn(records: &[Record])>,
 }
 
 /// The sidecars built into this binary: they run on every server, for its local user.
 pub fn built_in() -> Vec<BuiltIn> {
     vec![
-        BuiltIn { name: "shell", describe: crate::shell::describe, entries: false, call: crate::shell::call, sync: None },
-        BuiltIn { name: crate::agents::NAME, describe: crate::agents::describe, entries: true, call: crate::agents::call, sync: Some(crate::agents::sync) },
-        BuiltIn { name: "models", describe: crate::models::describe, entries: false, call: crate::models::call, sync: None },
+        BuiltIn { name: "shell", describe: crate::shell::describe, records: false, call: crate::shell::call, sync: None },
+        BuiltIn { name: crate::agents::NAME, describe: crate::agents::describe, records: true, call: crate::agents::call, sync: Some(crate::agents::sync) },
+        BuiltIn { name: "models", describe: crate::models::describe, records: false, call: crate::models::call, sync: None },
     ]
 }
 
@@ -114,9 +143,9 @@ impl Sidecars {
         names.iter().filter_map(|n| self.get(n)).map(|p| p.describe.clone()).collect()
     }
 
-    /// Hands a call to the sidecar and waits for its reply: `{ ok, entries? }` or `{ error }`. Each entry is
-    /// `{ kind, data, blobs? }`; naming a blob lets the servers that hold the entry fetch it.
-    pub async fn call(&self, app: &str, op: &str, input: Value, caller: Me, from: Option<String>) -> Result<(Value, Vec<Content>)> {
+    /// Hands a call to the sidecar and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
+    /// caller's scope keeps, so the servers that hold the scope can fetch it.
+    pub async fn call(&self, app: &str, op: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
         let p = self.get(app).ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
@@ -129,13 +158,8 @@ impl Sidecars {
         if let Some(err) = reply.get("error") {
             bail!("{}", err.as_str().unwrap_or("failed"));
         }
-        let entries = reply["entries"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|e| Content { blobs: serde_json::from_value(e["blobs"].clone()).unwrap_or_default(), ..Content::new(app, e["kind"].as_str().unwrap_or(""), e["data"].clone()) })
-            .collect();
-        Ok((reply["ok"].clone(), entries))
+        let blobs = reply["blobs"].as_array().into_iter().flatten().filter_map(|b| b.as_str().map(str::to_string)).collect();
+        Ok(Answer { ok: reply["ok"].clone(), records: Vec::new(), blobs })
     }
 
     /// The next call for `app`, waiting up to 25 seconds; None if there was none.

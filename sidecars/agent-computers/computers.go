@@ -523,7 +523,7 @@ func (ds *computers) run(ctx context.Context, op string, raw json.RawMessage) (a
 			return nil, err
 		}
 		return reply{ok: map[string]any{"backup": rec, "text": fmt.Sprintf("Backed up computer %s (%s). Restore it on any server with restore.", d.Name, bytesText(rec.Bytes))},
-			entries: []map[string]any{{"kind": "backup", "data": rec, "blobs": []string{rec.Blob}}}}, nil
+			blobs: []string{rec.Blob}}, nil
 	case "backups":
 		if here {
 			return map[string]any{"backups": ds.backupsHere()}, nil
@@ -708,10 +708,10 @@ func viewURL(ctx context.Context, d computer, minutes int) (string, error) {
 // computer it doesn't have.
 var local = []string{"list", "create", "borrow", "sign_in", "signing_in", "backups", "restore", "refresh_tools"}
 
-// reply is a result with entries for the node to write in the caller's log.
+// reply is a result with blobs the caller's scope keeps, so its servers can fetch them.
 type reply struct {
-	ok      any
-	entries []map[string]any
+	ok    any
+	blobs []string
 }
 
 type callerKey struct{}

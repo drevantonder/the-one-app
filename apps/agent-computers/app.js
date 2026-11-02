@@ -160,16 +160,6 @@ export default {
     user: `create table saves (item text primary key, blob text not null)`,
   },
 
-  on: {
-    // A profile's newest save, whose blob this scope keeps.
-    saved(db, e) {
-      db.exec("insert or replace into saves values (?, ?)", [e.data.item, e.data.blob]);
-    },
-    // A profile deleted from the Vault: its save goes.
-    dropped(db, e) {
-      db.exec("delete from saves where item = ?", [e.data.item]);
-    },
-  },
 
   ops: {
     borrow: {
@@ -240,9 +230,9 @@ export default {
         const kept = await ctx.user.query("select item, blob from saves");
         for (const s of kept) {
           if (s.item === item ? s.blob !== blob : !all.some((p) => p.id === s.item)) ctx.user.forget(s.blob);
-          if (s.item !== item && !all.some((p) => p.id === s.item)) ctx.user.append("dropped", { item: s.item });
+          if (s.item !== item && !all.some((p) => p.id === s.item)) ctx.user.exec("delete from saves where item = ?", [s.item]);
         }
-        ctx.user.append("saved", { item, blob }, [blob]);
+        ctx.user.exec("insert or replace into saves values (?, ?)", [item, blob], [blob]);
         return "Saved.";
       },
     },

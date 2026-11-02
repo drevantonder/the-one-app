@@ -89,7 +89,7 @@ func serve(node string, d *computers) {
 				result, err := d.run(ctx, c.Op, c.Input)
 				answer := map[string]any{"ok": result}
 				if r, ok := result.(reply); ok {
-					answer = map[string]any{"ok": r.ok, "entries": r.entries}
+					answer = map[string]any{"ok": r.ok, "blobs": r.blobs}
 				}
 				if err != nil {
 					answer = map[string]any{"error": err.Error()}

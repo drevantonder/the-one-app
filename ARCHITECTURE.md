@@ -11,14 +11,15 @@ The map: what lives where, and the few rules the code only shows by keeping them
                         │             │                        │
    store (src/store.rs)       apps (src/apps.rs,       sidecars (src/sidecars.rs)
                               src/runtime/, workerd)
-                        │
-   entry (src/entry.rs) · members (src/members.rs) · sync (src/sync.rs)
+                        │             │
+   entry (src/entry.rs) ·     databases (src/db.rs) in the bucket (src/bucket.rs)
+   members (src/members.rs) · sync (src/sync.rs)
 ```
 
 ## Rules
 
 - **Six primitives**: key, log, view, blob, call, app. Scopes, servers, deploys, sidecars, the Vault and backups are made of them.
-- **Entries are the truth; views are caches.** Everything anyone does is a signed entry in its author's log for one scope (a user's, a group's, or the install's, `global`). Every view is made by replaying a scope's entries, with `global`'s member entries, in one order, `(time, author, log, seq)`, so the same entries give the same views on every server. An entry, once appended, is never lost.
+- **Each app's databases are its data; entries are who can do what.** An app's data in a scope is one SQLite database, the truth, kept sealed in the install's bucket; a call's writes are one transaction, written as one step, so servers writing at once lose nothing. Members, trust, deploys, settings and the node's own state of each scope are signed entries in their author's log for one scope (a user's, a group's, or the install's, `global`), replayed with `global`'s member entries in one order, `(time, author, log, seq)`, so the same entries say the same on every server. An entry, once appended, is never lost.
 - **Trust decides who holds what.** A server holds a user's data only if that user trusts it, and a group's only if its owners can read it. No one reads another user's data except by an `open`, which that user sees. Privileged servers are trusted by admins, not built in: any server can be made one, and the install keeps working without them.
 - **A key belongs to one install, forever.** Installs (white labels, workplaces) never talk to each other. A key that isn't a current server or client can't sync, call or ask.
 - **A call runs once.** It names the scopes it touches before it runs, so a server that can't run it says so before doing anything, and failing over never repeats a side effect. It writes nothing if it fails.
@@ -39,7 +40,8 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `src/vault.rs`, `src/outbound.rs`: the Vault's items, and filling them into apps' and sidecars' requests on the way out.
 - `src/db.rs`: an app's database in a scope, kept in the bucket as sealed steps (each write's changeset, or a schema change) at numbered positions and a copy now and then; a write that loses a race catches up and runs again. No clock, disk or network.
 - `src/bucket.rs`: objects by name in a place, a folder or S3-compatible storage: created only if absent and replaced only while unchanged, for an install's own bucket; S3's requests go by presigned URL.
-- `src/backups.rs`, `src/node/backups.rs`: backups, each scope's entries and blobs encrypted with its own key (sealed to the recovery key) and sent to a place, a folder or S3-compatible storage, that's a Vault item; and which server backs up what, when.
+- `src/node/storage.rs`: where the install keeps its data, and moving it to S3-compatible storage that every server reaches.
+- `src/backups.rs`, `src/node/backups.rs`: backups, each scope's entries and blobs encrypted with its key and a copy of its folder in the bucket, sent to a place, a folder or S3-compatible storage, that's a Vault item; and which server backs up what, when. A scope's key is in the bucket, sealed to each server that holds the scope and to the recovery key.
 - `src/schedules.rs`: apps' schedules, and which server runs each.
 - `src/deploy.rs`, `src/bundle.rs`: `one deploy`, building an app with a pinned Bun into a bundle that keeps its source.
 - `src/screen/`: the design kit and the bridge every app screen is served in. `src/mcp_apps.rs`, `src/mcp_view.html`: widgets and screens drawn inline in chats.
@@ -63,11 +65,11 @@ The design that replaces privileged servers, replay and sync between servers. As
 - **Kernel services**: auth (sign-in by passkey and the usual ways, with Better Auth; OAuth for MCP clients), vault (every key, sealed; opened only with a client's secret: a passkey's PRF secret, or an MCP client's refresh token) and schedules (fires schedules; holds, sealed to itself, only the keys for work a person let run while they're away). Small JavaScript for workerd, on Cloudflare or any workerd. Not devices.
 - **Nodes**: the Rust node and sidecars, owned and used by a user, a group or everyone (today's acl). On a machine, or stateless on Cloudflare (workers-rs): a call fetches what it names, runs, writes and forgets. Any number in one Cloudflare account.
 - **Clients**: the iPhone and Mac apps, browsers and MCP clients like ChatGPT, all signing in through the auth server the same way. What a client has cached stays on it, protected by its OS.
-- **Storage**: one S3-compatible bucket with conditional writes (R2, S3, GCS, MinIO), or a folder for one machine. Each app has one SQLite database per scope, kept as a sealed copy plus sealed changesets (SQLite's session extension; on Workers, SQLite compiled into the Rust WebAssembly, since the stock JavaScript build generates WebAssembly at runtime, which Workers forbid). A changeset is written create-if-absent at its database's next position, so a clash just reruns. Nodes hold no bucket credentials: the kernel signs create-only URLs for what a call names, so nothing they do deletes data. Erasing destroys a key, not the ciphertext. Who can do what (members, trust, deploys, admins) is a small signed log in `global`, kept forever.
+- **Storage**: on Workers, SQLite compiled into the Rust WebAssembly (`src/db.rs` keeps to SQLite and the bucket for it), since the stock JavaScript build generates WebAssembly at runtime, which Workers forbid. Nodes hold no bucket credentials: the kernel signs create-only URLs for what a call names, so nothing they do deletes data. Erasing destroys a key, not the ciphertext. Who can do what (members, trust, deploys, admins) is a small signed log in `global`, in the bucket, kept forever; the rest of each scope's node state (Vault items, installs, schedules' runs, insights) is rows of its databases.
 - **Keys**: a tree per scope (scope, then app, then database). A call gets short-lived keys for what it names, and access tokens for sign-ins like Google's, never refresh tokens.
 - **Calls**: one with side effects outside its database claims a lease (a conditional write) before it runs, so it never runs twice; the rest write and retry on a clash. iroh stays for calls and streams between machines and a "something changed" ping; the bucket is the truth.
 - **Sidecars** run as their own OS user per scope. WhatsApp's linked device is pinned to one node and moves only by linking again. Shell and Computer Use run only with a grant for that device and session, approved by the person.
-- **Goes**: privileged servers, the main server, `on` handlers and replay, view snapshots, sync between servers, status kept as entries.
+- **Goes**: privileged servers, the main server, replay, view snapshots, sync between servers, status kept as entries.
 
 ## Designed, not built
 

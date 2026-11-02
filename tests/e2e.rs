@@ -78,7 +78,7 @@ async fn servers_and_a_phone_share_a_deployed_board() {
     let blob = a.put_blob(&bundle).unwrap();
     a.append(&one::entry::Scope::Global, one::node::deploy("board", &blob)).await.unwrap();
     eventually("b to run the new deploy", async || b.call(board("ping", json!({}))).await.is_ok_and(|r| r == "pong")).await;
-    assert!(sees(&b, "global", "from b").await, "a new deploy replays the stores");
+    assert!(sees(&b, "global", "from b").await, "a new deploy keeps the data");
 
     let phone = one_client::Client::start(temp("phone"), "Phone").await.unwrap();
     phone.join(&a.pair(None).unwrap()).await.unwrap();
@@ -297,6 +297,28 @@ async fn deploy_module(node: &Node, app: &str, source: &str) {
     node.deploy(&me, app, &blob).await.unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn the_install_moves_its_data_and_every_server_follows() {
+    let (a, _ra) = start("move-a").await;
+    let (b, _rb) = start("move-b").await;
+    a.create("Moving", "Andre").await.unwrap();
+    b.join(&a.pair(None).unwrap()).await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    assert_eq!(a.storage().unwrap()["kind"], "folder", "a new install keeps its data in a folder on its server");
+    eventually("the board to run", async || a.call(board("post", json!({ "text": "before the move" }))).await.is_ok()).await;
+
+    let to = temp("move-bucket");
+    let item = json!({ "title": "Storage", "type": "Storage", "fields": { "path": { "value": to.display().to_string() } }, "hosts": [], "apps": ["node"] });
+    a.set_item(&me, &one::entry::Scope::Global, item).await.unwrap();
+    for n in [&a, &b] {
+        eventually("each server to move", async || n.storage().unwrap()["where"] == to.display().to_string().as_str()).await;
+    }
+    assert!(sees(&b, "global", "before the move").await, "what was there came along");
+    b.call(board("post", json!({ "text": "after the move" }))).await.unwrap();
+    eventually("a to see it", async || sees(&a, "global", "after the move").await).await;
+    assert!(to.join("global/board/main/newest").exists(), "it's kept in the new place");
+}
+
 /// A server that answers every request with what it got: `{ host, authorization, body }`.
 async fn echo() -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -387,11 +409,10 @@ async fn apps_install_in_several_scopes_use_each_other_and_fork() {
   title: "Notes",
   schema: Object.fromEntries(["user", "group", "global"].map((k) => [k, "create table notes (text text)"])),
   ops: {
-    add: { run: (ctx, { text, scope }) => { (scope ? ctx.group(scope) : ctx.user).append("note", { text }); return null; } },
+    add: { run: (ctx, { text, scope }) => { (scope ? ctx.group(scope) : ctx.user).exec("insert into notes values (?)", [text]); return null; } },
     list: { run: async (ctx, { scope }) => (await (scope ? ctx.group(scope) : ctx.user).query("select text from notes")).map((n) => n.text) },
     who: { reads: true, run: (ctx) => ctx.me },
   },
-  on: { note: (db, e) => db.exec("insert into notes values (?)", [e.data.text]) },
 };"#;
     deploy_module(&a, "notes", notes).await;
     deploy_module(&a, "journal", r#"export default {
@@ -914,10 +935,9 @@ async fn schedules_run_once_per_slot_on_one_server_and_switch_off() {
     broken: { op: "tick", every: "5s" },
   },
   ops: {
-    tick: { run: (ctx) => { ctx.global.append("tick", { by: ctx.me.name }); return null; } },
+    tick: { run: (ctx) => { ctx.global.exec("insert into ticks values (?)", [ctx.me.name]); return null; } },
     ticks: { run: async (ctx) => (await ctx.global.query("select by from ticks")).map((t) => t.by) },
   },
-  on: { tick: (db, e) => db.exec("insert into ticks values (?)", [e.data.by]) },
 };"#)
     .await;
     a.install(&me, "ticker", &one::entry::Scope::Global, true).await.unwrap();
@@ -992,9 +1012,8 @@ async fn apps_badge_their_icons_and_the_install_pushes_through_the_sidecar_its_s
     let mine = one::entry::Scope::User(me.user.clone());
     deploy_module(&a, "reminders", r#"export default { name: "reminders",
         schema: { user: "create table due (id text primary key)" },
-        on: { due(db, e) { db.exec("insert or ignore into due values (?)", [e.id]); } },
         async badge(ctx) { return (await ctx.user.query("select count(*) as n from due"))[0].n; },
-        ops: { nudge: { async run(ctx) { ctx.user.append("due", {}); return ctx.notify({ title: "Pay the rent", screen: "bills" }); } } } };"#).await;
+        ops: { nudge: { async run(ctx) { ctx.user.exec("insert or ignore into due values (?)", [String(ctx.now())]); return ctx.notify({ title: "Pay the rent", screen: "bills" }); } } } };"#).await;
     a.install(&me, "reminders", &mine, true).await.unwrap();
 
     // With no push sidecar anywhere, the app's call fails there, and its badge still counts.
@@ -1246,15 +1265,14 @@ async fn work_goes_on_after_a_call_returns_and_forgotten_blobs_go() {
   schema: { user: "create table reads (text text); create table files (hash text)" },
   ops: {
     read: { run: (ctx) => {
-      ctx.waitUntil((async () => { await new Promise((r) => setTimeout(r, 1500)); ctx.user.append("read", { text: "done later" }); })());
+      ctx.waitUntil((async () => { await new Promise((r) => setTimeout(r, 1500)); ctx.user.exec("insert into reads values (?)", ["done later"]); })());
       return "started";
     } },
     reads: { run: async (ctx) => (await ctx.user.query("select text from reads")).map((r) => r.text) },
-    keep: { run: async (ctx) => { const hash = await ctx.blob.put(new TextEncoder().encode("a receipt")); ctx.user.append("file", { hash }, [hash]); return hash; } },
+    keep: { run: async (ctx) => { const hash = await ctx.blob.put(new TextEncoder().encode("a receipt")); ctx.user.exec("insert into files values (?)", [hash], [hash]); return hash; } },
     get: { run: async (ctx, { hash }) => new TextDecoder().decode(await ctx.blob.get(hash)) },
     forget: { run: (ctx, { hash }) => { ctx.user.forget(hash); return null; } },
   },
-  on: { read: (db, e) => db.exec("insert into reads values (?)", [e.data.text]) },
 };"#)
     .await;
     a.install(&me, "reader", &one::entry::Scope::User(me.user.clone()), true).await.unwrap();
@@ -1382,8 +1400,7 @@ async fn each_person_arranges_their_pages_and_their_widgets_options() {
     andre.create("Home", "Andre").await.unwrap();
     deploy_module(&andre, "notes", r#"export default {
         name: "notes", schema: { user: "create table notes (topic text, text text)" },
-        ops: { add: { run: (ctx, i) => ctx.user.append("note", i) } },
-        on: { note: (db, e) => db.exec("insert into notes values (?, ?)", [e.data.topic, e.data.text]) },
+        ops: { add: { run: (ctx, i) => ctx.user.exec("insert into notes values (?, ?)", [i.topic, i.text]) } },
         widgets: { latest: {
             title: "Notes", description: "The newest note", sizes: ["small", "medium"],
             options: {
@@ -1491,20 +1508,18 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert!(checked["apps"].as_array().unwrap().contains(&json!("board")), "{checked}");
     assert!(checked["vault"].as_array().unwrap().contains(&json!("Example key")), "{checked}");
     let restored = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
-    assert!(restored.entries.iter().any(|e| e.content.data["text"] == "before the backup"));
-    let entries_then = restored.entries.len();
+    assert!(restored.entries.iter().any(|e| e.content.kind == "genesis"));
+    assert_eq!(backed_up_posts(&dir, &install, &keys["global"]).await, ["before the backup"]);
+    let steps_then = restored.snapshot.databases["board/main"].0;
     let files: Vec<Vec<u8>> = walk(&dir).iter().map(|f| std::fs::read(f).unwrap()).collect();
     assert!(!files.iter().any(|f| f.windows(12).any(|w| w == b"s3cret-value") || f.windows(17).any(|w| w == b"before the backup")), "nothing is readable on the disk");
 
     // A change is backed up on the next run; only what's new is sent.
     a.call(board("post", json!({ "text": "after the backup" }))).await.unwrap();
     a.back_up_now();
-    eventually("the second backup", async || {
-        one::backups::restore(&place, &install, "global", &keys["global"]).is_ok_and(|r| r.entries.iter().any(|e| e.content.data["text"] == "after the backup"))
-    })
-    .await;
+    eventually("the second backup", async || backed_up_posts(&dir, &install, &keys["global"]).await.len() == 2).await;
     let again = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
-    assert!(again.snapshot.packs.len() >= 2 && again.entries.len() > entries_then);
+    assert!(again.snapshot.databases["board/main"].0 > steps_then);
     let checked = a.check_backups().await.unwrap();
     assert_eq!(checked[0]["place"], "T7 Shield", "{checked}");
     assert!(checked[0]["error"].is_null(), "{checked}");
@@ -1514,9 +1529,9 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert!(a.state()["backups"].is_null(), "no badge while backups work");
 
     // A disk that breaks: admins see what's wrong and its fix, on Settings, until a run works again.
-    let objects = dir.join(&install).join("objects");
-    std::fs::rename(&objects, dir.join("objects-aside")).unwrap();
-    std::fs::write(&objects, b"not a folder").unwrap();
+    let copy = dir.join(&install).join("bucket");
+    std::fs::rename(&copy, dir.join("bucket-aside")).unwrap();
+    std::fs::write(&copy, b"not a folder").unwrap();
     for text in ["broken once", "broken twice"] {
         a.call(board("post", json!({ "text": text }))).await.unwrap();
         a.back_up_now();
@@ -1525,11 +1540,23 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let problem = a.state()["backups"].clone();
     assert_eq!(problem["fix"], "Check the disk on backup-a is plugged in and has room.", "{problem}");
     assert!(problem["text"].as_str().unwrap().starts_with("T7 Shield "), "{problem}");
-    std::fs::remove_file(&objects).unwrap();
-    std::fs::rename(dir.join("objects-aside"), &objects).unwrap();
+    std::fs::remove_file(&copy).unwrap();
+    std::fs::rename(dir.join("bucket-aside"), &copy).unwrap();
     a.call(board("post", json!({ "text": "fixed" }))).await.unwrap();
     a.back_up_now();
     eventually("the badge to clear", async || a.state()["backups"].is_null()).await;
+}
+
+/// The board's posts in `global` as a place's copy of the install's bucket holds them, opened with the scope's key.
+async fn backed_up_posts(dir: &std::path::Path, install: &str, keys: &[[u8; 32]]) -> Vec<String> {
+    let copy = one::bucket::Place::Folder(dir.join(install).join("bucket"));
+    for key in keys {
+        let key = one::db::database_key(&one::db::app_key(key, "board"), "main");
+        if let Ok(db) = one::db::Db::open(&copy, "global/board/main", key).await {
+            return db.query("select text from posts order by time", &[]).unwrap().into_iter().map(|r| r["text"].as_str().unwrap().to_string()).collect();
+        }
+    }
+    Vec::new()
 }
 
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {

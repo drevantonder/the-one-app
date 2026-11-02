@@ -265,6 +265,38 @@ impl Place {
         Ok(out)
     }
 
+    /// The name of every object in the place, in every folder, sorted.
+    pub fn names(&self) -> Result<Vec<String>> {
+        let mut out = match self {
+            Place::Folder(dir) => {
+                fn walk(dir: &std::path::Path, at: &str, out: &mut Vec<String>) -> std::io::Result<()> {
+                    for e in std::fs::read_dir(dir.join(at))? {
+                        let e = e?;
+                        let name = e.file_name().to_string_lossy().to_string();
+                        if name.starts_with('.') {
+                            continue;
+                        }
+                        let path = if at.is_empty() { name } else { format!("{at}/{name}") };
+                        match e.file_type()?.is_dir() {
+                            true => walk(dir, &path, out)?,
+                            false => out.push(path),
+                        }
+                    }
+                    Ok(())
+                }
+                let mut out = Vec::new();
+                match walk(dir, "", &mut out) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    other => other.map_err(|e| disk(dir, e))?,
+                }
+                out
+            }
+            Place::S3(s3) => s3.list_all()?,
+        };
+        out.sort();
+        Ok(out)
+    }
+
     /// The objects in a folder of the place: each one's name, when it was last written (ms), and its size.
     pub fn objects(&self, folder: &str) -> Result<Vec<(String, u64, u64)>> {
         match self {
@@ -382,13 +414,26 @@ impl S3 {
         Failed(trouble, said).into()
     }
 
+    /// Every object's name in the bucket.
+    fn list_all(&self) -> Result<Vec<String>> {
+        Ok(self.list_under("", false)?.into_iter().map(|(name, _)| name).collect())
+    }
+
     /// The names under `prefix`, one level down: objects', with when each was last written (ms) and its size, and
     /// folders'.
     fn list(&self, prefix: &str) -> Result<Vec<(String, Option<(u64, u64)>)>> {
+        self.list_under(prefix, true)
+    }
+
+    /// The names under `prefix`, one level down with `delimit`, else every one.
+    fn list_under(&self, prefix: &str, delimit: bool) -> Result<Vec<(String, Option<(u64, u64)>)>> {
         let mut out = Vec::new();
         let mut token: Option<String> = None;
         loop {
-            let mut query = vec![("list-type", "2".to_string()), ("prefix", prefix.to_string()), ("delimiter", "/".to_string())];
+            let mut query = vec![("list-type", "2".to_string()), ("prefix", prefix.to_string())];
+            if delimit {
+                query.push(("delimiter", "/".to_string()));
+            }
             if let Some(t) = &token {
                 query.push(("continuation-token", t.clone()));
             }
@@ -410,7 +455,7 @@ impl S3 {
                     let Some(name) = between(item, &format!("<{tag}>"), &format!("</{tag}>")).map(|n| unescape(&n)) else { continue };
                     let written = between(item, "<LastModified>", "</LastModified>").and_then(|t| t.parse::<jiff::Timestamp>().ok()).map(|t| t.as_millisecond() as u64);
                     let size = between(item, "<Size>", "</Size>").and_then(|n| n.parse().ok());
-                    if let Some(name) = name.strip_prefix(prefix).map(|n| n.trim_end_matches('/')).filter(|n| !n.is_empty()) {
+                    if let Some(name) = name.strip_prefix(prefix).map(|n| if delimit { n.trim_end_matches('/') } else { n }).filter(|n| !n.is_empty()) {
                         out.push((name.to_string(), written.zip(size)));
                     }
                 }
@@ -557,6 +602,8 @@ mod tests {
         assert!(!place.replace("a/b", b"three", None).unwrap(), "none means only if there's none");
         assert!(place.replace("a/c", b"new", None).unwrap());
         assert_eq!(place.list("a").unwrap(), vec!["b".to_string(), "c".to_string()], "no partial files show");
+        place.put("d/e/f", b"deep").unwrap();
+        assert_eq!(place.names().unwrap(), ["a/b", "a/c", "d/e/f"]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

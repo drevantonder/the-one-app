@@ -11,9 +11,8 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
 use serde_json::{Value, json};
 
-use crate::apps::{AppEntry, Me};
-use crate::entry::Content;
-use crate::sidecars::Reply;
+use crate::apps::Me;
+use crate::sidecars::{Answer, Record, Reply};
 
 /// The built-in sidecar's name, which agents act as when the Vault fills their requests (`vault_fetch`).
 pub const NAME: &str = "agents";
@@ -45,15 +44,14 @@ pub fn describe() -> Value {
     })
 }
 
-/// The state the entries add up to: AGENTS.md, and each skill's files.
-fn state(entries: &[AppEntry]) -> (String, BTreeMap<String, BTreeMap<String, String>>) {
+/// The state the records add up to: AGENTS.md, and each skill's files.
+fn state(records: &[Record]) -> (String, BTreeMap<String, BTreeMap<String, String>>) {
     let mut text = String::new();
     let mut skills = BTreeMap::new();
-    for e in entries {
+    for e in records {
         match e.kind.as_str() {
             "agentsmd" => text = e.data["text"].as_str().unwrap_or("").to_string(),
             "skill" => {
-                // Checked here, not only in the operation: any member can sign an entry by hand.
                 let files: BTreeMap<String, String> = serde_json::from_value(e.data["files"].clone()).unwrap_or_default();
                 match e.data["name"].as_str() {
                     Some(name) if valid(name, &files).is_ok() => {
@@ -73,9 +71,6 @@ fn state(entries: &[AppEntry]) -> (String, BTreeMap<String, BTreeMap<String, Str
     (text, skills)
 }
 
-fn content(kind: &str, data: Value) -> Content {
-    Content::new("agents", kind, data)
-}
 
 /// A skill's name is one folder, and its files stay inside it.
 fn valid(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
@@ -87,15 +82,15 @@ fn valid(name: &str, files: &BTreeMap<String, String>) -> Result<()> {
     Ok(())
 }
 
-pub fn call(op: String, input: Value, _caller: Me, entries: Vec<AppEntry>) -> Reply {
+pub fn call(op: String, input: Value, _caller: Me, records: Vec<Record>) -> Reply {
     Box::pin(async move {
-        let (text, skills) = state(&entries);
+        let (text, skills) = state(&records);
         let name = || input["name"].as_str().map(str::to_string).context("give the skill's name");
-        Ok(match op.as_str() {
+        let (ok, kept) = match op.as_str() {
             "get" => (json!({ "text": text }), vec![]),
             "set" => {
                 let text = input["text"].as_str().context("give the text")?.to_string();
-                (json!("AGENTS.md is set; every device's harnesses get it now."), vec![content("agentsmd", json!({ "text": text }))])
+                (json!("AGENTS.md is set; every device's harnesses get it now."), vec![("agentsmd".to_string(), json!({ "text": text }))])
             }
             "skills" => {
                 let list: Vec<Value> = skills.iter().map(|(n, files)| json!({ "name": n, "description": description(files.get("SKILL.md").map(String::as_str).unwrap_or("")) })).collect();
@@ -109,38 +104,39 @@ pub fn call(op: String, input: Value, _caller: Me, entries: Vec<AppEntry>) -> Re
                 let n = name()?;
                 let files: BTreeMap<String, String> = serde_json::from_value(input["files"].clone()).context("files is path → text")?;
                 valid(&n, &files)?;
-                (json!(format!("{n} is set on every device.")), vec![content("skill", json!({ "name": n, "files": files }))])
+                (json!(format!("{n} is set on every device.")), vec![("skill".to_string(), json!({ "name": n, "files": files }))])
             }
             "skill_remove" => {
                 let n = name()?;
                 ensure!(skills.contains_key(&n), "no skill {n}");
-                (json!(format!("{n} is removed from every device.")), vec![content("skill_removed", json!({ "name": n }))])
+                (json!(format!("{n} is removed from every device.")), vec![("skill_removed".to_string(), json!({ "name": n }))])
             }
-            "history" => (json!(history(&entries, input["name"].as_str())), vec![]),
+            "history" => (json!(history(&records, input["name"].as_str())), vec![]),
             "restore" => {
                 let id = input["id"].as_str().context("give the revision's id, from history")?;
-                let e = entries.iter().find(|e| e.id == id).with_context(|| format!("no revision {id}"))?;
+                let e = records.iter().find(|e| e.id == id).with_context(|| format!("no revision {id}"))?;
                 match e.kind.as_str() {
-                    "agentsmd" => (json!("That AGENTS.md is current again on every device."), vec![content("agentsmd", e.data.clone())]),
+                    "agentsmd" => (json!("That AGENTS.md is current again on every device."), vec![("agentsmd".to_string(), e.data.clone())]),
                     "skill" => {
                         let n = e.data["name"].as_str().unwrap_or_default();
                         let files: BTreeMap<String, String> = serde_json::from_value(e.data["files"].clone()).unwrap_or_default();
                         valid(n, &files)?;
-                        (json!(format!("That {n} is current again on every device.")), vec![content("skill", e.data.clone())])
+                        (json!(format!("That {n} is current again on every device.")), vec![("skill".to_string(), e.data.clone())])
                     }
                     _ => bail!("{id} isn't a revision of AGENTS.md or a skill"),
                 }
             }
             other => bail!("agents has no operation {other}"),
-        })
+        };
+        Ok(Answer { records: kept, ..Answer::new(ok) })
     })
 }
 
 /// AGENTS.md's revisions, or a skill's, newest first, each with what changed since the one before.
-fn history(entries: &[AppEntry], skill: Option<&str>) -> Vec<Value> {
+fn history(records: &[Record], skill: Option<&str>) -> Vec<Value> {
     let mut before: Option<String> = None;
     let mut out = Vec::new();
-    for e in entries {
+    for e in records {
         let (now, change) = match (skill, e.kind.as_str()) {
             (None, "agentsmd") => {
                 let text = e.data["text"].as_str().unwrap_or_default().to_string();
@@ -156,7 +152,7 @@ fn history(entries: &[AppEntry], skill: Option<&str>) -> Vec<Value> {
             (Some(n), "skill_removed") if e.data["name"] == n => (None, "removed".to_string()),
             _ => continue,
         };
-        out.push(json!({ "id": e.id, "time": e.time, "by": e.user_name, "device": e.name, "size": now.as_ref().map_or(0, String::len), "change": change }));
+        out.push(json!({ "id": e.id, "time": e.time, "by": e.by, "device": e.device, "size": now.as_ref().map_or(0, String::len), "change": change }));
         before = now;
     }
     out.reverse();
@@ -182,14 +178,14 @@ fn description(skill_md: &str) -> String {
 
 /// Sets up every harness installed on this device: AGENTS.md, the skills, the board's prompt hook and the MCP server.
 /// It looks again every minute, so a harness installed later gets them too.
-pub fn sync(entries: &[AppEntry]) {
+pub fn sync(records: &[Record]) {
     // A node given a home of its own (one being tried out, say) writes nowhere else, so it leaves the harnesses alone.
     if std::env::var_os(format!("{}_HOME", crate::config::CLI.to_uppercase())).is_some() {
         return;
     }
-    static LATEST: Mutex<Vec<AppEntry>> = Mutex::new(Vec::new());
+    static LATEST: Mutex<Vec<Record>> = Mutex::new(Vec::new());
     static AGAIN: std::sync::Once = std::sync::Once::new();
-    *LATEST.lock().unwrap_or_else(|e| e.into_inner()) = entries.to_vec();
+    *LATEST.lock().unwrap_or_else(|e| e.into_inner()) = records.to_vec();
     AGAIN.call_once(|| {
         std::thread::spawn(|| {
             loop {
@@ -199,24 +195,24 @@ pub fn sync(entries: &[AppEntry]) {
                 if let Some(apps) = apps.and_then(|a| a.as_array().cloned()) {
                     *APPS.lock().unwrap_or_else(|e| e.into_inner()) = Some(apps);
                 }
-                let entries = LATEST.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                set_up(&entries);
+                let records = LATEST.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                set_up(&records);
             }
         });
     });
-    set_up(entries);
+    set_up(records);
 }
 
 /// The apps installed for this server's person, as the local API last listed them.
 static APPS: Mutex<Option<Vec<Value>>> = Mutex::new(None);
 
-fn set_up(entries: &[AppEntry]) {
+fn set_up(records: &[Record]) {
     static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return };
     let mut written = Written::load();
     harnesses(&home, &mut written);
-    let (text, mut skills) = state(entries);
+    let (text, mut skills) = state(records);
     // The built-in skills (src/skills.rs) go beside the person's own, which win a name they share. Until the apps are
     // known, those already written stay.
     let apps = APPS.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -650,26 +646,26 @@ mod tests {
         assert!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !name.starts_with('-') && !name.ends_with('-'), "{name}");
     }
 
-    fn entry(id: &str, kind: &str, data: Value) -> AppEntry {
-        AppEntry { app: "agents".into(), id: id.into(), scope: String::new(), kind: kind.into(), user: "u".into(), name: "mac".into(), user_name: "Andre".into(), role: None, groups: BTreeMap::new(), time: id.len() as u64, data, blobs: vec![] }
+    fn record(id: &str, kind: &str, data: Value) -> Record {
+        Record { id: id.into(), kind: kind.into(), data, time: id.len() as u64, by: "Andre".into(), device: "mac".into() }
     }
 
     #[test]
     fn history_lists_revisions_newest_first() {
         let skill = |t: &str| json!({ "name": "s", "files": { "SKILL.md": t } });
-        let entries = vec![
-            entry("a", "agentsmd", json!({ "text": "one\ntwo\n" })),
-            entry("b", "skill", skill("x")),
-            entry("c", "agentsmd", json!({ "text": "one\nthree\n" })),
-            entry("d", "skill_removed", json!({ "name": "s" })),
-            entry("e", "skill", skill("y")),
+        let records = vec![
+            record("a", "agentsmd", json!({ "text": "one\ntwo\n" })),
+            record("b", "skill", skill("x")),
+            record("c", "agentsmd", json!({ "text": "one\nthree\n" })),
+            record("d", "skill_removed", json!({ "name": "s" })),
+            record("e", "skill", skill("y")),
         ];
-        let md = history(&entries, None);
+        let md = history(&records, None);
         assert_eq!(md.iter().map(|r| r["id"].as_str().unwrap()).collect::<Vec<_>>(), ["c", "a"]);
         assert_eq!(md[0]["change"], "+ three");
         assert_eq!(md[1]["change"], "+ one");
         assert_eq!(md[0]["size"], 10);
-        let s = history(&entries, Some("s"));
+        let s = history(&records, Some("s"));
         assert_eq!(s.iter().map(|r| r["change"].as_str().unwrap()).collect::<Vec<_>>(), ["+ --- SKILL.md", "removed", "+ --- SKILL.md"]);
         assert_eq!(first_change("a\nb\n", "a\n"), "- b");
         assert_eq!(first_change("a\n", "a\n"), "no change");

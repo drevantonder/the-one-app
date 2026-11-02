@@ -1,7 +1,7 @@
 //! Apps run in workerd, Cloudflare's open-source Workers runtime, which the node starts beside itself.
-//! Each deployed app is an ES module inside `runtime/shim.js`: a Worker with a Durable Object per scope that holds the
-//! app's store of that scope in SQLite. The node replays entries into them and asks them to run operations.
-//! When the deploys change, the node writes the config again and restarts workerd; the stores stay on disk.
+//! Each deployed app is an ES module inside `runtime/shim.js`, which asks the node to run its queries and writes on
+//! its databases (`src/db.rs`), and runs its operations, widgets, hooks and screens.
+//! When the deploys change, the node writes the config again and restarts workerd.
 //! Every request an app makes (its `fetch`es, and the shim's asks of the node) goes to the node's outbound port,
 //! `src/outbound.rs`, carrying the token of the call it's made in.
 
@@ -10,14 +10,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow, bail, ensure};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::Digest;
 
-use std::collections::BTreeMap;
 
-use crate::entry::Content;
 use crate::members::Role;
 
 /// The workerd build every node runs, and each platform's npm package of it with its sha512.
@@ -44,25 +42,6 @@ pub struct Me {
     pub agent: Option<String>,
 }
 
-/// An entry as an app's `on` handlers see it.
-#[derive(Clone, Debug, Serialize)]
-pub struct AppEntry {
-    #[serde(skip)]
-    pub app: String,
-    pub id: String,
-    pub scope: String,
-    pub kind: String,
-    pub user: String,
-    pub name: String,
-    /// The user's name when it was written.
-    pub user_name: String,
-    pub role: Option<Role>,
-    pub groups: BTreeMap<String, Role>,
-    pub time: u64,
-    pub data: Value,
-    pub blobs: Vec<String>,
-}
-
 /// A scope a call may reach, and the caller's role there.
 #[derive(Clone, Debug, Serialize)]
 pub struct ScopeHandle {
@@ -87,11 +66,13 @@ pub struct Context {
 
 /// What a call asks the node to write once it returns.
 pub enum Append {
-    Entry { scope: String, content: Content },
+    /// A statement that writes the app's database of a scope, which keeps the blobs it names; or with `check`, a query
+    /// whose first value must be true as the write runs, else the call fails with that message.
+    Exec { scope: String, sql: String, params: Vec<Value>, blobs: Vec<String>, check: Option<String> },
     Install { app: String, scope: String, installed: bool },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     Switch { app: String, schedule: String, scope: String, on: bool },
-    /// Says a scope no longer needs a blob its entries named: once no scope does, servers delete it.
+    /// Says a scope no longer needs a blob it kept: once no scope does, servers delete it.
     Forget { scope: String, blob: String },
     /// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), with the caller's own rights.
     Retire { app: String, how: String },
@@ -116,7 +97,7 @@ pub struct Outcome {
 }
 
 /// A call's appends, as the shim gives them.
-pub fn appends(app: &str, list: &Value) -> Result<Vec<Append>> {
+pub fn appends(list: &Value) -> Result<Vec<Append>> {
     let mut appends = Vec::new();
     for a in list.as_array().into_iter().flatten() {
         let scope = a["scope"].as_str().unwrap_or("").to_string();
@@ -157,24 +138,16 @@ pub fn appends(app: &str, list: &Value) -> Result<Vec<Append>> {
             appends.push(Append::Forget { scope, blob: blob.into() });
             continue;
         }
-        match a["install"].as_str() {
-            Some(name) => appends.push(Append::Install { app: name.into(), scope, installed: a["installed"] != false }),
-            None => {
-                let blobs = a["blobs"].as_array().into_iter().flatten().filter_map(|b| b.as_str().map(str::to_string)).collect();
-                let content = Content { app: app.into(), kind: a["kind"].as_str().unwrap_or("").into(), data: a["data"].clone(), blobs };
-                appends.push(Append::Entry { scope, content });
-            }
+        if let Some(name) = a["install"].as_str() {
+            appends.push(Append::Install { app: name.into(), scope, installed: a["installed"] != false });
+            continue;
         }
+        let sql = a["exec"].as_str().context("an app writes its database with exec")?.to_string();
+        let params = a["params"].as_array().cloned().unwrap_or_default();
+        let blobs = a["blobs"].as_array().into_iter().flatten().filter_map(|b| b.as_str().map(str::to_string)).collect();
+        appends.push(Append::Exec { scope, sql, params, blobs, check: a["check"].as_str().map(str::to_string) });
     }
     Ok(appends)
-}
-
-/// One app's store of one scope: its new entries, or all of them into an empty store.
-pub struct Replay {
-    pub app: String,
-    pub scope: String,
-    pub fresh: bool,
-    pub entries: Vec<AppEntry>,
 }
 
 #[derive(Clone)]
@@ -200,8 +173,9 @@ impl Apps {
 
     fn start_blocking(dir: &Path, outbound: u16) -> Result<Self> {
         let workerd = workerd()?;
-        std::fs::create_dir_all(dir.join("storage"))?;
         stop_previous(dir);
+        // Where apps' stores were kept before each app's databases were in the bucket.
+        let _ = std::fs::remove_dir_all(dir.join("storage"));
         let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
         let config = write_config(dir, &[], port, outbound, 0)?;
         let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), 0)), pid: Mutex::new(None) });
@@ -235,7 +209,7 @@ impl Apps {
         Ok(Apps(runtime))
     }
 
-    /// Runs exactly these apps, (name, module source), restarting the runtime if they changed. Stores stay on disk.
+    /// Runs exactly these apps, (name, module source), restarting the runtime if they changed.
     pub async fn load(&self, apps: Vec<(String, String)>) -> Result<()> {
         let runtime = self.0.clone();
         tokio::task::spawn_blocking(move || {
@@ -308,30 +282,10 @@ impl Apps {
         Ok(reply)
     }
 
-    pub async fn replay(&self, jobs: Vec<Replay>) {
-        for job in jobs {
-            if job.entries.is_empty() && !job.fresh {
-                continue;
-            }
-            if let Err(err) = self.ask(&job.app, "replay", json!({ "scope": job.scope, "fresh": job.fresh, "entries": job.entries })).await {
-                tracing::warn!("{} replay of {}: {err:#}", job.app, job.scope);
-            }
-        }
-    }
-
-    /// Deletes every app's store of a scope.
-    pub async fn drop_scope(&self, scope: &str) {
-        for app in self.names() {
-            if let Err(err) = self.ask(&app, "drop", json!({ "scope": scope })).await {
-                tracing::warn!("{app}: dropping {scope}: {err:#}");
-            }
-        }
-    }
-
     /// Runs an operation, for at most `limit`: longer for an app that waits on sidecars.
     pub async fn call(&self, app: &str, op: &str, input: Value, ctx: &Context, limit: Duration) -> Result<Outcome> {
         let reply = self.ask_for(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from }), limit).await?;
-        Ok(Outcome { result: reply["ok"].clone(), appends: appends(app, &reply["appends"])?, later: reply["later"] == true })
+        Ok(Outcome { result: reply["ok"].clone(), appends: appends(&reply["appends"])?, later: reply["later"] == true })
     }
 
     pub async fn badge(&self, app: &str, ctx: &Context) -> Result<Value> {
@@ -387,7 +341,7 @@ impl Runtime {
     }
 }
 
-/// A runtime left behind by an earlier run of the node would hold on to its storage; stop it.
+/// A runtime left behind by an earlier run of the node would still be running; stop it.
 fn stop_previous(dir: &Path) {
     let Ok(pid) = std::fs::read_to_string(dir.join("workerd.pid")) else { return };
     let pid = pid.trim();
@@ -445,7 +399,6 @@ fn write_config(dir: &Path, apps: &[(String, String)], port: u16, outbound: u16,
     let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
     let mut services = vec![
         "(name = \"router\", worker = .router)".to_string(),
-        format!("(name = \"storage\", disk = (path = {}, writable = true))", quote(&dir.join("storage").to_string_lossy())),
         // Every request an app makes goes to the node, which makes it (filling in secrets) or answers it itself.
         format!("(name = \"outbound\", external = (address = \"127.0.0.1:{outbound}\", http = (style = host, forwardedProtoHeader = \"x-forwarded-proto\")))"),
     ];
@@ -460,10 +413,9 @@ fn write_config(dir: &Path, apps: &[(String, String)], port: u16, outbound: u16,
         services.push(format!("(name = {}, worker = .app{i})", quote(&format!("app-{name}"))));
         bindings.push(format!("(name = {}, service = {})", quote(name), quote(&format!("app-{name}"))));
         workers.push(format!(
-            "const app{i} :Workerd.Worker = (\n  modules = [(name = \"shim.js\", esModule = embed {}), (name = \"app.js\", esModule = embed {})],\n  compatibilityDate = \"{COMPATIBILITY_DATE}\",\n  compatibilityFlags = [\"nodejs_als\"],\n  globalOutbound = \"outbound\",\n  bindings = [(name = \"STORES\", durableObjectNamespace = \"Store\")],\n  durableObjectNamespaces = [(className = \"Store\", uniqueKey = {}, enableSql = true)],\n  durableObjectStorage = (localDisk = \"storage\"),\n);",
+            "const app{i} :Workerd.Worker = (\n  modules = [(name = \"shim.js\", esModule = embed {}), (name = \"app.js\", esModule = embed {})],\n  compatibilityDate = \"{COMPATIBILITY_DATE}\",\n  compatibilityFlags = [\"nodejs_als\"],\n  globalOutbound = \"outbound\",\n);",
             quote(&format!("apps/{name}/shim.js")),
             quote(&format!("apps/{name}/app.js")),
-            quote(name),
         ));
     }
     let config = format!(

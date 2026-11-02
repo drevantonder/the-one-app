@@ -106,7 +106,7 @@ fn places(state: &ScopeState) -> Vec<PlaceItem> {
     state
         .items
         .iter()
-        .filter(|(_, it)| it.apps.contains(members::APP))
+        .filter(|(_, it)| it.apps.contains(members::APP) && it.kind != super::storage::STORAGE)
         .map(|(id, it)| {
             let fields: BTreeMap<String, String> = it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect();
             let place = Place::from_fields(&fields).and_then(|p| match &p {
@@ -121,18 +121,6 @@ fn places(state: &ScopeState) -> Vec<PlaceItem> {
             PlaceItem { id: id.clone(), title: it.title.clone(), place, server: fields.get("server").and_then(|s| unhex(s).ok()), made: it.made }
         })
         .collect()
-}
-
-/// A user this server may write a scope's node entries as: the scope's own user, else its local user, else anyone
-/// who trusts it and may use the scope.
-fn writer(i: &Install, me: &Key, scope: &Scope) -> Option<String> {
-    let m = &i.r.members;
-    let ok = |u: &str| m.may_use(u, scope) && m.trusts(u, me);
-    match scope {
-        Scope::User(u) => ok(u).then(|| u.clone()),
-        _ if ok(&i.user) => Some(i.user.clone()),
-        _ => m.users.keys().find(|u| ok(u)).cloned(),
-    }
 }
 
 /// The servers that back up a scope to an S3 place, in the order they take it: privileged servers first, then the
@@ -161,7 +149,6 @@ fn line(m: &Members, scope: &Scope, place: &str) -> Vec<Key> {
 struct Due {
     scope: String,
     key: Option<[u8; 32]>,
-    writer: String,
 }
 
 impl Node {
@@ -238,6 +225,7 @@ impl Node {
     async fn back_up(&self, force: bool) -> Result<()> {
         let now = now_ms();
         let me = self.0.id;
+        let keys = self.held_keys().await;
         let (install, recovery, plan) = self.with(|i| {
             let m = &i.r.members;
             let Some(global) = i.views.get("global").map(|(_, s)| s) else { return Ok((String::new(), [0; 32], Vec::new())) };
@@ -258,8 +246,7 @@ impl Node {
                 }
                 // Every server prunes each scope it holds the key of, so pruning needs no one server.
                 let prune = (force || pruned.get(&p.id).is_none_or(|t| now - t >= PRUNE_EVERY)).then(|| -> Result<_> {
-                    let scopes: BTreeMap<String, [u8; 32]> = i.views.iter().filter(|(l, _)| Scope::parse(l).is_ok_and(|s| i.r.holds(&s))).filter_map(|(l, (_, s))| Some((l.clone(), s.backup_key?))).collect();
-                    Ok((scopes, releases(&i.r.store.scope("global")?)))
+                    Ok((keys.clone(), releases(&i.r.store.scope("global")?)))
                 });
                 let prune = prune.transpose()?;
                 let mut due = Vec::new();
@@ -284,21 +271,22 @@ impl Node {
                             }
                         }
                     }
-                    let state = i.views.get(&log).map(|(_, s)| s);
-                    let key = state.and_then(|s| s.backup_key);
+                    let key = keys.get(&log).copied();
                     let known = cache.get(&(p.id.clone(), log.clone())).filter(|s| key.is_some_and(|k| s.1 == b::key_id(&k)));
                     let changed = match known {
                         None => true,
                         Some((s, _)) => {
                             let since = s.time + b::EVERY <= now || force;
-                            since && frontier.iter().any(|(a, l, next)| *l == log && s.frontier.get(&hex(a)).copied().unwrap_or(0) < *next) && i.r.store.changed_since(&log, &s.frontier)?
+                            // Its databases change without entries: the bucket is looked at once an hour.
+                            let looked = self.0.backup_looked.lock().unwrap().get(&(p.id.clone(), log.clone())).is_some_and(|t| t + b::EVERY > now);
+                            let entries = frontier.iter().any(|(a, l, next)| *l == log && s.frontier.get(&hex(a)).copied().unwrap_or(0) < *next) && i.r.store.changed_since(&log, &s.frontier)?;
+                            since && (entries || !looked || force)
                         }
                     };
                     if !changed {
                         continue;
                     }
-                    let Some(writer) = writer(i, &me, &scope) else { continue };
-                    due.push(Due { scope: log, key, writer });
+                    due.push(Due { scope: log, key });
                 }
                 if !due.is_empty() || prune.is_some() {
                     plan.push((p, due, prune));
@@ -353,17 +341,24 @@ impl Node {
         Ok(())
     }
 
-    /// Backs up one scope to one place: makes the scope's key if it has none, then sends what the place lacks.
+    /// The key of each scope this server holds, by its name, of those it can have.
+    async fn held_keys(&self) -> BTreeMap<String, [u8; 32]> {
+        let scopes = self.with(|i| Ok(i.r.members.scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
+        let mut out = BTreeMap::new();
+        for scope in scopes {
+            if let Ok(key) = self.scope_key(&scope).await {
+                out.insert(scope.to_string(), key);
+            }
+        }
+        out
+    }
+
+    /// Backs up one scope to one place, with the scope's key: sends what the place lacks.
     async fn back_up_scope(&self, place: &Place, place_id: &str, install: &str, recovery: Key, d: &Due, now: u64) -> Result<Option<Snapshot>> {
         let scope = Scope::parse(&d.scope)?;
         let key = match d.key {
             Some(key) => key,
-            None => {
-                let key: [u8; 32] = rand::random();
-                self.append_as(&scope, &d.writer, None, members::node("backup-key", json!({ "key": hex(&key) }))).await?;
-                // Two servers may make one at once: the first written is the scope's, and the other's backups go again.
-                self.with(|i| Ok(i.views.get(&d.scope).and_then(|(_, s)| s.backup_key)))?.unwrap_or(key)
-            }
+            None => self.scope_key(&scope).await?,
         };
         let cached = self.0.backed.lock().unwrap().get(&(place_id.to_string(), d.scope.clone())).filter(|s| s.1 == b::key_id(&key)).map(|s| s.0.clone());
         let (entries, blobs) = self.with(|i| {
@@ -372,6 +367,7 @@ impl Node {
             Ok((entries.clone(), backed_blobs(&entries, &forgotten)))
         })?;
         let dir = self.0.dir.clone();
+        let bucket = self.bucket().ok();
         let (place, install, scope_name, server) = (place.clone(), install.to_string(), d.scope.clone(), self.0.id);
         let snap = tokio::task::spawn_blocking(move || -> Result<(Option<Snapshot>, Option<Snapshot>)> {
             // What the place holds: the newest snapshot there, which another server may have written since.
@@ -381,12 +377,13 @@ impl Node {
                 (_, None) => None,
                 _ => b::latest(&place, &install, &scope_name, &[key])?.map(|(s, _)| s),
             };
-            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, recovery, server, now, previous: previous.clone(), entries, blobs };
+            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, recovery, server, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
             let written = b::back_up(job, |hash| std::fs::read(release::blob_path(&dir, hash).ok()?).ok())?;
             Ok((written.clone(), written.or(previous)))
         })
         .await??;
         let (written, known) = snap;
+        self.0.backup_looked.lock().unwrap().insert((place_id.to_string(), d.scope.clone()), now);
         if let Some(known) = known {
             self.0.backed.lock().unwrap().insert((place_id.to_string(), d.scope.clone()), (known, b::key_id(&key)));
         }
@@ -530,11 +527,11 @@ impl Node {
     /// Restores each scope's newest snapshot from each place into a throwaway store, checking every entry and blob,
     /// and says what came back.
     pub async fn check_backups(&self) -> Result<Value> {
-        let (install, places, keys, root) = self.with(|i| {
+        let keys = self.held_keys().await;
+        let (install, places, root) = self.with(|i| {
             let global = &i.views.get("global").context("no install")?.1;
-            let keys: BTreeMap<String, [u8; 32]> = i.views.iter().filter_map(|(l, (_, s))| Some((l.clone(), s.backup_key?))).collect();
             let places: Vec<(String, Place)> = places(global).into_iter().filter_map(|p| Some((p.title, p.place.ok()?))).filter(|(_, p)| p.present()).collect();
-            Ok((i.r.root.map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, keys, i.r.root))
+            Ok((i.r.root.map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root))
         })?;
         let mut out = Vec::new();
         for (title, place) in places {
@@ -606,7 +603,7 @@ fn backed_blobs(entries: &[Entry], forgotten: &BTreeSet<String>) -> BTreeSet<Str
             }
             continue;
         }
-        out.extend(e.content.blobs.iter().filter(|b| e.content.app == members::APP || !forgotten.contains(*b)).cloned());
+        out.extend(e.content.blobs.iter().filter(|b| (e.content.app == members::APP && e.content.kind != "keep") || !forgotten.contains(*b)).cloned());
     }
     out.extend(newest.into_values().map(|(_, b)| b));
     out

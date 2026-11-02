@@ -206,16 +206,6 @@ export default {
                             token_endpoint text not null, resource text, client_secret text, verifier text not null);`,
   },
 
-  on: {
-    pending(db, e) {
-      const d = e.data;
-      db.exec("insert or replace into pending values (1, ?, ?, ?, ?, ?, ?, ?)", [d.state, d.account || null, d.client_id, d.token_endpoint, d.resource || null, d.client_secret || null, d.verifier]);
-    },
-    pending_done(db) {
-      db.exec("delete from pending");
-    },
-  },
-
   ops: {
     ...tools,
 
@@ -260,7 +250,7 @@ export default {
         const verifier = random(), state = random();
         const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
         // A sign-in waiting for its code, in this app's own data: its verifier, and its client until the account has it.
-        ctx.user.append("pending", { state, verifier, account: name || null, client_id, client_secret: client_secret || null, token_endpoint: as.token_endpoint, resource: as.resource });
+        ctx.user.exec("insert or replace into pending values (1, ?, ?, ?, ?, ?, ?, ?)", [state, name || null, client_id, as.token_endpoint, as.resource || null, client_secret || null, verifier]);
         const link = `${as.authorization_endpoint}?${form({
           response_type: "code", client_id, redirect_uri: REDIRECT, scope: as.scope, state, resource: as.resource,
           code_challenge: challenge, code_challenge_method: "S256",
@@ -312,7 +302,7 @@ export default {
 /// A sign-in that's over without an account (a code is taken once): it answers why rather than failing, so its
 /// verifier is forgotten, as a failed call writes nothing.
 function failed(ctx, why) {
-  ctx.user.append("pending_done", {});
+  ctx.user.exec("delete from pending");
   return { signed_in: false, why };
 }
 
@@ -341,7 +331,7 @@ async function finish(ctx, code, name) {
   if (!r.ok || !tok.access_token) return failed(ctx, `Sign-in failed: ${tok.error_description || tok.error || r.status}. Start again with sign_in.`);
   if (!tok.refresh_token) return failed(ctx, "The server gave no refresh token, so the sign-in wouldn't last. Start again with sign_in.");
   const acct = name || p.account || email(tok.id_token || "") || "default";
-  ctx.user.append("pending_done", {});
+  ctx.user.exec("delete from pending");
   const fields = {
     name: { value: acct }, access_token: { value: tok.access_token, secret: true }, refresh_token: { value: tok.refresh_token, secret: true },
     client_id: { value: p.client_id }, token_endpoint: { value: p.token_endpoint }, ...(p.resource ? { resource: { value: p.resource } } : {}),

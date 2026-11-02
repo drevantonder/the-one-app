@@ -75,7 +75,7 @@ export default {
         if (!s) throw new Error(`ai isn't installed for ${input.scope || "you"}`);
         if (input.scope === "global" && s.role !== "admin") throw new Error("only admins change everyone's AI");
         if (input.provider && !["local", "gemini"].includes(input.provider)) throw new Error("provider is local or gemini");
-        for (const key of Object.keys(DEFAULTS)) if (input[key] !== undefined) s.append("set", { key, value: input[key] });
+        for (const key of Object.keys(DEFAULTS)) if (input[key] !== undefined) s.exec("insert or replace into settings values (?, ?)", [key, JSON.stringify(input[key])]);
         return "Saved.";
       },
     },
@@ -132,10 +132,4 @@ export default {
     },
   },
 
-  on: {
-    set(db, e) {
-      if (e.scope === "global" && e.role !== "admin") return;
-      db.exec("insert or replace into settings values (?, ?)", [e.data.key, JSON.stringify(e.data.value)]);
-    },
-  },
 };

@@ -49,6 +49,17 @@ function refusal(repo, row, e, branch) {
   return null;
 }
 
+const randomId = () => [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
+
+/// Writes a new repo, or a fork of `from` with its branches (not suggestions) and history as they are now.
+function newRepo(ctx, g, { name, owner, from = null }) {
+  g.exec(`insert into repos (name, owner, "from", created, user) values (?, ?, ?, ?, ?)`, [name, owner, from, ctx.now(), ctx.me.user]);
+  if (from) {
+    g.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ? and branch not like '%@%'`, [name, ctx.me.user, ctx.me.name, ctx.now(), from]);
+    g.exec("insert or ignore into packs select ?, hash, time from packs where repo = ?", [name, from]);
+  }
+}
+
 /// What to call an owner, as far as the caller can tell: you, a group of theirs, admins.
 function ownerName(ctx, owner) {
   if (owner === `user:${ctx.me.user}`) return ctx.user?.name || "you";
@@ -201,7 +212,7 @@ export default {
         if (!NAME.test(name || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
         if (await repoOf(g, name)) throw new Error(`${name} already exists`);
         if (!actsFor(asWriter(ctx), owner)) throw new Error(`you don't act for ${owner}`);
-        g.append("repo", { name, owner });
+        newRepo(ctx, g, { name, owner });
         return `Created ${name}.`;
       },
     },
@@ -215,7 +226,7 @@ export default {
         if (!NAME.test(name || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
         if (await repoOf(g, name)) throw new Error(`${name} already exists`);
         if (!actsFor(asWriter(ctx), owner)) throw new Error(`you don't act for ${owner}`);
-        g.append("repo", { name, owner, from: repo });
+        newRepo(ctx, g, { name, owner, from: repo });
         return `Forked ${repo} as ${name}.`;
       },
     },
@@ -226,7 +237,7 @@ export default {
       async run(ctx, { repo }) {
         const r = await owned(ctx, repo);
         if (r.deleted) throw new Error(`${repo} is already in Recently Deleted`);
-        global(ctx).append("delete", { repo });
+        global(ctx).exec("update repos set deleted = ?, deleted_by = ? where name = ? and deleted is null", [ctx.now(), ctx.me.name, repo]);
         return `Deleted ${repo}: it's in Recently Deleted.`;
       },
     },
@@ -236,7 +247,7 @@ export default {
       async run(ctx, { repo }) {
         const r = await owned(ctx, repo);
         if (!r.deleted) throw new Error(`${repo} isn't deleted`);
-        global(ctx).append("restore", { repo });
+        global(ctx).exec("update repos set deleted = null, deleted_by = null where name = ?", [repo]);
         return `Restored ${repo}.`;
       },
     },
@@ -249,7 +260,10 @@ export default {
         const r = await owned(ctx, repo);
         if (!r.deleted) throw new Error(`delete ${repo} before erasing it`);
         const packs = await g.query("select hash from packs where repo = ? and hash not in (select hash from packs where repo != ?)", [repo, repo]);
-        g.append("erase", { repo });
+        // Erased, it's gone, and its name is free again; its forks keep their code, no longer forked from it.
+        for (const table of ["branches", "packs", "pushes"]) g.exec(`delete from ${table} where repo = ?`, [repo]);
+        g.exec("delete from repos where name = ?", [repo]);
+        g.exec(`update repos set "from" = null where "from" = ?`, [repo]);
         for (const p of packs) g.forget(p.hash);
         return `Erased ${repo}.`;
       },
@@ -267,7 +281,7 @@ export default {
         if (!r) {
           if (!NAME.test(repo || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
           r = { name: repo, owner: `user:${ctx.me.user}` };
-          g.append("repo", { name: repo, owner: r.owner });
+          newRepo(ctx, g, { name: repo, owner: r.owner });
         }
         if ((base && !SHA.test(base)) || (head && !SHA.test(head))) throw new Error("base and head are commit hashes");
         const row = (await g.query("select * from branches where repo = ? and branch = ?", [repo, branch]))[0];
@@ -276,52 +290,16 @@ export default {
         const { by } = split(branch);
         if (by && !row && by !== slug(ctx.user?.name) && by !== ctx.me.user) throw new Error(`suggestions are yours: push ${split(branch).base}@${slug(ctx.user?.name) || ctx.me.user}`);
         if ((row?.head ?? null) !== base) throw new Error(`${branch} has moved (it's at ${row?.head ?? "nothing"}): fetch, then push again`);
-        g.append("push", { repo, branch, base, head }, pack ? [pack] : []);
+        g.check("select (select head from branches where repo = ? and branch = ?) is ?", [repo, branch, base], `${branch} has moved: fetch, then push again`);
+        if (head) g.exec("insert or replace into branches values (?, ?, ?, ?, ?, ?)", [repo, branch, head, row?.user ?? ctx.me.user, ctx.me.name, ctx.now()]);
+        else g.exec("delete from branches where repo = ? and branch = ?", [repo, branch]);
+        if (pack) g.exec("insert or ignore into packs values (?, ?, ?)", [repo, pack, ctx.now()], [pack]);
+        g.exec("insert into pushes values (?, ?, ?, ?, ?, ?, ?, ?)", [randomId(), repo, branch, base, head, ctx.me.user, ctx.me.name, ctx.now()]);
         return head ? `${repo} ${branch} is at ${head.slice(0, 12)}.` : `Deleted ${branch} of ${repo}.`;
       },
     },
   },
 
-  on: {
-    delete(db, e) {
-      const r = db.query("select * from repos where name = ?", [e.data.repo])[0];
-      if (r && !r.deleted && actsFor(e, r.owner)) db.exec("update repos set deleted = ?, deleted_by = ? where name = ?", [e.time, e.name, r.name]);
-    },
-    restore(db, e) {
-      const r = db.query("select * from repos where name = ?", [e.data.repo])[0];
-      if (r?.deleted && actsFor(e, r.owner)) db.exec("update repos set deleted = null, deleted_by = null where name = ?", [r.name]);
-    },
-    // Erased, it's gone, and its name is free again; its forks keep their code, no longer forked from it.
-    erase(db, e) {
-      const r = db.query("select * from repos where name = ?", [e.data.repo])[0];
-      if (!r?.deleted || !actsFor(e, r.owner)) return;
-      for (const table of ["branches", "packs", "pushes"]) db.exec(`delete from ${table} where repo = ?`, [r.name]);
-      db.exec("delete from repos where name = ?", [r.name]);
-      db.exec(`update repos set "from" = null where "from" = ?`, [r.name]);
-    },
-    repo(db, e) {
-      const { name, owner, from } = e.data;
-      if (!NAME.test(name || "") || db.query("select 1 from repos where name = ?", [name]).length) return;
-      if (!actsFor(e, owner || "")) return;
-      if (from && !db.query("select 1 from repos where name = ?", [from]).length) return;
-      db.exec(`insert into repos (name, owner, "from", created, user) values (?, ?, ?, ?, ?)`, [name, owner, from || null, e.time, e.user]);
-      if (from) {
-        db.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ? and branch not like '%@%'`, [name, e.user, e.name, e.time, from]);
-        db.exec(`insert or ignore into packs select ?, hash, time from packs where repo = ?`, [name, from]);
-      }
-    },
-    push(db, e) {
-      const { repo, branch, base = null, head = null } = e.data;
-      const r = db.query("select * from repos where name = ?", [repo])[0];
-      if (!r || r.deleted) return;
-      const row = db.query("select * from branches where repo = ? and branch = ?", [repo, branch])[0];
-      if (refusal(r, row, e, branch) || (row?.head ?? null) !== base) return;
-      if (head) db.exec("insert or replace into branches values (?, ?, ?, ?, ?, ?)", [repo, branch, head, row?.user ?? e.user, e.name, e.time]);
-      else db.exec("delete from branches where repo = ? and branch = ?", [repo, branch]);
-      for (const hash of e.blobs) db.exec("insert or ignore into packs values (?, ?, ?)", [repo, hash, e.time]);
-      db.exec("insert into pushes values (?, ?, ?, ?, ?, ?, ?, ?)", [e.id, repo, branch, base, head, e.user, e.name, e.time]);
-    },
-  },
 
   screens: {
     main: page("Repos", mainScreen),

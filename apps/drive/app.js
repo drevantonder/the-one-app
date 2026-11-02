@@ -92,7 +92,8 @@ async function startSignIn(ctx, hint) {
   if (!client) throw noClient();
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
   const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-  ctx.user.append("pending", { verifier, client: client.id });
+  ctx.user.exec("delete from pending");
+  ctx.user.exec("insert into pending values (?, ?)", [verifier, client.id ?? null]);
   const q = new URLSearchParams({
     client_id: client.fields.client_id.value, redirect_uri: REDIRECT, response_type: "code", scope: SCOPES, access_type: "offline",
     prompt: "consent", include_granted_scopes: "true", code_challenge: challenge, code_challenge_method: "S256", ...(hint ? { login_hint: hint } : {}),
@@ -103,7 +104,7 @@ async function startSignIn(ctx, hint) {
 /// A sign-in that's over without an account: it answers why rather than failing, so its verifier is forgotten, as a
 /// failed call writes nothing.
 function failed(ctx, why) {
-  ctx.user.append("pending_done", {});
+  ctx.user.exec("delete from pending");
   return { signed_in: false, why };
 }
 
@@ -137,7 +138,7 @@ async function finishSignIn(ctx, given) {
   if (!tok.refresh_token) return failed(ctx, "Google didn't give a refresh token, so the sign-in wouldn't last; start again.");
   const email = emailOf(tok.id_token);
   if (!email) return failed(ctx, "Google didn't say which account signed in; start again.");
-  ctx.user.append("pending_done", {});
+  ctx.user.exec("delete from pending");
   const id = await ctx.vault.create({
     title: email, type: "Google account", domain: "google.com", hosts: [OAUTH], same: "email",
     fields: { email: { value: email }, refresh_token: { value: tok.refresh_token, secret: true }, scopes: { value: tok.scope || SCOPES }, client_id: { value: client.fields.client_id.value } },
@@ -147,13 +148,6 @@ async function finishSignIn(ctx, given) {
 }
 
 const signInSchema = { user: "create table pending (verifier text not null, client text);" };
-const signInOn = {
-  pending(db, e) {
-    db.exec("delete from pending");
-    db.exec("insert into pending values (?, ?)", [e.data.verifier, e.data.client ?? null]);
-  },
-  pending_done(db) { db.exec("delete from pending"); },
-};
 
 const signInOps = {
   accounts: {
@@ -277,7 +271,6 @@ export default {
     },
   },
 
-  on: signInOn,
 
   screens: {
     settings: { title: "Google Drive", html: settingsScreen("Google Drive", "Sign in to Google Drive, and apps like Claims save a copy of what you add to your own Drive.") },
