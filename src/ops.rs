@@ -581,7 +581,7 @@ fn mcp_file(v: &Value) -> Result<Value> {
         (resp.body_mut().with_config().limit(FILE_LIMIT as u64).read_to_vec()?, v["type"].as_str().map(str::to_string), name)
     } else if let Some(url) = v["url"].as_str() {
         ensure!(url.starts_with("https://") || url.starts_with("http://"), "a file's url is http or https");
-        let mut resp = crate::agent().get(url).call().with_context(|| format!("couldn't get {url}"))?;
+        let mut resp = fetch_file(url)?;
         ensure!(resp.status().is_success(), "{url} answered {}", resp.status());
         let ty = resp.headers().get("content-type").and_then(|t| t.to_str().ok()).map(|t| t.split(';').next().unwrap_or(t).to_string());
         let named = url.split(['?', '#']).next().and_then(|u| u.rsplit('/').next()).filter(|n| !n.is_empty()).map(str::to_string);
@@ -592,6 +592,50 @@ fn mcp_file(v: &Value) -> Result<Value> {
     let name = name.unwrap_or_default();
     let ty = ty.unwrap_or_else(|| mime(&name).to_string());
     Ok(json!({ "name": name, "type": ty, "size": bytes.len(), "base64": data_encoding::BASE64.encode(&bytes) }))
+}
+
+/// Gets a file an agent gave as a URL. For someone signed in elsewhere, only from the internet, each redirect too: this
+/// machine's addresses (its local API, which takes this server for its own programs), its network's and its tailnet's
+/// are its person's, not theirs.
+fn fetch_file(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
+    if !crate::signed_in() {
+        return crate::agent().get(url).call().with_context(|| format!("couldn't get {url}"));
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).build().into();
+    let mut at = url.to_string();
+    for _ in 0..10 {
+        let uri: ureq::http::Uri = at.parse().with_context(|| format!("{at} isn't a URL"))?;
+        let host = uri.host().with_context(|| format!("{at} has no host"))?.trim_matches(['[', ']']);
+        let port = uri.port_u16().unwrap_or(if uri.scheme_str() == Some("https") { 443 } else { 80 });
+        let addrs: Vec<_> = std::net::ToSocketAddrs::to_socket_addrs(&(host, port)).with_context(|| format!("couldn't find {host}"))?.collect();
+        ensure!(!addrs.is_empty() && addrs.iter().all(|a| on_the_internet(a.ip())), "{at} isn't on the internet: a file's url is public");
+        let resp = agent.get(&at).call().with_context(|| format!("couldn't get {at}"))?;
+        if !resp.status().is_redirection() {
+            return Ok(resp);
+        }
+        let to = resp.headers().get("location").and_then(|l| l.to_str().ok()).with_context(|| format!("{at} redirects nowhere"))?;
+        at = match to.starts_with('/') {
+            true => format!("{}://{}{to}", uri.scheme_str().unwrap_or("http"), uri.authority().map(|a| a.as_str()).unwrap_or(host)),
+            false => to.to_string(),
+        };
+        ensure!(at.starts_with("https://") || at.starts_with("http://"), "{url} redirects to {at}, which isn't http or https");
+    }
+    bail!("{url} redirects too many times")
+}
+
+/// Whether an address is on the internet: not this machine's, a private network's, a tailnet's (100.64.0.0/10,
+/// fd7a:115c:a1e0::/48) or a link's.
+fn on_the_internet(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            !(v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified() || v4.is_broadcast() || v4.is_multicast() || a == 0 || (a == 100 && (64..128).contains(&b)))
+        }
+        std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => on_the_internet(v4.into()),
+            None => !(v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() || v6.is_unique_local() || v6.is_unicast_link_local()),
+        },
+    }
 }
 
 /// A result as MCP content: text, or JSON with each file in it kept as a file this server serves, given back as a
@@ -636,5 +680,23 @@ fn keep_files(v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
         Value::Array(items) => items.iter_mut().for_each(|i| keep_files(i, shown, depth + 1)),
         Value::Object(map) => map.values_mut().for_each(|i| keep_files(i, shown, depth + 1)),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Someone signed in elsewhere can't have this server fetch a file from its own addresses, which would reach its
+    /// local API as this machine (the Vault, apps' code, sidecars' calls), or from its networks.
+    #[test]
+    fn a_sign_in_gets_files_only_from_the_internet() {
+        crate::SIGNED_IN.with(|t| *t.borrow_mut() = Some("a sign-in's token".into()));
+        for url in ["http://127.0.0.1:4747/v1/vault?scope=user", "http://localhost:4747/v1/source/board", "http://[::1]:4747/v1/state", "http://0.0.0.0:4747/v1/state", "http://192.168.0.1/", "http://100.100.100.100/", "http://[::ffff:127.0.0.1]:4747/v1/vault"] {
+            let err = mcp_file(&json!({ "url": url })).unwrap_err();
+            assert!(format!("{err:#}").contains("isn't on the internet"), "{url}: {err:#}");
+        }
+        crate::SIGNED_IN.with(|t| *t.borrow_mut() = None);
+        assert!(on_the_internet("1.1.1.1".parse().unwrap()) && on_the_internet("2606:4700:4700::1111".parse().unwrap()));
     }
 }
