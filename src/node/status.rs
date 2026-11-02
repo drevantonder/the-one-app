@@ -134,7 +134,7 @@ impl Node {
     /// Changes a scope's rows, then reads them back.
     pub(super) async fn say(&self, scope: &Scope, said: Said) -> Result<()> {
         let now = now_ms();
-        let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect())).await?;
+        let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect()), None).await?;
         db.lock()
             .await
             .write(&self.bucket()?, |c| {
@@ -182,7 +182,7 @@ impl Node {
 
     /// Reads a scope's rows into its `Status`, up to date.
     pub(super) async fn read_status(&self, scope: &Scope) -> Result<()> {
-        let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect())).await?;
+        let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect()), None).await?;
         let mut db = db.lock().await;
         db.catch_up(&self.bucket()?).await?;
         let rows = |sql: &str| db.query(sql, &[]);

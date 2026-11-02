@@ -137,7 +137,7 @@ export class Schedules extends DurableObject {
     const { app, name, scope, op, node } = body;
     if (!NAME.test(app || "") || !NAME.test(name || "")) refuse(400, "name the app and its schedule");
     if (typeof op !== "string" || !op) refuse(400, "name the op it runs");
-    if (typeof node !== "string" || !node.startsWith("https://")) refuse(400, "name the node that runs it, by its https address");
+    if (typeof node !== "string" || !node.startsWith("https://")) refuse(400, "name where it runs: the install's address, or a node's, over https");
     const w = when(body);
     const title = String(body.title || name);
     const what = String(body.what || app);
@@ -217,7 +217,7 @@ export class Schedules extends DurableObject {
       if (err.status === 404) this.sql.exec("update schedules set next = null where id = ?", row.id);
       return finish("failed", err.message);
     }
-    const resp = await fetch(new URL("/kernel/run", row.node), {
+    const resp = await fetch(`${row.node.replace(/\/$/, "")}/v1/kernel/run`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${session.token}` },
       body: JSON.stringify({ run, app: row.app, schedule: row.name, op: row.op, input: JSON.parse(row.input), scope: row.scope }),

@@ -10,7 +10,7 @@
 // /internal/, with the kernel's shared secret. Everyone else brings an access token.
 
 import { DurableObject } from "cloudflare:workers";
-import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, random, sealAppKey, sealTo, sealUnder } from "../shared/crypto.js";
+import { b64u, databaseKey, hkdf, idOf, keyPair, openAppKey, openSealed, openUnder, random, sealAppKey, sealTo, sealUnder } from "../shared/crypto.js";
 import { bucketUrls } from "../shared/s3.js";
 import { Items, schema } from "./items.js";
 import { bearer, Issuer } from "../shared/token.js";
@@ -351,7 +351,7 @@ export class Vault extends DurableObject {
       if (!NAME.test(want.app || "")) refuse(400, `${want.app} isn't an app's name`);
       mayUse(held, want.app);
       if (want.database !== undefined && !NAME.test(want.database)) refuse(400, `${want.database} isn't a database's name`);
-      let key = await this.appKey(want.scope, await this.scopeKey(held, want.scope), want.app);
+      let key = await this.appKey(want.scope, await this.scopeKey(held, want.scope), want.app, want.database);
       if (want.database !== undefined) key = await databaseKey(key, want.database);
       out.push({ ...pick(want), key: b64u.encode(key) });
     }
@@ -364,13 +364,18 @@ export class Vault extends DurableObject {
   }
 
   /// An app's key in a scope, kept in the bucket beside its data, sealed under the scope's key: the first to need it
-  /// (the vault, or a node) makes it at random, and whichever is written first is the key.
-  async appKey(scope, scopeKey, app) {
+  /// (the vault, or a node) makes it, and whichever is written first is the key. As a node makes it (src/db.rs:
+  /// `app_key`), it's random, unless `database` was written before app keys were: then it's the key derived from the
+  /// scope's that its data was sealed with, so it still opens.
+  async appKey(scope, scopeKey, app, database) {
     const name = appKeyName(scope, app);
-    const urls = await bucketUrls(this.bucket(), { read: [name], create: [name] }, 60);
+    const prefix = `${folderOf(scope)}/${app}/${database}`;
+    const earlier = database === undefined ? [] : [`${prefix}/newest`, `${prefix}/000000000001`];
+    const urls = await bucketUrls(this.bucket(), { read: [name, ...earlier], create: [name] }, 60);
     let resp = await fetch(urls.read[name]);
     if (resp.status === 404) {
-      const key = random(32);
+      const written = (await Promise.all(earlier.map((n) => fetch(urls.read[n]).then((r) => r.ok)))).some(Boolean);
+      const key = written ? await hkdf(scopeKey, `one/app\0${app}`) : random(32);
       const made = await fetch(urls.create[name], { method: "PUT", headers: { "if-none-match": "*" }, body: await sealAppKey(scopeKey, app, key) });
       if (made.ok) return key;
       if (made.status !== 412) refuse(502, `the bucket said ${made.status} to making ${app}'s key`);

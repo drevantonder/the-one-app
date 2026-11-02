@@ -348,7 +348,7 @@ async fn the_apps_decode_what_the_node_sends() {
     };"##;
     let bundle = one::bundle::pack(&[("app.js".into(), source.as_bytes().to_vec()), ("src/app.js".into(), source.as_bytes().to_vec())]).unwrap();
     let blob = node.put_blob(&bundle).unwrap();
-    let me = one::node::Caller { key: node.id(), user: node.user().unwrap(), agent: None };
+    let me = one::node::Caller { key: node.id(), user: node.user().unwrap(), agent: None, token: None };
     node.member("app", json!({ "name": "lamps", "owner": format!("user:{}", me.user) })).await.unwrap();
     node.deploy(&me, "lamps", &blob).await.unwrap();
     node.member("app", json!({ "name": "lamps", "owner": format!("user:{}", me.user), "source": "https://example.com/lamps" })).await.unwrap();

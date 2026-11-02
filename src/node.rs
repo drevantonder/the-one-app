@@ -29,6 +29,8 @@ use crate::replica::{Handled, Replica};
 use crate::vault;
 
 mod backups;
+mod scheduled;
+mod sessions;
 mod status;
 mod storage;
 mod tunnel;
@@ -202,6 +204,9 @@ pub struct Caller {
     pub user: String,
     /// The agent that asked through it, by name ("Claude Code"), when one did.
     pub agent: Option<String>,
+    /// The kernel access token it came with, when it's a sign-in's (or a run the schedules service handed in): a call
+    /// gets its keys and bucket URLs from the vault with it, and passes it on with the call to another server.
+    pub token: Option<String>,
 }
 
 /// An operation to run: of an app, or of a sidecar.
@@ -341,6 +346,8 @@ pub struct Inner {
     hinted: Mutex<HashMap<String, u64>>,
     /// The bundles this server has put in the bucket, or found there.
     shared: Mutex<std::collections::HashSet<String>>,
+    /// What the vault gave this server for the sign-ins its calls came with.
+    sessions: sessions::Sessions,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -447,6 +454,7 @@ impl Node {
             written: Mutex::new(HashMap::new()),
             hinted: Mutex::new(HashMap::new()),
             shared: Mutex::new(Default::default()),
+            sessions: Default::default(),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -633,7 +641,7 @@ impl Node {
             i.read = true;
             Ok(())
         })?;
-        let me = Caller { key: self.0.id, user, agent: None };
+        let me = Caller { key: self.0.id, user, agent: None, token: None };
         for app in apps {
             self.bring_in(&me, app).await?;
             self.append(&Scope::Global, members::node("install", json!({ "app": app }))).await?;
@@ -789,7 +797,7 @@ impl Node {
 
     /// Runs an operation for this server's local user: here, or on the nearest server that can.
     pub async fn call(&self, req: CallRequest) -> Result<Value> {
-        self.call_as(req, Caller { key: self.0.id, user: self.user()?, agent: None }).await
+        self.call_as(req, Caller { key: self.0.id, user: self.user()?, agent: None, token: None }).await
     }
 
     /// Runs an operation for `me`, whom this server acts for: here, or on the nearest server that can.
@@ -998,7 +1006,7 @@ impl Node {
             let _ = self.with(|i| Ok(i.far.insert(server, rtt)));
         }
         let (mut send, mut recv) = conn.open_bi().await?;
-        let request = json!({ "app": req.app, "sidecar": req.sidecar, "driver": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
+        let request = json!({ "app": req.app, "sidecar": req.sidecar, "driver": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": me.token } });
         send.write_all(&serde_json::to_vec(&request)?).await?;
         send.finish()?;
         let reply = tokio::time::timeout(self.limit(req).await + Duration::from_secs(5), recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
@@ -1060,11 +1068,16 @@ impl Node {
             self.record(&req.app, req, me, Some(&why));
             return Ok(Reply::Error(why));
         }
+        // The vault is asked once for the keys of every scope a sign-in's call names, which its session keeps here.
+        let want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), DATABASE)).collect();
+        if let Err(err) = self.session_keys(me, &want).await {
+            tracing::debug!("{}'s keys for {}: {err:#}", me.user, req.app);
+        }
         // A call that writes, tried on another server before this one, ran there if it took the lease first.
         if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);
             let lease = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
-            if !reads && !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
+            if !reads && !crate::bucket::Bucket::create(&self.call_bucket(me)?, &lease, hex(&self.0.id).as_bytes()).await? {
                 return Ok(Reply::Error("it ran on another server already, whose answer was lost: look before trying again".into()));
             }
         }
@@ -1101,9 +1114,11 @@ impl Node {
         Ok(Copied::moving(place, self.install_dir().join("copy"), self.0.moved.clone()))
     }
 
-    /// A database's key: `app`'s `database` in `scope`. The one place keys come from, until the kernel's vault gives
-    /// them: from the app's key, in the bucket sealed under the scope's.
+    /// A database's key, `app`'s `database` in `scope`, as this server opens it with its own keys: from the app's key,
+    /// in the bucket sealed under the scope's. A call that came with a token gets its keys from the vault instead
+    /// (`sessions`); this is for this server's own work, and installs with no kernel.
     async fn database_key(&self, scope: &Scope, app: &str, database: &str) -> Result<[u8; 32]> {
+        tracing::debug!("opening {scope}'s {app}/{database} with this server's own key");
         let scope_key = self.scope_key(scope).await?;
         let app_key = crate::db::app_key(&self.bucket()?, &scope_key, &scope.to_string(), app, database).await?;
         Ok(crate::kernel::database_key(&app_key, database))
@@ -1238,10 +1253,9 @@ impl Node {
     /// what they write with their pings, and `fill_copies` keeps up with the bucket. Only when a ping said it changed
     /// without sending what is the bucket asked first, and if it doesn't answer, the copy is read as it is: behind,
     /// never wrong.
-    async fn read_ready(&self, id: &(Scope, String), db: &mut Db) -> Result<()> {
-        let bucket = self.bucket()?;
+    async fn read_ready(&self, id: &(Scope, String), db: &mut Db, bucket: &Copied) -> Result<()> {
         if self.0.behind.lock().unwrap().remove(id) {
-            match tokio::time::timeout(BUCKET_WAIT, db.catch_up(&bucket)).await {
+            match tokio::time::timeout(BUCKET_WAIT, db.catch_up(bucket)).await {
                 Ok(Ok(_)) => return Ok(()),
                 Ok(Err(err)) => tracing::debug!("{}: reading this server's copy, as the bucket said {err:#}", db.prefix()),
                 Err(_) => tracing::debug!("{}: reading this server's copy, as the bucket didn't answer", db.prefix()),
@@ -1291,14 +1305,22 @@ impl Node {
     }
 
     /// `app`'s `database` of `scope`, opened from the bucket the first time and brought to `schema`, or else to the
-    /// app's deploy's.
-    async fn database(&self, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>) -> Result<Arc<tokio::sync::Mutex<Db>>> {
+    /// app's deploy's: with this server's own key, or `given`, a key the vault gave a call's session, with the bucket
+    /// as that call reaches it.
+    async fn database(&self, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>, given: Option<([u8; 32], &Copied)>) -> Result<Arc<tokio::sync::Mutex<Db>>> {
         let id = (scope.clone(), format!("{app}/{database}"));
-        if let Some(db) = self.0.dbs.lock().unwrap().get(&id).cloned() {
-            return Ok(db);
+        let cached = self.0.dbs.lock().unwrap().get(&id).cloned();
+        if let Some(db) = cached {
+            match given {
+                None => return Ok(db),
+                Some((key, _)) if db.lock().await.opens_with(&key) => return Ok(db),
+                Some(_) => {}
+            }
         }
-        let bucket = self.bucket()?;
-        let key = self.database_key(scope, app, database).await?;
+        let (key, bucket) = match given {
+            Some((key, bucket)) => (key, bucket.clone()),
+            None => (self.database_key(scope, app, database).await?, self.bucket()?),
+        };
         let mut db = Db::open(&bucket, &format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string())), key).await?;
         let schema = match schema {
             Some(schema) => schema,
@@ -1313,7 +1335,11 @@ impl Node {
         };
         db.migrate(&bucket, &schema).await?;
         let db = Arc::new(tokio::sync::Mutex::new(db));
-        Ok(self.0.dbs.lock().unwrap().entry(id).or_insert(db).clone())
+        let mut dbs = self.0.dbs.lock().unwrap();
+        match dbs.get(&id) {
+            Some(open) if open.try_lock().is_ok_and(|d| d.opens_with(&key)) => Ok(open.clone()),
+            _ => Ok(dbs.entry(id).insert_entry(db).get().clone()),
+        }
     }
 
     // Insights.
@@ -1438,6 +1464,7 @@ impl Node {
                 self.write_insight(to, me, said);
             }
         }
+        let schedules_changed = appends.iter().any(|a| matches!(a, Append::Install { .. } | Append::Switch { .. }));
         let (installs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
         let (execs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Exec { .. }));
         // Each scope's statements, in the order the call ran them, and the blobs they keep.
@@ -1462,8 +1489,7 @@ impl Node {
         }
         let wrote = !statements.is_empty();
         for (scope, list, kept) in statements {
-            let db = self.database(&scope, app, DATABASE, None).await?;
-            let bucket = self.bucket()?;
+            let (db, bucket) = self.call_database(me, &scope, app, DATABASE, None).await?;
             let mut db = db.lock().await;
             let at = db.at();
             db.write(&bucket, |c| crate::db::statements(c, &list)).await?;
@@ -1487,6 +1513,9 @@ impl Node {
         let by = (me.key != self.0.id).then_some(me.key);
         for (scope, content) in writes {
             self.append_as(&scope, &me.user, by, content).await?;
+        }
+        if schedules_changed && self.schedules_service().is_some() && me.token.is_some() {
+            self.sync_schedules_later(me);
         }
         Ok(())
     }
@@ -1534,10 +1563,10 @@ impl Node {
         vault::blot(&mut answer.ok, &used.into_inner().unwrap());
         let scope = Scope::User(user.clone());
         if !answer.records.is_empty() {
-            let db = self.database(&scope, app, SIDECAR_DATABASE, Some(vec![crate::sidecars::RECORDS.into()])).await?;
+            let (db, bucket) = self.call_database(me, &scope, app, SIDECAR_DATABASE, Some(vec![crate::sidecars::RECORDS.into()])).await?;
             let (time, by, device) = (now_ms(), caller.user_name.clone(), caller.name.clone());
             let mut db = db.lock().await;
-            db.write(&self.bucket()?, |c| {
+            db.write(&bucket, |c| {
                 for (kind, data) in &answer.records {
                     let row = [json!(kind), json!(data.to_string()), json!(time), json!(by), json!(device)];
                     crate::db::execute(c, "insert into records (kind, data, time, by, device) values (?, ?, ?, ?, ?)", &row)?;
@@ -1652,6 +1681,7 @@ impl Node {
                     tracing::debug!("reading the bucket: {err:#}");
                 }
                 self.fill_copies().await;
+                self.forget_sessions();
                 self.read_all_status();
             }
             if tick % 6 == 0 && self.has_install() {
@@ -1685,6 +1715,10 @@ impl Node {
     /// holds where the app is installed, as whoever installed it there or switched the schedule on since. A server
     /// waits `GRACE` for each server before it in line that it's connected to; one it can't reach doesn't count.
     async fn run_schedules(&self) -> Result<()> {
+        // An install with a kernel runs them from its schedules service, with only the keys each was let use.
+        if self.schedules_service().is_some() {
+            return Ok(());
+        }
         let now = now_ms();
         let declared = self.declared().await;
         let due = self.with(|i| {
@@ -1747,7 +1781,7 @@ impl Node {
             Err(err) => Reply::Error(format!("{err:#}")),
             Ok(()) => {
                 let req = CallRequest { app: app.into(), op: schedule.op.clone(), input: schedule.input.clone(), scopes: Some(vec![scope.to_string()]), client: Some("schedule".into()), ..Default::default() };
-                self.run(&req, &Caller { key: self.0.id, user: user.into(), agent: None }).await
+                self.run(&req, &Caller { key: self.0.id, user: user.into(), agent: None, token: None }).await
             }
         };
         let (ok, error) = match reply {
@@ -2438,7 +2472,7 @@ impl Node {
         let key = format!("{app}/{name}/{session}");
         let since = seen.get(&key).cloned().unwrap_or(Value::Null);
         let now = now_ms();
-        let caller = Caller { key: self.0.id, user: self.user()?, agent: None };
+        let caller = Caller { key: self.0.id, user: self.user()?, agent: None, token: None };
         let mut ctx = self.read_context(app, &caller)?;
         let _granted = self.grant(app, &caller, &mut ctx, 0);
         let out = self.0.apps.hook(app, name, json!({ "event": event, "since": since }), &ctx).await?;
@@ -2722,6 +2756,9 @@ impl Node {
         for (scope, content) in self.install_entries(caller, app, scope, installed).await? {
             self.append_as(&scope, &caller.user, by, content).await?;
         }
+        if self.schedules_service().is_some() && caller.token.is_some() {
+            self.sync_schedules_later(caller);
+        }
         Ok(())
     }
 
@@ -2747,8 +2784,13 @@ impl Node {
     /// Switches one of an app's schedules on or off in `scope`, for `caller`; switching one on makes it run as them.
     pub async fn switch_schedule(&self, caller: &Caller, app: &str, schedule: &str, scope: &Scope, on: bool) -> Result<()> {
         let content = self.with(|i| switch_entry(i, &caller.user, scope, app, schedule, on))?;
+        let kernel = self.schedules_service().is_some();
+        ensure!(!kernel || caller.token.is_some(), "sign in first ({} sign-in): schedules here run from your One App's kernel, with what your sign-in lets them use", crate::config::CLI);
         let by = (caller.key != self.0.id).then_some(caller.key);
         self.append_as(scope, &caller.user, by, content).await?;
+        if kernel {
+            self.sync_schedules(caller).await.context("it's switched, but the schedules service didn't take it")?;
+        }
         Ok(())
     }
 
@@ -2794,11 +2836,11 @@ impl Node {
                 let scope = Scope::parse(req["scope"].as_str().unwrap_or(""))?;
                 ensure!(grant.scopes.contains(&scope), "the call didn't name {scope}");
                 let params = req["params"].as_array().cloned().unwrap_or_default();
-                let db = self.database(&scope, &grant.app, DATABASE, None).await?;
+                let (db, bucket) = self.call_database(&grant.caller, &scope, &grant.app, DATABASE, None).await?;
                 let mut db = db.lock().await;
                 // Once a call, so it reads one state of the scope throughout.
                 if !grant.caught_up.contains(&scope) {
-                    self.read_ready(&(scope.clone(), format!("{}/{DATABASE}", grant.app)), &mut db).await?;
+                    self.read_ready(&(scope.clone(), format!("{}/{DATABASE}", grant.app)), &mut db, &bucket).await?;
                     if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
                         g.caught_up.push(scope.clone());
                     }
@@ -2915,7 +2957,7 @@ impl Node {
     /// Everything a shell needs to draw this server and its install, for this server's local user.
     pub fn state(&self) -> Value {
         let user = self.user().unwrap_or_default();
-        self.state_for(&Caller { key: self.0.id, user, agent: None })
+        self.state_for(&Caller { key: self.0.id, user, agent: None, token: None })
     }
 
     /// The state as `viewer`, this server or a client it serves, sees it.
@@ -3034,7 +3076,7 @@ impl Node {
 
     /// Writes one of `global`'s node entries as the local user, after checking it would count.
     pub async fn member(&self, kind: &str, data: Value) -> Result<()> {
-        self.member_as(&Caller { key: self.0.id, user: self.user()?, agent: None }, kind, data).await
+        self.member_as(&Caller { key: self.0.id, user: self.user()?, agent: None, token: None }, kind, data).await
     }
 
     /// The same, as `caller`, whose rights it's checked against.
@@ -3114,7 +3156,7 @@ impl Node {
             let Some(user) = user else { return Ok(()) };
             let _ = self.with(|i| Ok(i.asked.insert(caller, now_ms())));
             let node = self.clone();
-            let me = Caller { key: caller, user, agent: None };
+            let me = Caller { key: caller, user, agent: None, token: None };
             tokio::spawn(async move {
                 let result = async {
                     let request: Value = serde_json::from_slice(&recv.read_to_end(MESSAGE_LIMIT).await?)?;
@@ -3265,7 +3307,7 @@ impl Node {
 
     /// Makes a one-time pairing code for another of the local user's machines, or, for an admin, a new user's.
     pub fn pair(&self, new_user: Option<(String, Role)>) -> Result<String> {
-        Ok(self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None }, new_user, None)?.0)
+        Ok(self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None, token: None }, new_user, None)?.0)
     }
 
     /// Like `pair`, for `asker`, or for an admin, a code for another machine of `user` (an id or a name). With the id
@@ -3387,7 +3429,7 @@ impl Node {
         let by = pairing.by.as_deref().map(unhex).transpose()?;
         let new_user = pairing.new_user.as_ref().map(|(name, role)| (name.as_str(), *role));
         let admit = members::admit(&key, &user, &request.name, server, new_user);
-        self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None }, "admit", admit.data).await.context("this server can no longer admit that machine")?;
+        self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, "admit", admit.data).await.context("this server can no longer admit that machine")?;
         Ok(JoinReply { root, user, bucket })
     }
 
@@ -3490,7 +3532,7 @@ impl Node {
     fn ping(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
         let Ok((servers, me)) = self.with(|i| {
             let m = &i.r.members;
-            Ok((m.servers().filter(|s| s.key != self.0.id && m.holds(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>(), Caller { key: self.0.id, user: i.user.clone(), agent: None }))
+            Ok((m.servers().filter(|s| s.key != self.0.id && m.holds(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>(), Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }))
         }) else {
             return;
         };
@@ -3528,7 +3570,7 @@ impl Node {
     fn say_hello(&self) {
         let Ok((servers, me, sidecars)) = self.with(|i| {
             let servers: Vec<Key> = i.r.members.servers().map(|s| s.key).filter(|k| *k != self.0.id).collect();
-            Ok((servers, Caller { key: self.0.id, user: i.user.clone(), agent: None }, self.sidecars_here(i)))
+            Ok((servers, Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }, self.sidecars_here(i)))
         }) else {
             return;
         };
@@ -3546,7 +3588,11 @@ impl Node {
         let (mut send, mut recv) = conn.accept_bi().await?;
         let request: Value = serde_json::from_slice(&recv.read_to_end(MESSAGE_LIMIT).await?)?;
         let reply = match self.check_caller(remote, &request) {
-            Ok(me) => {
+            Ok(mut me) => {
+                // A sign-in's token goes along with its call: one that isn't the caller's is taken as none.
+                if let Some(token) = request["me"]["token"].as_str() {
+                    me.token = self.token_of(token, &me.user).await;
+                }
                 let mut req: CallRequest = serde_json::from_value(request)?;
                 // Only a server says an app made a call (whose items fill it in), and how deep it is.
                 if !self.with(|i| Ok(i.r.members.trusts(&me.user, &remote)))? {
@@ -3573,7 +3619,7 @@ impl Node {
             Ok(())
         })?;
         let agent = request["me"]["agent"].as_str().map(str::to_string);
-        Ok(Caller { key, user, agent })
+        Ok(Caller { key, user, agent, token: None })
     }
 
     /// Finds a server of the install by name or key prefix.
@@ -4057,9 +4103,9 @@ impl Node {
     async fn records(&self, app: &str) -> Result<Vec<crate::sidecars::Record>> {
         let user = self.user()?;
         let scope = Scope::User(user);
-        let db = self.database(&scope, app, SIDECAR_DATABASE, Some(vec![crate::sidecars::RECORDS.into()])).await?;
+        let db = self.database(&scope, app, SIDECAR_DATABASE, Some(vec![crate::sidecars::RECORDS.into()]), None).await?;
         let mut db = db.lock().await;
-        self.read_ready(&(scope, format!("{app}/{SIDECAR_DATABASE}")), &mut db).await?;
+        self.read_ready(&(scope, format!("{app}/{SIDECAR_DATABASE}")), &mut db, &self.bucket()?).await?;
         let rows = db.query("select * from records order by n", &[])?;
         Ok(rows
             .into_iter()

@@ -97,6 +97,11 @@ impl Db {
         self.at
     }
 
+    /// Whether it was opened with `key`.
+    pub fn opens_with(&self, key: &[u8; 32]) -> bool {
+        self.key == *key
+    }
+
     pub fn prefix(&self) -> &str {
         &self.prefix
     }

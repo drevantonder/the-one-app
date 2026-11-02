@@ -198,7 +198,7 @@ impl Node {
             for admin in &admins {
                 let input = json!({ "title": "Backups", "body": format!("{} {}", p.text, p.fix) });
                 let call = CallRequest { app: push.clone(), sidecar: Some(push.clone()), op: "send".into(), input, client: Some("app".into()), ..Default::default() };
-                match Box::pin(self.route(call, Caller { key: me, user: admin.clone(), agent: None })).await {
+                match Box::pin(self.route(call, Caller { key: me, user: admin.clone(), agent: None, token: None })).await {
                     Ok(sent) => tracing::info!("told {admin} about backups: {sent}"),
                     Err(err) => tracing::warn!("couldn't tell {admin} about backups: {err:#}"),
                 }

@@ -241,9 +241,9 @@ fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
     v.internal("grant", json!({ "user": SAM, "from": "sam's own passkey prf output", "to": "sam's authorization code", "client": "iphone" }));
     let (sam, until) = v.token(SAM, "iphone");
     v.internal("rekey", json!({ "from": "sam's authorization code", "to": "sam's refresh token", "token": sam, "until": until }));
-    let andre = vault.keys(&token, &[("global", "board", None)]).unwrap();
-    assert_eq!(vault.keys(&sam, &[("global", "board", None)]).unwrap(), andre);
-    assert!(vault.keys(&sam, &[(&format!("user:{ANDRE}"), "board", None)]).is_err());
+    let andre = vault.keys_until(&token, &[("global", "board", None)]).map(|k| k.0).unwrap();
+    assert_eq!(vault.keys_until(&sam, &[("global", "board", None)]).map(|k| k.0).unwrap(), andre);
+    assert!(vault.keys_until(&sam, &[(&format!("user:{ANDRE}"), "board", None)]).is_err());
 }
 
 #[test]
@@ -261,8 +261,14 @@ fn the_vault_given_the_installs_keys_opens_what_its_nodes_wrote() {
     // An admin's machine gives the vault Everyone's key, for Andre and for Sam, who has no keys here yet.
     let (status, out) = v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&global), "people": [ANDRE, SAM] }));
     assert_eq!((status, out["granted"].clone()), (200, json!([ANDRE])), "{out}");
-    let given = vault.keys(&token, &[("global", "board", Some("main"))]).unwrap();
+    let given = vault.keys_until(&token, &[("global", "board", Some("main"))]).unwrap().0;
     assert_eq!(given[0].key, kernel::database_key(&board, "main"), "the vault opens the Board the nodes wrote");
+
+    // An app whose data was written before app keys were random has no key in the bucket: the vault keys it as the
+    // nodes do, with the key its data was sealed with, never a new one that would open nothing.
+    agent.put(format!("{}/install/global/notes/main/000000000001", v.sites)).send(&b"a step"[..]).unwrap();
+    let given = vault.keys_until(&token, &[("global", "notes", Some("main"))]).unwrap().0;
+    assert_eq!(given[0].key, kernel::database_key(&kernel::derived_app_key(&global, "notes"), "main"), "the vault opens the Notes the nodes wrote");
 
     // Once a key under it was given out, its key stays.
     assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [ANDRE] })).0, 409);
@@ -739,19 +745,19 @@ fn signing_out_ends_a_clients_sessions_at_the_vault() {
     let (fresh, until) = v.token(ANDRE, "web");
     assert_eq!(v.internal("rekey", json!({ "from": format!("web's refresh token for {ANDRE}"), "to": "the laptop's next refresh token", "token": fresh, "until": until })).1["moved"], true);
     let board = [("global", "board", None)];
-    assert!(vault.keys(&laptop, &board).is_ok() && vault.keys(&fresh, &board).is_ok());
+    assert!(vault.keys_until(&laptop, &board).is_ok() && vault.keys_until(&fresh, &board).is_ok());
 
     // The laptop signs out: auth revokes its refresh token, and no access token it was given gets keys again.
     assert_eq!(v.internal("forget", json!({ "secret": "the laptop's next refresh token" })).0, 200);
     for token in [&laptop, &fresh] {
-        assert!(vault.keys(token, &board).is_err(), "a signed-out client's session still gets keys");
+        assert!(vault.keys_until(token, &board).is_err(), "a signed-out client's session still gets keys");
         assert_eq!(v.ask(token, "GET", "/session", json!(null)).0, 403);
     }
-    assert!(vault.keys(&phone, &board).is_ok(), "signing out one browser signs out another");
+    assert!(vault.keys_until(&phone, &board).is_ok(), "signing out one browser signs out another");
 
     // Removing the phone from Andre's clients ends its session too.
     let (_, copies) = v.ask(&phone, "GET", "/copies", json!(null));
     let id = copies["copies"].as_array().unwrap().iter().find(|c| c["kind"] == "client").unwrap()["id"].as_str().unwrap().to_string();
     assert_eq!(v.ask(&phone, "DELETE", &format!("/copies/{id}"), json!(null)).0, 200);
-    assert!(vault.keys(&phone, &board).is_err(), "a removed client's session still gets keys");
+    assert!(vault.keys_until(&phone, &board).is_err(), "a removed client's session still gets keys");
 }

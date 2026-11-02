@@ -245,7 +245,7 @@ pub struct Session {
     pub until: u64,
 }
 
-/// A run the schedules service hands a node: `POST <node>/kernel/run`, its token as the bearer. `run` names
+/// A run the schedules service hands a node: `POST <address>/v1/kernel/run`, its token as the bearer. `run` names
 /// it, the same each time it's sent, so a node that leases by it runs it once.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Run {
@@ -285,9 +285,11 @@ impl Vault {
         Ok(serde_json::from_value(out)?)
     }
 
-    /// The keys a call names: (scope, app, database?) each.
-    pub fn keys(&self, token: &str, want: &[(&str, &str, Option<&str>)]) -> Result<Vec<Key>> {
-        keys_given(&self.post(token, "/keys", keys_asked(want))?)
+    /// The keys a call names, (scope, app, database?) each, and until when (milliseconds) the session that gave them
+    /// lasts.
+    pub fn keys_until(&self, token: &str, want: &[(&str, &str, Option<&str>)]) -> Result<(Vec<Key>, u64)> {
+        let out = self.post(token, "/keys", keys_asked(want))?;
+        Ok((keys_given(&out)?, out["until"].as_u64().context("the vault didn't say until when")?))
     }
 
     /// URLs to read and create objects named `<scope's folder>/<app>/…` (or `log/…`, the install's log), and to

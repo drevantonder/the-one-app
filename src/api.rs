@@ -67,6 +67,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
         .route("/v1/kernel/keys", post(kernel_keys))
+        .route("/v1/kernel/run", post(kernel_run))
         .route("/v1/storage", get(storage_get).post(storage_post))
         .route("/v1/storage/{op}", post(storage_post))
         .route("/v1/tunnel", get(tunnel_get).post(tunnel_post))
@@ -144,6 +145,8 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/member",
     "/v1/backups",
     "/v1/backups/{op}",
+    // A run the schedules service hands in, with its own token.
+    "/v1/kernel/run",
 ];
 
 /// The skills for this machine's person (src/skills.rs).
@@ -250,6 +253,10 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
         if !SIGNED_IN.contains(&path.as_str()) && !from_this_machine(&req) {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response();
         }
+        // A run the schedules service hands in brings a token for that alone.
+        if token.starts_with("run.") != (path == "/v1/kernel/run") {
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": "only a scheduled run asks that, and it asks nothing else" }))).into_response();
+        }
         return match signed_in(&node, token).await {
             Ok(me) => {
                 req.extensions_mut().insert(me);
@@ -313,7 +320,7 @@ fn done() -> Reply {
 }
 
 fn local(node: &Node) -> Result<Caller, Error> {
-    Ok(Caller { key: node.id(), user: node.user()?, agent: None })
+    Ok(Caller { key: node.id(), user: node.user()?, agent: None, token: None })
 }
 
 /// Who asked: this machine's own user, or someone signed in with the kernel, whom this server acts for.
@@ -337,10 +344,10 @@ impl axum::extract::FromRequestParts<Node> for Me {
 
 /// Sign-ins checked lately, by their token's hash, until they expire.
 static SIGNED_INS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>> = std::sync::LazyLock::new(Default::default);
-static ISSUER: std::sync::Mutex<Option<std::sync::Arc<crate::kernel::Issuer>>> = std::sync::Mutex::new(None);
 
 /// Whom a kernel access token is for: one the auth service at the install's address signed for it, whose session at
-/// the vault is open, for a person of the install.
+/// the vault is open, for a person of the install. A scheduled run's token (`run.…`) is no access token: only the
+/// vault says whose it is.
 async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     use sha2::Digest;
     let now = crate::node::now_ms();
@@ -349,33 +356,42 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
         return Ok(me.clone());
     }
     let (address, vault) = node.kernel()?;
-    let issuer = {
-        let mut kept = ISSUER.lock().unwrap();
-        match kept.as_ref().filter(|i| i.iss == crate::kernel::Issuer::new(&address).iss) {
-            Some(issuer) => issuer.clone(),
-            None => kept.insert(std::sync::Arc::new(crate::kernel::Issuer::new(&address))).clone(),
+    let issuer = node.issuer()?;
+    let asked = token.clone();
+    let (user, until, session) = tokio::task::spawn_blocking(move || {
+        let vault = crate::kernel::Vault { url: vault };
+        if asked.starts_with("run.") {
+            let session = vault.session(&asked)?;
+            anyhow::ensure!(session.client.as_deref() == Some("schedules"), "that token isn't a scheduled run's");
+            return Ok((session.user.clone(), session.until, session));
         }
-    };
-    let (claims, session) = tokio::task::spawn_blocking(move || {
-        let claims = issuer.verify(&token, now)?;
+        let claims = issuer.verify(&asked, now)?;
         // MCP clients sign in for the address's MCP endpoint, as MCP names a server.
         let address = address.trim_end_matches('/');
         anyhow::ensure!(claims.for_resource(address) || claims.for_resource(&format!("{address}/mcp")), "that sign-in isn't for {address}");
-        let session = crate::kernel::Vault { url: vault }.session(&token)?;
+        let session = vault.session(&asked)?;
         anyhow::ensure!(session.user == claims.sub, "that sign-in's session is someone else's");
-        Ok((claims, session))
+        Ok((claims.sub, (claims.exp * 1000).min(session.until), session))
     })
     .await??;
-    anyhow::ensure!(node.is_user(&claims.sub), "you aren't a person of this install yet: an admin lets you in with {} kernel invite", crate::config::CLI);
-    let me = Me { caller: Caller { key: node.id(), user: claims.sub.clone(), agent: None }, sign_in: Some(session.name.clone().unwrap_or_default()) };
+    anyhow::ensure!(node.is_user(&user), "you aren't a person of this install yet: an admin lets you in with {} kernel invite", crate::config::CLI);
+    let me = Me { caller: Caller { key: node.id(), user, agent: None, token: Some(token) }, sign_in: Some(session.name.clone().unwrap_or_default()) };
     let mut kept = SIGNED_INS.lock().unwrap();
     kept.retain(|_, (_, until)| now < *until);
-    kept.insert(hash, (me.clone(), (claims.exp * 1000).min(session.until)));
+    kept.insert(hash, (me.clone(), until));
     Ok(me)
 }
 
 fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
     body[key].as_str().filter(|s| !s.trim().is_empty()).map(str::trim).ok_or_else(|| anyhow::anyhow!("give {key}").into())
+}
+
+/// A slot of a schedule the schedules service runs: `kernel::Run`, as the person who let it run.
+async fn kernel_run(State(node): State<Node>, me: Me, Json(run): Json<crate::kernel::Run>) -> Reply {
+    if !me.caller.token.as_deref().is_some_and(|t| t.starts_with("run.")) {
+        return Err(anyhow::anyhow!("only the schedules service hands in runs").into());
+    }
+    Ok(Json(node.kernel_run(&me.caller, &run).await?))
 }
 
 /// The keys of the scopes this server holds, for this machine's admin to hand to the install's kernel.

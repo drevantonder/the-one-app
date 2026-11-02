@@ -52,7 +52,7 @@ async fn servers_and_a_phone_share_a_deployed_board() {
     let recovery = a.create("Test", "Andre").await.unwrap();
     assert_eq!(recovery.len(), 64, "creating gives the recovery key's secret once");
     assert!(a.create("Another", "Andre").await.is_err(), "a white label holds one install");
-    let apps = a.apps(&one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None }).await.unwrap();
+    let apps = a.apps(&one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None }).await.unwrap();
     let listed = apps.iter().find(|app| app["name"] == "board").expect("the config's board is deployed");
     assert_eq!(listed["owner"], "admins");
     assert!(listed["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == "post")), "{listed}");
@@ -122,7 +122,7 @@ fn call(app: &str, op: &str, input: Value) -> CallRequest {
 async fn deploy_module(node: &Node, app: &str, source: &str) {
     let bundle = one::bundle::pack(&[("app.js".into(), source.as_bytes().to_vec()), ("src/app.js".into(), source.as_bytes().to_vec())]).unwrap();
     let blob = node.put_blob(&bundle).unwrap();
-    let me = one::node::Caller { key: node.id(), user: node.user().unwrap(), agent: None };
+    let me = one::node::Caller { key: node.id(), user: node.user().unwrap(), agent: None, token: None };
     if node.source(app, None, None).await.is_err() {
         node.member("app", json!({ "name": app, "owner": format!("user:{}", me.user) })).await.unwrap();
     }
@@ -145,7 +145,7 @@ async fn echo() -> u16 {
 async fn agents_ask_for_items_and_never_see_them() {
     let (a, _ra) = start("asks").await;
     a.create("Asks", "Andre").await.unwrap();
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: Some("Claude Code".into()) };
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: Some("Claude Code".into()), token: None };
     let mine = one::entry::Scope::User(me.user.clone());
     let ask = json!({ "title": "Example key", "fields": { "user": {}, "key": { "secret": true } }, "hosts": ["api.example.com"] });
     let asked = a.request_item(&me, &mine, "board", None, &ask, "Your example.com API key, from its settings page").await.unwrap();
@@ -212,7 +212,7 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
 }};"#);
     deploy_module(&a, "one", &module("one")).await;
     deploy_module(&a, "two", &module("two")).await;
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     let mine = one::entry::Scope::User(me.user.clone());
     for app in ["one", "two"] {
         a.install(&me, app, &mine, true).await.unwrap();
@@ -264,7 +264,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let (b, _rb) = start("backup-b").await;
     let recovery = a.create("Home", "Andre").await.unwrap();
     b.join(&a.pair(None).unwrap()).await.unwrap();
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     eventually("the board to run", async || a.call(board("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
     a.set_item(&me, &one::entry::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
 
