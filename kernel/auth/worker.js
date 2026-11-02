@@ -1,5 +1,5 @@
-// The auth service: who you are. Better Auth, in a Durable Object: sign-in by passkey, email and password, or Google,
-// and an OAuth server (per MCP's authorization spec) that every client signs in through: the iPhone and Mac apps,
+// The auth service: who you are. Better Auth, in a Durable Object: sign-in by passkey only, since only a passkey's PRF
+// output opens a person's keys, and an OAuth server (per MCP's authorization spec) that every client signs in through: the iPhone and Mac apps,
 // and MCP clients like Claude Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at
 // /api/auth/jwks, so nodes and the vault check them offline.
 //
@@ -7,24 +7,52 @@
 // opens their keys at the vault, which seals a copy for the client under its authorization code; each time the
 // client swaps a code or refresh token for new tokens, the vault moves the copy to the new refresh token and opens a
 // session under the new access token. Better Auth keeps refresh tokens only as hashes, so its database opens nothing.
+//
+// Nobody signs up uninvited, the install's first person too: `one kernel invite` makes a link that works once, for a
+// few days, and opening it lets its person make their first passkey, which makes their keys. A link for someone who
+// lost every passkey carries their keys, opened with the recovery key, for their new one.
 
 import { DurableObject } from "cloudflare:workers";
 import { oauthProvider } from "@better-auth/oauth-provider";
-import { passkey } from "@better-auth/passkey";
+import { getAuthenticatorName, passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
-import { consentPage, signInPage } from "./pages.js";
+import { NO_PRF, consentPage, invitePage, passkeysPage, signInPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
 
 const json = (v, status = 200) => Response.json(v, { status });
 const hex16 = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
+/// Refuses, as Better Auth does, since some refusals are made inside its routes.
+const refuse = (status, message) => {
+  throw new APIError({ 400: "BAD_REQUEST", 403: "FORBIDDEN", 404: "NOT_FOUND" }[status], { message });
+};
+/// How long an invite link works.
+const INVITE = 3 * 86_400_000;
+
+/// The hash an invite is kept by, so the auth service's database holds no link that works.
+async function inviteId(token) {
+  if (typeof token !== "string" || token.length < 32) refuse(404, "That invite link isn't whole: open the link you were sent as it is.");
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/// A passkey's name, for the person's list of them: its maker's, if it says, a security key's, or the device it was
+/// made on.
+function passkeyName(aaguid, transports = [], agent = "") {
+  const known = getAuthenticatorName(aaguid);
+  if (known) return known;
+  if (transports.length && transports.every((t) => ["usb", "nfc", "ble"].includes(t))) return "Security key";
+  const device = [["iPhone", "iPhone"], ["iPad", "iPad"], ["Android", "Android"], ["Macintosh", "Mac"], ["Windows", "Windows"], ["CrOS", "Chromebook"], ["Linux", "Linux"]].find(([k]) => agent.includes(k));
+  return device ? `Passkey on ${device[1]}` : "Passkey";
+}
 
 export class Auth extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    ctx.storage.sql.exec("create table if not exists invites (email text primary key, at integer not null, user text)");
+    // Invites were by email address until links replaced them.
+    if (ctx.storage.sql.exec("select 1 from pragma_table_info('invites') where name = 'email'").toArray().length) ctx.storage.sql.exec("drop table invites");
+    ctx.storage.sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null, until integer not null, used integer)");
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const options = this.options();
       const { runMigrations } = await getMigrations(options);
@@ -57,22 +85,16 @@ export class Auth extends DurableObject {
       basePath: "/api/auth",
       secret: env.AUTH_SECRET,
       database: { dialect: new DurableObjectDialect(sql), type: "sqlite", transaction: false },
-      emailAndPassword: { enabled: true },
-      socialProviders: env.GOOGLE ? { google: JSON.parse(env.GOOGLE) } : {},
       trustedOrigins: [url.origin],
       telemetry: { enabled: false },
       advanced: { database: { generateId: hex16 } },
       databaseHooks: {
         user: {
           create: {
-            // Only someone invited signs up, the install's first person too (one kernel invite), so nobody who finds
-            // the sign-in page first takes the install. They sign up as who the invite says they are in the install,
-            // so nodes know them by the same id.
+            // Only someone invited signs up (their passkey's registration makes them), as who the invite says they
+            // are in the install, so nodes know them by the same id.
             async before(user) {
-              const [invite] = sql.exec("select user from invites where email = ?", user.email.toLowerCase()).toArray();
-              if (!invite) return false;
-              sql.exec("delete from invites where email = ?", user.email.toLowerCase());
-              if (invite.user) return { data: { ...user, id: invite.user } };
+              if (!self.admitting || user.id !== self.admitting) return false;
             },
           },
         },
@@ -95,11 +117,29 @@ export class Auth extends DurableObject {
       },
       plugins: [
         jwt({ jwks: { keyPairConfig: { alg: "EdDSA", crv: "Ed25519" } }, jwt: { issuer: `${url.origin}/api/auth`, expirationTime: "1h" } }),
-        passkey({ rpID: url.hostname, rpName: env.NAME || "The One App", origin: url.origin }),
+        passkey({
+          rpID: url.hostname,
+          rpName: env.NAME || "The One App",
+          origin: url.origin,
+          registration: {
+            // Someone signed in adds a passkey; someone with an invite link (its secret as the context) makes their first.
+            requireSession: false,
+            async resolveUser({ context }) {
+              const invite = await self.openInvite(context);
+              return { id: invite.user, name: invite.name, displayName: invite.name };
+            },
+            // A passkey without PRF opens nothing, so none is kept. The page says only whether it has PRF, never its output.
+            async afterVerification({ ctx, verification, user, clientData, context }) {
+              if (clientData.clientExtensionResults?.prf?.enabled !== true) throw new APIError("BAD_REQUEST", { message: NO_PRF });
+              if (!(await getSessionFromCtx(ctx))) await self.admit(await self.openInvite(context), user);
+              return { name: passkeyName(verification.registrationInfo?.aaguid, clientData.response?.transports || [], ctx.headers?.get("user-agent") || "") };
+            },
+          },
+        }),
         oauthProvider({
           loginPage: "/sign-in",
           consentPage: "/consent",
-          scopes: ["openid", "profile", "email", "offline_access"],
+          scopes: ["openid", "profile", "offline_access"],
           allowDynamicClientRegistration: true,
           allowUnauthenticatedClientRegistration: true,
           // Claude Code and other local MCP clients register http://localhost redirects without saying they're native.
@@ -136,12 +176,18 @@ export class Auth extends DurableObject {
         const meta = await this.auth.handler(new Request(`${url.origin}/api/auth${which}`, { headers: request.headers }));
         return new Response(meta.body, { status: meta.status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" } });
       }
-      if (path === "/sign-in" && request.method === "GET") return html(signInPage({ name: this.auth.options.appName, google: !!this.env.GOOGLE, first: this.people() === 0 }));
-      if (path === "/consent" && request.method === "GET") return html(consentPage({ name: this.auth.options.appName }));
+      const name = this.auth.options.appName;
+      if (path === "/sign-in" && request.method === "GET") return html(signInPage({ name }));
+      if (path === "/consent" && request.method === "GET") return html(consentPage({ name }));
+      if (path === "/invite" && request.method === "GET") return html(invitePage({ name }));
+      if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
+      if (path === "/invite/keys" && request.method === "POST") return json(await this.inviteKeys(request, await request.json()));
+      if (path === "/passkeys" && request.method === "GET") return html(passkeysPage({ name }));
+      if (path === "/passkeys/add" && request.method === "POST") return json(await this.addPasskey(request, await request.json()));
       if (path === "/consent/about") return json(await this.about(request, url.searchParams.get("client_id")));
       if (path === "/consent/scopes" && request.method === "POST") return json(await this.scopes(request, await request.json()));
       if (path === "/consent/accept" && request.method === "POST") return json(await this.accept(request, await request.json()));
-      if (path === "/internal/invite" && request.method === "POST") return json(this.invite(request, await request.json()));
+      if (path === "/internal/invite" && request.method === "POST") return json(await this.invite(request, await request.json()));
       return new Response("not found", { status: 404 });
     } catch (err) {
       // Our own refusals have a numeric status; Better Auth's say theirs in statusCode.
@@ -150,10 +196,6 @@ export class Auth extends DurableObject {
       console.error(err.stack || err);
       return json({ error: "the auth service failed" }, 500);
     }
-  }
-
-  people() {
-    return this.ctx.storage.sql.exec("select count(*) n from user").one().n;
   }
 
   async session(request) {
@@ -168,28 +210,77 @@ export class Auth extends DurableObject {
     return client;
   }
 
-  /// What the consent screen shows before the passkey: the client's name, and whether the person has a passkey yet.
+  /// What the consent screen shows before the passkey: the client's name, and the person's.
   async about(request, clientId) {
     const { user } = await this.session(request);
     const client = await this.client(clientId);
-    const passkeys = this.ctx.storage.sql.exec("select count(*) n from passkey where userId = ?", user.id).one().n;
-    return { client: client.name || client.clientId, person: user.name || user.email, passkeys };
+    return { client: client.name || client.clientId, person: user.name };
   }
 
-  /// The scopes the person's passkey opens, with the apps that have data in each. Their first passkey makes their keys.
+  /// One of the person's passkeys, by its credential id: → its row, or a refusal.
+  passkeyOf(user, credential) {
+    const [row] = this.ctx.storage.sql.exec("select id, name, credentialID from passkey where userId = ? and credentialID = ?", user, String(credential || "")).toArray();
+    return row || refuse(403, "That passkey isn't yours.");
+  }
+
+  /// The scopes the person's passkey opens, with the apps that have data in each.
   async scopes(request, { prf, credential }) {
     const { user } = await this.session(request);
-    const mine = this.ctx.storage.sql.exec("select credentialID from passkey where userId = ? and credentialID = ?", user.id, String(credential || "")).toArray();
-    if (!mine.length) throw Object.assign(new Error("that passkey isn't yours"), { status: 403 });
+    this.passkeyOf(user.id, credential);
     try {
       return await this.vault("scopes", { user: user.id, secret: prf });
     } catch (err) {
-      if (err.status !== 403) throw err;
-      // No copy opens with it: if the person has no keys yet, this passkey makes them; otherwise it's a new passkey
-      // that one they had already must add.
-      await this.vault("passkey", { user: user.id, secret: prf, name: "Passkey", client: credential });
-      return await this.vault("scopes", { user: user.id, secret: prf });
+      if (err.status === 403) refuse(403, "This passkey doesn't open your keys yet: add it on your Passkeys page with one that does.");
+      throw err;
     }
+  }
+
+  /// The invite a link's secret opens, while it works.
+  async openInvite(token) {
+    const [invite] = this.ctx.storage.sql.exec("select * from invites where id = ?", await inviteId(token)).toArray();
+    if (!invite || invite.used) refuse(404, "That invite link has been used. Ask for a new one.");
+    if (invite.until <= Date.now()) refuse(404, "That invite link has expired. Ask for a new one.");
+    return invite;
+  }
+
+  /// Makes the invite's person, as their first passkey is registered: the database hook lets only them in.
+  async admit(invite, user) {
+    if (user.id !== invite.user) refuse(400, "That passkey was made for someone else.");
+    const context = await this.auth.$context;
+    if (await context.internalAdapter.findUserById(invite.user)) return;
+    this.admitting = invite.user;
+    try {
+      await context.internalAdapter.createUser({ id: invite.user, name: invite.name, email: `${invite.user}@people.invalid`, emailVerified: false });
+    } finally {
+      this.admitting = null;
+    }
+  }
+
+  /// What an invite page shows: whose it is.
+  async inviteAbout({ token }) {
+    const invite = await this.openInvite(token);
+    return { person: invite.name, until: invite.until };
+  }
+
+  /// The invite's person's first passkey (its PRF output) gets their keys: new ones, or, for someone who lost every
+  /// passkey, those the link carries. The link is spent.
+  async inviteKeys(request, { token, prf, credential }) {
+    const { user } = await this.session(request);
+    const invite = await this.openInvite(token);
+    if (invite.user !== user.id) refuse(403, "That invite is someone else's.");
+    const passkey = this.passkeyOf(user.id, credential);
+    await this.vault("passkey", { user: user.id, secret: prf, name: passkey.name || "Passkey", client: passkey.credentialID, from: token });
+    this.ctx.storage.sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
+    return {};
+  }
+
+  /// Another passkey for someone signed in: the vault seals their keys under it too, opened with one they have.
+  async addPasskey(request, { from, from_credential, prf, credential }) {
+    const { user } = await this.session(request);
+    this.passkeyOf(user.id, from_credential);
+    const passkey = this.passkeyOf(user.id, credential);
+    await this.vault("passkey", { user: user.id, secret: prf, name: passkey.name || "Passkey", client: passkey.credentialID, from });
+    return {};
   }
 
   /// Consent: the client gets a code, and a copy of the person's keys sealed under it, for the scopes they chose, the
@@ -217,14 +308,17 @@ export class Auth extends DurableObject {
     return { url: redirect };
   }
 
-  /// Lets someone sign up, as `user` (their id in the install) if it's given: the kernel's own tools ask, with its secret.
-  invite(request, { email, user }) {
-    if (request.headers.get("x-kernel-secret") !== this.env.KERNEL_SECRET) throw Object.assign(new Error("only the kernel asks that"), { status: 403 });
-    if (typeof email !== "string" || !email.includes("@")) throw Object.assign(new Error("not an email address"), { status: 400 });
-    if (user != null && !/^[0-9a-f]{16}$/.test(user)) throw Object.assign(new Error("a user id is 16 hex characters"), { status: 400 });
-    if (user != null && this.ctx.storage.sql.exec("select id from user where id = ?", user).toArray().length) throw Object.assign(new Error("someone has signed up as that user already"), { status: 409 });
-    this.ctx.storage.sql.exec("insert or replace into invites (email, at, user) values (?, ?, ?)", email.toLowerCase(), Date.now(), user ?? null);
-    return {};
+  /// An invite for `name` (only a label), as `user` (their id in the install; a new one if not given): → the secret its
+  /// link carries, kept here only as a hash, and until when it works. The kernel's own tools ask, with its secret.
+  async invite(request, { name, user }) {
+    if (request.headers.get("x-kernel-secret") !== this.env.KERNEL_SECRET) refuse(403, "only the kernel asks that");
+    if (typeof name !== "string" || !name.trim()) refuse(400, "give the person's name");
+    if (user != null && !/^[0-9a-f]{16}$/.test(user)) refuse(400, "a user id is 16 hex characters");
+    const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+    const until = Date.now() + INVITE;
+    this.ctx.storage.sql.exec("delete from invites where until <= ?", Date.now());
+    this.ctx.storage.sql.exec("insert into invites (id, name, user, until) values (?, ?, ?, ?)", await inviteId(token), name.trim(), user ?? hex16(), until);
+    return { token, until };
   }
 }
 

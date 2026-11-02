@@ -76,13 +76,14 @@ Usage:
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
                                        domains ({CLI}-<service>.<domain>, the install's address {CLI}.<domain> unless
                                        --address says, for good: passkeys belong to it), or at its workers.dev address
-  {CLI} kernel invite <email> [--user <id>]
-                                       let someone sign up at the kernel's sign-in, as who they are in the install
-                                       (this machine's person, unless --user says), so nodes know them: nobody can
-                                       uninvited, its first person too
+  {CLI} kernel invite <name> [--user <id>]
+                                       a link that lets someone join, once and for a few days, by making their
+                                       passkey, as who they are in the install (--user, or this machine's person for
+                                       the first), so nodes know them; nobody joins uninvited, the first person too.
+                                       For someone who lost every passkey, --user them and pipe the recovery key
   {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/), auth-url, vault-url,
-                                       schedules-url, resources (nodes' own addresses, comma-separated), bucket or
-                                       google (its JSON object piped, with - as its value)
+                                       schedules-url, resources (nodes' own addresses, comma-separated) or bucket
+                                       (its JSON object piped, with - as its value)
   {CLI} kernel use <address> <vault> <schedules>
                                        point this install at its kernel: its nodes take sign-ins made at the address
   {CLI} storage                        where the install's data is kept
@@ -373,14 +374,19 @@ fn run(args: Vec<String>) -> Result<()> {
             one::kernel::deploy(&cf, &settings, &modules, &web)?;
             print!("Deployed.\n{}", kernel_said(&settings));
         }
-        ["kernel", "invite", email] => {
+        ["kernel", "invite", name] => {
             let settings = one::kernel::Settings::load()?;
+            // The install's first person is this machine's.
             let user = match flags.get("user").and_then(Value::as_str) {
                 Some(user) => Some(user.to_string()),
-                None => get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
+                None if one::kernel::people(&settings)?.is_empty() => get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
+                None => None,
             };
-            one::kernel::invite(&settings.auth_url, &settings.kernel_secret, email, user.as_deref())?;
-            println!("{email} can sign up at {}/sign-in now.", settings.address);
+            let piped = || (!std::io::IsTerminal::is_terminal(&std::io::stdin())).then(|| std::io::read_to_string(std::io::stdin()).ok()).flatten().filter(|r| !r.trim().is_empty());
+            let invite = one::kernel::invite(&settings, name, user.as_deref(), piped)?;
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64;
+            let days = (invite.until.saturating_sub(now) + 43_200_000) / 86_400_000;
+            println!("Send {name} this link. It works once, for {days} days: opening it, they make their passkey and join.\n\n  {}", invite.link);
         }
         ["kernel", "set", name, value] => {
             let mut settings = one::kernel::Settings::load()?;
@@ -392,9 +398,8 @@ fn run(args: Vec<String>) -> Result<()> {
                 "schedules-url" => settings.schedules_url = value.trim_end_matches('/').to_string(),
                 "resources" => settings.resources = value.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect(),
                 "bucket" if *value == "-" => settings.bucket = Some(piped()?),
-                "google" if *value == "-" => settings.google = Some(piped()?),
-                "bucket" | "google" => bail!("pipe {name}'s JSON object on stdin and give - as its value, so it's in no shell's history"),
-                _ => bail!("no kernel setting {name}: node-url, auth-url, vault-url, schedules-url, resources, bucket or google"),
+                "bucket" => bail!("pipe its JSON object on stdin and give - as its value, so it's in no shell's history"),
+                _ => bail!("no kernel setting {name}: node-url, auth-url, vault-url, schedules-url, resources or bucket"),
             }
             settings.save()?;
             println!("Set {name}. {CLI} kernel serve takes it at its next start, and {CLI} kernel deploy when it next runs.");
@@ -1254,7 +1259,6 @@ fn kernel_said(s: &one::kernel::Settings) -> String {
         out += &format!("  nodes     {}\n", s.resources.join(", "));
     }
     out += &format!("  bucket    {}\n", s.bucket.as_ref().map(|b| format!("{} in {}", b["bucket"].as_str().unwrap_or("?"), b["endpoint"].as_str().unwrap_or("?"))).unwrap_or("none yet: kernel set bucket -".into()));
-    out += &format!("  Google    {}\n", if s.google.is_some() { "sign-in on" } else { "sign-in off" });
     out
 }
 

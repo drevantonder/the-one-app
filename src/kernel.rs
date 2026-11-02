@@ -353,9 +353,6 @@ pub struct Settings {
     /// The install's bucket: `{ endpoint, bucket, region, key_id, secret }`.
     #[serde(default)]
     pub bucket: Option<Value>,
-    /// Google sign-in: `{ clientId, clientSecret }`.
-    #[serde(default)]
-    pub google: Option<Value>,
 }
 
 impl Settings {
@@ -390,7 +387,6 @@ impl Settings {
             recovery_key: B64U.encode(&twin(&seed).1),
             resources: vec![],
             bucket: None,
-            google: None,
         };
         (settings, data_encoding::HEXLOWER.encode(&seed))
     }
@@ -438,12 +434,7 @@ impl Settings {
             }
         }
         match service {
-            "auth" => {
-                out.push(("AUTH_SECRET".into(), self.auth_secret.clone(), true));
-                if let Some(google) = &self.google {
-                    out.push(("GOOGLE".into(), google.to_string(), true));
-                }
-            }
+            "auth" => out.push(("AUTH_SECRET".into(), self.auth_secret.clone(), true)),
             "vault" => {
                 if let Some(bucket) = &self.bucket {
                     out.push(("BUCKET".into(), bucket.to_string(), true));
@@ -747,14 +738,52 @@ impl Cloudflare {
     }
 }
 
-/// Lets someone sign up at the auth service at `auth_url`, with the kernel's secret, as `user` (who they are in the
-/// install, so nodes know them) if it's given: nobody signs up uninvited, the install's first person too.
-pub fn invite(auth_url: &str, kernel_secret: &str, email: &str, user: Option<&str>) -> Result<()> {
+/// Asks a kernel service at `url`, as only the kernel's own tools may.
+fn internal(url: &str, path: &str, kernel_secret: &str, body: Value) -> Result<Value> {
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-    let mut resp = agent.post(format!("{}/internal/invite", auth_url.trim_end_matches('/'))).header("x-kernel-secret", kernel_secret).send_json(json!({ "email": email, "user": user }))?;
+    let mut resp = agent.post(format!("{}/internal/{path}", url.trim_end_matches('/'))).header("x-kernel-secret", kernel_secret).send_json(body)?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-    ensure!(resp.status() == 200, "the auth service said: {}", out["error"].as_str().unwrap_or("nothing"));
-    Ok(())
+    ensure!(resp.status() == 200, "{}", out["error"].as_str().unwrap_or("the kernel failed"));
+    Ok(out)
+}
+
+/// Everyone with keys in `settings`' install: `{ user, sealed }`, their key pair's secret half sealed to the recovery key.
+pub fn people(settings: &Settings) -> Result<Vec<Value>> {
+    let out = internal(&settings.vault_url, "recovery", &settings.kernel_secret, json!({}))?;
+    Ok(out["people"].as_array().cloned().unwrap_or_default())
+}
+
+/// An invite link: opening it lets its person make their first passkey and join.
+pub struct Invite {
+    pub link: String,
+    /// Until when it works, in milliseconds since 1970.
+    pub until: u64,
+}
+
+/// Invites someone to join `settings`' install, `name` only a label, as `user` (who they are in the install, so nodes
+/// know them; a new id if not given). Nobody joins uninvited, the install's first person too. Someone who has keys
+/// already lost every passkey: their link carries their keys, opened with the recovery key's secret (`recovery` gives
+/// it, asked only then), for their new passkey.
+pub fn invite(settings: &Settings, name: &str, user: Option<&str>, recovery: impl FnOnce() -> Option<String>) -> Result<Invite> {
+    let held = match user {
+        Some(user) => people(settings)?.into_iter().find(|p| p["user"] == user),
+        None => None,
+    };
+    let key = match held {
+        None => None,
+        Some(held) => {
+            let recovery = recovery().with_context(|| format!("{name} has keys already, so their link must carry them: pipe the recovery key"))?;
+            let seed: [u8; 32] = data_encoding::HEXLOWER.decode(recovery.trim().as_bytes()).ok().and_then(|s| s.try_into().ok()).context("that isn't a recovery key")?;
+            let sealed = B64U.decode(held["sealed"].as_str().unwrap_or("").as_bytes())?;
+            Some(open_sealed(&twin(&seed).0, &sealed).context("that isn't this install's recovery key")?)
+        }
+    };
+    let out = internal(&settings.auth_url, "invite", &settings.kernel_secret, json!({ "name": name, "user": user }))?;
+    let (token, until) = (out["token"].as_str().context("the auth service gave no invite")?, out["until"].as_u64().unwrap_or(0));
+    if let Some(key) = key {
+        internal(&settings.vault_url, "recover", &settings.kernel_secret, json!({ "user": user, "key": B64U.encode(&key), "secret": token, "until": until }))?;
+    }
+    Ok(Invite { link: format!("{}/invite#{token}", settings.address), until })
 }
 
 /// A web file's type, by its extension.

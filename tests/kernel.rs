@@ -533,8 +533,18 @@ impl Passkey {
         sha2::Sha256::digest(self.rp.as_bytes()).to_vec()
     }
 
-    /// What `navigator.credentials.create` gives, as JSON, for registration options.
+    /// Its PRF output, as a browser gets it at the install's address.
+    fn prf(&self) -> String {
+        B64U.encode(&self.id.repeat(2))
+    }
+
+    /// What `navigator.credentials.create` gives, as JSON, for registration options: only whether it has PRF, as the
+    /// pages send it.
     fn create(&self, options: &Value) -> Value {
+        self.create_with(options, true)
+    }
+
+    fn create_with(&self, options: &Value, prf: bool) -> Value {
         use ciborium::Value as C;
         let cose = C::Map(vec![(C::Integer(1.into()), C::Integer(1.into())), (C::Integer(3.into()), C::Integer((-8).into())), (C::Integer((-1).into()), C::Integer(6.into())), (C::Integer((-2).into()), C::Bytes(self.key.verifying_key().to_bytes().to_vec()))]);
         let mut auth = self.rp_hash();
@@ -547,7 +557,7 @@ impl Passkey {
         let attestation = C::Map(vec![(C::Text("fmt".into()), C::Text("none".into())), (C::Text("attStmt".into()), C::Map(vec![])), (C::Text("authData".into()), C::Bytes(auth))]);
         let id = B64U.encode(&self.id);
         let client = self.client_data("webauthn.create", options["challenge"].as_str().unwrap());
-        json!({ "id": id, "rawId": id, "type": "public-key", "clientExtensionResults": {},
+        json!({ "id": id, "rawId": id, "type": "public-key", "clientExtensionResults": if prf { json!({ "prf": { "enabled": true } }) } else { json!({}) },
             "response": { "clientDataJSON": B64U.encode(&client), "attestationObject": B64U.encode(&cbor(&attestation)), "transports": ["internal"] } })
     }
 
@@ -576,6 +586,9 @@ struct Kernel {
     schedules: String,
     secret: String,
     recovery: [u8; 32],
+    /// The recovery key, as its holder keeps it.
+    recovery_key: String,
+    settings: kernel::Settings,
     store: Store,
 }
 
@@ -613,6 +626,8 @@ impl Kernel {
             schedules: settings.schedules_url.clone(),
             secret: settings.kernel_secret.clone(),
             recovery: kernel::twin(&seed).0,
+            recovery_key: recovery,
+            settings,
             store: Store::Standin(format!("http://127.0.0.1:{sites}")),
         }
     }
@@ -634,6 +649,8 @@ impl Kernel {
             schedules: settings.schedules_url.clone(),
             secret: settings.kernel_secret.clone(),
             recovery: kernel::twin(&seed).0,
+            recovery_key: read("ONE_TEST_KERNEL_RECOVERY").trim().to_string(),
+            settings: settings.clone(),
             store: Store::Real(one::bucket::Place::from_fields(&fields).unwrap()),
         }
     }
@@ -694,23 +711,32 @@ fn signs_in(k: &Kernel) -> (String, String) {
         assert!(meta[field].is_string(), "no {field} in {meta}");
     }
 
-    // Nobody signs up uninvited, the install's first person too; invited (one kernel invite), he makes an account.
-    let (status, _) = browser.post("/api/auth/sign-up/email", json!({ "name": "Andre", "email": "andre@example.com", "password": "a long enough password" }));
-    assert_ne!(status, 200, "not invited, nobody signs up");
-    kernel::invite(&k.auth, &k.secret, "Andre@example.com", None).unwrap();
-    let (status, made) = browser.post("/api/auth/sign-up/email", json!({ "name": "Andre", "email": "andre@example.com", "password": "a long enough password" }));
-    assert_eq!(status, 200, "{made}");
-    let user = made["user"]["id"].as_str().unwrap().to_string();
-    assert!(user.len() == 16 && user.chars().all(|c| c.is_ascii_hexdigit()), "a user id is 16 hex characters: {user}");
-    let (status, _) = k.browser().post("/api/auth/sign-up/email", json!({ "name": "Mallory", "email": "mallory@example.com", "password": "a long enough password" }));
-    assert_ne!(status, 200, "a stranger can't sign up");
+    // Nobody signs up uninvited, the install's first person too: there's no passkey to make without an invite link.
+    for path in ["/api/auth/passkey/generate-register-options", "/api/auth/passkey/generate-register-options?context=a-link-nobody-made-for-anyone-at-all-here"] {
+        let (status, _, _) = k.browser().get(path);
+        assert_ne!(status, 200, "uninvited, nobody makes a passkey: {path}");
+    }
+    for path in ["/api/auth/sign-up/email", "/api/auth/sign-in/email", "/api/auth/sign-in/social"] {
+        let (status, _) = k.browser().post(path, json!({ "name": "Mallory", "email": "mallory@example.com", "password": "a long enough password", "provider": "google" }));
+        assert_ne!(status, 200, "passkeys only: {path}");
+    }
 
-    // He makes a passkey.
-    let passkey = k.passkey();
-    let (status, options, _) = browser.get("/api/auth/passkey/generate-register-options");
-    assert_eq!(status, 200, "{options}");
-    let (status, registered) = browser.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "name": "MacBook" }));
-    assert_eq!(status, 200, "{registered}");
+    // A passkey without PRF opens nothing, so it isn't kept, and the link still works.
+    let invite = kernel::invite(&k.settings, "Andre", None, || None).unwrap();
+    assert!(invite.link.starts_with(&format!("{}/invite#", k.address)), "{}", invite.link);
+    assert!(invite.until > now() + 2 * 86_400_000 && invite.until < now() + 8 * 86_400_000, "an invite works for a few days");
+    let token = invite.link.split_once('#').unwrap().1.to_string();
+    let mut stranger = k.browser();
+    let (_, options, _) = stranger.get(&format!("/api/auth/passkey/generate-register-options?context={}", enc(&token)));
+    let (status, refused) = stranger.post("/api/auth/passkey/verify-registration", json!({ "response": k.passkey().create_with(&options, false), "createSession": true }));
+    assert_eq!(status, 400, "{refused}");
+    assert!(refused["message"].as_str().unwrap_or("").contains("iCloud Keychain"), "it says which passkeys work: {refused}");
+
+    // Invited (one kernel invite), he makes his passkey, which makes his keys; the link works once.
+    let (passkey, user) = joins_with(k, &mut browser, &token);
+    assert!(user.len() == 16 && user.chars().all(|c| c.is_ascii_hexdigit()), "a user id is 16 hex characters: {user}");
+    let (status, spent, _) = k.browser().get(&format!("/api/auth/passkey/generate-register-options?context={}", enc(&token)));
+    assert_ne!(status, 200, "a spent link makes no passkey: {spent}");
 
     // Claude Code registers itself and sends him to authorize it.
     let (status, client) = k.browser().post(meta["registration_endpoint"].as_str().unwrap(), json!({
@@ -734,9 +760,9 @@ fn signs_in(k: &Kernel) -> (String, String) {
     let (_, options, _) = browser.get("/api/auth/passkey/generate-authenticate-options");
     let (status, signed) = browser.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options, &user) }));
     assert_eq!(status, 200, "{signed}");
-    let prf = B64U.encode(&rand::random::<[u8; 32]>());
+    let prf = passkey.prf();
     let (_, about, _) = browser.get(&format!("/consent/about?client_id={client_id}"));
-    assert_eq!(about["client"], "Claude Code", "{about}");
+    assert_eq!((about["client"].as_str(), about["person"].as_str()), (Some("Claude Code"), Some("Andre")), "{about}");
     let (status, scopes) = browser.post("/consent/scopes", json!({ "prf": prf, "credential": B64U.encode(&passkey.id) }));
     assert_eq!(status, 200, "{scopes}");
     let mine = format!("user:{user}");
@@ -797,15 +823,90 @@ fn signs_in(k: &Kernel) -> (String, String) {
     let (status, _, _) = refreshed(&refresh);
     assert_ne!(status, 200, "a spent refresh token is refused");
 
-    // Removing his passkey: it opens nothing again, at the next consent.
+    // He adds a second passkey, with the one he has: it opens his keys too. One without PRF isn't kept.
+    let (second, status) = adds_passkey(k, &mut browser, &passkey);
+    assert_eq!(status, 200);
+    let (_, options, _) = browser.get("/api/auth/passkey/generate-register-options");
+    let (status, _) = browser.post("/api/auth/passkey/verify-registration", json!({ "response": k.passkey().create_with(&options, false) }));
+    assert_eq!(status, 400, "a passkey without PRF isn't kept");
+    let (status, _) = browser.post("/passkeys/add", json!({ "from": B64U.encode(&rand::random::<[u8; 32]>()), "from_credential": B64U.encode(&passkey.id), "prf": "a passkey's prf output here", "credential": B64U.encode(&second.id) }));
+    assert_eq!(status, 403, "a new passkey is added only with one that opens his keys");
+
+    // Removing his first passkey: it opens nothing again, at the next consent; his second still does.
     let (_, list, _) = browser.get("/api/auth/passkey/list-user-passkeys");
-    let (status, _) = browser.post("/api/auth/passkey/delete-passkey", json!({ "id": list[0]["id"] }));
+    assert_eq!(list.as_array().unwrap().len(), 2, "{list}");
+    let first = list.as_array().unwrap().iter().find(|p| p["credentialID"] == B64U.encode(&passkey.id)).unwrap();
+    let (status, _) = browser.post("/api/auth/passkey/delete-passkey", json!({ "id": first["id"] }));
     assert_eq!(status, 200);
     let (_, held) = post(&format!("{}/internal/scopes", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": user, "secret": prf }));
     assert!(held["error"].is_string(), "{held}");
+    let (status, scopes) = browser.post("/consent/scopes", json!({ "prf": second.prf(), "credential": B64U.encode(&second.id) }));
+    assert_eq!(status, 200, "{scopes}");
     (access2.to_string(), user)
 }
 
+/// Someone joins with an invite link for `name` (as `user`, if given): → their passkey and user id.
+fn joins(k: &Kernel, browser: &mut Browser, name: &str, user: Option<&str>) -> (Passkey, String) {
+    let invite = kernel::invite(&k.settings, name, user, || None).unwrap();
+    joins_with(k, browser, invite.link.split_once('#').unwrap().1)
+}
+
+/// Opening an invite link (its secret, `token`): they make a passkey with PRF, which signs them in, and its PRF output
+/// makes their keys, or opens those the link carries. → their passkey and user id.
+fn joins_with(k: &Kernel, browser: &mut Browser, token: &str) -> (Passkey, String) {
+    let (status, about) = k.browser().post("/invite/about", json!({ "token": token }));
+    assert_eq!(status, 200, "{about}");
+    let passkey = k.passkey();
+    let (status, options, _) = browser.get(&format!("/api/auth/passkey/generate-register-options?context={}", enc(token)));
+    assert_eq!(status, 200, "{options}");
+    let (status, made) = browser.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true }));
+    assert_eq!(status, 200, "{made}");
+    assert_eq!(made["user"]["name"], about["person"]);
+    let user = made["user"]["id"].as_str().unwrap().to_string();
+    let (status, keys) = browser.post("/invite/keys", json!({ "token": token, "prf": passkey.prf(), "credential": B64U.encode(&passkey.id) }));
+    assert_eq!(status, 200, "{keys}");
+    (passkey, user)
+}
+
+/// Someone signed in adds a passkey with one they have (`with`), as the Passkeys page does: → it, and how adding it
+/// at the vault went.
+fn adds_passkey(k: &Kernel, browser: &mut Browser, with: &Passkey) -> (Passkey, u16) {
+    let new = k.passkey();
+    let (status, options, _) = browser.get("/api/auth/passkey/generate-register-options");
+    assert_eq!(status, 200, "{options}");
+    let (status, made) = browser.post("/api/auth/passkey/verify-registration", json!({ "response": new.create(&options) }));
+    assert_eq!(status, 200, "{made}");
+    let (status, _) = browser.post("/passkeys/add", json!({ "from": with.prf(), "from_credential": B64U.encode(&with.id), "prf": new.prf(), "credential": B64U.encode(&new.id) }));
+    (new, status)
+}
+
+#[test]
+fn someone_who_lost_every_passkey_joins_again_with_a_link_that_carries_their_keys() {
+    let k = Kernel::start(None);
+    let (lost, andre) = joins(&k, &mut k.browser(), "Andre", None);
+    let (_, held) = post(&format!("{}/internal/scopes", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": andre, "secret": lost.prf() }));
+
+    // He has keys, so his new link must carry them: only the recovery key opens them.
+    let err = kernel::invite(&k.settings, "Andre", Some(&andre), || None).err().unwrap().to_string();
+    assert!(err.contains("pipe the recovery key"), "{err}");
+    let other = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
+    assert!(kernel::invite(&k.settings, "Andre", Some(&andre), || Some(other)).is_err(), "another recovery key opens nothing");
+    let invite = kernel::invite(&k.settings, "Andre", Some(&andre), || Some(k.recovery_key.clone())).unwrap();
+
+    // Opening it on a new device, his new passkey opens what his lost one did.
+    let mut browser = k.browser();
+    let (passkey, user) = joins_with(&k, &mut browser, invite.link.split_once('#').unwrap().1);
+    assert_eq!(user, andre);
+    let (status, scopes) = browser.post("/consent/scopes", json!({ "prf": passkey.prf(), "credential": B64U.encode(&passkey.id) }));
+    assert_eq!(status, 200, "{scopes}");
+    assert_eq!(scopes["scopes"], held["scopes"]);
+
+    // Someone new's link carries nothing, and needs no recovery key.
+    let (sam, sam_id) = joins(&k, &mut k.browser(), "Sam", None);
+    assert_ne!(sam_id, andre);
+    let (_, theirs) = post(&format!("{}/internal/scopes", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": sam_id, "secret": sam.prf() }));
+    assert_eq!(theirs["scopes"], json!([format!("user:{sam_id}")]), "{theirs}");
+}
 
 /// The whole flow against a deployed kernel (see `Kernel::deployed`), its schedules handing runs to a stand-in node
 /// here that a tunnel reaches: `ONE_TEST_NODE` is the https address that reaches port `ONE_TEST_NODE_PORT`.
@@ -1199,7 +1300,11 @@ fn the_gateway_sends_each_path_where_it_belongs_and_nothing_a_node_says_runs_at_
     let (status, _, meta) = ask("GET", &at("/.well-known/oauth-authorization-server/api/auth"), &[], None);
     assert_eq!(status, 200, "{meta}");
     assert_eq!(serde_json::from_str::<Value>(&meta).unwrap()["issuer"], at("/api/auth"));
-    let (status, _, _) = ask("POST", &at("/internal/invite"), &[], Some(json!({ "email": "mallory@example.com" })));
+    for (path, says) in [("/sign-in", "Sign In with a Passkey"), ("/invite", "Make a Passkey"), ("/passkeys", "Add a Passkey")] {
+        let (status, _, body) = ask("GET", &at(path), &[], None);
+        assert!(status == 200 && body.contains(says), "{path}: {status}");
+    }
+    let (status, _, _) = ask("POST", &at("/internal/invite"), &[], Some(json!({ "name": "Mallory" })));
     assert_eq!(status, 405, "the kernel's own routes aren't reachable at the address");
 
     // A node gets the token, never the browser's cookies, and what it says is stamped so it can't run here.
@@ -1245,15 +1350,9 @@ fn a_browser_signs_in_at_the_address_and_uses_a_node_as_its_person_for_what_its_
         node.member("setting", json!({ "name": "address", "value": k.address })).await.unwrap();
         node.member("setting", json!({ "name": "kernel_vault", "value": k.vault })).await.unwrap();
     });
-    kernel::invite(&k.auth, &k.secret, "andre@example.com", Some(&andre)).unwrap();
     let mut browser = k.browser();
-    let (status, made) = browser.post("/api/auth/sign-up/email", json!({ "name": "Andre", "email": "andre@example.com", "password": "a long enough password" }));
-    assert_eq!(status, 200, "{made}");
-    assert_eq!(made["user"]["id"], andre.as_str(), "he signs up as who he is in the install");
-    let passkey = k.passkey();
-    let (_, options, _) = browser.get("/api/auth/passkey/generate-register-options");
-    let (status, registered) = browser.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "name": "MacBook" }));
-    assert_eq!(status, 200, "{registered}");
+    let (passkey, user) = joins(&k, &mut browser, "Andre", Some(&andre));
+    assert_eq!(user, andre, "he joins as who he is in the install");
 
     let (_, options, _) = browser.get("/api/auth/passkey/generate-authenticate-options");
     let (status, signed) = browser.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options, &andre) }));
@@ -1338,7 +1437,7 @@ fn web_sign_in(k: &Kernel, browser: &mut Browser, passkey: &Passkey, consent: Va
     ));
     assert_eq!(status, 302);
     let oauth_query = location.unwrap().split_once('?').unwrap().1.to_string();
-    let prf = B64U.encode(&passkey.id.repeat(2));
+    let prf = passkey.prf();
     let (status, _) = browser.post("/consent/scopes", json!({ "prf": prf, "credential": B64U.encode(&passkey.id) }));
     assert_eq!(status, 200);
     let mut accept = json!({ "oauth_query": oauth_query, "accept": true, "prf": prf });

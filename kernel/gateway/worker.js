@@ -6,7 +6,7 @@
 // sandboxed into an opaque origin, can't be sniffed into another type, and sets no cookies here.
 
 /// Paths the auth service answers: exactly these, or under the ones ending in `/`.
-const AUTH = ["/api/auth/", "/sign-in", "/consent", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"];
+const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/consent", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"];
 const NODE = ["/v1/", "/mcp"];
 
 /// What a node's answer is stamped with.

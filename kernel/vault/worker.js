@@ -88,6 +88,7 @@ export class Vault extends DurableObject {
         case "POST /internal/forget": return json(await this.forget(body));
         case "POST /internal/forget-passkeys": return json(this.forgetPasskeys(body));
         case "POST /internal/recovery": return json(this.recovery());
+        case "POST /internal/recover": return json(await this.recover(body));
         case "POST /internal/standing": return json(await this.standing(body));
         case "POST /internal/run": return json(await this.run(body));
       }
@@ -173,7 +174,8 @@ export class Vault extends DurableObject {
   }
 
   /// A passkey's copy, for `user`. Their first makes their key pair and their scope's key (and the install's, for
-  /// the first person); a later one is opened from another of their passkeys, or a code from the recovery key.
+  /// the first person); a later one is opened from another of their passkeys, or an invite link made with the
+  /// recovery key.
   async passkey({ user, secret, name, from, client = null }) {
     if (!/^[0-9a-f]{16}$/.test(user || "")) refuse(400, "not a user id");
     secret = secretOf(secret);
@@ -194,6 +196,16 @@ export class Vault extends DurableObject {
       if (opened.row.kind === "recovery") this.sql.exec("delete from copies where id = ?", opened.row.id);
     }
     return { id: await this.seal(secret, { user, kind: "passkey", name: String(name || "Passkey"), client, held }) };
+  }
+
+  /// A copy of `user`'s key pair's secret half (`key`, opened with the recovery key, for someone who lost every
+  /// passkey), sealed under their invite link's secret until it expires, for their new passkey to be added with.
+  async recover({ user, key, secret, until }) {
+    const [person] = this.sql.exec("select public from people where user = ?", user).toArray();
+    if (!person) refuse(404, "nobody has keys as that user");
+    if (!(Number(until) > Date.now())) refuse(400, "say until when it's kept");
+    const held = { user, key, public: b64u.encode(person.public), scopes: null };
+    return { id: await this.seal(secretOf(secret), { user, kind: "recovery", name: "Recovery", held, until: Number(until) }) };
   }
 
   async makeScope(scope, user, publicKey) {

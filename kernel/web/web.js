@@ -57,7 +57,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
       const challenge = b64u(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
       sessionStorage.setItem("one.pkce", JSON.stringify({ verifier, state, back: location.pathname + location.search }));
       const q = new URLSearchParams({
-        response_type: "code", client_id: client, redirect_uri: `${location.origin}/callback`, scope: "openid profile email offline_access",
+        response_type: "code", client_id: client, redirect_uri: `${location.origin}/callback`, scope: "openid profile offline_access",
         code_challenge: challenge, code_challenge_method: "S256", state, prompt: "consent",
       });
       location.href = `${meta.authorization_endpoint}?${q}`;
@@ -1058,6 +1058,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     const waiting = store.state?.vault_requests ?? store.state?.secret_requests ?? 0;
     detail.innerHTML = bar("") + `<div class="scroll"><div class="settings"><div class="page-header"><h1>Settings</h1><div class="page-subtitle">${esc(i?.name || "")}</div></div>` +
       `<div class="list profile"><div class="row plain">${one.avatar(u.id, u.name).replace('class="avatar"', 'class="avatar big"')}<div class="main"><div class="profile-name">${esc(u.name)}</div><div class="sub">${esc(u.role === "admin" ? `Admin of ${i.name}` : `Member of ${i.name}`)}</div><div class="sub">${esc(browserName())}</div></div><button class="button" data-signout>Sign Out</button></div></div>` +
+      `<div class="list"><a class="row plain" href="/passkeys"><span class="setting-icon" style="--tile:#34c759">${keyGlyph}</span><div class="main"><div class="title"><span>Passkeys</span></div></div><span class="chev">›</span></a></div>` +
       (waiting ? `<div class="list"><button class="row plain" data-requests><span class="setting-icon" style="--tile:#ff9500">${trayGlyph}</span><div class="main"><div class="title"><span>Requests</span></div></div><span class="nav-count">${waiting}</span><span class="chev">›</span></button></div>` : "") +
       (shop ? `<div class="list"><a class="row plain" href="${esc(href({ kind: "screen", app: shop.name, screen: "main", params: "{}" }))}" data-go='${esc(JSON.stringify({ kind: "screen", app: shop.name, screen: "main", params: "{}" }))}'>${one.appIcon(shop, 29)}<div class="main"><div class="title"><span>App Store</span></div></div><span class="chev">›</span></a></div>` : "") +
       `</div></div>`;
@@ -1065,6 +1066,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     $("[data-requests]", detail)?.addEventListener("click", () => requestsSheet());
   }
 
+  const keyGlyph = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3M16 7l3 3M14 9l2 2"/></svg>`;
   const trayGlyph = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></svg>`;
 
   /// The requests for items waiting for this person: each opens in the Vault's sheet.
