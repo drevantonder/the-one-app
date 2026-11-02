@@ -129,7 +129,13 @@ impl Node {
         let bucket = self.bucket()?;
         let Some((token, vault)) = self.kernel_vault(me) else { return Ok(bucket) };
         let Place::S3(s3) = &bucket.place else { return Ok(bucket) };
-        let urls = self.0.sessions.kept.lock().unwrap().entry(hash(&token)).or_default().urls.clone();
+        let urls = {
+            let mut kept = self.0.sessions.kept.lock().unwrap();
+            let session = kept.entry(hash(&token)).or_default();
+            // Whose it is, so a removal forgets its URLs too, even if it never asked for keys.
+            session.user = me.user.clone();
+            session.urls.clone()
+        };
         let host = s3.endpoint.split("://").nth(1).unwrap_or(&s3.endpoint);
         let signed = S3 { auth: Auth::Signed(signer(vault, token, urls, format!("https://{host}/{}/", s3.bucket))), ..s3.clone() };
         Ok(Copied::new(Place::S3(signed), self.install_dir().join("copy")))
