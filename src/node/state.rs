@@ -182,11 +182,10 @@ impl Node {
     }
 
     pub(super) async fn member_content(&self, caller: &Caller, content: Content) -> Result<()> {
-        let kind = content.kind.clone();
         let by = (caller.key != self.0.id).then_some(caller.key);
         // One that wouldn't count would change nothing anywhere: refuse it instead.
         let counts = self.with(|i| i.r.would_count(&caller.user, by, content.clone(), now_ms()))?;
-        ensure!(counts, "that changes nothing: you may not {kind} that");
+        ensure!(counts, "you aren't allowed to change that, so nothing changed");
         let before = self.with(|i| Ok(i.r.members.roles()))?;
         self.append_as(&Scope::Global, &caller.user, by, content).await?;
         let after = self.with(|i| Ok(i.r.members.roles()))?;

@@ -19,8 +19,10 @@
 <div class="large-title">Backups</div>
 <div id="backups"></div>
 <script>
-  // Backups, for admins: how they're going first, in words; then each place they go to, and the snapshots.
+  // Backups: how they're going first, in words; then each place they go to, and the snapshots. Only admins add and
+  // remove places; everyone may back up now.
   let backups = { places: [], snapshots: [], disks: [], here: "" };
+  let admin = false;
   let error = "";
   let asked = 0;
 
@@ -39,7 +41,9 @@
   const list = (items) => [...items].join(", ");
 
   const draw = () => one.render("#backups", async () => {
-    backups = await one.api("GET", "/v1/backups");
+    const [got, state] = await Promise.all([one.api("GET", "/v1/backups"), one.api("GET", "/v1/state")]);
+    backups = got;
+    admin = state.user?.role === "admin";
     const places = backups.places || [];
     const failing = places.filter((p) => p.problem).sort((a, b) => a.problem.since - b.problem.since)[0];
     const problem = failing?.problem;
@@ -49,7 +53,7 @@
       const head = failing.last ? `Not backed up to ${failing.title} since ${one.ago(failing.last.time, { long: true })}` : `Not backed up to ${failing.title} yet`;
       lines = [`<div class="headline">${one.esc(head)}</div>`, `<div class="error">${one.esc(problem.text)}</div>`, `<div class="error">${one.esc(problem.fix)}</div>`];
     } else if (newest) lines = [`<div class="headline">Backed up ${one.esc(one.ago(newest.time, { long: true }))}</div>`];
-    else if (!places.length) lines = ['<div class="headline">Not backed up</div>', '<div class="muted">Add a disk or S3-compatible storage, and your devices back up to it every hour that something changes.</div>'];
+    else if (!places.length) lines = ['<div class="headline">Not backed up</div>', `<div class="muted">${admin ? "Add a disk or S3-compatible storage, and your devices" : "Once an admin adds a disk or S3-compatible storage, your devices"} back up to it every hour that something changes.</div>`];
     else lines = ['<div class="headline">Backing up…</div>'];
     const [icon, color] = problem ? ["exclamation-mark", "var(--danger)"] : newest ? ["check", "var(--ok)"] : ["hard-drive", "var(--muted)"];
     const button = places.length ? `<button class="button" id="now"${Date.now() - asked < 10000 ? " disabled" : ""}>${problem ? "Try Again" : "Back Up Now"}</button>` : "";
@@ -57,12 +61,12 @@
     return `<div class="list"><div class="status"><span class="badge" style="--c:${color}">${one.icon(icon)}</span><div class="main">${lines.join("")}${button}</div></div></div>
       ${error ? `<p class="footer error">${one.esc(error)}</p>` : ""}
       <h2 class="section">Places</h2>
-      <div class="list">${places.map((p, n) => `<div class="row go" data-place="${n}">${placeIcon(p.kind)}<div class="main">
+      <div class="list"${places.length || admin ? "" : " hidden"}>${places.map((p, n) => `<div class="row go" data-place="${n}">${placeIcon(p.kind)}<div class="main">
           <div class="title" style="font-weight:400"><span>${one.esc(p.title)}</span>${p.last && !p.problem ? `<span class="when">${one.esc(when(p.last.time))}</span>` : ""}</div>
           ${p.problem ? `<div class="sub error">${one.esc(p.problem.text)}</div>` : `<div class="sub">${one.esc(p.kind === "folder" ? `Disk on ${name(p.device)}` : `Off-site · ${p.where}`)}</div>`}
         </div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}
-        <div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--accent)">Add Place…</span></div></div></div></div>
-      <p class="footer">Encrypted before it leaves. The recovery key opens every backup, everyone's.</p>
+        ${admin ? `<div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--accent)">Add Place…</span></div></div></div>` : ""}</div>
+      <p class="footer">${admin ? "" : "Only admins add and remove places. "}Encrypted before it leaves. The recovery key opens every backup, everyone's.</p>
       ${snapshots.length ? `<h2 class="section">Snapshots</h2><div class="list">${snapshots.map((s, n) => `<div class="row plain go" data-snapshot="${n}"><div class="main"><div class="title"><span>${one.esc(when(s.time, true))}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}</div>` : ""}`;
   });
 
@@ -95,10 +99,10 @@
     sheet.body.innerHTML = `${p.problem ? `<div class="list"><div class="row plain"><div class="main"><div class="sub wrap error">${one.esc(p.problem.text)}</div><div class="sub wrap" style="color:var(--text)">${one.esc(p.problem.fix)}</div></div></div></div>` : ""}
       <div style="margin-top:18px">${one.info([...where, ["Last backup", p.last && `${when(p.last.time, true)}, ${name(p.last.device)}`]])}</div>
       ${item ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="vault"><div class="main"><div class="title"><span>Edit in Vault</span></div></div><span class="chev">${one.icon("caret-right")}</span></div></div>` : ""}
-      <div class="list" style="margin-top:18px"><div class="row plain go" id="stop"><div class="main"><div class="title"><span class="error">Stop Backing Up Here</span></div></div></div></div>
+      ${admin ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="stop"><div class="main"><div class="title"><span class="error">Stop Backing Up Here</span></div></div></div></div>` : ""}
       <div id="confirm"></div>`;
     sheet.body.querySelector("#vault")?.addEventListener("click", () => one.open("vault", { scope: "global", id: p.id }));
-    sheet.body.querySelector("#stop").addEventListener("click", async () => {
+    sheet.body.querySelector("#stop")?.addEventListener("click", async () => {
       const stopped = await one.confirm(sheet.body.querySelector("#confirm"), {
         title: `Stop backing up to ${p.title}?`, detail: "What's there now stays there.", action: "Stop Backing Up", danger: true,
         run: () => one.api("POST", "/v1/backups/place", { id: p.id, deleted: true }),
