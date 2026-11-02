@@ -10,6 +10,10 @@ publish = false
 # The tests are one binary (tests/main.rs), so the crate links into one, not one per file.
 autotests = false
 
+# It has no doctests: rustdoc would build the crate again on every `cargo test` to find none.
+[lib]
+doctest = false
+
 [[test]]
 name = "main"
 path = "tests/main.rs"

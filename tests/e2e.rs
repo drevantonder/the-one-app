@@ -5,11 +5,7 @@ use std::time::{Duration, Instant};
 use one::node::{CallRequest, Node};
 use serde_json::{Value, json};
 
-fn temp(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("one-e2e-{name}-{}", rand::random::<u32>()));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
+use crate::temp;
 
 async fn start(name: &str) -> Node {
     let dir = temp(name);
@@ -31,7 +27,7 @@ async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
         if check().await {
             return;
         }
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("timed out waiting for {what}");
 }

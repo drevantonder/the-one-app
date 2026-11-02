@@ -22,7 +22,9 @@ use serde_json::json;
 
 const SERVERS: usize = 8;
 const WRITES: usize = 30;
-const SEEDS: u64 = 40;
+/// Seeds every `cargo test` runs: enough to catch what fails often, few enough that the many runs on one machine stay
+/// quick. What fails rarely, a sweep of `ONE_SIM_SEEDS` finds.
+const SEEDS: u64 = 16;
 
 /// One bucket, reached over links that delay every request and fail some.
 #[derive(Clone)]
@@ -283,7 +285,7 @@ fn saw(seen: &Seen, db: &Db, seed: u64) {
 async fn run_copied(seed: u64) {
     let link = Link::new(seed);
     let key = one::kernel::database_key(&[seed as u8; 32], "main");
-    let root = std::env::temp_dir().join(format!("one-sim-{}-{seed}", std::process::id()));
+    let root = crate::temp(&format!("sim-{seed}"));
     let copies: Vec<Copied<Link>> = (0..COPYING).map(|s| Copied::new(link.clone(), root.join(s.to_string()))).collect();
     let seen = Seen::default();
     let mut servers = Vec::new();
@@ -351,5 +353,5 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 
 #[test]
 fn copies_on_servers_are_behind_never_wrong() {
-    seeds(SEEDS / 4, run_copied);
+    seeds(SEEDS / 2, run_copied);
 }

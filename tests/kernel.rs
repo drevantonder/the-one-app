@@ -67,8 +67,7 @@ impl Drop for Running {
 }
 
 fn run(servers: Vec<Served>) -> Running {
-    let dir = std::env::temp_dir().join(format!("one-kernel-test-{}", rand::random::<u64>()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::temp("workerd");
     let listening = {
         let mut held = LISTENING.lock().unwrap();
         servers
@@ -98,8 +97,7 @@ fn post(url: &str, headers: &[(&str, &str)], body: Value) -> (u16, Value) {
 
 #[test]
 fn the_kernels_own_tests_pass() {
-    let dir = std::env::temp_dir().join(format!("one-kernel-tests-{}", rand::random::<u64>()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::temp("kernel-tests");
     std::fs::write(dir.join("tests.js"), module("test/tests.js")).unwrap();
     std::fs::write(
         dir.join("config.capnp"),
@@ -611,7 +609,7 @@ impl Kernel {
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let modules = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();
         let sites = port();
-        let web = std::env::temp_dir().join(format!("one-kernel-web-{}", rand::random::<u64>()));
+        let web = crate::temp("web");
         std::fs::create_dir_all(web.join("screen")).unwrap();
         std::fs::write(web.join("index.html"), "<!doctype html><title>The web client</title>").unwrap();
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
@@ -903,8 +901,7 @@ fn the_gateway_sends_each_path_where_it_belongs_and_nothing_a_node_says_runs_at_
 fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let v = Vault::start();
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let dir = std::env::temp_dir().join(format!("one-kernel-node-{}", rand::random::<u64>()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::temp("node");
     std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "node" }).to_string()).unwrap();
     let (node, api) = rt.block_on(async {
         let node = one::node::Node::start(&dir, one::sidecars::built_in()).await.unwrap();

@@ -282,8 +282,7 @@ fn check(structs: &BTreeMap<String, Vec<Field>>, within: &str, ty: &str, value: 
 }
 
 async fn start(name: &str) -> one::node::Node {
-    let dir = std::env::temp_dir().join(format!("one-contracts-{name}-{}", rand::random::<u32>()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::temp(name);
     std::fs::write(dir.join("server.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
     one::node::Node::start(&dir, one::sidecars::built_in()).await.unwrap()
 }
@@ -389,8 +388,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
     let files = ["shared/crypto.js", "shared/token.js", "schedules/worker.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
-    let dir = std::env::temp_dir().join(format!("one-formats-{}", rand::random::<u64>()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::temp("formats");
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     let served = kernel::Served { name: "formats".into(), module: kernel::module_from(files.to_vec(), "test/formats.js").unwrap(), class: None, listen: addr.clone(), bindings: vec![], assets: None, outbound: None };
@@ -494,8 +492,7 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
     let files = vec![("gateway/worker.js".to_string(), std::fs::read(root.join("gateway/worker.js")).unwrap())];
     for tunnel in [false, true] {
-        let dir = std::env::temp_dir().join(format!("one-gateway-{}", rand::random::<u64>()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::temp("gateway");
         let mut listening = vec![("gateway".to_string(), std::net::TcpListener::bind("127.0.0.1:0").unwrap())];
         let addr = listening[0].1.local_addr().unwrap().to_string();
         let mut served = vec![kernel::Served {
@@ -595,8 +592,7 @@ fn the_gateway_names_the_windows_app_as_windows_does() {
 #[test]
 fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
     let chrome = one::deploy::chrome().expect("this test draws screens in Chrome or Chromium: none was found (CHROME=<path> names one)");
-    let dir = std::env::temp_dir().join(format!("one-screens-{}", rand::random::<u64>()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::temp("screens");
     // What each page says once it's drawn, as its title.
     let title = |name: &str, body: &str, own: bool| -> String {
         let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body, own);
