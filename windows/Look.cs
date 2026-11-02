@@ -27,12 +27,17 @@ public static class Look
     }
 
     public static bool Dark => (App.Window?.Content as FrameworkElement)?.ActualTheme == ElementTheme.Dark;
+    /// The window's theme, for what's drawn outside it (sheets), which otherwise take Windows' own.
+    public static ElementTheme Theme => Dark ? ElementTheme.Dark : ElementTheme.Light;
 
     public static Color Accent => Hex(Store.Shared.Config?.Accent ?? Brand.Accent, Dark);
     public static SolidColorBrush AccentBrush => new(Accent);
 
-    public static Brush Secondary => Themed("TextFillColorSecondaryBrush");
-    public static Brush Tertiary => Themed("TextFillColorTertiaryBrush");
+    // Fluent's text fills, as its light and dark themes have them: its own brushes keep the theme the window started
+    // in when Windows changes it while it's open.
+    public static Brush Primary => new SolidColorBrush(Dark ? Color.FromArgb(0xFF, 255, 255, 255) : Color.FromArgb(0xE4, 0, 0, 0));
+    public static Brush Secondary => new SolidColorBrush(Dark ? Color.FromArgb(0xC5, 255, 255, 255) : Color.FromArgb(0x9E, 0, 0, 0));
+    public static Brush Tertiary => new SolidColorBrush(Dark ? Color.FromArgb(0x87, 255, 255, 255) : Color.FromArgb(0x72, 0, 0, 0));
     public static Brush Card => Themed("CardBackgroundFillColorDefaultBrush");
     public static Brush CardStroke => Themed("CardStrokeColorDefaultBrush");
     public static Brush Divider => Themed("DividerStrokeColorDefaultBrush");
@@ -56,7 +61,7 @@ public static class Look
         "bad" => new SolidColorBrush(Hex("#ff3b30")),
         "blue" => new SolidColorBrush(Hex("#0a9edc")),
         "purple" => new SolidColorBrush(Hex("#a550d9")),
-        _ => otherwise ?? Themed("TextFillColorPrimaryBrush"),
+        _ => otherwise ?? Primary,
     };
 
     /// Windows' own symbols, for the window's own controls.

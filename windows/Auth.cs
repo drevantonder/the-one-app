@@ -210,7 +210,7 @@ public sealed class Auth
             var target = line.Split(' ').Length > 1 ? line.Split(' ')[1] : "";
             var callback = target.StartsWith("/callback?");
             var page = callback
-                ? $"<!doctype html><meta charset=utf-8><title>{WebUtility.HtmlEncode(Brand.Name)}</title><body style=\"font:15px system-ui;display:grid;place-items:center;height:90vh;color:#555\"><p>You’re signed in. Go back to {WebUtility.HtmlEncode(Brand.Name)}.</p><script>location.href = \"{Brand.Cli}://signed-in\"</script>"
+                ? $"<!doctype html><meta charset=utf-8><title>{WebUtility.HtmlEncode(Brand.Name)}</title><meta name=color-scheme content=\"light dark\"><body style=\"font:15px system-ui;display:grid;place-items:center;height:90vh;color:GrayText\"><p>You’re signed in. Go back to {WebUtility.HtmlEncode(Brand.Name)}.</p><script>location.href = \"{Brand.Cli}://signed-in\"</script>"
                 : "";
             var bytes = Encoding.UTF8.GetBytes(page);
             var head = Encoding.ASCII.GetBytes($"HTTP/1.1 {(callback ? "200 OK" : "404 Not Found")}\r\ncontent-type: text/html; charset=utf-8\r\ncontent-length: {bytes.Length}\r\nconnection: close\r\n\r\n");

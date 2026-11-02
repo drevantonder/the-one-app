@@ -55,6 +55,13 @@ public sealed class MainWindow : Window
         root.Children.Add(body);
         root.RequestedTheme = Appearance.Theme;
         Content = root;
+        // Windows turning dark or light while it's open: what's drawn with the other's colours is drawn again.
+        root.ActualThemeChanged += (_, _) =>
+        {
+            Buttons();
+            Redraw();
+        };
+        Buttons();
         Store.Shared.Changed += Redraw;
         // An app's own change (a sign-in finished on its settings screen) lists its accounts again.
         Store.Shared.Event += e =>
@@ -74,6 +81,19 @@ public sealed class MainWindow : Window
 
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    /// The title bar's buttons in the window's light or dark, which Windows leaves as they were when it changes.
+    void Buttons()
+    {
+        var dark = root.ActualTheme == ElementTheme.Dark;
+        Windows.UI.Color Ink(byte a) => dark ? Windows.UI.Color.FromArgb(a, 255, 255, 255) : Windows.UI.Color.FromArgb(a, 0, 0, 0);
+        var bar = AppWindow.TitleBar;
+        bar.ButtonBackgroundColor = bar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        bar.ButtonForegroundColor = bar.ButtonHoverForegroundColor = bar.ButtonPressedForegroundColor = Ink(228);
+        bar.ButtonInactiveForegroundColor = Ink(110);
+        bar.ButtonHoverBackgroundColor = Ink(20);
+        bar.ButtonPressedBackgroundColor = Ink(36);
+    }
 
     /// Brings the window in front of the others, as a widget's link opens it.
     public void Bring()
@@ -503,6 +523,6 @@ public sealed class MainWindow : Window
     public async Task Alert(string message)
     {
         if (Content.XamlRoot == null) return;
-        await new ContentDialog { Title = "Couldn’t Do That", Content = message, CloseButtonText = "OK", XamlRoot = Content.XamlRoot }.ShowAsync();
+        await new ContentDialog { RequestedTheme = Look.Theme, Title = "Couldn’t Do That", Content = message, CloseButtonText = "OK", XamlRoot = Content.XamlRoot }.ShowAsync();
     }
 }
