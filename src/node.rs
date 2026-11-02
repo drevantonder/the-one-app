@@ -345,6 +345,8 @@ pub struct Inner {
     shared: Mutex<std::collections::HashSet<String>>,
     /// The blobs of entries this device wrote that the bucket didn't take then, tried again each minute.
     unshared: Mutex<Vec<(Scope, String)>>,
+    /// Held while `install/forgotten` changes.
+    forgotten: Mutex<()>,
     /// What the vault gave this device for the sign-ins its calls came with.
     sessions: sessions::Sessions,
     /// This device's socket to the relay.
@@ -455,6 +457,7 @@ impl Node {
             hinted: Mutex::new(HashMap::new()),
             shared: Mutex::new(Default::default()),
             unshared: Mutex::new(Vec::new()),
+            forgotten: Mutex::new(()),
             sessions: Default::default(),
             relay: relay::Relay::new(),
         }));
@@ -780,6 +783,7 @@ impl Node {
             }
             if tick % 6 == 0 && self.has_install() {
                 self.share_unshared().await;
+                self.take_forgotten().await;
                 for sidecar in self.0.built_in_sidecars.iter().filter(|n| n.sync.is_some()) {
                     self.sync_built_in(sidecar.name);
                 }

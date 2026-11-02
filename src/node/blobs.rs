@@ -140,29 +140,17 @@ impl Node {
         })
     }
 
-    /// Takes from the bucket each blob a scope forgot that no entry of that scope still needs ten minutes later, by
-    /// when an entry another device wrote naming it again is read here, and deletes the blobs here that no entry this
-    /// device holds still needs: `(scope, hash)`s.
+    /// Notes in `install/forgotten` each blob a scope forgot, `(scope, hash)`s, to take from the bucket once
+    /// `FORGOTTEN_KEPT` is up, and deletes the blobs here that no entry this device holds still needs.
     pub(super) fn delete_forgotten(&self, forgotten: Vec<(String, String)>) {
+        let due = now_ms() + FORGOTTEN_KEPT.as_millis() as u64;
         for (log, hash) in forgotten {
             if self.0.built_in.values().any(|b| *b == hash) {
                 continue;
             }
-            let (node, scope_log, blob) = (self.clone(), log.clone(), hash.clone());
-            tokio::spawn(async move {
-                tokio::time::sleep(FORGOTTEN_KEPT).await;
-                if node.blob_named(&blob, |s| s.to_string() == scope_log).unwrap_or(true) {
-                    return;
-                }
-                let marker = format!("{scope_log} {blob}");
-                node.0.shared.lock().unwrap().remove(&marker);
-                let _ = node.note_shared(&format!("- {marker}"));
-                let Ok(bucket) = node.bucket() else { return };
-                let name = crate::bucket::blob_name(&scope_log, &blob);
-                if let Err(err) = tokio::task::spawn_blocking(move || bucket.place.delete(&name)).await.map_err(anyhow::Error::from).and_then(|r| r) {
-                    tracing::warn!("taking a forgotten blob from the bucket: {err:#}");
-                }
-            });
+            if let Err(err) = self.note_forgotten(&[format!("{due} {log} {hash}")], &[]) {
+                tracing::warn!("noting a forgotten blob: {err:#}");
+            }
             if self.blob_named(&hash, |_| true).unwrap_or(true) {
                 continue;
             }
@@ -172,6 +160,60 @@ impl Node {
                 }
             }
         }
+    }
+
+    /// Takes from the bucket each forgotten blob whose time is up that no entry of its scope needs, by when an entry
+    /// another device wrote naming it again is read here. Kept in a file, so a restart loses none; one the bucket didn't
+    /// take is tried again next time.
+    pub(super) async fn take_forgotten(&self) {
+        let now = now_ms();
+        let noted = std::fs::read_to_string(self.install_dir().join("forgotten")).unwrap_or_default();
+        let mut done = Vec::new();
+        for line in noted.lines() {
+            let mut parts = line.splitn(3, ' ');
+            let (Some(Ok(due)), Some(log), Some(blob)) = (parts.next().map(str::parse::<u64>), parts.next(), parts.next()) else {
+                done.push(line.to_string());
+                continue;
+            };
+            if due > now {
+                continue;
+            }
+            match self.blob_named(blob, |s| s.to_string() == log) {
+                Ok(false) => {}
+                Ok(true) => {
+                    done.push(line.to_string());
+                    continue;
+                }
+                Err(_) => continue,
+            }
+            let Ok(bucket) = self.bucket() else { continue };
+            let name = crate::bucket::blob_name(log, blob);
+            if let Err(err) = tokio::task::spawn_blocking(move || bucket.place.delete(&name)).await.map_err(anyhow::Error::from).and_then(|r| r) {
+                tracing::warn!("taking a forgotten blob from the bucket: {err:#}");
+                continue;
+            }
+            let marker = format!("{log} {blob}");
+            self.0.shared.lock().unwrap().remove(&marker);
+            let _ = self.note_shared(&format!("- {marker}"));
+            done.push(line.to_string());
+        }
+        if !done.is_empty() {
+            if let Err(err) = self.note_forgotten(&[], &done) {
+                tracing::warn!("noting forgotten blobs taken: {err:#}");
+            }
+        }
+    }
+
+    /// Adds lines to `install/forgotten`, `<due> <scope> <hash>`, and takes out the ones `done`.
+    fn note_forgotten(&self, add: &[String], done: &[String]) -> Result<()> {
+        let _file = self.0.forgotten.lock().unwrap();
+        let path = self.install_dir().join("forgotten");
+        let was = std::fs::read_to_string(&path).unwrap_or_default();
+        let lines: String = was.lines().filter(|l| !done.iter().any(|d| d == l)).chain(add.iter().map(String::as_str)).map(|l| format!("{l}\n")).collect();
+        let tmp = path.with_extension("new");
+        std::fs::write(&tmp, lines)?;
+        std::fs::rename(&tmp, &path)?;
+        Ok(())
     }
 
     pub(super) fn blob_named_for(&self, hash: &str, user: &str) -> Result<bool> {
