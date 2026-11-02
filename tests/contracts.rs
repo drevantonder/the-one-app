@@ -390,14 +390,10 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     let files = ["shared/crypto.js", "shared/token.js", "schedules/worker.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
     let dir = std::env::temp_dir().join(format!("one-formats-{}", rand::random::<u64>()));
     std::fs::create_dir_all(&dir).unwrap();
-    let addr = format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
     let served = kernel::Served { name: "formats".into(), module: kernel::module_from(files.to_vec(), "test/formats.js").unwrap(), class: None, listen: addr.clone(), bindings: vec![], assets: None, outbound: None };
-    let mut child = kernel::start(&kernel::write_config(&dir, &[served]).unwrap()).unwrap();
-    let started = std::time::Instant::now();
-    while std::net::TcpStream::connect(&addr).is_err() {
-        assert!(started.elapsed().as_secs() < 30, "workerd didn't start");
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
+    let mut child = kernel::start(&kernel::write_config(&dir, &[served]).unwrap(), vec![("formats".into(), listener)]).unwrap();
     let js = |body: Value| -> Value {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         agent.post(format!("http://{addr}")).send_json(body).unwrap().body_mut().read_json().unwrap()
@@ -493,11 +489,11 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
     let files = vec![("gateway/worker.js".to_string(), std::fs::read(root.join("gateway/worker.js")).unwrap())];
-    let free = || format!("127.0.0.1:{}", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port());
     for tunnel in [false, true] {
         let dir = std::env::temp_dir().join(format!("one-gateway-{}", rand::random::<u64>()));
         std::fs::create_dir_all(&dir).unwrap();
-        let addr = free();
+        let mut listening = vec![("gateway".to_string(), std::net::TcpListener::bind("127.0.0.1:0").unwrap())];
+        let addr = listening[0].1.local_addr().unwrap().to_string();
         let mut served = vec![kernel::Served {
             name: "gateway".into(),
             module: kernel::module_from(files.clone(), "gateway/worker.js").unwrap(),
@@ -508,14 +504,11 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
             outbound: Some(kernel::NEARBY.into()),
         }];
         if tunnel {
-            served.push(kernel::Served { name: "tunnelled".into(), module: tunnelled.to_vec(), class: None, listen: free(), bindings: vec![], assets: None, outbound: None });
+            listening.push(("tunnelled".into(), std::net::TcpListener::bind("127.0.0.1:0").unwrap()));
+            let listen = listening[1].1.local_addr().unwrap().to_string();
+            served.push(kernel::Served { name: "tunnelled".into(), module: tunnelled.to_vec(), class: None, listen, bindings: vec![], assets: None, outbound: None });
         }
-        let mut child = kernel::start(&kernel::write_config(&dir, &served).unwrap()).unwrap();
-        let started = std::time::Instant::now();
-        while std::net::TcpStream::connect(&addr).is_err() {
-            assert!(started.elapsed().as_secs() < 30, "workerd didn't start");
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
+        let mut child = kernel::start(&kernel::write_config(&dir, &served).unwrap(), listening).unwrap();
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         for route in one::api::SIGNED_IN {
             let path = route.replace("{app}", "board").replace("{screen}", "main").replace("{hash}", "00").replace("{name}", "access").replace("{op}", "now");

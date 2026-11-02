@@ -1,7 +1,7 @@
 //! The kernel services (`kernel/`) running in the pinned workerd, as nodes and the auth service use them.
 
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use data_encoding::BASE64URL_NOPAD as B64U;
 use one::kernel::{self, Served};
@@ -33,8 +33,15 @@ fn module(entry: &str) -> Vec<u8> {
     kernel::module_from(files(), entry).unwrap()
 }
 
+/// Sockets listening on ports `port` gave out, until `run` gives them to the workerd serving there.
+static LISTENING: std::sync::Mutex<Vec<std::net::TcpListener>> = std::sync::Mutex::new(Vec::new());
+
+/// A port of this machine's that stays ours: nothing else, another test's workerd included, can take it.
 fn port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    LISTENING.lock().unwrap().push(listener);
+    port
 }
 
 fn now() -> u64 {
@@ -58,18 +65,19 @@ impl Drop for Running {
 fn run(servers: Vec<Served>) -> Running {
     let dir = std::env::temp_dir().join(format!("one-kernel-test-{}", rand::random::<u64>()));
     std::fs::create_dir_all(&dir).unwrap();
-    let addrs: Vec<String> = servers.iter().map(|s| s.listen.clone()).collect();
+    let listening = {
+        let mut held = LISTENING.lock().unwrap();
+        servers
+            .iter()
+            .map(|s| {
+                let at = held.iter().position(|l| l.local_addr().unwrap().to_string() == s.listen).expect("a service listens on a port from port()");
+                (s.name.clone(), held.swap_remove(at))
+            })
+            .collect()
+    };
     let config = kernel::write_config(&dir, &servers).unwrap();
-    let child = kernel::start(&config).unwrap();
-    let running = Running { child, dir };
-    for addr in addrs {
-        let started = std::time::Instant::now();
-        while std::net::TcpStream::connect(&addr).is_err() {
-            assert!(started.elapsed() < Duration::from_secs(30), "workerd didn't start");
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-    running
+    let child = kernel::start(&config, listening).unwrap();
+    Running { child, dir }
 }
 
 fn post(url: &str, headers: &[(&str, &str)], body: Value) -> (u16, Value) {
