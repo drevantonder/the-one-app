@@ -87,7 +87,8 @@
   };
   const orderSection = () => {
     const all = places(), admin = state.user?.role === "admin";
-    if (!all.length) return "";
+    // With one place, there's nothing to put first.
+    if (all.length < 2) return "";
     const rank = (d) => Object.keys(PLACES).indexOf(d.use) * 10 + (COST[d.kind] || 0);
     const html = `<h2 class="section">Where Things Run</h2><div class="list">${all.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).map((d) => orderRow(d, admin)).join("")}</div>`;
     return html + `<p class="footer">Things run on the first device here that’s on and has room.</p>`;
@@ -110,8 +111,12 @@
     if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(serverRow).join("") + "</div>";
     html += orderSection();
     const holding = servers.filter(holds).map((s) => shown(s.name));
-    html += `<h2 class="section">Where Your Data Lives</h2><div class="list"><div class="row plain"><div class="main">${one.esc(list(holding))}</div></div></div>`;
-    html += error ? `<p class="footer error">${one.esc(error)}</p>` : '<p class="footer">Only these keep your own data.</p>';
+    // Said only where it isn't every device there is.
+    if (servers.length > 1 || holding.length !== servers.length) {
+      html += `<h2 class="section">Where Your Data Lives</h2><div class="list"><div class="row plain"><div class="main">${one.esc(list(holding))}</div></div></div>`;
+      html += error ? "" : '<p class="footer">Only these keep your own data.</p>';
+    }
+    if (error) html += `<p class="footer error">${one.esc(error)}</p>`;
     return html;
   }
 
