@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,7 +22,9 @@ import (
 // windowsQEMU runs Windows 11 in QEMU on a Linux x86 machine with KVM: UEFI Secure Boot (OVMF) and a TPM (swtpm), as
 // Windows 11 needs. A device's folder has its disk, its UEFI variables and its TPM; the machine reaches it through
 // QEMU's monitor (pictures, mouse and keys), and through SSH forwarded to a port here (commands), as the Windows
-// account one that trusts this machine's key. A copy is a disk on top of a lasting device's base: a copy of its
+// account one that trusts this machine's key. Its network is passt's, which reaches the internet as this machine does
+// but none of this machine's own 127.0.0.1, where QEMU's own would put it at 10.0.2.2 for any program in Windows to
+// reach what only this machine's programs use; only its SSH comes in. A copy is a disk on top of a lasting device's base: a copy of its
 // disk taken when it's copied, kept for the next copy until the lasting device next stops.
 type windowsQEMU struct{}
 
@@ -47,7 +50,7 @@ func (windowsQEMU) can() string {
 	} else {
 		f.Close()
 	}
-	for _, c := range []string{"qemu-system-x86_64", "qemu-img", "swtpm"} {
+	for _, c := range []string{"qemu-system-x86_64", "qemu-img", "swtpm", "passt"} {
 		if _, err := exec.LookPath(c); err != nil {
 			return "Windows needs " + c + " here"
 		}
@@ -155,6 +158,22 @@ func (w windowsQEMU) start(ctx context.Context, v *vm) error {
 		"--terminate", "--daemon", "--log", "file="+winFile(v, "tpm/log")); err != nil {
 		return err
 	}
+	// One passt for each start, which ends when QEMU does; one left by a start that failed goes first, with its port.
+	if b, err := os.ReadFile(winFile(v, "passt.pid")); err == nil {
+		if pid, _ := strconv.Atoi(strings.TrimSpace(string(b))); pid > 0 {
+			syscall.Kill(pid, syscall.SIGTERM)
+			time.Sleep(time.Second)
+		}
+	}
+	sock := winFile(v, "passt.sock")
+	os.Remove(sock)
+	args := []string{"--one-off", "--no-map-gw", "--socket", sock, "--pid", winFile(v, "passt.pid"), "-t", fmt.Sprintf("127.0.0.1/%d:22", v.Port), "--quiet"}
+	for _, dns := range upstreamDNS() {
+		args = append(args, "-D", dns)
+	}
+	if _, err := runOutliving(ctx, "passt", args...); err != nil {
+		return err
+	}
 	cpus, gb := max(v.CPUs, 2), max(v.GB, 4)
 	_, err := runOutliving(ctx, "qemu-system-x86_64", "-name", "agent-devices-"+v.Name, "-daemonize", "-pidfile", winFile(v, "qemu.pid"),
 		"-machine", "q35,smm=on,accel=kvm", "-global", "driver=cfi.pflash01,property=secure,value=on",
@@ -163,7 +182,7 @@ func (w windowsQEMU) start(ctx context.Context, v *vm) error {
 		"-drive", "if=pflash,format=raw,unit=1,file="+winFile(v, "OVMF_VARS.fd"),
 		"-chardev", "socket,id=chrtpm,path="+winFile(v, "tpm/sock"), "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-crb,tpmdev=tpm0",
 		"-drive", "file="+winFile(v, "disk.qcow2")+",if=none,id=d0,discard=unmap", "-device", "nvme,drive=d0,serial=one,bootindex=0",
-		"-netdev", fmt.Sprintf("user,id=n0,hostfwd=tcp:127.0.0.1:%d-:22", v.Port), "-device", "e1000e,netdev=n0",
+		"-netdev", "stream,id=n0,server=off,addr.type=unix,addr.path="+sock, "-device", "e1000e,netdev=n0",
 		"-device", "qemu-xhci", "-device", "usb-tablet", "-vga", "std", "-rtc", "base=utc,clock=host",
 		"-audio", "none", "-display", "none", "-vnc", fmt.Sprintf("127.0.0.1:%d", v.Display), "-monitor", "unix:"+winFile(v, "monitor.sock")+",server,nowait")
 	if err != nil {
@@ -277,13 +296,46 @@ func (w windowsQEMU) install(ctx context.Context, v *vm, app string) (string, er
 	return w.ssh(ctx, v, "Start-Process -Wait '"+dest+"' -ArgumentList '/S'; 'Ran its installer with /S.'")
 }
 
-// reach forwards the port inside Windows to QEMU's address for this machine's own 127.0.0.1 (10.0.2.2).
+// upstreamDNS is the resolvers this machine asks, not a stub of its own on 127.0.0.53, which Windows can't reach.
+func upstreamDNS() []string {
+	var found []string
+	for _, file := range []string{"/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"} {
+		b, _ := os.ReadFile(file)
+		for _, line := range strings.Split(string(b), "\n") {
+			f := strings.Fields(line)
+			if len(f) == 2 && f[0] == "nameserver" {
+				if ip := net.ParseIP(f[1]); ip != nil && ip.To4() != nil && !ip.IsLoopback() && !slices.Contains(found, f[1]) {
+					found = append(found, f[1])
+				}
+			}
+		}
+	}
+	return found
+}
+
+// reach forwards the port inside Windows to this machine's own, over SSH from here, until Windows stops.
 func (w windowsQEMU) reach(ctx context.Context, v *vm, port int) (string, error) {
 	p := strconv.Itoa(port)
-	if _, err := w.ssh(ctx, v, "netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport="+p+" connectaddress=10.0.2.2 connectport="+p); err != nil {
+	reached := fmt.Sprintf("%s reaches this machine's port %d at 127.0.0.1:%d.", v.Name, port, port)
+	// A port proxy reach once left there, to QEMU's 10.0.2.2, which is nothing now, holds the port: it goes.
+	out, err := w.ssh(ctx, v, "netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport="+p+" | Out-Null; "+
+		"(Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort "+p+" -State Listen -ErrorAction SilentlyContinue | % { (Get-Process -Id $_.OwningProcess).Name }) -join ','")
+	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s reaches this machine's port %d at 127.0.0.1:%d.", v.Name, port, port), nil
+	switch strings.TrimSpace(out) {
+	case "":
+	case "sshd":
+		return reached, nil
+	default:
+		return "", fmt.Errorf("%s has %s on its port %d already", v.Name, strings.TrimSpace(out), port)
+	}
+	name, args := outliving("ssh", append(w.sshArgs(v, "-p"), "-f", "-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15",
+		"-R", "127.0.0.1:"+p+":127.0.0.1:"+p, windowsUser+"@127.0.0.1")...)
+	if _, err := run(ctx, name, args...); err != nil {
+		return "", err
+	}
+	return reached, nil
 }
 
 func (w windowsQEMU) run(ctx context.Context, v *vm, command string) (string, error) {
