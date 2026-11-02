@@ -107,7 +107,7 @@ impl Node {
     /// object of the bucket it had that the new one lacks, then keeps the install's data there.
     async fn move_to(&self, fields: BTreeMap<String, String>) -> Result<()> {
         let to = Place::from_fields(&fields)?;
-        let from = self.bucket().ok();
+        let from = self.bucket().ok().map(|b| b.place);
         let root = self.with(|i| i.r.root.map(|r| r.to_hex()).context("no install"))?;
         let (place, theirs) = (to.clone(), root.clone());
         tokio::task::spawn_blocking(move || -> Result<()> {

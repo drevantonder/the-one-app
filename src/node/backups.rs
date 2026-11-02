@@ -368,7 +368,7 @@ impl Node {
             Ok((entries.clone(), backed_blobs(&entries, &forgotten)))
         })?;
         let dir = self.0.dir.clone();
-        let bucket = self.bucket().ok();
+        let bucket = self.bucket().ok().map(|b| b.place);
         let (place, install, scope_name, server) = (place.clone(), install.to_string(), d.scope.clone(), self.0.id);
         let snap = tokio::task::spawn_blocking(move || -> Result<(Option<Snapshot>, Option<Snapshot>)> {
             // What the place holds: the newest snapshot there, which another server may have written since.

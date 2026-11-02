@@ -17,7 +17,7 @@ use tokio::sync::broadcast;
 use crate::apps::{Apps, Context, Me, ScopeHandle};
 use crate::call::Append;
 use crate::backups::{KEY_OBJECT, KEYS};
-use crate::bucket::Place;
+use crate::bucket::{Copied, Place};
 use crate::db::Db;
 use crate::entry::{Content, Entry, Key, Order, Scope, hex, new_id, short, unhex};
 use crate::members::{self, Members, Principal, Role, ScopeState};
@@ -50,6 +50,10 @@ pub const RATE_LIMIT: u32 = 600;
 const STOPPED_FOR: u64 = 15 * 60_000;
 /// How often a server looks for schedules to run.
 const SCHEDULE_TICK: Duration = Duration::from_secs(10);
+/// How long a read waits for the bucket, when a ping said its database changed, before it reads this server's copy.
+const BUCKET_WAIT: Duration = Duration::from_secs(5);
+/// The largest step a ping carries: a bigger one, the servers it tells read from the bucket.
+const PINGED_STEP: usize = 256 << 10;
 /// How long a call's work may carry on after it returns (`ctx.waitUntil`).
 const LATER_LIMIT: Duration = Duration::from_secs(600);
 /// How many of an app's failures a server records an hour; the rest are only counted on the next hour's.
@@ -318,6 +322,8 @@ pub struct Inner {
     backup_looked: Mutex<HashMap<(String, String), u64>>,
     /// Each database of each scope, by its app and name (`board/main`), as this server last read it.
     dbs: Mutex<HashMap<(Scope, String), Arc<tokio::sync::Mutex<Db>>>>,
+    /// The databases another server said it wrote without sending the step, which a read catches up from the bucket.
+    behind: Mutex<std::collections::HashSet<(Scope, String)>>,
     /// Each scope's key, once this server has it.
     scope_keys: Mutex<HashMap<Scope, [u8; 32]>>,
     /// Whether this server is moving to the install's new storage now.
@@ -425,6 +431,7 @@ impl Node {
             pruned: Mutex::new(HashMap::new()),
             backup_looked: Mutex::new(HashMap::new()),
             dbs: Mutex::new(HashMap::new()),
+            behind: Mutex::new(Default::default()),
             scope_keys: Mutex::new(HashMap::new()),
             moving: Mutex::new(false),
             tunnel: Mutex::new(None),
@@ -662,6 +669,13 @@ impl Node {
         })?;
         // A scope this server no longer holds: it forgets what it read of it.
         self.0.dbs.lock().unwrap().retain(|(scope, _), _| !handled.dropped.contains(&scope.to_string()));
+        if let Ok(bucket) = self.bucket() {
+            for log in &handled.dropped {
+                if let Err(err) = bucket.forget(&crate::bucket::folder(log)) {
+                    tracing::warn!("forgetting this server's copy of {log}: {err:#}");
+                }
+            }
+        }
         if handled.new.iter().any(|e| e.content.app == release::APP && e.content.kind == "node-release") {
             self.0.released.notify_one();
         }
@@ -1034,9 +1048,10 @@ impl Node {
 
     // Databases.
 
-    /// The install's bucket, as this server reaches it.
-    fn bucket(&self) -> Result<Place> {
-        self.with(|i| i.bucket.as_ref().map(|(p, _)| p.clone()).context("this server can't reach the install's bucket, where apps keep their data: use another server"))
+    /// The install's bucket, as this server reaches it, with its copy of the databases' steps.
+    fn bucket(&self) -> Result<Copied> {
+        let place = self.with(|i| i.bucket.as_ref().map(|(p, _)| p.clone()).context("this server can't reach the install's bucket, where apps keep their data: use another server"))?;
+        Ok(Copied::new(place, self.install_dir().join("copy")))
     }
 
     /// A database's key: `app`'s `database` in `scope`. The one place keys come from, until the kernel's vault gives
@@ -1127,6 +1142,64 @@ impl Node {
                 }
             }
         });
+    }
+
+    /// What another server said it wrote to a database: step `at`, kept in this server's copy if it sent it and holds
+    /// the scope, or else the database is behind, and its next read catches up from the bucket.
+    fn written_there(&self, by: &Key, scope: &Scope, app: &str, database: &str, at: u64, step: Option<&str>) -> Result<()> {
+        let id = (scope.clone(), format!("{app}/{database}"));
+        let holds = self.with(|i| Ok(i.r.members.holds(&self.0.id, scope) && i.r.members.holds(by, scope)))?;
+        let bucket = self.bucket()?;
+        let prefix = format!("{}/{}", crate::bucket::folder(&scope.to_string()), id.1);
+        let kept = match step.map(|s| data_encoding::BASE64.decode(s.as_bytes())) {
+            Some(Ok(bytes)) if holds && at > 0 => {
+                bucket.keep(&crate::db::step_name(&prefix, at), &bytes)?;
+                // A step whose one before isn't here may follow one this server wasn't sent.
+                at == 1 || bucket.kept(&crate::db::step_name(&prefix, at - 1))?.is_some()
+            }
+            _ => false,
+        };
+        if !kept {
+            self.0.behind.lock().unwrap().insert(id);
+        }
+        Ok(())
+    }
+
+    /// Brings a database up to date for a call that reads it, as far as this server's copy goes: other servers send
+    /// what they write with their pings, and `fill_copies` keeps up with the bucket. Only when a ping said it changed
+    /// without sending what is the bucket asked first, and if it doesn't answer, the copy is read as it is: behind,
+    /// never wrong.
+    async fn read_ready(&self, id: &(Scope, String), db: &mut Db) -> Result<()> {
+        let bucket = self.bucket()?;
+        if self.0.behind.lock().unwrap().remove(id) {
+            match tokio::time::timeout(BUCKET_WAIT, db.catch_up(&bucket)).await {
+                Ok(Ok(_)) => return Ok(()),
+                Ok(Err(err)) => tracing::debug!("{}: reading this server's copy, as the bucket said {err:#}", db.prefix()),
+                Err(_) => tracing::debug!("{}: reading this server's copy, as the bucket didn't answer", db.prefix()),
+            }
+        }
+        db.catch_up(&bucket.here_only()).await?;
+        Ok(())
+    }
+
+    /// Fetches into this server's copy what the bucket has of each database open here that it lacks, every tick: a
+    /// ping that was lost, or a write by a node that sends none (the serverless one). A database a call is using is
+    /// left for the next.
+    async fn fill_copies(&self) {
+        let Ok(bucket) = self.bucket() else { return };
+        let open: Vec<_> = self.0.dbs.lock().unwrap().iter().map(|(id, db)| (id.clone(), db.clone())).collect();
+        let mut changed = Vec::new();
+        for ((_, name), db) in open {
+            let Ok((prefix, at)) = db.try_lock().map(|db| (db.prefix().to_string(), db.at())) else { continue };
+            match bucket.fill(&prefix, at).await {
+                Ok(0) => {}
+                Ok(_) => changed.extend(name.split('/').next().filter(|app| *app != members::APP).map(str::to_string)),
+                Err(err) => tracing::debug!("{prefix}: {err:#}"),
+            }
+        }
+        if !changed.is_empty() {
+            self.emit(Event::Changed { apps: changed });
+        }
     }
 
     /// `app`'s `database` of `scope`, opened from the bucket the first time and brought to `schema`, or else to the
@@ -1303,10 +1376,13 @@ impl Node {
         for (scope, list, kept) in statements {
             let db = self.database(&scope, app, DATABASE, None).await?;
             let bucket = self.bucket()?;
-            db.lock()
-                .await
-                .write(&bucket, |c| crate::db::statements(c, &list))
-                .await?;
+            let mut db = db.lock().await;
+            let at = db.at();
+            db.write(&bucket, |c| crate::db::statements(c, &list)).await?;
+            if db.at() > at {
+                self.ping(&scope, Some((app, DATABASE, db.at())));
+            }
+            drop(db);
             if !kept.is_empty() {
                 writes.push((scope, Content { blobs: kept, ..members::node("keep", json!({})) }));
             }
@@ -1372,16 +1448,17 @@ impl Node {
         if !answer.records.is_empty() {
             let db = self.database(&scope, app, SIDECAR_DATABASE, Some(vec![crate::sidecars::RECORDS.into()])).await?;
             let (time, by, device) = (now_ms(), caller.user_name.clone(), caller.name.clone());
-            db.lock()
-                .await
-                .write(&self.bucket()?, |c| {
-                    for (kind, data) in &answer.records {
-                        let row = [json!(kind), json!(data.to_string()), json!(time), json!(by), json!(device)];
-                        crate::db::execute(c, "insert into records (kind, data, time, by, device) values (?, ?, ?, ?, ?)", &row)?;
-                    }
-                    Ok(())
-                })
-                .await?;
+            let mut db = db.lock().await;
+            db.write(&self.bucket()?, |c| {
+                for (kind, data) in &answer.records {
+                    let row = [json!(kind), json!(data.to_string()), json!(time), json!(by), json!(device)];
+                    crate::db::execute(c, "insert into records (kind, data, time, by, device) values (?, ?, ?, ?, ?)", &row)?;
+                }
+                Ok(())
+            })
+            .await?;
+            self.ping(&scope, Some((app, SIDECAR_DATABASE, db.at())));
+            drop(db);
             if let Some(n) = built_in.filter(|n| n.sync.is_some()) {
                 self.sync_built_in(n.name);
             }
@@ -1440,6 +1517,11 @@ impl Node {
                 }
                 let scope = Scope::parse(input["scope"].as_str().unwrap_or(""))?;
                 let app = input["app"].as_str().map(str::to_string);
+                if let (Some(app), Some(database)) = (&app, input["database"].as_str()) {
+                    self.written_there(&me.key, &scope, app, database, input["at"].as_u64().unwrap_or(0), input["step"].as_str())?;
+                    self.emit(Event::Changed { apps: vec![app.clone()] });
+                    return Ok(json!(null));
+                }
                 let node = self.clone();
                 tokio::spawn(async move {
                     let _ = node.read_log(&scope).await;
@@ -1474,7 +1556,10 @@ impl Node {
     async fn destroy_keys(&self, app: &str) -> Result<()> {
         let bucket = self.bucket()?;
         self.0.dbs.lock().unwrap().retain(|(_, db), _| db.split('/').next() != Some(app));
-        let app = app.to_string();
+        for folder in bucket.folders()? {
+            bucket.forget(&format!("{folder}/{app}"))?;
+        }
+        let (bucket, app) = (bucket.place, app.to_string());
         tokio::task::spawn_blocking(move || {
             for scope in bucket.list("")?.iter().map(|f| crate::bucket::scope_of(f)).filter(|s| Scope::parse(s).is_ok()) {
                 bucket.delete(&crate::kernel::app_key_name(&scope, &app))?;
@@ -1495,6 +1580,7 @@ impl Node {
                 if let Err(err) = self.read_logs().await {
                     tracing::debug!("reading the bucket: {err:#}");
                 }
+                self.fill_copies().await;
                 self.read_all_status();
             }
             if tick % 6 == 0 && self.has_install() {
@@ -2625,7 +2711,7 @@ impl Node {
                 let mut db = db.lock().await;
                 // Once a call, so it reads one state of the scope throughout.
                 if !grant.caught_up.contains(&scope) {
-                    db.catch_up(&self.bucket()?).await?;
+                    self.read_ready(&(scope.clone(), format!("{}/{DATABASE}", grant.app)), &mut db).await?;
                     if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
                         g.caught_up.push(scope.clone());
                     }
@@ -3251,16 +3337,28 @@ impl Node {
         self.database_key(scope, members::APP, LOG).await
     }
 
-    /// Tells the servers that hold `scope` it changed, `app`'s data if it's an app's, so they read it now rather than
-    /// in a moment: in the background, and only a hint.
-    fn ping(&self, scope: &Scope, app: Option<&str>) {
+    /// Tells the servers that hold `scope` it changed, so they read it now rather than in a moment: its entries, or
+    /// with `wrote`, step `at` of an app's database, which it sends, so they read it from their copy, not the bucket. In
+    /// the background, and only a hint.
+    fn ping(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
         let Ok((servers, me)) = self.with(|i| {
             let m = &i.r.members;
             Ok((m.servers().filter(|s| s.key != self.0.id && m.holds(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>(), Caller { key: self.0.id, user: i.user.clone(), agent: None }))
         }) else {
             return;
         };
-        let req = CallRequest { app: members::APP.into(), op: "changed".into(), input: json!({ "scope": scope.to_string(), "app": app }), ..Default::default() };
+        if servers.is_empty() {
+            return;
+        }
+        let mut input = json!({ "scope": scope.to_string() });
+        if let Some((app, database, at)) = wrote {
+            input = json!({ "scope": scope.to_string(), "app": app, "database": database, "at": at });
+            let name = crate::db::step_name(&format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string())), at);
+            if let Some(step) = self.bucket().ok().and_then(|b| b.kept(&name).ok().flatten()).filter(|s| s.len() <= PINGED_STEP) {
+                input["step"] = json!(data_encoding::BASE64.encode(&step));
+            }
+        }
+        let req = CallRequest { app: members::APP.into(), op: "changed".into(), input, ..Default::default() };
         for server in servers {
             let (node, req, me) = (self.clone(), req.clone(), me.clone());
             tokio::spawn(async move {
@@ -3815,9 +3913,10 @@ impl Node {
     /// A built-in sidecar's records, in its database of this server's local user, oldest first.
     async fn records(&self, app: &str) -> Result<Vec<crate::sidecars::Record>> {
         let user = self.user()?;
-        let db = self.database(&Scope::User(user), app, SIDECAR_DATABASE, Some(vec![crate::sidecars::RECORDS.into()])).await?;
+        let scope = Scope::User(user);
+        let db = self.database(&scope, app, SIDECAR_DATABASE, Some(vec![crate::sidecars::RECORDS.into()])).await?;
         let mut db = db.lock().await;
-        db.catch_up(&self.bucket()?).await?;
+        self.read_ready(&(scope, format!("{app}/{SIDECAR_DATABASE}")), &mut db).await?;
         let rows = db.query("select * from records order by n", &[])?;
         Ok(rows
             .into_iter()

@@ -97,6 +97,10 @@ impl Db {
         self.at
     }
 
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+
     /// Applies the steps written since this server last read: whether there were any.
     pub async fn catch_up(&mut self, bucket: &impl Bucket) -> Result<bool> {
         let from = self.at;
