@@ -149,20 +149,13 @@ impl Db {
     pub async fn write<R>(&mut self, bucket: &impl Bucket, mut f: impl FnMut(&Connection) -> Result<R>) -> Result<R> {
         for _ in 0..TRIES {
             self.catch_up(bucket).await?;
-            self.conn.execute_batch("begin")?;
-            let made = changes(&self.conn, &mut f);
-            let (result, changes) = match made {
-                Ok(made) => made,
-                Err(err) => {
-                    self.conn.execute_batch("rollback")?;
-                    return Err(err);
-                }
-            };
+            let open = Open::begin(&mut self.conn)?;
+            let (result, changes) = changes(&open, &mut f)?;
             if changes.is_empty() {
-                self.conn.execute_batch("commit")?;
+                open.execute_batch("commit")?;
                 return Ok(result);
             }
-            let name = self.step(self.at + 1);
+            let name = step_name(&self.prefix, self.at + 1);
             let step = [b"c".as_slice(), &changes].concat();
             let sealed = seal(&self.key, &name, &step);
             let created = match bucket.create(&name, &sealed).await {
@@ -173,18 +166,12 @@ impl Db {
                 },
                 created => created,
             };
-            match created {
-                Ok(true) => {
-                    self.conn.execute_batch("commit")?;
-                    self.at += 1;
-                    self.written(bucket).await;
-                    return Ok(result);
-                }
-                Ok(false) => self.conn.execute_batch("rollback")?,
-                Err(err) => {
-                    self.conn.execute_batch("rollback")?;
-                    return Err(err);
-                }
+            if created? {
+                open.execute_batch("commit")?;
+                drop(open);
+                self.at += 1;
+                self.written(bucket).await;
+                return Ok(result);
             }
         }
         bail!("{} changed too often to write to", self.prefix)
@@ -395,6 +382,34 @@ fn changes<R>(conn: &Connection, f: &mut impl FnMut(&Connection) -> Result<R>) -
     made
 }
 
+/// A write's transaction, rolled back when it's dropped uncommitted: on an error, and when the write's future is
+/// dropped while it waits on the bucket (a call that ran out of time, or whose caller went away), which would otherwise
+/// leave it open, its changes seen by reads, and every later write failing to begin. It holds the connection mutably,
+/// as only that is `Send` across the bucket's await.
+struct Open<'a>(&'a mut Connection);
+
+impl<'a> Open<'a> {
+    fn begin(conn: &'a mut Connection) -> Result<Self> {
+        conn.execute_batch("begin")?;
+        Ok(Open(conn))
+    }
+}
+
+impl std::ops::Deref for Open<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        self.0
+    }
+}
+
+impl Drop for Open<'_> {
+    fn drop(&mut self) {
+        if !self.0.is_autocommit() {
+            let _ = self.0.execute_batch("rollback");
+        }
+    }
+}
+
 /// Applies a changeset written from the state this database is in, so nothing should clash; if something does, the
 /// change wins where it can, the same way on every server.
 fn apply_changes(conn: &Connection, changes: &[u8]) -> Result<()> {
@@ -468,4 +483,41 @@ mod tests {
         });
     }
 
+    /// A bucket whose writes, while its flag is up, never finish.
+    #[derive(Default)]
+    struct Stalls(Memory, std::sync::atomic::AtomicBool);
+
+    impl Bucket for Stalls {
+        async fn get(&self, name: &str) -> Result<Option<crate::bucket::Object>> {
+            self.0.get(name).await
+        }
+        async fn create(&self, name: &str, bytes: &[u8]) -> Result<bool> {
+            if self.1.load(std::sync::atomic::Ordering::Relaxed) {
+                std::future::pending::<()>().await;
+            }
+            self.0.create(name, bytes).await
+        }
+        async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
+            self.0.replace(name, bytes, tag).await
+        }
+    }
+
+    #[test]
+    fn a_write_given_up_on_leaves_nothing_behind() {
+        rt().block_on(async {
+            let bucket = Stalls::default();
+            let mut db = Db::open(&bucket, "p", rand::random()).await.unwrap();
+            db.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            // A call that runs out of time, or whose caller goes away, drops its write while the bucket hasn't answered.
+            bucket.1.store(true, std::sync::atomic::Ordering::Relaxed);
+            {
+                let mut write = std::pin::pin!(db.write(&bucket, |c| execute(c, "insert into notes values ('given up')", &[]).map(|_| ())));
+                std::future::poll_fn(|cx| std::task::Poll::Ready(assert!(write.as_mut().poll(cx).is_pending()))).await;
+            }
+            assert!(db.query("select * from notes", &[]).unwrap().is_empty(), "what it wrote isn't read");
+            bucket.1.store(false, std::sync::atomic::Ordering::Relaxed);
+            db.write(&bucket, |c| execute(c, "insert into notes values ('next')", &[]).map(|_| ())).await.expect("the next write goes ahead");
+            assert_eq!(db.query("select text from notes", &[]).unwrap(), vec![serde_json::from_value(json!({ "text": "next" })).unwrap()]);
+        });
+    }
 }
