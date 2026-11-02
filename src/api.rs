@@ -51,7 +51,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/acl", post(acl))
         .route("/v1/trust", post(trust))
         .route("/v1/use", post(use_))
-        .route("/v1/open", post(open))
         .route("/v1/group", post(group))
         .route("/v1/invite", post(invite))
         .route("/v1/accept", post(accept))
@@ -530,11 +529,6 @@ async fn trust(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Rep
 async fn use_(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     node.set_use(&me.caller, text(&body, "server")?, text(&body, "use")?).await?;
     done()
-}
-
-async fn open(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let user = node.find_user(text(&body, "user")?)?;
-    Ok(Json(json!({ "ok": node.open(&user, text(&body, "server")?, body["agent"].as_str().map(str::to_string)).await? })))
 }
 
 async fn group(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {

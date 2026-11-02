@@ -228,9 +228,6 @@ pub struct CallRequest {
     /// The server to run it on, by name or key prefix; by default the nearest that can.
     #[serde(default)]
     pub server: Option<String>,
-    /// A user whose data was opened for the caller, to run as, reading only.
-    #[serde(default, rename = "as")]
-    pub as_user: Option<String>,
     /// The agent that asked (an MCP client's name), credited on the call.
     #[serde(default)]
     pub agent: Option<String>,
@@ -1001,7 +998,7 @@ impl Node {
             let _ = self.with(|i| Ok(i.far.insert(server, rtt)));
         }
         let (mut send, mut recv) = conn.open_bi().await?;
-        let request = json!({ "app": req.app, "sidecar": req.sidecar, "driver": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
+        let request = json!({ "app": req.app, "sidecar": req.sidecar, "driver": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
         send.write_all(&serde_json::to_vec(&request)?).await?;
         send.finish()?;
         let reply = tokio::time::timeout(self.limit(req).await + Duration::from_secs(5), recv.read_to_end(MESSAGE_LIMIT)).await.context("timed out")??;
@@ -1561,26 +1558,9 @@ impl Node {
         Ok(answer.ok)
     }
 
-    /// The node's own operations, which other servers ask for: `open`.
+    /// The node's own operations, which other servers ask for.
     async fn node_op(&self, op: &str, input: &Value, me: &Caller) -> Result<Value> {
         match op {
-            "open" => {
-                let user = input["user"].as_str().context("whose data?")?;
-                let scope = Scope::User(user.into());
-                self.with(|i| {
-                    let m = &i.r.members;
-                    ensure!(m.holds(&self.0.id, &scope), "{} doesn't hold that user's data", self.server_name());
-                    ensure!(m.owners(&self.0.id).iter().any(|o| m.acts_for(&me.user, o)), "only someone acting for an owner of {} opens data on it", self.server_name());
-                    Ok(())
-                })?;
-                let by = (me.key != self.0.id).then_some(me.key);
-                let mut data = json!({ "server": hex(&self.0.id) });
-                if let Some(agent) = &me.agent {
-                    data["agent"] = json!(agent);
-                }
-                self.append_as(&scope, &me.user, by, members::node("open", data)).await?;
-                Ok(json!(format!("Opened for an hour on {}.", self.server_name())))
-            }
             // Another server's hints, which only a server of the install gives.
             "hello" | "changed" if self.with(|i| Ok(i.r.members.server(&me.key).is_some()))? => {
                 if op == "hello" {
@@ -3013,21 +2993,15 @@ impl Node {
                     json!({ "id": g.id, "name": g.name, "role": m.group_role(me, &g.id), "members": members, "invited": invited })
                 })
                 .collect();
-            let opens: Vec<Value> = i
-                .views
-                .get(&Scope::User(me.clone()).to_string())
-                .map(|(_, s)| s.opens.iter().map(|(by, server, time, agent)| json!({ "by": by, "by_name": m.users.get(by).map(|u| &u.name), "agent": agent, "server": hex(server), "time": time, "until": time + members::OPEN_FOR })).collect())
-                .unwrap_or_default();
             json!({
                 "name": m.name, "root": i.r.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
                 "member": m.server(&self.0.id).is_some(),
-                "users": users, "groups": groups, "servers": servers, "clients": clients, "opens": opens,
+                "users": users, "groups": groups, "servers": servers, "clients": clients,
                 "entries": i.r.store.count().unwrap_or(0), "settings": settings,
                 // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
                 "serverless": settings.contains_key("serverless").then(|| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE) })),
             })
         });
-        let opens = install.as_ref().map(|i| i["opens"].clone()).unwrap_or(json!([]));
         let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "accent": crate::config::ACCENT, "store": settings["store"], "push": settings["push"] });
         let mut state = json!({
             // `brand` is the same, for shells built before it was `config`.
@@ -3039,7 +3013,6 @@ impl Node {
             "server": { "key": hex(&self.0.id), "name": self.server_name(), "ready": ready, "guide": crate::skills::address() },
             "user": user,
             "install": install,
-            "opens": opens,
             // Requests for an item waiting for this user to answer (see GET /v1/vault/requests); and for shells
             // built before the Vault.
             "vault_requests": waiting,
@@ -3120,12 +3093,6 @@ impl Node {
             self.member("rename", json!({ "key": hex(&self.0.id), "name": name })).await?;
         }
         Ok(())
-    }
-
-    /// Opens `user`'s data on `server` for an hour, for the local user.
-    pub async fn open(&self, user: &str, server: &str, agent: Option<String>) -> Result<Value> {
-        let req = CallRequest { app: members::APP.into(), op: "open".into(), input: json!({ "user": user }), server: Some(server.into()), agent, ..Default::default() };
-        self.call(req).await
     }
 
     // Clients.
@@ -3750,14 +3717,6 @@ fn handles(m: &Members, scopes: &[Scope], user: &str) -> Vec<ScopeHandle> {
 fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
     let m = &i.r.members;
     let here = node.0.id;
-    if let Some(target) = &req.as_user {
-        let scope = Scope::User(target.clone());
-        let open = i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.opens.iter().any(|(by, server, t, _)| by == &me.user && *server == here && now_ms() < t + members::OPEN_FOR));
-        ensure!(open, "that user's data isn't open for you on {}", node.server_name());
-        let caller = Caller { key: me.key, user: target.clone(), agent: me.agent.clone() };
-        let ctx = Context { me: node_me(node, m, &caller), now: now_ms(), scopes: handles(m, std::slice::from_ref(&scope), target), read_only: true, token: String::new(), from: None };
-        return Ok(Ok((ctx, vec![scope])));
-    }
     if !m.serves(&here, &me.user) {
         return Ok(Err(format!("{} doesn't serve you", node.server_name())));
     }
@@ -4281,7 +4240,6 @@ pub fn qr(text: &str) -> Result<String> {
 /// The Settings screens, by name: each client's own (src/screen/settings/<name>.html), the same on every one.
 const SETTINGS_SCREENS: &[(&str, &str)] = &[
     ("account", include_str!("screen/settings/account.html")),
-    ("access", include_str!("screen/settings/access.html")),
     ("appearance", include_str!("screen/settings/appearance.html")),
     ("vault", include_str!("screen/settings/vault.html")),
     ("requests", include_str!("screen/settings/requests.html")),
@@ -4323,7 +4281,6 @@ fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, st
         item("devices", "Devices", "devices", "#8e8e93"),
         item("agents", "Agents", "sparkle", "#ff2d55"),
         item("vault", "Vault", "lock", "#5856d6"),
-        item("access", "Access Log", "eye", "#af52de"),
         item("appearance", "Appearance", "circle-half", "#007aff"),
     ]);
     if me.role == Role::Admin {

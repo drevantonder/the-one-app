@@ -20,8 +20,6 @@ struct NodeState: Decodable, Sendable, Equatable {
     /// The user this machine was admitted for, once it is in an install.
     var user: Person?
     var install: Install?
-    /// Who opened this user's data, and when.
-    var opens: [Open]
     /// How many requests for a Vault item wait for this user; and as nodes before the Vault said it.
     var vaultRequests: Int?
     var secretRequests: Int?
@@ -35,7 +33,7 @@ struct NodeState: Decodable, Sendable, Equatable {
     var waitingRequests: Int { vaultRequests ?? secretRequests ?? 0 }
 
     enum CodingKeys: String, CodingKey {
-        case config, machine = "me", host = "server", user, install, opens, vaultRequests = "vault_requests", secretRequests = "secret_requests", arrangements, backups
+        case config, machine = "me", host = "server", user, install, vaultRequests = "vault_requests", secretRequests = "secret_requests", arrangements, backups
         case settingsItems = "settings_items"
     }
 }
@@ -163,17 +161,6 @@ struct ClientInfo: Codable, Sendable, Equatable, Identifiable {
     var asked: Double?
 
     var id: String { key }
-}
-
-struct Open: Codable, Sendable, Equatable, Identifiable {
-    /// The user who opened it.
-    var by: String
-    var server: String
-    var time: Double
-    /// The agent it was opened through, if one did it.
-    var agent: String?
-
-    var id: String { "\(by).\(server).\(time)" }
 }
 
 /// An app as `GET /v1/apps` describes it: only what a shell needs to show it.

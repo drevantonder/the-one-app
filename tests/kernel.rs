@@ -313,11 +313,6 @@ fn the_vault_fills_an_apps_requests_with_secrets_it_never_shows() {
     assert_eq!(filled["text"].as_str().unwrap().len(), 43, "a generated key: {filled}");
     assert_eq!(v.ask(&token, "POST", "/fill", json!({ "app": "agent-devices", "host": "shell", "text": "{{00000000000000ff:key}}" })).0, 400);
 
-    // Each use is in Andre's record.
-    let (_, record) = v.ask(&token, "GET", "/unseals", json!({}));
-    let what: Vec<String> = record["unseals"].as_array().unwrap().iter().flat_map(|u| u["what"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_string())).collect();
-    assert!(what.contains(&format!("gmail used {id}")) && what.contains(&"agent-devices used 00000000000000ff".to_string()), "{what:?}");
-
     // Deleted, it fills nothing.
     assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": { "id": id, "deleted": true } })).0, 200);
     let (_, gone) = fetch("gmail", "https://oauth2.googleapis.com/token", &format!("{{{{{id}:refresh_token}}}}"));
@@ -691,8 +686,8 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert!(["users", "install", "backups"].iter().all(|i| items(&andres).iter().any(|n| n == i)), "{:?}", items(&andres));
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
     let page = |path: &str| agent.get(format!("{api}{path}")).header("authorization", format!("Bearer {sams}")).call().unwrap().body_mut().read_to_string().unwrap();
-    let access = page("/v1/settings-screens/access");
-    assert!(access.contains("Access Log") && access.contains(&format!("\"user\":\"{sam}\"")), "the page is Sam's: {access}");
+    let vault = page("/v1/settings-screens/vault");
+    assert!(vault.contains(&format!("\"user\":\"{sam}\"")), "the page is Sam's: {vault}");
     assert!(page("/v1/settings-screens/nothing").contains("one.notFound()"));
 
     // What only admins may do, Sam can't; Andre can, signed in as on his Mac.

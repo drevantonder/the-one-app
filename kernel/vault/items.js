@@ -144,9 +144,8 @@ export class Items {
     return { id: row.id, hosts: data.hosts, value: secrets[field] };
   }
 
-  /// `text` with each placeholder filled for a request to `host`, adding to `used` the items whose secrets it
-  /// filled in; refuses when a secret field isn't sent there.
-  async fill(held, app, text, host, used = new Set()) {
+  /// `text` with each placeholder filled for a request to `host`; refuses when a secret field isn't sent there.
+  async fill(held, app, text, host) {
     let out = "";
     let rest = text;
     for (;;) {
@@ -161,7 +160,6 @@ export class Items {
         continue;
       }
       if (found.hosts.length && !found.hosts.includes(host)) throw new Error(`${name} is sent only to ${found.hosts.join(", ")}, not ${host}`);
-      if (found.hosts.length) used.add(found.id);
       out += rest.slice(0, start) + found.value;
       rest = rest.slice(end + 2);
     }
@@ -170,15 +168,15 @@ export class Items {
 
   /// Makes an app's request with its fields filled in: `{ app, url, method?, headers?, body? }` (body as text, or
   /// body64) → `{ status, headers, body64 }`. Redirects come back to the app, so a secret never follows one.
-  async fetch(held, { app, url, method = "GET", headers = {}, body, body64 }, used) {
+  async fetch(held, { app, url, method = "GET", headers = {}, body, body64 }) {
     const target = new URL(url);
     if (target.protocol !== "https:") throw new Error("the vault sends only https requests");
     const host = target.hostname.toLowerCase();
     const filled = new Headers();
-    for (const [k, v] of Object.entries(headers)) filled.set(k, await this.fill(held, app, String(v), host, used));
+    for (const [k, v] of Object.entries(headers)) filled.set(k, await this.fill(held, app, String(v), host));
     let payload = body64 !== undefined ? b64u.decode(body64) : body;
-    if (typeof payload === "string" && payload.includes("{{")) payload = await this.fill(held, app, payload, host, used);
-    const resp = await fetch(await this.fill(held, app, url, host, used), { method, headers: filled, body: payload, redirect: "manual" });
+    if (typeof payload === "string" && payload.includes("{{")) payload = await this.fill(held, app, payload, host);
+    const resp = await fetch(await this.fill(held, app, url, host), { method, headers: filled, body: payload, redirect: "manual" });
     const bytes = new Uint8Array(await resp.arrayBuffer());
     if (bytes.length > LIMIT) throw new Error(`${host} answered with more than 32 MB`);
     return { status: resp.status, headers: Object.fromEntries(resp.headers), body64: b64u.encode(bytes) };

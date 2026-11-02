@@ -4,7 +4,7 @@
 // (a passkey's PRF output, an OAuth client's refresh token) and kept by a hash of that secret; a session is a copy
 // sealed under an access token, kept until the token expires or its client signs out. Each scope's key is sealed to the public half of every
 // person who may open it, and to the install's recovery key. A request that brings an access token gets the keys it
-// names from its session, and each one is recorded where its person can see it.
+// names from its session.
 //
 // The auth service is the only one that sees clients' secrets (it issues them), so it alone calls the routes under
 // /internal/, with the kernel's shared secret. Everyone else brings an access token.
@@ -58,12 +58,18 @@ export class Vault extends DurableObject {
       create table if not exists copies (id text primary key, user text not null, kind text not null, name text not null,
         client text, sealed blob not null, made integer not null, until integer, line text);
       create index if not exists copies_user on copies (user);
-      create table if not exists unseals (at integer not null, user text not null, client text, what text not null);
-      create index if not exists unseals_user on unseals (user, at);
     `);
     this.sql.exec(schema);
     // A client's copies (pending, its own, and its sessions) share a line, so signing it out ends its sessions too.
     if (!this.sql.exec("select name from pragma_table_info('copies') where name = 'line'").toArray().length) this.sql.exec("alter table copies add column line text");
+    // When a key under each scope was first given out: until then, a scope's key the nodes made may replace its own.
+    if (!this.sql.exec("select name from pragma_table_info('scopes') where name = 'given'").toArray().length) {
+      this.sql.exec("alter table scopes add column given integer");
+      if (this.sql.exec("select name from sqlite_master where name = 'unseals'").toArray().length) {
+        this.sql.exec(`update scopes set given = 1 where exists (select 1 from unseals where what like '%"' || scopes.scope || '/%')`);
+        this.sql.exec("drop table unseals");
+      }
+    }
     this.items = new Items(this.sql, this);
   }
 
@@ -109,7 +115,6 @@ export class Vault extends DurableObject {
       case "POST /fetch": return json(await this.fetchFor(token, claims, body));
       case "POST /fill": return json(await this.fillFor(token, claims, body));
       case "GET /copies": return json(this.copies(claims.sub));
-      case "GET /unseals": return json(this.unseals(claims.sub, Number(url.searchParams.get("before")) || Date.now() + 1));
     }
     const remove = path.match(/^\/copies\/([A-Za-z0-9_-]{43})$/);
     if (request.method === "DELETE" && remove) return json(this.remove(claims.sub, remove[1]));
@@ -216,8 +221,8 @@ export class Vault extends DurableObject {
   /// the one it replaces.
   async scopeKeyGiven({ scope, key, people }) {
     if (!SCOPE.test(scope || "")) refuse(400, `${scope} isn't a scope`);
-    const used = this.sql.exec("select count(*) n from unseals where what like ?", `%"${scope}/%`).one().n;
-    if (used) refuse(409, `keys under ${scope} were given out here already, so its key stays`);
+    const [had] = this.sql.exec("select given from scopes where scope = ?", scope).toArray();
+    if (had?.given) refuse(409, `keys under ${scope} were given out here already, so its key stays`);
     const bytes = b64u.decode(String(key || ""));
     if (bytes.length !== 32) refuse(400, "a scope's key is 32 bytes");
     const recovery = b64u.decode(this.env.RECOVERY_KEY || refuse(503, "the vault has no recovery key"));
@@ -350,7 +355,7 @@ export class Vault extends DurableObject {
       if (want.database !== undefined) key = await databaseKey(key, want.database);
       out.push({ ...pick(want), key: b64u.encode(key) });
     }
-    this.record(held.user, row.client || claims.azp, out.map((k) => [k.scope, k.app, k.database].filter(Boolean).join("/")));
+    for (const scope of new Set(out.map((k) => k.scope))) this.sql.exec("update scopes set given = ? where scope = ? and given is null", Date.now(), scope);
     return { keys: out, until: row.until };
   }
 
@@ -385,19 +390,15 @@ export class Vault extends DurableObject {
     const name = appKeyName(scope, app);
     const resp = await fetch((await bucketUrls(this.bucket(), { remove: [name] }, 60)).remove[name], { method: "DELETE" });
     if (!resp.ok && resp.status !== 404) refuse(502, `the bucket said ${resp.status} to erasing ${app}'s key`);
-    this.record(held.user, row.client || claims.azp, [`erased ${scope}/${app}`]);
     return {};
   }
 
-  /// Makes an app's request with its Vault fields filled in (see items.js), recording the items it used.
+  /// Makes an app's request with its Vault fields filled in (see items.js).
   async fetchFor(token, claims, body) {
     const { row, held } = await this.sessionOf(token);
     if (!NAME.test(body.app || "")) refuse(400, "name the app whose request it is");
     mayUse(held, body.app);
-    const used = new Set();
-    const out = await this.items.fetch(held, body, used).catch((err) => refuse(400, err.message));
-    if (used.size) this.record(held.user, row.client || claims.azp, [...used].map((id) => `${body.app} used ${id}`));
-    return out;
+    return this.items.fetch(held, body).catch((err) => refuse(400, err.message));
   }
 
   /// Fills `text` for a sidecar of the app `app` to send to `host` itself.
@@ -405,19 +406,8 @@ export class Vault extends DurableObject {
     const { row, held } = await this.sessionOf(token);
     if (!NAME.test(app || "") || typeof host !== "string" || typeof text !== "string") refuse(400, "give app, host and text");
     mayUse(held, app);
-    const used = new Set();
-    const filled = await this.items.fill(held, app, text, host.toLowerCase(), used).catch((err) => refuse(400, err.message));
-    if (used.size) this.record(held.user, row.client || claims.azp, [...used].map((id) => `${app} used ${id}`));
+    const filled = await this.items.fill(held, app, text, host.toLowerCase()).catch((err) => refuse(400, err.message));
     return { text: filled };
-  }
-
-  record(user, client, what) {
-    this.sql.exec("insert into unseals (at, user, client, what) values (?, ?, ?, ?)", Date.now(), user, client || null, JSON.stringify(what));
-  }
-
-  unseals(user, before) {
-    const rows = this.sql.exec("select at, client, what from unseals where user = ? and at < ? order by at desc limit 100", user, before).toArray();
-    return { unseals: rows.map((r) => ({ ...r, what: JSON.parse(r.what) })) };
   }
 
   /// Presigned URLs to read and create objects, and to replace a database's `newest` (only while it's still the

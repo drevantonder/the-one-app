@@ -312,9 +312,6 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
         })
         .collect();
     let mine = states.get(&Scope::User(me.into()).to_string());
-    let opens: Vec<Value> = mine
-        .map(|s| s.opens.iter().map(|(by, server, time, agent)| json!({ "by": by, "by_name": m.users.get(by).map(|u| &u.name), "agent": agent, "server": hex(server), "time": time, "until": time + members::OPEN_FOR })).collect())
-        .unwrap_or_default();
     let mut settings: serde_json::Map<String, Value> = one::config::SETTINGS.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
     settings.extend(m.settings.iter().map(|(k, v)| (k.clone(), json!(v))));
     for key in ["store", "push"] {
@@ -333,10 +330,9 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
         "user": user,
         "install": {
             "name": m.name, "root": m.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role), "member": false,
-            "users": users, "groups": groups, "servers": servers, "clients": clients, "opens": opens, "entries": 0, "settings": settings,
+            "users": users, "groups": groups, "servers": servers, "clients": clients, "entries": 0, "settings": settings,
             "serverless": { "use": one::rank::place(&set, one::rank::CLOUDFLARE, one::rank::CLOUDFLARE) },
         },
-        "opens": opens,
         "vault_requests": waiting, "secret_requests": waiting,
         "arrangements": mine.map(|s| s.arrangements.clone()).unwrap_or_default(),
         "backups": null,

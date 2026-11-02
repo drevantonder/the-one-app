@@ -37,7 +37,6 @@ Usage:
   {CLI} acl <server> --owners a,b --users c,d
                                        who owns and uses a server: user or group names, or install
   {CLI} trust <server> | untrust <server>
-  {CLI} open <user> <server>           read a user's data on a server you own, for an hour; they see it
   {CLI} apps                           every app and its operations
   {CLI} deploy <dir> [--name <app>] [--owner <owner>]
                                        build the app in <dir> (app.ts or app.js, and its npm packages) with Bun and
@@ -298,10 +297,6 @@ fn run(args: Vec<String>) -> Result<()> {
             let trust = positional[0] == "trust";
             post("/v1/trust", json!({ "server": server, "trust": trust }))?;
             println!("You {} {server}.", if trust { "trust" } else { "no longer trust" });
-        }
-        ["open", user, server] => {
-            let r = post("/v1/open", json!({ "user": user, "server": server, "agent": agent_from_env() }))?;
-            println!("{}", r["ok"].as_str().unwrap_or("Opened."));
         }
         ["deploy", app] if flags.contains_key("version") => {
             let version = flags["version"].as_str().context("give --version <hash>")?;
@@ -987,9 +982,6 @@ fn status(state: &Value) {
             let asked = c["asked"].as_u64().map(|t| format!(", asked here {}", ago(t))).unwrap_or_default();
             println!("  ▯ {}  {}{asked}", c["name"].as_str().unwrap_or(""), name(c["user"].as_str().unwrap_or("")));
         }
-    }
-    for o in i["opens"].as_array().into_iter().flatten() {
-        println!("\n{} opened your data on a server {}.", o["by_name"].as_str().unwrap_or("someone"), ago(o["time"].as_u64().unwrap_or(0)));
     }
 }
 

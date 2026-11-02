@@ -13,9 +13,6 @@ use crate::entry::{Content, Entry, Key, Order, Scope, hex, is_id, unhex};
 /// The node's own entries. Apps never see them.
 pub const APP: &str = "node";
 
-/// How long an `open` lets its opener read a user's data.
-pub const OPEN_FOR: u64 = 3_600_000;
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
@@ -330,8 +327,7 @@ impl Members {
         if !self.holds(&author, &scope) || !self.trusts(e.user(), &author) {
             return false;
         }
-        let opener = e.content.app == APP && e.content.kind == "open" && matches!(scope, Scope::User(_));
-        if !opener && !self.may_use(e.user(), &scope) {
+        if !self.may_use(e.user(), &scope) {
             return false;
         }
         match e.by() {
@@ -584,9 +580,6 @@ pub struct ScopeState {
     pub requests: BTreeMap<String, VaultRequest>,
     /// The blobs this scope's apps said they no longer need, though their entries name them.
     pub forgotten: BTreeSet<String>,
-    /// (opener, server, time)
-    /// Who opened this user's data, on which server, when, and through which agent.
-    pub opens: Vec<(String, Key, u64, Option<String>)>,
     /// The Vault's items here, by id.
     pub items: BTreeMap<String, crate::vault::Item>,
     /// In a user's own scope: how they arranged each page, by page (`user`, `group:<id>` or `global`):
@@ -734,13 +727,6 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let hidden = data["hidden"].as_array().cloned().unwrap_or_default();
             ensure!(hidden.iter().all(|a| a.as_str().is_some_and(valid_app_name)), "hidden lists apps");
             state.arrangements.insert(page.to_string(), json!({ "items": items, "hidden": hidden, "time": e.time() }));
-        }
-        "open" => {
-            let Scope::User(_) = &scope else { bail!("only a user's data is opened") };
-            let server = unhex(e.content.data["server"].as_str().context("no server")?)?;
-            ensure!(m.holds(&server, &scope), "that server doesn't hold it");
-            ensure!(m.owners(&server).iter().any(|o| m.acts_for(w, o)), "only someone acting for an owner of the server opens");
-            state.opens.push((w.to_string(), server, e.time(), e.content.data["agent"].as_str().map(str::to_string)));
         }
         _ if scope == Scope::Global => {}
         other => bail!("{other} isn't a node entry of a user or group scope"),
