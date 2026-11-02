@@ -257,7 +257,7 @@ At the start of a session, read the top (board_read with no topic), for context.
     },
     create: {
       words: ["topic", "description"],
-      description: "Create a topic under an existing one (the top always exists), with a one-line description. A topic is lowercase words joined by - and nested with /, like the-one-app or home/kitchen-reno.",
+      description: "Create a topic, and its parents where they're missing, with a one-line description. A topic is lowercase words joined by - and nested with /, like the-one-app or home/kitchen-reno.",
       input: {
         type: "object",
         required: ["topic", "description"],
@@ -271,20 +271,24 @@ At the start of a session, read the top (board_read with no topic), for context.
       async run(ctx, { topic: path, description, force, scope }) {
         const b = board(ctx, scope);
         path = String(path || "").trim().replace(/^\/+|\/+$/g, "");
-        if (!/^[a-z0-9-]+(\/[a-z0-9-]+)*$/.test(path)) throw new Error("a topic is lowercase words joined by - and nested with /, like the-one-app or home/kitchen-reno");
+        if (!/^[a-z0-9-]+(\/[a-z0-9-]+)*$/.test(path)) throw new Error("Not created: a topic is lowercase words joined by - and nested with /, like the-one-app or home/kitchen-reno");
         description = String(description ?? "").trim();
-        if (!description || /[\r\n]/.test(description) || bytes(description) > LIMIT) throw new Error(`the description must be one line of at most ${LIMIT} bytes`);
+        if (!description || /[\r\n]/.test(description) || bytes(description) > LIMIT) throw new Error(`Not created: the description must be one line of at most ${LIMIT} bytes`);
         const existing = (await b.query("select description from topics where path = ?", [path]))[0];
-        if (existing) throw new Error(`${path} already exists: ${existing.description}`);
-        const parent = parentOf(path);
-        if (!(await exists(b, parent))) throw new Error(`no topic ${parent}: create it first`);
+        if (existing) throw new Error(`Not created: ${path} already exists: ${existing.description}`);
         if (!force) {
-          const like = (await b.query("select path, description from topics order by path")).filter((t) => alike(t.path.split("/").pop(), path.split("/").pop()));
+          // A topic like this one elsewhere, not one of its own parents.
+          const like = (await b.query("select path, description from topics order by path"))
+            .filter((t) => !path.startsWith(`${t.path}/`) && alike(t.path.split("/").pop(), path.split("/").pop()));
           if (like.length)
             throw new Error(["Not created: these topics look like the same thing.", ...like.map((t) => `  ${t.path} — ${t.description}`), "Use one of them, or call board_create again with force true if yours is different."].join("\n"));
         }
+        // Its parents are made too, where they're missing: home for home/kitchen-reno.
+        const made = [];
+        for (let parent = parentOf(path); parent && !(await exists(b, parent)); parent = parentOf(parent)) made.unshift(parent);
+        for (const parent of made) b.exec("insert or ignore into topics values (?, ?, ?, ?)", [parent, `Topics under ${parent}`, ctx.now(), ctx.me.name]);
         b.exec("insert or ignore into topics values (?, ?, ?, ?)", [path, description, ctx.now(), ctx.me.name]);
-        return `Created ${path}. Post to it with board_post.`;
+        return made.length ? `Created ${[...made, path].join(" and ")}. Post to ${path} with board_post.` : `Created ${path}. Post to it with board_post.`;
       },
     },
     topics: {
