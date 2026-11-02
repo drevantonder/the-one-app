@@ -785,11 +785,9 @@ fn keep_files(v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
             if ty.starts_with("image/") && bytes.len() <= MCP_FILE_LIMIT {
                 shown.push(json!({ "type": "image", "data": data_encoding::BASE64.encode(&bytes), "mimeType": ty }));
             }
+            // No link to it: a browser can't prove to the node it's one of this machine's own programs (src/api.rs);
+            // `file get` saves it.
             *v = json!({ "name": name, "type": ty, "size": bytes.len(), "file": id });
-            // A link to this machine's node works only on it.
-            if !crate::signed_in() {
-                v["link"] = json!(format!("http://{}/v1/blobs/{id}", crate::addr()));
-            }
         }
         return;
     }
