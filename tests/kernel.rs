@@ -198,7 +198,7 @@ fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
     let vault = kernel::Vault { url: v.url.clone() };
     v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
     v.internal("passkey", json!({ "user": SAM, "secret": "sam's own passkey prf output" }));
-    let mine = one::backups::folder(&format!("user:{ANDRE}"));
+    let mine = one::bucket::folder(&format!("user:{ANDRE}"));
     v.internal("grant", json!({ "user": ANDRE, "from": "andre's passkey prf output", "to": "andre's code here", "client": "iphone" }));
     let (token, until) = v.token(ANDRE, "iphone");
     v.internal("rekey", json!({ "from": "andre's code here", "to": "andre's refresh token", "token": token, "until": until }));
@@ -214,7 +214,7 @@ fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
     assert_eq!(url_query(&urls.read[&format!("{mine}/board/main/copy")])["X-Amz-SignedHeaders"], "host");
 
     // Sam's objects, and names that climb out of an app, aren't Andre's to reach; Everyone's are (he's its first).
-    let sams = format!("{}/board/main/copy", one::backups::folder(&format!("user:{SAM}")));
+    let sams = format!("{}/board/main/copy", one::bucket::folder(&format!("user:{SAM}")));
     assert!(vault.urls(&token, &[&sams], &[], &[]).is_err());
     assert!(vault.urls(&token, &[], &[&format!("{mine}/board/../../x")], &[]).is_err());
     assert!(vault.urls(&token, &[], &[&format!("{mine}/board")], &[]).is_err());

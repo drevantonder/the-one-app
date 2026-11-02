@@ -1,8 +1,10 @@
 // Every app runs inside this shim, in workerd. The app module (./app.js) is the app's deployed code; this turns it
 // into a Worker that answers the node: operations, widgets, hooks and screens. Its databases, one per scope, are the
-// node's: a query asks the node, and a call's writes are handed to it when the call returns, as one write.
+// node's: a query asks the node, and a call's writes are handed to it when the call returns, as one write. A node on a
+// machine asks it over HTTP (`fetch`); the serverless node by RPC (`Call`), handing it what answers for the node.
 import app from "./app.js";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { WorkerEntrypoint } from "cloudflare:workers";
 
 // Every request goes out through the node (the Worker's global outbound), carrying the token of the call it's made
 // in, so the node knows whose it is: it fills in that call's secrets, and refuses them to other hosts.
@@ -47,7 +49,7 @@ async function askNode(token, path, init = {}) {
 
 /// After a call returned: waits for the work it left running (ctx.waitUntil), hands the node what that work wrote,
 /// and says it's done.
-async function finish(token, later, appends) {
+async function finish(ask, later, appends) {
   let error = null;
   for (let i = 0; i < later.length; i++) {
     try {
@@ -58,11 +60,11 @@ async function finish(token, later, appends) {
     }
   }
   try {
-    if (appends.length) await askNode(token, "appends", { method: "POST", body: JSON.stringify({ appends: appends.splice(0) }) });
+    if (appends.length) await ask("appends", { method: "POST", body: JSON.stringify({ appends: appends.splice(0) }) });
   } catch (err) {
     error ||= String(err?.message ?? err);
   }
-  await askNode(token, "done", { method: "POST", body: JSON.stringify({ error }) }).catch(() => {});
+  await ask("done", { method: "POST", body: JSON.stringify({ error }) }).catch(() => {});
 }
 
 /// A widget's options' defaults, as its render sees them when a person chose none.
@@ -83,12 +85,12 @@ async function widgetOptions(widget, ctx) {
 }
 
 /// What a call, widget or hook gets: the caller, and a handle on each scope the node lets it reach.
-function context(env, body, appends, later) {
+function context(ask, body, appends, later) {
   const handle = (s) => ({
     id: s.id, name: s.name, role: s.role,
     /// Reads this scope's database: the rows, each an object by column. It sees what the call writes only once the
     /// call has returned.
-    query: async (q, params = []) => (await (await askNode(body.token, "query", { method: "POST", body: JSON.stringify({ scope: s.id, sql: q, params }) })).json()).ok,
+    query: async (q, params = []) => (await (await ask("query", { method: "POST", body: JSON.stringify({ scope: s.id, sql: q, params }) })).json()).ok,
     /// Writes this scope's database once the call returns, with every other statement it ran, as one transaction;
     /// `blobs` are blobs the scope keeps from now on.
     exec: (q, params = [], blobs = []) => {
@@ -113,8 +115,6 @@ function context(env, body, appends, later) {
     },
   });
   const scopes = body.scopes.map(handle);
-  // What the node does for a call: other apps' and sidecars' operations, blobs, the install's apps.
-  const ask = (path, init) => askNode(body.token, path, init);
   // `ctx.apps.<name>.<op>(input, { server })`, for exactly the apps (or sidecars) the app says it uses; `server` (a
   // name) runs it there, like a sidecar on the machine that has what it needs.
   const uses = { apps: app.uses?.apps || [], sidecars: [...(app.uses?.sidecars || []), ...(app.uses?.drivers || [])] };
@@ -235,48 +235,65 @@ function context(env, body, appends, later) {
   };
 }
 
+/// Answers one of the node's requests: `describe`, `screen` (with `name`), or a call, widget, its options, a badge or
+/// a hook, for `body`; `ask` is how it asks the node, `waitUntil` how work outlives the reply. → what the reply says.
+async function handle(what, name, body, ask, waitUntil) {
+  if (what === "describe") return { ok: describe() };
+  if (what === "screen") return { ok: app.screens?.[name]?.html ?? null };
+  try {
+    const appends = [];
+    const later = [];
+    const ctx = context(ask, body, appends, later);
+    let run;
+    if (what === "call") {
+      const op = app.ops?.[body.op];
+      if (!op) throw new Error(`${app.name} has no operation ${body.op}`);
+      run = () => op.run(ctx, body.input ?? {});
+    } else if (what === "widget") {
+      const widget = app.widgets[body.name];
+      ctx.size = body.size || widget.size || "medium";
+      ctx.options = { ...optionDefaults(widget), ...(body.options || {}) };
+      run = () => widget.render(ctx);
+    } else if (what === "options") {
+      run = () => widgetOptions(app.widgets[body.name], ctx);
+    } else if (what === "badge") {
+      run = () => app.badge(ctx);
+    } else if (what === "hook") {
+      const hook = app.hooks?.[body.name];
+      if (!hook) throw new Error(`${app.name} has no hook ${body.name}`);
+      run = () => hook(ctx, body.input);
+    } else {
+      throw new Error(`no such request ${what}`);
+    }
+    const result = await calls.run(body.token, run);
+    const keep = what === "call" && later.length > 0;
+    const reply = { ok: result, appends: what === "call" ? appends.splice(0) : [], later: keep };
+    if (keep) waitUntil(calls.run(body.token, () => finish(ask, later, appends)));
+    return reply;
+  } catch (err) {
+    return { error: String(err?.message ?? err) };
+  }
+}
+
 export default {
   async fetch(req, env, execution) {
     const url = new URL(req.url);
     const what = url.pathname.split("/").pop();
-    if (what === "describe") return json({ ok: describe() });
-    if (what === "screen") {
-      const screen = app.screens?.[url.searchParams.get("name")];
-      return json({ ok: screen ? screen.html : null });
-    }
-    const body = await req.json();
-    try {
-      const appends = [];
-      const later = [];
-      const ctx = context(env, body, appends, later);
-      let run;
-      if (what === "call") {
-        const op = app.ops?.[body.op];
-        if (!op) throw new Error(`${app.name} has no operation ${body.op}`);
-        run = () => op.run(ctx, body.input ?? {});
-      } else if (what === "widget") {
-        const widget = app.widgets[body.name];
-        ctx.size = body.size || widget.size || "medium";
-        ctx.options = { ...optionDefaults(widget), ...(body.options || {}) };
-        run = () => widget.render(ctx);
-      } else if (what === "options") {
-        run = () => widgetOptions(app.widgets[body.name], ctx);
-      } else if (what === "badge") {
-        run = () => app.badge(ctx);
-      } else if (what === "hook") {
-        const hook = app.hooks?.[body.name];
-        if (!hook) throw new Error(`${app.name} has no hook ${body.name}`);
-        run = () => hook(ctx, body.input);
-      } else {
-        throw new Error(`no such request ${what}`);
-      }
-      const result = await calls.run(body.token, run);
-      const keep = what === "call" && later.length > 0;
-      const reply = json({ ok: result, appends: what === "call" ? appends.splice(0) : [], later: keep });
-      if (keep) execution.waitUntil(calls.run(body.token, () => finish(body.token, later, appends)));
-      return reply;
-    } catch (err) {
-      return json({ error: String(err?.message ?? err) }, 400);
-    }
+    const body = ["describe", "screen"].includes(what) ? {} : await req.json();
+    const reply = await handle(what, url.searchParams.get("name"), body, (path, init) => askNode(body.token, path, init), (p) => execution.waitUntil(p));
+    return json(reply, reply.error === undefined ? 200 : 400);
   },
 };
+
+/// The serverless node runs an app through this: `node.ask(path, init)` answers what the node does for a call, as
+/// `askNode`'s requests are answered on a machine, with a Response.
+export class Call extends WorkerEntrypoint {
+  async run(what, name, body, node) {
+    const ask = async (path, init = {}) => {
+      const r = await node.ask(path, init.method || "GET", init.body ?? null);
+      if (!r.ok) throw new Error(await r.text());
+      return r;
+    };
+    return handle(what, name, body, ask, (p) => this.ctx.waitUntil(p));
+  }
+}

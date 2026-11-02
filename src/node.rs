@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
-use crate::apps::{Append, Apps, Context, Me, ScopeHandle};
+use crate::apps::{Apps, Context, Me, ScopeHandle};
+use crate::call::Append;
 use crate::backups::{KEY_OBJECT, KEYS};
 use crate::bucket::Place;
 use crate::db::Db;
@@ -66,7 +67,7 @@ const LOG: &str = "log";
 
 /// Where a scope's entries are in the bucket, at numbered positions.
 fn log_prefix(scope: &Scope) -> String {
-    format!("{}/{}/{LOG}", crate::backups::folder(&scope.to_string()), members::APP)
+    format!("{}/{}/{LOG}", crate::bucket::folder(&scope.to_string()), members::APP)
 }
 
 /// What an app's own database is called: SQLite's name for a connection's first.
@@ -979,7 +980,7 @@ impl Node {
         // A call that writes, tried on another server before this one, ran there if it took the lease first.
         if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);
-            let lease = format!("{}/{}/calls/{id}", crate::backups::folder(&scope.to_string()), req.app);
+            let lease = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
             if !reads && !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
                 return Ok(Reply::Error("it ran on another server already, whose answer was lost: look before trying again".into()));
             }
@@ -1038,7 +1039,7 @@ impl Node {
             return Ok(*key);
         }
         let bucket = self.bucket()?;
-        let folder = crate::backups::folder(&scope.to_string());
+        let folder = crate::bucket::folder(&scope.to_string());
         let given = format!("{folder}/{KEYS}/{}", hex(&self.0.id));
         let key = match Bucket::get(&bucket, &given).await? {
             Some(o) => crate::backups::unseal(self.0.key.as_bytes(), &o.bytes)?,
@@ -1077,7 +1078,7 @@ impl Node {
     async fn give_key(&self, scope: &Scope, key: &[u8; 32]) -> Result<()> {
         use crate::bucket::Bucket;
         let bucket = self.bucket()?;
-        let folder = crate::backups::folder(&scope.to_string());
+        let folder = crate::bucket::folder(&scope.to_string());
         let to = self.with(|i| {
             let m = &i.r.members;
             let mut to: Vec<(String, Key)> = m.servers().filter(|s| m.holds(&s.key, scope)).map(|s| (hex(&s.key), s.key)).collect();
@@ -1115,7 +1116,7 @@ impl Node {
         }
         let bucket = self.bucket()?;
         let key = self.database_key(scope, app, database).await?;
-        let mut db = Db::open(&bucket, &format!("{}/{app}/{database}", crate::backups::folder(&scope.to_string())), key).await?;
+        let mut db = Db::open(&bucket, &format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string())), key).await?;
         let schema = match schema {
             Some(schema) => schema,
             None => {
@@ -1282,16 +1283,7 @@ impl Node {
             let bucket = self.bucket()?;
             db.lock()
                 .await
-                .write(&bucket, |c| {
-                    for (sql, params, check) in &list {
-                        let rows = crate::db::execute(c, sql, params)?;
-                        if let Some(message) = check {
-                            let held = rows.first().and_then(|r| r.values().next()).is_some_and(|v| v.as_i64().is_some_and(|n| n != 0) || v == true);
-                            ensure!(held, "{message}");
-                        }
-                    }
-                    Ok(())
-                })
+                .write(&bucket, |c| crate::db::statements(c, &list))
                 .await?;
             if !kept.is_empty() {
                 writes.push((scope, Content { blobs: kept, ..members::node("keep", json!({})) }));
@@ -1462,7 +1454,7 @@ impl Node {
         self.0.dbs.lock().unwrap().retain(|(_, db), _| db.split('/').next() != Some(app));
         let app = app.to_string();
         tokio::task::spawn_blocking(move || {
-            for scope in bucket.list("")?.iter().map(|f| crate::backups::scope_of(f)).filter(|s| Scope::parse(s).is_ok()) {
+            for scope in bucket.list("")?.iter().map(|f| crate::bucket::scope_of(f)).filter(|s| Scope::parse(s).is_ok()) {
                 bucket.delete(&crate::kernel::app_key_name(&scope, &app))?;
             }
             Ok(())
@@ -1567,7 +1559,7 @@ impl Node {
         if !self.ready() || latest.is_none() || self.0.bundles.lock().unwrap().get(app) != latest.as_ref() {
             return Ok(());
         }
-        let lease = format!("{}/{}/slots/{app}/{}/{slot}", crate::backups::folder(&scope.to_string()), members::APP, schedule.name);
+        let lease = format!("{}/{}/slots/{app}/{}/{slot}", crate::bucket::folder(&scope.to_string()), members::APP, schedule.name);
         if !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
             return Ok(());
         }
@@ -2297,16 +2289,7 @@ impl Node {
         let made_here = self.with(|i| Ok(settings(&i.r.members).remove("made_here")))?;
         let api = format!("http://localhost:{}", crate::api::port());
         let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": made_here });
-        let context = json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope, "config": config });
-        // `</` can't appear inside the inline script, so it can't end it early.
-        let context = context.to_string().replace("</", "<\\/");
-        Ok(format!(
-            "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\
-             <style>{kit}:root{{--accent:{accent}}}</style><script>window.__one={context};{bridge}</script></head><body>{body}</body></html>",
-            kit = include_str!("screen/kit.css"),
-            accent = crate::config::ACCENT,
-            bridge = concat!(include_str!("screen/bridge.js"), include_str!("screen/kit.js"), include_str!("screen/code.js"), include_str!("screen/markdown.js")),
-        ))
+        Ok(crate::screen::page(&json!({ "app": app, "screen": name, "params": params, "me": me, "scope": scope, "config": config }), &body))
     }
 
     /// Every app in the install, with what each does for `viewer` where it's installed for them; and the sidecars
@@ -2662,7 +2645,7 @@ impl Node {
             ("POST", "/appends") => {
                 ensure!(self.0.later.lock().unwrap().contains_key(token), "only work a call left running after it returned hands in appends later");
                 let req: Value = serde_json::from_slice(&body)?;
-                let appends = crate::apps::appends(&req["appends"])?;
+                let appends = crate::call::appends(&req["appends"])?;
                 self.write_appends(&grant.app, appends, &grant.scopes, &grant.caller, grant.from.as_deref()).await?;
                 ok(json!({}))
             }

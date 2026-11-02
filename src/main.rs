@@ -81,6 +81,10 @@ Usage:
                                        passkey, as who they are in the install (--user, or this machine's person for
                                        the first), so nodes know them; nobody joins uninvited, the first person too.
                                        For someone who lost every passkey, --user them and pipe the recovery key
+  {CLI} serverless deploy [--account <id>]
+                                       put the install's serverless node in the kernel's Cloudflare account (a node as
+                                       a Worker, with the API token in CLOUDFLARE_API_TOKEN) and send the address's
+                                       /v1/ and /mcp to it; what needs a machine goes on to node-url
   {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/: a node's address, or
                                        cloudflare:<id>, the Workers VPC service of a Cloudflare Tunnel to one),
                                        auth-url, vault-url, schedules-url, resources (nodes' own addresses,
@@ -346,13 +350,7 @@ fn run(args: Vec<String>) -> Result<()> {
             one::kernel::serve(&settings)?
         }
         ["kernel", "deploy"] => {
-            let token = std::env::var("CLOUDFLARE_API_TOKEN").context("give a Cloudflare API token that may edit Workers in CLOUDFLARE_API_TOKEN")?;
-            let api = "https://api.cloudflare.com/client/v4".to_string();
-            let account = match flags.get("account").and_then(Value::as_str) {
-                Some(account) => account.to_string(),
-                None => one::kernel::Cloudflare { api: api.clone(), token: token.clone(), account: String::new() }.accounts()?,
-            };
-            let cf = one::kernel::Cloudflare { api, token, account };
+            let cf = cloudflare(&flags)?;
             let settings = match one::kernel::Settings::load() {
                 Ok(settings) => settings,
                 Err(_) => {
@@ -378,6 +376,21 @@ fn run(args: Vec<String>) -> Result<()> {
             let web: Vec<(String, Vec<u8>)> = one::kernel::web_files().map(|(path, bytes)| (path.to_string(), bytes.to_vec())).collect();
             one::kernel::deploy(&cf, &settings, &modules, &web)?;
             print!("Deployed.\n{}", kernel_said(&settings));
+        }
+        ["serverless", "deploy"] => {
+            let cf = cloudflare(&flags)?;
+            let mut settings = one::kernel::Settings::load()?;
+            one::serverless::deploy(&cf, &settings)?;
+            if !settings.serverless {
+                settings.serverless = true;
+                settings.save()?;
+                let gateway = one::kernel::SERVICES.iter().position(|(s, _, _)| *s == "gateway").unwrap();
+                let mut modules = vec![Vec::new(); one::kernel::SERVICES.len()];
+                modules[gateway] = one::kernel::module(one::kernel::SERVICES[gateway].1)?;
+                let web: Vec<(String, Vec<u8>)> = one::kernel::web_files().map(|(path, bytes)| (path.to_string(), bytes.to_vec())).collect();
+                one::kernel::deploy_some(&cf, &settings, &modules, &web, &["gateway"])?;
+            }
+            println!("The serverless node is in your Cloudflare account, and {} sends /v1/ and /mcp to it; what needs a machine goes on to {}.", settings.address, settings.node_url.as_deref().unwrap_or("no machine yet: kernel set node-url"));
         }
         ["kernel", "invite", name] => {
             let settings = one::kernel::Settings::load()?;
@@ -1271,6 +1284,17 @@ fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> 
 
 /// Backups' status, for people.
 /// Where a kernel is, and what it's set to, without its secrets.
+/// Cloudflare's API with the token in CLOUDFLARE_API_TOKEN, for the account `--account` names or the token's only one.
+fn cloudflare(flags: &Map<String, Value>) -> Result<one::kernel::Cloudflare> {
+    let token = std::env::var("CLOUDFLARE_API_TOKEN").context("give a Cloudflare API token that may edit Workers in CLOUDFLARE_API_TOKEN")?;
+    let api = "https://api.cloudflare.com/client/v4".to_string();
+    let account = match flags.get("account").and_then(Value::as_str) {
+        Some(account) => account.to_string(),
+        None => one::kernel::Cloudflare { api: api.clone(), token: token.clone(), account: String::new() }.accounts()?,
+    };
+    Ok(one::kernel::Cloudflare { api, token, account })
+}
+
 fn kernel_said(s: &one::kernel::Settings) -> String {
     let mut out = format!("{}'s kernel\n  address   {}\n  vault     {}\n  schedules {}\n", s.name, s.address, s.vault_url, s.schedules_url);
     if s.vault_url.starts_with("http://127.0.0.1") {

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "client"]
+members = [".", "client", "serverless"]
 
 # netdev 0.46 uses a macOS-only libc type on every Apple system, which breaks iPhone builds of the client.
 # Drop this once iroh moves to a netdev that builds for iOS.
@@ -21,32 +21,39 @@ anyhow = "1"
 # (src/backups.rs). Both were already built, through iroh.
 aes-gcm = "0.10"
 curve25519-dalek = "4.1"
-blake3 = "1"
-axum = "0.8"
-ciborium = "0.2"
 data-encoding = "2"
 # The kernel's access tokens are signed with Ed25519 (src/kernel.rs checks them); iroh already builds it.
 ed25519-dalek = "3"
 # The kernel derives keys with HKDF-SHA256, because that's what WebCrypto in workerd has (src/kernel.rs).
 hkdf = "0.13"
+rand = "0.8"
+# `serialize` makes and reads an app database's copy in memory (src/db.rs).
+rusqlite = { version = "0.41", features = ["bundled", "limits", "serialize"] }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.11"
+serde_json = "1"
+tracing = "0.1"
+
+# On Workers (the serverless node, serverless/), rand gets its randomness from the runtime's crypto.getRandomValues.
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+# What only a node on a machine uses: the rest of the node (src/lib.rs keeps the shared modules apart).
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+blake3 = "1"
+axum = "0.8"
+ciborium = "0.2"
 iroh = "1.4"
 # Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
 jiff = "0.2"
 # So workerd dies with its node on Linux (prctl PR_SET_PDEATHSIG).
 libc = "0.2"
 p2panda-core = "0.7"
-rand = "0.8"
-# `serialize` makes and reads an app database's copy in memory (src/db.rs).
-rusqlite = { version = "0.41", features = ["bundled", "limits", "serialize"] }
-serde = { version = "1", features = ["derive"] }
-sha2 = "0.11"
 # Release signatures are OpenSSH signatures (sshsig), which install.sh checks with ssh-keygen; this reads the keys and
 # makes and checks the signatures.
 ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"] }
-serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
 # A site's favicon.ico becomes a PNG for shells (src/logos.rs); ureq already brings it in.
@@ -63,6 +70,10 @@ opt-level = 3
 
 [profile.release]
 strip = true
+
+# wasm-bindgen reads which WebAssembly features the serverless node's build uses from what stripping would remove.
+[profile.release.package.one-serverless]
+strip = false
 
 [dev-dependencies]
 one-client = { path = "client" }

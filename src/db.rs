@@ -52,7 +52,7 @@ pub async fn app_key(bucket: &impl Bucket, scope_key: &[u8; 32], scope: &str, ap
     if let Some(o) = bucket.get(&name).await? {
         return crate::kernel::open_app_key(scope_key, app, &o.bytes);
     }
-    let prefix = format!("{}/{app}/{database}", crate::backups::folder(scope));
+    let prefix = format!("{}/{app}/{database}", crate::bucket::folder(scope));
     let written = bucket.get(&newest_name(&prefix)).await?.is_some() || bucket.get(&step_name(&prefix, 1)).await?.is_some();
     let key = if written { crate::kernel::derived_app_key(scope_key, app) } else { rand::random() };
     if bucket.create(&name, &crate::kernel::seal_app_key(scope_key, app, &key)).await? {
@@ -268,6 +268,19 @@ pub fn query(conn: &Connection, sql: &str, params: &[Value]) -> Result<Vec<Map<S
     let mut stmt = conn.prepare(sql)?;
     ensure!(stmt.readonly(), "a query only reads");
     run(&mut stmt, params)
+}
+
+/// Runs a call's statements on a scope's database, in the order it ran them: each (sql, params, check), where a
+/// check's first value must be true, else the write fails with its message.
+pub fn statements(conn: &Connection, list: &[(String, Vec<Value>, Option<String>)]) -> Result<()> {
+    for (sql, params, check) in list {
+        let rows = execute(conn, sql, params)?;
+        if let Some(message) = check {
+            let held = rows.first().and_then(|r| r.values().next()).is_some_and(|v| v.as_i64().is_some_and(|n| n != 0) || v == true);
+            ensure!(held, "{message}");
+        }
+    }
+    Ok(())
 }
 
 /// Runs a statement that may write: its rows, if it gives any (`returning`).

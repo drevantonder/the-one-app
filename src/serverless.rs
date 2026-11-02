@@ -1,0 +1,63 @@
+//! The serverless node (`serverless/`) on Cloudflare: a node of the install as a Worker in its kernel's account, with
+//! no address of its own, which the gateway sends `/v1/` and `/mcp` to by service binding. A release carries its built
+//! WebAssembly (`update` builds it, where Rust builds for WebAssembly); its apps are the built-in ones this release
+//! ships, built here with the pinned Bun.
+
+use anyhow::{Context, Result};
+use serde_json::{Value, json};
+
+use crate::kernel::{Cloudflare, Settings, worker_name};
+
+/// The serverless node's Worker is `<cli>-node`.
+pub const SERVICE: &str = "node";
+
+/// The serverless node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim and each
+/// built-in app's module.
+pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
+    let built = |name: &str| {
+        let found = crate::config::SERVERLESS.iter().find(|(n, _)| *n == name).map(|(_, b)| b.to_vec());
+        found.with_context(|| format!("this build of {} has no serverless node: {} update builds one, on a Linux device with Rust", crate::config::NAME, crate::config::CLI))
+    };
+    let mut apps = serde_json::Map::new();
+    for (name, files) in crate::config::BUILT_IN {
+        let bundle = crate::deploy::build_files(files)?;
+        let hash = data_encoding::HEXLOWER.encode(&blake3::hash(&bundle).as_bytes()[..8]);
+        apps.insert(name.to_string(), json!({ "module": crate::bundle::module(&bundle)?, "hash": hash }));
+    }
+    let shim = include_str!("runtime/shim.js");
+    let built_js = format!("export const shim = {};\nexport const apps = {};\nexport const compatibilityDate = {};\n", json!(shim), Value::Object(apps), json!(crate::apps::COMPATIBILITY_DATE));
+    Ok(vec![
+        ("worker.js".into(), "application/javascript+module", include_bytes!("../serverless/worker.js").to_vec()),
+        ("one_serverless.js".into(), "application/javascript+module", built("one_serverless.js")?),
+        ("one_serverless_bg.wasm".into(), "application/wasm", built("one_serverless_bg.wasm")?),
+        ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
+    ])
+}
+
+/// Its bindings: the kernel's auth and vault, Worker Loader, the install's address and name, and the node on a
+/// machine that what needs one goes on to.
+pub fn metadata(settings: &Settings) -> Value {
+    let mut bindings = vec![
+        json!({ "type": "service", "name": "AUTH", "service": worker_name("auth") }),
+        json!({ "type": "service", "name": "VAULT", "service": worker_name("vault") }),
+        json!({ "type": "worker_loader", "name": "LOADER" }),
+        json!({ "type": "plain_text", "name": "ADDRESS", "text": settings.address }),
+        json!({ "type": "plain_text", "name": "NAME", "text": settings.name }),
+    ];
+    if settings.node_url.is_some() {
+        bindings.push(match settings.machine("MACHINE") {
+            (name, value, _) if value.starts_with("vpc:") => json!({ "type": "vpc_service", "name": name, "service_id": &value[4..] }),
+            (name, value, _) => json!({ "type": "plain_text", "name": name, "text": value }),
+        });
+    }
+    // Its logs say which calls ran here, for whoever owns the account.
+    json!({ "main_module": "worker.js", "compatibility_date": crate::apps::COMPATIBILITY_DATE, "bindings": bindings, "observability": { "enabled": true } })
+}
+
+/// Puts the serverless node in the kernel's Cloudflare account, with no address but the gateway's binding to it.
+pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
+    let modules = modules()?;
+    let modules: Vec<(&str, &str, &[u8])> = modules.iter().map(|(n, k, b)| (n.as_str(), *k, b.as_slice())).collect();
+    cf.upload(&worker_name(SERVICE), &modules, &metadata(settings))?;
+    cf.hide(&worker_name(SERVICE))
+}

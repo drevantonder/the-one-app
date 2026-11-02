@@ -69,7 +69,16 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     missed |= started.len() < macs.iter().filter(|m| m["online"] == true).count();
 
     println!("Building {short}");
-    step(Command::new(cargo()).current_dir(&src).env("CONFIG", &config).args(["build", "--release"]))?;
+    let mut build = Command::new(cargo());
+    build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
+    // A device that can't build it makes a release with no serverless node, which can't deploy one.
+    match serverless(&src, &config) {
+        Ok(dir) => {
+            build.env("SERVERLESS", dir);
+        }
+        Err(err) => println!("  no serverless node in this build: {err:#}"),
+    }
+    step(&mut build)?;
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     // The build devices say they run: main's commit, and a white label's config's.
     let version: Value = serde_json::from_slice(&Command::new(&binary).args(["version", "--json"]).output()?.stdout).context("ask the new build what it is")?;
@@ -233,6 +242,18 @@ fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
 }
 
 /// Cargo, also where rustup puts it, for a shell that doesn't have it on its PATH.
+/// Builds the serverless node (`serverless/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
+/// folder they're in. It needs Rust's wasm32-unknown-unknown target, a clang that builds for it (SQLite is C), and the
+/// wasm-bindgen of the version it's built with.
+fn serverless(src: &Path, config: &Path) -> Result<PathBuf> {
+    step(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["build", "--release", "-p", "one-serverless", "--target", "wasm32-unknown-unknown"]))
+        .context("build the serverless node (rustup target add wasm32-unknown-unknown)")?;
+    let out = src.join("target/serverless");
+    let wasm = src.join("target/wasm32-unknown-unknown/release/one_serverless.wasm");
+    step(Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm)).context("make its glue (cargo install wasm-bindgen-cli, the version in Cargo.lock)")?;
+    Ok(out)
+}
+
 fn cargo() -> PathBuf {
     let rustup = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cargo/bin/cargo");
     if quiet(Command::new("cargo").arg("--version")) || !rustup.exists() { "cargo".into() } else { rustup }

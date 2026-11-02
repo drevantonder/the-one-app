@@ -23,7 +23,7 @@ use curve25519_dalek::montgomery::MontgomeryPoint;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 
-use crate::bucket::Place;
+use crate::bucket::{Place, folder, scope_of};
 use crate::entry::{Entry, Key, hex};
 
 /// The object in a scope's folder in the bucket that names its key, by its id, and the folder of the key sealed to each
@@ -143,16 +143,6 @@ fn open_snapshot(keys: &[[u8; 32]], bytes: &[u8]) -> Result<Option<(Snapshot, [u
     let Some(key) = keys.iter().find(|k| key_id(k).as_bytes() == &bytes[..16]) else { return Ok(None) };
     let plain = cipher(&blake3::derive_key(SNAPSHOT, key)).decrypt(bytes[16..28].into(), &bytes[28..]).map_err(|_| anyhow!("a snapshot didn't decrypt"))?;
     Ok(Some((serde_json::from_slice(&plain)?, *key)))
-}
-
-/// A scope as a folder names it.
-pub fn folder(scope: &str) -> String {
-    scope.replacen(':', "-", 1)
-}
-
-/// The scope a folder is.
-pub fn scope_of(folder: &str) -> String {
-    folder.replacen('-', ":", 1)
 }
 
 /// A pack: entries, as CBOR, each its header and body.

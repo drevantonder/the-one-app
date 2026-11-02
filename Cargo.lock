@@ -2547,6 +2547,7 @@ dependencies = [
  "data-encoding",
  "ed25519-dalek 3.0.0",
  "flate2",
+ "getrandom 0.2.17",
  "hkdf",
  "iroh",
  "jiff",
@@ -2582,6 +2583,20 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "one-serverless"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "data-encoding",
+ "js-sys",
+ "one",
+ "serde_json",
+ "sqlite-wasm-rs",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -3623,7 +3638,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36bd8e29bf08189a005b2df1df99823aa0861cabe9044e5f31ed54ca292ee618"
 dependencies = [
  "cc",
+ "js-sys",
  "rsqlite-vfs",
+ "wasm-bindgen",
 ]
 
 [[package]]

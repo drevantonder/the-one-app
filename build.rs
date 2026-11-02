@@ -90,6 +90,21 @@ fn main() {
     files.sort();
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
     let out = format!("{out}pub const KERNEL: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
+    // The serverless node's WebAssembly and its glue (serverless/), which `update` builds into SERVERLESS where Rust
+    // builds for WebAssembly, so a release carries them to devices with no Rust to deploy it from.
+    println!("cargo:rerun-if-env-changed=SERVERLESS");
+    let serverless: Vec<String> = match std::env::var("SERVERLESS") {
+        Ok(dir) => ["one_serverless.js", "one_serverless_bg.wasm"]
+            .iter()
+            .map(|name| {
+                let path = std::path::Path::new(&dir).join(name);
+                println!("cargo:rerun-if-changed={}", path.display());
+                format!("({name:?}, include_bytes!({:?}))", std::fs::canonicalize(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())))
+            })
+            .collect(),
+        Err(_) => vec![],
+    };
+    let out = format!("{out}pub const SERVERLESS: &[(&str, &[u8])] = &[{}];\n", serverless.join(", "));
     // The apps every agent needs from the start: their guide is in MCP's instructions, and code mode keeps their tools.
     let always_on: String = config.get("always_on").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()).map(|n| format!("{n:?},")).collect();
     let out = format!("{out}pub const ALWAYS_ON: &[&str] = &[{always_on}];\n");
