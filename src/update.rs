@@ -26,7 +26,6 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         ensure!(installer_is_ours(), "install.sh installs another white label, so {NAME} isn't released on GitHub; {CLI} update runs main on its servers");
         ensure!(quiet(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     }
-    let key = release_key()?;
     // Updates here take turns: they share one checkout, and each would test one commit and send out another.
     let _turn = turn()?;
     let src = checkout()?;
@@ -68,6 +67,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
+    let key = release_key()?;
     // Testing and building at once: neither waits for the other, and nothing goes out unless both work.
     println!("Testing and building {short}");
     let built = std::thread::scope(|s| {
