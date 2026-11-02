@@ -1043,8 +1043,16 @@ impl Node {
                 let id = crate::backups::key_id(&key);
                 let name = format!("{folder}/{KEY_OBJECT}");
                 if !Bucket::create(&bucket, &name, id.as_bytes()).await? && Bucket::get(&bucket, &name).await?.is_none_or(|o| o.bytes != id.as_bytes()) {
-                    // Another server made it just now, and may have given it to this one already.
-                    match Bucket::get(&bucket, &given).await? {
+                    // Another server made it just now: it gives it to this one next, once it's sealed it.
+                    let mut found = None;
+                    for _ in 0..50 {
+                        found = Bucket::get(&bucket, &given).await?;
+                        if found.is_some() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                    match found {
                         Some(o) => crate::backups::unseal(self.0.key.as_bytes(), &o.bytes)?,
                         None => bail!("{} doesn't have {scope}'s key yet: a server that has it gives it when it's next on", self.server_name()),
                     }
