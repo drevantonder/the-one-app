@@ -1,7 +1,6 @@
 //! Backups: each scope's signed entries and the blobs they name, encrypted with the scope's own key and sent to a
-//! place that can't read them: a folder on one device's disk, or S3-compatible storage. A backup is what sync moves,
-//! sent to a peer that can't think; a restore is an import. Each scope's key is sealed to the install's recovery key,
-//! so a backup and that key are all a recovery needs.
+//! place that can't read them: a folder on one device's disk, or S3-compatible storage; a restore is an import. Each
+//! scope's key is sealed to the install's recovery key, so a backup and that key are all a recovery needs.
 //!
 //! A place holds a folder for each install, named by its genesis, so installs can share a bucket:
 //!
