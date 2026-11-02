@@ -12,6 +12,7 @@
   const draw = () => one.render("#account", async () => {
     const [state, device] = await Promise.all([one.api("GET", "/v1/state"), one.device()]);
     const me = state.user, install = state.install;
+    one.title(me.name);
     const address = install?.settings?.address;
     return `<div class="me">${one.avatar(me.id, me.name)}<div class="name">${one.esc(me.name)}</div>
       <div class="muted">${one.esc(`${me.role === "admin" ? "Admin" : "Member"} of ${install?.name || ""}`)}</div></div>

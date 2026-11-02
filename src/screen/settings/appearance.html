@@ -16,6 +16,7 @@
 <div class="large-title">Appearance</div>
 <div class="list"><div class="choices" id="choices"></div></div>
 <script>
+  one.title("Appearance");
   // Light, Dark or Automatic for this device, as small pictures of a screen with a check under each.
   const half = (look) => `<div class="half ${look}"><b></b><i></i><i></i><i></i><i></i></div>`;
   const shots = { light: half("light"), dark: half("dark"), automatic: half("light") + half("dark") };
