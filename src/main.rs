@@ -63,9 +63,10 @@ Usage:
                                        agents use, a secret field only for its item's sites: you get the answer,
                                        never the secret
   {CLI} vault remove <item> [<field>]  delete an item, or one of its fields
-  {CLI} vault request <app> (--need <name> | --title <t> --fields a,b [--secret-fields b] --hosts a,b) [--why text]
-                                       ask the person for an item an app may use: a link to a sheet where they pick
-                                       or make one, so you never see it; vault status <id> says how it went
+  {CLI} vault request [<app>] (--need <name> | --title <t> --fields a,b [--secret-fields b] --hosts a,b) [--why text]
+                                       ask the person for an item an app may use (with no app, for vault fetch): a
+                                       link to a sheet where they pick or make one, so you never see it; vault status
+                                       <id> says how it went
   {CLI} vault requests                 the requests waiting for you; vault answer <id> [--item <id> | --decline]
                                        answers one, a new item's values on stdin (one line, or a JSON object)
   {CLI} kernel                         where this machine's kernel is: its services' addresses and what it's set to
@@ -618,14 +619,16 @@ fn run(args: Vec<String>) -> Result<()> {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             println!("{}", vault_remove(scope, item, positional.get(3).map(String::as_str))?);
         }
-        ["vault", "request", app] => {
+        ["vault", "request", app @ ..] if app.len() < 2 => {
+            // With no app, it's for agents: the person's own, with vault fetch.
+            let app = app.first().copied().unwrap_or("agents");
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             let list = |k: &str| flags.get(k).and_then(Value::as_str).map(|v| v.split(',').map(str::trim).filter(|v| !v.is_empty()).map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
             let secret = list("secret-fields");
             let fields: Map<String, Value> = list("fields").into_iter().map(|f| (f.clone(), json!({ "secret": secret.contains(&f) }))).collect();
             let body = json!({ "scope": scope, "app": app, "need": flags.get("need"), "title": flags.get("title"), "fields": fields, "hosts": list("hosts"), "why": flags.get("why"), "agent": agent_from_env() });
             let r = post("/v1/vault/request", body)?;
-            println!("Open this to answer it: {}\n{CLI} vault status {} says how it went.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""));
+            println!("Give the person this link: {}\nTell them; {CLI} vault status {} says how it went once they say they've done it.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""));
         }
         ["vault", "status", id] => {
             let r = get(&format!("/v1/vault/requests?id={id}"))?;
@@ -1590,8 +1593,10 @@ fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Resu
         "fetch" => post("/v1/vault/fetch", json!({ "url": text("url")?, "method": input.get("method"), "headers": input.get("headers"), "body": input.get("body"), "agent": agent })),
         "remove" => Ok(json!(vault_remove(scope, text("item")?, input.get("field").and_then(Value::as_str))?)),
         "request" => {
-            let r = post("/v1/vault/request", json!({ "scope": scope, "app": input.get("app"), "need": input.get("need"), "title": input.get("title"), "fields": input.get("fields"), "hosts": input.get("hosts"), "why": input.get("why"), "agent": agent }))?;
-            Ok(json!(format!("Asked. Give the person this link: {}\nIt's also waiting in their Settings, under Requests. Poll vault_status with id {} until it's set.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""))))
+            // With no app, it's for agents: the person's own, with vault_fetch.
+            let app = input.get("app").and_then(Value::as_str).unwrap_or("agents");
+            let r = post("/v1/vault/request", json!({ "scope": scope, "app": app, "need": input.get("need"), "title": input.get("title"), "fields": input.get("fields"), "hosts": input.get("hosts"), "why": input.get("why"), "agent": agent }))?;
+            Ok(json!(format!("Asked. Give the person this link: {}\nIt's also waiting in their Settings, under Requests. Tell them; check vault_status with id {} when they say they've done it.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""))))
         }
         "status" => {
             let id = text("id")?;

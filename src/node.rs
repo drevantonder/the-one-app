@@ -2036,7 +2036,7 @@ impl Node {
             // Agents use an item (vault_fetch) only once its person lets agents use it, never by themselves.
             let had = i.views.get(&scope.to_string()).and_then(|(_, s)| s.items.get(&id)).is_some_and(|it| it.apps.contains(crate::agents::NAME));
             let wants = data["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == crate::agents::NAME));
-            ensure!(caller.agent.is_none() || had || !wants, "only the person lets agents use an item: ask them with vault_request (app agents), and they pick or make it");
+            ensure!(caller.agent.is_none() || had || !wants, "only the person lets agents use an item: ask them with vault_request, leaving out app, and they pick or make it");
             item_entry(i, &caller.user, scope, data)
         })?;
         let by = (caller.key != self.0.id).then_some(caller.key);
@@ -2062,7 +2062,7 @@ impl Node {
         data["agent"] = json!(caller.agent);
         self.with(|i| {
             ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "you can't change the Vault in {scope}");
-            ensure!(i.r.members.apps.get(app).is_some_and(|a| !a.erased) || app == members::APP, "no app named {app}");
+            ensure!(i.r.members.apps.get(app).is_some_and(|a| !a.erased) || app == members::APP || app == crate::agents::NAME, "no app named {app}");
             Ok(())
         })?;
         let by = (caller.key != self.0.id).then_some(caller.key);
