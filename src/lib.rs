@@ -26,6 +26,7 @@ fn user_home() -> PathBuf {
 }
 pub mod backups;
 pub mod bucket;
+pub mod db;
 pub mod entry;
 pub mod git;
 pub mod skills;
