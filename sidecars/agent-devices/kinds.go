@@ -11,11 +11,13 @@ import (
 	"log"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -530,6 +532,30 @@ func runIn(ctx context.Context, stdin io.Reader, name string, args ...string) (s
 	return out.String(), nil
 }
 
+// localOnly says whose port is, of what only this machine's own programs use on its 127.0.0.1: its node's local API,
+// Agent Devices' viewer, and each device's controls, screen and shell. "" if it's none of those.
+func (ds *devices) localOnly(ctx context.Context, port int) string {
+	if u, err := url.Parse(ds.node); err == nil && u.Port() == strconv.Itoa(port) {
+		return "this machine's node's"
+	}
+	if port == viewerPort {
+		return "Agent Devices' viewer's"
+	}
+	for _, v := range ds.vms() {
+		// Android: its console, and adb's port after it. Windows: its shell (SSH), and its screen (VNC).
+		if port == v.Port || (v.Kind == "android" && port == v.Port+1) || (v.Display > 0 && port == 5900+v.Display) {
+			return v.Name + "'s"
+		}
+	}
+	all, _ := list(ctx)
+	for _, d := range all {
+		if d.port == port {
+			return d.Name + "'s"
+		}
+	}
+	return ""
+}
+
 // usedPorts are the ports this machine's devices of other kinds use.
 func (ds *devices) usedPorts() []int {
 	var ports []int
@@ -719,6 +745,9 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		port, _ := in["port"].(float64)
 		if port < 1 || port > 65535 {
 			return nil, true, errors.New("reach which port? a number from 1 to 65535")
+		}
+		if mine := ds.localOnly(ctx, int(port)); mine != "" {
+			return nil, true, fmt.Errorf("no device reaches port %d: it's %s, for this machine's own programs only", int(port), mine)
 		}
 		if !k.running(ctx, v) {
 			return nil, true, fmt.Errorf("%s is stopped: start it first", v.Name)
