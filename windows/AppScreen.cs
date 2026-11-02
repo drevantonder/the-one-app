@@ -61,6 +61,8 @@ public sealed class AppScreen : Grid
         {
             Store.Shared.Event -= Forward;
             Restyled -= Rescheme;
+            ticking?.Stop();
+            waiting?.Cancel();
         };
     }
 
@@ -73,21 +75,14 @@ public sealed class AppScreen : Grid
 
     void Rescheme()
     {
-        if (web.CoreWebView2 != null) web.CoreWebView2.Profile.PreferredColorScheme = Scheme;
+        if (web.CoreWebView2 == null) return;
+        web.CoreWebView2.Profile.PreferredColorScheme = Scheme;
+        _ = web.CoreWebView2.ExecuteScriptAsync($"document.documentElement.style.zoom = '{Zoom}'");
     }
 
     async Task Start()
     {
-        if (web.CoreWebView2 != null) return;
-        try
-        {
-            html = Own ? await Node.ClientScreen(route.Screen, route.Params) : await Node.Screen(route.App!, route.Screen, route.Params, route.Scope);
-        }
-        catch (Exception error)
-        {
-            Fail(error.Message);
-            return;
-        }
+        if (web.CoreWebView2 != null || !await Fetch()) return;
         await web.EnsureCoreWebView2Async();
         var core = web.CoreWebView2!;
         var settings = core.Settings;
@@ -134,6 +129,97 @@ public sealed class AppScreen : Grid
 
     bool shown;
 
+    // MARK: Offline
+
+    /// Since when the screen shows its last copy, the node not answering; null while it answers.
+    DateTime? kept;
+    /// The node's tries since it last answered, for the wait before the next: 2, 4, 8, 16, then every 30 seconds.
+    int misses;
+    InfoBar? offline;
+    DispatcherTimer? ticking;
+    System.Threading.CancellationTokenSource? waiting;
+
+    /// Reads the screen's page. Offline, an app's screen shows its last copy, saying so, and asks again and again,
+    /// waiting longer each time, as the iPhone's does. → whether there's a page to show.
+    async Task<bool> Fetch()
+    {
+        try
+        {
+            html = Own ? await Node.ClientScreen(route.Screen, route.Params) : await Node.Screen(route.App!, route.Screen, route.Params, route.Scope);
+            if (!Own) ScreenCopies.Keep(route, html);
+            misses = 0;
+            kept = null;
+            Offline(null);
+            return true;
+        }
+        catch (Exception error)
+        {
+            if (kept == null)
+            {
+                if (error is SignedOutException || Own || ScreenCopies.Last(route) is not { } copy)
+                {
+                    Fail(error.Message);
+                    return false;
+                }
+                (html, kept) = copy;
+            }
+            misses++;
+            _ = Again(TimeSpan.FromSeconds(Math.Min(30, 1 << Math.Min(misses, 5))));
+            return true;
+        }
+    }
+
+    /// Asks the node again after `wait`, or at Try Now; once it answers, the screen as it is now.
+    async Task Again(TimeSpan wait)
+    {
+        waiting = new System.Threading.CancellationTokenSource();
+        Offline(DateTime.Now + wait);
+        try { await Task.Delay(wait, waiting.Token); } catch (TaskCanceledException) { }
+        if (!IsLoaded) return;
+        Offline(null);
+        if (await Fetch() && kept == null && web.CoreWebView2 is { } core)
+        {
+            shown = false;
+            core.Navigate($"{origin}/");
+        }
+    }
+
+    /// The bar over a screen shown as it last looked: since when, and when it's asked again (`next`), with Try Now;
+    /// asking now, if `next` is null; gone once the node answers.
+    void Offline(DateTime? next)
+    {
+        if (kept is not { } since)
+        {
+            if (offline != null) Children.Remove(offline);
+            offline = null;
+            ticking?.Stop();
+            web.Margin = new Thickness(0);
+            return;
+        }
+        // Below the bar, while it's there.
+        web.Margin = new Thickness(0, 64, 0, 0);
+        if (offline == null)
+        {
+            offline = new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Informational, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 8, 12, 0) };
+            var now = new Button { Content = "Try Now" };
+            now.Click += (_, _) => waiting?.Cancel();
+            offline.ActionButton = now;
+            Children.Add(offline);
+            ticking = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            ticking.Tick += (_, _) => Say();
+            ticking.Start();
+        }
+        offline.ActionButton.Visibility = next == null ? Visibility.Collapsed : Visibility.Visible;
+        void Say()
+        {
+            if (offline == null) return;
+            var ago = DateTime.Now - since;
+            var when = ago.TotalMinutes < 1 ? "just now" : ago.TotalHours < 1 ? $"{(int)ago.TotalMinutes} min ago" : ago.TotalDays < 1 ? $"{(int)ago.TotalHours} hr ago" : since.ToString("d MMM");
+            offline.Message = $"Offline: this is how it looked {when}. " + (next is { } n ? $"Reconnecting in {Math.Max(1, (int)Math.Ceiling((n - DateTime.Now).TotalSeconds))}s" : "Reconnecting…");
+        }
+        Say();
+    }
+
     static CoreWebView2PreferredColorScheme Scheme => Appearance.Chosen switch { "light" => CoreWebView2PreferredColorScheme.Light, "dark" => CoreWebView2PreferredColorScheme.Dark, _ => CoreWebView2PreferredColorScheme.Auto };
 
     /// The screen's own address answers with its page; nothing else is there.
@@ -175,6 +261,10 @@ public sealed class AppScreen : Grid
         })();
         """;
 
+    /// The kit is sized for a phone's 17-point text: a computer's is 14, larger as Windows' text size is (Settings >
+    /// Accessibility > Text size).
+    static string Zoom => (14.0 / 17 * new Windows.UI.ViewManagement.UISettings().TextScaleFactor).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     /// What makes a screen sit in the window as its own: the window's backdrop shows through, the install's accent in
     /// light and dark, and on a computer, Windows' size of text (a page's widgets keep their own size).
     static string Fitted()
@@ -190,10 +280,10 @@ public sealed class AppScreen : Grid
               const style = document.createElement("style");
               style.textContent = `
                 html, body { background: transparent !important; }
-                html { zoom: calc(14 / 17); }
                 :root:root { --accent: {{Css(false)}}; --bg: transparent; --card: rgba(0, 0, 0, 0.04); }
                 @media (prefers-color-scheme: dark) { :root:root { --accent: {{Css(true)}}; --card: rgba(255, 255, 255, 0.05); } }`;
               document.head.appendChild(style);
+              document.documentElement.style.zoom = "{{Zoom}}";
             });
             """;
     }
@@ -459,5 +549,44 @@ public sealed class AppScreen : Grid
         var path = Path.Combine(dir, Path.GetFileName(name));
         await System.IO.File.WriteAllBytesAsync(path, bytes);
         Shell.Open(path);
+    }
+}
+
+/// The last copy of each app screen this computer showed, which stands in while the node can't be reached; gone once
+/// the person signs out.
+static class ScreenCopies
+{
+    static string Dir => Path.Combine(Brand.Folder, "Screen copies");
+
+    static string FileOf(Route r)
+    {
+        var key = string.Join("\u0001", r.App, r.Screen, r.Params, r.Scope ?? "");
+        return Path.Combine(Dir, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..24] + ".html");
+    }
+
+    public static void Keep(Route r, string html)
+    {
+        try
+        {
+            Directory.CreateDirectory(Dir);
+            System.IO.File.WriteAllText(FileOf(r), html);
+        }
+        catch { }
+    }
+
+    /// Its page and when it was kept.
+    public static (string html, DateTime? kept)? Last(Route r)
+    {
+        try
+        {
+            var file = FileOf(r);
+            return System.IO.File.Exists(file) ? (System.IO.File.ReadAllText(file), System.IO.File.GetLastWriteTime(file)) : null;
+        }
+        catch { return null; }
+    }
+
+    public static void Forget()
+    {
+        try { if (Directory.Exists(Dir)) Directory.Delete(Dir, true); } catch { }
     }
 }

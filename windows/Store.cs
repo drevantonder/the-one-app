@@ -89,6 +89,10 @@ public sealed class Store
     /// What Settings shows this person, in order, as the node says.
     public List<SettingsItem> SettingsItems => State?.SettingsItems ?? [];
 
+    /// The count on the app's taskbar button, as an iPhone's icon has it: every app's badge on every page, and the
+    /// requests waiting.
+    public int IconBadge => (SettingsItems.FirstOrDefault(i => i.Name == "requests")?.Badge ?? 0) + BadgesOf.Values.SelectMany(b => b.Values).Sum(n => Math.Max(0, n));
+
     // MARK: Loading
 
     /// Loads the node's state, then its apps, widgets and badges if who this is or their groups changed.
@@ -140,6 +144,14 @@ public sealed class Store
             catch { }
             try { await Task.Delay(3000, cancel); } catch { return; }
         }
+    }
+
+    /// Back after a while away (asleep, say), when events may have been missed: everything read again, and every open
+    /// screen told something may have changed.
+    public async Task CaughtUp()
+    {
+        try { await RefreshState(); } catch { }
+        Event?.Invoke(new JsonObject { ["type"] = "install" });
     }
 
     async Task Handle(JsonNode e)

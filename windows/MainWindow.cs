@@ -65,8 +65,23 @@ public sealed class MainWindow : Window
             DrawSidebar();
         };
         Buttons();
-        // The screens keep up by themselves; the sidebar, with what the store reads.
+        // The screens keep up by themselves; the sidebar and the taskbar's count, with what the store reads.
         Store.Shared.Changed += DrawSidebar;
+        Store.Shared.Changed += () => Taskbar(Store.Shared.IconBadge);
+        // In front again after a minute or more away: what events may have missed.
+        var away = DateTime.MaxValue;
+        Activated += (_, e) =>
+        {
+            if (e.WindowActivationState == WindowActivationState.Deactivated)
+            {
+                away = DateTime.Now;
+                return;
+            }
+            if (nav != null && DateTime.Now - away > TimeSpan.FromMinutes(1)) _ = Store.Shared.CaughtUp();
+            away = DateTime.MaxValue;
+        };
+        // Windows' text size, from Settings > Accessibility, as each screen's.
+        texts.TextScaleFactorChanged += (_, _) => DispatcherQueue.TryEnqueue(AppScreen.Restyle);
         // The Widgets board's widgets keep up with the window's.
         Store.Shared.WidgetsRead += () =>
         {
@@ -76,6 +91,29 @@ public sealed class MainWindow : Window
         };
         Closed += (_, _) => listening?.Cancel();
         _ = Start();
+    }
+
+    readonly Windows.UI.ViewManagement.UISettings texts = new();
+
+    /// The count on the taskbar's button, or none.
+    static void Taskbar(int count)
+    {
+        try
+        {
+            var updater = Windows.UI.Notifications.BadgeUpdateManager.CreateBadgeUpdaterForApplication();
+            if (count <= 0)
+            {
+                updater.Clear();
+                return;
+            }
+            var badge = Windows.UI.Notifications.BadgeUpdateManager.GetTemplateContent(Windows.UI.Notifications.BadgeTemplateType.BadgeNumber);
+            ((Windows.Data.Xml.Dom.XmlElement)badge.SelectSingleNode("/badge")).SetAttribute("value", count.ToString());
+            updater.Update(new Windows.UI.Notifications.BadgeNotification(badge));
+        }
+        catch
+        {
+            // Run from its folder, not installed, it has no badge.
+        }
     }
 
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
@@ -105,7 +143,8 @@ public sealed class MainWindow : Window
     /// Where a link opens, once the window shows the pages: a widget's (`<cli>://open?app=…&screen=…&params=…&scope=…`),
     /// or a page at your One App's address, as the web client has them (kernel/web/web.js): `/`, `/page/<scope>`,
     /// `/services/<scope>`, `/app/<app>/<screen>?params=&scope=`, `/settings`, `/settings/<item>?params=`, and
-    /// `/vault?id=&scope=` (or `<cli>://vault?…`), a request for an item, in the Vault's sheet. An invite link
+    /// `/vault?id=&scope=` (or `<cli>://vault?…`), a request for an item, in the Vault's sheet; `<cli>://page` and
+    /// `<cli>://settings` as below. An invite link
     /// (`<address>/invite#…`) welcomes the person with it, as pasting it does. `<cli>://signed-in`, where the browser
     /// comes back after signing in, only brings the window to the front.
     Route? opening;
@@ -154,6 +193,9 @@ public sealed class MainWindow : Window
             opening = q["app"] is { Length: > 0 } app ? Route.ScreenOf(app, scope, q["screen"] ?? "main", q["params"] ?? "{}") : Route.PageOf(scope ?? "user");
         }
         else if (link.Host == "vault" && q["id"] is { Length: > 0 } id && q["scope"] is { Length: > 0 } s) asking = (s, id);
+        // As the iPhone takes them: `<cli>://page?scope=…` (its Services with `folder=services`), `<cli>://settings[/<item>]`.
+        else if (link.Host == "page" && q["scope"] is { Length: > 0 } page) opening = q["folder"] == "services" ? Route.Services(page) : Route.PageOf(page);
+        else if (link.Host == "settings") opening = link.AbsolutePath.Trim('/') is { Length: > 0 } item ? Route.OwnOf(item) : Route.Settings;
         if (nav != null) Opening();
     }
 
@@ -262,6 +304,8 @@ public sealed class MainWindow : Window
         Sheet.CloseAll();
         nav = null;
         Store.Shared.Clear();
+        ScreenCopies.Forget();
+        Taskbar(0);
         var panel = new StackPanel { Spacing = 14, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var logo = new Image { Source = new BitmapImage(new Uri(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Logo.png"))), Width = 112, Height = 112, HorizontalAlignment = HorizontalAlignment.Center };
         panel.Children.Add(logo);
@@ -272,6 +316,8 @@ public sealed class MainWindow : Window
         {
             var whose = char.ToUpperInvariant(Brand.Yours[0]) + Brand.Yours[1..];
             var address = new TextBox { PlaceholderText = "one.example.com, or an invite link", Width = 340, HorizontalAlignment = HorizontalAlignment.Center, IsSpellCheckEnabled = false };
+            // The touch keyboard's for web addresses.
+            address.InputScope = new Microsoft.UI.Xaml.Input.InputScope { Names = { new Microsoft.UI.Xaml.Input.InputScopeName(Microsoft.UI.Xaml.Input.InputScopeNameValue.Url) } };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(address, $"{whose}’s address or invite link");
             panel.Children.Add(new TextBlock { Text = $"{whose}’s address, or the invite link you were sent.", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords });
             panel.Children.Add(address);
