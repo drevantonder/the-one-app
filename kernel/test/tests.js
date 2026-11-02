@@ -1,5 +1,5 @@
 // The kernel's own tests, run by `workerd test` (tests/kernel.rs runs them with cargo test).
-import { appKey, b64u, databaseKey, idOf, keyPair, openSealed, openUnder, random, sealTo, sealUnder } from "../shared/crypto.js";
+import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, random, sealAppKey, sealTo, sealUnder } from "../shared/crypto.js";
 import { presign } from "../shared/s3.js";
 import { verify } from "../shared/token.js";
 
@@ -28,11 +28,13 @@ export default {
     const create = new URL(await presign({ method: "PUT", host: "h", path: "/b/k", region: "auto", keyId: "k", secret: "s", expires: 60, headers: { "If-None-Match": "*" } }));
     equal(create.searchParams.get("X-Amz-SignedHeaders"), "host;if-none-match", "a create URL signs If-None-Match in");
 
-    // Keys derive one way: an app's key from its scope's, a database's from its app's, each different.
+    // An app's key opens with its scope's key, under its own name only; a database's derives from its app's.
     const scope = random(32);
-    const app = await appKey(scope, "board");
-    equal((await appKey(scope, "board")).join(), app.join(), "deriving again");
-    if ((await appKey(scope, "boards")).join() === app.join()) throw new Error("two apps share a key");
+    const app = random(32);
+    const sealedApp = await sealAppKey(scope, "board", app);
+    equal((await openAppKey(scope, "board", sealedApp)).join(), app.join(), "opening an app's key");
+    await fails(() => openAppKey(scope, "boards", sealedApp), "opening it as another app's");
+    await fails(() => openAppKey(random(32), "board", sealedApp), "opening it with another scope's key");
     if ((await databaseKey(app, "main")).join() === app.join()) throw new Error("a database has its app's key");
 
     // Sealing to a key pair opens only with it.

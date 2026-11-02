@@ -113,11 +113,12 @@ struct Vault {
     issuer: String,
     secret: String,
     recovery: [u8; 32],
+    store: Store,
 }
 
 impl Vault {
     fn start() -> Vault {
-        let (vault, auth, schedules, node) = (port(), port(), port(), port());
+        let (vault, auth, schedules, node, sites) = (port(), port(), port(), port(), port());
         let (recovery, recovery_public) = kernel::twin(&rand::random());
         let secret = B64U.encode(&rand::random::<[u8; 32]>());
         let issuer = "https://auth.test/api/auth".to_string();
@@ -126,7 +127,7 @@ impl Vault {
         let bucket = json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }).to_string();
         let running = run(vec![
             Served { name: "auth".into(), module: module("test/auth.js"), class: None, listen: format!("127.0.0.1:{auth}"), bindings: vec![], outbound: None },
-            Served { name: "sites".into(), module: module("test/sites.js"), class: None, listen: format!("127.0.0.1:{}", port()), bindings: vec![], outbound: None },
+            Served { name: "sites".into(), module: module("test/sites.js"), class: None, listen: format!("127.0.0.1:{sites}"), bindings: vec![], outbound: None },
             Served {
                 name: "vault".into(),
                 module: module("vault/worker.js"),
@@ -166,6 +167,7 @@ impl Vault {
             issuer,
             secret,
             recovery,
+            store: Store::Standin(format!("http://127.0.0.1:{sites}")),
         }
     }
 
@@ -196,20 +198,53 @@ impl Vault {
     }
 
     fn ask_at(&self, server: &str, token: &str, method: &str, path: &str, body: Value) -> (u16, Value) {
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-        let url = format!("{server}{path}");
-        let mut resp = match method {
-            "GET" => agent.get(url).header("authorization", format!("Bearer {token}")).call().unwrap(),
-            "DELETE" => agent.delete(url).header("authorization", format!("Bearer {token}")).call().unwrap(),
-            _ => agent.post(url).header("authorization", format!("Bearer {token}")).send_json(body).unwrap(),
-        };
-        (resp.status().as_u16(), resp.body_mut().read_json().unwrap())
+        ask_at(server, token, method, path, body)
     }
 
     /// The scope keys the recovery key opens.
     fn recovered(&self) -> std::collections::BTreeMap<String, [u8; 32]> {
-        let (_, out) = self.internal("recovery", json!({}));
-        out["scopes"].as_array().unwrap().iter().map(|s| (s["scope"].as_str().unwrap().to_string(), kernel::open_sealed(&self.recovery, &B64U.decode(s["sealed"].as_str().unwrap().as_bytes()).unwrap()).unwrap().try_into().unwrap())).collect()
+        recovered(&self.url, &self.secret, &self.recovery)
+    }
+}
+
+/// Asks a kernel service with a bearer token.
+fn ask_at(server: &str, token: &str, method: &str, path: &str, body: Value) -> (u16, Value) {
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    let url = format!("{server}{path}");
+    let mut resp = match method {
+        "GET" => agent.get(url).header("authorization", format!("Bearer {token}")).call().unwrap(),
+        "DELETE" => agent.delete(url).header("authorization", format!("Bearer {token}")).call().unwrap(),
+        _ => agent.post(url).header("authorization", format!("Bearer {token}")).send_json(body).unwrap(),
+    };
+    (resp.status().as_u16(), resp.body_mut().read_json().unwrap())
+}
+
+/// The scope keys the recovery key opens, at the vault at `url`.
+fn recovered(url: &str, secret: &str, recovery: &[u8; 32]) -> std::collections::BTreeMap<String, [u8; 32]> {
+    let (_, out) = post(&format!("{url}/internal/recovery"), &[("x-kernel-secret", secret)], json!({}));
+    let b = |v: &Value| B64U.decode(v.as_str().unwrap().as_bytes()).unwrap();
+    out["scopes"].as_array().unwrap().iter().map(|s| (s["scope"].as_str().unwrap().to_string(), kernel::open_sealed(recovery, &b(&s["sealed"])).unwrap().try_into().unwrap())).collect()
+}
+
+/// The install's bucket, as a test reads it: the stand-in sites' (`<url>/install/…`), or a real one.
+enum Store {
+    Standin(String),
+    Real(one::bucket::Place),
+}
+
+impl Store {
+    /// An app's key in a scope, as nodes open it: its copy in the bucket, sealed under the scope's key.
+    fn app_key(&self, scope_key: &[u8; 32], scope: &str, app: &str) -> Option<[u8; 32]> {
+        let name = kernel::app_key_name(scope, app);
+        let sealed = match self {
+            Store::Standin(url) => {
+                let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+                let mut resp = agent.get(format!("{url}/install/{name}")).call().unwrap();
+                (resp.status() == 200).then(|| resp.body_mut().read_to_vec().unwrap())
+            }
+            Store::Real(place) => place.get(&name).unwrap(),
+        }?;
+        Some(kernel::open_app_key(scope_key, app, &sealed).unwrap())
     }
 }
 
@@ -255,9 +290,10 @@ fn a_client_added_with_a_passkey_gets_keys_for_what_it_may_use() {
     assert!(kernel::verify(&token, &jwks, &v.issuer, until + 1000).is_err());
 
     let keys = vault.keys(&token, &[(&me, "board", None), (&me, "board", Some("main"))]).unwrap();
-    let board = kernel::app_key(&scopes[&me], "board");
-    assert_eq!(keys[0].key, board, "the vault derives an app's key as nodes do");
-    assert_eq!(keys[1].key, kernel::database_key(&board, "main"));
+    let board = v.store.app_key(&scopes[&me], &me, "board").expect("the Board's key, in the bucket");
+    assert_eq!(keys[0].key, board, "an app's key is kept in the bucket sealed under its scope's, as nodes open it");
+    assert_ne!(board, keys[1].key);
+    assert_eq!(keys[1].key, kernel::database_key(&board, "main"), "a database's key derives from its app's as nodes do");
     assert!(vault.keys(&token, &[("global", "board", None)]).unwrap_err().to_string().contains("may not use global"));
 
     // The code is spent; the refresh token moves on with each refresh, and only the newest opens anything.
@@ -292,6 +328,12 @@ fn a_client_added_with_a_passkey_gets_keys_for_what_it_may_use() {
     assert_eq!(left["left"], 1);
     let (_, gone) = v.internal("rekey", json!({ "from": "the second refresh token", "to": "a fourth", "token": second, "until": until }));
     assert_eq!(gone["moved"], false);
+
+    // Erasing the Board in his scope destroys its key: nothing opens its data again, and it starts over with a new one.
+    assert_eq!(v.ask(&second, "POST", "/erase", json!({ "scope": me, "app": "board" })).0, 200);
+    assert!(v.store.app_key(&scopes[&me], &me, "board").is_none(), "its key is gone from the bucket");
+    assert_ne!(vault.keys(&second, &[(&me, "board", None)]).unwrap()[0].key, board);
+    assert_eq!(v.ask(&second, "POST", "/erase", json!({ "scope": "global", "app": "board" })).0, 403, "only in a scope it may use");
 }
 
 #[test]
@@ -492,37 +534,75 @@ impl Passkey {
     }
 }
 
-/// The real auth service and vault, as an install runs them.
+/// The real kernel services, as an install runs them.
 struct Kernel {
-    running: Running,
+    /// The workerd running them here, if not deployed.
+    running: Option<Running>,
     auth: String,
     vault: String,
+    schedules: String,
     secret: String,
     recovery: [u8; 32],
+    store: Store,
 }
 
 const RESOURCE: &str = "https://node.test/mcp";
 
 impl Kernel {
-    /// Runs them as `one kernel serve` does, from new settings.
+    /// Runs them as `one kernel serve` does, from new settings, with the stand-in sites as the bucket.
     fn start() -> Kernel {
         let auth = port();
         let (mut settings, recovery) = kernel::Settings::new("Test", &format!("http://localhost:{auth}"));
         settings.ports = [auth, port(), port()];
+        (settings.vault_url, settings.schedules_url) = (format!("http://127.0.0.1:{}", settings.ports[1]), format!("http://127.0.0.1:{}", settings.ports[2]));
         settings.resources = vec![RESOURCE.into()];
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let modules = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();
-        let running = run(kernel::served(&settings, modules));
+        let sites = port();
+        let mut served = kernel::served(&settings, modules);
+        served[1].outbound = Some("sites".into());
+        served.push(Served { name: "sites".into(), module: module("test/sites.js"), class: None, listen: format!("127.0.0.1:{sites}"), bindings: vec![], outbound: None });
+        let running = run(served);
         let seed: [u8; 32] = data_encoding::HEXLOWER.decode(recovery.as_bytes()).unwrap().try_into().unwrap();
-        Kernel { running, auth: settings.auth_url.clone(), vault: format!("http://127.0.0.1:{}", settings.ports[1]), secret: settings.kernel_secret.clone(), recovery: kernel::twin(&seed).0 }
+        Kernel {
+            running: Some(running),
+            auth: settings.auth_url.clone(),
+            vault: settings.vault_url.clone(),
+            schedules: settings.schedules_url.clone(),
+            secret: settings.kernel_secret.clone(),
+            recovery: kernel::twin(&seed).0,
+            store: Store::Standin(format!("http://127.0.0.1:{sites}")),
+        }
+    }
+
+    /// A kernel `one kernel deploy` put up for trying, never an install's own: `ONE_TEST_KERNEL` names its
+    /// settings.json (its resources include https://node.test/mcp, and it has a bucket) and `ONE_TEST_KERNEL_RECOVERY`
+    /// a file holding its recovery key.
+    fn deployed() -> Kernel {
+        let read = |var: &str| std::fs::read_to_string(std::env::var(var).unwrap_or_else(|_| panic!("{var} names a file"))).unwrap();
+        let settings: kernel::Settings = serde_json::from_str(&read("ONE_TEST_KERNEL")).unwrap();
+        assert!(settings.resources.iter().any(|r| r == RESOURCE), "its resources include {RESOURCE}");
+        let fields = settings.bucket.as_ref().expect("it has a bucket").as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect();
+        let seed: [u8; 32] = data_encoding::HEXLOWER.decode(read("ONE_TEST_KERNEL_RECOVERY").trim().as_bytes()).unwrap().try_into().unwrap();
+        Kernel {
+            running: None,
+            auth: settings.auth_url.clone(),
+            vault: settings.vault_url.clone(),
+            schedules: settings.schedules_url.clone(),
+            secret: settings.kernel_secret.clone(),
+            recovery: kernel::twin(&seed).0,
+            store: Store::Real(one::bucket::Place::from_fields(&fields).unwrap()),
+        }
     }
 
     fn browser(&self) -> Browser {
         Browser { origin: self.auth.clone(), cookies: Default::default() }
     }
 
+    /// A passkey for the auth service's host, as passkeys belong to it.
     fn passkey(&self) -> Passkey {
-        Passkey { key: ed25519_dalek::SigningKey::from_bytes(&rand::random()), id: rand::random::<[u8; 16]>().to_vec(), rp: "localhost".into(), origin: self.auth.clone() }
+        let rp = self.auth.split("://").nth(1).unwrap().split([':', '/']).next().unwrap().to_string();
+        Passkey { key: ed25519_dalek::SigningKey::from_bytes(&rand::random()), id: rand::random::<[u8; 16]>().to_vec(), rp, origin: self.auth.clone() }
     }
 }
 
@@ -553,7 +633,13 @@ fn enc(s: &str) -> String {
 
 #[test]
 fn an_mcp_client_signs_in_with_a_passkey_and_its_tokens_open_its_keys() {
-    let k = Kernel::start();
+    signs_in(&Kernel::start());
+}
+
+/// The install's first person signs up, makes a passkey with PRF, and lets Claude Code in through OAuth; its tokens
+/// open its keys, refresh, and are revoked; his passkey is removed. → a token that still opens his own scope, until it
+/// expires, and his user id.
+fn signs_in(k: &Kernel) -> (String, String) {
     let mut browser = k.browser();
 
     // The authorization server says where everything is, where MCP clients look for it.
@@ -632,19 +718,20 @@ fn an_mcp_client_signs_in_with_a_passkey_and_its_tokens_open_its_keys() {
     assert_eq!((claims.sub.as_str(), claims.azp.as_str(), claims.for_resource(RESOURCE)), (user.as_str(), client_id.as_str(), true), "{claims:?}");
 
     let vault = kernel::Vault { url: k.vault.clone() };
-    let (_, recovery) = post(&format!("{}/internal/recovery", k.vault), &[("x-kernel-secret", &k.secret)], json!({}));
-    let sealed = recovery["scopes"].as_array().unwrap().iter().find(|s| s["scope"] == mine.as_str()).unwrap()["sealed"].as_str().unwrap().to_string();
-    let scope_key: [u8; 32] = kernel::open_sealed(&k.recovery, &B64U.decode(sealed.as_bytes()).unwrap()).unwrap().try_into().unwrap();
-    assert_eq!(vault.keys(&access, &[(&mine, "board", None)]).unwrap()[0].key, kernel::app_key(&scope_key, "board"));
+    let board = vault.keys(&access, &[(&mine, "board", None)]).unwrap()[0].key;
+    let scope_key = recovered(&k.vault, &k.secret, &k.recovery)[&mine];
+    assert_eq!(k.store.app_key(&scope_key, &mine, "board"), Some(board), "the Board's key is in the bucket, sealed under his scope's");
     assert!(vault.keys(&access, &[("global", "board", None)]).is_err(), "he gave it only his own");
 
     // Better Auth keeps the refresh token only as its hash.
-    let dbs = std::fs::read_dir(k.running.dir.join("data/auth/auth")).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "sqlite"));
+    if let Some(running) = &k.running {
+    let dbs = std::fs::read_dir(running.dir.join("data/auth/auth")).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "sqlite"));
     let conn = dbs.map(|db| rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap()).find(|c| c.prepare("select token from oauthRefreshToken").is_ok()).expect("Better Auth's database");
     let stored: Vec<String> = conn.prepare("select token from oauthRefreshToken").unwrap().query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
     let hashed = { use sha2::Digest; B64U.encode(&sha2::Sha256::digest(refresh.as_bytes())) };
     assert_eq!(stored, vec![hashed], "only the refresh token's hash is kept");
     drop(conn);
+    }
 
     // Refreshing moves its keys to the new refresh token; the old one opens nothing.
     let refreshed = |token: &str| k.browser().send("POST", meta["token_endpoint"].as_str().unwrap(), None, Some(&[("grant_type", "refresh_token"), ("refresh_token", token), ("client_id", &client_id), ("resource", RESOURCE)]));
@@ -652,7 +739,7 @@ fn an_mcp_client_signs_in_with_a_passkey_and_its_tokens_open_its_keys() {
     assert_eq!(status, 200, "{again}");
     let access2 = again["access_token"].as_str().unwrap();
     assert_ne!(again["refresh_token"].as_str().unwrap(), refresh);
-    assert_eq!(vault.keys(access2, &[(&mine, "board", None)]).unwrap()[0].key, kernel::app_key(&scope_key, "board"));
+    assert_eq!(vault.keys(access2, &[(&mine, "board", None)]).unwrap()[0].key, board);
 
     // Signing Claude Code out (revoking its refresh token) leaves it nothing to open.
     let latest = again["refresh_token"].as_str().unwrap().to_string();
@@ -669,8 +756,60 @@ fn an_mcp_client_signs_in_with_a_passkey_and_its_tokens_open_its_keys() {
     assert_eq!(status, 200);
     let (_, held) = post(&format!("{}/internal/scopes", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": user, "secret": prf }));
     assert!(held["error"].is_string(), "{held}");
+    (access2.to_string(), user)
 }
 
+
+/// The whole flow against a deployed kernel (see `Kernel::deployed`), its schedules handing runs to a stand-in node
+/// here that a tunnel reaches: `ONE_TEST_NODE` is the https address that reaches port `ONE_TEST_NODE_PORT`.
+#[test]
+#[ignore]
+fn a_deployed_kernel_signs_people_in_and_runs_what_they_let_run() {
+    let k = Kernel::deployed();
+    let (token, user) = signs_in(&k);
+    let me = format!("user:{user}");
+
+    // The node: it keeps each run it's handed, with its token.
+    let runs: std::sync::Arc<std::sync::Mutex<Vec<(String, Value)>>> = Default::default();
+    let kept = runs.clone();
+    let take = move |headers: axum::http::HeaderMap, axum::Json(run): axum::Json<Value>| {
+        let token = headers["authorization"].to_str().unwrap().trim_start_matches("Bearer ").to_string();
+        kept.lock().unwrap().push((token, run));
+        async move { axum::Json(json!({ "ok": true })) }
+    };
+    let app = axum::Router::new().route("/kernel/run", axum::routing::post(take));
+    let listener = std::net::TcpListener::bind(format!("127.0.0.1:{}", std::env::var("ONE_TEST_NODE_PORT").unwrap())).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    std::thread::spawn(move || tokio::runtime::Runtime::new().unwrap().block_on(async move { axum::serve(tokio::net::TcpListener::from_std(listener).unwrap(), app).await.unwrap() }));
+
+    // He lets the Board tidy every minute; its first slot runs once, as him, with only the Board.
+    let add = json!({ "app": "board", "name": "tidy", "scope": me, "title": "Tidy the board", "what": "Board", "op": "tidy", "every": "1m", "node": std::env::var("ONE_TEST_NODE").unwrap() });
+    let (status, made) = ask_at(&k.schedules, &token, "POST", "/schedules", add);
+    assert_eq!(status, 200, "{made}");
+    let id = made["id"].as_str().unwrap().to_string();
+    let started = std::time::Instant::now();
+    loop {
+        let (_, list) = ask_at(&k.schedules, &token, "GET", "/schedules", json!({}));
+        if !list["schedules"][0]["last"].is_null() {
+            assert_eq!(list["schedules"][0]["last"]["status"], "ran", "{list}");
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(150), "its alarm didn't run it: {list}");
+        std::thread::sleep(Duration::from_secs(2));
+    }
+    let (status, _) = ask_at(&k.schedules, &token, "DELETE", &format!("/schedules/{id}"), json!({}));
+    assert_eq!(status, 200);
+    let runs = runs.lock().unwrap().clone();
+    assert_eq!(runs.len(), 1, "one slot, one run: {runs:?}");
+    let (run_token, run) = &runs[0];
+    let run: kernel::Run = serde_json::from_value(run.clone()).unwrap();
+    assert_eq!((run.app.as_str(), run.op.as_str(), run.scope.as_str()), ("board", "tidy", me.as_str()));
+    let vault = kernel::Vault { url: k.vault.clone() };
+    let session = vault.session(run_token).unwrap();
+    assert_eq!((session.user.as_str(), session.client.as_deref(), session.apps.clone()), (user.as_str(), Some("schedules"), Some(vec!["board".to_string()])));
+    assert_eq!(vault.keys(run_token, &[(&me, "board", None)]).unwrap()[0].key, vault.keys(&token, &[(&me, "board", None)]).unwrap()[0].key);
+    assert!(vault.keys(run_token, &[(&me, "calendar", None)]).is_err(), "a run can't use an app it wasn't let use");
+}
 
 #[test]
 fn a_schedule_runs_once_as_its_person_with_only_what_it_was_let_use() {

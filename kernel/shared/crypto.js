@@ -1,7 +1,8 @@
 // The kernel's formats, which nodes read too (src/kernel.rs; tests/contracts.rs checks they agree).
 //
-// Keys are a tree per scope: a scope's key is 32 random bytes; an app's key in it, and a database's in that app, are
-// derived from the one above with HKDF-SHA256, so whoever holds a key can derive what's under it and nothing beside.
+// Keys are a tree per scope. A scope's key is 32 random bytes, and so is each app's key in it, kept sealed under the
+// scope's key: nonce ‖ AES-256-GCM(HKDF-SHA256(scope key, "one/app\0<app>"), nonce, app key), so erasing an app (deleting
+// its sealed key) destroys its key, and its data with it. A database's key is derived from its app's with HKDF-SHA256.
 //
 // Sealed to a public key (an X25519 key: a person's, the recovery key's twin, the schedules service's), bytes are
 // share ‖ AES-256-GCM(key, zero nonce, plain), where share is a fresh X25519 public key and key is HKDF-SHA256 of the
@@ -48,9 +49,18 @@ export function random(n = 32) {
   return crypto.getRandomValues(new Uint8Array(n));
 }
 
-/// An app's key in a scope, from the scope's key.
-export function appKey(scopeKey, app) {
-  return hkdf(scopeKey, `one/app\0${app}`);
+/// An app's key, sealed under its scope's key.
+export async function sealAppKey(scopeKey, app, key) {
+  const nonce = random(12);
+  const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, await aes(await hkdf(scopeKey, `one/app\0${app}`), "encrypt"), key);
+  return concat(nonce, new Uint8Array(sealed));
+}
+
+/// An app's key, from its sealed copy and its scope's key.
+export async function openAppKey(scopeKey, app, sealed) {
+  sealed = bytes(sealed);
+  const key = await aes(await hkdf(scopeKey, `one/app\0${app}`), "decrypt");
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: sealed.slice(0, 12) }, key, sealed.slice(12)));
 }
 
 /// A database's key in an app, from the app's key.

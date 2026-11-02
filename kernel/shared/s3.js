@@ -1,7 +1,7 @@
 // Presigned URLs for the install's S3-compatible bucket (AWS Signature Version 4, in the query), so nodes
 // read and create objects without holding the bucket's credentials. A create URL signs `If-None-Match: *` in, so the
 // request must send it and can only make an object that isn't there; a replace URL signs `If-Match: <ETag>` in, so it
-// changes only the version it names. Nothing a node does deletes data.
+// changes only the version it names. Nothing a node does deletes data: only the vault deletes, erasing an app's key.
 
 const text = new TextEncoder();
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -40,15 +40,18 @@ export async function presign({ method, host, path, region, keyId, secret, expir
   return `https://${host}${canonicalPath}?${canonicalQuery}&X-Amz-Signature=${hex(await hmac(key, toSign))}`;
 }
 
-/// URLs to read objects, to create them, and to replace them while they're the version an ETag names, in a bucket
-/// `{ endpoint, bucket, region, key_id, secret }` (a Backup place's fields), path-style, good for `expires` seconds.
-export async function bucketUrls(bucket, { read = [], create = [], replace = [] }, expires = 900) {
+/// URLs to read objects, to create them, to replace them while they're the version an ETag names, and to delete them
+/// (for the vault itself), in a bucket `{ endpoint, bucket, region, key_id, secret }` (a Backup place's fields),
+/// path-style, good for `expires` seconds.
+export async function bucketUrls(bucket, { read = [], create = [], replace = [], remove = [] }, expires = 900) {
   const endpoint = new URL(bucket.endpoint.includes("://") ? bucket.endpoint : `https://${bucket.endpoint}`);
   const common = { host: endpoint.host, region: bucket.region || "auto", keyId: bucket.key_id, secret: bucket.secret, expires, date: new Date() };
   const at = (name) => `${endpoint.pathname.replace(/\/$/, "")}/${bucket.bucket}/${name}`;
   const out = { read: {}, create: {}, replace: {} };
+  if (remove.length) out.remove = {};
   for (const name of read) out.read[name] = await presign({ ...common, method: "GET", path: at(name) });
   for (const name of create) out.create[name] = await presign({ ...common, method: "PUT", path: at(name), headers: { "if-none-match": "*" } });
   for (const { name, etag } of replace) out.replace[name] = await presign({ ...common, method: "PUT", path: at(name), headers: { "if-match": etag } });
+  for (const name of remove) out.remove[name] = await presign({ ...common, method: "DELETE", path: at(name) });
   return out;
 }

@@ -10,7 +10,8 @@
 //! ```
 //!
 //! No clock, disk or network: the bucket is all it reads and writes, so it runs wherever SQLite does. Its keys come
-//! from the kernel's tree (`src/kernel.rs`): scope, then app, then database.
+//! from the kernel's tree (`src/kernel.rs`): a scope's key seals each app's (`app_key`), from which each database's
+//! is derived.
 
 use std::ffi::{c_char, c_int, c_void};
 
@@ -41,6 +42,24 @@ pub fn open(key: &[u8; 32], name: &str, sealed: &[u8]) -> Result<Vec<u8>> {
     ensure!(sealed.len() >= 12 + 16, "{name} is too short to be sealed");
     let nonce: [u8; 12] = sealed[..12].try_into().expect("12 bytes");
     Aes256Gcm::new(key.into()).decrypt(&nonce.into(), Payload { msg: &sealed[12..], aad: name.as_bytes() }).map_err(|_| anyhow!("{name} didn't open with its key"))
+}
+
+/// An app's key in a scope, from its copy in the bucket (`kernel::app_key_name`), sealed under the scope's key. The
+/// first to need it makes it: at random, or, for a `database` written before app keys were random, the key derived
+/// from the scope's that its data was sealed with, so it still opens. Whichever is written first is the key.
+pub async fn app_key(bucket: &impl Bucket, scope_key: &[u8; 32], scope: &str, app: &str, database: &str) -> Result<[u8; 32]> {
+    let name = crate::kernel::app_key_name(scope, app);
+    if let Some(o) = bucket.get(&name).await? {
+        return crate::kernel::open_app_key(scope_key, app, &o.bytes);
+    }
+    let prefix = format!("{}/{app}/{database}", crate::backups::folder(scope));
+    let written = bucket.get(&newest_name(&prefix)).await?.is_some() || bucket.get(&step_name(&prefix, 1)).await?.is_some();
+    let key = if written { crate::kernel::derived_app_key(scope_key, app) } else { rand::random() };
+    if bucket.create(&name, &crate::kernel::seal_app_key(scope_key, app, &key)).await? {
+        return Ok(key);
+    }
+    let made = bucket.get(&name).await?.context("an app's key went as it was made")?;
+    crate::kernel::open_app_key(scope_key, app, &made.bytes)
 }
 
 /// One SQLite database of an app's, at a position in its steps.
@@ -412,6 +431,24 @@ mod tests {
             objects.insert(name.into(), bytes.to_vec());
             Ok(true)
         }
+    }
+
+    #[test]
+    fn an_apps_key_is_made_once_and_data_written_before_keeps_its_key() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let scope: [u8; 32] = rand::random();
+            let board = app_key(&bucket, &scope, "global", "board", "main").await.unwrap();
+            assert_ne!(board, crate::kernel::derived_app_key(&scope, "board"), "a new app's key is random");
+            assert_eq!(app_key(&bucket, &scope, "global", "board", "main").await.unwrap(), board, "and kept");
+
+            // The calendar wrote its database when keys were derived: its key is that one, kept from now on.
+            let derived = crate::kernel::derived_app_key(&scope, "calendar");
+            let mut db = Db::open(&bucket, "global/calendar/main", crate::kernel::database_key(&derived, "main")).await.unwrap();
+            db.migrate(&bucket, &[SCHEMA.to_string()]).await.unwrap();
+            assert_eq!(app_key(&bucket, &scope, "global", "calendar", "main").await.unwrap(), derived);
+            assert!(bucket.get(&crate::kernel::app_key_name("global", "calendar")).await.unwrap().is_some());
+        });
     }
 
     const SCHEMA: &str = "create table counts (name text primary key, n integer not null); create table notes (text text)";

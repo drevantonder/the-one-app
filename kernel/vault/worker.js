@@ -10,7 +10,7 @@
 // /internal/, with the kernel's shared secret. Everyone else brings an access token.
 
 import { DurableObject } from "cloudflare:workers";
-import { appKey, b64u, databaseKey, idOf, keyPair, openSealed, openUnder, random, sealTo, sealUnder } from "../shared/crypto.js";
+import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, random, sealAppKey, sealTo, sealUnder } from "../shared/crypto.js";
 import { bucketUrls } from "../shared/s3.js";
 import { Items, schema } from "./items.js";
 import { bearer, Issuer } from "../shared/token.js";
@@ -43,6 +43,9 @@ function secretOf(v) {
 
 /// A scope's folder in the bucket: `user:<id>` is written `user-<id>`, which every disk takes.
 export const folderOf = (scope) => scope.replace(":", "-");
+
+/// Where an app's sealed key is kept: `_key` in its folder, a name no database can have.
+const appKeyName = (scope, app) => `${folderOf(scope)}/${app}/_key`;
 
 export class Vault extends DurableObject {
   constructor(ctx, env) {
@@ -97,6 +100,7 @@ export class Vault extends DurableObject {
       case "POST /keys": return json(await this.keys(token, claims, body));
       case "POST /urls": return json(await this.urls(token, claims, body));
       case "POST /share": return json(await this.share(token, claims, body));
+      case "POST /erase": return json(await this.erase(token, claims, body));
       case "GET /items": return json(this.items.list((await this.sessionOf(token)).held, url.searchParams.get("scope")));
       case "POST /items": return json(await this.items.set((await this.sessionOf(token)).held, body));
       case "POST /fetch": return json(await this.fetchFor(token, claims, body));
@@ -247,7 +251,8 @@ export class Vault extends DurableObject {
     return {};
   }
 
-  /// Everything sealed to the recovery key: each scope's key, and each person's key pair's secret half.
+  /// Everything sealed to the recovery key: each scope's key, and each person's key pair's secret half. (Each app's
+  /// key is in the bucket, sealed under its scope's.)
   recovery() {
     const scopes = this.sql.exec("select scope, recovery from scopes order by scope").toArray();
     const people = this.sql.exec("select user, recovery from people order by user").toArray();
@@ -303,12 +308,47 @@ export class Vault extends DurableObject {
       if (!NAME.test(want.app || "")) refuse(400, `${want.app} isn't an app's name`);
       mayUse(held, want.app);
       if (want.database !== undefined && !NAME.test(want.database)) refuse(400, `${want.database} isn't a database's name`);
-      let key = await appKey(await this.scopeKey(held, want.scope), want.app);
+      let key = await this.appKey(want.scope, await this.scopeKey(held, want.scope), want.app);
       if (want.database !== undefined) key = await databaseKey(key, want.database);
       out.push({ ...pick(want), key: b64u.encode(key) });
     }
     this.record(held.user, row.client || claims.azp, out.map((k) => [k.scope, k.app, k.database].filter(Boolean).join("/")));
     return { keys: out, until: row.until };
+  }
+
+  bucket() {
+    return this.env.BUCKET ? JSON.parse(this.env.BUCKET) : refuse(503, "the install has no bucket");
+  }
+
+  /// An app's key in a scope, kept in the bucket beside its data, sealed under the scope's key: the first to need it
+  /// (the vault, or a node) makes it at random, and whichever is written first is the key.
+  async appKey(scope, scopeKey, app) {
+    const name = appKeyName(scope, app);
+    const urls = await bucketUrls(this.bucket(), { read: [name], create: [name] }, 60);
+    let resp = await fetch(urls.read[name]);
+    if (resp.status === 404) {
+      const key = random(32);
+      const made = await fetch(urls.create[name], { method: "PUT", headers: { "if-none-match": "*" }, body: await sealAppKey(scopeKey, app, key) });
+      if (made.ok) return key;
+      if (made.status !== 412) refuse(502, `the bucket said ${made.status} to making ${app}'s key`);
+      resp = await fetch(urls.read[name]);
+    }
+    if (!resp.ok) refuse(502, `the bucket said ${resp.status} to reading ${app}'s key`);
+    return openAppKey(scopeKey, app, new Uint8Array(await resp.arrayBuffer()));
+  }
+
+  /// Erases an app's data in a scope by destroying its key: `{ scope, app }`, by a session that opens the scope and
+  /// isn't limited to some apps. Its data stays in the bucket, which nothing can open again.
+  async erase(token, claims, { scope, app }) {
+    const { row, held } = await this.sessionOf(token);
+    if (!NAME.test(app || "")) refuse(400, `${app} isn't an app's name`);
+    if (held.apps) refuse(403, "this may not erase apps");
+    await this.scopeKey(held, scope);
+    const name = appKeyName(scope, app);
+    const resp = await fetch((await bucketUrls(this.bucket(), { remove: [name] }, 60)).remove[name], { method: "DELETE" });
+    if (!resp.ok && resp.status !== 404) refuse(502, `the bucket said ${resp.status} to erasing ${app}'s key`);
+    this.record(held.user, row.client || claims.azp, [`erased ${scope}/${app}`]);
+    return {};
   }
 
   /// Makes an app's request with its Vault fields filled in (see items.js), recording the items it used.
@@ -348,7 +388,7 @@ export class Vault extends DurableObject {
   /// Everyone's.
   async urls(token, claims, { read = [], create = [], replace = [] }) {
     if (![read, create, replace].every(Array.isArray) || read.length + create.length + replace.length > 256) refuse(400, "name at most 256 objects");
-    const bucket = this.env.BUCKET ? JSON.parse(this.env.BUCKET) : refuse(503, "the install has no bucket");
+    const bucket = this.bucket();
     const { held } = await this.sessionOf(token);
     const scopes = this.held(held);
     const open = new Set(scopes.map(folderOf));

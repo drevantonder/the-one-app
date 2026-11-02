@@ -978,10 +978,11 @@ impl Node {
     }
 
     /// A database's key: `app`'s `database` in `scope`. The one place keys come from, until the kernel's vault gives
-    /// them: from the scope's key.
+    /// them: from the app's key, in the bucket sealed under the scope's.
     async fn database_key(&self, scope: &Scope, app: &str, database: &str) -> Result<[u8; 32]> {
         let scope_key = self.scope_key(scope).await?;
-        Ok(crate::kernel::database_key(&crate::kernel::app_key(&scope_key, app), database))
+        let app_key = crate::db::app_key(&self.bucket()?, &scope_key, &scope.to_string(), app, database).await?;
+        Ok(crate::kernel::database_key(&app_key, database))
     }
 
     /// A scope's key, which its databases and backups are sealed with. The first server to need one makes it, and the
@@ -1390,7 +1391,26 @@ impl Node {
     /// its owner. A deleted app stops running and leaves every page, but keeps its data until it's erased.
     pub async fn retire(&self, caller: &Caller, app: &str, how: &str) -> Result<()> {
         let (_, content) = self.with(|i| check_append(i, app, Append::Retire { app: app.into(), how: how.into() }, &[], caller))?;
-        self.member_content(caller, content).await
+        self.member_content(caller, content).await?;
+        if how == "erased" {
+            self.destroy_keys(app).await?;
+        }
+        Ok(())
+    }
+
+    /// Erases an app's data in every scope by deleting its keys: its databases stay in the bucket, which nothing opens
+    /// again.
+    async fn destroy_keys(&self, app: &str) -> Result<()> {
+        let bucket = self.bucket()?;
+        self.0.dbs.lock().unwrap().retain(|(_, db), _| db.split('/').next() != Some(app));
+        let app = app.to_string();
+        tokio::task::spawn_blocking(move || {
+            for scope in bucket.list("")?.iter().map(|f| crate::backups::scope_of(f)).filter(|s| Scope::parse(s).is_ok()) {
+                bucket.delete(&crate::kernel::app_key_name(&scope, &app))?;
+            }
+            Ok(())
+        })
+        .await?
     }
 
     // Schedules.

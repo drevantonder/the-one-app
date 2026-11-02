@@ -1565,8 +1565,10 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
 /// The board's posts in `global` as a place's copy of the install's bucket holds them, opened with the scope's key.
 async fn backed_up_posts(dir: &std::path::Path, install: &str, keys: &[[u8; 32]]) -> Vec<String> {
     let copy = one::bucket::Place::Folder(dir.join(install).join("bucket"));
+    let Ok(Some(sealed)) = copy.get(&one::kernel::app_key_name("global", "board")) else { return Vec::new() };
     for key in keys {
-        let key = one::kernel::database_key(&one::kernel::app_key(key, "board"), "main");
+        let Ok(app) = one::kernel::open_app_key(key, "board", &sealed) else { continue };
+        let key = one::kernel::database_key(&app, "main");
         if let Ok(db) = one::db::Db::open(&copy, "global/board/main", key).await {
             return db.query("select text from posts order by time", &[]).unwrap().into_iter().map(|r| r["text"].as_str().unwrap().to_string()).collect();
         }

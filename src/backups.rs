@@ -261,8 +261,8 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
 }
 
 /// Copies what a scope's folder in the install's bucket has that the place lacks, into `<install>/bucket/`, laid out
-/// as the bucket is: its key's id and the key sealed to each server and the recovery key, and each database's new steps
-/// and newest copy (sealed as they are), past what `snap` says it has.
+/// as the bucket is: its key's id and the key sealed to each server and the recovery key, each app's key (sealed under
+/// the scope's), and each database's new steps and newest copy (sealed as they are), past what `snap` says it has.
 fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: &mut Snapshot) -> Result<()> {
     let folder = folder(scope);
     let mut copy = |name: &str, known: bool| -> Result<bool> {
@@ -279,7 +279,8 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
         copy(&format!("{folder}/{KEYS}/{name}"), true)?;
     }
     for app in bucket.list(&folder)?.into_iter().filter(|a| crate::members::valid_app_name(a) || a == crate::members::APP) {
-        for database in bucket.list(&format!("{folder}/{app}"))? {
+        copy(&crate::kernel::app_key_name(scope, &app), true)?;
+        for database in bucket.list(&format!("{folder}/{app}"))?.into_iter().filter(|d| !d.starts_with('_')) {
             let prefix = format!("{folder}/{app}/{database}");
             let Some(hint) = bucket.get(&crate::db::newest_name(&prefix))? else { continue };
             let (_, newest_copy) = crate::db::newest(&hint)?;

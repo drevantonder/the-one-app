@@ -356,8 +356,8 @@ fn go_sidecars_read_the_calls_the_node_hands_them() {
     assert!(read >= 10, "the test read the Go sidecars' calls ({read} fields)");
 }
 
-/// The kernel's services (JavaScript, `kernel/shared/crypto.js`) and nodes (`src/kernel.rs`) derive the same
-/// keys from a scope's key, and each opens what the other seals.
+/// The kernel's services (JavaScript, `kernel/shared/crypto.js`) and nodes (`src/kernel.rs`) each open what the
+/// other seals: app keys under scope keys, keys to key pairs and under secrets; and derive the same database keys.
 #[test]
 fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     use data_encoding::BASE64URL_NOPAD as B64U;
@@ -381,11 +381,15 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     };
     let b = |v: &Value| B64U.decode(v.as_str().unwrap().as_bytes()).unwrap();
 
+    // An app's key, sealed under its scope's: each opens what the other sealed, and derives the same database key.
     let scope: [u8; 32] = rand::random();
-    let derived = js(json!({ "op": "derive", "scopeKey": B64U.encode(&scope), "app": "board", "database": "main" }));
-    let app = kernel::app_key(&scope, "board");
-    assert_eq!(b(&derived["app"]), app, "an app's key");
-    assert_eq!(b(&derived["database"]), kernel::database_key(&app, "main"), "a database's key");
+    let app: [u8; 32] = rand::random();
+    let opened = js(json!({ "op": "openAppKey", "scopeKey": B64U.encode(&scope), "app": "board", "sealed": B64U.encode(&kernel::seal_app_key(&scope, "board", &app)), "database": "main" }));
+    assert_eq!(b(&opened["key"]), app, "JavaScript opens an app's key Rust sealed");
+    assert_eq!(b(&opened["database"]), kernel::database_key(&app, "main"), "a database's key");
+    let sealed = js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&scope), "app": "board", "key": B64U.encode(&app) }));
+    assert_eq!(kernel::open_app_key(&scope, "board", &b(&sealed["sealed"])).unwrap(), app, "Rust opens an app's key JavaScript sealed");
+    assert!(kernel::open_app_key(&scope, "calendar", &b(&sealed["sealed"])).is_err(), "only as that app's");
 
     // Sealed to a key pair: JavaScript's pair, sealed in Rust; Rust's pair (the recovery key's twin), sealed in JavaScript.
     let pair = js(json!({ "op": "keyPair" }));
