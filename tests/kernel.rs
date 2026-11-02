@@ -363,3 +363,303 @@ fn the_vault_fills_an_apps_requests_with_secrets_it_never_shows() {
     let echoed: Value = serde_json::from_slice(&B64U.decode(gone["body64"].as_str().unwrap().as_bytes()).unwrap()).unwrap();
     assert_eq!(echoed["body"], format!("{{{{{id}:refresh_token}}}}"));
 }
+
+/// A browser's cookies and Origin, for asking the auth server as its screens do.
+struct Browser {
+    origin: String,
+    cookies: std::collections::BTreeMap<String, String>,
+}
+
+impl Browser {
+    fn send(&mut self, method: &str, path: &str, body: Option<Value>, form: Option<&[(&str, &str)]>) -> (u16, Value, Option<String>) {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).build().into();
+        let url = if path.starts_with("http") { path.to_string() } else { format!("{}{path}", self.origin) };
+        let cookie = self.cookies.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; ");
+        let mut resp = match (method, body, form) {
+            ("GET", ..) => agent.get(&url).header("origin", &self.origin).header("cookie", &cookie).call().unwrap(),
+            (_, _, Some(form)) => agent.post(&url).header("origin", &self.origin).send_form(form.iter().copied()).unwrap(),
+            (_, body, _) => agent.post(&url).header("origin", &self.origin).header("cookie", &cookie).send_json(body.unwrap_or(json!({}))).unwrap(),
+        };
+        for set in resp.headers().get_all("set-cookie") {
+            let pair = set.to_str().unwrap().split(';').next().unwrap();
+            let (name, value) = pair.split_once('=').unwrap();
+            self.cookies.insert(name.trim().into(), value.into());
+        }
+        let location = resp.headers().get("location").map(|l| l.to_str().unwrap().to_string());
+        let status = resp.status().as_u16();
+        let text = resp.body_mut().read_to_string().unwrap_or_default();
+        (status, serde_json::from_str(&text).unwrap_or(Value::String(text)), location)
+    }
+
+    fn post(&mut self, path: &str, body: Value) -> (u16, Value) {
+        let (status, out, _) = self.send("POST", path, Some(body), None);
+        (status, out)
+    }
+
+    fn get(&mut self, path: &str) -> (u16, Value, Option<String>) {
+        self.send("GET", path, None, None)
+    }
+}
+
+/// A passkey kept in software, as an authenticator keeps one: an Ed25519 key, with attestation "none".
+struct Passkey {
+    key: ed25519_dalek::SigningKey,
+    id: Vec<u8>,
+    rp: String,
+    origin: String,
+}
+
+fn cbor(v: &ciborium::Value) -> Vec<u8> {
+    let mut out = Vec::new();
+    ciborium::into_writer(v, &mut out).unwrap();
+    out
+}
+
+impl Passkey {
+    fn client_data(&self, kind: &str, challenge: &str) -> Vec<u8> {
+        json!({ "type": kind, "challenge": challenge, "origin": self.origin, "crossOrigin": false }).to_string().into_bytes()
+    }
+
+    fn rp_hash(&self) -> Vec<u8> {
+        use sha2::Digest;
+        sha2::Sha256::digest(self.rp.as_bytes()).to_vec()
+    }
+
+    /// What `navigator.credentials.create` gives, as JSON, for registration options.
+    fn create(&self, options: &Value) -> Value {
+        use ciborium::Value as C;
+        let cose = C::Map(vec![(C::Integer(1.into()), C::Integer(1.into())), (C::Integer(3.into()), C::Integer((-8).into())), (C::Integer((-1).into()), C::Integer(6.into())), (C::Integer((-2).into()), C::Bytes(self.key.verifying_key().to_bytes().to_vec()))]);
+        let mut auth = self.rp_hash();
+        auth.push(0x45 | 0x18); // user present, verified, backed up, with a credential
+        auth.extend(0u32.to_be_bytes());
+        auth.extend([0; 16]);
+        auth.extend((self.id.len() as u16).to_be_bytes());
+        auth.extend(&self.id);
+        auth.extend(cbor(&cose));
+        let attestation = C::Map(vec![(C::Text("fmt".into()), C::Text("none".into())), (C::Text("attStmt".into()), C::Map(vec![])), (C::Text("authData".into()), C::Bytes(auth))]);
+        let id = B64U.encode(&self.id);
+        let client = self.client_data("webauthn.create", options["challenge"].as_str().unwrap());
+        json!({ "id": id, "rawId": id, "type": "public-key", "clientExtensionResults": {},
+            "response": { "clientDataJSON": B64U.encode(&client), "attestationObject": B64U.encode(&cbor(&attestation)), "transports": ["internal"] } })
+    }
+
+    /// What `navigator.credentials.get` gives, as JSON, for authentication options.
+    fn get(&self, options: &Value, user: &str) -> Value {
+        use ed25519_dalek::Signer;
+        use sha2::Digest;
+        let mut auth = self.rp_hash();
+        auth.push(0x05 | 0x18);
+        auth.extend(1u32.to_be_bytes());
+        let client = self.client_data("webauthn.get", options["challenge"].as_str().unwrap());
+        let signature = self.key.sign(&[&auth[..], &sha2::Sha256::digest(&client)[..]].concat());
+        let id = B64U.encode(&self.id);
+        json!({ "id": id, "rawId": id, "type": "public-key", "clientExtensionResults": {},
+            "response": { "clientDataJSON": B64U.encode(&client), "authenticatorData": B64U.encode(&auth), "signature": B64U.encode(&signature.to_bytes()), "userHandle": B64U.encode(user.as_bytes()) } })
+    }
+}
+
+/// The real auth server and vault, as an install runs them.
+struct Kernel {
+    running: Running,
+    auth: String,
+    vault: String,
+    secret: String,
+    recovery: [u8; 32],
+}
+
+const RESOURCE: &str = "https://compute.test/mcp";
+
+impl Kernel {
+    fn start() -> Kernel {
+        let (vault, auth) = (port(), port());
+        let (recovery, recovery_public) = kernel::twin(&rand::random());
+        let secret = B64U.encode(&rand::random::<[u8; 32]>());
+        let origin = format!("http://localhost:{auth}");
+        let bucket = json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }).to_string();
+        let running = run(vec![
+            Served {
+                name: "auth".into(),
+                module: module("auth/worker.js"),
+                class: Some("Auth".into()),
+                listen: format!("127.0.0.1:{auth}"),
+                bindings: vec![
+                    ("VAULT".into(), "service:vault".into()),
+                    ("AUTH_URL".into(), origin.clone()),
+                    ("AUTH_SECRET".into(), B64U.encode(&rand::random::<[u8; 32]>())),
+                    ("KERNEL_SECRET".into(), secret.clone()),
+                    ("RESOURCES".into(), json!([RESOURCE]).to_string()),
+                ],
+                outbound: None,
+            },
+            Served {
+                name: "vault".into(),
+                module: module("vault/worker.js"),
+                class: Some("Vault".into()),
+                listen: format!("127.0.0.1:{vault}"),
+                bindings: vec![
+                    ("AUTH".into(), "service:auth".into()),
+                    ("ISSUER".into(), format!("{origin}/api/auth")),
+                    ("KERNEL_SECRET".into(), secret.clone()),
+                    ("RECOVERY_KEY".into(), B64U.encode(&recovery_public)),
+                    ("BUCKET".into(), bucket),
+                ],
+                outbound: None,
+            },
+        ]);
+        Kernel { running, auth: origin, vault: format!("http://127.0.0.1:{vault}"), secret, recovery }
+    }
+
+    fn browser(&self) -> Browser {
+        Browser { origin: self.auth.clone(), cookies: Default::default() }
+    }
+
+    fn passkey(&self) -> Passkey {
+        Passkey { key: ed25519_dalek::SigningKey::from_bytes(&rand::random()), id: rand::random::<[u8; 16]>().to_vec(), rp: "localhost".into(), origin: self.auth.clone() }
+    }
+}
+
+fn query_of(url: &str) -> std::collections::BTreeMap<String, String> {
+    let query = url.split_once('?').map(|(_, q)| q).unwrap_or("");
+    query.split('&').filter_map(|p| p.split_once('=')).map(|(k, v)| (dec(k), dec(v))).collect()
+}
+
+fn dec(s: &str) -> String {
+    let bytes = s.replace('+', " ").into_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() + 0 && i + 2 <= bytes.len() - 1 {
+            out.push(u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap(), 16).unwrap());
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).unwrap()
+}
+
+fn enc(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+#[test]
+fn an_mcp_client_signs_in_with_a_passkey_and_its_tokens_open_its_keys() {
+    let k = Kernel::start();
+    let mut browser = k.browser();
+
+    // The authorization server says where everything is, where MCP clients look for it.
+    let (status, meta, _) = browser.get("/.well-known/oauth-authorization-server/api/auth");
+    assert_eq!(status, 200, "{meta}");
+    let issuer = meta["issuer"].as_str().unwrap().to_string();
+    assert_eq!(issuer, format!("{}/api/auth", k.auth));
+    for field in ["authorization_endpoint", "token_endpoint", "registration_endpoint", "jwks_uri"] {
+        assert!(meta[field].is_string(), "no {field} in {meta}");
+    }
+
+    // The install's first person makes an account; nobody else can without an invite.
+    let (status, made) = browser.post("/api/auth/sign-up/email", json!({ "name": "Andre", "email": "andre@example.com", "password": "a long enough password" }));
+    assert_eq!(status, 200, "{made}");
+    let user = made["user"]["id"].as_str().unwrap().to_string();
+    assert!(user.len() == 16 && user.chars().all(|c| c.is_ascii_hexdigit()), "a user id is 16 hex characters: {user}");
+    let (status, _) = k.browser().post("/api/auth/sign-up/email", json!({ "name": "Mallory", "email": "mallory@example.com", "password": "a long enough password" }));
+    assert_ne!(status, 200, "a stranger can't sign up");
+
+    // He makes a passkey.
+    let passkey = k.passkey();
+    let (status, options, _) = browser.get("/api/auth/passkey/generate-register-options");
+    assert_eq!(status, 200, "{options}");
+    let (status, registered) = browser.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "name": "MacBook" }));
+    assert_eq!(status, 200, "{registered}");
+
+    // Claude Code registers itself and sends him to authorize it.
+    let (status, client) = k.browser().post(meta["registration_endpoint"].as_str().unwrap(), json!({
+        "client_name": "Claude Code", "redirect_uris": ["http://localhost:9999/callback"], "token_endpoint_auth_method": "none",
+        "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"] }));
+    assert_eq!(status, 201, "{client}");
+    let client_id = client["client_id"].as_str().unwrap().to_string();
+    let verifier = B64U.encode(&rand::random::<[u8; 32]>());
+    let challenge = { use sha2::Digest; B64U.encode(&sha2::Sha256::digest(verifier.as_bytes())) };
+    let authorize = format!(
+        "{}?response_type=code&client_id={client_id}&redirect_uri={}&scope={}&state=s1&code_challenge={challenge}&code_challenge_method=S256&resource={}",
+        meta["authorization_endpoint"].as_str().unwrap(), enc("http://localhost:9999/callback"), enc("openid offline_access"), enc(RESOURCE)
+    );
+    let (status, _, location) = browser.get(&authorize);
+    assert_eq!(status, 302);
+    let location = location.unwrap();
+    assert!(location.contains("/consent?"), "signed in, he's sent to consent: {location}");
+    let oauth_query = location.split_once('?').unwrap().1.to_string();
+
+    // At the consent screen, his passkey (and its PRF output) opens his keys; he lets Claude Code use his own.
+    let (_, options, _) = browser.get("/api/auth/passkey/generate-authenticate-options");
+    let (status, signed) = browser.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options, &user) }));
+    assert_eq!(status, 200, "{signed}");
+    let prf = B64U.encode(&rand::random::<[u8; 32]>());
+    let (_, about, _) = browser.get(&format!("/consent/about?client_id={client_id}"));
+    assert_eq!(about["client"], "Claude Code", "{about}");
+    let (status, scopes) = browser.post("/consent/scopes", json!({ "prf": prf, "credential": B64U.encode(&passkey.id) }));
+    assert_eq!(status, 200, "{scopes}");
+    let mine = format!("user:{user}");
+    let mut opened: Vec<String> = scopes["scopes"].as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect();
+    opened.sort();
+    assert_eq!(opened, ["global".to_string(), mine.clone()], "his first passkey makes his keys, and Everyone's");
+    let (status, wrong) = browser.post("/consent/scopes", json!({ "prf": B64U.encode(&rand::random::<[u8; 32]>()), "credential": B64U.encode(&passkey.id) }));
+    assert_eq!(status, 403, "another PRF output opens nothing: {wrong}");
+    let (status, accepted) = browser.post("/consent/accept", json!({ "oauth_query": oauth_query, "accept": true, "prf": prf, "scopes": [mine] }));
+    assert_eq!(status, 200, "{accepted}");
+    let redirect = accepted["url"].as_str().unwrap();
+    let params = query_of(redirect);
+    assert!(redirect.starts_with("http://localhost:9999/callback"), "{redirect}");
+    assert_eq!(params["state"], "s1");
+
+    // Claude Code swaps the code for tokens: a JWT that compute servers check offline, and that opens its keys.
+    let (status, tokens, _) = k.browser().send("POST", meta["token_endpoint"].as_str().unwrap(), None, Some(&[
+        ("grant_type", "authorization_code"), ("code", &params["code"]), ("redirect_uri", "http://localhost:9999/callback"),
+        ("client_id", &client_id), ("code_verifier", &verifier), ("resource", RESOURCE)]));
+    assert_eq!(status, 200, "{tokens}");
+    let access = tokens["access_token"].as_str().unwrap().to_string();
+    let refresh = tokens["refresh_token"].as_str().unwrap().to_string();
+    let (_, jwks, _) = k.browser().get(meta["jwks_uri"].as_str().unwrap());
+    let claims = kernel::verify(&access, &jwks, &issuer, now()).unwrap();
+    assert_eq!((claims.sub.as_str(), claims.azp.as_str(), claims.for_resource(RESOURCE)), (user.as_str(), client_id.as_str(), true), "{claims:?}");
+
+    let vault = kernel::Vault { url: k.vault.clone() };
+    let (_, recovery) = post(&format!("{}/internal/recovery", k.vault), &[("x-kernel-secret", &k.secret)], json!({}));
+    let sealed = recovery["scopes"].as_array().unwrap().iter().find(|s| s["scope"] == mine.as_str()).unwrap()["sealed"].as_str().unwrap().to_string();
+    let scope_key: [u8; 32] = kernel::open_sealed(&k.recovery, &B64U.decode(sealed.as_bytes()).unwrap()).unwrap().try_into().unwrap();
+    assert_eq!(vault.keys(&access, &[(&mine, "board", None)]).unwrap()[0].key, kernel::app_key(&scope_key, "board"));
+    assert!(vault.keys(&access, &[("global", "board", None)]).is_err(), "he gave it only his own");
+
+    // Better Auth keeps the refresh token only as its hash.
+    let dbs = std::fs::read_dir(k.running.dir.join("data/auth/auth")).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "sqlite"));
+    let conn = dbs.map(|db| rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap()).find(|c| c.prepare("select token from oauthRefreshToken").is_ok()).expect("Better Auth's database");
+    let stored: Vec<String> = conn.prepare("select token from oauthRefreshToken").unwrap().query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+    let hashed = { use sha2::Digest; B64U.encode(&sha2::Sha256::digest(refresh.as_bytes())) };
+    assert_eq!(stored, vec![hashed], "only the refresh token's hash is kept");
+    drop(conn);
+
+    // Refreshing moves its keys to the new refresh token; the old one opens nothing.
+    let refreshed = |token: &str| k.browser().send("POST", meta["token_endpoint"].as_str().unwrap(), None, Some(&[("grant_type", "refresh_token"), ("refresh_token", token), ("client_id", &client_id), ("resource", RESOURCE)]));
+    let (status, again, _) = refreshed(&refresh);
+    assert_eq!(status, 200, "{again}");
+    let access2 = again["access_token"].as_str().unwrap();
+    assert_ne!(again["refresh_token"].as_str().unwrap(), refresh);
+    assert_eq!(vault.keys(access2, &[(&mine, "board", None)]).unwrap()[0].key, kernel::app_key(&scope_key, "board"));
+
+    // Signing Claude Code out (revoking its refresh token) leaves it nothing to open.
+    let latest = again["refresh_token"].as_str().unwrap().to_string();
+    let (status, revoked, _) = k.browser().send("POST", &format!("{issuer}/oauth2/revoke"), None, Some(&[("token", &latest), ("token_type_hint", "refresh_token"), ("client_id", &client_id)]));
+    assert_eq!(status, 200, "{revoked}");
+    let (_, moved) = post(&format!("{}/internal/rekey", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "from": latest, "to": "anything at all, long", "token": access2, "until": now() + 60_000 }));
+    assert_eq!(moved["moved"], false);
+    let (status, _, _) = refreshed(&refresh);
+    assert_ne!(status, 200, "a spent refresh token is refused");
+
+    // Removing his passkey: it opens nothing again, at the next consent.
+    let (_, list, _) = browser.get("/api/auth/passkey/list-user-passkeys");
+    let (status, _) = browser.post("/api/auth/passkey/delete-passkey", json!({ "id": list[0]["id"] }));
+    assert_eq!(status, 200);
+    let (_, held) = post(&format!("{}/internal/scopes", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": user, "secret": prf }));
+    assert!(held["error"].is_string(), "{held}");
+}
+

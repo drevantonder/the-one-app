@@ -83,6 +83,7 @@ export class Vault extends DurableObject {
         case "POST /internal/rekey": return json(await this.rekey(body));
         case "POST /internal/scopes": return json(await this.scopesOf(body));
         case "POST /internal/forget": return json(await this.forget(body));
+        case "POST /internal/forget-passkeys": return json(this.forgetPasskeys(body));
         case "POST /internal/recovery": return json(this.recovery());
       }
       refuse(404, "no such route");
@@ -144,7 +145,7 @@ export class Vault extends DurableObject {
 
   /// A passkey's copy, for `user`. Their first makes their key pair and their scope's key (and the install's, for
   /// the first person); a later one is opened from another of their passkeys, or a code from the recovery key.
-  async passkey({ user, secret, name, from }) {
+  async passkey({ user, secret, name, from, client = null }) {
     if (!/^[0-9a-f]{16}$/.test(user || "")) refuse(400, "not a user id");
     secret = secretOf(secret);
     const known = this.sql.exec("select user from people where user = ?", user).toArray()[0];
@@ -163,7 +164,7 @@ export class Vault extends DurableObject {
       held = opened.held;
       if (opened.row.kind === "recovery") this.sql.exec("delete from copies where id = ?", opened.row.id);
     }
-    return { id: await this.seal(secret, { user, kind: "passkey", name: String(name || "Passkey"), held }) };
+    return { id: await this.seal(secret, { user, kind: "passkey", name: String(name || "Passkey"), client, held }) };
   }
 
   async makeScope(scope, user, publicKey) {
@@ -211,6 +212,13 @@ export class Vault extends DurableObject {
   /// Deletes the copy a secret opens (a refresh token that was revoked).
   async forget({ secret }) {
     this.sql.exec("delete from copies where id = ?", await idOf(secretOf(secret)));
+    return {};
+  }
+
+  /// Deletes a person's passkeys' copies, but for those of the passkeys in `keep` (by credential id).
+  forgetPasskeys({ user, keep }) {
+    const rows = this.sql.exec("select id, client from copies where user = ? and kind = 'passkey'", user).toArray();
+    for (const row of rows.filter((r) => !(keep || []).includes(r.client))) this.sql.exec("delete from copies where id = ?", row.id);
     return {};
   }
 

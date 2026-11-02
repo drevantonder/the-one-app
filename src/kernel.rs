@@ -224,7 +224,7 @@ pub fn folder_of(scope: &str) -> String {
 // Building and running.
 
 /// The kernel's servers: each one's name, its module, and its Durable Object's class.
-pub const SERVERS: &[(&str, &str, Option<&str>)] = &[("vault", "vault/worker.js", Some("Vault"))];
+pub const SERVERS: &[(&str, &str, Option<&str>)] = &[("vault", "vault/worker.js", Some("Vault")), ("auth", "auth/worker.js", Some("Auth"))];
 
 /// A kernel server's module, built from the sources this release was signed with by the pinned Bun, once per
 /// version of them.
