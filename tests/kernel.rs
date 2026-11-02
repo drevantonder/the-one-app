@@ -1012,6 +1012,10 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert!(opens(&andres, &format!("group:{group}")));
     assert_eq!(ask(&andres, "POST", "/v1/remove", json!({ "user": sam })).0, 200);
     assert!(!opens(&sams, "global") && !opens(&sams, &format!("group:{group}")) && opens(&andres, "global"));
+    // An admin who makes himself a member is one at the vault no more, at once.
+    assert_eq!(ask(&andres, "POST", "/v1/role", json!({ "user": andre, "role": "member" })).0, 200);
+    let err = vault.invite(&andres, "Kim").err().expect("he's no admin there").to_string();
+    assert!(err.contains("only an admin"), "{err}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -190,9 +190,7 @@ impl Node {
         let before = self.with(|i| Ok(i.r.members.roles()))?;
         self.append_as(&Scope::Global, &caller.user, by, content).await?;
         let after = self.with(|i| Ok(i.r.members.roles()))?;
-        // A role someone gave themselves the vault hears from the next `kernel keys`, but for accepting an invite.
-        let changed = members::roles_changed(&before, &after).into_iter().filter(|(user, role, invited, _)| role.is_none() || *invited || *user != caller.user || kind == "accept").collect();
-        self.tell_vault(caller, changed).await
+        self.tell_vault(caller, members::roles_changed(&before, &after)).await
     }
 
     /// Tells the install's vault how people's roles changed, as `caller`, who changed them, so whoever was let in opens
