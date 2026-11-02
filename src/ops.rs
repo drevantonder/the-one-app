@@ -55,7 +55,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
         );
     }
     if o["confirm"] == true && !confirmed {
-        ask(&format!("{CLI} {app} {op} can't be undone. Go ahead?"), &format!("{app} {op} can't be undone: run it again with --confirm"))?;
+        ask(&format!("{CLI} {app} {op} sends or can't be undone. Go ahead?"), &format!("{CLI} {app} {op} sends or can't be undone: ask the person first, and only once they agreed, run it again with --confirm"))?;
     }
     let mut r = match post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })) {
         Ok(r) => r,
@@ -510,7 +510,7 @@ pub fn help(app: &Value, op: &Value) -> String {
     text.push('\n');
     text.push_str(match (op["reads"] == true, op["confirm"] == true) {
         (true, _) => "It only reads.\n",
-        (_, true) => "It can't be undone: it asks first, or give --confirm.\n",
+        (_, true) => "It sends or can't be undone: it asks first, or give --confirm once the person agreed.\n",
         _ => "",
     });
     if !required.is_empty() {
