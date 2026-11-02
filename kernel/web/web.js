@@ -515,6 +515,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
         el.href = href(to);
         el.dataset.go = JSON.stringify(to);
         el.innerHTML = `<span class="tile-icon">${icon(a, 60)}${badge(appBadge(a.name, p))}</span><span class="tile-name">${esc(label(a))}</span>`;
+        el.addEventListener("contextmenu", (e) => { e.preventDefault(); menu(e, actions(a, p)); });
         return { el, span: [1, 1] };
       }
       const w = item.widget, a = app(w.app);
@@ -524,6 +525,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
       el.dataset.size = size;
       // A widget without a link of its own opens its app.
       if (!tree(w, size)?.link && a && hasScreens(a)) el.addEventListener("click", (e) => { if (!e.defaultPrevented) go(screenRoute(a, p)); });
+      el.addEventListener("contextmenu", (e) => { e.preventDefault(); menu(e, widgetActions(w, item.kept, p, size)); });
       return { el, span: CELLS[size] || CELLS.medium, widget: w };
     });
     const services = { kind: "services", scope: p.scope };
@@ -693,6 +695,30 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     return out;
   }
 
+  const SIZE_NAMES = { small: "Small", medium: "Medium", large: "Large", xl: "Extra Large" };
+
+  /// What right-clicking a widget offers, as touching and holding one does on a Mac: its sizes, then Copy What Went
+  /// Wrong if it broke, and Remove Widget.
+  function widgetActions(w, kept, p, size) {
+    const out = supported(w).map((s) => ({ label: `${s === size ? "✓ " : ""}${SIZE_NAMES[s]}`, run: () => s !== size && arrange(p, (item) => (item.id === kept.id ? { ...item, size: s } : item)) }));
+    if (w.error) out.push({ label: "Copy What Went Wrong", run: () => navigator.clipboard.writeText(w.error) });
+    out.push({ label: "Remove Widget", danger: true, run: () => arrange(p, (item) => (item.id === kept.id ? null : item)) });
+    return out;
+  }
+
+  /// Keeps a page in its person's order with `edit` applied to each item (null takes it off), then draws it again.
+  async function arrange(p, edit) {
+    const kept = items(p).map((i) => (i.app ? { app: i.app.name } : i.kept)).map(edit).filter(Boolean);
+    const hidden = store.state?.arrangements?.[p.scope]?.hidden || [];
+    store.state.arrangements = { ...(store.state.arrangements || {}), [p.scope]: { items: kept, hidden } };
+    render();
+    try {
+      await api("/v1/arrange", { method: "POST", body: { page: p.scope, items: kept, hidden } });
+    } catch (err) {
+      alertError(err);
+    }
+  }
+
   function confirmDelete(a) {
     const { body, close } = one.sheet({ title: `Delete ${label(a)}?`, done: "Cancel" });
     body.innerHTML = `<p class="sheet-text">${esc(label(a))} leaves every page, for everyone, and stops running. It waits in the App Store’s Recently Deleted, with its data, until its owners erase it.</p><div class="sheet-actions"><button class="button danger" data-delete>Delete App</button></div>`;
@@ -718,7 +744,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     body.innerHTML = `<p class="sheet-text">${esc(err.message || err)}</p>`;
   }
 
-  /// A small menu by `anchor`, closed by a choice, a click elsewhere or Escape.
+  /// A small menu by `anchor` (a button, or a right-click), closed by a choice, a click elsewhere or Escape.
   function menu(anchor, entries) {
     document.querySelector(".menu")?.remove();
     if (!entries.length) return;
@@ -726,9 +752,10 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     m.className = "menu";
     m.innerHTML = entries.map((e, i) => `<button class="menu-item${e.danger ? " danger" : ""}" data-i="${i}">${esc(e.label)}</button>`).join("");
     document.body.append(m);
-    const box = anchor.getBoundingClientRect();
-    m.style.top = `${Math.min(box.bottom + 4, innerHeight - m.offsetHeight - 8)}px`;
-    m.style.left = `${Math.max(8, box.right - m.offsetWidth)}px`;
+    // By a button, under its right edge; at a right-click, where it was.
+    const at = anchor instanceof Event ? { top: anchor.clientY, left: anchor.clientX } : (({ bottom, right }) => ({ top: bottom + 4, left: right - m.offsetWidth }))(anchor.getBoundingClientRect());
+    m.style.top = `${Math.max(8, Math.min(at.top, innerHeight - m.offsetHeight - 8))}px`;
+    m.style.left = `${Math.max(8, Math.min(at.left, innerWidth - m.offsetWidth - 8))}px`;
     const close = () => { m.remove(); document.removeEventListener("mousedown", outside, true); document.removeEventListener("keydown", key); };
     const outside = (e) => { if (!m.contains(e.target)) close(); };
     const key = (e) => e.key === "Escape" && close();

@@ -89,6 +89,7 @@ button.row.still { cursor: default; }
 .row.add { color: var(--accent); }
 .plus, .new-item { width: 20px; text-align: center; font-size: 18px; font-weight: 300; color: var(--accent); flex: none; }
 .row .check { color: var(--accent); font-weight: 600; }
+.row.muted { color: var(--muted); gap: 8px; }
 .warn-text { color: #ff9f0a; }
 .none { padding: 12px 4px; }
 .row .chev { font-size: 18px; }
