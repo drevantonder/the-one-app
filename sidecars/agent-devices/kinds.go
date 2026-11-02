@@ -665,9 +665,7 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		}
 		return fmt.Sprintf("Gave back %s.", v.Name), true, nil
 	case "view":
-		if !k.running(ctx, v) {
-			return nil, true, fmt.Errorf("%s is stopped: start it first", v.Name)
-		}
+		// Someone opening it means to use it: it starts, or carries on.
 		if err := ds.awake(ctx, v); err != nil {
 			return nil, true, err
 		}

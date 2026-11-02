@@ -76,6 +76,9 @@ const PAGE = `
   const paused = (c) => c.state !== "running";
   const screenless = (c) => c.borrowed?.no_screen;
   const capital = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const titles = { windows: "Windows", android: "Android", iphone: "iPhone" };
+  const named = (c) => titles[c.name] || capital(c.name);
+  const off = (c) => (c.state === "paused" ? "Paused" : "Off");
   const phone = (c) => c.kind === "android" || c.kind === "iphone";
   const glyph = (browser, c) => phone(c)
     ? '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>'
@@ -87,11 +90,12 @@ const PAGE = `
   // when the devices are on more than one server.
   function tile(c, servers) {
     const b = c.borrowed;
-    const name = b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : capital(c.name);
-    const line = [b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : paused(c) ? "Paused" : "", servers > 1 ? host(c.server) : ""].filter(Boolean).join(" · ");
+    const name = b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : named(c);
+    const line = [b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : paused(c) ? off(c) : "", servers > 1 ? host(c.server) : ""].filter(Boolean).join(" · ");
     const k = key(c);
     const pic = pics[k] ? \`<img src="\${pics[k]}" alt=""\${phone(c) ? ' class="tall"' : ""}>\` : glyph(screenless(c), c);
-    const opens = !paused(c) && !screenless(c);
+    // A phone or Windows opens even when off: it starts for whoever opens it.
+    const opens = !screenless(c) && (!paused(c) || c.kind !== "linux");
     return \`<div class="tile\${paused(c) ? " paused" : ""}\${opens ? " opens" : ""}" data-k="\${one.esc(k)}"><div class="pic">\${pic}</div><div class="name">\${one.esc(name)}</div><div class="sub">\${one.esc(line)}</div></div>\`;
   }
 
