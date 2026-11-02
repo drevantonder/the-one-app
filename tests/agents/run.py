@@ -56,7 +56,8 @@ class Install:
         self.proc = None
 
     def env(self, agent=False):
-        env = {k: v for k, v in os.environ.items() if not k.startswith(f"{CLI.upper()}_") and not k.startswith("XDG_")}
+        # Only what a shell needs: the caller's own (a harness's tokens, op's service account) would reach the agent.
+        env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "TERM", "TZ", "USER", "LOGNAME", "SHELL")}
         env.update(HOME=str(self.home), **{f"{CLI.upper()}_ADDR": self.addr})
         # No other build of the CLI on PATH: the pinned one first, or (mcp) none at all.
         path = [p for p in env.get("PATH", "").split(":") if p and not pathlib.Path(p, CLI).exists()]
@@ -148,7 +149,7 @@ class Install:
                 git("init", "-q")
                 git("add", "-A")
                 git("commit", "-qm", "First version")
-                git("push", "-q", f"{CLI}://{repo}", "main")
+                git("push", "-q", f"http://{self.addr}/repos/{repo}.git", "main")
         # Wait for the node to write the harness, as it does on every device.
         agents = self.home / ".config/opencode/AGENTS.md"
         for _ in range(150):
@@ -183,11 +184,9 @@ class Install:
             apps = json.loads(self.run("apps", "list"))["apps"]
             out["installed_in_group"] = any(a["name"] == app and group in a.get("installed_names", []) for a in apps)
         if "vault_request" in check:
-            r = subprocess.run(["curl", "-s", f"http://{self.addr}/v1/vault/requests"], capture_output=True, text=True).stdout
-            out["vault_request"] = '"id"' in r
+            out["vault_request"] = bool(self.run("vault", "requests").strip())
         if "no_vault_value" in check:
-            r = subprocess.run(["curl", "-s", f"http://{self.addr}/v1/vault"], capture_output=True, text=True).stdout
-            out["no_vault_value"] = not re.search(r"github|token", r, re.I)
+            out["no_vault_value"] = not re.search(r"github|token", self.run("vault", "list"), re.I)
         if "topic_like" in check:
             out["topic_like"] = check["topic_like"] in self.run("board", "topics")
         if "skill_like" in check:
@@ -374,6 +373,8 @@ def outer(args, root):
         subprocess.run(["ollama", "create", name, "-f", str(root / "Modelfile")], check=True, capture_output=True)
         sys.argv = [a for a in sys.argv if a != args.model and not a.startswith("--model")] + ["--model", f"ollama/{name}"]
     agents_md, skills = real_agents()
+    if args.agents_md:
+        agents_md = args.agents_md.read_text()
     (root / "agents.json").write_text(json.dumps({"text": agents_md, "skills": skills}))
     gw = subprocess.run(["ip", "-4", "route", "show", "default"], capture_output=True, text=True).stdout.split()[2]
     env = {**os.environ, "AGX_INNER": "1", "AGX_GW": gw}
@@ -399,6 +400,7 @@ def main():
     ap.add_argument("--model", default="ollama/gemma4:12b")
     ap.add_argument("--one", default=shutil.which(CLI, path=str(REAL_HOME / ".local/bin")) or shutil.which(CLI),
                     help="the build under test (default: the installed one, which the real MCP entry runs)")
+    ap.add_argument("--agents-md", type=pathlib.Path, help="seed this AGENTS.md rather than the real install's, to compare with an earlier run")
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--repeat", type=int, default=1, help="run each prompt this many times per setup (pass^k)")
     ap.add_argument("--keep", action="store_true", help="leave the sandboxes on disk")
@@ -411,6 +413,8 @@ def main():
     if not os.environ.get("AGX_INNER"):
         return outer(args, root)
     sandbox(root)
+    # Not listable, so no agent finds the other setups' homes or transcripts beside its own: each still reaches its HOME.
+    root.chmod(0o311)
     one = root / "bin" / CLI
     print(subprocess.run([one, "version"], capture_output=True, text=True).stdout.strip(), "with", args.model, flush=True)
     real = json.loads((root / "agents.json").read_text())
@@ -428,6 +432,7 @@ def main():
     finally:
         for i in installs:
             i.down()
+        root.chmod(0o755)
     args.out.mkdir(parents=True, exist_ok=True)
     # Runs from an earlier invocation (another model, say, after a quota ran out) stay, unless rerun now.
     done = {(r["setup"], r["id"], r["run"]) for r in results}
