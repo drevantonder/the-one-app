@@ -176,10 +176,7 @@ struct Input {
 }
 
 pub fn call(host: &Host, call: &Call) -> Result<Value> {
-    let input: Input = match &call.input {
-        Value::Null => Input::default(),
-        input => serde_json::from_value(input.clone()).map_err(|err| anyhow!("bad input: {err}"))?,
-    };
+    let input: Input = crate::sidecars::input(&call.input)?;
     match call.op.as_str() {
         "_screen" if input.name == "settings" => return Ok(json!(include_str!("messenger/settings.html"))),
         "_screen" => bail!("Messenger has no screen {:?}", input.name),
@@ -283,13 +280,18 @@ fn devices(host: &Host, op: &str, input: Value) -> Result<Value> {
     Ok(reply["ok"].clone())
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
 struct Ref {
-    #[serde(rename = "ref")]
     id: String,
     role: String,
     name: String,
+}
+
+impl Ref {
+    /// A ref as the browser tools give it, any field of it null or missing as empty.
+    fn read(r: &Value) -> Ref {
+        let text = |name: &str| r[name].as_str().unwrap_or_default().to_string();
+        Ref { id: text("ref"), role: text("role"), name: text("name") }
+    }
 }
 
 #[derive(Default)]
@@ -444,7 +446,7 @@ impl Browser {
                 outline.push_str(text);
                 outline.push('\n');
                 page.parts.push(parse::outline(text));
-                page.refs.extend(serde_json::from_value::<Vec<Ref>>(part["refs"].clone()).unwrap_or_default());
+                page.refs.extend(part["refs"].as_array().into_iter().flatten().map(Ref::read));
                 page.url = part["page"]["url"].as_str().or(part["page"]["URL"].as_str()).unwrap_or_default().into();
                 match part["snapshot"]["continuation"].as_str().filter(|c| !c.is_empty()) {
                     Some(more) => input["continuation"] = json!(more),

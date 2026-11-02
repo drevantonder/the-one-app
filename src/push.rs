@@ -12,11 +12,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow, bail};
 use http_body_util::BodyExt;
 use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::sidecars::{Call, Host};
+use crate::sidecars::{Call, Host, input};
 
 pub const NAME: &str = "push";
 
@@ -98,7 +97,7 @@ pub fn call(host: &Host, call: &Call) -> Result<Value> {
     let or = |s: String, default: &str| if s.is_empty() { default.to_string() } else { s };
     match call.op.as_str() {
         "register" => {
-            let mut d: Device = read(&call.input)?;
+            let mut d: Device = input(&call.input)?;
             d.token = d.token.to_lowercase();
             if !(16..=200).contains(&d.token.len()) || !d.token.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
                 bail!("a device token is hex");
@@ -111,7 +110,7 @@ pub fn call(host: &Host, call: &Call) -> Result<Value> {
             Ok(json!("Registered for push."))
         }
         "unregister" => {
-            let token = read::<Device>(&call.input)?.token.to_lowercase();
+            let token = input::<Device>(&call.input)?.token.to_lowercase();
             change(host, |all| {
                 if all.get(&token).is_some_and(|d| d.user == me.user) {
                     all.remove(&token);
@@ -128,7 +127,7 @@ pub fn call(host: &Host, call: &Call) -> Result<Value> {
             Err(err) => json!({ "ready": false, "why": format!("{err:#}") }),
         }),
         "send" => {
-            let mut push: Send = read(&call.input)?;
+            let mut push: Send = input(&call.input)?;
             if push.title.is_empty() {
                 bail!("give it a title");
             }
@@ -152,11 +151,6 @@ pub fn call(host: &Host, call: &Call) -> Result<Value> {
         }
         op => bail!("push has no operation {op}"),
     }
-}
-
-/// An input, where none is an empty one.
-fn read<T: DeserializeOwned + Default>(input: &Value) -> Result<T> {
-    Ok(if input.is_null() { T::default() } else { serde_json::from_value(input.clone())? })
 }
 
 /// Whether the install's push setting names this sidecar; an admin turns push off in Settings by emptying it.

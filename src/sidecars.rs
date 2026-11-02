@@ -237,6 +237,18 @@ impl Host {
     }
 }
 
+/// A call's input as `T`, where none is an empty one and a field that's null is one not given, as Go's sidecars read them.
+pub fn input<T: serde::de::DeserializeOwned + Default>(input: &Value) -> Result<T> {
+    fn given(v: &Value) -> Value {
+        match v {
+            Value::Object(o) => Value::Object(o.iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k.clone(), given(v))).collect()),
+            Value::Array(a) => Value::Array(a.iter().map(given).collect()),
+            v => v.clone(),
+        }
+    }
+    Ok(if input.is_null() { T::default() } else { serde_json::from_value(given(input)).map_err(|err| anyhow!("bad input: {err}"))? })
+}
+
 /// The node's answer: None for no content.
 fn answer(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Option<Value>> {
     let mut resp = resp?;
