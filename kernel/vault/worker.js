@@ -2,7 +2,7 @@
 //
 // Each person has an X25519 key pair. Its secret half is kept only in copies, each sealed under one client's secret
 // (a passkey's PRF output, an OAuth client's refresh token) and kept by a hash of that secret; a session is a copy
-// sealed under an access token, kept until the token expires. Each scope's key is sealed to the public half of every
+// sealed under an access token, kept until the token expires or its client signs out. Each scope's key is sealed to the public half of every
 // person who may open it, and to the install's recovery key. A request that brings an access token gets the keys it
 // names from its session, and each one is recorded where its person can see it.
 //
@@ -56,12 +56,14 @@ export class Vault extends DurableObject {
       create table if not exists scopes (scope text primary key, recovery blob not null, made integer not null);
       create table if not exists grants (user text not null, scope text not null, sealed blob not null, primary key (user, scope));
       create table if not exists copies (id text primary key, user text not null, kind text not null, name text not null,
-        client text, sealed blob not null, made integer not null, until integer);
+        client text, sealed blob not null, made integer not null, until integer, line text);
       create index if not exists copies_user on copies (user);
       create table if not exists unseals (at integer not null, user text not null, client text, what text not null);
       create index if not exists unseals_user on unseals (user, at);
     `);
     this.sql.exec(schema);
+    // A client's copies (pending, its own, and its sessions) share a line, so signing it out ends its sessions too.
+    if (!this.sql.exec("select name from pragma_table_info('copies') where name = 'line'").toArray().length) this.sql.exec("alter table copies add column line text");
     this.items = new Items(this.sql, this);
   }
 
@@ -166,10 +168,10 @@ export class Vault extends DurableObject {
     return { row, held: plain };
   }
 
-  async seal(secret, { user, kind, name, client = null, held, until = null }) {
+  async seal(secret, { user, kind, name, client = null, held, until = null, line = null }) {
     const id = await idOf(secret);
     const sealed = await sealUnder(secret, JSON.stringify(held));
-    this.sql.exec("insert or replace into copies (id, user, kind, name, client, sealed, made, until) values (?, ?, ?, ?, ?, ?, ?, ?)", id, user, kind, name, client, sealed, Date.now(), until);
+    this.sql.exec("insert or replace into copies (id, user, kind, name, client, sealed, made, until, line) values (?, ?, ?, ?, ?, ?, ?, ?, ?)", id, user, kind, name, client, sealed, Date.now(), until, line);
     return id;
   }
 
@@ -243,7 +245,7 @@ export class Vault extends DurableObject {
   async grant({ user, from, to, name, client }) {
     const opened = await this.open(secretOf(from), ["passkey"]);
     if (!opened || opened.held.user !== user) refuse(403, "that passkey isn't this person's");
-    return { id: await this.seal(secretOf(to), { user, kind: "pending", name: String(name || "Client"), client, held: opened.held, until: Date.now() + PENDING }) };
+    return { id: await this.seal(secretOf(to), { user, kind: "pending", name: String(name || "Client"), client, held: opened.held, until: Date.now() + PENDING, line: b64u.encode(random(16)) }) };
   }
 
   /// Moves a client's copy from its old secret (an authorization code, or the refresh token it just used) to its new
@@ -252,9 +254,10 @@ export class Vault extends DurableObject {
     const opened = await this.open(secretOf(from), ["pending", "client"]);
     if (!opened) return { moved: false };
     const { row, held } = opened;
-    await this.seal(secretOf(to), { user: row.user, kind: "client", name: row.name, client: row.client, held });
+    const line = row.line || row.id;
+    await this.seal(secretOf(to), { user: row.user, kind: "client", name: row.name, client: row.client, held, line });
     this.sql.exec("delete from copies where id = ?", row.id);
-    if (token) await this.session(token, row, held, until);
+    if (token) await this.session(token, { ...row, line }, held, until);
     return { moved: true };
   }
 
@@ -262,13 +265,21 @@ export class Vault extends DurableObject {
     const expires = Math.min(Number(until) || 0, Date.now() + 3_600_000);
     if (!(expires > Date.now())) refuse(400, "a session needs its token's expiry");
     this.sql.exec("delete from copies where kind = 'session' and until <= ?", Date.now());
-    await this.seal(secretOf(token), { user: row.user, kind: "session", name: row.name, client: row.client, held, until: expires });
+    await this.seal(secretOf(token), { user: row.user, kind: "session", name: row.name, client: row.client, held, until: expires, line: row.line });
   }
 
-  /// Deletes the copy a secret opens (a refresh token that was revoked).
+  /// Deletes the copy a secret opens: a refresh token that was revoked, which ends its client's sessions too, so no
+  /// node gets keys with its access tokens again (what a node already has, it keeps until they expire).
   async forget({ secret }) {
-    this.sql.exec("delete from copies where id = ?", await idOf(secretOf(secret)));
+    this.forgetCopy(this.sql.exec("select id, kind, line from copies where id = ?", await idOf(secretOf(secret))).toArray()[0]);
     return {};
+  }
+
+  /// Deletes a copy, and if it's a client's, every copy of its line: its sessions.
+  forgetCopy(row) {
+    if (!row) return;
+    this.sql.exec("delete from copies where id = ?", row.id);
+    if (row.line && ["pending", "client"].includes(row.kind)) this.sql.exec("delete from copies where line = ?", row.line);
   }
 
   /// Deletes a person's passkeys' copies, but for those of the passkeys in `keep` (by credential id).
@@ -301,9 +312,9 @@ export class Vault extends DurableObject {
   }
 
   remove(user, id) {
-    const row = this.sql.exec("select user from copies where id = ?", id).toArray()[0];
+    const row = this.sql.exec("select id, user, kind, line from copies where id = ?", id).toArray()[0];
     if (!row || row.user !== user) refuse(404, "no such copy");
-    this.sql.exec("delete from copies where id = ?", id);
+    this.forgetCopy(row);
     const left = this.sql.exec("select count(*) n from copies where user = ? and kind in ('passkey', 'client')", user).one().n;
     return { left };
   }

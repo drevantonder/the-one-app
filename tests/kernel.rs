@@ -159,7 +159,7 @@ impl Vault {
     fn token(&self, user: &str, client: &str) -> (String, u64) {
         let exp = now() / 1000 + 3600;
         let agent: ureq::Agent = ureq::Agent::config_builder().build().into();
-        let token = agent.post(format!("{}/sign", self.auth)).send_json(json!({ "iss": self.issuer, "sub": user, "azp": client, "client_id": client, "aud": self.auth, "scope": "openid", "exp": exp })).unwrap().body_mut().read_to_string().unwrap();
+        let token = agent.post(format!("{}/sign", self.auth)).send_json(json!({ "iss": self.issuer, "sub": user, "azp": client, "client_id": client, "aud": self.auth, "scope": "openid", "exp": exp, "jti": B64U.encode(&rand::random::<[u8; 16]>()) })).unwrap().body_mut().read_to_string().unwrap();
         (token, exp * 1000)
     }
 
@@ -714,4 +714,36 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let renamed = agent.post(format!("{api}/v1/name")).header("authorization", format!("Bearer {andres}")).header("forwarded", "host=\"one.example\"").send_json(json!({ "name": "elsewhere" })).unwrap();
     assert_eq!(renamed.status(), 403);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn signing_out_ends_a_clients_sessions_at_the_vault() {
+    let v = Vault::start();
+    let vault = kernel::Vault { url: v.url.clone() };
+    v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
+    let laptop = v.client(ANDRE, "andre's passkey prf output", "web");
+    // Another browser of Andre's: the same client to auth, signed in on its own.
+    let code = "the phone's authorization code";
+    v.internal("grant", json!({ "user": ANDRE, "from": "andre's passkey prf output", "to": code, "client": "web" }));
+    let (phone, until) = v.token(ANDRE, "web");
+    v.internal("rekey", json!({ "from": code, "to": "the phone's refresh token", "token": phone, "until": until }));
+    // The laptop refreshes: its old access token's session is still its own.
+    let (fresh, until) = v.token(ANDRE, "web");
+    assert_eq!(v.internal("rekey", json!({ "from": format!("web's refresh token for {ANDRE}"), "to": "the laptop's next refresh token", "token": fresh, "until": until })).1["moved"], true);
+    let board = [("global", "board", None)];
+    assert!(vault.keys(&laptop, &board).is_ok() && vault.keys(&fresh, &board).is_ok());
+
+    // The laptop signs out: auth revokes its refresh token, and no access token it was given gets keys again.
+    assert_eq!(v.internal("forget", json!({ "secret": "the laptop's next refresh token" })).0, 200);
+    for token in [&laptop, &fresh] {
+        assert!(vault.keys(token, &board).is_err(), "a signed-out client's session still gets keys");
+        assert_eq!(v.ask(token, "GET", "/session", json!(null)).0, 403);
+    }
+    assert!(vault.keys(&phone, &board).is_ok(), "signing out one browser signs out another");
+
+    // Removing the phone from Andre's clients ends its session too.
+    let (_, copies) = v.ask(&phone, "GET", "/copies", json!(null));
+    let id = copies["copies"].as_array().unwrap().iter().find(|c| c["kind"] == "client").unwrap()["id"].as_str().unwrap().to_string();
+    assert_eq!(v.ask(&phone, "DELETE", &format!("/copies/{id}"), json!(null)).0, 200);
+    assert!(vault.keys(&phone, &board).is_err(), "a removed client's session still gets keys");
 }
