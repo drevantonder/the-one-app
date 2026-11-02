@@ -12,7 +12,7 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey};
 use p2panda_core::{Hash, SigningKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 
 use crate::apps::{Append, Apps, Context, Me, ScopeHandle};
 use crate::backups::{KEY_OBJECT, KEYS};
@@ -22,8 +22,8 @@ use crate::entry::{Content, Entry, Key, Order, Scope, hex, new_id, short, unhex}
 use crate::members::{self, Members, Principal, Role, ScopeState};
 use crate::release::{self, Release};
 use crate::schedules::{self, Schedule};
-use crate::store::{Frontier, Store};
-use crate::sync::{self, Sidecar, Handled, Msg, Replica};
+use crate::store::Store;
+use crate::replica::{Handled, Replica};
 use crate::vault;
 
 mod backups;
@@ -40,8 +40,6 @@ const CALL_LIMIT: Duration = Duration::from_secs(30);
 const SIDECAR_LIMIT: Duration = Duration::from_secs(600);
 /// The most a call or a client's request (or its answer) may carry: an email of a claim's receipts, base64, fits.
 const MESSAGE_LIMIT: usize = 64 << 20;
-/// How long a waking server waits for its first round of dialing before it may call itself ready.
-const FIRST_DIAL: Duration = Duration::from_secs(5);
 /// How many app-to-app calls deep a call may be: a person's call of A, A's of B, B's of C, C's of D.
 pub const MAX_DEPTH: u32 = 3;
 /// How many calls an app may make of other apps, or runs of its schedules, a minute on one server.
@@ -60,6 +58,16 @@ const REQUEST_LIFE: u64 = 86_400_000;
 const CHANGED_SHOWN: u64 = 14 * 86_400_000;
 /// The object in an install's bucket that says whose it is: the install's genesis.
 const INSTALL_OBJECT: &str = "install";
+/// How often a server says hello to the others: which sidecars serve there, and how loaded it is.
+const PRESENCE_EVERY: Duration = Duration::from_secs(15);
+/// What the node's database of a scope's entries is called, under its own name.
+const LOG: &str = "log";
+
+/// Where a scope's entries are in the bucket, at numbered positions.
+fn log_prefix(scope: &Scope) -> String {
+    format!("{}/{}/{LOG}", crate::backups::folder(&scope.to_string()), members::APP)
+}
+
 /// What an app's own database is called: SQLite's name for a connection's first.
 const DATABASE: &str = "main";
 /// What a built-in sidecar's database of its records is called, under its name.
@@ -81,23 +89,20 @@ struct InstallFile {
     root: String,
     /// This server's local user.
     user: String,
-    /// The server whose pairing code this one joined with, to sync with until it sees itself admitted.
-    #[serde(default)]
-    paired_by: Option<String>,
     /// The install's bucket, as a place's fields: a folder's `path`, or S3's. None if this server can't reach it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bucket: Option<BTreeMap<String, String>>,
 }
 
-struct Session {
-    tx: mpsc::UnboundedSender<Msg>,
-    /// The frontier the peer last said it had.
-    frontier: Option<Frontier>,
+/// A sidecar serving on a server: its name, the users it serves, and what it does (its operations), which callers
+/// list until apps wrap sidecars.
+pub type Sidecar = (String, Vec<String>, Value);
+
+/// Another server, as it last said hello: the sidecars serving there, and how loaded it is.
+struct Peer {
     sidecars: Vec<Sidecar>,
-    /// How loaded the peer said it is.
     load: Option<crate::load::Load>,
-    /// Whether this server has received everything the peer's first hello offered it.
-    caught_up: bool,
+    seen: Instant,
 }
 
 struct Install {
@@ -105,7 +110,8 @@ struct Install {
     user: String,
     /// The install's bucket, and its fields, which a server joining is given.
     bucket: Option<(Place, BTreeMap<String, String>)>,
-    sessions: HashMap<Key, Session>,
+    /// Each other server, as it last said hello.
+    peers: HashMap<Key, Peer>,
     /// When each client last asked this server something.
     asked: HashMap<Key, u64>,
     /// The build each server last said it runs.
@@ -116,8 +122,15 @@ struct Install {
     views: HashMap<String, (Order, ScopeState)>,
     /// How long each server took to answer a call lately.
     nearest: HashMap<Key, Duration>,
-    /// Whether the first round of dialing since this server woke is done.
-    dialed: bool,
+    /// Whether this server has read every scope it holds from the bucket since it woke.
+    read: bool,
+}
+
+impl Install {
+    /// Whether another server said hello lately.
+    fn online(&self, server: &Key) -> bool {
+        self.peers.get(server).is_some_and(|p| p.seen.elapsed() < 3 * PRESENCE_EVERY)
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -184,6 +197,9 @@ pub struct Caller {
 /// An operation to run: of an app, or of a sidecar.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct CallRequest {
+    /// Names this call wherever it's tried, so a call that writes runs on one server only: the first to take its lease.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// The app, or for a sidecar's call, the sidecar (older machines name a sidecar here).
     #[serde(default)]
     pub app: String,
@@ -275,7 +291,6 @@ pub struct Inner {
     grants: Mutex<HashMap<String, Grant>>,
     /// The port apps' requests go out through.
     outbound: u16,
-    woke: Instant,
     /// What each app did in its last minute, and the apps stopped here for looping.
     guard: Mutex<Guard>,
     /// The schedules' slots running here now: `<scope>/<app>/<schedule>/<slot>`.
@@ -389,7 +404,6 @@ impl Node {
             logos: crate::logos::Logos::open(dir),
             grants: Mutex::new(HashMap::new()),
             outbound: outbound.local_addr()?.port(),
-            woke: Instant::now(),
             guard: Mutex::new(Guard::default()),
             running: Mutex::new(Default::default()),
             later: Mutex::new(HashMap::new()),
@@ -418,15 +432,20 @@ impl Node {
             node.keep_alone_here()?;
             node.follow_storage();
             node.read_all_status();
+            let reader = node.clone();
+            tokio::spawn(async move {
+                if let Err(err) = reader.read_logs().await {
+                    tracing::warn!("reading the bucket: {err:#}");
+                }
+            });
         }
         let router = Router::builder(endpoint)
-            .accept(sync::ALPN, SyncHandler(node.clone()))
             .accept(JOIN_ALPN, JoinHandler(node.clone()))
             .accept(CALL_ALPN, CallHandler(node.clone()))
             .accept(CLIENT_ALPN, ClientHandler(node.clone()))
             .accept(BLOB_ALPN, BlobHandler(node.clone()))
             .spawn();
-        tokio::spawn(node.clone().dial_loop());
+        tokio::spawn(node.clone().presence_loop());
         tokio::spawn(node.clone().schedule_loop());
         tokio::spawn(node.clone().backup_loop());
         let worker = node.clone();
@@ -455,7 +474,7 @@ impl Node {
         &self.0.sidecars
     }
 
-    /// Registers a sidecar; the node advertises it to the servers it syncs with.
+    /// Registers a sidecar; the node says so in its hello to the other servers.
     pub async fn register_sidecar(&self, app: &str, describe: Value) -> Result<()> {
         if let Some(why) = self.removed_here(app) {
             bail!("{why}");
@@ -518,10 +537,9 @@ impl Node {
         let file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
         let store = Store::open(&dir.join("entries.db"))?;
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
-        let paired_by = file.paired_by.and_then(|h| unhex(&h).ok());
-        let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)), paired_by)?;
+        let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)))?;
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((Place::from_fields(&f)?, f))).transpose()?;
-        let install = Install { r, user: file.user, bucket, sessions: HashMap::new(), asked: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), dialed: false };
+        let install = Install { r, user: file.user, bucket, peers: HashMap::new(), asked: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), read: false };
         *self.0.install.lock().unwrap() = Some(install);
         Ok(())
     }
@@ -574,10 +592,15 @@ impl Node {
         // Until it's moved to S3-compatible storage, the install's bucket is a folder here.
         let bucket: BTreeMap<String, String> = [("path".to_string(), self.install_dir().join("bucket").display().to_string())].into();
         Place::from_fields(&bucket)?.create(INSTALL_OBJECT, entry.hash().to_hex().as_bytes())?;
-        self.save_install(&InstallFile { root: entry.hash().to_hex(), user: user.clone(), paired_by: None, bucket: Some(bucket) })?;
+        self.save_install(&InstallFile { root: entry.hash().to_hex(), user: user.clone(), bucket: Some(bucket) })?;
         Store::open(&self.install_dir().join("entries.db"))?.insert_own(&entry, None)?;
         self.open_install()?;
         self.replay_all().await?;
+        self.put_entry(&Scope::Global, &entry).await?;
+        self.with(|i| {
+            i.read = true;
+            Ok(())
+        })?;
         let me = Caller { key: self.0.id, user, agent: None };
         for app in apps {
             self.bring_in(&me, app).await?;
@@ -597,36 +620,25 @@ impl Node {
     /// Writes an entry to this server's log of `scope`, as `user`, for `by` if it ran for someone else.
     async fn append_as(&self, scope: &Scope, user: &str, by: Option<Key>, content: Content) -> Result<Entry> {
         let _write = self.0.writes.lock().await;
-        let (entry, handled) = self.with(|i| i.r.append(scope, user, by, content, now_ms()))?;
-        self.after(handled, None).await?;
+        // What's in the bucket first, so the entry comes after all of it.
+        self.read_log_now(scope).await?;
+        let entry = self.with(|i| i.r.make(scope, user, by, content, now_ms()))?;
+        self.put_entry(scope, &entry).await?;
+        let handled = self.with(|i| i.r.add_own(&entry))?;
+        self.after(handled).await?;
+        self.ping(scope, None);
         Ok(entry)
     }
 
     /// Passes on new entries, follows what changed in the members, and brings each scope's state up to date.
-    async fn after(&self, handled: Handled, from: Option<Key>) -> Result<()> {
+    async fn after(&self, handled: Handled) -> Result<()> {
         if handled.new.is_empty() && handled.dropped.is_empty() && !handled.members {
             return Ok(());
         }
         self.with(|i| {
-            for (peer, session) in &i.sessions {
-                if Some(*peer) != from {
-                    if let Some(msg) = i.r.for_peer(peer, &handled.new) {
-                        let _ = session.tx.send(msg);
-                    }
-                }
-                if handled.gained {
-                    let _ = session.tx.send(i.r.hello(Vec::new())?);
-                }
-                if let Some((_, logs)) = handled.peers_gained.iter().find(|(k, _)| k == peer) {
-                    let frontier = session.frontier.clone().unwrap_or_default();
-                    for msg in i.r.missing_in(peer, &frontier, |l| logs.iter().any(|g| g == l))? {
-                        let _ = session.tx.send(msg);
-                    }
-                }
-            }
             if handled.members {
-                let r = &i.r;
-                i.sessions.retain(|peer, _| r.may_sync(peer));
+                let m = &i.r.members;
+                i.peers.retain(|peer, _| m.server(peer).is_some());
             }
             for log in &handled.dropped {
                 i.views.remove(log);
@@ -703,13 +715,12 @@ impl Node {
         Ok(())
     }
 
-    /// Whether this server is ready to run calls: it has replayed what it holds and, since it woke, received
-    /// everything each connected server's hello offered it.
+    /// Whether this server is ready to run calls: it's a server of the install, and has read every scope it holds
+    /// from the bucket since it woke.
     pub fn ready(&self) -> bool {
         self.with(|i| {
             let alone = i.r.members.servers().all(|s| s.key == self.0.id);
-            let dialed = i.dialed || alone || self.0.woke.elapsed() > FIRST_DIAL;
-            Ok(i.r.members.server(&self.0.id).is_some() && dialed && i.sessions.values().all(|s| s.caught_up))
+            Ok(i.r.members.server(&self.0.id).is_some() && (i.read || alone))
         })
         .unwrap_or(false)
     }
@@ -725,7 +736,8 @@ impl Node {
     /// Tries the servers that might run a call, nearest first, one at a time, the next only if one can't be reached
     /// or says to go elsewhere.
     async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
-        let req = self.resolve(req);
+        let mut req = self.resolve(req);
+        req.id.get_or_insert_with(new_id);
         if req.server.as_deref() == Some("all") {
             return self.everywhere(req, me).await;
         }
@@ -789,13 +801,13 @@ impl Node {
             let mut servers: Vec<Key> = if req.sidecar.is_none() {
                 m.servers().map(|s| s.key).filter(|s| m.serves(s, &me.user)).collect()
             } else {
-                let mut s: Vec<Key> = i.sessions.iter().filter(|(_, s)| s.sidecars.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
+                let mut s: Vec<Key> = i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.sidecars.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
                 if here && (me.user == i.user || (self.0.sidecars.serves_everyone(&req.app) && i.r.members.serves(&self.0.id, &me.user))) {
                     s.push(self.0.id);
                 }
                 s
             };
-            let rank = |k: &Key| (*k != self.0.id, !i.sessions.contains_key(k), i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)));
+            let rank = |k: &Key| (*k != self.0.id, !i.online(k), i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)));
             servers.sort_by_key(rank);
             Ok(servers)
         })
@@ -921,6 +933,14 @@ impl Node {
         if let Some(why) = self.stopped(&req.app) {
             self.record(&req.app, req, me, Some(&why));
             return Ok(Reply::Error(why));
+        }
+        // A call that writes, tried on another server before this one, ran there if it took the lease first.
+        if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
+            let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);
+            let lease = format!("{}/{}/calls/{id}", crate::backups::folder(&scope.to_string()), req.app);
+            if !reads && !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
+                return Ok(Reply::Error("it ran on another server already, whose answer was lost: look before trying again".into()));
+            }
         }
         let mut ctx = ctx;
         ctx.from = req.from.clone();
@@ -1328,6 +1348,32 @@ impl Node {
                 self.append_as(&scope, &me.user, by, members::node("open", data)).await?;
                 Ok(json!(format!("Opened for an hour on {}.", self.server_name())))
             }
+            // Another server's hints, which only a server of the install gives.
+            "hello" | "changed" if self.with(|i| Ok(i.r.members.server(&me.key).is_some()))? => {
+                if op == "hello" {
+                    let sidecars: Vec<Sidecar> = serde_json::from_value(input["sidecars"].clone()).unwrap_or_default();
+                    let load = serde_json::from_value(input["load"].clone()).ok();
+                    let changed = self.with(|i| {
+                        let changed = i.peers.get(&me.key).is_none_or(|p| p.sidecars != sidecars);
+                        i.peers.insert(me.key, Peer { sidecars, load, seen: Instant::now() });
+                        Ok(changed)
+                    })?;
+                    if changed {
+                        self.emit(Event::Servers);
+                    }
+                    return Ok(json!(null));
+                }
+                let scope = Scope::parse(input["scope"].as_str().unwrap_or(""))?;
+                let app = input["app"].as_str().map(str::to_string);
+                let node = self.clone();
+                tokio::spawn(async move {
+                    let _ = node.read_log(&scope).await;
+                    if let Some(app) = app {
+                        node.emit(Event::Changed { apps: vec![app] });
+                    }
+                });
+                Ok(json!(null))
+            }
             other => bail!("the node has no operation {other}"),
         }
     }
@@ -1350,8 +1396,11 @@ impl Node {
     async fn schedule_loop(self) {
         for tick in 1u64.. {
             tokio::time::sleep(SCHEDULE_TICK).await;
-            // What other servers said, every tick; and wrote of a built-in sidecar's records, every minute.
+            // What other servers wrote and said, every tick; and wrote of a built-in sidecar's records, every minute.
             if self.has_install() {
+                if let Err(err) = self.read_logs().await {
+                    tracing::debug!("reading the bucket: {err:#}");
+                }
                 self.read_all_status();
             }
             if tick % 6 == 0 && self.has_install() {
@@ -1406,7 +1455,7 @@ impl Node {
                         }
                         let line = schedules::line(m, &scope, &user, app, &s.name);
                         let Some(at) = line.iter().position(|k| *k == self.0.id) else { continue };
-                        let ahead = line[..at].iter().filter(|k| i.sessions.contains_key(*k)).count() as u64;
+                        let ahead = line[..at].iter().filter(|k| i.online(k)).count() as u64;
                         if now - slot >= ahead * schedules::GRACE {
                             out.push((scope.clone(), app.clone(), s.clone(), slot, user));
                         }
@@ -2181,7 +2230,7 @@ impl Node {
             sidecars.extend(self.with(|i| Ok(self.sidecars_here(i)))?.into_iter().map(|d| d.2));
         }
         let remote = self.with(|i| {
-            let mut d: Vec<Value> = i.sessions.values().flat_map(|s| s.sidecars.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
+            let mut d: Vec<Value> = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.sidecars.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
             d.sort_by_key(|v| v["name"].as_str().unwrap_or("").to_string());
             Ok(d)
         })?;
@@ -2290,7 +2339,7 @@ impl Node {
     fn sidecar_image(&self, name: &str) -> Option<(Value, Value)> {
         self.with(|i| {
             let here = self.sidecars_here(i).into_iter().map(|d| d.2);
-            let there = i.sessions.values().flat_map(|s| s.sidecars.iter().map(|d| d.2.clone()));
+            let there = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.sidecars.iter().map(|d| d.2.clone()));
             Ok(here.chain(there).find(|d| d["name"] == name && d["image"].is_string()).map(|d| (d["image"].clone(), d["image_kind"].clone())))
         })
         .ok()
@@ -2586,7 +2635,7 @@ impl Node {
             let servers: Vec<Value> = m
                 .servers()
                 .map(|s| {
-                    let session = i.sessions.get(&s.key);
+                    let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
                     // The containers on a server are its owners' business.
                     let load = if s.key == self.0.id { Some(crate::load::current()) } else { session.and_then(|s| s.load.clone()) }.map(|mut l| {
                         if !m.owners(&s.key).iter().any(|o| m.acts_for(me, o)) {
@@ -2962,18 +3011,17 @@ impl Node {
             bail!("{}", err.as_str().unwrap_or("the pairing code was refused"));
         }
         let reply: JoinReply = serde_json::from_value(reply)?;
-        let paired_by = *code.from.id.as_bytes();
         // A folder on another machine isn't here: the bucket is this install's only if it says so.
         let bucket = reply.bucket.filter(|f| Place::from_fields(f).ok().and_then(|p| p.get(INSTALL_OBJECT).ok().flatten()).is_some_and(|r| r == reply.root.as_bytes()));
         if bucket.is_none() {
             tracing::warn!("this server can't reach the install's bucket: it keeps no app's data until the install moves to S3-compatible storage");
         }
-        self.save_install(&InstallFile { root: reply.root, user: reply.user, paired_by: Some(hex(&paired_by)), bucket })?;
+        self.save_install(&InstallFile { root: reply.root, user: reply.user, bucket })?;
         self.open_install()?;
         let node = self.clone();
         tokio::spawn(async move {
-            if let Err(err) = node.connect_sync(paired_by).await {
-                tracing::warn!("first sync after joining: {err:#}");
+            if let Err(err) = node.read_logs().await {
+                tracing::debug!("reading the bucket after joining: {err:#}");
             }
         });
         self.emit(Event::Install);
@@ -3027,159 +3075,130 @@ impl Node {
         Ok(JoinReply { root, user, bucket })
     }
 
-    // Sync.
+    // Entries in the bucket, and what servers tell each other.
 
-    async fn dial_loop(self) {
+    /// Reads what each scope this server holds has in the bucket after what it last read, `global` first, until it
+    /// gains no scope by what it read.
+    async fn read_logs(&self) -> Result<()> {
         loop {
-            let wanted: Vec<Key> = self
-                .with(|i| {
-                    let mut servers: Vec<Key> = i.r.members.servers().map(|s| s.key).filter(|k| *k != self.0.id).collect();
-                    // Still joining: only the server that made the pairing code knows this one is in.
-                    if i.r.members.server(&self.0.id).is_none() {
-                        servers.extend(i.r.paired_by);
-                    }
-                    Ok(servers.into_iter().filter(|s| !i.sessions.contains_key(s)).collect())
-                })
-                .unwrap_or_default();
-            let mut dials = tokio::task::JoinSet::new();
-            for server in wanted {
-                let node = self.clone();
-                dials.spawn(async move {
-                    if let Err(err) = node.connect_sync(server).await {
-                        tracing::debug!("sync with {}: {err:#}", short(&server));
-                    }
-                });
+            let scopes = self.with(|i| {
+                let mut scopes: Vec<Scope> = i.r.members.scopes().into_iter().filter(|s| i.r.holds(s)).collect();
+                scopes.sort_by_key(|s| *s != Scope::Global);
+                Ok(scopes)
+            })?;
+            let mut gained = false;
+            for scope in scopes {
+                gained |= self.read_log(&scope).await?;
             }
-            // The first round is done once each dial connected or failed, or soon enough; sessions run on.
-            let _ = tokio::time::timeout(FIRST_DIAL, async {
-                while self.with(|i| Ok(!i.dialed)).unwrap_or(false) && !dials.is_empty() {
-                    let all_tried = self.with(|i| Ok(i.r.members.servers().filter(|s| s.key != self.0.id).all(|s| i.sessions.contains_key(&s.key)))).unwrap_or(true);
-                    if all_tried {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            })
-            .await;
-            let _ = self.with(|i| Ok(i.dialed = true));
-            dials.detach_all();
-            tokio::time::sleep(Duration::from_secs(15)).await;
+            if !gained {
+                break;
+            }
         }
-    }
-
-    async fn connect_sync(&self, server: Key) -> Result<()> {
-        let conn = tokio::time::timeout(Duration::from_secs(20), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, sync::ALPN))
-            .await
-            .context("timed out")??;
-        let (send, recv) = conn.open_bi().await?;
-        self.session(server, send, recv).await
-    }
-
-    async fn accept_sync(&self, conn: Connection) -> Result<()> {
-        let remote = *conn.remote_id().as_bytes();
-        ensure!(self.with(|i| Ok(i.r.may_sync(&remote)))?, "{} isn't a server of this install", short(&remote));
-        let (send, recv) = conn.accept_bi().await?;
-        self.session(remote, send, recv).await
-    }
-
-    /// What this server's hello says: its frontier, and the sidecars serving its local user here.
-    fn hello(&self, i: &Install) -> Result<Msg> {
-        let sidecars = self.sidecars_here(i);
-        i.r.hello(sidecars)
-    }
-
-    /// Says hello to every peer again, as when this server's sidecars change.
-    fn say_hello(&self) {
-        let _ = self.with(|i| {
-            let hello = self.hello(i)?;
-            for s in i.sessions.values() {
-                let _ = s.tx.send(hello.clone());
-            }
-            Ok(())
-        });
-    }
-
-    /// Runs one sync session until the connection drops.
-    async fn session(&self, peer: Key, mut send: iroh::endpoint::SendStream, mut recv: iroh::endpoint::RecvStream) -> Result<()> {
-        let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
         self.with(|i| {
-            tx.send(self.hello(i)?).ok();
-            i.sessions.insert(peer, Session { tx: tx.clone(), frontier: None, sidecars: Vec::new(), load: None, caught_up: false });
+            i.read = true;
             Ok(())
-        })?;
-        self.emit(Event::Servers);
-        tracing::info!("syncing with {}", self.name_of(&peer));
-        let writer = async {
-            while let Some(mut msg) = rx.recv().await {
-                // Hellos made inside sync carry no sidecars or load; every hello this server sends does.
-                if let Msg::Hello { sidecars, load, .. } = &mut msg {
-                    if sidecars.is_empty() {
-                        if let Ok(Msg::Hello { sidecars: d, .. }) = self.with(|i| self.hello(i)) {
-                            *sidecars = d;
-                        }
-                    }
-                    *load = Some(crate::load::current());
-                }
-                sync::write(&mut send, &msg).await?;
-            }
-            anyhow::Ok(())
-        };
-        let hellos = async {
-            loop {
-                tokio::time::sleep(Duration::from_secs(30)).await;
-                let hello = self.with(|i| self.hello(i))?;
-                tx.send(hello).map_err(|_| anyhow!("session closed"))?;
-            }
-        };
-        let reader = async {
-            loop {
-                let msg = sync::read(&mut recv).await?;
-                for reply in self.handle(peer, msg).await? {
-                    tx.send(reply).map_err(|_| anyhow!("session closed"))?;
-                }
-            }
-        };
-        let result: Result<()> = tokio::select! { r = writer => r, r = hellos => r, r = reader => r };
-        let _ = self.with(|i| {
-            if i.sessions.get(&peer).is_some_and(|s| s.tx.same_channel(&tx)) {
-                i.sessions.remove(&peer);
-            }
-            Ok(())
-        });
-        self.emit(Event::Servers);
-        result
+        })
     }
 
-    async fn handle(&self, peer: Key, msg: Msg) -> Result<Vec<Msg>> {
+    /// Reads a scope's entries in the bucket after the last this server read: whether it now holds a scope it didn't.
+    async fn read_log(&self, scope: &Scope) -> Result<bool> {
         let _write = self.0.writes.lock().await;
-        let sidecars_changed = self.with(|i| {
-            let Msg::Hello { frontier, sidecars, load } = &msg else { return Ok(false) };
-            let Some(s) = i.sessions.get_mut(&peer) else { return Ok(false) };
-            s.frontier = Some(frontier.clone());
-            s.load = load.clone();
-            let changed = s.sidecars != *sidecars;
-            s.sidecars = sidecars.clone();
-            Ok(changed)
-        })?;
-        let mut handled = self.with(|i| i.r.handle(&peer, msg, now_ms()))?;
-        let replies = std::mem::take(&mut handled.replies);
-        let caught_up = self.with(|i| {
-            let Some(frontier) = i.sessions.get(&peer).and_then(|s| s.frontier.clone()) else { return Ok(false) };
-            if i.sessions[&peer].caught_up {
-                return Ok(false);
+        self.read_log_now(scope).await
+    }
+
+    /// `read_log`, while this server holds its writes.
+    async fn read_log_now(&self, scope: &Scope) -> Result<bool> {
+        use crate::bucket::Bucket;
+        let (bucket, key, prefix) = (self.bucket()?, self.log_key(scope).await?, log_prefix(scope));
+        let log = scope.to_string();
+        let from = self.with(|i| i.r.store.position(&log))?;
+        let (mut at, mut entries) = (from, Vec::new());
+        while let Some(o) = Bucket::get(&bucket, &crate::db::step_name(&prefix, at + 1)).await? {
+            let name = crate::db::step_name(&prefix, at + 1);
+            match crate::db::open(&key, &name, &o.bytes).and_then(|b| crate::backups::unpack(&b)) {
+                Ok(list) if list.iter().all(|e| e.log() == log) => entries.extend(list),
+                Ok(_) => tracing::debug!("{name} is another scope's"),
+                Err(err) => tracing::debug!("{name}: {err:#}"),
             }
-            let mine: HashMap<(Key, String), u32> = i.r.store.frontier()?.into_iter().map(|(a, l, n)| ((a, l), n)).collect();
-            let lacking = frontier.iter().any(|(a, l, n)| Scope::parse(l).is_ok_and(|s| i.r.holds(&s)) && mine.get(&(*a, l.clone())).copied().unwrap_or(0) < *n);
-            if !lacking {
-                i.sessions.get_mut(&peer).unwrap().caught_up = true;
-            }
-            Ok(!lacking)
-        })?;
-        self.after(handled, Some(peer)).await?;
-        if sidecars_changed || caught_up {
-            self.emit(Event::Servers);
+            at += 1;
         }
-        Ok(replies)
+        if at == from {
+            return Ok(false);
+        }
+        let handled = self.with(|i| {
+            let handled = i.r.receive(entries, now_ms())?;
+            i.r.store.set_position(&log, at)?;
+            Ok(handled)
+        })?;
+        let gained = handled.gained;
+        self.after(handled).await?;
+        Ok(gained)
+    }
+
+    /// Writes an entry this server made to its scope's entries in the bucket, at the first position free.
+    async fn put_entry(&self, scope: &Scope, entry: &Entry) -> Result<()> {
+        use crate::bucket::Bucket;
+        let (bucket, key, prefix) = (self.bucket()?, self.log_key(scope).await?, log_prefix(scope));
+        let bytes = crate::backups::pack(&[entry]);
+        let mut at = self.with(|i| i.r.store.position(&scope.to_string()))?;
+        for _ in 0..1000 {
+            at += 1;
+            let name = crate::db::step_name(&prefix, at);
+            if Bucket::create(&bucket, &name, &crate::db::seal(&key, &name, &bytes)).await? {
+                return Ok(());
+            }
+        }
+        bail!("{scope} changed too often to write to")
+    }
+
+    /// The key a scope's entries are sealed with in the bucket: the node's `log` of the scope.
+    async fn log_key(&self, scope: &Scope) -> Result<[u8; 32]> {
+        self.database_key(scope, members::APP, LOG).await
+    }
+
+    /// Tells the servers that hold `scope` it changed, `app`'s data if it's an app's, so they read it now rather than
+    /// in a moment: in the background, and only a hint.
+    fn ping(&self, scope: &Scope, app: Option<&str>) {
+        let Ok((servers, me)) = self.with(|i| {
+            let m = &i.r.members;
+            Ok((m.servers().filter(|s| s.key != self.0.id && m.holds(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>(), Caller { key: self.0.id, user: i.user.clone(), agent: None }))
+        }) else {
+            return;
+        };
+        let req = CallRequest { app: members::APP.into(), op: "changed".into(), input: json!({ "scope": scope.to_string(), "app": app }), ..Default::default() };
+        for server in servers {
+            let (node, req, me) = (self.clone(), req.clone(), me.clone());
+            tokio::spawn(async move {
+                let _ = node.ask_server(server, &req, &me).await;
+            });
+        }
+    }
+
+    /// Tells every other server which sidecars serve its local user here and how loaded it is, now and then.
+    async fn presence_loop(self) {
+        loop {
+            if self.has_install() {
+                self.say_hello();
+            }
+            tokio::time::sleep(PRESENCE_EVERY).await;
+        }
+    }
+
+    /// Says hello to every other server: as now and then, and when this server's sidecars change.
+    fn say_hello(&self) {
+        let Ok((servers, me, sidecars)) = self.with(|i| {
+            let servers: Vec<Key> = i.r.members.servers().map(|s| s.key).filter(|k| *k != self.0.id).collect();
+            Ok((servers, Caller { key: self.0.id, user: i.user.clone(), agent: None }, self.sidecars_here(i)))
+        }) else {
+            return;
+        };
+        let req = CallRequest { app: members::APP.into(), op: "hello".into(), input: json!({ "sidecars": sidecars, "load": crate::load::current() }), ..Default::default() };
+        for server in servers {
+            let (node, req, me) = (self.clone(), req.clone(), me.clone());
+            tokio::spawn(async move {
+                let _ = node.ask_server(server, &req, &me).await;
+            });
+        }
     }
 
     async fn accept_call(&self, conn: Connection) -> Result<()> {
@@ -3724,7 +3743,7 @@ impl Node {
     fn peers(&self) -> Vec<Key> {
         self.with(|i| {
             let mut peers: Vec<Key> = i.r.members.servers().map(|m| m.key).filter(|d| *d != self.0.id).collect();
-            peers.sort_by_key(|k| !i.sessions.contains_key(k));
+            peers.sort_by_key(|k| !i.online(k));
             Ok(peers)
         })
         .unwrap_or_default()
@@ -3828,8 +3847,6 @@ fn hostname() -> String {
 }
 
 #[derive(Clone, Debug)]
-struct SyncHandler(Node);
-#[derive(Clone, Debug)]
 struct JoinHandler(Node);
 #[derive(Clone, Debug)]
 struct CallHandler(Node);
@@ -3851,12 +3868,6 @@ impl ProtocolHandler for BlobHandler {
 impl ProtocolHandler for ClientHandler {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         self.0.accept_client(conn).await.map_err(accept_err)
-    }
-}
-
-impl ProtocolHandler for SyncHandler {
-    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
-        self.0.accept_sync(conn).await.map_err(accept_err)
     }
 }
 

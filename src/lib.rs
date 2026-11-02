@@ -32,7 +32,7 @@ pub mod git;
 pub mod skills;
 pub mod members;
 pub mod store;
-pub mod sync;
+pub mod replica;
 pub mod agents;
 pub mod api;
 pub mod apps;

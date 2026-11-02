@@ -156,7 +156,7 @@ pub fn scope_of(folder: &str) -> String {
 }
 
 /// A pack: entries, as CBOR, each its header and body.
-fn pack(entries: &[&Entry]) -> Vec<u8> {
+pub fn pack(entries: &[&Entry]) -> Vec<u8> {
     let list: Vec<ciborium::Value> = entries
         .iter()
         .map(|e| {
@@ -170,7 +170,7 @@ fn pack(entries: &[&Entry]) -> Vec<u8> {
 }
 
 /// A pack's entries, each checked as if it came from another server: signature, body and content.
-fn unpack(bytes: &[u8]) -> Result<Vec<Entry>> {
+pub fn unpack(bytes: &[u8]) -> Result<Vec<Entry>> {
     let ciborium::Value::Array(list) = ciborium::from_reader(bytes)? else { bail!("not a pack") };
     list.into_iter()
         .map(|v| match v {

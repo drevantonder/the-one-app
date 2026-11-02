@@ -162,6 +162,8 @@ struct Runtime {
     loaded: Mutex<(Vec<(String, String)>, u64)>,
     /// The running workerd's process id, so a hung one can be stopped and started again.
     pid: Mutex<Option<u32>>,
+    /// What each loaded app says it is, once asked.
+    described: Mutex<std::collections::HashMap<String, Value>>,
 }
 
 impl Apps {
@@ -178,7 +180,7 @@ impl Apps {
         let _ = std::fs::remove_dir_all(dir.join("storage"));
         let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
         let config = write_config(dir, &[], port, outbound, 0)?;
-        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), 0)), pid: Mutex::new(None) });
+        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), 0)), pid: Mutex::new(None), described: Mutex::new(Default::default()) });
         let watch = runtime.clone();
         let (dir, log) = (dir.to_path_buf(), dir.join("workerd.log"));
         std::thread::Builder::new().name("workerd".into()).spawn(move || loop {
@@ -222,6 +224,7 @@ impl Apps {
                 let port = runtime.base.rsplit(':').next().unwrap().parse()?;
                 write_config(&runtime.dir, &apps, port, runtime.outbound, loaded.1)?;
                 loaded.0 = apps;
+                runtime.described.lock().unwrap().clear();
                 loaded.1
             };
             runtime.restart();
@@ -313,8 +316,17 @@ impl Apps {
         Ok(reply["ok"].as_str().map(str::to_string))
     }
 
+    /// What an app says it is and does, as its loaded deploy says it: asked once per deploy.
     pub async fn describe(&self, app: &str) -> Result<Value> {
-        Ok(self.ask(app, "describe", json!({})).await?["ok"].clone())
+        if let Some(d) = self.0.described.lock().unwrap().get(app) {
+            return Ok(d.clone());
+        }
+        let generation = self.0.loaded.lock().unwrap().1;
+        let d = self.ask(app, "describe", json!({})).await?["ok"].clone();
+        if self.0.loaded.lock().unwrap().1 == generation {
+            self.0.described.lock().unwrap().insert(app.to_string(), d.clone());
+        }
+        Ok(d)
     }
 }
 

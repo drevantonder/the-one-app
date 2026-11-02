@@ -66,3 +66,5 @@ strip = true
 
 [dev-dependencies]
 one-client = { path = "client" }
+# tests/sim.rs runs on tokio's paused clock, so links that wait seconds take none.
+tokio = { version = "1", features = ["test-util"] }

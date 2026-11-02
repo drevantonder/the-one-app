@@ -1,6 +1,6 @@
-//! Every log of every scope this server holds, kept in SQLite exactly as the entries arrived.
+//! Every log of every scope this server holds, kept in SQLite exactly as the entries arrived, and how far it has read
+//! each scope's entries in the bucket.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Result, ensure};
@@ -38,7 +38,9 @@ impl Store {
              create index if not exists entries_order on entries (log, time, author, seq);
              -- The end of each of this server's own logs, kept when a scope is deleted, so a log it holds again
              -- goes on from where it was and never has two entries with one seq.
-             create table if not exists heads (log text primary key, seq integer not null, hash blob not null, time integer not null);",
+             create table if not exists heads (log text primary key, seq integer not null, hash blob not null, time integer not null);
+             -- The last position of each scope's entries in the bucket this server has read.
+             create table if not exists positions (log text primary key, at integer not null);",
         )?;
         Ok(Store { db })
     }
@@ -143,24 +145,6 @@ impl Store {
         Ok(out)
     }
 
-    /// Every entry of the logs `wanted` names that the holder of `theirs` lacks, in log order.
-    pub fn missing(&self, theirs: &Frontier, wanted: impl Fn(&str) -> bool) -> Result<Vec<Entry>> {
-        let have: HashMap<(Key, String), u32> = theirs.iter().map(|(a, l, n)| ((*a, l.clone()), *n)).collect();
-        let mut stmt = self.db.prepare("select author, log, max(seq) from entries group by author, log")?;
-        let logs: Vec<(Key, String, u32)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
-        let mut out = Vec::new();
-        // `global` first: it decides what the receiver holds.
-        let mut logs: Vec<_> = logs.into_iter().filter(|(_, log, _)| wanted(log)).collect();
-        logs.sort_by_key(|(_, log, _)| log != "global");
-        for (author, log, max) in logs {
-            let from = have.get(&(author, log.clone())).copied().unwrap_or(0);
-            if from <= max {
-                out.extend(self.query("select header, body from entries where author = ? and log = ? and seq >= ? order by seq", params![author, log, from])?);
-            }
-        }
-        Ok(out)
-    }
-
     fn query(&self, sql: &str, params: impl rusqlite::Params) -> Result<Vec<Entry>> {
         let mut stmt = self.db.prepare(sql)?;
         let rows = stmt.query_map(params, |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
@@ -191,6 +175,17 @@ impl Store {
     pub fn delete(&self, log: &str) -> Result<()> {
         ensure!(log != "global", "every server holds global");
         self.db.execute("delete from entries where log = ?", [log])?;
+        self.db.execute("delete from positions where log = ?", [log])?;
+        Ok(())
+    }
+
+    /// The last position of a scope's entries in the bucket this server has read.
+    pub fn position(&self, log: &str) -> Result<u64> {
+        Ok(self.db.query_row("select at from positions where log = ?", [log], |r| r.get::<_, i64>(0)).optional()?.unwrap_or(0) as u64)
+    }
+
+    pub fn set_position(&self, log: &str, at: u64) -> Result<()> {
+        self.db.execute("insert or replace into positions values (?, ?)", params![log, at as i64])?;
         Ok(())
     }
 

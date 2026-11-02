@@ -122,7 +122,7 @@ impl Db {
             if bucket.create(&self.step(self.at + 1), &seal(&self.key, &self.step(self.at + 1), &step)).await? {
                 self.apply(&step)?;
                 self.at += 1;
-                self.written(bucket).await?;
+                self.written(bucket).await;
             }
         }
         bail!("{} changed too often to change its schema", self.prefix)
@@ -153,11 +153,20 @@ impl Db {
             }
             let name = self.step(self.at + 1);
             let step = [b"c".as_slice(), &changes].concat();
-            match bucket.create(&name, &seal(&self.key, &name, &step)).await {
+            let sealed = seal(&self.key, &name, &step);
+            let created = match bucket.create(&name, &sealed).await {
+                // The answer was lost: what's at the position says whether it landed.
+                Err(err) => match bucket.get(&name).await {
+                    Ok(o) => Ok(o.is_some_and(|o| o.bytes == sealed)),
+                    Err(_) => Err(err),
+                },
+                created => created,
+            };
+            match created {
                 Ok(true) => {
                     self.conn.execute_batch("commit")?;
                     self.at += 1;
-                    self.written(bucket).await?;
+                    self.written(bucket).await;
                     return Ok(result);
                 }
                 Ok(false) => self.conn.execute_batch("rollback")?,
@@ -184,8 +193,15 @@ impl Db {
         step_name(&self.prefix, n)
     }
 
-    /// After writing a step: a copy, if steps have piled up since the last, and the newest hint moved on.
-    async fn written(&mut self, bucket: &impl Bucket) -> Result<()> {
+    /// After writing a step: a copy, if steps have piled up since the last, and the newest hint moved on. Both only
+    /// save readers work, so a link that fails them fails nothing.
+    async fn written(&mut self, bucket: &impl Bucket) {
+        if let Err(err) = self.hint(bucket).await {
+            tracing::debug!("{}: {err:#}", self.prefix);
+        }
+    }
+
+    async fn hint(&mut self, bucket: &impl Bucket) -> Result<()> {
         if self.at >= self.copy + COPY_EVERY {
             let name = copy_name(&self.prefix, self.at);
             let bytes = self.conn.serialize("main")?.to_vec();
