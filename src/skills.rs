@@ -249,7 +249,7 @@ pub fn groups_tools() -> Vec<Value> {
 }
 
 /// The node's own tools, shown as an app's operations are, to search, scripts and skills.
-fn node_app(name: &str, title: &str, description: &str, guide: &str, tools: Vec<Value>) -> Value {
+pub fn node_app(name: &str, title: &str, description: &str, guide: &str, tools: Vec<Value>) -> Value {
     json!({
         "name": name, "title": title, "description": description, "instructions": guide,
         "ops": tools.into_iter().map(|t| {

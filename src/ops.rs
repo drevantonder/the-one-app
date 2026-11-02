@@ -26,14 +26,16 @@ pub fn find(app: &str, op: &str) -> Option<(Value, Value)> {
     Some((a, o))
 }
 
-/// The node's own tools, as apps: what search lists, which run here rather than as an app's call.
-fn node_apps() -> [Value; 3] {
-    [one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app()]
+/// The node's own tools, as apps: what search lists, which run here rather than as an app's call; and widgets_show,
+/// which MCP has too (src/mcp_apps.rs), as text here.
+fn node_apps() -> [Value; 4] {
+    let widgets = crate::mcp_apps::tools().into_iter().filter(|t| t["name"] == "widgets_show").collect();
+    [one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app(), one::skills::node_app("widgets", "Widgets", "Your widgets, as text", "", widgets)]
 }
 
 /// Whether an app is one of the node's own tools, which run here, as the person: never on another device.
 pub fn node_app(app: &str) -> bool {
-    ["vault", "backups", "groups"].contains(&app)
+    ["vault", "backups", "groups", "widgets"].contains(&app)
 }
 
 /// `<CLI> <app> <op> [words] [--input value]...`: runs it and prints what it gives back.
@@ -155,8 +157,14 @@ fn unknown(app: &str, op: &str) -> String {
         let (a, o) = (&app[..i], &app[i + 1..]);
         apps.iter().find(|x| x["name"] == a)?["ops"].as_array()?.iter().any(|x| x["name"] == o).then(|| format!("{a} {o}"))
     });
-    match tool {
-        Some(command) => format!("no app {app}: did you mean {CLI} {command} {op}?"),
+    if let Some(command) = tool {
+        return format!("no app {app}: did you mean {CLI} {command} {op}?");
+    }
+    // One the App Store has that isn't added where the caller sees it.
+    let listed = post("/v1/call", json!({ "app": "apps", "op": "list", "input": {}, "client": "cli" })).ok();
+    let line = listed.as_ref().and_then(|l| l["ok"].as_str()).and_then(|l| l.lines().find(|l| l.contains(&format!(" ({app}): not added"))).map(String::from));
+    match line.as_deref().and_then(|l| l.split_once(&format!(" ({app})"))) {
+        Some((title, _)) => format!("{title} isn't added yet: {CLI} apps add {app} user adds it for you, or {CLI} apps add {app} global for everyone"),
         None => format!("no app {app}; {CLI} apps lists them"),
     }
 }
