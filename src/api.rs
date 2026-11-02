@@ -77,7 +77,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/name", post(name))
         .route("/v1/remove", post(remove))
         .route("/v1/role", post(role))
-        .route("/v1/relays", post(relays))
         .route("/v1/settings", post(settings))
         .route("/v1/acl", post(acl))
         .route("/v1/trust", post(trust))
@@ -555,11 +554,6 @@ async fn remove(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
 async fn role(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let role: Role = serde_json::from_value(body["role"].clone())?;
     node.member_as(&me.caller, "role", json!({ "user": node.find_user(text(&body, "user")?)?, "role": role })).await?;
-    done()
-}
-
-async fn relays(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.member("relays", json!({ "urls": body["urls"] })).await?;
     done()
 }
 

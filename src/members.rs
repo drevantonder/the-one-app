@@ -136,7 +136,6 @@ pub struct Members {
     pub acls: BTreeMap<Key, Acl>,
     /// (user, device) for each `trust` not since undone by `untrust`.
     pub trusted: BTreeSet<(String, Key)>,
-    pub relays: Vec<String>,
     /// The install's settings its admins set: each name's latest value. The rest are the white label's defaults.
     pub settings: BTreeMap<String, String>,
     pub apps: BTreeMap<String, App>,
@@ -497,10 +496,6 @@ impl Members {
                     ensure!(self.manages(&w, &group), "not allowed to rename that group");
                     self.groups.get_mut(&group).unwrap().name = name;
                 }
-            }
-            "relays" => {
-                ensure!(self.is_admin(&w), "admins only");
-                self.relays = data["urls"].as_array().context("no urls")?.iter().filter_map(|u| u.as_str().map(str::to_string)).collect();
             }
             "setting" => {
                 ensure!(self.is_admin(&w), "admins only");
