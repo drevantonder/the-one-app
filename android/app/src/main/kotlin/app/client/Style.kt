@@ -19,28 +19,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Call
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DateRange
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Email
-import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Notifications
-import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Send
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -146,80 +124,40 @@ fun Theme(accent: String, appearance: Appearance, content: @Composable () -> Uni
 
 // MARK: Symbols
 
-/** The symbols app icons are drawn with: the screens' bridge's own (src/screen/bridge.js), so every place draws the
- *  same ones, each on a 24-point grid. */
+/** Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every device draws the
+ *  same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled. */
 object Glyphs {
     private var all: Map<String, String> = emptyMap()
+    private val paths = LruCache<String, Path>(200)
 
     fun load(context: Context) {
         if (all.isNotEmpty()) return
-        val text = context.assets.open("glyphs.json").bufferedReader().readText()
+        val text = context.assets.open("icons.json").bufferedReader().readText()
         all = (json.parseToJsonElement(text) as JsonObject).mapValues { it.value.jsonPrimitive.content }
     }
 
     fun has(name: String?) = name != null && all.containsKey(name)
 
-    /** A glyph's shapes: each a path, and whether it's filled rather than outlined. */
-    fun shapes(name: String): List<Pair<Path, Boolean>> {
-        val svg = all[name] ?: return emptyList()
-        return Regex("""<(rect|circle|path)([^>]*)/>""").findAll(svg).mapNotNull { m ->
-            val a = Regex("""([\w-]+)="([^"]*)"""").findAll(m.groupValues[2]).associate { it.groupValues[1] to it.groupValues[2] }
-            fun n(k: String) = a[k]?.toFloatOrNull() ?: 0f
-            val path = when (m.groupValues[1]) {
-                "rect" -> Path().apply { addRoundRect(RectF(n("x"), n("y"), n("x") + n("width"), n("y") + n("height")), n("rx"), n("rx"), Path.Direction.CW) }
-                "circle" -> Path().apply { addCircle(n("cx"), n("cy"), n("r"), Path.Direction.CW) }
-                else -> runCatching { PathParser.createPathFromPathData(a["d"] ?: "") }.getOrNull() ?: return@mapNotNull null
-            }
-            path to (a["fill"] == "currentColor")
-        }.toList()
-    }
+    /** An icon's path data, as screens draw it. */
+    fun data(name: String) = all[name]
 
-    /** Draws a glyph `size` pixels across at (x, y). */
-    fun draw(canvas: Canvas, name: String, x: Float, y: Float, size: Float, color: Int, weight: Float = 1.9f) {
-        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = weight; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; this.color = color
-        }
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; this.color = color }
+    fun path(name: String): Path? = paths.get(name)
+        ?: all[name]?.let { runCatching { PathParser.createPathFromPathData(it) }.getOrNull() }?.also { paths.put(name, it) }
+
+    /** Draws an icon `size` pixels across at (x, y). */
+    fun draw(canvas: Canvas, name: String, x: Float, y: Float, size: Float, color: Int) {
+        val path = path(name) ?: return
         canvas.save()
         canvas.translate(x, y)
-        canvas.scale(size / 24f, size / 24f)
-        for ((path, filled) in shapes(name)) canvas.drawPath(path, if (filled) fill else stroke)
+        canvas.scale(size / 256f, size / 256f)
+        canvas.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; this.color = color })
         canvas.restore()
-    }
-}
-
-/** A widget's or a row's symbol, by the SF Symbol name apps give: the glyph if there is one, else Android's nearest. */
-fun materialSymbol(name: String?): ImageVector? {
-    val n = (name ?: return null).removeSuffix(".fill").removeSuffix(".circle")
-    return when {
-        name.startsWith("checkmark.circle") -> Icons.Rounded.CheckCircle
-        n.startsWith("checkmark") -> Icons.Rounded.Check
-        n.startsWith("exclamationmark") -> Icons.Rounded.Warning
-        n.startsWith("info") -> Icons.Rounded.Info
-        n.startsWith("plus") -> Icons.Rounded.Add
-        n.startsWith("xmark") -> Icons.Rounded.Close
-        n.startsWith("trash") -> Icons.Rounded.Delete
-        n.startsWith("gear") -> Icons.Rounded.Settings
-        n.startsWith("person") -> Icons.Rounded.Person
-        n.startsWith("envelope") -> Icons.Rounded.Email
-        n.startsWith("phone") -> Icons.Rounded.Call
-        n.startsWith("star") -> Icons.Rounded.Star
-        n.startsWith("house") -> Icons.Rounded.Home
-        n.startsWith("magnifyingglass") || n == "search" -> Icons.Rounded.Search
-        n.startsWith("arrow.clockwise") || n.startsWith("arrow.triangle.2") -> Icons.Rounded.Refresh
-        n.startsWith("lock") -> Icons.Rounded.Lock
-        n.startsWith("bell") -> Icons.Rounded.Notifications
-        n.startsWith("heart") -> Icons.Rounded.Favorite
-        n.startsWith("calendar") || n.startsWith("clock") -> Icons.Rounded.DateRange
-        n.startsWith("play") -> Icons.Rounded.PlayArrow
-        n.startsWith("paperplane") -> Icons.Rounded.Send
-        else -> null
     }
 }
 
 // MARK: App icons
 
-/** What an app's tile shows: its symbol on its colour, or its own picture. */
+/** What an app's tile shows: its icon on its colour, or its own picture. */
 data class TileLook(val icon: String?, val seed: String, val color: String? = null, val image: String? = null, val imageKind: String? = null)
 
 fun AppInfo.look() = TileLook(icon, name, color, image, imageKind)
@@ -232,7 +170,7 @@ fun steadyHash(text: String): Int = text.codePoints().toArray().fold(5381) { h, 
 private val tiles = LruCache<String, Bitmap>(80)
 
 /** An app's icon tile as the iPhone's Home Screen draws one, `px` pixels across: a finished app icon edge to edge, a
- *  logo inset on white, or its symbol (or first letter) in white on its colour. */
+ *  logo inset on white, or its icon filled (or first letter) in white on its colour. */
 fun tileBitmap(look: TileLook, px: Int, title: String = look.seed): Bitmap {
     val key = "${look.icon}|${look.seed}|${look.color}|${look.image?.length}|${look.image?.hashCode()}|${look.imageKind}|$px|$title"
     tiles.get(key)?.let { return it }
@@ -259,9 +197,9 @@ fun tileBitmap(look: TileLook, px: Int, title: String = look.seed): Bitmap {
         paint.shader = LinearGradient(0f, 0f, 0f, s, top.toArgb(), base.toArgb(), Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, s, s, paint)
         paint.shader = null
-        if (Glyphs.has(look.icon)) {
-            val g = s * 0.56f
-            Glyphs.draw(canvas, look.icon!!, (s - g) / 2, (s - g) / 2, g, android.graphics.Color.WHITE)
+        if (Glyphs.has("${look.icon}-fill")) {
+            val g = s * 0.5f
+            Glyphs.draw(canvas, "${look.icon}-fill", (s - g) / 2, (s - g) / 2, g, android.graphics.Color.WHITE)
         } else {
             val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE; textSize = s * 0.46f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD); textAlign = Paint.Align.CENTER }
             canvas.drawText(title.take(1).uppercase(), s / 2, s / 2 - (text.descent() + text.ascent()) / 2, text)
@@ -296,7 +234,7 @@ fun AppTile(look: TileLook, size: Dp, title: String = look.seed) {
 @Composable
 fun AppTile(app: AppInfo?, seed: String, size: Dp) = AppTile(app?.look() ?: TileLook(null, seed), size, app?.label ?: seed)
 
-/** A row's icon, as Settings draws one: a white glyph (or symbol) on a system colour. */
+/** A row's icon, as Settings draws one: a white Phosphor icon (or Material one) on a system colour. */
 @Composable
 fun SymbolTile(icon: ImageVector? = null, glyph: String? = null, color: Color, size: Dp = 29.dp) {
     val context = LocalContext.current
@@ -305,7 +243,7 @@ fun SymbolTile(icon: ImageVector? = null, glyph: String? = null, color: Color, s
         if (glyph != null && Glyphs.has(glyph)) {
             val px = with(LocalDensity.current) { (size * 0.62f).roundToPx() }
             val bitmap = remember(glyph, px) {
-                Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888).also { Glyphs.draw(Canvas(it), glyph, 0f, 0f, px.toFloat(), android.graphics.Color.WHITE, 2.2f) }.asImageBitmap()
+                Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888).also { Glyphs.draw(Canvas(it), glyph, 0f, 0f, px.toFloat(), android.graphics.Color.WHITE) }.asImageBitmap()
             }
             Image(bitmap, null, Modifier.size(size * 0.62f))
         } else if (icon != null) {

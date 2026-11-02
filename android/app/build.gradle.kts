@@ -25,14 +25,14 @@ val commit = providers.exec { commandLine("git", "-C", repo.path, "rev-parse", "
     .standardOutput.asText.get().trim().ifEmpty { "unknown" }
 val cli = field("cli")
 
-// The launcher icon from the config's, and the logo the app shows; the symbols app icons are drawn with, from the
-// screens' bridge, so both draw the same ones.
+// The launcher icon from the config's, and the logo the app shows; and Phosphor's icons, which apps name, as every
+// device draws them.
 val generated = layout.buildDirectory.dir("generated/white-label")
 val whiteLabel = tasks.register("whiteLabel") {
     val icon = art("icon")
     val logo = art("logo")
-    val bridge = repo.resolve("src/screen/bridge.js")
-    inputs.files(icon, logo, bridge, config)
+    val icons = repo.resolve("vendor/phosphor/icons.json")
+    inputs.files(icon, logo, icons, config)
     outputs.dir(generated)
     doLast {
         val out = generated.get().asFile
@@ -63,12 +63,8 @@ val whiteLabel = tasks.register("whiteLabel") {
         )
         out.resolve("res/drawable-nodpi").mkdirs()
         logo.copyTo(out.resolve("res/drawable-nodpi/logo.png"))
-        // `const glyphs = { name: '<svg elements>', … }`, as JSON.
-        val block = bridge.readText().substringAfter("const glyphs = {").substringBefore("\n  };")
-        val glyphs = Regex("""^\s*"?([\w.]+)"?: '([^']*)',?$""", RegexOption.MULTILINE).findAll(block)
-            .joinToString(",\n", "{\n", "\n}\n") { "  " + quoted(it.groupValues[1]) + ": " + quoted(it.groupValues[2]) }
         out.resolve("assets").mkdirs()
-        out.resolve("assets/glyphs.json").writeText(glyphs)
+        icons.copyTo(out.resolve("assets/icons.json"))
     }
 }
 

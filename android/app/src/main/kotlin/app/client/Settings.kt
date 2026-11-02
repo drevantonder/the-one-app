@@ -68,8 +68,8 @@ fun SettingsPage(store: Store) {
             SettingsRow("Requests", glyph = null, icon = Icons.Rounded.Notifications, color = Color(0xFFFF9500), value = "${store.requests}", badge = true) { store.path.add(Route.Requests) }
         }
         Section {
-            SettingsRow("App Store", glyph = "square.grid.2x2", color = Color(0xFF007AFF)) { store.path.add(store.storeApp?.let { Route.Screen(it.name) } ?: Route.AppStore) }
-            SettingsRow("Devices", glyph = "desktopcomputer", color = Color(0xFF8E8E93)) { store.path.add(Route.Devices) }
+            SettingsRow("App Store", glyph = "squares-four-fill", color = Color(0xFF007AFF)) { store.path.add(store.storeApp?.let { Route.Screen(it.name) } ?: Route.AppStore) }
+            SettingsRow("Devices", glyph = "monitor-fill", color = Color(0xFF8E8E93)) { store.path.add(Route.Devices) }
         }
         Section {
             SettingsRow("Passkeys", icon = Icons.Rounded.Lock, color = Color(0xFF34C759)) { SignIn.openInTab(context, Uri.parse("${store.signIn.address}/passkeys")) }

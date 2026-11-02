@@ -40,6 +40,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -221,8 +222,12 @@ private class Bridge(val context: Context, val store: Store, val route: Route.Sc
             }
             "vault" -> return JsonPrimitive(askVault(str(m, "need") ?: ""))
             "scan" -> throw NodeError("Scanning documents needs the iPhone or iPad app. Choose the files instead.")
+            "icons" -> {
+                val names = (m["names"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+                return JsonObject(names.mapNotNull { n -> Glyphs.data(n)?.let { n to JsonPrimitive(it) } }.toMap())
+            }
             "icon" -> {
-                val look = TileLook(str(m, "symbol")?.ifEmpty { null }, str(m, "seed") ?: "", str(m, "color")?.ifEmpty { null }, str(m, "image")?.ifEmpty { null }, str(m, "kind"))
+                val look = TileLook(str(m, "icon")?.ifEmpty { null }, str(m, "seed") ?: "", str(m, "color")?.ifEmpty { null }, str(m, "image")?.ifEmpty { null }, str(m, "kind"))
                 val size = ((m["size"] as? JsonPrimitive)?.doubleOrNull ?: 36.0) * context.resources.displayMetrics.density
                 return JsonPrimitive(png(tileBitmap(look, size.toInt().coerceIn(8, 512))))
             }

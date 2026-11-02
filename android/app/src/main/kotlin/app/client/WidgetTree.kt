@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Switch
@@ -396,21 +395,17 @@ fun SvgPath(d: String, color: Color, size: Dp, stroke: Boolean) {
     }
 }
 
-/** A symbol by the SF Symbol name apps give: a glyph of the bridge's, Android's nearest, or a dot. */
+/** A Phosphor icon by name, filled in `color`; a dot if there's none by that name. */
 @Composable
 fun Symbol(name: String, color: Color, size: Dp, modifier: Modifier = Modifier) {
     Glyphs.load(LocalContext.current)
-    if (Glyphs.has(name)) {
-        val shapes = remember(name) { Glyphs.shapes(name).map { (path, filled) -> path.asComposePath() to filled } }
+    val path = remember(name) { Glyphs.path(name)?.asComposePath() }
+    if (path != null) {
         Canvas(modifier.size(size)) {
-            scale(this.size.width / 24f, pivot = Offset.Zero) {
-                for ((path, filled) in shapes) if (filled) drawPath(path, color) else drawPath(path, color, style = Stroke(1.9f, cap = StrokeCap.Round, join = StrokeJoin.Round))
-            }
+            scale(this.size.width / 256f, pivot = Offset.Zero) { drawPath(path, color) }
         }
     } else {
-        val vector = materialSymbol(name)
-        if (vector != null) Icon(vector, null, modifier.size(size), tint = color)
-        else Box(modifier.size(size), contentAlignment = Alignment.Center) { Box(Modifier.size(size / 3).background(color, CircleShape)) }
+        Box(modifier.size(size), contentAlignment = Alignment.Center) { Box(Modifier.size(size / 3).background(color, CircleShape)) }
     }
 }
 
