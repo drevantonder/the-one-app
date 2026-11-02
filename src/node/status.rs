@@ -1,0 +1,270 @@
+//! How things went, as servers say it: who used each app, its errors and its AI cost; schedules' runs; the build each
+//! server runs; backups' runs. Rows each scope's node database changes in place, not entries: written often, and
+//! needed only as they are now. Each server reads them back into `Status`, which the rest of the node looks at.
+
+use super::*;
+
+/// The node's own database of a scope.
+const NODE_DATABASE: (&str, &str) = (members::APP, "main");
+
+/// Its schema, as its changes, oldest first.
+const SCHEMA: &[&str] = &["
+create table used (app text, user text, client text, days integer not null, day integer not null, last integer not null, agent text,
+                   primary key (app, user, client));
+create table errors (app text, op text, error text, count integer not null, first integer not null, last integer not null,
+                     user text not null, primary key (app, op, error));
+create table cost (app text, model text, usd real not null, input integer not null, output integer not null, calls integer not null,
+                   primary key (app, model));
+create table runs (app text, schedule text, slot integer, time integer not null, server text not null, user text not null,
+                   ok integer not null, error text, ms integer not null, spec text, primary key (app, schedule, slot));
+create table builds (server text primary key, build text not null, target text not null, time integer not null);
+create table backups (place text, server text, time integer, error text, trouble text, snapshots text not null,
+                      primary key (place, server, time));
+create table alerts (place text primary key, time integer not null);
+"];
+
+/// How many runs of each schedule a scope keeps.
+pub const RUNS_KEPT: usize = 20;
+/// How many backup runs to each place `global` keeps.
+pub const BACKUP_RUNS_KEPT: usize = 100;
+
+/// A scope's rows, as this server last read them.
+#[derive(Clone, Debug, Default)]
+pub struct Status {
+    /// What each app's owners see of it here: who used it, its errors, its AI cost.
+    pub insights: BTreeMap<String, Insights>,
+    /// Each schedule's latest runs here, oldest first, by (app, schedule).
+    pub runs: BTreeMap<(String, String), Vec<Run>>,
+    /// When a schedule's runs first followed a different definition, by (app, schedule): (was, is, when).
+    pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
+    /// In `global`: the build each server runs.
+    pub builds: HashMap<Key, release::Running>,
+    /// In `global`: the latest backup runs, oldest first.
+    pub backups: Vec<BackupRun>,
+    /// In `global`: by (place, scope), the newest entry's time a snapshot there holds, and when it was written.
+    pub covered: BTreeMap<(String, String), (u64, u64)>,
+    /// In `global`: when admins were last told of a place's trouble, by place.
+    pub alerted: BTreeMap<String, u64>,
+}
+
+/// An app's insights in one scope.
+#[derive(Clone, Debug, Default)]
+pub struct Insights {
+    /// By (user, client): the days they used it, when last, and the agent last named.
+    pub used: BTreeMap<(String, String), Used>,
+    /// By (op, error): how often, first and last, and by whom last.
+    pub errors: BTreeMap<(String, String), Failed>,
+    /// By model: dollars, tokens in and out, and calls.
+    pub cost: BTreeMap<String, Cost>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Used {
+    pub days: u64,
+    pub last: u64,
+    pub agent: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Failed {
+    pub count: u64,
+    pub first: u64,
+    pub last: u64,
+    pub user: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Cost {
+    pub usd: f64,
+    pub input: u64,
+    pub output: u64,
+    pub calls: u64,
+}
+
+/// One run of a schedule: the slot it ran for, when, on which server, as whom, how it went, and the definition it
+/// followed.
+#[derive(Clone, Debug)]
+pub struct Run {
+    pub slot: u64,
+    pub time: u64,
+    pub server: Key,
+    pub user: String,
+    pub ok: bool,
+    pub error: Option<String>,
+    pub ms: u64,
+    pub spec: Value,
+}
+
+/// One server's backup run to one place: the snapshots it wrote, or what went wrong.
+#[derive(Clone, Debug)]
+pub struct BackupRun {
+    /// The place's Vault item.
+    pub place: String,
+    pub server: Key,
+    pub time: u64,
+    pub error: Option<String>,
+    /// What kind of trouble the error is, for its fix: `crate::bucket::Trouble`'s name.
+    pub trouble: Option<String>,
+    pub snapshots: Vec<BackedUp>,
+}
+
+/// A scope's snapshot in a run: when its newest entry was, and what it added.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct BackedUp {
+    pub scope: String,
+    pub upto: u64,
+    pub entries: u64,
+    pub blobs: u64,
+    pub bytes: u64,
+}
+
+/// One change to a scope's rows.
+pub enum Said {
+    /// A call of `app` by `user` from `client` (`agent` naming who asked through it), on `day`.
+    Used { app: String, user: String, client: String, agent: Option<String>, day: u64 },
+    Failed { app: String, op: String, error: String, user: String },
+    Cost { app: String, model: String, usd: f64, input: u64, output: u64 },
+    Ran { app: String, schedule: String, run: Run },
+    Build { server: Key, build: String, target: String },
+    BackedUp(BackupRun),
+    Alerted { place: String },
+}
+
+impl Node {
+    /// Changes a scope's rows, then reads them back.
+    pub(super) async fn say(&self, scope: &Scope, said: Said) -> Result<()> {
+        let now = now_ms();
+        let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect())).await?;
+        db.lock()
+            .await
+            .write(&self.bucket()?, |c| {
+                let ex = |sql: &str, params: &[Value]| crate::db::execute(c, sql, params).map(|_| ());
+                match &said {
+                    Said::Used { app, user, client, agent, day } => ex(
+                        "insert into used values (?, ?, ?, 1, ?, ?, ?) on conflict (app, user, client) do update set
+                           days = days + (excluded.day > day), day = max(day, excluded.day), last = max(last, excluded.last), agent = coalesce(excluded.agent, agent)",
+                        &[json!(app), json!(user), json!(client), json!(day), json!(now), json!(agent)],
+                    ),
+                    Said::Failed { app, op, error, user } => ex(
+                        "insert into errors values (?, ?, ?, 1, ?, ?, ?) on conflict (app, op, error) do update set
+                           count = count + 1, first = min(first, excluded.first), last = max(last, excluded.last), user = excluded.user",
+                        &[json!(app), json!(op), json!(error), json!(now), json!(now), json!(user)],
+                    ),
+                    Said::Cost { app, model, usd, input, output } => ex(
+                        "insert into cost values (?, ?, ?, ?, ?, 1) on conflict (app, model) do update set
+                           usd = usd + excluded.usd, input = input + excluded.input, output = output + excluded.output, calls = calls + 1",
+                        &[json!(app), json!(model), json!(usd.max(0.0)), json!(input), json!(output)],
+                    ),
+                    Said::Ran { app, schedule, run } => {
+                        ex(
+                            "insert or replace into runs values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            &[json!(app), json!(schedule), json!(run.slot), json!(run.time), json!(hex(&run.server)), json!(run.user), json!(run.ok), json!(run.error), json!(run.ms), json!(run.spec.to_string())],
+                        )?;
+                        ex(
+                            "delete from runs where app = ? and schedule = ? and slot not in (select slot from runs where app = ? and schedule = ? order by slot desc limit ?)",
+                            &[json!(app), json!(schedule), json!(app), json!(schedule), json!(RUNS_KEPT)],
+                        )
+                    }
+                    Said::Build { server, build, target } => ex("insert or replace into builds values (?, ?, ?, ?)", &[json!(hex(server)), json!(build), json!(target), json!(now)]),
+                    Said::BackedUp(r) => {
+                        ex(
+                            "insert or replace into backups values (?, ?, ?, ?, ?, ?)",
+                            &[json!(r.place), json!(hex(&r.server)), json!(r.time), json!(r.error), json!(r.trouble), json!(serde_json::to_string(&r.snapshots)?)],
+                        )?;
+                        ex("delete from backups where place = ? and time not in (select time from backups where place = ? order by time desc limit ?)", &[json!(r.place), json!(r.place), json!(BACKUP_RUNS_KEPT)])
+                    }
+                    Said::Alerted { place } => ex("insert or replace into alerts values (?, ?)", &[json!(place), json!(now)]),
+                }
+            })
+            .await?;
+        self.read_status(scope).await
+    }
+
+    /// Reads a scope's rows into its `Status`, up to date.
+    pub(super) async fn read_status(&self, scope: &Scope) -> Result<()> {
+        let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect())).await?;
+        let mut db = db.lock().await;
+        db.catch_up(&self.bucket()?).await?;
+        let rows = |sql: &str| db.query(sql, &[]);
+        let text = |v: &Value| v.as_str().unwrap_or("").to_string();
+        let n = |v: &Value| v.as_u64().unwrap_or(0);
+        let mut s = Status::default();
+        for r in rows("select * from used")? {
+            let used = Used { days: n(&r["days"]), last: n(&r["last"]), agent: r["agent"].as_str().map(str::to_string) };
+            s.insights.entry(text(&r["app"])).or_default().used.insert((text(&r["user"]), text(&r["client"])), used);
+        }
+        for r in rows("select * from errors")? {
+            let failed = Failed { count: n(&r["count"]), first: n(&r["first"]), last: n(&r["last"]), user: text(&r["user"]) };
+            s.insights.entry(text(&r["app"])).or_default().errors.insert((text(&r["op"]), text(&r["error"])), failed);
+        }
+        for r in rows("select * from cost")? {
+            let cost = Cost { usd: r["usd"].as_f64().unwrap_or(0.0), input: n(&r["input"]), output: n(&r["output"]), calls: n(&r["calls"]) };
+            s.insights.entry(text(&r["app"])).or_default().cost.insert(text(&r["model"]), cost);
+        }
+        for r in rows("select * from runs order by slot")? {
+            let key = (text(&r["app"]), text(&r["schedule"]));
+            let run = Run {
+                slot: n(&r["slot"]),
+                time: n(&r["time"]),
+                server: unhex(r["server"].as_str().unwrap_or("")).unwrap_or_default(),
+                user: text(&r["user"]),
+                ok: r["ok"] == 1,
+                error: r["error"].as_str().map(str::to_string),
+                ms: n(&r["ms"]),
+                spec: serde_json::from_str(r["spec"].as_str().unwrap_or("null")).unwrap_or_default(),
+            };
+            let runs = s.runs.entry(key.clone()).or_default();
+            if let Some(last) = runs.last().filter(|l| !l.spec.is_null() && !run.spec.is_null() && l.spec != run.spec) {
+                s.changed.insert(key, (last.spec.clone(), run.spec.clone(), run.time));
+            }
+            runs.push(run);
+        }
+        for r in rows("select * from builds")? {
+            if let Ok(server) = unhex(r["server"].as_str().unwrap_or("")) {
+                s.builds.insert(server, release::Running { commit: text(&r["build"]), target: text(&r["target"]) });
+            }
+        }
+        for r in rows("select * from backups order by time")? {
+            let snapshots: Vec<BackedUp> = serde_json::from_str(r["snapshots"].as_str().unwrap_or("[]")).unwrap_or_default();
+            let run = BackupRun {
+                place: text(&r["place"]),
+                server: unhex(r["server"].as_str().unwrap_or("")).unwrap_or_default(),
+                time: n(&r["time"]),
+                error: r["error"].as_str().map(str::to_string),
+                trouble: r["trouble"].as_str().map(str::to_string),
+                snapshots,
+            };
+            if run.error.is_none() {
+                for b in &run.snapshots {
+                    let covered = s.covered.entry((run.place.clone(), b.scope.clone())).or_default();
+                    *covered = (covered.0.max(b.upto), covered.1.max(run.time));
+                }
+            }
+            s.backups.push(run);
+        }
+        for r in rows("select * from alerts")? {
+            s.alerted.insert(text(&r["place"]), n(&r["time"]));
+        }
+        // While it holds the database, so a read that started earlier can't land after this one.
+        self.with(|i| {
+            if *scope == Scope::Global {
+                i.builds = s.builds.clone();
+            }
+            i.status.insert(scope.to_string(), s);
+            Ok(())
+        })
+    }
+
+    /// Reads every scope's rows this server holds again, for what other servers said: in the background.
+    pub(super) fn read_all_status(&self) {
+        let node = self.clone();
+        tokio::spawn(async move {
+            let scopes = node.with(|i| Ok(i.r.members.scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
+            for scope in scopes {
+                if let Err(err) = node.read_status(&scope).await {
+                    tracing::debug!("reading {scope}'s status: {err:#}");
+                }
+            }
+        });
+    }
+}

@@ -146,7 +146,7 @@ pub struct Members {
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
-const SCOPE_ONLY: &[&str] = &["ran", "schedule", "secret-request", "vault-request", "item", "keep", "forget", "used", "failed", "cost", "backup-key", "backup", "backup-alert"];
+const SCOPE_ONLY: &[&str] = &["schedule", "secret-request", "vault-request", "item", "keep", "forget", "backup-key"];
 
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
@@ -548,7 +548,7 @@ impl Members {
                 self.sidecars.insert((server, name), SidecarInstall { blob, local: data["local"] == true, by: w, time: e.time() });
             }
             "secret" => ensure!(self.is_admin(&w), "admins only"),
-            "install" | "uninstall" | "node-release" | "running" => {}
+            "install" | "uninstall" | "node-release" => {}
             other => bail!("unknown kind {other}"),
         }
         Ok(())
@@ -572,7 +572,7 @@ pub fn valid_app_name(name: &str) -> bool {
 }
 
 /// What a scope's own node entries add up to: the apps installed in it, every `open` of it, its Vault items, and its
-/// schedules' switches and runs.
+/// schedules' switches.
 #[derive(Clone, Debug, Default)]
 pub struct ScopeState {
     pub installed: BTreeSet<String>,
@@ -580,16 +580,10 @@ pub struct ScopeState {
     pub installers: BTreeMap<String, (String, u64)>,
     /// Each schedule switched on or off here, by (app, schedule): (on, by whom, when).
     pub switches: BTreeMap<(String, String), (bool, String, u64)>,
-    /// Each schedule's latest runs here, oldest first, by (app, schedule).
-    pub runs: BTreeMap<(String, String), Vec<Run>>,
-    /// When a schedule's runs first followed a different definition, by (app, schedule): (was, is, when).
-    pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
     /// Apps' and agents' requests for a person's item here, by id.
     pub requests: BTreeMap<String, VaultRequest>,
     /// The blobs this scope's apps said they no longer need, though their entries name them.
     pub forgotten: BTreeSet<String>,
-    /// What each app's owners see of it here: who used it, its errors, its AI cost.
-    pub insights: BTreeMap<String, Insights>,
     /// (opener, server, time)
     /// Who opened this user's data, on which server, when, and through which agent.
     pub opens: Vec<(String, Key, u64, Option<String>)>,
@@ -600,55 +594,6 @@ pub struct ScopeState {
     pub arrangements: BTreeMap<String, Value>,
     /// The key this scope's backups are encrypted with: the first `backup-key` written here.
     pub backup_key: Option<[u8; 32]>,
-    /// In `global`: the latest backup runs, oldest first.
-    pub backups: Vec<BackupRun>,
-    /// In `global`: by (place, scope), the newest entry's time a snapshot there holds, and when it was written.
-    pub covered: BTreeMap<(String, String), (u64, u64)>,
-    /// In `global`: when admins were last told of a place's trouble, by place.
-    pub alerted: BTreeMap<String, u64>,
-}
-
-/// How many backup runs `global`'s state keeps.
-pub const BACKUP_RUNS_KEPT: usize = 500;
-
-/// One server's backup run to one place: the snapshots it wrote, or what went wrong.
-#[derive(Clone, Debug)]
-pub struct BackupRun {
-    /// The place's Vault item.
-    pub place: String,
-    pub server: Key,
-    pub time: u64,
-    pub error: Option<String>,
-    /// What kind of trouble the error is, for its fix: `crate::backups::Trouble`'s name.
-    pub trouble: Option<String>,
-    pub snapshots: Vec<BackedUp>,
-}
-
-/// A scope's snapshot in a run: when its newest entry was, and what it added.
-#[derive(Clone, Debug)]
-pub struct BackedUp {
-    pub scope: String,
-    pub upto: u64,
-    pub entries: u64,
-    pub blobs: u64,
-    pub bytes: u64,
-}
-
-/// How many runs of each schedule a scope's state keeps.
-pub const RUNS_KEPT: usize = 20;
-
-/// One run of a schedule: the slot it ran for, when, on which server, as whom, how it went, and the definition it
-/// followed.
-#[derive(Clone, Debug)]
-pub struct Run {
-    pub slot: u64,
-    pub time: u64,
-    pub server: Key,
-    pub user: String,
-    pub ok: bool,
-    pub error: Option<String>,
-    pub ms: u64,
-    pub spec: Value,
 }
 
 /// An app's or agent's request for a person's item that an app may use: the fields it wants (name, and whether
@@ -665,40 +610,6 @@ pub struct VaultRequest {
     pub agent: Option<String>,
     pub time: u64,
     pub answer: Option<(String, String, u64)>,
-}
-
-/// An app's insights in one scope.
-#[derive(Clone, Debug, Default)]
-pub struct Insights {
-    /// By (user, client): the days they used it, when last, and the agent last named.
-    pub used: BTreeMap<(String, String), Used>,
-    /// By (op, error): how often, first and last, and by whom last.
-    pub errors: BTreeMap<(String, String), Failed>,
-    /// By model: dollars, tokens in and out, and calls.
-    pub cost: BTreeMap<String, Cost>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Used {
-    pub days: u64,
-    pub last: u64,
-    pub agent: Option<String>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Failed {
-    pub count: u64,
-    pub first: u64,
-    pub last: u64,
-    pub user: String,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Cost {
-    pub usd: f64,
-    pub input: u64,
-    pub output: u64,
-    pub calls: u64,
 }
 
 /// Whether `user` installs apps and manages the Vault's items in `scope`: their own, a group's they're an admin of, and `global`
@@ -750,30 +661,6 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let on = data["on"].as_bool().context("on or off?")?;
             state.switches.insert((app, name), (on, w.to_string(), e.time()));
         }
-        "ran" => {
-            let data = &e.content.data;
-            let app = data["app"].as_str().context("no app")?.to_string();
-            let name = data["schedule"].as_str().context("no schedule")?.to_string();
-            let run = Run {
-                slot: data["slot"].as_u64().context("no slot")?,
-                time: e.time(),
-                server: e.author(),
-                user: w.to_string(),
-                ok: data["ok"].as_bool().unwrap_or(false),
-                error: data["error"].as_str().map(str::to_string),
-                ms: data["ms"].as_u64().unwrap_or(0),
-                spec: data["spec"].clone(),
-            };
-            let key = (app, name);
-            let runs = state.runs.entry(key.clone()).or_default();
-            if let Some(last) = runs.last().filter(|l| !l.spec.is_null() && !run.spec.is_null() && l.spec != run.spec) {
-                state.changed.insert(key, (last.spec.clone(), run.spec.clone(), run.time));
-            }
-            runs.push(run);
-            if runs.len() > RUNS_KEPT {
-                runs.remove(0);
-            }
-        }
         "secret" => {
             // An earlier server's: the item of its own it is.
             ensure!(manages_scope(m, w, &scope), "not allowed to change the Vault there");
@@ -788,66 +675,10 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let id = crate::vault::apply(&mut state.items, data, w, e.time(), |a| !m.apps.get(a).is_some_and(|a| a.erased))?;
             answered(state, data, &id, w, e.time());
         }
-        "used" | "failed" | "cost" => {
-            let data = &e.content.data;
-            let app = data["app"].as_str().context("no app")?.to_string();
-            let ins = state.insights.entry(app).or_default();
-            match e.content.kind.as_str() {
-                "used" => {
-                    let u = ins.used.entry((w.to_string(), data["client"].as_str().unwrap_or("api").to_string())).or_default();
-                    u.days += 1;
-                    u.last = u.last.max(e.time());
-                    if let Some(agent) = data["agent"].as_str() {
-                        u.agent = Some(agent.to_string());
-                    }
-                }
-                "failed" => {
-                    let key = (data["op"].as_str().unwrap_or("").to_string(), data["error"].as_str().unwrap_or("").to_string());
-                    let f = ins.errors.entry(key).or_insert(Failed { first: e.time(), ..Default::default() });
-                    f.count += 1;
-                    f.last = e.time();
-                    f.user = w.to_string();
-                }
-                _ => {
-                    let c = ins.cost.entry(data["model"].as_str().unwrap_or("?").to_string()).or_default();
-                    c.usd += data["usd"].as_f64().unwrap_or(0.0).max(0.0);
-                    c.input += data["input"].as_u64().unwrap_or(0);
-                    c.output += data["output"].as_u64().unwrap_or(0);
-                    c.calls += 1;
-                }
-            }
-        }
         "backup-key" => {
             ensure!(state.backup_key.is_none(), "the scope has its backup key");
             let key = unhex(e.content.data["key"].as_str().context("no key")?)?;
             state.backup_key = Some(key);
-        }
-        "backup" => {
-            ensure!(scope == Scope::Global, "backup runs are written in global");
-            let data = &e.content.data;
-            let snapshots = data["snapshots"].as_array().into_iter().flatten().map(|s| BackedUp {
-                scope: s["scope"].as_str().unwrap_or("").to_string(),
-                upto: s["upto"].as_u64().unwrap_or(0),
-                entries: s["entries"].as_u64().unwrap_or(0),
-                blobs: s["blobs"].as_u64().unwrap_or(0),
-                bytes: s["bytes"].as_u64().unwrap_or(0),
-            });
-            let place = data["place"].as_str().filter(|p| is_id(p)).context("no place")?.to_string();
-            let snapshots: Vec<BackedUp> = snapshots.collect();
-            for s in &snapshots {
-                let covered = state.covered.entry((place.clone(), s.scope.clone())).or_default();
-                *covered = (covered.0.max(s.upto), covered.1.max(e.time()));
-            }
-            let (error, trouble) = (data["error"].as_str().map(str::to_string), data["trouble"].as_str().map(str::to_string));
-            state.backups.push(BackupRun { place, server: e.author(), time: e.time(), error, trouble, snapshots });
-            if state.backups.len() > BACKUP_RUNS_KEPT {
-                state.backups.remove(0);
-            }
-        }
-        "backup-alert" => {
-            ensure!(scope == Scope::Global, "backup alerts are written in global");
-            let place = e.content.data["place"].as_str().filter(|p| is_id(p)).context("no place")?.to_string();
-            state.alerted.insert(place, e.time());
         }
         // A blob the scope keeps, which its `blobs` names.
         "keep" => {}

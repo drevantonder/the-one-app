@@ -116,11 +116,6 @@ pub fn install(r: &Release, bytes: &[u8]) -> Result<PathBuf> {
     Ok(exe)
 }
 
-/// Says which build a server runs, so everyone can see when a release has landed.
-pub fn running() -> Content {
-    Content::new(APP, "running", json!({ "commit": crate::config::BUILD, "target": crate::config::TARGET }))
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Running {
     pub commit: String,
@@ -128,16 +123,6 @@ pub struct Running {
     pub target: String,
 }
 
-/// The build each server last said it runs.
-pub fn builds(entries: &[Entry]) -> std::collections::HashMap<Key, Running> {
-    let mut out = std::collections::HashMap::new();
-    for e in entries.iter().filter(|e| e.content.app == APP && e.content.kind == "running") {
-        if let Ok(r) = serde_json::from_value::<Running>(e.content.data.clone()) {
-            out.insert(e.author(), r);
-        }
-    }
-    out
-}
 
 #[cfg(test)]
 mod tests {

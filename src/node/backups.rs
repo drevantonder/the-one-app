@@ -2,6 +2,7 @@
 //! each run went, written in `global` so every device shows it. The format and the places are `crate::backups`.
 
 use super::*;
+use super::status::{BackedUp, BackupRun, Said};
 use std::collections::BTreeSet;
 
 use crate::backups::{self as b, Snapshot};
@@ -38,11 +39,12 @@ impl Problem {
 fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
     let m = &i.r.members;
     let Some((_, global)) = i.views.get("global") else { return Ok(Vec::new()) };
+    let status = i.status.get("global").cloned().unwrap_or_default();
     let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
     let mut out = Vec::new();
     for p in places(global) {
-        let runs: Vec<&members::BackupRun> = global.backups.iter().filter(|r| r.place == p.id).collect();
-        let failing: Vec<&&members::BackupRun> = runs.iter().rev().take_while(|r| r.error.is_some()).collect();
+        let runs: Vec<&BackupRun> = status.backups.iter().filter(|r| r.place == p.id).collect();
+        let failing: Vec<&&BackupRun> = runs.iter().rev().take_while(|r| r.error.is_some()).collect();
         if let Some(last) = failing.first() {
             let error = last.error.clone().unwrap_or_default();
             let trouble = last.trouble.as_deref().and_then(crate::bucket::Trouble::parse);
@@ -72,7 +74,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
                 _ => line(m, &scope, &p.id).first().copied(),
             };
             let Some(backer) = backer.filter(|_| i.r.holds(&scope)) else { continue };
-            let covered = global.covered.get(&(p.id.clone(), log.clone())).map_or(0, |c| c.0);
+            let covered = status.covered.get(&(p.id.clone(), log.clone())).map_or(0, |c| c.0);
             let Some(waiting) = i.r.store.first_change(&log, covered)? else { continue };
             let since = waiting.max(p.made);
             if now.saturating_sub(since) >= LATE && late.as_ref().is_none_or(|l| since < l.0) {
@@ -180,20 +182,19 @@ impl Node {
         let (due, admins, push) = self.with(|i| {
             let m = &i.r.members;
             let push = settings(m).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
-            let Some((_, global)) = i.views.get("global") else { return Ok((Vec::new(), Vec::new(), push)) };
-            if push.is_empty() {
+            if push.is_empty() || !i.views.contains_key("global") {
                 return Ok((Vec::new(), Vec::new(), push));
             }
             let at = line(m, &Scope::Global, "alerts").iter().position(|k| *k == me).unwrap_or(usize::MAX / 2) as u64;
             let due: Vec<Problem> = problems(i, now)?
                 .into_iter()
-                .filter(|p| p.push.is_some_and(|t| now >= t + at * STAGGER) && global.alerted.get(&p.place).is_none_or(|t| *t < p.since))
+                .filter(|p| p.push.is_some_and(|t| now >= t + at * STAGGER) && i.status.get("global").and_then(|s| s.alerted.get(&p.place)).is_none_or(|t| *t < p.since))
                 .collect();
             let admins: Vec<String> = m.users.values().filter(|u| !u.removed && m.is_admin(&u.id)).map(|u| u.id.clone()).collect();
             Ok((due, admins, push))
         })?;
         for p in due {
-            self.append(&Scope::Global, members::node("backup-alert", json!({ "place": p.place, "since": p.since }))).await?;
+            self.say(&Scope::Global, Said::Alerted { place: p.place.clone() }).await?;
             for admin in &admins {
                 let input = json!({ "title": "Backups", "body": format!("{} {}", p.text, p.fix) });
                 let call = CallRequest { app: push.clone(), sidecar: Some(push.clone()), op: "send".into(), input, client: Some("app".into()), ..Default::default() };
@@ -265,7 +266,7 @@ impl Node {
                         // A server further down the line takes a scope's changes only once they've waited for each
                         // server before it.
                         if at > 0 {
-                            let covered = global.backups.iter().filter(|r| r.place == p.id && r.error.is_none()).flat_map(|r| &r.snapshots).filter(|s| s.scope == log).map(|s| s.upto).max().unwrap_or(0);
+                            let covered = i.status.get("global").and_then(|s| s.covered.get(&(p.id.clone(), log.clone()))).map_or(0, |c| c.0);
                             if !b::takes_over(at, i.r.store.first_change(&log, covered)?, p.made, now) {
                                 continue;
                             }
@@ -390,18 +391,12 @@ impl Node {
         Ok(written)
     }
 
-    /// Writes how a run to a place went, in `global`.
+    /// Says how a run to a place went, in `global`.
     async fn backed_up(&self, place: &str, now: u64, error: Option<anyhow::Error>, snapshots: Vec<Snapshot>) -> Result<()> {
-        let snapshots: Vec<Value> = snapshots.iter().map(|s| json!({ "scope": s.scope, "upto": s.upto, "entries": s.entries, "blobs": s.blobs.len(), "bytes": s.bytes })).collect();
-        let mut data = json!({ "place": place, "time": now, "snapshots": snapshots });
-        if let Some(error) = error {
-            data["error"] = json!(format!("{error:#}").chars().take(500).collect::<String>());
-            if let Some(trouble) = crate::bucket::Trouble::of(&error) {
-                data["trouble"] = json!(trouble.name());
-            }
-        }
-        self.append(&Scope::Global, members::node("backup", data)).await?;
-        Ok(())
+        let snapshots = snapshots.iter().map(|s| BackedUp { scope: s.scope.clone(), upto: s.upto, entries: s.entries, blobs: s.blobs.len() as u64, bytes: s.bytes }).collect();
+        let trouble = error.as_ref().and_then(crate::bucket::Trouble::of).map(|t| t.name().to_string());
+        let error = error.map(|e| format!("{e:#}").chars().take(500).collect::<String>());
+        self.say(&Scope::Global, Said::BackedUp(BackupRun { place: place.into(), server: self.0.id, time: now, error, trouble, snapshots })).await
     }
 
     /// Backups as a person sees them: each place, how its last run went, the recent snapshots, and the disks here.
@@ -411,11 +406,11 @@ impl Node {
             let empty = ScopeState::default();
             let global = i.views.get("global").map(|(_, s)| s).unwrap_or(&empty);
             let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
-            let runs = &global.backups;
+            let runs = i.status.get("global").map(|s| s.backups.clone()).unwrap_or_default();
             let problems = problems(i, now_ms())?;
             let mut out = Vec::new();
             for p in places(global) {
-                let mine: Vec<&members::BackupRun> = runs.iter().filter(|r| r.place == p.id).collect();
+                let mine: Vec<&BackupRun> = runs.iter().filter(|r| r.place == p.id).collect();
                 let last_ok = mine.iter().rev().find(|r| r.error.is_none());
                 let (kind, place_where, endpoint) = match &p.place {
                     Ok(Place::Folder(path)) => ("folder", path.display().to_string(), None),

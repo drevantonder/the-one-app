@@ -27,6 +27,7 @@ use crate::sync::{self, Sidecar, Handled, Msg, Replica};
 use crate::vault;
 
 mod backups;
+mod status;
 mod storage;
 
 const JOIN_ALPN: &[u8] = b"one/join/1";
@@ -109,6 +110,8 @@ struct Install {
     asked: HashMap<Key, u64>,
     /// The build each server last said it runs.
     builds: HashMap<Key, release::Running>,
+    /// Each scope's rows of how things went, as this server last read them.
+    status: HashMap<String, status::Status>,
     /// Each scope's views: how far they've replayed, and what the scope's node entries add up to.
     views: HashMap<String, (Order, ScopeState)>,
     /// How long each server took to answer a call lately.
@@ -300,6 +303,8 @@ pub struct Inner {
     scope_keys: Mutex<HashMap<Scope, [u8; 32]>>,
     /// Whether this server is moving to the install's new storage now.
     moving: Mutex<bool>,
+    /// Held while this server makes or finds a scope's key.
+    making_keys: tokio::sync::Mutex<()>,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -399,6 +404,7 @@ impl Node {
             dbs: Mutex::new(HashMap::new()),
             scope_keys: Mutex::new(HashMap::new()),
             moving: Mutex::new(false),
+            making_keys: tokio::sync::Mutex::new(()),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -411,6 +417,7 @@ impl Node {
             node.replay_all().await?;
             node.keep_alone_here()?;
             node.follow_storage();
+            node.read_all_status();
         }
         let router = Router::builder(endpoint)
             .accept(sync::ALPN, SyncHandler(node.clone()))
@@ -514,7 +521,7 @@ impl Node {
         let paired_by = file.paired_by.and_then(|h| unhex(&h).ok());
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)), paired_by)?;
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((Place::from_fields(&f)?, f))).transpose()?;
-        let install = Install { r, user: file.user, bucket, sessions: HashMap::new(), asked: HashMap::new(), builds: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), dialed: false };
+        let install = Install { r, user: file.user, bucket, sessions: HashMap::new(), asked: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), dialed: false };
         *self.0.install.lock().unwrap() = Some(install);
         Ok(())
     }
@@ -624,7 +631,6 @@ impl Node {
             for log in &handled.dropped {
                 i.views.remove(log);
             }
-            i.builds.extend(release::builds(&handled.new));
             update_views(i, &handled.new)
         })?;
         // A scope this server no longer holds: it forgets what it read of it.
@@ -653,7 +659,6 @@ impl Node {
         let _write = self.0.writes.lock().await;
         self.with(|i| {
             i.views.clear();
-            i.builds = release::builds(&i.r.store.scope("global")?);
             let all = i.r.store.ordered()?;
             update_views(i, &all)
         })
@@ -693,7 +698,7 @@ impl Node {
         }
         let running = self.with(|i| Ok(i.builds.get(&self.0.id).map(|r| r.commit.clone())))?;
         if running.as_deref() != Some(crate::config::BUILD) {
-            self.append(&Scope::Global, release::running()).await?;
+            self.say(&Scope::Global, status::Said::Build { server: self.0.id, build: crate::config::BUILD.into(), target: crate::config::TARGET.into() }).await?;
         }
         Ok(())
     }
@@ -964,9 +969,15 @@ impl Node {
         if let Some(key) = self.0.scope_keys.lock().unwrap().get(scope) {
             return Ok(*key);
         }
+        // One at a time here, so this server never makes two keys for a scope.
+        let _making = self.0.making_keys.lock().await;
+        if let Some(key) = self.0.scope_keys.lock().unwrap().get(scope) {
+            return Ok(*key);
+        }
         let bucket = self.bucket()?;
         let folder = crate::backups::folder(&scope.to_string());
-        let key = match Bucket::get(&bucket, &format!("{folder}/{KEYS}/{}", hex(&self.0.id))).await? {
+        let given = format!("{folder}/{KEYS}/{}", hex(&self.0.id));
+        let key = match Bucket::get(&bucket, &given).await? {
             Some(o) => crate::backups::unseal(self.0.key.as_bytes(), &o.bytes)?,
             None => {
                 // One its backups made before the bucket kept keys.
@@ -975,9 +986,14 @@ impl Node {
                 let id = crate::backups::key_id(&key);
                 let name = format!("{folder}/{KEY_OBJECT}");
                 if !Bucket::create(&bucket, &name, id.as_bytes()).await? && Bucket::get(&bucket, &name).await?.is_none_or(|o| o.bytes != id.as_bytes()) {
-                    bail!("{} doesn't have {scope}'s key yet: a server that has it gives it when it's next on", self.server_name());
+                    // Another server made it just now, and may have given it to this one already.
+                    match Bucket::get(&bucket, &given).await? {
+                        Some(o) => crate::backups::unseal(self.0.key.as_bytes(), &o.bytes)?,
+                        None => bail!("{} doesn't have {scope}'s key yet: a server that has it gives it when it's next on", self.server_name()),
+                    }
+                } else {
+                    key
                 }
-                key
             }
         };
         self.0.scope_keys.lock().unwrap().insert(scope.clone(), key);
@@ -1053,13 +1069,13 @@ impl Node {
     fn record(&self, app: &str, req: &CallRequest, me: &Caller, error: Option<&str>) {
         let now = now_ms();
         let client = req.client.clone().unwrap_or_else(|| "api".into());
-        let content = match error {
+        let said = match error {
             None => {
                 let day = now / 86_400_000;
                 if !self.0.seen.lock().unwrap().insert((app.to_string(), me.user.clone(), client.clone(), day)) {
                     return;
                 }
-                members::node("used", json!({ "app": app, "client": client, "agent": me.agent, "day": day }))
+                status::Said::Used { app: app.into(), user: me.user.clone(), client, agent: me.agent.clone(), day }
             }
             Some(error) => {
                 let hour = now / 3_600_000;
@@ -1070,15 +1086,15 @@ impl Node {
                     return;
                 }
                 let error: String = error.lines().next().unwrap_or("").chars().take(300).collect();
-                members::node("failed", json!({ "app": app, "op": req.op, "error": error, "client": client, "agent": me.agent }))
+                status::Said::Failed { app: app.into(), op: req.op.clone(), error, user: me.user.clone() }
             }
         };
-        self.write_insight(app, me, content);
+        self.write_insight(app, me, said);
     }
 
     /// Writes an insight about `app` for `me`'s call: in the app owner's scope when `me` may use it and this server
     /// holds it, else in `global`; in the background.
-    fn write_insight(&self, app: &str, me: &Caller, content: Content) {
+    fn write_insight(&self, app: &str, me: &Caller, said: status::Said) {
         let Ok(scope) = self.with(|i| {
             let m = &i.r.members;
             let owner = m.apps.get(app).map(|a| a.owner.clone()).context("no such app")?;
@@ -1091,9 +1107,9 @@ impl Node {
         }) else {
             return;
         };
-        let (node, user, by) = (self.clone(), me.user.clone(), (me.key != self.0.id).then_some(me.key));
+        let node = self.clone();
         tokio::spawn(async move {
-            if let Err(err) = node.append_as(&scope, &user, by, content).await {
+            if let Err(err) = node.say(&scope, said).await {
                 tracing::debug!("insights: {err:#}");
             }
         });
@@ -1112,9 +1128,9 @@ impl Node {
             let mut people: BTreeMap<(String, String), (u64, u64, Option<String>)> = BTreeMap::new();
             let mut errors: BTreeMap<(String, String), (u64, u64, u64, String)> = BTreeMap::new();
             let mut cost: BTreeMap<String, (f64, u64, u64, u64)> = BTreeMap::new();
-            for (log, (_, state)) in &i.views {
+            for (log, status) in &i.status {
                 let Ok(scope) = Scope::parse(log) else { continue };
-                let Some(ins) = state.insights.get(app).filter(|_| m.may_use(&viewer.user, &scope)) else { continue };
+                let Some(ins) = status.insights.get(app).filter(|_| m.may_use(&viewer.user, &scope)) else { continue };
                 for ((user, client), u) in &ins.used {
                     let p = people.entry((user.clone(), client.clone())).or_default();
                     p.0 += u.days;
@@ -1157,8 +1173,14 @@ impl Node {
         for cost in costs {
             if let Append::Cost { data } = cost {
                 let to = from.unwrap_or(app);
-                let data = json!({ "app": to, "model": data["model"], "usd": data["usd"], "input": data["input"], "output": data["output"], "by": app });
-                self.write_insight(to, me, members::node("cost", data));
+                let said = status::Said::Cost {
+                    app: to.into(),
+                    model: data["model"].as_str().unwrap_or("?").into(),
+                    usd: data["usd"].as_f64().unwrap_or(0.0),
+                    input: data["input"].as_u64().unwrap_or(0),
+                    output: data["output"].as_u64().unwrap_or(0),
+                };
+                self.write_insight(to, me, said);
             }
         }
         let (installs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
@@ -1328,7 +1350,10 @@ impl Node {
     async fn schedule_loop(self) {
         for tick in 1u64.. {
             tokio::time::sleep(SCHEDULE_TICK).await;
-            // What another server wrote of a built-in sidecar's records, every minute.
+            // What other servers said, every tick; and wrote of a built-in sidecar's records, every minute.
+            if self.has_install() {
+                self.read_all_status();
+            }
             if tick % 6 == 0 && self.has_install() {
                 for sidecar in self.0.built_in_sidecars.iter().filter(|n| n.sync.is_some()) {
                     self.sync_built_in(sidecar.name);
@@ -1375,7 +1400,7 @@ impl Node {
                         let Some(user) = runs_as(m, state, &scope, app, &s.name) else { continue };
                         let Some(slot) = s.slot(now) else { continue };
                         let installed = state.installers.get(app).map(|(_, t)| *t).unwrap_or(0);
-                        let ran = state.runs.get(&(app.clone(), s.name.clone())).is_some_and(|r| r.iter().any(|r| r.slot == slot));
+                        let ran = i.status.get(log).and_then(|st| st.runs.get(&(app.clone(), s.name.clone()))).is_some_and(|r| r.iter().any(|r| r.slot == slot));
                         if slot < installed || ran || !schedules::due(s, slot, now) {
                             continue;
                         }
@@ -1408,6 +1433,15 @@ impl Node {
 
     /// Runs one slot of a schedule here: an ordinary call as `user`, touching only `scope`; then writes how it went.
     async fn run_schedule(&self, scope: &Scope, app: &str, schedule: &Schedule, slot: u64, user: &str) -> Result<()> {
+        // A slot runs once: the server that takes it in the bucket first, once it's ready to run it.
+        let latest = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone())))?;
+        if !self.ready() || latest.is_none() || self.0.bundles.lock().unwrap().get(app) != latest.as_ref() {
+            return Ok(());
+        }
+        let lease = format!("{}/{}/slots/{app}/{}/{slot}", crate::backups::folder(&scope.to_string()), members::APP, schedule.name);
+        if !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
+            return Ok(());
+        }
         let started = Instant::now();
         let reply = match self.count(app, "schedule").await {
             Err(err) => Reply::Error(format!("{err:#}")),
@@ -1419,15 +1453,11 @@ impl Node {
         let (ok, error) = match reply {
             Reply::Ok(_) => (true, None),
             Reply::Error(e) => (false, Some(e.chars().take(500).collect::<String>())),
-            // Not here yet (not ready, or without the latest deploy): the next tick tries again.
-            Reply::Elsewhere(why) => {
-                tracing::debug!("{app}'s schedule {} waits: {why}", schedule.name);
-                return Ok(());
-            }
+            // It took the slot, so it says so; the next slot is tried again.
+            Reply::Elsewhere(why) => (false, Some(format!("it didn't run: {why}"))),
         };
-        let data = json!({ "app": app, "schedule": schedule.name, "slot": slot, "ok": ok, "error": error, "ms": started.elapsed().as_millis() as u64, "spec": schedule.spec() });
-        self.append_as(scope, user, None, members::node("ran", data)).await?;
-        Ok(())
+        let run = status::Run { slot, time: now_ms(), server: self.0.id, user: user.into(), ok, error, ms: started.elapsed().as_millis() as u64, spec: schedule.spec() };
+        self.say(scope, status::Said::Ran { app: app.into(), schedule: schedule.name.clone(), run }).await
     }
 
     /// An app's schedules where it's installed for `viewer` and this server holds the scope: what each runs and when,
@@ -1444,12 +1474,13 @@ impl Node {
                 if !state.installed.contains(app) {
                     continue;
                 }
+                let status = i.status.get(&scope.to_string()).cloned().unwrap_or_default();
                 let scope_name = handles(m, std::slice::from_ref(&scope), &viewer.user).remove(0).name;
                 let base = |name: &str| {
                     let key = (app.to_string(), name.to_string());
-                    let runs = state.runs.get(&key);
+                    let runs = status.runs.get(&key);
                     let last = runs.and_then(|r| r.last()).map(|r| json!({ "time": r.time, "ok": r.ok, "error": r.error }));
-                    let changed = state.changed.get(&key).filter(|(.., t)| now.saturating_sub(*t) < CHANGED_SHOWN).map(|(was, is, t)| json!({ "was": schedules::say(was), "is": schedules::say(is), "time": t }));
+                    let changed = status.changed.get(&key).filter(|(.., t)| now.saturating_sub(*t) < CHANGED_SHOWN).map(|(was, is, t)| json!({ "was": schedules::say(was), "is": schedules::say(is), "time": t }));
                     json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": members::manages_scope(m, &viewer.user, &scope), "last": last, "changed": changed })
                 };
                 for s in declared {
@@ -1477,7 +1508,7 @@ impl Node {
                     list.push(v);
                 }
                 // Schedules a deploy removed that ran lately.
-                for ((a, name), runs) in &state.runs {
+                for ((a, name), runs) in &status.runs {
                     let gone = a == app && !declared.iter().any(|s| match s {
                         Ok(s) => &s.name == name,
                         Err((n, _)) => n == name,
@@ -1489,7 +1520,7 @@ impl Node {
                         list.push(v);
                     }
                 }
-                for ((a, name), runs) in state.runs.iter().filter(|((a, _), _)| a == app) {
+                for ((a, name), runs) in status.runs.iter().filter(|((a, _), _)| a == app) {
                     let _ = a;
                     for r in runs {
                         activity.push(json!({ "schedule": name, "scope": scope.to_string(), "scope_name": scope_name, "time": r.time, "ok": r.ok, "error": r.error, "ms": r.ms, "server": m.machines.get(&r.server).map(|s| s.name.clone()), "user": user_name(&r.user) }));
