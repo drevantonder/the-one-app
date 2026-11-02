@@ -6,6 +6,7 @@
 //! caught. Everything else (keys, hints, leases) is read from the bucket each time.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 
@@ -19,11 +20,19 @@ pub struct Copied<B = Place> {
     here: Place,
     /// Whether a name this server's copy lacks is looked for in the bucket.
     reach: bool,
+    /// Where the install's data went, if it moved since `place` was taken: held to write, and taken whole while it
+    /// moves, so a write waits for the move and then goes where the data is, never only to where it was.
+    moved: Arc<tokio::sync::RwLock<Option<B>>>,
 }
 
 impl<B: Bucket + Clone> Copied<B> {
     pub fn new(place: B, dir: PathBuf) -> Copied<B> {
-        Copied { place, here: Place::Folder(dir), reach: true }
+        Copied::moving(place, dir, Arc::default())
+    }
+
+    /// The bucket `place` and this server's copy in `dir`, following each move of the install's data in `moved`.
+    pub fn moving(place: B, dir: PathBuf, moved: Arc<tokio::sync::RwLock<Option<B>>>) -> Copied<B> {
+        Copied { place, here: Place::Folder(dir), reach: true, moved }
     }
 
     /// Only this server's copy: what it lacks isn't there, and nothing is written.
@@ -131,7 +140,9 @@ impl<B: Bucket> Bucket for Copied<B> {
             return Ok(None);
         }
         tracing::trace!(target: "bucket", "get {name}");
-        let got = Bucket::get(&self.place, name).await?;
+        // While the data moves, what it moves from is still all of it.
+        let moved = self.moved.try_read().ok();
+        let got = Bucket::get(moved.as_deref().and_then(Option::as_ref).unwrap_or(&self.place), name).await?;
         if let Some(o) = got.as_ref().filter(|_| kept(name)) {
             if let Err(err) = self.here.create(name, &o.bytes) {
                 tracing::debug!("keeping {name}: {err:#}");
@@ -145,7 +156,8 @@ impl<B: Bucket> Bucket for Copied<B> {
             bail!("this server's copy of the bucket is only read");
         }
         tracing::trace!(target: "bucket", "create {name}");
-        let created = Bucket::create(&self.place, name, bytes).await?;
+        let moved = self.moved.read().await;
+        let created = Bucket::create(moved.as_ref().unwrap_or(&self.place), name, bytes).await?;
         if created && kept(name) {
             if let Err(err) = self.here.create(name, bytes) {
                 tracing::debug!("keeping {name}: {err:#}");
@@ -159,6 +171,35 @@ impl<B: Bucket> Bucket for Copied<B> {
             bail!("this server's copy of the bucket is only read");
         }
         tracing::trace!(target: "bucket", "replace {name}");
-        Bucket::replace(&self.place, name, bytes, tag).await
+        let moved = self.moved.read().await;
+        Bucket::replace(moved.as_ref().unwrap_or(&self.place), name, bytes, tag).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A write made while the install's data moves waits, then goes where the data went: none is left behind.
+    #[tokio::test]
+    async fn a_write_during_a_move_goes_to_the_new_bucket() {
+        let dir = std::env::temp_dir().join(format!("copied-move-{}", rand::random::<u64>()));
+        let (old, new) = (Place::Folder(dir.join("old")), Place::Folder(dir.join("new")));
+        let moved: Arc<tokio::sync::RwLock<Option<Place>>> = Arc::default();
+        let copied = Copied::moving(old.clone(), dir.join("copy"), moved.clone());
+        let name = "global/node/log/000000000001";
+        let mut moving = moved.write().await;
+        let write = tokio::spawn({
+            let copied = copied.clone();
+            async move { Bucket::create(&copied, name, b"written while it moved").await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!write.is_finished(), "a write waits while the data moves");
+        *moving = Some(new.clone());
+        drop(moving);
+        assert!(write.await.unwrap().unwrap());
+        assert!(new.get(name).unwrap().is_some() && old.get(name).unwrap().is_none(), "it went to the new bucket only");
+        assert!(Bucket::get(&copied.here_only(), name).await.unwrap().is_some(), "and is kept in this server's copy");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

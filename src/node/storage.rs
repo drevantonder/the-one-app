@@ -118,6 +118,13 @@ impl Node {
             if let Some(other) = place.get(INSTALL_OBJECT)?.filter(|r| r != theirs.as_bytes()) {
                 bail!("that bucket holds another install's data ({})", String::from_utf8_lossy(&other));
             }
+            Ok(())
+        })
+        .await??;
+        // Writes wait while it copies, then go to the new bucket, so none is left only in the old one.
+        let mut moved = self.0.moved.write().await;
+        let (place, theirs) = (to.clone(), root.clone());
+        tokio::task::spawn_blocking(move || -> Result<()> {
             if let Some(from) = from.filter(|f| f.present()) {
                 for name in from.names()? {
                     if place.get(&name)?.is_none() {
@@ -136,9 +143,11 @@ impl Node {
         file.bucket = Some(fields.clone());
         self.save_install(&file)?;
         self.with(|i| {
-            i.bucket = Some((to, fields));
+            i.bucket = Some((to.clone(), fields));
             Ok(())
         })?;
+        *moved = Some(to);
+        drop(moved);
         // What it read of the old bucket stays true, but is read again from the new one.
         self.0.dbs.lock().unwrap().clear();
         tracing::info!("the install's data is kept in {} now", self.storage()?["where"].as_str().unwrap_or(""));

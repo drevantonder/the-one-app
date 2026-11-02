@@ -320,6 +320,8 @@ pub struct Inner {
     scope_keys: Mutex<HashMap<Scope, [u8; 32]>>,
     /// Whether this server is moving to the install's new storage now.
     moving: Mutex<bool>,
+    /// Where the install's data went: every bucket this server has used writes there, after a move (`Copied`).
+    moved: Arc<tokio::sync::RwLock<Option<Place>>>,
     /// This server's connector for the install's tunnel, with the token it runs with.
     tunnel: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
     /// Held while this server makes or finds a scope's key.
@@ -430,6 +432,7 @@ impl Node {
             behind: Mutex::new(Default::default()),
             scope_keys: Mutex::new(HashMap::new()),
             moving: Mutex::new(false),
+            moved: Arc::default(),
             tunnel: Mutex::new(None),
             making_keys: tokio::sync::Mutex::new(()),
             written: Mutex::new(HashMap::new()),
@@ -1069,7 +1072,7 @@ impl Node {
     /// The install's bucket, as this server reaches it, with its copy of the databases' steps.
     fn bucket(&self) -> Result<Copied> {
         let place = self.with(|i| i.bucket.as_ref().map(|(p, _)| p.clone()).context("this server can't reach the install's bucket, where apps keep their data: use another server"))?;
-        Ok(Copied::new(place, self.install_dir().join("copy")))
+        Ok(Copied::moving(place, self.install_dir().join("copy"), self.0.moved.clone()))
     }
 
     /// A database's key: `app`'s `database` in `scope`. The one place keys come from, until the kernel's vault gives
