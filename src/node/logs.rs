@@ -94,9 +94,9 @@ impl Node {
         self.database_key(scope, members::APP, crate::log::NAME).await
     }
 
-    /// Tells the servers that hold `scope` it changed, so they read it now rather than in a moment: its entries, or
-    /// with `wrote`, step `at` of an app's database, which it sends, so they read it from their copy, not the bucket. In
-    /// the background, and only a hint.
+    /// Tells the servers that hold `scope` it changed, so they read it now rather than at their next look: its entries,
+    /// or with `wrote`, step `at` of an app's database. In the background, and only a hint: each reads what changed from
+    /// the bucket.
     pub(super) fn ping(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
         let Ok((servers, me)) = self.with(|i| {
             let m = &i.r.members;
@@ -110,10 +110,6 @@ impl Node {
         let mut input = json!({ "scope": scope.to_string() });
         if let Some((app, database, at)) = wrote {
             input = json!({ "scope": scope.to_string(), "app": app, "database": database, "at": at });
-            let name = crate::db::step_name(&format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string())), at);
-            if let Some(step) = self.bucket().ok().and_then(|b| b.kept(&name).ok().flatten()).filter(|s| s.len() <= PINGED_STEP) {
-                input["step"] = json!(data_encoding::BASE64.encode(&step));
-            }
         }
         let req = CallRequest { app: members::APP.into(), op: "changed".into(), input, ..Default::default() };
         for server in servers {
@@ -122,6 +118,40 @@ impl Node {
                 let _ = node.ask_server(server, &req, &me).await;
             });
         }
+    }
+
+    /// What another server said changed in `scope`, which this server holds: its entries, which it reads now, or with
+    /// `wrote`, step `at` of a database, which it fetches into its copy now if it has the database open, and until then
+    /// reads from the bucket first.
+    pub(super) fn changed_there(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
+        if !self.with(|i| Ok(i.r.holds(scope))).unwrap_or(false) {
+            return;
+        }
+        let (node, scope) = (self.clone(), scope.clone());
+        let Some((app, database, at)) = wrote.map(|(a, d, at)| (a.to_string(), d.to_string(), at)) else {
+            tokio::spawn(async move {
+                let _ = node.read_log(&scope).await;
+            });
+            return;
+        };
+        let id = (scope, format!("{app}/{database}"));
+        self.0.behind.lock().unwrap().insert(id.clone());
+        tokio::spawn(async move {
+            let open = node.0.dbs.lock().unwrap().get(&id).cloned();
+            let filled = match (open, node.bucket()) {
+                (Some(db), Ok(bucket)) => match db.try_lock().map(|db| (db.prefix().to_string(), db.at())) {
+                    Ok((prefix, from)) => bucket.fill(&prefix, from).await.is_ok_and(|n| from + n >= at),
+                    Err(_) => false,
+                },
+                _ => false,
+            };
+            if filled {
+                node.0.behind.lock().unwrap().remove(&id);
+            }
+            if app != members::APP {
+                node.emit(Event::Changed { apps: vec![app] });
+            }
+        });
     }
 
     /// Tells every other server which sidecars serve its local user here and how loaded it is, now and then.

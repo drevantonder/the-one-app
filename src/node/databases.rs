@@ -101,52 +101,19 @@ impl Node {
         });
     }
 
-    /// What another server said it wrote to a database: step `at`, kept in this server's copy if it sent it and holds
-    /// the scope, or else the database is behind, and its next read catches up from the bucket.
-    pub(super) fn written_there(&self, by: &Key, scope: &Scope, app: &str, database: &str, at: u64, step: Option<&str>) -> Result<()> {
-        let id = (scope.clone(), format!("{app}/{database}"));
-        let holds = self.with(|i| Ok(i.r.members.holds(&self.0.id, scope) && i.r.members.holds(by, scope)))?;
-        let bucket = self.bucket()?;
-        let prefix = format!("{}/{}", crate::bucket::folder(&scope.to_string()), id.1);
-        let kept = match step.map(|s| data_encoding::BASE64.decode(s.as_bytes())) {
-            Some(Ok(bytes)) if holds && at > 0 => {
-                bucket.keep(&crate::db::step_name(&prefix, at), &bytes, &hex(by))?;
-                // A step whose one before isn't here may follow one this server wasn't sent.
-                at == 1 || bucket.kept(&crate::db::step_name(&prefix, at - 1))?.is_some()
-            }
-            _ => false,
-        };
-        if !kept {
-            self.0.behind.lock().unwrap().insert(id);
-        }
-        Ok(())
-    }
-
-    /// What a node that sends no pings (the serverless one) said it wrote, as someone who may use `scope`: step `at`
-    /// of `app`'s `database`, which this server fetches from the bucket into its copy, if it holds the scope, and
-    /// passes on to the others that do as if it wrote it. Only a hint, which each checks against the bucket.
+    /// What a node that tells no other server what it wrote (the serverless one) said it wrote, as someone who may use
+    /// `scope`: step `at` of `app`'s `database`, which this server takes as another server's word, and passes on to the
+    /// others that hold the scope as if it wrote it.
     pub async fn written_elsewhere(&self, me: &Caller, scope: &Scope, app: &str, database: &str, at: u64) -> Result<()> {
-        let holds = self.with(|i| {
-            ensure!(i.r.members.may_use(&me.user, scope), "you can't use {scope}");
-            Ok(i.r.members.holds(&self.0.id, scope))
-        })?;
-        if holds && at > 0 {
-            let bucket = self.bucket()?;
-            let prefix = format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()));
-            crate::bucket::Bucket::get(&bucket, &crate::db::step_name(&prefix, at)).await?;
-            // A step whose one before isn't here may follow one this server hasn't read.
-            if at > 1 && bucket.kept(&crate::db::step_name(&prefix, at - 1))?.is_none() {
-                self.0.behind.lock().unwrap().insert((scope.clone(), format!("{app}/{database}")));
-            }
-            self.emit(Event::Changed { apps: vec![app.to_string()] });
-        }
+        ensure!(self.with(|i| Ok(i.r.members.may_use(&me.user, scope)))?, "you can't use {scope}");
+        self.changed_there(scope, Some((app, database, at)));
         self.ping(scope, Some((app, database, at)));
         Ok(())
     }
 
-    /// Brings a database up to date for a call that reads it, as far as this server's copy goes: other servers send
-    /// what they write with their pings, and `fill_copies` keeps up with the bucket. Only when a ping said it changed
-    /// without sending what is the bucket asked first, and if it doesn't answer, the copy is read as it is: behind,
+    /// Brings a database up to date for a call that reads it, as far as this server's copy goes: a notice of another
+    /// server's write fetches its step into the copy, and `fill_copies` keeps up with the bucket. Only while a notice's
+    /// step isn't here yet is the bucket asked first, and if it doesn't answer, the copy is read as it is: behind,
     /// never wrong.
     pub(super) async fn read_ready(&self, id: &(Scope, String), db: &mut Db, bucket: &Copied) -> Result<()> {
         if self.0.behind.lock().unwrap().remove(id) {
@@ -160,31 +127,11 @@ impl Node {
         Ok(())
     }
 
-    /// Fetches into this server's copy what the bucket has of each database open here that it lacks, every tick: a
-    /// ping that was lost, or a serverless write no server was told of. A database a call is using is
-    /// left for the next. First, the steps other servers sent are checked against the bucket's: a database that read
-    /// one that differs is read again from the bucket's, and the server that sent it is recorded, for Devices.
+    /// Fetches into this server's copy what the bucket has of each database open here that it lacks, every tick: what
+    /// a lost notice would have said. A database a call is using is left for the next.
     pub(super) async fn fill_copies(&self) {
         let Ok(bucket) = self.bucket() else { return };
         let mut changed = Vec::new();
-        match bucket.check().await {
-            Ok(wrong) => {
-                for (name, from) in wrong {
-                    let Some((folder, id)) = name.rsplit_once('/').and_then(|(prefix, _)| prefix.split_once('/')) else { continue };
-                    let Ok(scope) = Scope::parse(&crate::bucket::scope_of(folder)) else { continue };
-                    tracing::warn!("{from} sent {name}, which isn't the bucket's: reading it again");
-                    self.0.dbs.lock().unwrap().remove(&(scope, id.to_string()));
-                    changed.extend(id.split('/').next().filter(|app| *app != members::APP).map(str::to_string));
-                    let Ok(server) = unhex(&from) else { continue };
-                    let name = self.with(|i| Ok(i.r.members.server(&server).map(|s| s.name.clone()))).ok().flatten().unwrap_or_else(|| short(&server));
-                    let said = status::Said::Failed { app: members::APP.into(), op: "changed".into(), error: format!("{name} sent a step that isn't the bucket's"), user: from };
-                    if let Err(err) = self.say(&Scope::Global, said).await {
-                        tracing::warn!("recording that {name} sent a wrong step: {err:#}");
-                    }
-                }
-            }
-            Err(err) => tracing::warn!("checking the steps other servers sent: {err:#}"),
-        }
         let open: Vec<_> = self.0.dbs.lock().unwrap().iter().map(|(id, db)| (id.clone(), db.clone())).collect();
         for ((_, name), db) in open {
             let Ok((prefix, at)) = db.try_lock().map(|db| (db.prefix().to_string(), db.at())) else { continue };

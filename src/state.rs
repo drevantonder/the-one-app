@@ -79,7 +79,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
                 "owners": list(m.owners(&s.key)), "users": list(m.users_of(&s.key)), "privileged": m.privileged(&s.key),
                 "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(),
                 "serves_me": m.serves(&s.key, me),
-                "build": null, "target": null, "sent_wrong": null, "sidecars": [], "installed_sidecars": [],
+                "build": null, "target": null, "sidecars": [], "installed_sidecars": [],
                 "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
                 "load": null,
             });

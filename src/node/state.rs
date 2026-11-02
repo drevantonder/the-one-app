@@ -137,8 +137,6 @@ impl Node {
                 "kind": load.as_ref().map(|l| l.kind.clone()), "far": i.far.get(&s.key).is_some_and(|d| *d > FAR),
                 "me": Some(s.key) == device, "here": s.key == self.0.id, "online": s.key == self.0.id || session.is_some(),
                 "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
-                // When it last sent another server a step that wasn't the bucket's.
-                "sent_wrong": i.status.get(&Scope::Global.to_string()).and_then(|st| st.insights.get(members::APP)).and_then(|ins| ins.errors.iter().filter(|((op, _), f)| op == "changed" && f.user == hex(&s.key)).map(|(_, f)| f.last).max()),
                 "sidecars": sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>(),
                 "installed_sidecars": installed_sidecars(m, s, sidecars, i.builds.get(&s.key).map(|r| r.commit.as_str())),
                 "load": load,

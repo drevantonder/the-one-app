@@ -27,7 +27,6 @@ async function devices(ctx) {
   for (const s of servers) for (const c of s.load?.containers || []) if (byName.has(c.name) && c.name !== s.name) host.set(c.name, s.name);
   const device = (s, on) => ({
     name: s.name, os: os(s), online: !!s.online, here: !!s.me, host: on || null, build: s.build || null,
-    sentWrong: s.sent_wrong || null,
     memory: s.online ? s.load?.memory || null : null, disk: s.online ? s.load?.disk || null : null,
     cpu: s.online ? s.load?.cpu || [] : [], gpu: s.online ? s.load?.gpu || [] : [],
   });
@@ -95,7 +94,7 @@ export default {
       async run(ctx, { history } = {}) {
         const now = (samples) => (samples?.length ? samples[samples.length - 1] : null);
         const list = await devices(ctx);
-        return { devices: history ? list : list.map((d) => ({ ...d, cpu: now(d.cpu), gpu: now(d.gpu) })), text: list.map((d) => `${d.host ? "  " : ""}${d.name}${d.kind ? ` (${d.kind})` : ""}: ${line(d)}${d.sentWrong ? ` · sent other devices wrong data, ${new Date(d.sentWrong).toISOString()}` : ""}`).join("\n") };
+        return { devices: history ? list : list.map((d) => ({ ...d, cpu: now(d.cpu), gpu: now(d.gpu) })), text: list.map((d) => `${d.host ? "  " : ""}${d.name}${d.kind ? ` (${d.kind})` : ""}: ${line(d)}`).join("\n") };
       },
     },
   },
@@ -138,7 +137,6 @@ export default {
 .guest .k { flex: 0 2 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; }
 .guest .m { color: var(--muted); font-size: 13px; white-space: nowrap; }
 .guest .bar { flex: 0 3 64px; min-width: 16px; }
-.wrong { color: #ff3b30; font-size: 13px; margin-top: 6px; }
 </style>
 <div id="list"></div>
 <script>
@@ -167,7 +165,7 @@ function card(d, guests) {
   }
   const rows = guests.map((g) => \`<div class="guest"><span class="n">\${one.esc(g.name)}</span><span class="k">\${g.kind === "podman" ? "podman" : "container"}</span>\${bar(g.memory)}<span class="m">\${g.memory ? mem(g.memory.used) : ""}</span></div>\`).join("");
   return \`<div class="dev\${d.online ? "" : " off"}\${d.host ? " sub" : ""}"><header><h3>\${one.esc(d.name)}</h3><span class="os">\${d.online ? sub : "Offline"}</span></header>
-    \${d.sentWrong ? '<div class="wrong">Sent other devices wrong data, ' + new Date(d.sentWrong).toLocaleString() + "</div>" : ""}\${stats ? '<div class="stats">' + stats + "</div>" : ""}\${rows ? '<div class="guests">' + rows + "</div>" : ""}</div>\`;
+    \${stats ? '<div class="stats">' + stats + "</div>" : ""}\${rows ? '<div class="guests">' + rows + "</div>" : ""}</div>\`;
 }
 async function show() {
   try {
@@ -229,12 +227,10 @@ function icon(d, w) {
   return { t: "icon", path: ICONS[kind] || ICONS.desktop, w, ...(LOGOS[os] ? { badge: LOGOS[os] } : {}) };
 }
 
-/// "This device · On linux", "Not updated yet" when it runs another build than most servers, "Sent other devices
-/// wrong data" when another server caught it, or "Offline".
+/// "This device · On linux", "Not updated yet" when it runs another build than most servers, or "Offline".
 function detail(d, latest) {
-  const wrong = d.sentWrong && "Sent other devices wrong data";
-  if (!d.online) return wrong ? `Offline · ${wrong}` : "Offline";
-  return [wrong, d.here && "This device", d.host && `On ${d.host}`, d.kind && (d.kind === "podman" ? "Podman" : "Container"), d.build && latest && d.build !== latest && "Not updated yet"].filter(Boolean).join(" · ");
+  if (!d.online) return "Offline";
+  return [d.here && "This device", d.host && `On ${d.host}`, d.kind && (d.kind === "podman" ? "Podman" : "Container"), d.build && latest && d.build !== latest && "Not updated yet"].filter(Boolean).join(" · ");
 }
 
 /// The build most online servers run.

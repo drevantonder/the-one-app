@@ -73,8 +73,6 @@ const STOPPED_FOR: u64 = 15 * 60_000;
 const TICK: Duration = Duration::from_secs(10);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this server's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
-/// The largest step a ping carries: a bigger one, the servers it tells read from the bucket.
-const PINGED_STEP: usize = 256 << 10;
 /// How long a call's work may carry on after it returns (`ctx.waitUntil`).
 const LATER_LIMIT: Duration = Duration::from_secs(600);
 /// How many of an app's failures a server records an hour; the rest are only counted on the next hour's.

@@ -509,19 +509,8 @@ impl Node {
                     return Ok(json!(null));
                 }
                 let scope = Scope::parse(input["scope"].as_str().unwrap_or(""))?;
-                let app = input["app"].as_str().map(str::to_string);
-                if let (Some(app), Some(database)) = (&app, input["database"].as_str()) {
-                    self.written_there(&me.key, &scope, app, database, input["at"].as_u64().unwrap_or(0), input["step"].as_str())?;
-                    self.emit(Event::Changed { apps: vec![app.clone()] });
-                    return Ok(json!(null));
-                }
-                let node = self.clone();
-                tokio::spawn(async move {
-                    let _ = node.read_log(&scope).await;
-                    if let Some(app) = app {
-                        node.emit(Event::Changed { apps: vec![app] });
-                    }
-                });
+                let wrote = input["app"].as_str().zip(input["database"].as_str()).map(|(app, db)| (app, db, input["at"].as_u64().unwrap_or(0)));
+                self.changed_there(&scope, wrote);
                 Ok(json!(null))
             }
             other => bail!("the node has no operation {other}"),

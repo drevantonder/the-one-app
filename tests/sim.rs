@@ -4,10 +4,9 @@
 //! sent goes on. Every seed must end with every server reading the same database, holding every write it was told
 //! landed, once, and nothing one attempt wrote twice. A failing seed is a bug. `ONE_SIM_SEEDS=<from>..<to>` sweeps more.
 //!
-//! Then the same with each server keeping a copy on its disk, sent some of the others' steps as they're written, and
-//! reading from its copy alone in between: what it reads may be behind, but never anything no server read at the same
-//! step, and the copy opens nothing without the key. A hacked server that sends some of them steps of its own making,
-//! sealed with the key, at positions their copies lack, is caught: each copy ends matching the bucket.
+//! Then the same with each server keeping a copy on its disk, told of some of the others' writes as they're made, and
+//! fetching what it's told of from the bucket into its copy, and reading from its copy alone in between: what it reads
+//! may be behind, but never anything no server read at the same step, and the copy opens nothing without the key.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -264,12 +263,11 @@ async fn run_copied(seed: u64) {
                 let id = (server * WRITES + i) as u64;
                 let at = db.at();
                 link.write(&mut db, here, id, server).await;
-                // Its ping, carrying the step it wrote, reaches some of the others.
-                let name = one::db::step_name("global/sim/main", db.at());
-                if let Some(step) = here.kept(&name).unwrap().filter(|_| db.at() > at) {
-                    for (other, copy) in copies.iter().enumerate().filter(|(o, _)| *o != server) {
+                // Its notice reaches some of the others, which fetch what's new into their copies, if the link lets them.
+                if db.at() > at {
+                    for (_, copy) in copies.iter().enumerate().filter(|(o, _)| *o != server) {
                         if link.rng.lock().unwrap().gen_bool(0.6) {
-                            copy.keep(&name, &step, &server.to_string()).unwrap_or_else(|e| panic!("seed {seed}: server {other} kept no step: {e:#}"));
+                            let _ = copy.fill("global/sim/main", 0).await;
                         }
                     }
                 }
@@ -286,31 +284,8 @@ async fn run_copied(seed: u64) {
     }
     link.settle().await;
     let fresh = Db::open(&link.steady(), "global/sim/main", key).await.unwrap();
-    // Server 0 is hacked: it sends the others, at each position their copies lack, a step of a kind that writes nothing.
-    let mut forged = vec![Vec::new(); COPYING];
-    for (i, copy) in copies.iter().enumerate().skip(1) {
-        for n in 1..=fresh.at() {
-            let name = one::db::step_name("global/sim/main", n);
-            if copy.kept(&name).unwrap().is_none() {
-                copy.keep(&name, &one::db::seal(&key, &name, b"x"), "0").unwrap();
-                forged[i].push((name, "0".to_string()));
-            }
-        }
-    }
-    for (i, (db, copy)) in dbs.iter_mut().zip(&copies).enumerate() {
-        // Read before the check: the forged steps are read as they are.
+    for (db, copy) in dbs.iter_mut().zip(&copies) {
         retry(async || db.catch_up(copy).await).await;
-        let mut wrong = Vec::new();
-        while !walk(&root.join(i.to_string()).join(".sent")).is_empty() {
-            wrong.extend(copy.check().await.unwrap());
-        }
-        // One the link failed is checked again later.
-        wrong.sort();
-        assert_eq!(wrong, forged[i], "seed {seed}: server {i} found each step server 0 forged, and only those");
-        if !wrong.is_empty() {
-            // As a node does: the database is read again, from its copy, now the bucket's.
-            *db = retry(async || Db::open(copy, "global/sim/main", key).await).await;
-        }
     }
     for (i, (db, copy)) in dbs.iter().zip(&copies).enumerate() {
         assert_eq!(state(db), state(&fresh), "seed {seed}: server {i} caught up with the bucket");
@@ -320,7 +295,7 @@ async fn run_copied(seed: u64) {
         assert!(Db::open(&copy.here_only(), "global/sim/main", one::kernel::database_key(&[!(seed as u8); 32], "main")).await.is_err(), "seed {seed}: another key opened server {i}'s copy");
     }
     for (i, copy) in copies.iter().enumerate() {
-        for name in walk(&root.join(i.to_string())).iter().filter_map(|f| f.strip_prefix(root.join(i.to_string())).ok()?.to_str().map(str::to_string)).filter(|n| !n.starts_with(".sent")) {
+        for name in walk(&root.join(i.to_string())).iter().filter_map(|f| f.strip_prefix(root.join(i.to_string())).ok()?.to_str().map(str::to_string)) {
             assert_eq!(copy.kept(&name).unwrap(), link.objects.lock().unwrap().get(&name).cloned(), "seed {seed}: server {i}'s {name} is the bucket's");
         }
     }
