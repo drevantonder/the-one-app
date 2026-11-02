@@ -82,7 +82,7 @@ func (l *link) servers() (servers, error) {
 			}
 		}
 	}
-	body, err := request(&http.Client{Timeout: 5 * time.Second}, l.node+"/v1/state", nil)
+	body, err := request(&http.Client{Timeout: 5 * time.Second, Transport: toNode}, l.node+"/v1/state", nil)
 	if err == nil {
 		err = json.Unmarshal(body, &state)
 	}

@@ -35,7 +35,7 @@ func main() {
 		log.Fatal(err)
 	}
 	go m.keepGivingBack()
-	poll := &http.Client{Timeout: 40 * time.Second}
+	poll := &http.Client{Timeout: 40 * time.Second, Transport: toNode}
 	for {
 		if err := post(node+"/v1/sidecars/"+app, describe()); err != nil {
 			log.Printf("registering: %v", err)

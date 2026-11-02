@@ -46,7 +46,7 @@ func main() {
 // serve registers with the node and answers its calls, registering again
 // whenever the node forgets (it keeps sidecars in memory) or restarts.
 func serve(node string, w *whatsapp) {
-	poll := &http.Client{Timeout: 40 * time.Second}
+	poll := &http.Client{Timeout: 40 * time.Second, Transport: toNode}
 	for {
 		if err := post(node+"/v1/sidecars/"+app, describe); err != nil {
 			log.Printf("registering: %v", err)
@@ -142,7 +142,7 @@ func request(client *http.Client, url string, body any) ([]byte, error) {
 // callOn runs one of this sidecar's operations on another of the user's
 // servers, through this server's node, and decodes its result into out.
 func callOn(node, server, op string, input, out any) error {
-	body, err := request(&http.Client{Timeout: 28 * time.Second}, node+"/v1/call",
+	body, err := request(&http.Client{Timeout: 28 * time.Second, Transport: toNode}, node+"/v1/call",
 		map[string]any{"app": app, "sidecar": app, "op": op, "input": input, "server": server})
 	if err != nil {
 		return err

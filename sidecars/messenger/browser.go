@@ -46,7 +46,7 @@ func (b *browser) devices(op string, input map[string]any) (any, error) {
 		call["sidecar"] = "agent-devices"
 	}
 	body, _ := json.Marshal(call)
-	client := &http.Client{Timeout: 3 * time.Minute}
+	client := &http.Client{Timeout: 3 * time.Minute, Transport: toNode}
 	resp, err := client.Post(b.node+"/v1/call", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, err

@@ -57,7 +57,7 @@ func main() {
 // when the devices' tools change, once no call is waiting for an answer:
 // registering again forgets those.
 func serve(node string, d *devices) {
-	poll := &http.Client{Timeout: 40 * time.Second}
+	poll := &http.Client{Timeout: 40 * time.Second, Transport: toNode}
 	var running atomic.Int64
 	for {
 		described, _ := json.Marshal(d.describe())

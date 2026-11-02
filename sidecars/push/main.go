@@ -44,13 +44,13 @@ func main() {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	serve(node, &sender{dir: dir, node: node, client: &http.Client{Timeout: 15 * time.Second}})
+	serve(node, &sender{dir: dir, node: node, client: &http.Client{Timeout: 15 * time.Second, Transport: toNode}})
 }
 
 // serve registers with the node and answers its calls, registering again
 // whenever the node forgets (it keeps sidecars in memory) or restarts.
 func serve(node string, s *sender) {
-	poll := &http.Client{Timeout: 40 * time.Second}
+	poll := &http.Client{Timeout: 40 * time.Second, Transport: toNode}
 	for {
 		if err := post(node+"/v1/sidecars/"+app, describe); err != nil {
 			log.Printf("registering: %v", err)
