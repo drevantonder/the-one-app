@@ -41,7 +41,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
         return Ok(());
     }
     let mut take = |k: &str| flags.remove(k).and_then(|v| v.into_iter().last().flatten());
-    let device = take("device");
+    let device = if own_device(o) { None } else { take("device") };
     let scopes = take("scopes").map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     let out = take("out");
     let confirmed = flags.remove("confirm").is_some() || flags.remove("yes").is_some();
@@ -208,6 +208,12 @@ fn places(op: &Value) -> Vec<String> {
 /// The operation's input from flags, words (filling `places` in order) and files. Given fewer words than places, the
 /// optional places are skipped first: `one board post "hi"` is text, `one board post ideas "hi"` a topic and text.
 /// A word left over is an error, never folded into another input: it says to quote text, or which flag to give it as.
+/// Whether an operation takes a `device` of its own (an agent device's name, say): then that's what `device` is, and
+/// it says itself where it runs, so the CLI's and MCP's `device` (which of your devices runs it) isn't offered.
+pub fn own_device(op: &Value) -> bool {
+    op["input"]["properties"].get("device").is_some()
+}
+
 /// Whether an operation's input takes `name`: one of its properties, or anything where it's open-ended. A name it
 /// doesn't take (one renamed, say) fails, rather than being passed over and the call run as if it weren't given.
 pub fn takes(schema: &Value, name: &str) -> bool {
@@ -521,10 +527,9 @@ pub fn help(app: &Value, op: &Value) -> String {
         }
         rows.push((flag, about.join("; ")));
     }
-    if app["runs"] == "here" {
-        rows.push(("--device <name>".into(), "which of your devices runs it, by name; all for every one; default is this one".into()));
-    } else {
-        rows.push(("--device <name>".into(), "run it on that device (by name)".into()));
+    if !own_device(op) {
+        let about = if app["runs"] == "here" { "which of your devices runs it, by name; all for every one; default is this one" } else { "run it on that device (by name)" };
+        rows.push(("--device <name>".into(), about.into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
     if op["confirm"] == true {
@@ -601,7 +606,7 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
             prop["description"] = json!(format!("{about}{MCP_FILE}"));
         }
     }
-    if app["runs"] == "here" {
+    if app["runs"] == "here" && !own_device(op) {
         schema["properties"]["device"] = json!({ "type": "string", "description": "which of your devices, by name, or all for every one; default is this one" });
     }
     if op["confirm"] == true {
