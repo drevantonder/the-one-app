@@ -177,10 +177,8 @@ export default {
     list: {
       reads: true,
       description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; its tagline, if it has one, and description; owner, where it's installed (that you can see), forks, and the places you may add it to. Each says whether it's a service: it has no screen or widget of its own (Gmail, AI), and shells keep it in each page's Services folder. With service, only those.",
-      // `connector`, and before it `connected`, are service's old names, which shells built before still send.
-      input: { type: "object", properties: { service: { type: "boolean", description: "only services" }, connector: { type: "boolean", description: "the same as service" }, connected: { type: "boolean", description: "the same as service" } } },
-      async run(ctx, { service, connector, connected } = {}) {
-        const only = service ?? connector ?? connected;
+      input: { type: "object", properties: { service: { type: "boolean", description: "only services" } } },
+      async run(ctx, { service: only } = {}) {
         const name = namer(ctx);
         const all = (await ctx.catalog()).filter((a) => !a.deleted || !only);
         const services = await Promise.all(all.map((a) => isService(ctx, a).catch(() => false)));
@@ -195,8 +193,6 @@ export default {
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], sidecars: [] },
             built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
             source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, service: services[all.indexOf(a)],
-            // service's old names, for whatever read them before
-            connector: services[all.indexOf(a)], connected: services[all.indexOf(a)],
           };
         }));
         apps.sort((a, b) => a.title.localeCompare(b.title));
@@ -338,9 +334,9 @@ export default {
 ${addTo}
 ${onAPage}
 document.getElementById("top").innerHTML = one.largeTitle("App Store");
-// Services would bury the rest, so they get their own tab. A shell's Add a Service opens it with { service: true }
-// ({ connector: true } or { connected: true } from shells built before), on that tab.
-let tab = one.params.service || one.params.connector || one.params.connected ? "services" : "apps";
+// Services would bury the rest, so they get their own tab. A shell's Add a Service opens it with { service: true }, on
+// that tab.
+let tab = one.params.service ? "services" : "apps";
 let query = "";
 let data = null;
 function pick(t) {
