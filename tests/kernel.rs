@@ -294,6 +294,12 @@ fn the_vault_given_the_installs_keys_opens_what_its_nodes_wrote() {
     let (global, board): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
     let agent: ureq::Agent = ureq::Agent::config_builder().build().into();
     agent.put(format!("{}/install/global/board/_key", v.sites)).send(&kernel::seal_app_key(&global, "board", &board)[..]).unwrap();
+    agent.put(format!("{}/install/global/_key", v.sites)).send(one::backups::key_id(&global).as_bytes()).unwrap();
+
+    // Until an admin gives it, the vault gives out no key under its own, and seals no item under it.
+    assert_eq!(v.ask(&token, "POST", "/keys", json!({ "keys": [{ "scope": "global", "app": "board" }] })).0, 409);
+    let item = json!({ "id": "0123456789abcdef", "title": "A key", "hosts": ["api.example.com"], "apps": ["board"], "fields": { "key": { "generate": true } } });
+    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": "global", "item": item })).0, 409);
 
     // An admin's machine gives the vault Everyone's key, for Andre and for Sam, who has no keys here yet.
     let (status, out) = v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&global), "people": [ANDRE, SAM] }));
@@ -307,8 +313,11 @@ fn the_vault_given_the_installs_keys_opens_what_its_nodes_wrote() {
     let given = vault.keys_until(&token, &[("global", "notes", Some("main"))]).unwrap().0;
     assert_eq!(given[0].key, kernel::database_key(&kernel::derived_app_key(&global, "notes"), "main"), "the vault opens the Notes the nodes wrote");
 
-    // Once a key under it was given out, its key stays.
+    // Once given, its key stays; and so does that of a scope nodes made none for, once an item is sealed under it.
     assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [ANDRE] })).0, 409);
+    let mine = format!("user:{ANDRE}");
+    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": mine, "item": item })).0, 200);
+    assert_eq!(v.internal("scope-key", json!({ "scope": mine, "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [ANDRE] })).0, 409);
 }
 
 fn url_query(url: &str) -> std::collections::BTreeMap<String, String> {

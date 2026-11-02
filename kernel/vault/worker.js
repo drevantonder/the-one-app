@@ -65,7 +65,7 @@ export class Vault extends DurableObject {
     this.sql.exec(schema);
     // A client's copies (pending, its own, and its sessions) share a line, so signing it out ends its sessions too.
     if (!this.sql.exec("select name from pragma_table_info('copies') where name = 'line'").toArray().length) this.sql.exec("alter table copies add column line text");
-    // When a key under each scope was first given out: until then, a scope's key the nodes made may replace its own.
+    // When each scope's key was settled (see `settle`): until then, a scope's key the nodes made may replace its own.
     if (!this.sql.exec("select name from pragma_table_info('scopes') where name = 'given'").toArray().length) {
       this.sql.exec("alter table scopes add column given integer");
       if (this.sql.exec("select name from sqlite_master where name = 'unseals'").toArray().length) {
@@ -262,8 +262,7 @@ export class Vault extends DurableObject {
 
   /// A scope's key that the install's nodes made before it had a kernel, given by an admin's machine (`kernel keys`):
   /// it's the scope's key from now on, sealed to the recovery key and to each of `people` who has keys here, in place
-  /// of one this vault made. Only while no key under the scope has been given out here, so nothing was sealed under
-  /// the one it replaces.
+  /// of one this vault made. Only while the scope's key isn't settled, so nothing was sealed under the one it replaces.
   async scopeKeyGiven({ scope, key, people }) {
     if (!SCOPE.test(scope || "")) refuse(400, `${scope} isn't a scope`);
     const [had] = this.sql.exec("select given from scopes where scope = ?", scope).toArray();
@@ -271,7 +270,7 @@ export class Vault extends DurableObject {
     const bytes = b64u.decode(String(key || ""));
     if (bytes.length !== 32) refuse(400, "a scope's key is 32 bytes");
     const recovery = b64u.decode(this.env.RECOVERY_KEY || refuse(503, "the vault has no recovery key"));
-    this.sql.exec("insert or replace into scopes (scope, recovery, made) values (?, ?, ?)", scope, await sealTo(recovery, bytes), Date.now());
+    this.sql.exec("insert or replace into scopes (scope, recovery, made, given) values (?, ?, ?, ?)", scope, await sealTo(recovery, bytes), Date.now(), Date.now());
     this.sql.exec("delete from grants where scope = ?", scope);
     const granted = [];
     for (const user of Array.isArray(people) ? people : []) {
@@ -396,12 +395,25 @@ export class Vault extends DurableObject {
       if (!NAME.test(want.app || "")) refuse(400, `${want.app} isn't an app's name`);
       mayUse(held, want.app);
       if (want.database !== undefined && !NAME.test(want.database)) refuse(400, `${want.database} isn't a database's name`);
-      let key = await this.appKey(want.scope, await this.scopeKey(held, want.scope), want.app, want.database);
+      const scopeKey = await this.scopeKey(held, want.scope);
+      await this.settle(want.scope);
+      let key = await this.appKey(want.scope, scopeKey, want.app, want.database);
       if (want.database !== undefined) key = await databaseKey(key, want.database);
       out.push({ ...pick(want), key: b64u.encode(key) });
     }
-    for (const scope of new Set(out.map((k) => k.scope))) this.sql.exec("update scopes set given = ? where scope = ? and given is null", Date.now(), scope);
     return { keys: out, until: row.until };
+  }
+
+  /// Settles a scope's key at its first use here (a key under it given out, or an item sealed under it): it's the
+  /// scope's key from then on. Refused while the bucket has a scope key its nodes made before the vault had it, until
+  /// an admin gives that one here (`kernel keys`), so nothing is sealed under a key their data isn't.
+  async settle(scope) {
+    if (this.sql.exec("select given from scopes where scope = ?", scope).toArray()[0]?.given) return;
+    const name = `${folderOf(scope)}/_key`;
+    const resp = await fetch((await bucketUrls(this.bucket(), { read: [name] }, 60)).read[name]);
+    if (resp.ok) refuse(409, `${scope}'s key was made by its nodes before the vault had it: an admin gives it here with kernel keys`);
+    if (resp.status !== 404) refuse(502, `the bucket said ${resp.status} to reading ${scope}'s key`);
+    this.sql.exec("update scopes set given = ? where scope = ? and given is null", Date.now(), scope);
   }
 
   bucket() {

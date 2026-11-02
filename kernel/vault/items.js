@@ -44,7 +44,8 @@ function shown(row) {
 }
 
 export class Items {
-  /// `vault` opens scopes' keys: `scopeKey(held, scope)`, and `held(held)`, the scopes a session opens.
+  /// `vault` opens scopes' keys: `scopeKey(held, scope)`, `settle(scope)` before one seals anything, and `held(held)`,
+  /// the scopes a session opens.
   constructor(sql, vault) {
     this.sql = sql;
     this.vault = vault;
@@ -73,6 +74,7 @@ export class Items {
       this.sql.exec("delete from items where id = ?", item.id);
       return { id: item.id, deleted: true };
     }
+    await this.vault.settle(scope);
     const now = Date.now();
     const before = row ? JSON.parse(row.data) : { title: "", type: "", domain: null, fields: {}, hosts: [], apps: [], app: item.app || null };
     const secrets = row?.sealed ? await open(key, row.sealed) : {};
