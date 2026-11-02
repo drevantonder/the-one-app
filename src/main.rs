@@ -715,8 +715,7 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/retire", json!({ "app": app, "how": past }))?;
             println!("{app} is {past}{}.", if *how == "delete" { ": it's in the App Store's Recently Deleted until you restore or erase it" } else { "" });
         }
-        // `drivers`: what sidecars were called first.
-        ["sidecars" | "drivers"] => {
+        ["sidecars"] => {
             let state = get("/v1/state")?;
             for s in state["install"]["servers"].as_array().into_iter().flatten() {
                 let installed = s["installed_sidecars"].as_array().cloned().unwrap_or_default();
@@ -739,7 +738,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
-        ["sidecars" | "drivers", how @ ("remove" | "add"), name] => {
+        ["sidecars", how @ ("remove" | "add"), name] => {
             let server = flags.get("server").and_then(Value::as_str);
             post("/v1/sidecar", json!({ "name": name, "server": server, "installed": *how == "add" }))?;
             let on = server.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());

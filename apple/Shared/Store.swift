@@ -224,7 +224,7 @@ final class Store {
         return owner.hasPrefix("group:") && install?.group(String(owner.dropFirst(6)))?.role(of: me.id) == "admin"
     }
 
-    /// The App Store's page for an app, if the install's store app is here and the app is one it lists (drivers aren't).
+    /// The App Store's page for an app, if the install's store app is here and the app is one it lists (sidecars aren't).
     func storeRoute(for app: AppInfo) -> Route? {
         guard let name = config?.store, let store = self.app(name), store.has(screen: "app"), (app.deploys ?? 0) > 0 else { return nil }
         return .screen(ScreenRoute(app: name, screen: "app", params: Self.params(["app": app.name])))

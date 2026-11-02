@@ -128,7 +128,6 @@ struct Server: Codable, Sendable, Equatable, Identifiable {
     var target: String?
     /// The commit its node was built from.
     var build: String?
-    var drivers: [String]?
     /// How loaded it is, as it last said.
     var load: Load?
 

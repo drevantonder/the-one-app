@@ -3027,8 +3027,6 @@ impl Node {
                         "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
                         // When it last sent another server a step that wasn't the bucket's.
                         "sent_wrong": i.status.get(&Scope::Global.to_string()).and_then(|st| st.insights.get(members::APP)).and_then(|ins| ins.errors.iter().filter(|((op, _), f)| op == "changed" && f.user == hex(&s.key)).map(|(_, f)| f.last).max()),
-                        // `drivers` too: sidecars' name before, which shells and sidecars built before still read.
-                        "drivers": if s.key == self.0.id { here_sidecars.iter().map(|d| d.0.clone()).collect() } else { session.map(|s| s.sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },
                         "sidecars": if s.key == self.0.id { here_sidecars.iter().map(|d| d.0.clone()).collect() } else { session.map(|s| s.sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>()).unwrap_or_default() },
                         "installed_sidecars": installed_sidecars(m, s, if s.key == self.0.id { &here_sidecars } else { session.map(|s| s.sidecars.as_slice()).unwrap_or_default() }, i.builds.get(&s.key).map(|r| r.commit.as_str())),
                         "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),

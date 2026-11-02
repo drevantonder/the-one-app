@@ -294,7 +294,7 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
                 "key": hex(&s.key), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
                 "owners": list(m.owners(&s.key)), "users": list(m.users_of(&s.key)), "privileged": m.privileged(&s.key),
                 "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(), "serves_me": m.serves(&s.key, me),
-                "build": null, "target": null, "drivers": [], "sidecars": [], "installed_sidecars": [],
+                "build": null, "target": null, "sidecars": [], "installed_sidecars": [],
                 "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
                 "load": null, "kind": null, "use": one::rank::place(&set, &hex(&s.key), ""), "far": false,
             })

@@ -34,8 +34,7 @@ function describe() {
     }),
     badge: typeof app.badge === "function",
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
-    // `drivers` is what `sidecars` was called first; apps that say it still use theirs.
-    uses: { apps: app.uses?.apps || [], sidecars: [...(app.uses?.sidecars || []), ...(app.uses?.drivers || [])] },
+    uses: { apps: app.uses?.apps || [], sidecars: app.uses?.sidecars || [] },
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
     // Each kind of scope's schema (user, group, global), as the changes that make it, oldest first.
     schema: Object.fromEntries(Object.entries(app.schema || {}).map(([kind, sql]) => [kind, [].concat(sql)])),
@@ -119,7 +118,7 @@ function context(ask, body, appends, later) {
   const scopes = body.scopes.map(handle);
   // `ctx.apps.<name>.<op>(input, { server })`, for exactly the apps (or sidecars) the app says it uses; `server` (a
   // name) runs it there, like a sidecar on the machine that has what it needs.
-  const uses = { apps: app.uses?.apps || [], sidecars: [...(app.uses?.sidecars || []), ...(app.uses?.drivers || [])] };
+  const uses = { apps: app.uses?.apps || [], sidecars: app.uses?.sidecars || [] };
   const used = (kind) => new Proxy({}, {
     get(_, name) {
       if (typeof name !== "string" || name === "then") return undefined;
@@ -159,8 +158,6 @@ function context(ask, body, appends, later) {
     group: (id) => find(id.startsWith("group:") ? id : `group:${id}`),
     apps: used("apps"),
     sidecars: used("sidecars"),
-    // What `sidecars` was called first.
-    drivers: used("sidecars"),
     blob: {
       put: async (bytes) => (await (await ask("blob", { method: "POST", body: bytes })).json()).blob,
       get: async (hash) => new Uint8Array(await (await ask(`blob/${hash}`)).arrayBuffer()),
