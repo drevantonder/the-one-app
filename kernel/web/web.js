@@ -175,8 +175,8 @@ window.__one = {};
   const me = () => store.state?.user;
   const install = () => store.state?.install;
   // The white label's name and accent, as the gateway's index.html says them, until the install's state does.
-  const label = { name: document.querySelector('meta[name="application-name"]')?.content || "", accent: document.querySelector('meta[name="theme-color"]')?.content || "" };
-  const config = () => store.state?.config || label;
+  const whiteLabel = { name: document.querySelector('meta[name="application-name"]')?.content || "", accent: document.querySelector('meta[name="theme-color"]')?.content || "" };
+  const config = () => store.state?.config || whiteLabel;
   const app = (name) => store.apps.find((a) => a.name === name);
   const label = (a) => a?.title || a?.name || "";
   const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");
