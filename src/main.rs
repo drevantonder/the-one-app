@@ -350,7 +350,8 @@ fn run(args: Vec<String>) -> Result<()> {
         ["kernel", "serve"] => {
             let settings = match one::kernel::Settings::load() {
                 Ok(settings) => settings,
-                Err(_) => {
+                Err(err) => {
+                    one::kernel::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
                     let url = flags.get("address").and_then(Value::as_str).context("say where people will reach the install, with --address https://…")?;
                     let (settings, recovery) = one::kernel::Settings::new(NAME, url);
                     settings.save()?;
@@ -366,9 +367,8 @@ fn run(args: Vec<String>) -> Result<()> {
             let cf = cloudflare(&flags, loaded.as_ref().ok())?;
             let settings = match loaded {
                 Ok(settings) => settings,
-                // Settings here that can't be read are this kernel's still: never made again.
-                Err(err) if one::kernel::Settings::path().exists() => return Err(err),
-                Err(_) => {
+                Err(err) => {
+                    one::kernel::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
                     // A kernel already in the account was made elsewhere: new settings here would replace its secrets.
                     let made = cf.scripts()?.contains_key(&one::kernel::worker_name("vault"));
                     anyhow::ensure!(!made || flags.contains_key("new"), "the Cloudflare account has a kernel already, made on another machine: deploy it there, where its settings are, or bring them here ({} and .env.local). --new replaces it, and everything it holds can't be read again", one::kernel::Settings::path().display());

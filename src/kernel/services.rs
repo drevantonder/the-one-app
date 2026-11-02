@@ -162,6 +162,12 @@ fn write_private(path: &Path, text: &str) -> Result<()> {
     Ok(std::fs::rename(part, path)?)
 }
 
+fn none_in(dir: &Path) -> Result<()> {
+    let there: Vec<&str> = ["settings.json", ".env.local"].into_iter().filter(|f| dir.join(f).exists()).collect();
+    ensure!(there.is_empty(), "{} has a kernel's {} already, which didn't load: move them away to make new ones", dir.display(), there.join(" and "));
+    Ok(())
+}
+
 /// A value as `.env.local` writes it: in single quotes, which Varlock takes as they are.
 fn quoted(value: &str) -> String {
     format!("'{value}'")
@@ -205,6 +211,12 @@ impl Settings {
             ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client people sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
         }
         Ok(settings)
+    }
+
+    /// Refuses unless this machine has no kernel's settings or secrets, even ones that don't load, for new ones to be
+    /// made: new settings would keep an earlier kernel's secrets, or replace settings that only failed to load.
+    pub fn none_here() -> Result<()> {
+        none_in(Settings::path().parent().unwrap())
     }
 
     /// New settings, with new secrets: → them, and the new recovery key's secret, to be shown once.
@@ -813,4 +825,23 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
         }
     }
     bail!("some services' bindings never resolved")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_settings_are_made_only_where_no_kernels_secrets_are() {
+        let dir = std::env::temp_dir().join(format!("kernel-settings-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(none_in(&dir).is_ok());
+        std::fs::write(dir.join(".env.local"), "AUTH_SECRET='an earlier kernel's secret'\n").unwrap();
+        let refused = format!("{:#}", none_in(&dir).unwrap_err());
+        assert!(refused.contains(".env.local") && !refused.contains("an earlier kernel's secret"), "{refused}");
+        std::fs::remove_file(dir.join(".env.local")).unwrap();
+        std::fs::write(dir.join("settings.json"), "{}").unwrap();
+        assert!(none_in(&dir).is_err(), "settings that didn't load aren't replaced");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
