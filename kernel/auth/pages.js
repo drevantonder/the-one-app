@@ -84,6 +84,19 @@ const webauthn = `
   }
 `;
 
+/// What a client other than the web client is told: what it will do, and where it goes, since its name is only what it
+/// calls itself. Uses the page's install.
+const acts = `
+  function acts(about) {
+    const what = document.getElementById("what");
+    what.textContent = about.client + " will act as you, with everything you can use in " + install + ", until you sign it out.";
+    const where = document.createElement("p");
+    where.className = "callout";
+    where.textContent = about.goes === "an app on this device" ? "It's an app on this device." : about.goes === "where you got your code" ? "It's where you got your code. Only go on if you got it yourself, on your own device." : "It goes to " + about.goes + ". Only go on if that's who you meant to sign in to.";
+    what.after(where);
+  }
+`;
+
 const page = (title, body, script) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)}</title><style>${style}</style></head><body><main>${body}<p class="error"></p></main><script>${webauthn}${script}</script></body></html>`;
 
@@ -100,17 +113,17 @@ export function signInPage({ name, google }) {
     <p id="what">With your passkey: it's what opens your keys.</p>
     <button class="primary" id="passkey">Sign In with a Passkey</button>
     <p class="note">No passkey here yet? Use one from another device, or ask whoever runs ${escape(name)} for an invite link.</p>`;
-  const script = `
+  const script = `${acts}
     const oauth_query = location.search.slice(1);
     const client_id = new URLSearchParams(oauth_query).get("client_id");
     const install = ${JSON.stringify(name).replaceAll("<", "\\u003c")};
     if (client_id) (async () => {
       try {
-        const about = await api("/sign-in/about?client_id=" + encodeURIComponent(client_id));
+        const about = await api("/sign-in/about?" + new URLSearchParams({ client_id, redirect_uri: new URLSearchParams(oauth_query).get("redirect_uri") || "" }));
         const title = "Sign in to " + about.client + (about.person ? " as " + about.person : "");
         document.title = title;
         document.getElementById("title").textContent = title;
-        if (!about.web) document.getElementById("what").textContent = about.client + " will act as you, with everything you can use in " + install + ", until you sign it out.";
+        if (!about.web) acts(about);
       } catch (err) { say(err.message); }
     })();
     document.getElementById("passkey").onclick = async () => {
@@ -128,7 +141,7 @@ function googlePage({ name, google }) {
     <h1 id="title">Sign in to ${escape(name)}</h1>
     <p id="what">With your Google account at ${escape(google)}.</p>
     <button class="primary" id="google">Sign In with Google</button>`;
-  const script = `
+  const script = `${acts}
     // Google's answer comes back here, with an error added to the query if it said no.
     const raw = location.search.slice(1);
     const failed = /(^|&)error=/.test(raw);
@@ -140,11 +153,11 @@ function googlePage({ name, google }) {
     if (failed) say("That didn't sign you in. Use your Google account at " + domain + ".");
     if (client_id) (async () => {
       try {
-        const about = await api("/sign-in/about?client_id=" + encodeURIComponent(client_id));
+        const about = await api("/sign-in/about?" + new URLSearchParams({ client_id, redirect_uri: new URLSearchParams(oauth_query).get("redirect_uri") || "" }));
         const title = "Sign in to " + about.client;
         document.title = title;
         document.getElementById("title").textContent = title;
-        if (!about.web) document.getElementById("what").textContent = about.client + " will act as you, with everything you can use in " + install + ", until you sign it out.";
+        if (!about.web) acts(about);
         // Back from Google just now: on to the client.
         if (about.fresh && !failed) location.replace((await api("/sign-in/accept", { oauth_query })).url);
       } catch (err) { say(err.message); }

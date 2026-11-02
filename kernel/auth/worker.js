@@ -31,6 +31,18 @@ import { DurableObjectDialect } from "./sql.js";
 const json = (v, status = 200) => Response.json(v, { status });
 const hex16 = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
 /// Refuses, as Better Auth does, since some refusals are made inside its routes.
+/// Where a client's sign-in goes, in words: the site it goes back to, or an app on the person's device (one listening on
+/// it, or its own link scheme), or the device that showed them a code.
+function goesTo(uri, origin) {
+  let url;
+  try { url = new URL(uri); } catch { return ON_DEVICE; }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return ON_DEVICE;
+  if (url.origin === origin && url.pathname === "/sign-in/code/done") return BY_CODE;
+  if (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return ON_DEVICE;
+  return url.host;
+}
+const [ON_DEVICE, BY_CODE] = ["an app on this device", "where you got your code"];
+
 const refuse = (status, message) => {
   throw new APIError({ 400: "BAD_REQUEST", 403: "FORBIDDEN", 404: "NOT_FOUND" }[status], { message });
 };
@@ -208,6 +220,7 @@ export class Auth extends DurableObject {
     const url = new URL(request.url);
     const path = url.pathname;
     try {
+      if (path === "/api/auth/oauth2/register" && request.method === "POST") await this.notNamedAsUs(await request.clone().json().catch(() => ({})));
       if (path.startsWith("/api/auth/")) return await this.auth.handler(request);
       if (path.startsWith("/.well-known/oauth-authorization-server") || path.startsWith("/.well-known/openid-configuration")) {
         const which = path.includes("openid") ? "/.well-known/openid-configuration" : "/.well-known/oauth-authorization-server";
@@ -219,7 +232,7 @@ export class Auth extends DurableObject {
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
       if (path === "/sign-in" && request.method === "GET") return html(signInPage({ name, google }));
       if (path === "/internal/invite" && request.method === "POST") return json(await this.invite(request, await request.json()));
-      if (path === "/sign-in/about") return json(await this.about(request, url.searchParams.get("client_id")));
+      if (path === "/sign-in/about") return json(await this.about(request, url.searchParams.get("client_id"), url.searchParams.get("redirect_uri")));
       if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
       if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), name, google);
       if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ name, google, done: await this.codeDone(url.searchParams) }));
@@ -267,15 +280,27 @@ export class Auth extends DurableObject {
     return client;
   }
 
-  /// What signing in to a client says: its name (the install's, for the web client, which is at its address), the
-  /// person's, if they're signed in here already, and whether they just signed in with Google.
-  async about(request, clientId) {
+  /// A client names itself, so none may take the install's name, as signing in to it would read as signing in here;
+  /// nor its apps' ("<install> on <device>"), unless it comes back to the device, as they do.
+  notNamedAsUs(body) {
+    const plain = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "").replace(/^the/, "");
+    const [name, ours] = [plain(body.client_name), plain(this.auth.options.appName)];
+    const origin = new URL(this.env.ADDRESS).origin;
+    const toSites = [].concat(body.redirect_uris || []).some((u) => ![ON_DEVICE, BY_CODE].includes(goesTo(u, origin)));
+    if (name === ours || (name.startsWith(ours) && toSites)) refuse(400, `a client can't be called ${body.client_name}: that's the name of what it signs in to`);
+  }
+
+  /// What signing in to a client says: its name (the install's, for the web client, which is at its address), where
+  /// its sign-in goes (`redirect`, if it's one of the client's, else its first), since the name is only what it calls
+  /// itself, the person's, if they're signed in here already, and whether they just signed in with Google.
+  async about(request, clientId, redirect) {
     const session = await this.auth.api.getSession({ headers: request.headers });
     const client = await this.client(clientId);
     const origin = new URL(this.env.ADDRESS).origin;
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const web = uris.length > 0 && uris.every((u) => u === `${origin}/callback`);
-    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, person: session?.user.name || null, fresh: !!session && fresh(session) };
+    const goes = web ? null : goesTo(uris.includes(redirect) ? redirect : uris[0], origin);
+    return { client: web ? this.auth.options.appName : client.name || client.clientId, web, goes, person: session?.user.name || null, fresh: !!session && fresh(session) };
   }
 
   // Signing in with a code, for a client with no browser of its own (the CLI on a server): it makes an authorization

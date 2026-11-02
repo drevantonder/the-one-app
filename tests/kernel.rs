@@ -784,6 +784,28 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A client names itself, so the sign-in page also says where it goes, and no client takes the install's name, nor its
+/// apps' unless it comes back to the device as they do: one passkey tap gives a client the person's keys.
+#[test]
+fn a_client_is_shown_by_where_it_goes_and_none_is_named_as_the_install() {
+    let k = Kernel::start(None);
+    let register = |name: &str, back: &str| post(&format!("{}/api/auth/oauth2/register", k.address), &[], json!({ "client_name": name, "redirect_uris": [back], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"] }));
+    for (name, back) in [("Test", "https://elsewhere.example/back"), (" the TEST ", "http://localhost:4000/back"), ("Test on Andre's Mac", "https://elsewhere.example/back")] {
+        let (status, out) = register(name, back);
+        assert_eq!(status, 400, "{name} going to {back} was taken: {out}");
+    }
+    let goes = |name: &str, back: &str| {
+        let (status, out) = register(name, back);
+        assert_eq!(status, 201, "{out}");
+        let (_, about, _) = k.browser().get(&format!("/sign-in/about?client_id={}&redirect_uri={}", out["client_id"].as_str().unwrap(), enc(back)));
+        (about["client"].as_str().unwrap().to_string(), about["goes"].clone())
+    };
+    assert_eq!(goes("Claude", "https://claude.ai/api/mcp/auth_callback"), ("Claude".into(), json!("claude.ai")));
+    assert_eq!(goes("Claude Code", "http://localhost:33418/callback").1, "an app on this device");
+    assert_eq!(goes("Test on Andre's iPhone", "one://signed-in/").1, "an app on this device");
+    assert_eq!(goes("Test on a server", &format!("{}/sign-in/code/done", k.address)).1, "where you got your code");
+}
+
 #[test]
 fn signing_out_ends_a_clients_sessions_at_the_vault() {
     let v = Vault::start();
