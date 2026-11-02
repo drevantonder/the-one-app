@@ -342,7 +342,12 @@ fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
 
 async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Json<Value> {
     Json(match signed_in {
-        Some(me) => node.state_for(&me.caller),
+        // With what the sign-in opens, so a client shows only those pages and apps.
+        Some(me) => {
+            let mut state = node.state_for(&me.caller);
+            state["sign_in"] = json!({ "scopes": me.scopes, "apps": me.apps, "read_only": me.read_only });
+            state
+        }
         None => node.state(),
     })
 }

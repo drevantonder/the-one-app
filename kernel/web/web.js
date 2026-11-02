@@ -206,7 +206,9 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
       out.push({ scope: `group:${g.id}`, title: g.name, subtitle: `${people(g.members.length)} · ${chosenBy(admins)}`, whose: `For ${g.name}`, group: g.id });
     }
     out.push({ scope: "global", title: "Everyone", subtitle: `${people(i.users.length)} · ${chosenBy(i.users.filter((x) => x.role === "admin").map((x) => x.id))}`, whose: "For everyone" });
-    return out;
+    // Only those this browser's sign-in opens.
+    const opens = store.state?.sign_in?.scopes;
+    return opens ? out.filter((p) => opens.includes(p.scope === "user" ? `user:${u.id}` : p.scope)) : out;
   }
   const page = (scope) => pages().find((p) => p.scope === scope);
 
@@ -218,8 +220,10 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     return g?.members.some((m) => m.user === me()?.id && m.role === "admin") || false;
   }
 
-  const appsOn = (p) => store.apps.filter((a) => hasScreens(a) && scopes(a).includes(p.scope));
-  const servicesOn = (p) => store.apps.filter((a) => isService(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
+  /// Whether this browser's sign-in opens an app: every app, unless it was let use only some.
+  const opened = (a) => !store.state?.sign_in?.apps || store.state.sign_in.apps.includes(a.name);
+  const appsOn = (p) => store.apps.filter((a) => hasScreens(a) && opened(a) && scopes(a).includes(p.scope));
+  const servicesOn = (p) => store.apps.filter((a) => isService(a) && opened(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
   const appBadge = (name, p) => Math.max(0, store.badges[p.scope]?.[name] || 0);
 
   function owns(a) {
@@ -392,12 +396,12 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
   const screenRoute = (a, p, screen = "main", params = {}) => ({ kind: "screen", app: a.name, screen, params: JSON.stringify(params), scope: p?.scope });
   const settingsRoute = (a, p, add) => (has(a, "settings") ? screenRoute(a, p, "settings", add ? { add: true } : {}) : null);
   function storeRoute(a) {
-    const s = app(config().store);
+    const s = storeApp();
     return s && has(s, "app") && (a.deploys || 0) > 0 ? { kind: "screen", app: s.name, screen: "app", params: JSON.stringify({ app: a.name }) } : null;
   }
   function serviceStoreRoute() {
-    const s = app(config().store);
-    return s && hasScreens(s) ? { kind: "screen", app: s.name, screen: "main", params: JSON.stringify({ service: true }) } : null;
+    const s = storeApp();
+    return s ? { kind: "screen", app: s.name, screen: "main", params: JSON.stringify({ service: true }) } : null;
   }
 
   // MARK: Drawing
@@ -480,7 +484,11 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     if (r.kind === "screen" && shown === key && $(".screen-frame", detail)) return;
     const again = shown === key;
     shown = key;
-    if (r.kind === "page") drawPage(detail, page(r.scope) || page("user"));
+    if (r.kind === "page") {
+      const p = page(r.scope) || pages()[0];
+      if (p) drawPage(detail, p);
+      else detail.innerHTML = message("Nothing Here Yet", "This browser was let into none of your pages. Sign out in Settings and sign in again to choose them.");
+    }
     else if (r.kind === "services") {
       const p = page(r.scope);
       // Drawn again in place, keeping the accounts it listed, as what's on the page changes.
@@ -507,7 +515,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     const list = items(p);
     const empty = !appsOn(p).length && !widgetsOn(p).length;
     detail.innerHTML = bar("") + `<div class="scroll"><div class="page"><div class="page-header"><h1>${esc(p.title)}</h1><div class="page-subtitle">${esc(p.subtitle)}</div></div>` +
-      (empty ? `<div class="empty-page"><div class="empty-page-title">Nothing here yet</div><div class="empty-page-text">${canArrange(p.scope) ? `Apps you add to ${esc(p.title)} show up here.` : `When its admins add apps to ${esc(p.title)}, they show up here.`}</div>${canArrange(p.scope) ? `<button class="button primary" data-store>Open the App Store</button>` : ""}</div>` : "") +
+      (empty ? `<div class="empty-page"><div class="empty-page-title">Nothing here yet</div><div class="empty-page-text">${canArrange(p.scope) ? `Apps you add to ${esc(p.title)} show up here.` : `When its admins add apps to ${esc(p.title)}, they show up here.`}</div>${canArrange(p.scope) && storeApp() ? `<button class="button primary" data-store>Open the App Store</button>` : ""}</div>` : "") +
       `<div class="grid"></div></div></div>`;
     $("[data-store]", detail)?.addEventListener("click", () => openStore());
     const grid = $(".grid", detail);
@@ -599,7 +607,7 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
   }
 
   function refit(item, size) {
-    const w = item.widget, a = app(w.app), p = page(route().scope) || page("user");
+    const w = item.widget, a = app(w.app), p = page(route().scope) || pages()[0];
     item.span = CELLS[size];
     const el = oneWidgets.card({ ...w, title: w.title || label(a) || w.widget }, widgetHost(p), tree(w, size));
     el.classList.add("widget");
@@ -607,9 +615,15 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
     return el;
   }
 
-  function openStore() {
+  /// The install's App Store, if it's on a page this browser's sign-in opens.
+  function storeApp() {
     const s = app(config().store);
-    if (s && hasScreens(s)) go({ kind: "screen", app: s.name, screen: "main", params: "{}" });
+    return s && hasScreens(s) && opened(s) && pages().some((p) => scopes(s).includes(p.scope)) ? s : null;
+  }
+
+  function openStore() {
+    const s = storeApp();
+    if (s) go({ kind: "screen", app: s.name, screen: "main", params: "{}" });
   }
 
   // MARK: Services
@@ -1040,12 +1054,12 @@ window.__one = { host: async (message) => (message.type === "copy" ? navigator.c
   function drawSettings(detail) {
     document.title = "Settings";
     const u = me(), i = install();
-    const storeApp = app(config().store);
+    const shop = storeApp();
     const waiting = store.state?.vault_requests ?? store.state?.secret_requests ?? 0;
     detail.innerHTML = bar("") + `<div class="scroll"><div class="settings"><div class="page-header"><h1>Settings</h1><div class="page-subtitle">${esc(i?.name || "")}</div></div>` +
       `<div class="list profile"><div class="row plain">${one.avatar(u.id, u.name).replace('class="avatar"', 'class="avatar big"')}<div class="main"><div class="profile-name">${esc(u.name)}</div><div class="sub">${esc(u.role === "admin" ? `Admin of ${i.name}` : `Member of ${i.name}`)}</div><div class="sub">${esc(browserName())}</div></div><button class="button" data-signout>Sign Out</button></div></div>` +
       (waiting ? `<div class="list"><button class="row plain" data-requests><span class="setting-icon" style="--tile:#ff9500">${trayGlyph}</span><div class="main"><div class="title"><span>Requests</span></div></div><span class="nav-count">${waiting}</span><span class="chev">›</span></button></div>` : "") +
-      (storeApp ? `<div class="list"><a class="row plain" href="${esc(href({ kind: "screen", app: storeApp.name, screen: "main", params: "{}" }))}" data-go='${esc(JSON.stringify({ kind: "screen", app: storeApp.name, screen: "main", params: "{}" }))}'>${one.appIcon(storeApp, 29)}<div class="main"><div class="title"><span>App Store</span></div></div><span class="chev">›</span></a></div>` : "") +
+      (shop ? `<div class="list"><a class="row plain" href="${esc(href({ kind: "screen", app: shop.name, screen: "main", params: "{}" }))}" data-go='${esc(JSON.stringify({ kind: "screen", app: shop.name, screen: "main", params: "{}" }))}'>${one.appIcon(shop, 29)}<div class="main"><div class="title"><span>App Store</span></div></div><span class="chev">›</span></a></div>` : "") +
       `</div></div>`;
     $("[data-signout]", detail).onclick = () => auth.signOut();
     $("[data-requests]", detail)?.addEventListener("click", () => requestsSheet());
