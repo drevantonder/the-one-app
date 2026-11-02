@@ -6,7 +6,8 @@ import Security
 /// Signing in, as every client of the install's auth service does (kernel/web/web.js is the same in a browser): this
 /// app registers itself as an OAuth client, the person signs in with their passkey in the system's sign-in sheet,
 /// and it comes back at `<cli>://signed-in/` with a code that PKCE turns into tokens. The refresh token is kept in the
-/// Keychain, for this device only; access tokens only in memory.
+/// Keychain, for this device only; access tokens only in memory. The iPhone sends them to the install's address; the
+/// Mac's window, to the Mac's own node.
 actor Auth {
     static let shared = Auth()
 
@@ -186,7 +187,7 @@ actor Auth {
     }
 
     /// The refresh token, in the Keychain: on this device only, readable once it has been unlocked since it started,
-    /// so a widget's button works from the lock screen.
+    /// so a widget's button works from the lock screen. The Mac's is in the login keychain, which only this app reads.
     private enum Keychain {
         static var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "\(cli) sign-in", kSecAttrAccount as String: "refresh"] }
 
@@ -199,7 +200,11 @@ actor Auth {
         static func write(_ value: String?) {
             SecItemDelete(query as CFDictionary)
             guard let value else { return }
-            SecItemAdd(query.merging([kSecValueData as String: Data(value.utf8), kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]) { $1 } as CFDictionary, nil)
+            var item = query.merging([kSecValueData as String: Data(value.utf8)]) { $1 }
+            #if os(iOS)
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            #endif
+            SecItemAdd(item as CFDictionary, nil)
         }
     }
 }

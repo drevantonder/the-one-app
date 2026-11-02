@@ -28,12 +28,13 @@ targets:
         LSApplicationCategoryType: public.app-category.productivity
         NSHumanReadableCopyright: ""
         CLI: ${CONFIG_CLI}
+        Yours: ${CONFIG_YOURS}
         NodePort: "${CONFIG_PORT}"
         Accent: ${CONFIG_ACCENT}
         BuildCommit: ${BUILD_COMMIT}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        # <cli>://vault?id=…&scope=…: an agent's request for a Vault item.
+        # <cli>://signed-in/: back from signing in; <cli>://vault?id=…&scope=…: an agent's request for a Vault item.
         CFBundleURLTypes:
           - CFBundleURLName: app.${CONFIG_CLI}.mac
             CFBundleURLSchemes:

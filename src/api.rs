@@ -1,6 +1,6 @@
 //! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; and how someone
-//! signed in with the install's kernel (a browser, through the gateway) reaches it, as themselves, for what their
-//! sign-in opens.
+//! signed in with the install's kernel (a browser, through the gateway, or the Mac app's window here) reaches it, as
+//! themselves, for what their sign-in opens.
 
 use std::convert::Infallible;
 

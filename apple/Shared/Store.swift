@@ -108,6 +108,9 @@ final class Store {
     var startNode: (@MainActor () async throws -> Void)?
     /// A friendlier name for this machine than its hostname, offered once.
     var preferredDeviceName: String?
+    /// Whether someone is signed in, so their apps and widgets are asked for: until they are, a Mac's window asks its
+    /// node only what it is.
+    var signedIn = true
 
     private(set) var phase = Phase.connecting
     private(set) var state: NodeState?
@@ -150,6 +153,7 @@ final class Store {
 
     /// Forgets everything it showed: the person signed out.
     func forget() {
+        ScreenCache.forget()
         state = nil
         apps = []
         widgets = [:]
@@ -546,7 +550,7 @@ final class Store {
         self.state = state
         arrangements = (state.arrangements ?? [:]).merging(unsaved) { $1 }
         phase = .ready
-        if first { await renameIfHostname() }
+        if first, signedIn { await renameIfHostname() }
         if first || arrived || apps.isEmpty || regrouped { await refreshApps() }
     }
 
@@ -596,7 +600,7 @@ final class Store {
     // MARK: Apps
 
     func refreshApps() async {
-        guard install != nil else { return }
+        guard install != nil, signedIn else { return }
         do {
             let apps = try await node.apps()
             if apps != self.apps { self.apps = apps }
@@ -616,7 +620,7 @@ final class Store {
     }
 
     func refreshWidgets() async {
-        guard let install, !install.joining else { return }
+        guard let install, !install.joining, signedIn else { return }
         let node = node
         var fresh: [String: [WidgetInfo]] = [:]
         await withTaskGroup(of: (String, [WidgetInfo]?).self) { tasks in

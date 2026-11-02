@@ -296,10 +296,10 @@ private struct ScreenWebView: Representable {
             case "signOut":
                 #if os(iOS)
                 await Phone.shared.signOut()
-                return (nil, nil)
                 #else
-                return (nil, String(localized: "This device stays signed in. Remove it in Devices."))
+                await Mac.shared.signOut()
                 #endif
+                return (nil, nil)
             case "appearance":
                 if let value = (body["value"] as? String).flatMap(Appearance.init(rawValue:)) { UserDefaults.standard.set(value.rawValue, forKey: "appearance") }
                 return (UserDefaults.standard.string(forKey: "appearance").flatMap(Appearance.init(rawValue:))?.rawValue ?? Appearance.automatic.rawValue, nil)
@@ -307,7 +307,7 @@ private struct ScreenWebView: Representable {
                 #if os(iOS)
                 return (["name": UIDevice.current.name, "build": store.build, "signOut": true], nil)
                 #else
-                return (["name": displayName(store.server?.name ?? store.state?.machine.name ?? ""), "build": store.build, "signOut": false], nil)
+                return (["name": displayName(store.server?.name ?? store.state?.machine.name ?? ""), "build": store.build, "signOut": Auth.signedIn], nil)
                 #endif
             case "request":
                 do {
@@ -644,6 +644,10 @@ enum ScreenCache {
         guard let data = try? Data(contentsOf: url) else { return nil }
         let time = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .now
         return (String(decoding: data, as: UTF8.self), time)
+    }
+
+    static func forget() {
+        try? FileManager.default.removeItem(at: dir)
     }
 }
 

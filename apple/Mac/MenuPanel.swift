@@ -11,7 +11,7 @@ struct MenuPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let install = store.install {
+            if let install = store.install, store.signedIn {
                 HStack(spacing: 10) {
                     Image("Logo").resizable().frame(width: 26, height: 26)
                     Text(install.name).font(.headline)
@@ -29,7 +29,7 @@ struct MenuPanel: View {
                             .frame(width: 7, height: 7)
                         Text(displayName(server.name))
                         Spacer()
-                        if server.key == store.state?.machine.key {
+                        if server.key == store.server?.key {
                             Text("This device").foregroundStyle(.secondary)
                         } else if !server.isOnline {
                             Text("Offline").foregroundStyle(.tertiary)
@@ -55,14 +55,14 @@ struct MenuPanel: View {
                 }
                 Divider().padding(.vertical, 6).padding(.horizontal, 14)
             } else {
-                Text(store.state == nil ? "Starting…" : "Not set up yet")
+                Text(store.state == nil ? "Starting…" : store.install == nil ? "Not set up yet" : "Signed out")
                     .foregroundStyle(.secondary)
                     .padding(14)
                 Divider().padding(.horizontal, 14)
             }
 
             MenuButton(action: open) {
-                Text("Open \(store.config?.name ?? appName)")
+                Text(store.signedIn || store.state == nil ? "Open \(store.config?.name ?? appName)" : "Sign In…")
             }
             MenuButton {
                 openAtLogin.toggle()

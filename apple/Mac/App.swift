@@ -1,19 +1,17 @@
+import AuthenticationServices
 import ServiceManagement
 import SwiftUI
 
 @main
 struct MacApp: App {
-    @State private var store: Store
+    @State private var mac = Mac.shared
+    private var store: Store { mac.store }
 
     init() {
         SingleCopy.claim()
-        let store = Store(node: .local)
-        store.startNode = NodeLauncher.start
-        store.preferredDeviceName = Host.current().localizedName
-        Task { await store.run() }
+        Mac.shared.run()
         Sidecars.start()
-        WidgetItems.shared.start(store)
-        _store = State(initialValue: store)
+        WidgetItems.shared.start(Mac.shared.store)
         if !UserDefaults.standard.bool(forKey: "loginItemSet") {
             UserDefaults.standard.set(true, forKey: "loginItemSet")
             try? SMAppService.mainApp.register()
@@ -44,6 +42,7 @@ struct MacApp: App {
     var body: some Scene {
         Window(appName, id: "main") {
             RootView()
+                .environment(mac)
                 .environment(store)
                 .tint(accent)
                 .frame(minWidth: 760, minHeight: 500)
@@ -60,7 +59,7 @@ struct MacApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("Pair a Computer…") { store.sheet = .pair }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
-                    .disabled(store.install == nil)
+                    .disabled(store.install == nil || !store.signedIn)
                 Button("Join with a Pairing Code…") { store.sheet = .join }
                     .keyboardShortcut("j", modifiers: [.command, .shift])
                     .disabled(store.install != nil)
@@ -79,6 +78,130 @@ struct MacApp: App {
 
     private var accent: Color {
         store.config.map { Color(accentHex: $0.accent) } ?? .accentColor
+    }
+}
+
+/// The Mac's window before and after its person signs in. Signed in, its calls carry their token to this Mac's own
+/// node, which opens their data with keys the vault gives that sign-in, as for every other client; the node itself,
+/// and the sidecars, stay this machine's own programs.
+@MainActor @Observable
+final class Mac {
+    static let shared = Mac()
+
+    let store = Store(node: NodeClient(transport: MacNode(), client: "mac"))
+    private(set) var signingIn = false
+    var signInError: String?
+    /// Asking as this machine's own program, until its person signs in.
+    private(set) var asMachine = false
+    private var running: Task<Void, Never>?
+
+    init() {
+        let defaults = UserDefaults.standard
+        // A window that showed pages before it could sign in keeps asking as this machine's own program until its
+        // person signs in, rather than an update signing them out.
+        if defaults.object(forKey: "asMachine") == nil { defaults.set(!Auth.signedIn && defaults.object(forKey: "selection") != nil, forKey: "asMachine") }
+        asMachine = Self.asMachine
+        store.signedIn = Auth.signedIn || asMachine
+        store.startNode = NodeLauncher.start
+        store.preferredDeviceName = Host.current().localizedName
+    }
+
+    /// Whether the window still asks as this machine's own program, not signed in. Goes once nodes refuse calls with
+    /// no token (ARCHITECTURE.md).
+    nonisolated static var asMachine: Bool { UserDefaults.standard.bool(forKey: "asMachine") && !Auth.signedIn }
+
+    /// Keeps the window in step with the node, as whoever is signed in.
+    func run() {
+        running?.cancel()
+        running = Task { await store.run() }
+    }
+
+    /// Signs in at `typed` (an address, or an invite link, whose page makes the person's passkey first), with their
+    /// passkey in the system's sign-in sheet.
+    func signIn(_ typed: String, session: WebAuthenticationSession) async -> URL? {
+        guard !signingIn else { return nil }
+        signingIn = true
+        signInError = nil
+        defer { signingIn = false }
+        do {
+            if let invite = try Auth.take(typed) { return invite }
+            let name = displayName(store.server?.name ?? Host.current().localizedName ?? "Mac")
+            // In a session of its own: the browser keeps nothing, and asks no "wants to use … to sign in" before the passkey.
+            let signedIn = try await Auth.shared.signIn(name: "\(appName) on \(name)") { url in
+                try await session.authenticate(using: url, callback: .customScheme(Auth.cli), preferredBrowserSession: .ephemeral, additionalHeaderFields: [:])
+            }
+            guard signedIn else { return nil }
+        } catch {
+            signInError = error.localizedDescription
+            return nil
+        }
+        UserDefaults.standard.set(false, forKey: "asMachine")
+        asMachine = false
+        store.signedIn = true
+        store.forget()
+        run()
+        return nil
+    }
+
+    /// Signs out: the first screen again, with nothing of the person's left in the window.
+    func signOut() async {
+        await Auth.shared.signOut()
+        signedOut(nil)
+    }
+
+    /// The node no longer takes this Mac's sign-in.
+    func signedOut(_ why: String?) {
+        UserDefaults.standard.set(false, forKey: "asMachine")
+        asMachine = false
+        guard store.signedIn else { return }
+        store.signedIn = false
+        signInError = why
+        store.forget()
+        run()
+    }
+}
+
+/// This Mac's own node, asked as the person signed in. Signed out, the window asks it only what it is, and to join an
+/// install with a pairing code.
+struct MacNode: NodeTransport {
+    private static let base = URL(string: "http://127.0.0.1:\(Bundle.main.object(forInfoDictionaryKey: "NodePort") as! String)")!
+    private static let signedOut: Set = ["v1/state", "v1/join"]
+
+    var unreachable: String { HTTPNode(base: Self.base).unreachable }
+
+    /// The node, as whoever's signed in: none, for what only someone signed in asks.
+    private func node(_ path: String) throws -> HTTPNode {
+        if Auth.signedIn { return HTTPNode(base: Self.base, auth: .shared) }
+        if Mac.asMachine || Self.signedOut.contains(path) { return HTTPNode(base: Self.base) }
+        throw Auth.SignedOut(message: String(localized: "Sign in first."))
+    }
+
+    private func signedIn<T>(_ path: String, _ work: (HTTPNode) async throws -> T) async throws -> T {
+        let node = try node(path)
+        do {
+            return try await work(node)
+        } catch let error as Auth.SignedOut {
+            if node.auth != nil { await Mac.shared.signedOut(error.message) }
+            throw error
+        }
+    }
+
+    func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data {
+        try await signedIn(path) { try await $0.send(method, path, body: body, timeout: timeout) }
+    }
+
+    func page(app: String, screen: String, params: String, scope: String?) async throws -> String {
+        try await signedIn("") { try await $0.page(app: app, screen: screen, params: params, scope: scope) }
+    }
+
+    func settingsPage(_ name: String, params: String) async throws -> String {
+        try await signedIn("") { try await $0.settingsPage(name, params: params) }
+    }
+
+    /// Signed out, none: the window is asked again once someone signs in.
+    func events() -> AsyncThrowingStream<NodeEvent, Error> {
+        guard let node = try? node("") else { return AsyncThrowingStream { _ in } }
+        return node.events()
     }
 }
 

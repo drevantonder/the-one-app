@@ -230,7 +230,7 @@ struct NodeError: LocalizedError, Sendable {
 
 }
 
-/// How a shell reaches a node: HTTP to this machine's own, or, on a phone, the client library to a server.
+/// How a shell reaches a node: the Mac's own, or the install's address from a phone.
 protocol NodeTransport: Sendable {
     /// Sends a request and returns the local API's JSON reply, or throws its error.
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data
@@ -244,16 +244,18 @@ protocol NodeTransport: Sendable {
     var unreachable: String { get }
 }
 
-/// The node's HTTP API: this machine's own node, or with `auth`, the install's address as the person signed in.
+/// The node's HTTP API: this machine's own node, or the install's address; with `auth`, as the person signed in.
 struct HTTPNode: NodeTransport {
     var base: URL
     var auth: Auth?
 
+    private var here: Bool { base.host() == "127.0.0.1" }
+
     var unreachable: String {
-        auth == nil ? "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." : String(localized: "Your devices aren’t answering.")
+        here ? "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." : String(localized: "Your devices aren’t answering.")
     }
 
-    /// A request as the person signed in, if this goes through the address: a refused token is renewed once.
+    /// A request as the person signed in, if they are: a refused token is renewed once.
     private func signed(_ request: URLRequest) async throws -> (URLRequest, String?) {
         guard let auth else { return (request, nil) }
         var request = request
@@ -285,7 +287,7 @@ struct HTTPNode: NodeTransport {
             struct Failure: Decodable { var error: String? }
             let error = (try? JSONDecoder().decode(Failure.self, from: data))?.error
             if auth != nil, status == 401 { throw Auth.SignedOut(message: error ?? String(localized: "Sign in again.")) }
-            throw NodeError(error ?? (auth != nil && status >= 500 ? String(localized: "Your devices aren’t answering.") : "The node answered \(status)"))
+            throw NodeError(error ?? (!here && status >= 500 ? String(localized: "Your devices aren’t answering.") : "The node answered \(status)"))
         }
         return data
     }
@@ -445,12 +447,6 @@ struct NodeClient: Sendable {
     /// What the node credits this shell's calls to, for apps' insights; a phone's server labels it itself.
     var client: String?
 
-    /// The Mac's own node.
-    static var local: NodeClient {
-        let port = Bundle.main.object(forInfoDictionaryKey: "NodePort") as! String
-        return NodeClient(transport: HTTPNode(base: URL(string: "http://127.0.0.1:\(port)")!), client: "mac")
-    }
-
     private func json(_ fields: [String: Any?]) throws -> Data {
         try JSONSerialization.data(withJSONObject: fields.mapValues { $0 ?? NSNull() })
     }
@@ -516,11 +512,6 @@ struct NodeClient: Sendable {
     func events() -> AsyncThrowingStream<NodeEvent, Error> { transport.events() }
 
     // MARK: The install
-
-    /// Creates an install, with this machine as its first admin's server. The reply's recovery key is shown once.
-    func create(name: String, userName: String) async throws -> String? {
-        try await post("v1/create", ["name": name, "user_name": userName])["recovery"] as? String
-    }
 
     /// A pairing code for another of this user's computers.
     func pair() async throws -> String {
