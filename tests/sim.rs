@@ -1,8 +1,8 @@
 //! Many servers writing one app's database in one bucket over bad links: every request is slow by a random amount, so
-//! they arrive out of order, and some fail, before or after the bucket did what they asked. Some writes are given up on
-//! part way, as a call that runs out of time is, and what they sent goes on. Every seed must end with every server
-//! reading the same database, holding every write it was told landed, once, and nothing one attempt wrote twice. A
-//! failing seed is a bug. `ONE_SIM_SEEDS=<from>..<to>` sweeps more.
+//! they arrive out of order, and some fail, before or after the bucket did what they asked, or time out while still on
+//! their way and land later. Some writes are given up on part way, as a call that runs out of time is, and what they
+//! sent goes on. Every seed must end with every server reading the same database, holding every write it was told
+//! landed, once, and nothing one attempt wrote twice. A failing seed is a bug. `ONE_SIM_SEEDS=<from>..<to>` sweeps more.
 //!
 //! Then the same with each server keeping a copy on its disk, sent some of the others' steps as they're written, and
 //! reading from its copy alone in between: what it reads may be behind, but never anything no server read at the same
@@ -48,12 +48,12 @@ impl Link {
     }
 
     /// Sends a request: it waits on the way there, may fail before it reaches the bucket, may fail after, and its
-    /// answer waits on the way back.
+    /// answer waits on the way back. Some time out while they're still on their way, and reach the bucket later.
     async fn send<T: 'static>(&self, does: impl FnOnce(&mut BTreeMap<String, Vec<u8>>) -> T + 'static) -> Result<T> {
-        let (there, before, after, back) = {
+        let (there, before, after, back, late) = {
             let mut rng = self.rng.lock().unwrap();
             let fails = if self.steady { 0.0 } else { 1.0 };
-            (rng.gen_range(0..100), rng.gen_bool(0.05 * fails), rng.gen_bool(0.05 * fails), rng.gen_range(0..100))
+            (rng.gen_range(0..100), rng.gen_bool(0.05 * fails), rng.gen_bool(0.05 * fails), rng.gen_range(0..100), rng.gen_bool(0.03 * fails))
         };
         let (objects, going) = (self.objects.clone(), self.going.clone());
         going.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -68,6 +68,10 @@ impl Link {
                 Some(done) => Ok(done),
             }
         });
+        if late {
+            tokio::time::sleep(Duration::from_millis(there / 2)).await;
+            bail!("the link dropped it, or it's late");
+        }
         request.await.unwrap()
     }
 

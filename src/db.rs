@@ -158,15 +158,7 @@ impl Db {
             let name = step_name(&self.prefix, self.at + 1);
             let step = [b"c".as_slice(), &changes].concat();
             let sealed = seal(&self.key, &name, &step);
-            let created = match bucket.create(&name, &sealed).await {
-                // The answer was lost: what's at the position says whether it landed.
-                Err(err) => match bucket.get(&name).await {
-                    Ok(o) => Ok(o.is_some_and(|o| o.bytes == sealed)),
-                    Err(_) => Err(err),
-                },
-                created => created,
-            };
-            if created? {
+            if created(bucket, &name, &sealed).await? {
                 open.execute_batch("commit")?;
                 drop(open);
                 self.at += 1;
@@ -223,6 +215,24 @@ impl Db {
             }
             // A kind of step a newer server writes.
             _ => Ok(()),
+        }
+    }
+}
+
+/// Creates an object that only this server would write with these bytes, such as a write's step: whether they're
+/// there now, rather than another's. When the answer is lost, the same is sent again rather than the bucket asked what's
+/// there, since the first may still be on its way and land after a read that found nothing: a write that took that for
+/// a lost race would run again on top of itself.
+pub async fn created(bucket: &impl Bucket, name: &str, bytes: &[u8]) -> Result<bool> {
+    let mut tries = 0;
+    loop {
+        match bucket.create(name, bytes).await {
+            Ok(true) => return Ok(true),
+            Ok(false) if tries == 0 => return Ok(false),
+            // One sent before, whose answer was lost, may be what's there.
+            Ok(false) => return Ok(bucket.get(name).await?.with_context(|| format!("{name} went once written"))?.bytes == bytes),
+            Err(err) if tries == 3 => return Err(err),
+            Err(_) => tries += 1,
         }
     }
 }

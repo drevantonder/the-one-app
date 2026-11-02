@@ -1171,7 +1171,7 @@ impl Node {
                 let key = earlier.unwrap_or_else(rand::random);
                 let id = crate::backups::key_id(&key);
                 let name = format!("{folder}/{KEY_OBJECT}");
-                if !Bucket::create(&bucket, &name, id.as_bytes()).await? && Bucket::get(&bucket, &name).await?.is_none_or(|o| o.bytes != id.as_bytes()) {
+                if !crate::db::created(&bucket, &name, id.as_bytes()).await? {
                     // Another server made it just now: it gives it to this one next, once it's sealed it.
                     let mut found = None;
                     for _ in 0..50 {
