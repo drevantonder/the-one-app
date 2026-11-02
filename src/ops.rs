@@ -208,11 +208,18 @@ fn places(op: &Value) -> Vec<String> {
 /// The operation's input from flags, words (filling `places` in order) and files. Given fewer words than places, the
 /// optional places are skipped first: `one board post "hi"` is text, `one board post ideas "hi"` a topic and text.
 /// A word left over is an error, never folded into another input: it says to quote text, or which flag to give it as.
+/// Whether an operation's input takes `name`: one of its properties, or anything where it's open-ended. A name it
+/// doesn't take (one renamed, say) fails, rather than being passed over and the call run as if it weren't given.
+pub fn takes(schema: &Value, name: &str) -> bool {
+    schema["properties"].get(name).is_some() || schema["additionalProperties"] == true || !schema["properties"].is_object()
+}
+
 fn input(schema: &Value, places: &[String], words: Vec<String>, flags: BTreeMap<String, Vec<Option<String>>>, files: &[String]) -> Result<Map<String, Value>> {
     let props = schema["properties"].as_object().cloned().unwrap_or_default();
     let mut input = Map::new();
     for (flag, values) in flags {
         let name = input_name(&props, &flag);
+        ensure!(takes(schema, &name), "--{flag} isn't an input of this (see --help)");
         input.insert(name.clone(), value(&flag, &values, props.get(&name))?);
     }
     for f in files {

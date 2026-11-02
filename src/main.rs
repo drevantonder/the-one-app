@@ -1660,6 +1660,9 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     let device = input.remove("device");
     let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = spec.or_else(|| ops::find(app, op).map(|(_, spec)| spec)) {
+        if let Some(other) = input.keys().find(|k| !ops::takes(&spec["input"], k)) {
+            anyhow::bail!("{other} isn't an input of {name}: see its inputSchema");
+        }
         anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
         ops::mcp_files(&spec, &mut input)?;
     }
