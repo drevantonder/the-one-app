@@ -144,15 +144,30 @@
     return input;
   };
 
-  // A large title at the top of a screen, as iOS draws one: the shell's own title stays empty until it scrolls away,
-  // so the name shows once. Call it once per screen, and put what it returns first.
+  // A large title at the top of a screen, as iOS draws one: the shell's own title stays empty while it shows, and is
+  // its text once it scrolls away, so the name shows once. The screen's `.large-title` is followed as it redraws, so
+  // calling it once is enough; put what it returns first, or draw a `.large-title` of its own.
+  let titled = false;
   one.largeTitle = (text) => {
-    one.title("");
-    setTimeout(() => {
-      const el = document.querySelector(".large-title");
-      if (!el || !window.IntersectionObserver) return void one.title(text);
-      new IntersectionObserver(([e]) => one.title(e.isIntersecting ? "" : text)).observe(el);
-    });
+    if (!titled) {
+      titled = true;
+      one.title(window.IntersectionObserver ? "" : text);
+      if (window.IntersectionObserver) {
+        let el = null;
+        const seen = new IntersectionObserver((all) => {
+          const e = all.filter((x) => x.target === el).pop();
+          if (e) one.title(e.isIntersecting ? "" : el.textContent);
+        });
+        const follow = () => {
+          const now = document.querySelector(".large-title");
+          if (now === el) return;
+          if (el) seen.unobserve(el);
+          if ((el = now)) seen.observe(el);
+        };
+        setTimeout(follow);
+        new MutationObserver(follow).observe(document.documentElement, { childList: true, subtree: true });
+      }
+    }
     return `<h1 class="large-title">${esc(text)}</h1>`;
   };
 

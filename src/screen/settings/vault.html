@@ -36,7 +36,7 @@
   const following = {};
 
   document.getElementById("new").innerHTML = one.icon("plus");
-  one.title("Vault");
+  one.largeTitle("Vault");
   one.search("#search", { onSearch: (q) => ((query = q.trim().toLowerCase()), drawList()) });
 
   const api = one.api;

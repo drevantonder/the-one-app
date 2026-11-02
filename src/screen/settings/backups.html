@@ -179,7 +179,7 @@
     return `${n >= 100 || u === 0 ? Math.round(n) : n.toFixed(1)} ${units[u]}`;
   }
 
-  one.title("Backups");
+  one.largeTitle("Backups");
   // Not while someone's typing in a sheet: their text would go.
   one.on("changed", () => !document.querySelector(".sheet") && draw());
   // Times like "12 minutes ago" stay true.

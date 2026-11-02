@@ -125,7 +125,7 @@
     });
   }
 
-  one.title("General");
+  one.largeTitle("General");
   // Not while someone's typing: their text would go.
   one.on("changed", () => !document.activeElement?.matches("input:not(.switch)") && draw());
   draw();

@@ -104,7 +104,7 @@
   document.addEventListener("change", (e) => e.target.dataset.user && change(e.target.dataset.user, e.target.value || null, e.target));
   document.addEventListener("click", (e) => e.target.closest?.("[data-add]") && add());
 
-  one.title("Users");
+  one.largeTitle("Users");
   one.on("changed", draw);
   draw();
 </script>

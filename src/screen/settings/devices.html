@@ -97,7 +97,7 @@
     row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : "Signed in"], trailing: "", removable: !c.me });
 
   function page() {
-    one.title("Devices");
+    one.largeTitle("Devices");
     const servers = state.install?.servers || [], clients = state.install?.clients || [];
     const mine = servers.filter((s) => s.user === me()), others = servers.filter((s) => s.user !== me());
     const here = [...servers, ...clients].find((m) => m.me);

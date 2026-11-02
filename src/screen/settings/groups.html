@@ -38,7 +38,7 @@
     const groups = state.install?.groups || [];
     const invited = groups.filter((g) => g.invited.some((m) => m.user === me));
     const mine = groups.filter((g) => g.role);
-    one.title("Groups");
+    one.largeTitle("Groups");
     let html = '<div class="large-title">Groups</div>';
     if (invited.length) {
       html += '<h2 class="section">Invited</h2><div class="list">' + invited.map((g) => `<div class="row"><div class="tile">${one.icon("users-three-fill")}</div>
@@ -61,7 +61,7 @@
     const me = state.user?.id;
     const g = state.install?.groups.find((x) => x.id === group);
     if (!g || (!g.role && !g.invited.some((m) => m.user === me))) return one.notFound({ title: "You're not in this group." });
-    one.title(g.name);
+    one.largeTitle(g.name);
     const admin = g.role === "admin";
     const admins = g.members.filter((m) => m.role === "admin").map((m) => m.user);
     const lastAdmin = admins.length === 1 && admins[0] === me;

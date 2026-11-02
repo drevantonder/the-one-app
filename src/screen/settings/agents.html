@@ -8,7 +8,7 @@
   .prompt .copy.copied { color: var(--ok); }
 </style>
 <script>
-  one.title("Agents");
+  one.largeTitle("Agents");
   one.render("#ask", async () => {
     // What to paste into an agent so it connects itself, as the node says.
     const text = (await one.api("GET", "/v1/state")).agent_prompt;
