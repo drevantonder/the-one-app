@@ -73,13 +73,8 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     println!("Building {short}");
     let mut build = Command::new(cargo());
     build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
-    // A device that can't build it makes a release with no serverless node, which can't deploy one.
-    match serverless(&src, &config) {
-        Ok(dir) => {
-            build.env("SERVERLESS", dir);
-        }
-        Err(err) => println!("  no serverless node in this build: {err:#}"),
-    }
+    // Every release carries the serverless node: one without it couldn't deploy the kernel.
+    build.env("SERVERLESS", serverless(&src, &config).context("couldn't build the serverless node, so nothing was sent out")?);
     run_quiet(&mut build)?;
 
     // An update's Macs build in the background, and a release's build it with what it publishes, which it waits for.
