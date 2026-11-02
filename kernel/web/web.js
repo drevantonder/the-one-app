@@ -420,8 +420,10 @@ window.__one = {};
   /// and on a computer the Mac app's size of text.
   function look(html) {
     const accent = /^#[0-9a-f]{3,8}$/i.test(config().accent || "") ? config().accent : "";
-    // This window's appearance, kept in step (see `scheme`).
-    const looks = `<script>(() => { const scheme = (${scheme})(); let now = ${JSON.stringify(appearance())}; const apply = () => scheme(document, now);
+    // This window's appearance, kept in step (see `scheme`); with the nonce of a page that runs only its own scripts
+    // (the client's own screens), as one of them.
+    const nonce = html.match(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-([0-9a-f]+)'/)?.[1];
+    const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { const scheme = (${scheme})(); let now = ${JSON.stringify(appearance())}; const apply = () => scheme(document, now);
       addEventListener("DOMContentLoaded", apply); addEventListener("load", apply);
       addEventListener("message", (e) => { if (e.source === parent && e.data?.oneScheme) apply(now = e.data.oneScheme); }); })()</script>`;
     const style = `<style>html, body { background: transparent !important; }${accent ? ` :root:root { --accent: ${accent}; }` : ""}

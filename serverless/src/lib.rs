@@ -159,13 +159,13 @@ pub fn statements(appends: &str, scopes: &str) -> Result<String, JsError> {
 /// An app screen's page (`src/screen.rs`), from what the screen is told (JSON) and the HTML the app wrote.
 #[wasm_bindgen]
 pub fn screen(context: &str, body: &str) -> Result<String, JsError> {
-    Ok(one::screen::page(&serde_json::from_str(context)?, body))
+    Ok(one::screen::page(&serde_json::from_str(context)?, body, false))
 }
 
 /// A client's own screen's page (`src/screen.rs`), from what the screen is told (JSON) and its name.
 #[wasm_bindgen]
 pub fn client_screen(context: &str, name: &str) -> Result<String, JsError> {
-    Ok(one::screen::page(&serde_json::from_str(context)?, one::screen::client_screen(name)))
+    Ok(one::screen::page(&serde_json::from_str(context)?, one::screen::client_screen(name), true))
 }
 
 /// The white label this node is: `{ name, cli, accent }`.

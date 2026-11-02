@@ -58,14 +58,14 @@
 
   // A row is tapped to remove it, unless it's the device looking.
   const row = ({ key, name, online, lines, trailing, removable }) =>
-    `<${removable ? `a class="row" onclick="remove('${key}')"` : 'div class="row"'}>
+    `<${removable ? `a class="row" data-remove="${one.esc(key)}"` : 'div class="row"'}>
       <div class="tile${online ? "" : " off"}">${one.icon(icon(name || "phone"))}</div>
       <div class="main"><div class="title"><span>${one.esc(shown(name) || "Phone")}</span></div>${subs(...lines)}</div>${trailing}</${removable ? "a" : "div"}>`;
 
   const serverRow = (s) => {
     const online = !!s.online;
     const trailing = mayTrust(s)
-      ? `<input type="checkbox" class="switch" aria-label="Trust ${one.esc(shown(s.name))} to keep your data"${(s.trusted_by || []).includes(me()) ? " checked" : ""} onchange="trust('${s.key}', this)">`
+      ? `<input type="checkbox" class="switch" aria-label="Trust ${one.esc(shown(s.name))} to keep your data"${(s.trusted_by || []).includes(me()) ? " checked" : ""} data-trust="${one.esc(s.key)}">`
       : status(online);
     return row({ key: s.key, name: s.name, online, lines: [s.me ? "This device" : runBy(s), online && load(s.load)], trailing, removable: s.user === me() && !s.me });
   };
@@ -81,7 +81,7 @@
   };
   const orderRow = (d, admin) => {
     const trailing = admin
-      ? `<label class="pick">${PLACES[d.use]}<select aria-label="Where ${one.esc(d.name)} comes" onchange="place('${one.esc(d.key)}', this.value, this)">${Object.entries(PLACES).map(([v, t]) => `<option value="${v}"${v === d.use ? " selected" : ""}>${t}</option>`).join("")}</select></label>`
+      ? `<label class="pick">${PLACES[d.use]}<select aria-label="Where ${one.esc(d.name)} comes" data-place="${one.esc(d.key)}">${Object.entries(PLACES).map(([v, t]) => `<option value="${v}"${v === d.use ? " selected" : ""}>${t}</option>`).join("")}</select></label>`
       : `<span class="note">${PLACES[d.use]}</span>`;
     return `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(d.name)}</span></div>${subs([KINDS[d.kind], d.here && "This device", !d.online && "Offline"].filter(Boolean).join(" · "))}</div>${trailing}</div>`;
   };
@@ -106,7 +106,7 @@
       html += `<h2 class="section">This Device</h2><div class="list"><label class="row plain"><input class="field" id="name" aria-label="This device’s name" value="${one.esc(here.name)}" autocomplete="off" spellcheck="false" enterkeyhint="done"></label></div>`;
     }
     html += '<h2 class="section">Your Devices</h2><div class="list">' + mine.map(serverRow).join("") + clients.filter((c) => c.user === me()).map(clientRow).join("") +
-      `<a class="row plain action-row" onclick="pair()">${one.icon("desktop")}<span>Pair a Computer</span></a></div><div id="ask"></div>`;
+      `<a class="row plain action-row" data-pair>${one.icon("desktop")}<span>Pair a Computer</span></a></div><div id="ask"></div>`;
     if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(serverRow).join("") + "</div>";
     html += orderSection();
     const holding = servers.filter(holds).map((s) => shown(s.name));
@@ -134,7 +134,17 @@
     await draw();
   }
 
-  document.addEventListener("change", (e) => e.target.id === "name" && rename(e.target));
+  document.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.id === "name") rename(t);
+    else if (t.dataset.trust) trust(t.dataset.trust, t);
+    else if (t.dataset.place) place(t.dataset.place, t.value, t);
+  });
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest?.("[data-remove], [data-pair]");
+    if (t?.dataset.remove) remove(t.dataset.remove);
+    else if (t) pair();
+  });
   document.addEventListener("keydown", (e) => e.target.id === "name" && e.key === "Enter" && e.target.blur());
   function rename(input) {
     const name = input.value.trim();

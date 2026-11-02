@@ -136,22 +136,22 @@ impl Node {
                 body.as_str().context("the screen isn't text")?.to_string()
             }
         };
-        self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body)
+        self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body, false)
     }
 
     /// A client's own screen (`crate::screen::client_screen`) as a whole page, like an app's but no app's.
     pub fn client_screen(&self, viewer: Caller, name: &str, params: Value) -> Result<String> {
-        self.page(&viewer, json!({ "screen": name, "params": params }), crate::screen::client_screen(name))
+        self.page(&viewer, json!({ "screen": name, "params": params }), crate::screen::client_screen(name), true)
     }
 
     /// A screen's page: its body with the design kit, the bridge, and `window.__one`, which is `context` and who's
     /// looking.
-    pub(super) fn page(&self, viewer: &Caller, mut context: Value, body: &str) -> Result<String> {
+    pub(super) fn page(&self, viewer: &Caller, mut context: Value, body: &str, own: bool) -> Result<String> {
         context["me"] = json!(self.me_for(viewer)?);
         let made_here = self.with(|i| Ok(crate::state::settings(&i.r.members).remove("made_here")))?;
         let api = format!("http://localhost:{}", crate::api::port());
         context["config"] = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": made_here });
-        Ok(crate::screen::page(&context, body))
+        Ok(crate::screen::page(&context, body, own))
     }
 
     /// Arranges a page for `caller` alone: the order of its apps and widgets, which widgets, their sizes and options,

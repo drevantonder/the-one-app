@@ -27,7 +27,7 @@
       const role = pending[u.id] || u.role;
       const trailing = !admin || u.id === me || (role === "admin" && admins === 1)
         ? `<span class="note">${role === "admin" ? "Admin" : "Member"}</span>`
-        : `<label class="pick">${role === "admin" ? "Admin" : "Member"}<select aria-label="${one.esc(u.name)}'s role" onchange="change('${u.id}', this.value || null, this)">
+        : `<label class="pick">${role === "admin" ? "Admin" : "Member"}<select aria-label="${one.esc(u.name)}'s role" data-user="${one.esc(u.id)}">
             <option value="admin"${role === "admin" ? " selected" : ""}>Admin</option><option value="member"${role === "member" ? " selected" : ""}>Member</option>
             <option disabled>──────</option><option value="">Remove ${one.esc(u.name)}</option></select></label>`;
       return `<div class="row">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div></div>${trailing}</div>`;
@@ -39,7 +39,7 @@
       const at = address ? ` at <b>${one.esc(address.replace(/^https?:\/\//, ""))}</b>` : "";
       html += `<h2 class="section">Add Someone</h2><p class="footer">Anyone with a Google account at ${one.esc(one.config.join_domain)} joins ${one.esc(ours)} by signing in with Google${at}.</p>`;
     } else if (admin) {
-      html += '<div class="list" style="margin-top:20px"><a class="row plain action-row" onclick="add()">Add Someone…</a></div>';
+      html += '<div class="list" style="margin-top:20px"><a class="row plain action-row" data-add>Add Someone…</a></div>';
     }
     return html;
   }
@@ -100,6 +100,9 @@
     };
     setTimeout(() => name.focus(), 50);
   }
+
+  document.addEventListener("change", (e) => e.target.dataset.user && change(e.target.dataset.user, e.target.value || null, e.target));
+  document.addEventListener("click", (e) => e.target.closest?.("[data-add]") && add());
 
   one.title("Users");
   one.on("changed", draw);

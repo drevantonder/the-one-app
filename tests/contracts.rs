@@ -588,16 +588,17 @@ fn the_gateway_names_the_windows_app_as_windows_does() {
 }
 
 /// A widget's tree is its app's, drawn on the clients' own screens, which act as the person looking: markup in every
-/// field of every node it can have draws as text, and makes no element, attribute or style (src/screen/widgets.js), in
-/// a browser.
+/// field of every node it can have draws as text, and makes no element, attribute or style (src/screen/widgets.js);
+/// and those screens run only their own scripts, refusing an inline handler or a script added to them (src/screen.rs),
+/// in a browser.
 #[test]
 fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
     let chrome = one::deploy::chrome().expect("this test draws screens in Chrome or Chromium: none was found (CHROME=<path> names one)");
     let dir = std::env::temp_dir().join(format!("one-screens-{}", rand::random::<u64>()));
     std::fs::create_dir_all(&dir).unwrap();
     // What each page says once it's drawn, as its title.
-    let title = |name: &str, body: &str| -> String {
-        let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body);
+    let title = |name: &str, body: &str, own: bool| -> String {
+        let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body, own);
         let path = dir.join(format!("{name}.html"));
         std::fs::write(&path, page).unwrap();
         let out = std::process::Command::new(&chrome)
@@ -611,6 +612,7 @@ fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
         title.unwrap_or_else(|| panic!("{name} wasn't drawn: {}", String::from_utf8_lossy(&out.stderr))).to_string()
     };
 
+    // Drawn with no policy, so only widgets.js keeps the markup out.
     let widgets = concat!("<script>", include_str!("../src/screen/widgets.js"), "</script>", r#"<script>
       const markup = `1"/><img src=x onerror="document.documentElement.dataset.ran = 1"><svg onload="document.documentElement.dataset.ran = 1">`;
       const fields = ["text", "value", "unit", "label", "max", "w", "h", "gap", "lines", "tone", "size", "weight", "style", "at", "title", "subtitle", "trailing",
@@ -635,7 +637,17 @@ fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
         document.title = `${document.documentElement.dataset.ran ? "ran" : "inert"} failed ${failed} made ${made} styled ${styled} drawn ${drawn} marks ${marks > 4 ? "yes" : "no"}`;
       }, 500));
     </script>"#);
-    assert_eq!(title("widgets", widgets), "inert failed 0 made 0 styled 0 drawn 23 marks yes", "a widget's markup is only ever text");
+    assert_eq!(title("widgets", widgets, false), "inert failed 0 made 0 styled 0 drawn 23 marks yes", "a widget's markup is only ever text");
 
+    // A client's own screen: its scripts run, markup put in it can't run any.
+    let own = r#"<script>
+      document.body.insertAdjacentHTML("beforeend", `<img src=x onerror="document.documentElement.dataset.ran = 'handler'"><a id="go" href="javascript:void (document.documentElement.dataset.ran = 'link')">x</a>`);
+      document.body.append(Object.assign(document.createElement("script"), { textContent: "document.documentElement.dataset.ran = 'script'" }));
+      document.getElementById("go").click();
+      addEventListener("load", () => setTimeout(() => (document.title = `ours ran, then ${document.documentElement.dataset.ran || "nothing"}`), 500));
+    </script>"#;
+    assert_eq!(title("own", own, true), "ours ran, then nothing", "a client's own screen runs only its own scripts");
+    // As an app's screen, the same runs (so the policy is what stops it).
+    assert_ne!(title("app", own, false), "ours ran, then nothing", "without the policy, this page does run what's put in it");
     let _ = std::fs::remove_dir_all(&dir);
 }

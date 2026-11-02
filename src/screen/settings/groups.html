@@ -43,17 +43,17 @@
     if (invited.length) {
       html += '<h2 class="section">Invited</h2><div class="list">' + invited.map((g) => `<div class="row"><div class="tile">${one.icon("users-three-fill")}</div>
         <div class="main"><div class="title"><span>${one.esc(g.name)}</span></div><div class="sub">${one.esc(names(g.members))}</div></div>
-        <button class="button capsule filled" onclick="accept('${g.id}', this)">Join</button></div>`).join("") + "</div>";
+        <button class="button capsule filled" data-accept="${one.esc(g.id)}">Join</button></div>`).join("") + "</div>";
     }
     if (!mine.length && !invited.length) {
-      return html + one.empty({ icon: "users-three", title: "No groups yet", text: "A group shares its apps and data, on a page of its own.", action: { label: "New Group", onclick: "create()" } }) + footer(error, true);
+      return html + one.empty({ icon: "users-three", title: "No groups yet", text: "A group shares its apps and data, on a page of its own.", action: { label: "New Group", run: () => create() } }) + footer(error, true);
     }
     if (mine.length) {
-      html += (invited.length ? '<h2 class="section">Yours</h2>' : "") + '<div class="list">' + mine.map((g) => `<a class="row" onclick="one.open('groups', { group: '${g.id}' })"><div class="tile">${one.icon("users-three-fill")}</div>
+      html += (invited.length ? '<h2 class="section">Yours</h2>' : "") + '<div class="list">' + mine.map((g) => `<a class="row" data-group="${one.esc(g.id)}"><div class="tile">${one.icon("users-three-fill")}</div>
         <div class="main"><div class="title"><span>${one.esc(g.name)}</span></div><div class="sub">${one.esc(names(g.members))}</div></div>
         ${g.role === "admin" ? '<span class="note">Admin</span>' : ""}<span class="chev">›</span></a>`).join("") + "</div>";
     }
-    return html + '<div class="list" style="margin-top:20px"><a class="row plain action-row" onclick="create()">New Group</a></div>' + footer(error, true);
+    return html + '<div class="list" style="margin-top:20px"><a class="row plain action-row" data-create>New Group</a></div>' + footer(error, true);
   }
 
   // One group: its members, its invites, and inviting or leaving.
@@ -70,7 +70,7 @@
       const role = pending[m.user] || m.role;
       const leave = m.user === me ? `Leave ${g.name}` : `Remove from ${g.name}`;
       const trailing = admin && !(role === "admin" && admins.length === 1)
-        ? `<label class="pick">${roleName(role)}<select aria-label="${one.esc(userName(m.user))}'s role" onchange="change('${m.user}', this.value || null)">
+        ? `<label class="pick">${roleName(role)}<select aria-label="${one.esc(userName(m.user))}'s role" data-member="${one.esc(m.user)}">
             <option value="admin"${role === "admin" ? " selected" : ""}>Admin</option><option value="member"${role === "member" ? " selected" : ""}>Member</option>
             <option disabled>──────</option><option value="">${one.esc(leave)}</option></select></label>`
         : `<span class="note">${roleName(role)}</span>`;
@@ -82,8 +82,8 @@
       html += '<h2 class="section">Invited</h2><div class="list">' + g.invited.map((m) => person(m.user, userName(m.user), '<span class="note">Waiting</span>')).join("") + "</div>";
     }
     const stuck = lastAdmin && g.members.length > 1;
-    html += '<div class="list" style="margin-top:20px">' + (admin ? '<a class="row plain action-row" onclick="invite()">Invite Someone…</a>' : "")
-      + `<a class="row plain danger-row${stuck ? " off" : ""}" onclick="change('${me}', null)">Leave ${one.esc(g.name)}</a></div>`;
+    html += '<div class="list" style="margin-top:20px">' + (admin ? '<a class="row plain action-row" data-invite>Invite Someone…</a>' : "")
+      + `<a class="row plain danger-row${stuck ? " off" : ""}" data-leave>Leave ${one.esc(g.name)}</a></div>`;
     if (stuck) html += footer("Make someone else an admin before you leave.");
     return html;
   }
@@ -157,7 +157,7 @@
     const people = sheet.body.querySelector("#people");
     const show = (note = "") => {
       matches = others.filter((u) => u.name.toLowerCase().includes(query.trim().toLowerCase()));
-      const rows = matches.map((u) => `<a class="row" data-user="${u.id}">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}</span></div>
+      const rows = matches.map((u) => `<a class="row" data-user="${one.esc(u.id)}">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}</span></div>
         ${u.role === "admin" ? `<div class="sub">Admin of your ${one.esc(one.config.name.replace(/^The /, ""))}</div>` : ""}</div>${one.icon("plus-circle-fill", "add")}</a>`);
       people.innerHTML = (rows.length ? `<div class="list">${rows.join("")}</div>` : others.length ? `<div class="list"><div class="row plain muted">No one called “${one.esc(query.trim())}”.</div></div>` : "")
         + (note ? footer(note, true) : footer(others.length ? "They join once they accept." : "Everyone is in this group already."));
@@ -186,6 +186,18 @@
     input.addEventListener("keydown", (e) => e.key === "Enter" && matches[0] && send(matches[0].id));
     show();
   }
+
+  document.addEventListener("change", (e) => e.target.dataset.member && change(e.target.dataset.member, e.target.value || null));
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest?.("#page [data-accept], #page [data-group], #page [data-create], #page [data-invite], #page [data-leave]");
+    if (!t) return;
+    const d = t.dataset;
+    if (d.accept) accept(d.accept, t);
+    else if (d.group) one.open("groups", { group: d.group });
+    else if ("create" in d) create();
+    else if ("invite" in d) invite();
+    else change(state.user?.id, null);
+  });
 
   one.on("changed", draw);
   draw();

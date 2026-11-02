@@ -7,13 +7,15 @@
   one.loading = (label = "Loading") =>
     `<div class="loading" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span>${esc(label)}</span></div>`;
 
-  // An empty list: an icon, a title, a line of text and a button, each but the title optional. `action.onclick` is
-  // the button's script.
+  // An empty list: an icon, a title, a line of text and a button, each but the title optional. `action.run` is what
+  // the button does.
+  const runs = [];
   one.empty = ({ icon = "tray", title, text, action } = {}) =>
     `<div class="empty-state"><div class="empty-icon">${one.icon(icon)}</div><div class="empty-title">${esc(title)}</div>` +
     (text ? `<div class="empty-text">${text}</div>` : "") +
-    (action ? `<button class="button" onclick="${esc(action.onclick)}">${esc(action.label)}</button>` : "") +
+    (action ? `<button class="button" data-run="${runs.push(action.run) - 1}">${esc(action.label)}</button>` : "") +
     "</div>";
+  document.addEventListener("click", (e) => runs[e.target.closest?.(".empty-state [data-run]")?.dataset.run]?.());
 
   // What a failure means for someone: what happened, in plain words, what is safe, and what to do next.
   one.plain = (err) => {
@@ -195,5 +197,5 @@
 
   // For a page that isn't there: a friendly note and a way home.
   one.notFound = ({ title = "This page isn't here.", text = "The link may be old or mistyped.", home = "Go to Home" } = {}) =>
-    one.empty({ icon: "question", title, text: esc(text), action: { label: home, onclick: "one.open('main')" } });
+    one.empty({ icon: "question", title, text: esc(text), action: { label: home, run: () => one.open("main") } });
 })();
