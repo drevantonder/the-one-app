@@ -120,10 +120,11 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
     }
-    failed |= deploy_kernel(&linux);
+    let kernel_failed = deploy_kernel(&linux);
 
     let Some(tag) = tag else {
         ensure!(!failed, "not every device runs {short}");
+        ensure!(!kernel_failed, "every device runs {short}, but the kernel isn't deployed");
         if !missed {
             std::fs::write(&done, &this)?;
         }
@@ -171,6 +172,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     gh.current_dir(&dir).args(["release", "create", tag, "--repo", REPO, "--target", &commit, "--generate-notes"]).args(&assets);
     step(&mut gh)?;
     ensure!(!failed, "released {tag}, but not every device runs it");
+    ensure!(!kernel_failed, "released {tag}, but the kernel isn't deployed");
     Ok(())
 }
 
@@ -315,8 +317,9 @@ fn turn() -> Result<std::fs::File> {
 fn deploy_kernel(linux: &[Value]) -> bool {
     let home = format!("${{{}_HOME:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", CLI.to_uppercase());
     // As a login there would: its profile is where 1Password's sign-in, which the kernel's secrets are read with,
-    // usually is, and ~/.local/bin where the installer puts this.
-    let deploy = format!(r#"[ -f "{home}/kernel/settings.json" ] || {{ echo none; exit 0; }}; . "$HOME/.profile" >/dev/null 2>&1; PATH="$HOME/.local/bin:$PATH" {CLI} kernel deploy"#);
+    // usually is, and ~/.local/bin where op may be. The node's own build, which Shell's sh is a child of, deploys it:
+    // what's called the CLI there may be something else.
+    let deploy = format!(r#"[ -f "{home}/kernel/settings.json" ] || {{ echo none; exit 0; }}; node=/proc/$PPID/exe; . "$HOME/.profile" >/dev/null 2>&1; PATH="$HOME/.local/bin:$PATH" "$node" kernel deploy"#);
     let mut failed = false;
     for device in linux.iter().filter(|d| d["online"] == true) {
         let name = device["name"].as_str().unwrap_or("");
