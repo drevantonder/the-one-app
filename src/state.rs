@@ -134,12 +134,12 @@ pub fn settings(m: &Members) -> Map<String, Value> {
     out
 }
 
-/// What to paste into an agent so it connects itself: the MCP server at the install's address, where it has one; else
+/// What to paste into an agent so it connects itself: the MCP server at the install's address, a connector in people's words, where it has one; else
 /// the skills a device serves on its tailnet (`guide`), or, where it serves none, the command line's guide.
 pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
     let (name, cli) = (crate::config::NAME, crate::config::CLI);
     match (address.filter(|a| !a.is_empty()), guide) {
-        (Some(address), _) => format!("Connect yourself to {name}: add the MCP server {}/mcp, and I'll sign in when it asks.", address.trim_end_matches('/')),
+        (Some(address), _) => format!("Connect yourself to {name}: add {}/mcp as a connector, and I'll sign in when it asks.", address.trim_end_matches('/')),
         (None, Some(guide)) => format!("Connect yourself to {name}: read {guide} and set it up for me."),
         (None, None) => format!("Connect yourself to {name}: run \"{cli} guide\" in a terminal and set it up for me."),
     }
