@@ -378,6 +378,9 @@ fn run(args: Vec<String>) -> Result<()> {
             if r["id"].is_string() {
                 println!("Every server moves the install's data there now.");
             }
+            if r["moving"] == true {
+                println!("This server is putting what it holds there, and keeps the install's data there from now on. Do the same on each of the install's other servers.");
+            }
         }
         ["backups"] => print!("{}", backups_said(&get("/v1/backups")?)),
         ["backups", "now"] => {

@@ -57,6 +57,18 @@ impl Node {
         }
         let item_fields: serde_json::Map<String, Value> = fields.iter().map(|(k, v)| (k.clone(), json!({ "value": v, "secret": k == "secret" }))).collect();
         let data = json!({ "title": "Storage", "type": STORAGE, "fields": item_fields, "hosts": [host], "apps": [members::APP] });
+        // A server of an install made before its data was in a bucket keeps it there now, with its entries, which
+        // takes a while: it runs no calls until it's done.
+        if self.bucket().is_err() {
+            let (node, caller) = (self.clone(), caller.clone());
+            tokio::spawn(async move {
+                let adopted = node.adopt(fields).await;
+                if let Err(err) = adopted.and(node.set_item(&caller, &Scope::Global, data).await.map(|_| ())) {
+                    tracing::warn!("moving the install's data: {err:#}");
+                }
+            });
+            return Ok(json!({ "tried": steps, "moving": true }));
+        }
         let id = self.set_item(caller, &Scope::Global, data).await?;
         Ok(json!({ "tried": steps, "id": id }))
     }
@@ -132,6 +144,44 @@ impl Node {
         tracing::info!("the install's data is kept in {} now", self.storage()?["where"].as_str().unwrap_or(""));
         self.emit(Event::Changed { apps: Vec::new() });
         Ok(())
+    }
+
+    /// Takes the bucket `fields` say as this server's own, for an install whose servers had none: puts every entry
+    /// it holds there (another server may have put some already), so every server reads them from then on.
+    async fn adopt(&self, fields: BTreeMap<String, String>) -> Result<()> {
+        let place = Place::from_fields(&fields)?;
+        let root = self.with(|i| i.r.root.map(|r| r.to_hex()).context("no install"))?;
+        let (p, theirs) = (place.clone(), root.clone());
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            if let Some(other) = p.get(INSTALL_OBJECT)?.filter(|r| r != theirs.as_bytes()) {
+                bail!("that bucket holds another install's data ({})", String::from_utf8_lossy(&other));
+            }
+            p.create(INSTALL_OBJECT, theirs.as_bytes())?;
+            Ok(())
+        })
+        .await??;
+        let dir = self.install_dir();
+        let mut file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        file.bucket = Some(fields.clone());
+        self.save_install(&file)?;
+        let logs = self.with(|i| {
+            i.bucket = Some((place, fields));
+            i.read = false;
+            Ok(i.r.store.logs()?)
+        })?;
+        let _write = self.0.writes.lock().await;
+        for log in logs {
+            let scope = Scope::parse(&log)?;
+            let entries = self.with(|i| i.r.store.scope(&log))?;
+            for entry in &entries {
+                self.put_entry(&scope, entry).await?;
+            }
+            tracing::info!("put {} of {scope}'s entries in the bucket", entries.len());
+        }
+        self.with(|i| {
+            i.read = true;
+            Ok(())
+        })
     }
 
     pub async fn storage_route(&self, me: &Caller, method: &str, path: &str, body: &Value) -> Result<Option<Value>> {

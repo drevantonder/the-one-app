@@ -320,6 +320,8 @@ pub struct Inner {
     moving: Mutex<bool>,
     /// Held while this server makes or finds a scope's key.
     making_keys: tokio::sync::Mutex<()>,
+    /// The last position this server wrote an entry of each scope at.
+    written: Mutex<HashMap<Scope, u64>>,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -419,6 +421,7 @@ impl Node {
             scope_keys: Mutex::new(HashMap::new()),
             moving: Mutex::new(false),
             making_keys: tokio::sync::Mutex::new(()),
+            written: Mutex::new(HashMap::new()),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -3140,11 +3143,13 @@ impl Node {
         use crate::bucket::Bucket;
         let (bucket, key, prefix) = (self.bucket()?, self.log_key(scope).await?, log_prefix(scope));
         let bytes = crate::backups::pack(&[entry]);
-        let mut at = self.with(|i| i.r.store.position(&scope.to_string()))?;
+        let written = self.0.written.lock().unwrap().get(scope).copied().unwrap_or(0);
+        let mut at = self.with(|i| i.r.store.position(&scope.to_string()))?.max(written);
         for _ in 0..1000 {
             at += 1;
             let name = crate::db::step_name(&prefix, at);
             if Bucket::create(&bucket, &name, &crate::db::seal(&key, &name, &bytes)).await? {
+                self.0.written.lock().unwrap().insert(scope.clone(), at);
                 return Ok(());
             }
         }
