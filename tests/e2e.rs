@@ -776,7 +776,13 @@ async fn an_app_wraps_the_sidecar_of_its_name_on_another_server() {
     a.create("Wraps", "Andre").await.unwrap();
     b.join(&a.pair(None).unwrap()).await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None };
+    let (mut here, mut there) = (b.subscribe(), a.subscribe());
     b.register_sidecar("lamps", json!({ "title": "Lamps", "image": "data:image/png;base64,AAAA", "image_kind": "icon", "ops": [{ "name": "on" }] })).await.unwrap();
+    // Shells on both servers hear lamps changed, so they list it again, with the sidecar's picture.
+    for (who, events) in [("b", &mut here), ("a", &mut there)] {
+        let heard = async { while !matches!(events.recv().await, Ok(one::node::Event::Changed { apps }) if apps.iter().any(|a| a == "lamps")) {} };
+        tokio::time::timeout(Duration::from_secs(45), heard).await.unwrap_or_else(|_| panic!("{who} to hear lamps changed"));
+    }
     let sidecar = b.clone();
     tokio::spawn(async move {
         loop {

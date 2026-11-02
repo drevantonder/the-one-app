@@ -112,14 +112,14 @@ pub struct Sidecars {
 }
 
 impl Sidecars {
-    /// Registers `app` and returns its description as the space sees it.
-    pub fn register(&self, app: &str, mut describe: Value) -> Value {
+    /// Registers `app`; whether that changes how it's listed: it wasn't here, had gone, or describes itself differently.
+    pub fn register(&self, app: &str, mut describe: Value) -> bool {
         describe["name"] = json!(app);
         describe["runs"] = json!("here");
         let (calls, rx) = mpsc::unbounded_channel();
         let p = Registered { describe: describe.clone(), calls, waiting: tokio::sync::Mutex::new(rx), replies: Mutex::new(HashMap::new()), seen: Mutex::new(Instant::now()) };
-        self.by_app.lock().unwrap().insert(app.to_string(), std::sync::Arc::new(p));
-        describe
+        let before = self.by_app.lock().unwrap().insert(app.to_string(), std::sync::Arc::new(p));
+        before.is_none_or(|p| p.describe != describe || p.seen.lock().unwrap().elapsed() >= GONE_AFTER)
     }
 
     fn get(&self, app: &str) -> Option<std::sync::Arc<Registered>> {

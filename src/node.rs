@@ -481,7 +481,8 @@ impl Node {
         &self.0.sidecars
     }
 
-    /// Registers a sidecar; the node says so in its hello to the other servers.
+    /// Registers a sidecar; the node says so in its hello to the other servers, and to shells when that changes it:
+    /// an app of its name shows its picture (a Mac app's icon).
     pub async fn register_sidecar(&self, app: &str, describe: Value) -> Result<()> {
         if let Some(why) = self.removed_here(app) {
             bail!("{why}");
@@ -489,7 +490,9 @@ impl Node {
         if let Some(domain) = describe["domain"].as_str() {
             self.logo(domain, app);
         }
-        self.0.sidecars.register(app, describe);
+        if self.0.sidecars.register(app, describe) {
+            self.emit(Event::Changed { apps: vec![app.to_string()] });
+        }
         self.say_hello();
         Ok(())
     }
@@ -1410,13 +1413,23 @@ impl Node {
                 if op == "hello" {
                     let sidecars: Vec<Sidecar> = serde_json::from_value(input["sidecars"].clone()).unwrap_or_default();
                     let load = serde_json::from_value(input["load"].clone()).ok();
-                    let changed = self.with(|i| {
-                        let changed = i.peers.get(&me.key).is_none_or(|p| p.sidecars != sidecars);
+                    // The sidecars that came, went or changed there, whose apps shells list again.
+                    let (new, changed) = self.with(|i| {
+                        let before = i.peers.get(&me.key).map(|p| p.sidecars.clone());
+                        let was = before.as_deref().unwrap_or_default();
+                        let missing = |a: &[Sidecar], b: &[Sidecar]| a.iter().filter(|s| !b.contains(s)).map(|s| s.0.clone()).collect::<Vec<_>>();
+                        let mut changed = missing(&sidecars, was);
+                        changed.extend(missing(was, &sidecars));
+                        changed.sort();
+                        changed.dedup();
                         i.peers.insert(me.key, Peer { sidecars, load, seen: Instant::now() });
-                        Ok(changed)
+                        Ok((before.is_none(), changed))
                     })?;
-                    if changed {
+                    if new || !changed.is_empty() {
                         self.emit(Event::Servers);
+                    }
+                    if !changed.is_empty() {
+                        self.emit(Event::Changed { apps: changed });
                     }
                     return Ok(json!(null));
                 }
