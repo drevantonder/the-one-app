@@ -66,14 +66,6 @@ const CHANGED_SHOWN: u64 = 14 * 86_400_000;
 const INSTALL_OBJECT: &str = "install";
 /// How often a server says hello to the others: which sidecars serve there, and how loaded it is.
 const PRESENCE_EVERY: Duration = Duration::from_secs(15);
-/// What the node's database of a scope's entries is called, under its own name.
-const LOG: &str = "log";
-
-/// Where a scope's entries are in the bucket, at numbered positions.
-fn log_prefix(scope: &Scope) -> String {
-    format!("{}/{}/{LOG}", crate::bucket::folder(&scope.to_string()), members::APP)
-}
-
 /// What an app's own database is called: SQLite's name for a connection's first.
 const DATABASE: &str = "main";
 /// What a built-in sidecar's database of its records is called, under its name.
@@ -334,6 +326,10 @@ pub struct Inner {
     making_keys: tokio::sync::Mutex<()>,
     /// The last position this server wrote an entry of each scope at.
     written: Mutex<HashMap<Scope, u64>>,
+    /// The step of each scope's entries this server last moved their newest hint on to, by scope.
+    hinted: Mutex<HashMap<String, u64>>,
+    /// The bundles this server has put in the bucket, or found there.
+    shared: Mutex<std::collections::HashSet<String>>,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -437,6 +433,8 @@ impl Node {
             tunnel: Mutex::new(None),
             making_keys: tokio::sync::Mutex::new(()),
             written: Mutex::new(HashMap::new()),
+            hinted: Mutex::new(HashMap::new()),
+            shared: Mutex::new(Default::default()),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -725,6 +723,7 @@ impl Node {
                 Err(err) => tracing::warn!("{app}'s deploy: {err:#}"),
             }
         }
+        tokio::spawn(self.clone().share_bundles(wanted.values().cloned().collect()));
         let changed: Vec<String> = {
             let bundles = self.0.bundles.lock().unwrap();
             modules.iter().map(|(a, _)| a.clone()).filter(|a| bundles.get(a) != wanted.get(a)).collect()
@@ -743,6 +742,25 @@ impl Node {
             self.say(&Scope::Global, status::Said::Build { server: self.0.id, build: crate::config::BUILD.into(), target: crate::config::TARGET.into() }).await?;
         }
         Ok(())
+    }
+
+    /// Puts each of `bundles` in the bucket that this server hasn't since it started (`bundle::bucket_name`), so a node
+    /// with no other way to get an app's latest deploy reads it there.
+    async fn share_bundles(self, bundles: Vec<String>) {
+        use crate::bucket::Bucket;
+        let Ok(bucket) = self.bucket() else { return };
+        let Ok(key) = self.database_key(&Scope::Global, members::APP, crate::bundle::DATABASE).await else { return };
+        for hash in bundles {
+            if self.0.shared.lock().unwrap().contains(&hash) {
+                continue;
+            }
+            let Ok(bytes) = self.blob(&hash).await else { continue };
+            let name = crate::bundle::bucket_name(&hash);
+            match Bucket::create(&bucket, &name, &crate::db::seal(&key, &name, &bytes)).await {
+                Ok(_) => drop(self.0.shared.lock().unwrap().insert(hash)),
+                Err(err) => tracing::debug!("{name}: {err:#}"),
+            }
+        }
     }
 
     /// Whether this server is ready to run calls: it's a server of the install, and has read every scope it holds
@@ -3285,23 +3303,18 @@ impl Node {
         self.read_log_now(scope).await
     }
 
-    /// `read_log`, while this server holds its writes.
+    /// `read_log`, while this server holds its writes. A server that has read none of a scope's entries starts from
+    /// their newest copy.
     async fn read_log_now(&self, scope: &Scope) -> Result<bool> {
-        use crate::bucket::Bucket;
-        let (bucket, key, prefix) = (self.bucket()?, self.log_key(scope).await?, log_prefix(scope));
-        let log = scope.to_string();
+        let (bucket, key, log) = (self.bucket()?, self.log_key(scope).await?, scope.to_string());
+        let prefix = crate::log::prefix(&log);
         let from = self.with(|i| i.r.store.position(&log))?;
-        let (mut at, mut entries) = (from, Vec::new());
-        while let Some(o) = Bucket::get(&bucket, &crate::db::step_name(&prefix, at + 1)).await? {
-            let name = crate::db::step_name(&prefix, at + 1);
-            match crate::db::open(&key, &name, &o.bytes).and_then(|b| crate::backups::unpack(&b)) {
-                Ok(list) if list.iter().all(|e| e.log() == log) => entries.extend(list),
-                Ok(_) => tracing::debug!("{name} is another scope's"),
-                Err(err) => tracing::debug!("{name}: {err:#}"),
-            }
-            at += 1;
-        }
+        let (at, entries) = match from {
+            0 => crate::log::open(&bucket, &key, &prefix, &log).await?,
+            _ => crate::log::read(&bucket, &key, &prefix, &log, from).await?,
+        };
         if at == from {
+            self.hint_log(scope, &bucket, &key, at).await;
             return Ok(false);
         }
         let handled = self.with(|i| {
@@ -3311,14 +3324,29 @@ impl Node {
         })?;
         let gained = handled.gained;
         self.after(handled).await?;
+        self.hint_log(scope, &bucket, &key, at).await;
         Ok(gained)
+    }
+
+    /// Once this server has read a scope's entries up to step `at`, and hasn't said so since it started: a copy of them
+    /// in the bucket if it's due, and their newest hint moved on (`src/log.rs`).
+    async fn hint_log(&self, scope: &Scope, bucket: &impl crate::bucket::Bucket, key: &[u8; 32], at: u64) {
+        let log = scope.to_string();
+        if self.0.hinted.lock().unwrap().get(&log) == Some(&at) {
+            return;
+        }
+        let entries = || self.with(|i| i.r.store.scope(&log));
+        match crate::log::hint(bucket, key, &crate::log::prefix(&log), at, entries).await {
+            Ok(()) => drop(self.0.hinted.lock().unwrap().insert(log, at)),
+            Err(err) => tracing::debug!("{log}'s copy: {err:#}"),
+        }
     }
 
     /// Writes an entry this server made to its scope's entries in the bucket, at the first position free.
     async fn put_entry(&self, scope: &Scope, entry: &Entry) -> Result<()> {
         use crate::bucket::Bucket;
-        let (bucket, key, prefix) = (self.bucket()?, self.log_key(scope).await?, log_prefix(scope));
-        let bytes = crate::backups::pack(&[entry]);
+        let (bucket, key, prefix) = (self.bucket()?, self.log_key(scope).await?, crate::log::prefix(&scope.to_string()));
+        let bytes = crate::entry::pack(&[entry]);
         let written = self.0.written.lock().unwrap().get(scope).copied().unwrap_or(0);
         let mut at = self.with(|i| i.r.store.position(&scope.to_string()))?.max(written);
         for _ in 0..1000 {
@@ -3334,7 +3362,7 @@ impl Node {
 
     /// The key a scope's entries are sealed with in the bucket: the node's `log` of the scope.
     async fn log_key(&self, scope: &Scope) -> Result<[u8; 32]> {
-        self.database_key(scope, members::APP, LOG).await
+        self.database_key(scope, members::APP, crate::log::NAME).await
     }
 
     /// Tells the servers that hold `scope` it changed, so they read it now rather than in a moment: its entries, or

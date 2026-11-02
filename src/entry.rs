@@ -192,3 +192,31 @@ pub fn unhex(s: &str) -> Result<Key> {
 pub fn short(key: &Key) -> String {
     hex(key)[..8].to_string()
 }
+
+/// A pack: entries, as CBOR, each its header and body.
+pub fn pack(entries: &[&Entry]) -> Vec<u8> {
+    let list: Vec<ciborium::Value> = entries
+        .iter()
+        .map(|e| {
+            let (h, b) = e.encode();
+            ciborium::Value::Array(vec![ciborium::Value::Bytes(h), ciborium::Value::Bytes(b)])
+        })
+        .collect();
+    let mut out = Vec::new();
+    ciborium::into_writer(&ciborium::Value::Array(list), &mut out).expect("cbor in memory");
+    out
+}
+
+/// A pack's entries, each checked as if it came from another server: signature, body and content.
+pub fn unpack(bytes: &[u8]) -> Result<Vec<Entry>> {
+    let ciborium::Value::Array(list) = ciborium::from_reader(bytes)? else { bail!("not a pack") };
+    list.into_iter()
+        .map(|v| match v {
+            ciborium::Value::Array(hb) => match hb.as_slice() {
+                [ciborium::Value::Bytes(h), ciborium::Value::Bytes(b)] => Entry::decode(h, b),
+                _ => bail!("not a pack"),
+            },
+            _ => bail!("not a pack"),
+        })
+        .collect()
+}

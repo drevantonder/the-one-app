@@ -27,6 +27,10 @@ ed25519-dalek = "3"
 # The kernel derives keys with HKDF-SHA256, because that's what WebCrypto in workerd has (src/kernel.rs).
 hkdf = "0.13"
 rand = "0.8"
+blake3 = "1"
+# Entries are p2panda operations, packed in CBOR in the bucket (src/entry.rs); the serverless node reads them too.
+ciborium = "0.2"
+p2panda-core = "0.7"
 # `serialize` makes and reads an app database's copy in memory (src/db.rs).
 rusqlite = { version = "0.41", features = ["bundled", "limits", "serialize"] }
 serde = { version = "1", features = ["derive"] }
@@ -40,15 +44,12 @@ getrandom = { version = "0.2", features = ["js"] }
 
 # What only a node on a machine uses: the rest of the node (src/lib.rs keeps the shared modules apart).
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-blake3 = "1"
 axum = "0.8"
-ciborium = "0.2"
 iroh = "1.4"
 # Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
 jiff = "0.2"
 # So workerd dies with its node on Linux (prctl PR_SET_PDEATHSIG).
 libc = "0.2"
-p2panda-core = "0.7"
 # Release signatures are OpenSSH signatures (sshsig), which install.sh checks with ssh-keygen; this reads the keys and
 # makes and checks the signatures.
 ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"] }

@@ -25,7 +25,7 @@ use serde_json::{Map, Value, json};
 use crate::bucket::Bucket;
 
 /// A copy is written once this many steps follow the last one.
-const COPY_EVERY: u64 = 100;
+pub const COPY_EVERY: u64 = 100;
 /// How many times a write runs again after losing a race before it gives up.
 const TRIES: usize = 50;
 
@@ -214,20 +214,7 @@ impl Db {
             bucket.create(&name, &seal(&self.key, &name, &bytes)).await?;
             self.copy = self.at;
         }
-        let name = newest_name(&self.prefix);
-        for _ in 0..TRIES {
-            let current = bucket.get(&name).await?;
-            let said = current.as_ref().map(|o| newest(&o.bytes)).transpose()?;
-            let (at, copy) = said.unwrap_or((0, 0));
-            let (at, copy) = (at.max(self.at), copy.max(self.copy));
-            if said == Some((at, copy)) {
-                return Ok(());
-            }
-            if bucket.replace(&name, &serde_json::to_vec(&json!({ "at": at, "copy": copy }))?, current.as_ref().map(|o| o.tag.as_str())).await? {
-                return Ok(());
-            }
-        }
-        Ok(())
+        hint(bucket, &self.prefix, self.at, self.copy).await
     }
 
     /// Applies a step: a changeset, or a schema change this database is due.
@@ -259,6 +246,24 @@ pub fn step_name(prefix: &str, n: u64) -> String {
 
 pub fn copy_name(prefix: &str, n: u64) -> String {
     format!("{prefix}/copy/{n:012}")
+}
+
+/// Moves the newest hint at `prefix` on to say at least step `at` and copy `copy`, replacing it only while unchanged.
+pub async fn hint(bucket: &impl Bucket, prefix: &str, at: u64, copy: u64) -> Result<()> {
+    let name = newest_name(prefix);
+    for _ in 0..TRIES {
+        let current = bucket.get(&name).await?;
+        let said = current.as_ref().map(|o| newest(&o.bytes)).transpose()?;
+        let (was_at, was_copy) = said.unwrap_or((0, 0));
+        let (at, copy) = (at.max(was_at), copy.max(was_copy));
+        if said == Some((at, copy)) {
+            return Ok(());
+        }
+        if bucket.replace(&name, &serde_json::to_vec(&json!({ "at": at, "copy": copy }))?, current.as_ref().map(|o| o.tag.as_str())).await? {
+            return Ok(());
+        }
+    }
+    Ok(())
 }
 
 /// What a database's newest hint says: (its last step, its newest copy).
@@ -410,45 +415,7 @@ fn check(conn: &Connection, rc: c_int) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bucket::Object;
-    use std::collections::BTreeMap;
-    use std::sync::Mutex;
-
-    /// A bucket in memory that can lose a race on purpose.
-    #[derive(Default)]
-    struct Memory {
-        objects: Mutex<BTreeMap<String, Vec<u8>>>,
-        /// Names another server takes just before this one writes them.
-        taken: Mutex<Vec<(String, Vec<u8>)>>,
-    }
-
-    impl Bucket for Memory {
-        async fn get(&self, name: &str) -> Result<Option<Object>> {
-            Ok(self.objects.lock().unwrap().get(name).map(|b| Object { bytes: b.clone(), tag: blake3::hash(b).to_hex().to_string() }))
-        }
-        async fn create(&self, name: &str, bytes: &[u8]) -> Result<bool> {
-            let mut objects = self.objects.lock().unwrap();
-            let mut taken = self.taken.lock().unwrap();
-            if let Some(i) = taken.iter().position(|(n, _)| n == name) {
-                let (n, b) = taken.remove(i);
-                objects.insert(n, b);
-            }
-            if objects.contains_key(name) {
-                return Ok(false);
-            }
-            objects.insert(name.into(), bytes.to_vec());
-            Ok(true)
-        }
-        async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
-            let mut objects = self.objects.lock().unwrap();
-            let now = objects.get(name).map(|b| blake3::hash(b).to_hex().to_string());
-            if now.as_deref() != tag {
-                return Ok(false);
-            }
-            objects.insert(name.into(), bytes.to_vec());
-            Ok(true)
-        }
-    }
+    use crate::bucket::Memory;
 
     #[test]
     fn an_apps_key_is_made_once_and_data_written_before_keeps_its_key() {

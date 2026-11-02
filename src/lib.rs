@@ -30,11 +30,9 @@ pub mod backups;
 pub mod bucket;
 pub mod call;
 pub mod db;
-#[cfg(not(target_family = "wasm"))]
 pub mod entry;
 #[cfg(not(target_family = "wasm"))]
 pub mod skills;
-#[cfg(not(target_family = "wasm"))]
 pub mod members;
 #[cfg(not(target_family = "wasm"))]
 pub mod store;
@@ -46,7 +44,6 @@ pub mod agents;
 pub mod api;
 #[cfg(not(target_family = "wasm"))]
 pub mod apps;
-#[cfg(not(target_family = "wasm"))]
 pub mod bundle;
 #[cfg(not(target_family = "wasm"))]
 pub mod deploy;
@@ -69,8 +66,8 @@ pub mod serverless;
 #[cfg(not(target_family = "wasm"))]
 pub mod sidecars;
 pub mod kernel;
+pub mod log;
 pub mod screen;
-#[cfg(not(target_family = "wasm"))]
 pub mod vault;
 #[cfg(not(target_family = "wasm"))]
 pub mod shell;

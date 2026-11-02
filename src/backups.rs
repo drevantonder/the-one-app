@@ -17,14 +17,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, anyhow, ensure};
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 
 use crate::bucket::{Place, folder, scope_of};
-use crate::entry::{Entry, Key, hex};
+use crate::entry::{Entry, Key, hex, pack, unpack};
 
 /// The object in a scope's folder in the bucket that names its key, by its id, and the folder of the key sealed to each
 /// server that holds the scope (by its key) and to the recovery key (`recovery`). No app has these names.
@@ -143,34 +143,6 @@ fn open_snapshot(keys: &[[u8; 32]], bytes: &[u8]) -> Result<Option<(Snapshot, [u
     let Some(key) = keys.iter().find(|k| key_id(k).as_bytes() == &bytes[..16]) else { return Ok(None) };
     let plain = cipher(&blake3::derive_key(SNAPSHOT, key)).decrypt(bytes[16..28].into(), &bytes[28..]).map_err(|_| anyhow!("a snapshot didn't decrypt"))?;
     Ok(Some((serde_json::from_slice(&plain)?, *key)))
-}
-
-/// A pack: entries, as CBOR, each its header and body.
-pub fn pack(entries: &[&Entry]) -> Vec<u8> {
-    let list: Vec<ciborium::Value> = entries
-        .iter()
-        .map(|e| {
-            let (h, b) = e.encode();
-            ciborium::Value::Array(vec![ciborium::Value::Bytes(h), ciborium::Value::Bytes(b)])
-        })
-        .collect();
-    let mut out = Vec::new();
-    ciborium::into_writer(&ciborium::Value::Array(list), &mut out).expect("cbor in memory");
-    out
-}
-
-/// A pack's entries, each checked as if it came from another server: signature, body and content.
-pub fn unpack(bytes: &[u8]) -> Result<Vec<Entry>> {
-    let ciborium::Value::Array(list) = ciborium::from_reader(bytes)? else { bail!("not a pack") };
-    list.into_iter()
-        .map(|v| match v {
-            ciborium::Value::Array(hb) => match hb.as_slice() {
-                [ciborium::Value::Bytes(h), ciborium::Value::Bytes(b)] => Entry::decode(h, b),
-                _ => bail!("not a pack"),
-            },
-            _ => bail!("not a pack"),
-        })
-        .collect()
 }
 
 // Places.

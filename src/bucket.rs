@@ -40,3 +40,41 @@ mod place;
 pub use copied::Copied;
 #[cfg(not(target_family = "wasm"))]
 pub use place::*;
+
+/// A bucket in memory that can lose a race on purpose.
+#[cfg(test)]
+#[derive(Default)]
+pub struct Memory {
+    pub objects: std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
+    /// Names another server takes just before this one writes them.
+    pub taken: std::sync::Mutex<Vec<(String, Vec<u8>)>>,
+}
+
+#[cfg(test)]
+impl Bucket for Memory {
+    async fn get(&self, name: &str) -> Result<Option<Object>> {
+        Ok(self.objects.lock().unwrap().get(name).map(|b| Object { bytes: b.clone(), tag: blake3::hash(b).to_hex().to_string() }))
+    }
+    async fn create(&self, name: &str, bytes: &[u8]) -> Result<bool> {
+        let mut objects = self.objects.lock().unwrap();
+        let mut taken = self.taken.lock().unwrap();
+        if let Some(i) = taken.iter().position(|(n, _)| n == name) {
+            let (n, b) = taken.remove(i);
+            objects.insert(n, b);
+        }
+        if objects.contains_key(name) {
+            return Ok(false);
+        }
+        objects.insert(name.into(), bytes.to_vec());
+        Ok(true)
+    }
+    async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
+        let mut objects = self.objects.lock().unwrap();
+        let now = objects.get(name).map(|b| blake3::hash(b).to_hex().to_string());
+        if now.as_deref() != tag {
+            return Ok(false);
+        }
+        objects.insert(name.into(), bytes.to_vec());
+        Ok(true)
+    }
+}

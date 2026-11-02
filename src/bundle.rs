@@ -1,5 +1,6 @@
 //! Bundles: what a deploy names. A tar holding `app.js`, the built ES module, and `src/`, the files it was built from.
-//! Plain ustar, written the same way every time, so the same files give the same blob.
+//! Plain ustar, written the same way every time, so the same files give the same blob. Each app's latest is kept in
+//! the bucket too, sealed, for a node that has no other way to get it (the serverless node).
 
 use std::path::Path;
 
@@ -30,6 +31,14 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) -> Result<()>
     }
     Ok(())
 }
+
+/// Where a bundle is kept in the bucket, by its hash: under `global`'s node folder, sealed with the key of the node's
+/// database `bundles` there.
+pub fn bucket_name(hash: &str) -> String {
+    format!("{}/{}/{DATABASE}/{hash}", crate::bucket::folder("global"), crate::members::APP)
+}
+
+pub const DATABASE: &str = "bundles";
 
 /// The built module a bundle holds.
 pub fn module(bundle: &[u8]) -> Result<String> {
