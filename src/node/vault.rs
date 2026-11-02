@@ -204,8 +204,22 @@ impl Node {
     /// its secret fields: what `app` declares as `need`, or `ask`'s `{ title, fields, hosts }`. → `{ id, link, scope }`.
     pub async fn request_item(&self, caller: &Caller, scope: &Scope, app: &str, need: Option<&str>, ask: &Value, why: &str) -> Result<Value> {
         let mut data = match need {
+            Some(_) if app == crate::agents::NAME => bail!(
+                "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the person"
+            ),
             Some(need) if app != members::APP => {
-                let d = self.0.apps.describe(app).await.ok().map(|d| d["vault"][need].clone()).filter(|d| d.is_object()).with_context(|| format!("{app} asks the Vault for no {need}"))?;
+                let declared = self.0.apps.describe(app).await.map_err(|_| anyhow!("Not asked: {app} isn't added, so it declares nothing it needs"))?["vault"].clone();
+                let d = declared[need].clone();
+                if !d.is_object() {
+                    let names: Vec<&str> = declared.as_object().into_iter().flatten().map(|(n, _)| n.as_str()).collect();
+                    bail!(
+                        "Not asked: {app} declares no {need}; {}",
+                        match names.is_empty() {
+                            true => "it declares nothing it needs, so give title, fields and hosts instead".to_string(),
+                            false => format!("it declares {}", names.join(", ")),
+                        }
+                    );
+                }
                 let fields: serde_json::Map<String, Value> = d["fields"].as_object().into_iter().flatten().map(|(n, f)| (n.clone(), json!({ "secret": f["secret"] == true }))).collect();
                 json!({ "title": d["title"], "fields": fields, "hosts": d["hosts"], "need": need })
             }
