@@ -209,7 +209,7 @@ impl Node {
                 Err(_) => Err(None),
             };
             let ours = format!("your {}", crate::config::NAME.trim_start_matches("The "));
-            let key = made.map_err(|why| anyhow!("{} wasn't made: {}. Try again.", name.trim(), why.unwrap_or(format!("{ours} couldn't be reached"))))?;
+            let key = made.map_err(|why| anyhow!("{} wasn't made: {}. Try again.", name.trim(), why.unwrap_or(format!("{ours}'s keys couldn't be reached"))))?;
             self.adopt_key(&scope, key).await?;
         }
         self.member_as(caller, "group", json!({ "group": group, "name": name })).await?;
@@ -231,8 +231,8 @@ impl Node {
                     let (vault, user, scopes) = (crate::kernel::Vault { url: url.clone() }, user.clone(), scopes.clone());
                     match tokio::task::spawn_blocking(move || vault.role(&token, &user, role, invited, &scopes)).await {
                         Ok(Ok(())) => Ok(()),
-                        Ok(Err(err)) => Err(format!("{err:#}").strip_prefix("the vault said: ").map(str::to_string).unwrap_or_else(|| format!("{ours} couldn't be reached"))),
-                        Err(_) => Err(format!("{ours} couldn't be reached")),
+                        Ok(Err(err)) => Err(format!("{err:#}").strip_prefix("the vault said: ").map(str::to_string).unwrap_or_else(|| format!("{ours}'s keys couldn't be reached"))),
+                        Err(_) => Err(format!("{ours}'s keys couldn't be reached")),
                     }
                 }
             };
