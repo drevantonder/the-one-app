@@ -289,7 +289,10 @@ export default {
         if (!ctx.global) return { t: "col", c: [] };
         const many = { small: 1, medium: 3, large: 6, xl: 6 }[ctx.size] || 3;
         const commits = await recent(ctx, many, ctx.options.repo);
-        if (!commits.length) return { t: "text", text: "No repos yet", size: "sm", tone: "muted" };
+        if (!commits.length) {
+          const any = (await ctx.global.query("select 1 from repos where deleted is null limit 1")).length;
+          return { t: "text", text: any ? "No commits yet" : "No repos yet", size: "sm", tone: "muted" };
+        }
         const link = (c) => ({ screen: "commit", params: { repo: c.repo, sha: c.sha } });
         if (ctx.size === "small") {
           const c = commits[0];
