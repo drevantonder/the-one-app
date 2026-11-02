@@ -463,7 +463,7 @@ impl Node {
             shared: Mutex::new(Default::default()),
             unshared: Mutex::new(Vec::new()),
             sessions: Default::default(),
-            relay: Default::default(),
+            relay: relay::Relay::new(),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {

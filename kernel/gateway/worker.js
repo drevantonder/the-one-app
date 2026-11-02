@@ -82,6 +82,12 @@ async function toWeb(request, env, url) {
 
 /// What a node signs to prove its key: this, then the challenge.
 const PROVE = "relay:";
+/// The most sockets the relay keeps, the most nodes one message goes to, the most messages a socket sends a minute
+/// (a big one goes in pieces of half a megabyte), and how long a socket may wait before proving its key.
+const SOCKETS = 256;
+const RECIPIENTS = 64;
+const PER_MINUTE = 3000;
+const PROVE_WITHIN = 30_000;
 
 export class Relay {
   constructor(ctx) {
@@ -97,10 +103,17 @@ export class Relay {
     }
     const key = url.searchParams.get("key") || "";
     if (request.headers.get("upgrade") !== "websocket" || !/^[0-9a-f]{64}$/.test(key)) return refuse(426, "the relay takes a node's WebSocket, with its key");
+    // Sockets that never proved their key go first.
+    const now = Date.now();
+    for (const ws of this.ctx.getWebSockets()) {
+      const said = ws.deserializeAttachment();
+      if (!said.proven && now - said.at > PROVE_WITHIN) ws.close(1008, "it never proved its key");
+    }
+    if (this.ctx.getWebSockets().length >= SOCKETS) return refuse(503, "the relay has as many nodes as it takes");
     const [client, server] = Object.values(new WebSocketPair());
     const challenge = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
     this.ctx.acceptWebSocket(server, [key]);
-    server.serializeAttachment({ key, challenge, proven: false });
+    server.serializeAttachment({ key, challenge, proven: false, at: now });
     server.send(JSON.stringify({ challenge }));
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -117,9 +130,14 @@ export class Relay {
       if (!(await proves(said.key, said.challenge, msg.signature))) return ws.close(1008, "that signature isn't the key's");
       // The newest socket of a key is the one it's reached at.
       for (const other of this.ctx.getWebSockets(said.key)) if (other !== ws) other.close(1000, "the node connected again");
-      ws.serializeAttachment({ ...said, proven: true });
+      ws.serializeAttachment({ ...said, proven: true, minute: Date.now(), sent: 0 });
       return ws.send(JSON.stringify({ ready: true }));
     }
+    const now = Date.now();
+    const fresh = now - said.minute >= 60_000;
+    const sent = fresh ? 1 : said.sent + 1;
+    if (sent > PER_MINUTE) return ws.close(1008, `more than ${PER_MINUTE} messages in a minute`);
+    ws.serializeAttachment({ ...said, minute: fresh ? now : said.minute, sent });
     const missed = this.pass(said.key, msg);
     // An ask of a node that isn't here is answered now, rather than waited on.
     if (msg.kind === "ask" && missed.length) ws.send(JSON.stringify({ from: missed[0], id: msg.id, gone: true }));
@@ -129,7 +147,9 @@ export class Relay {
   pass(from, msg) {
     const missed = [];
     const body = JSON.stringify({ ...msg, to: undefined, from });
-    for (const to of [msg.to].flat().filter((k) => typeof k === "string")) {
+    const recipients = [...new Set([msg.to].flat().filter((k) => typeof k === "string"))];
+    if (recipients.length > RECIPIENTS) return missed;
+    for (const to of recipients) {
       const ws = this.ctx.getWebSockets(to).find((w) => w.deserializeAttachment().proven);
       if (ws) ws.send(body);
       else missed.push(to);
