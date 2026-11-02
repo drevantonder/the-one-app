@@ -145,8 +145,18 @@ pub fn none_said(app: &Value, op: &str, ok: &Value, cli: bool) -> Option<String>
 
 /// What to say for an app or operation nobody here lists.
 fn unknown(app: &str, op: &str) -> String {
-    match get("/v1/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).cloned()) {
-        Some(_) => format!("{app} has no operation {op}; {CLI} {app} lists them"),
+    let mut apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    apps.extend(node_apps());
+    if apps.iter().any(|a| a["name"] == app) {
+        return format!("{app} has no operation {op}; {CLI} {app} lists them");
+    }
+    // A tool's name as a command, one repos_create notes: the command is one repos create notes.
+    let tool = app.match_indices('_').find_map(|(i, _)| {
+        let (a, o) = (&app[..i], &app[i + 1..]);
+        apps.iter().find(|x| x["name"] == a)?["ops"].as_array()?.iter().any(|x| x["name"] == o).then(|| format!("{a} {o}"))
+    });
+    match tool {
+        Some(command) => format!("no app {app}: did you mean {CLI} {command} {op}?"),
         None => format!("no app {app}; {CLI} apps lists them"),
     }
 }
