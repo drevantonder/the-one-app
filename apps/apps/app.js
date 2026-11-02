@@ -156,7 +156,7 @@ function addTo(name, { apps, places, admin }) {
     error = "";
     try {
       await one.call(box.checked ? "add" : "remove", { app: name, scope: box.dataset.scope, confirm: true });
-      ({ apps, places, admin } = await one.call("list"));
+      ({ apps, places, admin } = await one.call("list", { images: true }));
     } catch (err) {
       error = one.plain(err).title;
     }
@@ -187,8 +187,8 @@ export default {
     list: {
       reads: true,
       description: "Every app: the built-in ones (built_in), added to the install or not and up to date or not, and the ones made in the install; its tagline, if it has one, and description; owner, where it's installed (that you can see), forks, and the places you may add it to. Each says whether it's a service: it has no screen or widget of its own (Gmail, AI), and shells keep it in each page's Services folder. With service, only those.",
-      input: { type: "object", properties: { service: { type: "boolean", description: "only services" } } },
-      async run(ctx, { service: only } = {}) {
+      input: { type: "object", properties: { service: { type: "boolean", description: "only services" }, images: { type: "boolean", description: "with each app's picture as a data URL (image), for drawing it: large" } } },
+      async run(ctx, { service: only, images } = {}) {
         const name = namer(ctx);
         const all = (await ctx.catalog()).filter((a) => !a.deleted || !only);
         const services = await Promise.all(all.map((a) => isService(ctx, a).catch(() => false)));
@@ -196,7 +196,7 @@ export default {
           const added = a.deploys > 0;
           const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
           return {
-            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, image: a.image || null, image_kind: a.image_kind || null,
+            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, ...(images ? { image: a.image || null, image_kind: a.image_kind || null } : {}),
             tagline: d.tagline || a.tagline || null, description: d.description || a.description || null,
             owner: a.owner, owner_name: name(a.owner),
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
@@ -384,7 +384,7 @@ document.getElementById("list").addEventListener("click", (e) => {
   const r = e.target.closest("[data-app]");
   if (r) one.open("app", { app: r.dataset.app });
 });
-const show = () => one.render("#list", async () => ((data = await one.call("list")), html()), { loading: "Loading apps" });
+const show = () => one.render("#list", async () => ((data = await one.call("list", { images: true })), html()), { loading: "Loading apps" });
 one.on("changed", show);
 pick(tab);
 show();
@@ -524,7 +524,7 @@ function link(x) {
 }
 
 async function show() {
-  const [list, code, health, where] = await Promise.all([one.call("list"), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("servers", { app: name }).catch(() => null)]);
+  const [list, code, health, where] = await Promise.all([one.call("list", { images: true }), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("servers", { app: name }).catch(() => null)]);
   data = list;
   const a = list.apps.find((x) => x.name === name);
   if (!a) return (document.getElementById("app").innerHTML = one.notFound({ title: name + " was erased.", text: "It's gone from every list.", home: "Back to the App Store" }));

@@ -206,7 +206,11 @@ fn run(args: Vec<String>) -> Result<()> {
                 eprintln!("{}", line.as_str().map(String::from).unwrap_or_else(|| line.to_string()));
             }
             match result["ok"] == true {
-                true => println!("{}", match &result["value"] { Value::String(s) => s.clone(), v => serde_json::to_string_pretty(v)? }),
+                true => println!("{}", match &result["value"] {
+                    Value::String(s) => s.clone(),
+                    v if std::io::IsTerminal::is_terminal(&std::io::stdout()) => serde_json::to_string_pretty(v)?,
+                    v => serde_json::to_string(v)?,
+                }),
                 false => bail!("{}", code::shown(&result)),
             }
         }

@@ -418,7 +418,9 @@ fn show(app: &str, op: &str, ok: &Value, out: Option<&str>) -> Result<()> {
     let text = match ok {
         Value::String(s) => s.clone(),
         Value::Null => return Ok(()),
-        other => serde_json::to_string_pretty(other)?,
+        // Laid out for a person at a terminal; compact for an agent's shell or a pipe.
+        other if std::io::stdout().is_terminal() => serde_json::to_string_pretty(other)?,
+        other => serde_json::to_string(other)?,
     };
     match out {
         Some(path) => {
@@ -737,7 +739,7 @@ pub fn mcp_content(ok: &Value) -> Value {
     keep_files(&mut ok, &mut shown, 0);
     let text = match &ok {
         Value::String(s) => s.clone(),
-        other => serde_json::to_string_pretty(other).unwrap_or_default(),
+        other => serde_json::to_string(other).unwrap_or_default(),
     };
     let mut content = vec![json!({ "type": "text", "text": text })];
     content.extend(shown);

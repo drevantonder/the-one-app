@@ -289,7 +289,7 @@ pub fn shown(result: &Value) -> String {
     let mut text = match result["ok"] == true {
         true => match &result["value"] {
             Value::String(s) => s.clone(),
-            v => serde_json::to_string_pretty(v).unwrap_or_default(),
+            v => serde_json::to_string(v).unwrap_or_default(),
         },
         false => format!("{}: {}", result["error"]["kind"].as_str().unwrap_or("Error"), result["error"]["message"].as_str().unwrap_or("")),
     };
