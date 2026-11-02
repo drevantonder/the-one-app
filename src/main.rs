@@ -29,6 +29,7 @@ Usage:
   {CLI} remove <device> | --user <user>
   {CLI} role <user> admin|member       (admins)
   {CLI} settings [<name> <value>|--default]   the install's settings (admins set them)
+  {CLI} groups                         every group: who's in it, as admin or member, and who's invited
   {CLI} group create <name>            a group, with you as its admin
   {CLI} group invite <group> <user> [--admin]
   {CLI} group accept <group>
@@ -273,6 +274,10 @@ fn run(args: Vec<String>) -> Result<()> {
         ["role", user, role] => {
             post("/v1/role", json!({ "user": user, "role": role }))?;
             println!("{user} is now {role}.");
+        }
+        ["groups"] | ["group"] | ["groups", "list"] => {
+            print!("{}", groups_said(&get("/v1/state")?));
+            println!("\n{CLI} group create <name>, {CLI} group invite <group> <user> [--admin], {CLI} group accept <group> and {CLI} group remove <group> <user> change them.");
         }
         ["group", "create", name @ ..] if !name.is_empty() => {
             let r = post("/v1/group", json!({ "name": name.join(" ") }))?;
@@ -939,7 +944,7 @@ fn status(state: &Value) {
     if !groups.is_empty() {
         println!("\nGroups");
         for g in &groups {
-            let members: Vec<String> = g["members"].as_array().into_iter().flatten().map(|m| format!("{}{}", name(m["user"].as_str().unwrap_or("")), if m["role"] == "admin" { "*" } else { "" })).collect();
+            let members: Vec<String> = g["members"].as_array().into_iter().flatten().map(|m| format!("{} ({})", name(m["user"].as_str().unwrap_or("")), m["role"].as_str().unwrap_or("member"))).collect();
             println!("  {}  {}", g["name"].as_str().unwrap_or(""), members.join(", "));
         }
     }
@@ -962,6 +967,32 @@ fn status(state: &Value) {
             println!("  ▯ {}  {}{asked}", c["name"].as_str().unwrap_or(""), name(c["user"].as_str().unwrap_or("")));
         }
     }
+}
+
+/// Every group in words: its people with their roles, and who's invited.
+fn groups_said(state: &Value) -> String {
+    let i = &state["install"];
+    let names: std::collections::HashMap<&str, &str> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, u["name"].as_str()?))).collect();
+    let people = |list: &Value| -> Vec<String> {
+        list.as_array().into_iter().flatten().map(|m| {
+            let id = m["user"].as_str().unwrap_or("");
+            let me = if i["user"].as_str() == Some(id) { ", you" } else { "" };
+            format!("{} ({}{me})", names.get(id).copied().unwrap_or(id), m["role"].as_str().unwrap_or("member"))
+        }).collect()
+    };
+    let groups = i["groups"].as_array().cloned().unwrap_or_default();
+    if groups.is_empty() {
+        return "There are no groups yet.\n".into();
+    }
+    let mut out = String::new();
+    for g in &groups {
+        out.push_str(&format!("{}: {}\n", g["name"].as_str().unwrap_or(""), people(&g["members"]).join(", ")));
+        let invited = people(&g["invited"]);
+        if !invited.is_empty() {
+            out.push_str(&format!("  invited, not joined yet: {}\n", invited.join(", ")));
+        }
+    }
+    out
 }
 
 /// How long ago `ms` (milliseconds since 1970) was, roughly.
@@ -1568,6 +1599,7 @@ fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Resu
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
     let mut tools = one::vault::tools();
+    tools.extend(one::skills::groups_tools());
     // Backups are this machine's to run: a sign-in from elsewhere can't.
     if !signed_in() {
         tools.extend(one::backups::tools());
@@ -1619,6 +1651,9 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     }
     if app == "backups" {
         return backups_tool(op, &input, agent);
+    }
+    if name == "groups_list" {
+        return Ok(json!(groups_said(&get("/v1/state")?)));
     }
     let server = input.remove("server");
     let confirmed = input.remove("confirm") == Some(json!(true));

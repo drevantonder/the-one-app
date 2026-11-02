@@ -139,6 +139,7 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
         .collect();
     skills.push(app_skill(&vault_app()));
     skills.push(app_skill(&backups_app()));
+    skills.push(app_skill(&groups_app()));
     skills.extend(apps.iter().filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["ops"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
     skills
 }
@@ -191,6 +192,19 @@ const BACKUPS_GUIDE: &str = "Each device backs up the install's data it holds, e
 /// Backups' tools as an app's operations.
 pub fn backups_app() -> Value {
     node_app("backups", "Backups", "Encrypted copies of everything, to a disk or S3-compatible storage", BACKUPS_GUIDE, crate::backups::tools())
+}
+
+/// How the groups' tool is explained, as an app's guide is.
+const GROUPS_GUIDE: &str = "Groups are the people who share a page, its apps and its data, like a family or a team. groups_list says who's in each, as what (admin or member), and who's invited but hasn't joined.";
+
+/// The groups' tool as an app's operations.
+pub fn groups_app() -> Value {
+    node_app("groups", "Groups", "Who's in each group, as admin or member, and who's invited", GROUPS_GUIDE, groups_tools())
+}
+
+/// The groups' MCP tools.
+pub fn groups_tools() -> Vec<Value> {
+    vec![json!({ "name": "groups_list", "description": "Every group: who's in it, as admin or member, and who's invited but hasn't joined yet.", "inputSchema": { "type": "object", "properties": {} }, "annotations": { "readOnlyHint": true } })]
 }
 
 /// The node's own tools, shown as an app's operations are, to search, scripts and skills.
