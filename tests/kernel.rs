@@ -682,6 +682,27 @@ fn signs_in(browser: &mut Browser, passkey: &Passkey) -> String {
 }
 
 #[test]
+fn someone_in_the_log_before_their_first_passkey_joins_after_kernel_keys() {
+    const KIM: &str = "00000000000000e6";
+    let k = Kernel::start(None);
+    joins(&k, &mut k.browser(), "Andre", None);
+    // An admin's kernel keys gives Kim's own scope, with the key the install's nodes made, before she has a passkey.
+    let key = B64U.encode(&rand::random::<[u8; 32]>());
+    let give = |people: Value| post(&format!("{}/internal/scope-key", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "scope": format!("user:{KIM}"), "key": key, "people": people }));
+    assert_eq!(give(json!([KIM])).0, 200);
+    // She joins all the same; the next kernel keys opens her own to her, with that key.
+    let mut kims = k.browser();
+    let (passkey, kim) = joins(&k, &mut kims, "Kim", Some(KIM));
+    assert_eq!(kim, KIM);
+    let token = signs_in(&mut kims, &passkey);
+    let vault = kernel::Vault { url: k.vault.clone() };
+    let mine = format!("user:{KIM}");
+    assert!(vault.keys_until(&token, &[(&mine, "board", None)]).is_err());
+    assert_eq!(give(json!([KIM])).0, 200);
+    assert!(vault.keys_until(&token, &[(&mine, "board", None)]).is_ok());
+}
+
+#[test]
 fn an_admin_signed_in_makes_an_invite_link_that_works_once() {
     let k = Kernel::start(None);
     let (mut andres, mut sams) = (k.browser(), k.browser());

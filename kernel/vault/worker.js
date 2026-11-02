@@ -217,9 +217,11 @@ export class Vault extends DurableObject {
     const pair = await keyPair();
     const recovery = b64u.decode(this.env.RECOVERY_KEY || refuse(503, "the vault has no recovery key"));
     this.sql.exec("insert into people (user, public, recovery, made) values (?, ?, ?, ?)", user, pair.public, await sealTo(recovery, pair.secret), Date.now());
-    const scopes = [`user:${user}`];
-    if (!this.sql.exec("select scope from scopes where scope = 'global'").toArray().length) scopes.push("global");
-    for (const scope of scopes) await this.makeScope(scope, user, pair.public);
+    // Their own scope's key, and the install's for its first person, unless an admin's `kernel keys` gave it from the
+    // install's nodes already: it's that key, and the next one opens it to them.
+    for (const scope of [`user:${user}`, "global"]) {
+      if (!this.sql.exec("select 1 from scopes where scope = ?", scope).toArray().length) await this.makeScope(scope, user, pair.public);
+    }
     return { user, key: b64u.encode(pair.secret), public: b64u.encode(pair.public), scopes: null };
   }
 
