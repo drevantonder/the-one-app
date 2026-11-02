@@ -65,7 +65,7 @@ const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
 
 /// The hash an invite is kept by, so the auth service's database holds no link that works.
 async function inviteId(token) {
-  if (!token) refuse(403, "Joining takes an invite link: ask whoever runs this install for one.");
+  if (!token) refuse(403, "Joining takes an invite link: ask an admin for one.");
   if (typeof token !== "string" || token.length < 32) refuse(404, "That invite link isn't whole: open the link you were sent as it is.");
   return hash(token);
 }
@@ -471,7 +471,7 @@ export class Auth extends DurableObject {
       try {
         await this.vault("grant", { user: user.id, from: prf, to: code, name: client.name || client.clientId, client: client.clientId });
       } catch (err) {
-        if (err.status === 403) refuse(403, "This passkey doesn't open your keys yet: add it on your Passkeys page with one that does.");
+        if (err.status === 403) refuse(403, "This passkey doesn't unlock your data yet: add it on your Passkeys page with one that does.");
         throw err;
       }
     });

@@ -28,7 +28,7 @@ const style = `
 `;
 
 /// What a passkey without PRF is told, here and by the auth service.
-export const NO_PRF = "This passkey can't open your keys, so it can't be used here. Passkeys saved in iCloud Keychain (iPhone, iPad, Mac) or Google Password Manager (Android, Chrome) work, as do most security keys on a current system. Choose one of those and try again.";
+export const NO_PRF = "This passkey can't unlock your data, so it can't be used here. Passkeys saved in iCloud Keychain (iPhone, iPad, Mac) or Google Password Manager (Android, Chrome) work, as do most security keys on a current system. Choose one of those and try again.";
 
 // WebAuthn's binary fields, to and from the base64url its JSON uses; and asking for a passkey with its PRF output,
 // which opens the person's keys at the vault. A passkey without PRF opens nothing, so it's refused here and by the
@@ -100,6 +100,9 @@ const acts = `
 const page = (title, body, script) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)}</title><style>${style}</style></head><body><main>${body}<p class="error"></p></main><script>${webauthn}${script}</script></body></html>`;
 
+/// What a person joins, in their words: "your One App".
+const ours = (name) => `your ${name.replace(/^The /, "")}`;
+
 /// Which passkeys work, in plain words, for the pages that make or ask for one.
 const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system.";
 
@@ -110,7 +113,7 @@ export function signInPage({ name, google }) {
   if (google) return googlePage({ name, google });
   const body = `
     <h1 id="title">Sign in to ${escape(name)}</h1>
-    <p id="what">With your passkey: it's what opens your keys.</p>
+    <p id="what">With your passkey: it's what unlocks your data.</p>
     <button class="primary" id="passkey">Sign In with a Passkey</button>
     <p class="note">No passkey here yet? Use one from another device, or ask whoever runs ${escape(name)} for an invite link.</p>`;
   const script = `${acts}
@@ -198,12 +201,12 @@ export function invitePage({ name }) {
   const body = `
     <section id="join">
       <h1 id="title">Join ${escape(name)}</h1>
-      <p id="what">Make a passkey to join. It's how you sign in, and the only thing that opens your keys.</p>
+      <p id="what">Make a passkey to join. It's how you sign in, and the only thing that unlocks your data.</p>
       <button class="primary" id="passkey" disabled>Make a Passkey</button>
       <p class="note">${escape(WORKS)}</p>
     </section>
     <section id="done" hidden>
-      <h1>You're in</h1>
+      <h1>You've joined ${escape(ours(name))}</h1>
       <p class="callout">Add a second passkey, on another device or a security key, so losing this one doesn't lock you out.</p>
       <a class="button primary" href="/passkeys">Add Another Passkey</a>
       <a class="button" href="/">Open ${escape(name)}</a>
@@ -235,7 +238,7 @@ export function invitePage({ name }) {
 export function passkeysPage({ name }) {
   const body = `
     <h1>Passkeys</h1>
-    <p id="what">Each one signs you in to ${escape(name)} and opens your keys.</p>
+    <p id="what">Each one signs you in to ${escape(name)} and unlocks your data.</p>
     <button class="primary" id="signin" hidden>Sign In with a Passkey</button>
     <section id="mine" hidden>
       <ul class="passkeys" id="list"></ul>
@@ -283,7 +286,7 @@ export function passkeysPage({ name }) {
     };
     document.getElementById("list").onclick = async (e) => {
       const id = e.target.dataset?.id;
-      if (!id || !confirm("Remove this passkey? It won't sign you in or open your keys again.")) return;
+      if (!id || !confirm("Remove this passkey? It won't sign you in or unlock your data again.")) return;
       try { await api("/api/auth/passkey/delete-passkey", { id }); await show(); } catch (err) { say(err.message); }
     };`;
   return page(`Passkeys`, body, script);
