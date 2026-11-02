@@ -637,11 +637,11 @@ fn run(args: Vec<String>) -> Result<()> {
         ["vault", "status", id] => {
             let r = get(&format!("/v1/vault/requests?id={id}"))?;
             let r = r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone();
-            println!("{} for {} in {}: {}", r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""));
+            println!("{} for {} in {}: {}", r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope_name"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""));
         }
         ["vault", "requests"] => {
             for r in get("/v1/vault/requests")?.as_array().into_iter().flatten() {
-                println!("{}  {} for {} in {}  {}  {}", r["id"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""), r["why"].as_str().unwrap_or(""));
+                println!("{}  {} for {} in {}  {}  {}", r["id"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or(""), r["app"].as_str().unwrap_or(""), r["scope_name"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""), r["why"].as_str().unwrap_or(""));
             }
         }
         ["vault", "answer", id] => {

@@ -722,8 +722,9 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             }
             ensure!(!state.requests.contains_key(&id), "that request is already made");
             let app = data["app"].as_str().context("no app")?.to_string();
-            // An item the node itself uses (a backup place's) is asked for as the node's.
-            ensure!(m.apps.contains_key(&app) || app == APP, "no such app");
+            // An item the node itself uses (a backup place's) is asked for as the node's, and one agents use (vault_fetch)
+            // as theirs.
+            ensure!(m.apps.contains_key(&app) || app == APP || app == crate::agents::NAME, "no such app");
             // An earlier server's asks for one secret field, `name`.
             let (title, fields) = match data["name"].as_str() {
                 Some(name) => (name.to_string(), vec![(name.to_string(), true)]),
