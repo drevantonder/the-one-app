@@ -73,7 +73,8 @@ fn score(app: &Value, op: &Value, query: &[String]) -> u32 {
     let app_name = words(&format!("{} {}", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or("")));
     let about = words(op["description"].as_str().unwrap_or(""));
     let guide = words(&format!("{} {}", app["description"].as_str().unwrap_or(""), app["instructions"].as_str().unwrap_or("")));
-    let has = |list: &[String], w: &str| list.iter().any(|x| x == w || (w.len() > 3 && x.starts_with(w)));
+    // Either may be the other's stem: devices is devic, device is device.
+    let has = |list: &[String], w: &str| list.iter().any(|x| x == w || (w.len() > 3 && x.starts_with(w)) || (x.len() > 3 && w.starts_with(x.as_str())));
     query.iter().map(|w| if has(&name, w) { 6 } else { 0 } + if has(&app_name, w) { 4 } else { 0 } + if has(&about, w) { 2 } else { 0 } + if has(&guide, w) { 1 } else { 0 }).sum()
 }
 
@@ -86,11 +87,22 @@ fn call(app: &Value, op: &Value, how: For) -> String {
         For::Cli => {
             let schema = &op["input"];
             let required: Vec<&str> = schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            // The inputs words fill, as --help shows them; the rest are flags.
+            let words: Vec<&str> = match op["words"].as_array() {
+                Some(w) => w.iter().filter_map(Value::as_str).collect(),
+                None => required.clone(),
+            };
             let mut line = format!("{CLI} {a} {o}");
-            for r in &required {
-                line.push_str(&format!(" <{}>", r.replace('_', "-")));
+            for w in &words {
+                line.push_str(&match required.contains(w) {
+                    true => format!(" <{}>", w.replace('_', "-")),
+                    false => format!(" [<{}>]", w.replace('_', "-")),
+                });
             }
-            for (k, v) in schema["properties"].as_object().into_iter().flatten().filter(|(k, _)| !required.contains(&k.as_str())) {
+            for r in required.iter().filter(|r| !words.contains(r)) {
+                line.push_str(&format!(" --{} <{}>", r.replace('_', "-"), r.replace('_', "-")));
+            }
+            for (k, v) in schema["properties"].as_object().into_iter().flatten().filter(|(k, _)| !required.contains(&k.as_str()) && !words.contains(&k.as_str())) {
                 match v["type"] == "boolean" {
                     true => line.push_str(&format!(" [--{}]", k.replace('_', "-"))),
                     false => line.push_str(&format!(" [--{} {}]", k.replace('_', "-"), ts(v))),
@@ -104,7 +116,8 @@ fn call(app: &Value, op: &Value, how: For) -> String {
 /// The operations that best match `query`, best first, each with how to call it and what it does, then the guide of
 /// each app they're in.
 pub fn search(apps: &[Value], query: &str, limit: usize, how: For) -> String {
-    let query = words(query);
+    // What people call the devices their One App runs on.
+    let query: Vec<String> = words(query).into_iter().map(|w| if matches!(w.as_str(), "server" | "machine" | "box") { "device".into() } else { w }).collect();
     let mut found: Vec<(u32, usize, &Value, &Value)> = Vec::new();
     for (i, app) in apps.iter().enumerate() {
         for op in app["ops"].as_array().into_iter().flatten() {
@@ -118,7 +131,7 @@ pub fn search(apps: &[Value], query: &str, limit: usize, how: For) -> String {
     found.truncate(limit.max(1));
     if found.is_empty() {
         let names: Vec<&str> = apps.iter().filter_map(|a| a["name"].as_str()).collect();
-        return format!("Nothing matches. Try other words, or an app's name: {}.", names.join(", "));
+        return format!("Nothing matches. Try other words, or an app's name: {}. {} shows the apps you can add.", names.join(", "), if matches!(how, For::Cli) { format!("{CLI} apps list") } else { "apps_list".into() });
     }
     let mut text = String::new();
     let mut shown: Vec<&Value> = Vec::new();

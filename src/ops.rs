@@ -19,10 +19,16 @@ pub const MCP_FILE_LIMIT: usize = 1 << 20;
 
 /// An operation as `GET /v1/apps` describes it, with its app; None when no app or sidecar here lists it.
 pub fn find(app: &str, op: &str) -> Option<(Value, Value)> {
-    let apps = get("/v1/apps").ok()?;
-    let a = apps.as_array()?.iter().find(|a| a["name"] == app)?.clone();
+    let mut apps = get("/v1/apps").ok()?.as_array()?.clone();
+    apps.extend(node_apps());
+    let a = apps.iter().find(|a| a["name"] == app)?.clone();
     let o = a["ops"].as_array()?.iter().find(|o| o["name"] == op)?.clone();
     Some((a, o))
+}
+
+/// The node's own tools, as apps: what search lists, which run here rather than as an app's call.
+fn node_apps() -> [Value; 3] {
+    [one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app()]
 }
 
 /// `<CLI> <app> <op> [words] [--input value]...`: runs it and prints what it gives back.
@@ -57,7 +63,11 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     if o["confirm"] == true && !confirmed {
         ask(&format!("{CLI} {app} {op} sends or can't be undone. Go ahead?"), &format!("{CLI} {app} {op} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action"))?;
     }
-    let mut r = match post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })) {
+    let call = match node_apps().iter().any(|n| n["name"] == app) {
+        true => crate::dispatch(&format!("{app}_{op}"), input, agent_from_env().as_deref(), "cli", Some(o.clone())).map(|ok| json!({ "ok": ok })),
+        false => post("/v1/call", json!({ "server": server, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })),
+    };
+    let mut r = match call {
         Ok(r) => r,
         Err(e) => bail!("{}", in_cli_words(&format!("{e:#}"))),
     };
@@ -75,7 +85,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
 /// (`one gmail sign_in`).
 fn in_cli_words(text: &str) -> String {
     let mut apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-    apps.extend([one::skills::vault_app(), one::skills::groups_app()]);
+    apps.extend(node_apps());
     let command = |word: &str| -> Option<String> {
         word.match_indices('_').find_map(|(i, _)| {
             let (app, op) = (&word[..i], &word[i + 1..]);
