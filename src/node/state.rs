@@ -282,9 +282,10 @@ impl Node {
     /// Finds a device of the install by name or key prefix.
     pub fn find_device(&self, name: &str) -> Result<Key> {
         let found: Vec<Key> = self.with(|i| Ok(i.r.members.devices().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
+        let names = || self.with(|i| Ok(i.r.members.devices().map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
         match found.as_slice() {
             [one] => Ok(*one),
-            [] => bail!("no device called {name}"),
+            [] => bail!("no device called {name}: your devices are {}", names()),
             _ => bail!("several devices match {name}"),
         }
     }
@@ -292,9 +293,10 @@ impl Node {
     /// Finds a device or client of the install by name or key prefix.
     pub fn find_machine(&self, name: &str) -> Result<Key> {
         let found: Vec<Key> = self.with(|i| Ok(i.r.members.machines.values().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).map(|m| m.key).collect()))?;
+        let names = || self.with(|i| Ok(i.r.members.machines.values().filter(|m| !m.removed).map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
         match found.as_slice() {
             [one] => Ok(*one),
-            [] => bail!("no device called {name}"),
+            [] => bail!("no device called {name}: your devices are {}", names()),
             _ => bail!("several devices match {name}"),
         }
     }
