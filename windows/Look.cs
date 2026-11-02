@@ -65,13 +65,7 @@ public static class Look
     /// Phosphor's icons (vendor/phosphor, beside the program), which apps name for their tiles, screens and widgets, so
     /// every device draws the same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one,
     /// `git-branch-fill` filled.
-    public static readonly Dictionary<string, string> Icons = LoadIcons();
-
-    static Dictionary<string, string> LoadIcons()
-    {
-        try { return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Assets", "icons.json"))) ?? []; }
-        catch { return []; }
-    }
+    public static Dictionary<string, string> Icons => WidgetArt.Icons;
 
     /// A named icon, `size` across, filled with `brush`; nothing if there's none by that name.
     public static FrameworkElement? Icon(string? name, double size, Brush? brush = null)

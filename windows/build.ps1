@@ -1,9 +1,9 @@
-# In the Windows VM, from build.sh: builds the app from the sources beside this file, installs it for this user (its
-# folder under Programs, and a Start menu shortcut), and starts it on the signed-in desktop.
+# In the Windows VM, from build.sh: builds the app from the sources beside this file as a package, signed with this
+# machine's certificate (setup.ps1), installs it for this user, and starts it on the signed-in desktop.
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $app = Get-Content "$here\build.json" -Raw | ConvertFrom-Json
-& "$here\setup.ps1" | Out-Null
+$signing = & "$here\setup.ps1" -Publisher $app.publisher | Select-Object -Last 1
 $dotnet = "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe"
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
@@ -22,6 +22,21 @@ $pngs = foreach ($s in $sizes) {
   $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
   , $stream.ToArray()
 }
+# The package's own: its tiles, its logo, and the picture the Widgets board's picker shows.
+function Png($size, $file, $inset = 0, $width = $size) {
+  $bitmap = New-Object System.Drawing.Bitmap $width, $size
+  $g = [System.Drawing.Graphics]::FromImage($bitmap)
+  $g.InterpolationMode = 'HighQualityBicubic'
+  $s = $size - 2 * $inset
+  $g.DrawImage($source, ($width - $s) / 2, $inset, $s, $s)
+  $g.Dispose()
+  $bitmap.Save("$here\Assets\$file", [System.Drawing.Imaging.ImageFormat]::Png)
+  $bitmap.Dispose()
+}
+Png 150 Tile.png 24
+Png 44 Small.png
+Png 50 Store.png
+Png 300 Widget.png 90 300
 $source.Dispose()
 $ico = New-Object System.IO.MemoryStream
 $w = New-Object System.IO.BinaryWriter $ico
@@ -36,28 +51,37 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 foreach ($p in $pngs) { $w.Write($p) }
 [System.IO.File]::WriteAllBytes("$here\Assets\App.ico", $ico.ToArray())
 
-$out = "$here\out"
-& $dotnet publish "$here\One.csproj" -c Release -r win-x64 --self-contained -p:Platform=x64 -p:AppFile=$($app.file) "-p:AppName=$($app.name)" -o $out
+$out = "$here\package"
+& $dotnet publish "$here\One.csproj" -c Release -r win-x64 --self-contained -p:Platform=x64 -p:AppFile=$($app.file) "-p:AppName=$($app.name)" -p:SigningCertificate=$signing
 if ($LASTEXITCODE -ne 0) { throw "the build failed" }
+$package = Get-ChildItem -Recurse "$out\*.msix" | Sort-Object LastWriteTime | Select-Object -Last 1
+# The Windows App SDK's runtime, which it depends on: its own packages from NuGet, the framework first.
+$runtime = (Get-ChildItem "$env:USERPROFILE\.nuget\packages\microsoft.windowsappsdk.runtime" | Sort-Object { [version]$_.Name } | Select-Object -Last 1).FullName
+$runtimes = 'Microsoft.WindowsAppRuntime', 'Main', 'Singleton', 'DDLM' | ForEach-Object { Get-ChildItem "$runtime\tools\MSIX\win10-x64\*.msix" | Where-Object Name -like "*$_*" | Select-Object -First 1 -ExpandProperty FullName }
 
-# Installed for this user: a running copy is closed first.
+# Installed for this user, over the one there (closed first), keeping what it keeps, then started; the app as it was
+# before it was a package goes. Both on the desktop of whoever is signed in, as a task: Windows installs packages only
+# for a session there, not an SSH one, and a window started from SSH never draws.
 Get-Process -Name $app.file -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 500
-$dest = "$env:LOCALAPPDATA\Programs\$($app.name)"
-if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-Copy-Item -Recurse $out $dest
-$exe = "$dest\$($app.file).exe"
-$shell = New-Object -ComObject WScript.Shell
-$link = $shell.CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\$($app.name).lnk")
-$link.TargetPath = $exe
-$link.WorkingDirectory = $dest
-$link.Save()
-
-# Started on the desktop of whoever is signed in (an SSH session has none), by Explorer, as a click on it would: a task
-# runs Explorer there, which opens the shortcut. (Started by the task itself, the window never draws.)
-$task = "Start $($app.file)"
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
-$open = New-ScheduledTaskAction -Execute explorer.exe -Argument "`"$($link.FullName)`""
-Register-ScheduledTask -TaskName $task -Action $open -Principal $principal -Force | Out-Null
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\$($app.name)", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\$($app.name).lnk" -ErrorAction SilentlyContinue
+$log = "$here\install.log"
+Remove-Item $log -ErrorAction SilentlyContinue
+Set-Content "$here\install.ps1" @"
+try {
+  foreach (`$r in '$($runtimes -join "','")') { Add-AppxPackage -Path `$r -ErrorAction SilentlyContinue }
+  Add-AppxPackage -Path '$($package.FullName)' -ForceApplicationShutdown -ForceUpdateFromAnyVersion -ErrorAction Stop
+  `$p = Get-AppxPackage -Name '$($app.file)'
+  Start-Process explorer.exe "shell:AppsFolder\`$(`$p.PackageFamilyName)!App"
+  "Installed $($app.name) `$(`$p.Version), and started it." | Set-Content '$log'
+} catch { "Couldn't install it: `$_" | Set-Content '$log' }
+"@
+$task = "Install $($app.file)"
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+$run = New-ScheduledTaskAction -Execute powershell.exe -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$here\install.ps1`""
+Register-ScheduledTask -TaskName $task -Action $run -Principal $principal -Force | Out-Null
 Start-ScheduledTask -TaskName $task
-"Installed $($app.name) at $dest, and started it."
+for ($i = 0; -not (Test-Path $log) -and $i -lt 240; $i++) { Start-Sleep -Milliseconds 500 }
+$said = Get-Content $log -ErrorAction SilentlyContinue
+if (-not $said) { throw "the install didn't finish" }
+if ($said -like "Couldn't*") { throw $said }
+$said

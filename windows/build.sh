@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the Windows app in the Windows VM on this machine (~/devices/windows: WinUI 3 builds only on Windows), then
+# Builds the Windows app in the Windows VM on this machine (Agent Devices' windows: WinUI 3 builds only on Windows), then
 # installs it there and starts it. CONFIG=path/to/config.toml builds another white label.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -15,6 +15,16 @@ stage=$(mktemp -d)/$cli
 trap 'rm -rf "$(dirname "$stage")"' EXIT
 mkdir -p "$stage/Assets"
 cp ./*.cs App.xaml One.csproj app.manifest ./*.ps1 "$stage/"
+# The package: named for the white label, its widgets' COM class steady for it, its version newer each build (days
+# since 2026, then the minute of that day), so installing it updates the one there, keeping its sign-in.
+file=${name//[^A-Za-z0-9]/}
+widgets=$(printf '%s widgets' "$cli" | sha1sum | sed -E 's/^(.{8})(.{4})(.{4})(.{4})(.{12}).*/\1-\2-\3-\4-\5/')
+now=$(date -u +%s)
+version="1.$(( (now - $(date -u -d 2026-01-01 +%s)) / 86400 )).$(( now % 86400 / 60 )).0"
+xml() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/[&|\\]/\\&/g'; }
+sed -e "s|@ID@|$file|g; s|@PUBLISHER@|CN=$(xml "${name//[^A-Za-z0-9 ]/}")|g; s|@VERSION@|$version|g; s|@NAME@|$(xml "$name")|g" \
+  -e "s|@FILE@|$file|g; s|@CLI@|$(xml "$cli")|g; s|@WIDGETS@|$widgets|g" Package.appxmanifest |
+  awk '/<Definition /{d=1} d{b=b $0 "\n"} !d{print} /<\/Definition>/{d=0; for (n=1; n<=4; n++) {x=b; gsub(/@N@/, n, x); printf "%s", x}}' > "$stage/Package.appxmanifest"
 cp "$(art icon)" "$stage/Assets/Icon.png"
 cp "$(art logo)" "$stage/Assets/Logo.png"
 cp "$root/vendor/phosphor/icons.json" "$stage/Assets/icons.json"
@@ -32,15 +42,16 @@ public static class Brand
     /// The install's address, for a white label with one install; empty, the person gives it.
     public const string Address = $(quote "$(field address)");
     public const string Commit = $(quote "$commit");
+    /// The COM class the Widgets board starts this program as, for its widgets (Package.appxmanifest).
+    public const string WidgetClass = "$widgets";
     /// Where this app keeps what it keeps on this computer.
     public static string Folder => System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), Name);
 }
 CS
-printf '{"name":%s,"file":%s}\n' "$(quote "$name")" "$(quote "${name//[^A-Za-z0-9]/}")" > "$stage/build.json"
+printf '{"name":%s,"file":%s,"publisher":%s}\n' "$(quote "$name")" "$(quote "$file")" "$(quote "CN=${name//[^A-Za-z0-9 ]/}")" > "$stage/build.json"
 
-vm=~/devices/windows
 ssh=(ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=$HOME/devices/windows-vm/known_hosts -o LogLevel=ERROR -o ConnectTimeout=10 one@127.0.0.1)
-"${ssh[@]}" exit 2>/dev/null || { "$vm" start; until "${ssh[@]}" exit 2>/dev/null; do sleep 5; done; }
+"${ssh[@]}" exit 2>/dev/null || { one agent-devices start windows >/dev/null; until "${ssh[@]}" exit 2>/dev/null; do sleep 5; done; }
 "${ssh[@]}" "Remove-Item -Recurse -Force build\\$cli -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force build | Out-Null"
 scp -q -r -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile="$HOME/devices/windows-vm/known_hosts" -o LogLevel=ERROR "$stage" "one@127.0.0.1:build/"
 "${ssh[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File build\\$cli\\build.ps1"

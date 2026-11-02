@@ -37,6 +37,8 @@ public sealed class Store
 
     /// After anything it holds changes.
     public event Action? Changed;
+    /// After the pages' widgets are read again.
+    public event Action? WidgetsRead;
     /// Each node event, for the open screen.
     public event Action<JsonNode>? Event;
 
@@ -187,6 +189,13 @@ public sealed class Store
         else Changed?.Invoke();
     }
 
+    /// Everything again, as the Widgets board's widgets read it.
+    public async Task RefreshAll()
+    {
+        State = await Node.State();
+        await RefreshApps();
+    }
+
     public async Task RefreshApps()
     {
         if (Install == null) return;
@@ -202,6 +211,7 @@ public sealed class Store
             try { BadgesOf[p.Scope] = await Node.Badges(p.Scope); } catch { BadgesOf[p.Scope] = []; }
         }));
         Changed?.Invoke();
+        WidgetsRead?.Invoke();
         ScheduleRedraw();
     }
 
@@ -230,7 +240,7 @@ public sealed class Store
         _ = Task.Delay(TimeSpan.FromMilliseconds(wait), cancel.Token).ContinueWith(async t =>
         {
             if (!t.IsCanceled) try { await RefreshWidgets(); } catch { }
-        }, TaskScheduler.FromCurrentSynchronizationContext());
+        }, SynchronizationContext.Current == null ? TaskScheduler.Default : TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     /// Follows the node's events until signed out: what changed, so the window and the open screen keep up.

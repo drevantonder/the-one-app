@@ -250,8 +250,11 @@ public sealed class Auth
         bool Fresh() => access != null && access != stale && until > DateTime.UtcNow.AddMinutes(1);
         if (Fresh()) return access!;
         await refreshing.WaitAsync();
+        // The Widgets board's widgets refresh it in a process of their own: one at a time, each with the token the
+        // other kept last.
         try
         {
+            using var held = await Held();
             if (Fresh()) return access!;
             var refresh = Refresh() ?? throw new SignedOutException("Signed out.");
             var meta = await Meta();
@@ -270,6 +273,17 @@ public sealed class Auth
         finally
         {
             refreshing.Release();
+        }
+    }
+
+    /// This app's processes' lock on refreshing: a file only one may have open.
+    static async Task<IDisposable> Held()
+    {
+        Directory.CreateDirectory(Brand.Folder);
+        for (var tries = 0; ; tries++)
+        {
+            try { return new FileStream(Path.Combine(Brand.Folder, "sign-in.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (IOException) when (tries < 300) { await Task.Delay(100); }
         }
     }
 

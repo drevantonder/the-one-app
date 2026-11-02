@@ -61,12 +61,48 @@ public sealed class MainWindow : Window
         {
             if (e["type"]?.GetValue<string>() == "changed") ServicesView.Stale((e["apps"] as System.Text.Json.Nodes.JsonArray)?.Select(a => a?.ToString() ?? ""));
         };
+        // The Widgets board's widgets keep up with the window's.
+        Store.Shared.WidgetsRead += () =>
+        {
+            var list = WidgetCache.Of(Store.Shared);
+            var accent = Store.Shared.Config?.Accent ?? Brand.Accent;
+            _ = System.Threading.Tasks.Task.Run(() => Widgets.Changed(list, accent));
+        };
         Closed += (_, _) => listening?.Cancel();
         _ = Start();
     }
 
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    /// Brings the window in front of the others, as a widget's link opens it.
+    public void Bring()
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } p) p.Restore();
+        SetForegroundWindow(hwnd);
+    }
+
+    /// Where a link opens (a widget's: `<cli>://open?app=…&screen=…&params=…&scope=…`), once the window shows the pages.
+    Route? opening;
+
+    public void Open(Uri link)
+    {
+        if (link.Host != "open") return;
+        var q = System.Web.HttpUtility.ParseQueryString(link.Query);
+        var scope = q["scope"];
+        opening = q["app"] is { Length: > 0 } app ? Route.ScreenOf(app, scope, q["screen"] ?? "main", q["params"] ?? "{}") : Route.PageOf(scope ?? "user");
+        if (nav != null) Opening();
+    }
+
+    void Opening()
+    {
+        if (opening is not { } r) return;
+        opening = null;
+        // Its page, if this computer opens it; an app's screen on a page it isn't on still opens.
+        if (r.Kind == "page" && Store.Shared.PageFor(r.Scope) == null) return;
+        Go(r);
+    }
 
     public void Restyle()
     {
@@ -256,6 +292,7 @@ public sealed class MainWindow : Window
         nav.BackRequested += (_, _) => Back();
         body.Content = nav;
         Redraw();
+        Opening();
     }
 
     /// Goes somewhere in place of where the window is, as a sidebar row does.

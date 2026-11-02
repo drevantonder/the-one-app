@@ -9,6 +9,8 @@ namespace One;
 public partial class App : Application
 {
     public static MainWindow? Window { get; private set; }
+    /// The link this start opens, until the window opens it.
+    public static Uri? Pending { get; set; }
 
     public App()
     {
@@ -31,6 +33,8 @@ public partial class App : Application
             Resources["NavigationViewContentGridBorderBrush"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
             Window = new MainWindow();
             Window.Activate();
+            if (Pending is { } link) Window.Open(link);
+            Pending = null;
         }
         catch (Exception e)
         {
@@ -38,6 +42,14 @@ public partial class App : Application
             throw;
         }
     }
+
+    /// A later start's link (a widget's), opened in this window, brought to the front.
+    public static void Opened(Uri? link) => Window?.DispatcherQueue.TryEnqueue(() =>
+    {
+        Window.Activate();
+        Window.Bring();
+        if (link != null) Window.Open(link);
+    });
 
     public static void Problem(Exception? e)
     {
