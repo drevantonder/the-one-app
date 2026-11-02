@@ -411,6 +411,8 @@ fn run(args: Vec<String>) -> Result<()> {
                 let web: Vec<(String, Vec<u8>)> = one::kernel::web_files().map(|(path, bytes)| (path.to_string(), bytes.to_vec())).collect();
                 one::kernel::deploy_some(&cf, &settings, &modules, &web, &["gateway"])?;
             }
+            // So Devices shows it, for its admins to say where it comes in the order things run in.
+            post("/v1/settings", json!({ "name": "serverless", "value": "on" }))?;
             println!("The serverless node is in your Cloudflare account, and {} sends /v1/ and /mcp to it; what needs a machine goes on to {}.", settings.address, settings.node_url.as_deref().unwrap_or("no machine yet: kernel set node-url"));
         }
         ["kernel", "invite", name] => {

@@ -1,11 +1,15 @@
 // Devices: every server in the install and how loaded it is (memory, CPU, GPU, disk), with the containers each one
-// hosts listed under it. Each server measures itself and says so when it syncs; this app only draws what
+// hosts listed under it; and where things run first (ctx.order, src/rank.rs), which admins change. Each server measures itself and says so when it syncs; this app only draws what
 // ctx.servers() gives it.
 
 const GB = 1e9;
 const GiB = 2 ** 30;
 
-const os = (s) => (s.target || "").includes("apple") ? "macOS" : (s.target || "").includes("linux") ? "Linux" : "";
+const os = (s) => (s.target || "").includes("apple") ? "macOS" : (s.target || "").includes("linux") ? "Linux" : (s.target || "").includes("windows") ? "Windows" : "";
+
+/// Where things run first: each place's words, and what each kind of device is called.
+const PLACES = { first: "Use First", needed: "When Needed", last: "Last Resort" };
+const TYPES = { always_on: "Always on", laptop: "Laptop", cloud: "Cloud server", cloudflare: "On the web, costs a little each time it wakes" };
 const pct = (sp) => (sp && sp.total ? Math.round((sp.used * 100) / sp.total) : null);
 const last = (xs) => (xs && xs.length ? xs[xs.length - 1] : null);
 /// Bytes as GB: memory counts them in 2^30s, as macOS and Activity Monitor do, disks in 10^9s.
@@ -57,9 +61,33 @@ export default {
   icon: "monitor",
   color: "#30b0c7",
   description: "How loaded each server is: memory, CPU, GPU and disk, with its containers",
-  instructions: "devices_list shows every server in the install, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU and GPU (percent busy, a sample every 5 seconds over the last two minutes, oldest first) and disk, and the containers each hosts under it. Use it to pick a server with room for a desktop, a model or a build.",
+  instructions: "Your One App runs each thing on the first device in its order that can run it, is on and has room: Use First, then When Needed, then Last Resort (Cloudflare among them, once there is one), a device far from the others only when it's nearer. devices_order shows that order; devices_use moves a device, for an admin, only when the person asks. devices_list shows every server in the install, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU and GPU (percent busy, a sample every 5 seconds over the last two minutes, oldest first) and disk, and the containers each hosts under it. Use it to pick a server with room for a desktop, a model or a build.",
 
   ops: {
+    order: {
+      description: "Where things run first: every device, and Cloudflare once there is one, in the order calls, sidecars and new agent devices go to them, each with its place (first: Use First, needed: When Needed, last: Last Resort) and what it is.",
+      input: { type: "object", properties: {} },
+      reads: true,
+      async run(ctx) {
+        const { order, admin } = await ctx.order();
+        return { order, admin, text: order.map((d) => `${PLACES[d.use]}: ${d.name} (${TYPES[d.kind] || d.kind}${d.online ? "" : ", offline"})`).join("\n") };
+      },
+    },
+    use: {
+      description: "Move a device, or Cloudflare, to Use First, When Needed or Last Resort, for an admin. Only when the person asks.",
+      input: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "the device's name, or Cloudflare" },
+          place: { type: "string", enum: ["first", "needed", "last"], description: "first: Use First; needed: When Needed; last: Last Resort" },
+        },
+        required: ["name", "place"],
+      },
+      async run(ctx, { name, place }) {
+        const { order } = await ctx.order(name, place);
+        return { order, text: `${name} is now ${PLACES[place]}.` };
+      },
+    },
     list: {
       description: "List every server, online or not, with its memory, disk (bytes), CPU and GPU (percent busy, every 5 s over two minutes, oldest first), and each one's containers under it (host).",
       input: { type: "object", properties: {} },
@@ -110,8 +138,12 @@ export default {
 .guest .m { color: var(--muted); font-size: 13px; white-space: nowrap; }
 .guest .bar { flex: 0 3 64px; min-width: 16px; }
 .wrong { color: #ff3b30; font-size: 13px; margin-top: 6px; }
+#order h2.head { font-size: 20px; font-weight: 700; margin: 32px 0 0; }
+#order .about { color: var(--muted); font-size: 13px; margin: 6px 16px 0; }
+#order .row .sub { color: var(--muted); font-size: 13px; }
 </style>
 <div id="list"></div>
+<div id="order"></div>
 <script>
 const GB = 1e9, GiB = 2 ** 30;
 const size = (b, g = GB) => b >= 10 * g ? Math.round(b / g) + " GB" : b >= g ? (b / g).toFixed(1) + " GB" : Math.round(b / (g / 1000)) + " MB";
@@ -156,8 +188,50 @@ async function show() {
     document.getElementById("list").innerHTML = \`<div class="empty error">\${one.esc(err.message)}</div>\`;
   }
 }
+const PLACES = { first: "Use First", needed: "When Needed", last: "Last Resort" };
+const TYPES = { always_on: "Always on", laptop: "Laptop, sleeps", cloud: "Cloud server, paid by the hour", cloudflare: "On the web, costs a little each time it wakes" };
+let moving = false;
+/// Where things run first: each place's devices, in the order they're used, each with a menu to move it, for an admin.
+async function order() {
+  if (moving) return;
+  let got;
+  try {
+    got = await one.call("order", {});
+  } catch {
+    return;
+  }
+  const row = (d) => {
+    const sub = [TYPES[d.kind] || "", d.here ? "This device" : "", d.online ? "" : "Offline"].filter(Boolean).join(" · ");
+    const pick = got.admin
+      ? \`<label class="pick">\${PLACES[d.use]}<select aria-label="Where \${one.esc(d.name)} comes" onchange="move('\${one.esc(d.key)}', this.value, this)">\${Object.entries(PLACES).map(([v, t]) => \`<option value="\${v}"\${v === d.use ? " selected" : ""}>\${t}</option>\`).join("")}</select></label>\`
+      : "";
+    return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(d.name)}</span></div><div class="sub">\${sub}</div></div>\${pick}</div>\`;
+  };
+  let html = '<h2 class="head">Where Things Run</h2>';
+  for (const [place, title] of Object.entries(PLACES)) {
+    const here = got.order.filter((d) => d.use === place);
+    if (here.length) html += \`<h2 class="section">\${title}</h2><div class="list">\${here.map(row).join("")}</div>\`;
+  }
+  html += '<p class="about">Things run on the first device here that\\'s on and has room. One far away from you is used only when it\\'s nearer.</p>';
+  document.getElementById("order").innerHTML = html;
+}
+async function move(key, place, select) {
+  moving = true;
+  select.disabled = true;
+  let failed = null;
+  try {
+    await one.call("use", { name: key, place });
+  } catch (err) {
+    failed = err.message;
+  }
+  moving = false;
+  await order();
+  if (failed) document.getElementById("order").insertAdjacentHTML("beforeend", '<p class="wrong">' + one.esc(failed) + "</p>");
+}
 show();
+order();
 setInterval(show, 5000);
+setInterval(order, 15000);
 </script>`,
     },
   },

@@ -21,6 +21,7 @@ use crate::bucket::{Copied, Place};
 use crate::db::Db;
 use crate::entry::{Content, Entry, Key, Order, Scope, hex, new_id, short, unhex};
 use crate::members::{self, Members, Principal, Role, ScopeState};
+use crate::rank;
 use crate::release::{self, Release};
 use crate::schedules::{self, Schedule};
 use crate::store::Store;
@@ -47,6 +48,15 @@ pub const MAX_DEPTH: u32 = 3;
 /// How many calls an app may make of other apps, or runs of its schedules, a minute on one server.
 pub const RATE_LIMIT: u32 = 600;
 /// How long an app that looped stays stopped on a server, unless it's deployed again sooner.
+/// A server whose round trip is longer than this is far: a nearer one runs what it would have, whatever their order.
+const FAR: Duration = Duration::from_millis(250);
+
+/// Whether a server has no room for more: its memory, or its CPU of late, over 90% used.
+fn full(load: &crate::load::Load) -> bool {
+    let busy = load.cpu.iter().rev().take(3).map(|c| *c as u32).sum::<u32>() / 3;
+    load.memory.is_some_and(|m| m.total > 0 && m.used * 10 > m.total * 9) || busy > 90
+}
+
 const STOPPED_FOR: u64 = 15 * 60_000;
 /// How often a server looks for schedules to run.
 const SCHEDULE_TICK: Duration = Duration::from_secs(10);
@@ -120,6 +130,8 @@ struct Install {
     views: HashMap<String, (Order, ScopeState)>,
     /// How long each server took to answer a call lately.
     nearest: HashMap<Key, Duration>,
+    /// How far each server is: its connection's round trip, when this server last asked it something.
+    far: HashMap<Key, Duration>,
     /// Whether this server has read every scope it holds from the bucket since it woke.
     read: bool,
 }
@@ -562,7 +574,7 @@ impl Node {
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)))?;
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((Place::from_fields(&f)?, f))).transpose()?;
-        let install = Install { r, user: file.user, bucket, peers: HashMap::new(), asked: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), read: false };
+        let install = Install { r, user: file.user, bucket, peers: HashMap::new(), asked: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), far: HashMap::new(), read: false };
         *self.0.install.lock().unwrap() = Some(install);
         Ok(())
     }
@@ -890,12 +902,18 @@ impl Node {
         Ok(Value::Object(out))
     }
 
-    /// The servers that might run a call, nearest first.
+    /// The servers that might run a call, in the order it tries them: those that are up with room first; then the
+    /// near before the far (FAR); then by the install's order (src/rank.rs); this server before another as good; then
+    /// the nearest. A sidecar about its own machine runs here first.
     fn candidates(&self, req: &CallRequest, me: &Caller) -> Result<Vec<Key>> {
         if let Some(server) = &req.server {
             return Ok(vec![self.find_server(server)?]);
         }
         let here = self.runs_sidecar_here(&req.app);
+        // A sidecar, or one of its operations, that's about its own machine (`"prefer": "here"`: Shell, models_here) runs
+        // on the caller's first.
+        let about_here = |d: &Value| d["prefer"] == "here" || d["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == req.op.as_str() && o["prefer"] == "here"));
+        let here_first = here && req.sidecar.is_some() && self.with(|i| Ok(self.sidecars_here(i).iter().any(|d| d.0 == req.app && about_here(&d.2))))?;
         self.with(|i| {
             let m = &i.r.members;
             let mut servers: Vec<Key> = if req.sidecar.is_none() {
@@ -907,8 +925,16 @@ impl Node {
                 }
                 s
             };
-            let rank = |k: &Key| (*k != self.0.id, !i.online(k), i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)));
-            servers.sort_by_key(rank);
+            let set = rank::set(&i.r.members.settings);
+            let here_load = crate::load::current();
+            let rank = |k: &Key| {
+                let here = *k == self.0.id;
+                let load = if here { Some(&here_load) } else { i.peers.get(k).and_then(|p| p.load.as_ref()) };
+                let kind = load.map(|l| l.kind.as_str()).unwrap_or("");
+                let far = !here && i.far.get(k).is_some_and(|d| *d > FAR);
+                (!here && !i.online(k), here_first && !here, load.is_some_and(full), far, rank::order(&set, &hex(k), kind), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
+            };
+            servers.sort_by_cached_key(rank);
             Ok(servers)
         })
     }
@@ -971,6 +997,9 @@ impl Node {
     /// Asks another server to run a call.
     async fn ask_server(&self, server: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
         let conn = tokio::time::timeout(Duration::from_secs(10), self.0.endpoint.connect(EndpointId::from_bytes(&server)?, CALL_ALPN)).await.context("timed out")??;
+        if let Some(rtt) = conn.paths().iter().find(|p| p.is_selected()).map(|p| p.rtt()) {
+            let _ = self.with(|i| Ok(i.far.insert(server, rtt)));
+        }
         let (mut send, mut recv) = conn.open_bi().await?;
         let request = json!({ "app": req.app, "sidecar": req.sidecar, "driver": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "as": req.as_user, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent } });
         send.write_all(&serde_json::to_vec(&request)?).await?;
@@ -2859,6 +2888,23 @@ impl Node {
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
             ("GET", "/servers") => ok(self.state_for(&grant.caller)["install"]["servers"].take()),
+            // Where things run first, as the person the call is for: only an admin changes it.
+            ("GET", "/use") => {
+                let install = self.state_for(&grant.caller)["install"].take();
+                let mut order: Vec<Value> = install["servers"].as_array().cloned().unwrap_or_default().into_iter().map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "use": s["use"], "online": s["online"], "here": s["me"] })).collect();
+                if let Some(use_) = install["serverless"]["use"].as_str() {
+                    order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "use": use_, "online": true, "here": false }));
+                }
+                let set = self.with(|i| Ok(rank::set(&i.r.members.settings)))?;
+                order.sort_by_cached_key(|s| (rank::order(&set, s["key"].as_str().unwrap_or(""), s["kind"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase()));
+                ok(json!({ "order": order, "admin": install["role"] == "admin" }))
+            }
+            ("POST", "/use") => {
+                ensure!(!grant.read_only, "this call only reads: it can't change where things run");
+                let req: Value = serde_json::from_slice(&body)?;
+                self.set_use(&grant.caller, req["server"].as_str().unwrap_or(""), req["use"].as_str().unwrap_or("")).await?;
+                ok(json!({}))
+            }
             _ => bail!("the node has no {method} {path}"),
         })
     }
@@ -2866,6 +2912,24 @@ impl Node {
     /// Sets one of the install's settings, for an admin; `None` puts back the white label's default.
     pub async fn set_setting(&self, caller: &Caller, name: &str, value: Option<&str>) -> Result<()> {
         self.member_as(caller, "setting", json!({ "name": name, "value": value })).await
+    }
+
+    /// Puts a server, or the serverless node (`cloudflare`), first, when needed or last in the install's order of where
+    /// things run, for an admin: the `use` setting, every other server's place written down as it is now.
+    pub async fn set_use(&self, caller: &Caller, server: &str, place: &str) -> Result<()> {
+        let place = rank::Use::parse(place).context("a place is first, needed or last")?;
+        let id = if server.eq_ignore_ascii_case(rank::CLOUDFLARE) { rank::CLOUDFLARE.to_string() } else { hex(&self.find_server(server)?) };
+        let here = crate::load::current().kind;
+        let value = self.with(|i| {
+            let m = &i.r.members;
+            let kind = |k: &Key| if *k == self.0.id { here.clone() } else { i.peers.get(k).and_then(|p| p.load.as_ref()).map(|l| l.kind.clone()).unwrap_or_default() };
+            let mut now: Vec<(String, String)> = m.servers().map(|s| (hex(&s.key), kind(&s.key))).collect();
+            if m.settings.contains_key("serverless") {
+                now.push((rank::CLOUDFLARE.into(), rank::CLOUDFLARE.into()));
+            }
+            Ok(rank::with(&m.settings, &now, &id, place))
+        })?;
+        self.set_setting(caller, rank::SETTING, Some(&value)).await
     }
 
     /// Everything a shell needs to draw this server and its install, for this server's local user.
@@ -2902,6 +2966,7 @@ impl Node {
             let me = &viewer.user;
             let list = |ps: Vec<Principal>| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
             let here_sidecars = self.sidecars_here(i);
+            let set = rank::set(&m.settings);
             let servers: Vec<Value> = m
                 .servers()
                 .map(|s| {
@@ -2913,7 +2978,10 @@ impl Node {
                         }
                         l
                     });
+                    // What it is, as it last said; a server that hasn't, as one that's always on.
+                    let kind = load.as_ref().map(|l| l.kind.clone()).filter(|k| !k.is_empty()).unwrap_or_else(|| "always_on".into());
                     json!({
+                        "kind": kind, "use": rank::place(&set, &hex(&s.key), &kind), "far": i.far.get(&s.key).is_some_and(|d| *d > FAR),
                         "key": hex(&s.key), "name": s.name, "user": s.user, "me": Some(s.key) == device, "here": s.key == self.0.id,
                         "online": s.key == self.0.id || session.is_some(),
                         "owners": list(m.owners(&s.key)), "users": list(m.users_of(&s.key)), "privileged": m.privileged(&s.key),
@@ -2955,6 +3023,8 @@ impl Node {
                 "member": m.server(&self.0.id).is_some(),
                 "users": users, "groups": groups, "servers": servers, "clients": clients, "opens": opens,
                 "entries": i.r.store.count().unwrap_or(0), "settings": settings,
+                // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
+                "serverless": settings.contains_key("serverless").then(|| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE) })),
             })
         });
         let opens = install.as_ref().map(|i| i["opens"].clone()).unwrap_or(json!([]));

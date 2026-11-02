@@ -6,7 +6,8 @@
 // writes what a call wrote as one step (src/db.rs). An app's requests go out through the vault, which fills in the
 // Vault's items, so no secret reaches this node.
 //
-// Calls of apps that keep to their own data run here. Everything else goes first to the install's node on a machine
+// Calls of apps that keep to their own data run here when the install's order (src/rank.rs, set in Devices) puts this
+// node before every machine, or the machines are far. Everything else goes first to the install's node on a machine
 // (`MACHINE`), as the gateway sent it; when none answers, this node answers what it can (the install's state, apps,
 // widgets, badges, and any app with no sidecar) and says plainly that the rest needs a device that's off.
 //
@@ -481,6 +482,33 @@ async function screenOf(env, who, view, app, name, params, scope) {
 /// Until when a node on a machine didn't answer, so requests meanwhile don't wait for it again.
 let machineOffUntil = 0;
 
+/// A machine whose round trip through the tunnel is longer than this is far (src/node.rs's FAR): this node, near the
+/// person asking, runs what it can rather than wait on it.
+const FAR = 250;
+/// The tunnel's last round trip from here, and when it was measured.
+let machineRtt = 0;
+let measuredAt = 0;
+
+/// Measures the tunnel's round trip now and then: how long a node on a machine takes to say what it says to nothing.
+function measure(env, ctx) {
+  if ((!env.MACHINE && !env.MACHINE_URL) || Date.now() - measuredAt < 60_000) return;
+  measuredAt = Date.now();
+  const started = Date.now();
+  const sent = env.MACHINE ? env.MACHINE.fetch(`http://${new URL(env.ADDRESS).host}/v1/far`) : fetch(`${env.MACHINE_URL}/v1/far`);
+  ctx.waitUntil(sent.then((r) => r.body?.cancel()).then(() => (machineRtt = Date.now() - started)).catch(() => {}));
+}
+
+const PLACES = { first: 0, needed: 1, last: 2 };
+
+/// Whether an app's call this node could run goes to a machine first: a machine is up, not far, and comes at this
+/// node's place in the install's order or before it (at the same place a machine costs less).
+function machineFirst(view, env, ctx) {
+  measure(env, ctx);
+  if (Date.now() < machineOffUntil || machineRtt > FAR) return false;
+  const mine = PLACES[view.state.install.serverless?.use] ?? PLACES.needed;
+  return view.state.install.servers.some((s) => (PLACES[s.use] ?? PLACES.first) <= mine);
+}
+
 /// Sends a request on to the install's node on a machine, as the gateway sent it here: its answer, or null when none
 /// answers within `wait` (an answer that has begun may stream for as long as it takes).
 async function fromMachine(request, env, wait = 15_000) {
@@ -545,8 +573,8 @@ async function route(request, env, ctx) {
     const run = new Run(env, ctx, who, await installFor(env, who));
     const app = deployed(run.view, req.app);
     const d = app && (await describe(env, who, app));
-    // An app that keeps to its own data runs here; the rest on a machine when one answers.
-    if (d && plain(d)) return json(await run.call(req));
+    // An app that keeps to its own data runs here, unless a machine comes first; the rest on a machine when one answers.
+    if (d && plain(d) && !machineFirst(run.view, env, ctx)) return json(await run.call(req));
     const r = await fromMachine(request, env, 120_000);
     if (r) return r;
     if (!d || d.uses?.sidecars?.length) refuse(503, needsDevice(d, req.app));
@@ -559,7 +587,7 @@ async function route(request, env, ctx) {
     const app = deployed(view, screenAt[1]);
     const d = app && (await describe(env, who, app));
     const params = JSON.parse(url.searchParams.get("params") || "{}");
-    if (d && plain(d)) return screenOf(env, who, view, app, screenAt[2], params, url.searchParams.get("scope"));
+    if (d && plain(d) && !machineFirst(view, env, ctx)) return screenOf(env, who, view, app, screenAt[2], params, url.searchParams.get("scope"));
     const r = await fromMachine(request, env);
     if (r) return r;
     if (!d || d.uses?.sidecars?.length) refuse(503, needsDevice(d, screenAt[1]));

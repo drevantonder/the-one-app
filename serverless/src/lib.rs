@@ -286,6 +286,7 @@ pub fn install(user: &str, client: &str, scopes: &str, now: f64) -> Result<Strin
 fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &str, now: u64) -> Value {
     let list = |ps: Vec<Principal>| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
     let hex = one::entry::hex;
+    let set = one::rank::set(&m.settings);
     let servers: Vec<Value> = m
         .servers()
         .map(|s| {
@@ -295,7 +296,7 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
                 "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(), "serves_me": m.serves(&s.key, me),
                 "build": null, "target": null, "drivers": [], "sidecars": [], "installed_sidecars": [],
                 "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
-                "load": null,
+                "load": null, "kind": null, "use": one::rank::place(&set, &hex(&s.key), ""), "far": false,
             })
         })
         .collect();
@@ -333,6 +334,7 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
         "install": {
             "name": m.name, "root": m.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role), "member": false,
             "users": users, "groups": groups, "servers": servers, "clients": clients, "opens": opens, "entries": 0, "settings": settings,
+            "serverless": { "use": one::rank::place(&set, one::rank::CLOUDFLARE, one::rank::CLOUDFLARE) },
         },
         "opens": opens,
         "vault_requests": waiting, "secret_requests": waiting,

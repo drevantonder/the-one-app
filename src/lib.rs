@@ -36,6 +36,7 @@ pub mod sign_in;
 #[cfg(not(target_family = "wasm"))]
 pub mod skills;
 pub mod members;
+pub mod rank;
 #[cfg(not(target_family = "wasm"))]
 pub mod store;
 #[cfg(not(target_family = "wasm"))]

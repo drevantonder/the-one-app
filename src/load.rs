@@ -33,6 +33,9 @@ pub struct Load {
     /// The containers running here.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub containers: Vec<Guest>,
+    /// What this machine is, for where things run first (src/rank.rs): `laptop`, `cloud` or `always_on`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub kind: String,
 }
 
 /// Bytes.
@@ -57,7 +60,7 @@ static LOAD: OnceLock<Mutex<Load>> = OnceLock::new();
 /// This machine's load, as last sampled. The first call starts sampling.
 pub fn current() -> Load {
     static STARTED: std::sync::Once = std::sync::Once::new();
-    let load = LOAD.get_or_init(|| Mutex::new(Load { container: in_container(), ..Load::default() }));
+    let load = LOAD.get_or_init(|| Mutex::new(Load { container: in_container(), kind: kind().into(), ..Load::default() }));
     STARTED.call_once(|| drop(std::thread::Builder::new().name("load".into()).spawn(sample)));
     load.lock().unwrap().clone()
 }
@@ -103,6 +106,65 @@ impl Cpu {
         let (b, t) = last?;
         (total > t).then(|| ((busy.saturating_sub(b)) * 100 / (total - t)) as u8)
     }
+}
+
+/// What this machine is: a `laptop` if it has a battery (it sleeps), `cloud` if it's a server rented from a cloud by the
+/// hour, else `always_on`. Any OS: what's asked is the machine's firmware and power, never which OS it runs.
+fn kind() -> &'static str {
+    if battery() {
+        "laptop"
+    } else if CLOUDS.iter().any(|c| firmware().contains(c)) {
+        "cloud"
+    } else {
+        "always_on"
+    }
+}
+
+/// What a rented cloud server's firmware says (Azure's is its chassis asset tag).
+const CLOUDS: &[&str] = &["Amazon EC2", "Google Compute Engine", "DigitalOcean", "Hetzner", "Vultr", "Linode", "Akamai", "OracleCloud", "Scaleway", "Alibaba Cloud", "7783-7084-3265-9085-8269-3286-77"];
+
+#[cfg(target_os = "linux")]
+fn battery() -> bool {
+    std::fs::read_dir("/sys/class/power_supply").into_iter().flatten().flatten().any(|d| {
+        let read = |f: &str| std::fs::read_to_string(d.path().join(f)).unwrap_or_default();
+        // A mouse's or keyboard's battery is a "Device"'s.
+        read("type").trim() == "Battery" && read("scope").trim() != "Device"
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn firmware() -> String {
+    ["sys_vendor", "product_name", "bios_vendor", "chassis_asset_tag"].iter().map(|f| std::fs::read_to_string(format!("/sys/class/dmi/id/{f}")).unwrap_or_default()).collect::<Vec<_>>().join("\n")
+}
+
+#[cfg(target_os = "macos")]
+fn battery() -> bool {
+    run("/usr/bin/pmset", &["-g", "batt"]).is_some_and(|o| o.contains("InternalBattery"))
+}
+
+#[cfg(target_os = "macos")]
+fn firmware() -> String {
+    String::new()
+}
+
+#[cfg(windows)]
+fn battery() -> bool {
+    run("powershell", &["-NoProfile", "-Command", "@(Get-CimInstance Win32_Battery).Count"]).is_some_and(|o| o.trim() != "0")
+}
+
+#[cfg(windows)]
+fn firmware() -> String {
+    run("powershell", &["-NoProfile", "-Command", "$s = Get-CimInstance Win32_ComputerSystem; $e = Get-CimInstance Win32_SystemEnclosure; $b = Get-CimInstance Win32_BIOS; $s.Manufacturer; $s.Model; $b.Manufacturer; $e.SMBIOSAssetTag"]).unwrap_or_default()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn battery() -> bool {
+    false
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn firmware() -> String {
+    String::new()
 }
 
 fn in_container() -> bool {

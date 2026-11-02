@@ -204,6 +204,17 @@ function context(ask, body, appends, later) {
     catalog: async () => (await ask("catalog")).json(),
     /// The install's servers, as `GET /v1/state` gives them to the caller: online or not, and each one's load.
     servers: async () => (await ask("servers")).json(),
+    /// Where things run first (src/rank.rs): `{ order, admin }`, every server and the serverless node (key "cloudflare")
+    /// in the order things go to them, each with its `kind` and its place, `use` ("first", "needed" or "last"), and
+    /// whether the caller is an admin. Given a server (its name or key, or "cloudflare") and a place, puts it there
+    /// first, for an admin.
+    order: async (server, place) => {
+      if (server !== undefined) {
+        if (body.read_only) throw new Error("this call only reads: it can't change where things run");
+        await ask("use", { method: "POST", body: JSON.stringify({ server, use: place }) });
+      }
+      return (await ask("use")).json();
+    },
     /// Installs (or with `installed: false`, uninstalls) an app in a scope, with the caller's own rights there.
     install: (name, scope, installed = true) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");

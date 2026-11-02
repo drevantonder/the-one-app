@@ -15,7 +15,7 @@ pub fn describe() -> Value {
         "name": "models", "title": "Models", "icon": "cpu", "color": "#32ade6", "runs": "here", "description": "Runs AI models on your own devices",
         "instructions": "Local models run on the device that has them. models_here lists this server's models; give server \"all\" for every server's, and which are loaded. models_chat asks one and returns its answer, on whichever of your servers has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
         "ops": [
-            { "name": "here", "reads": true, "description": "This server's local models, and whether each is loaded; give server \"all\" for every server's.", "input": { "type": "object", "properties": {} } },
+            { "name": "here", "reads": true, "prefer": "here", "description": "This server's local models, and whether each is loaded; give server \"all\" for every server's.", "input": { "type": "object", "properties": {} } },
             { "name": "chat", "reads": true, "description": "Ask a local model and get its answer, on whichever of your servers has it (or the server given). Give prompt, or messages as [{role, content}]; system sets its instructions; format \"json\" or a JSON schema makes it answer in JSON.",
               "input": { "type": "object", "required": ["model"], "properties": {
                   "model": { "type": "string", "description": "a model's name as here lists it" },
