@@ -1,13 +1,46 @@
 // The bridge every app screen gets as `one`. Inside a shell, the shell answers it (WKWebView's
-// `one` message handler, WebView2's `chrome.webview`); in a plain browser on the device it talks
-// to the node directly. A screen never knows which.
+// `one` message handler, WebView2's `chrome.webview`); in a sandboxed frame (the web client's, a chat's), the page
+// holding the frame answers its messages; in a plain browser on the device it talks to the node directly. A screen
+// never knows which. The web client's own page loads it too, for the kit, answering it itself (`__one.host`).
 (() => {
   const ctx = window.__one;
   const handlers = { changed: [] };
   const shell = window.webkit?.messageHandlers?.one;
+  const framed = !shell && window.parent !== window;
+
+  // Framed: each message goes up as `{ one: message, id }`, answered with `{ oneReply: id, ok }` or `{ oneReply: id,
+  // error }`; node events come down as `{ oneEvent: event }`. Only the page holding the frame is listened to.
+  let asked = 0;
+  const waiting = {};
+  if (framed) {
+    addEventListener("message", (e) => {
+      const m = e.source === window.parent && e.data;
+      if (!m) return;
+      if (m.oneEvent) one.__event(m.oneEvent);
+      const w = waiting[m.oneReply];
+      if (!w) return;
+      delete waiting[m.oneReply];
+      m.error === undefined ? w.ok(m.ok) : w.fail(new Error(m.error));
+    });
+    // Links leave the frame for a tab of their own, as a shell sends them to the browser.
+    document.addEventListener("click", (e) => {
+      const a = e.target.closest?.("a[href]");
+      if (!a || e.defaultPrevented || a.hasAttribute("download") || /^(#|javascript:)/i.test(a.getAttribute("href"))) return;
+      e.preventDefault();
+      host({ type: "link", url: a.href }).catch(() => {});
+    });
+  }
 
   async function host(message) {
     if (shell) return shell.postMessage(message);
+    if (ctx.host) return ctx.host(message);
+    if (framed) {
+      return new Promise((ok, fail) => {
+        const id = ++asked;
+        waiting[id] = { ok, fail };
+        window.parent.postMessage({ one: message, id }, "*");
+      });
+    }
     if (message.type === "call") {
       const r = await fetch("/v1/call", {
         method: "POST",
@@ -40,7 +73,7 @@
   }
 
   // Browser only: the node's events, to refresh when this app's data changes.
-  if (!shell && window.EventSource) {
+  if (!shell && !framed && !ctx.host && window.EventSource) {
     new EventSource("/v1/events").onmessage = (m) => one.__event(JSON.parse(m.data));
   }
 

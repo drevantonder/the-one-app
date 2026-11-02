@@ -281,16 +281,16 @@ async fn the_apple_apps_decode_what_the_node_sends() {
     let _ = std::fs::remove_dir_all(disk);
 }
 
-/// Every widget node an app draws, both shells draw: the Apple apps natively, and chats as HTML.
+/// Every widget node an app draws, the Apple apps draw natively, and the web client and chats as HTML.
 #[test]
 fn every_widget_node_is_drawn_by_both_shells() {
     let swift = read("apple/Shared/Views/WidgetTree.swift");
-    let html = read("src/mcp_view.html");
+    let html = read("src/screen/widgets.js");
     let body = swift.split("switch node.t").nth(1).expect("WidgetTree.swift switches on node.t");
     let apple = quoted(body.split("\n    }\n").next().unwrap(), "case");
-    let chats = quoted(&html, "case");
+    let web = quoted(&html, "case");
     assert!(apple.len() > 10, "{apple:?}");
-    assert_eq!(apple, chats.intersection(&apple).cloned().collect(), "chats draw every node the Apple apps do");
+    assert_eq!(apple, web.intersection(&apple).cloned().collect(), "the web draws every node the Apple apps do");
     let mut drawn: BTreeSet<String> = BTreeSet::new();
     for dir in std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("apps")).unwrap() {
         let app = dir.unwrap().path().join("app.js");
@@ -308,8 +308,10 @@ fn every_widget_node_is_drawn_by_both_shells() {
 fn the_apple_apps_answer_everything_a_screen_asks() {
     let bridge = read("src/screen/bridge.js");
     let swift = read("apple/Shared/Views/AppScreen.swift");
-    let asked = quoted(&bridge, "{ type:");
+    let mut asked = quoted(&bridge, "{ type:");
     assert!(asked.contains("call") && asked.contains("open") && asked.contains("haptic"), "{asked:?}");
+    // Only a sandboxed frame sends a link up; a web view's own navigation takes them to the browser.
+    asked.remove("link");
     let answered = quoted(&swift, "case");
     let missing: Vec<_> = asked.difference(&answered).collect();
     assert!(missing.is_empty(), "screens ask for what the Apple apps don't answer: {missing:?}");

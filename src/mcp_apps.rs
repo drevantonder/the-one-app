@@ -26,7 +26,7 @@ pub fn read(uri: &str) -> Result<Value, Value> {
     if uri != view_uri() {
         return Err(json!({ "code": -32002, "message": format!("no resource {uri}") }));
     }
-    Ok(json!({ "contents": [{ "uri": uri, "mimeType": MIME, "text": include_str!("mcp_view.html"), "_meta": { "ui": { "prefersBorder": true } } }] }))
+    Ok(json!({ "contents": [{ "uri": uri, "mimeType": MIME, "text": include_str!("mcp_view.html").replace("/*widgets.js*/", include_str!("screen/widgets.js")), "_meta": { "ui": { "prefersBorder": true } } }] }))
 }
 
 pub fn tools() -> Vec<Value> {
