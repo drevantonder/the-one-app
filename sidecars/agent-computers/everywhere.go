@@ -27,6 +27,15 @@ func (ds *computers) callNode(ctx context.Context, server, op string, input map[
 	if server != "" {
 		req["server"] = server
 	}
+	return ds.post(ctx, req)
+}
+
+// callApp calls one of the app's operations, on this server's node.
+func (ds *computers) callApp(ctx context.Context, op string, input any) (json.RawMessage, error) {
+	return ds.post(ctx, map[string]any{"app": app, "op": op, "input": input})
+}
+
+func (ds *computers) post(ctx context.Context, req map[string]any) (json.RawMessage, error) {
 	b, _ := json.Marshal(req)
 	r, err := http.NewRequestWithContext(ctx, http.MethodPost, ds.node+"/v1/call", bytes.NewReader(b))
 	if err != nil {

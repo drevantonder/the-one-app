@@ -167,20 +167,8 @@ func (ds *computers) pack(ctx context.Context, d computer, p *profile) (save, er
 // saved has the app record a save on the profile's item. A save made while a
 // call of the app's waits (save_profile) is recorded the same way.
 func (ds *computers) saved(ctx context.Context, s save) error {
-	b, _ := json.Marshal(map[string]any{"app": app, "op": "_saved", "input": s})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ds.node+"/v1/call", bytes.NewReader(b))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("recording the save: %s", msg)
+	if _, err := ds.callApp(ctx, "_saved", s); err != nil {
+		return fmt.Errorf("recording the save: %w", err)
 	}
 	return nil
 }

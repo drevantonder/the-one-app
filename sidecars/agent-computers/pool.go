@@ -36,7 +36,8 @@ const (
 )
 
 // A loan is a borrowed computer's: who has it and what for, and the browser
-// profile it started with. Its profile's key is kept only in memory, in held.
+// profile it started with. Its profile's key is kept only in memory, in held;
+// after a restart, the app gives it again when the profile is saved.
 type loan struct {
 	By        string    `json:"by"`
 	For       string    `json:"for"`
@@ -224,7 +225,12 @@ func (ds *computers) giveBack(ctx context.Context, name, why string) error {
 	d, err := find(ctx, name)
 	if err == nil {
 		if p := ds.heldProfile(name); l.SigningIn && p == nil {
-			log.Printf("%s: not saving the %s profile: its key is gone, as after this program restarted", name, l.Profile)
+			// Its key went when this program restarted: the app's save_profile gives it again, and gives the
+			// computer back once it's saved.
+			if _, err := ds.callApp(ctx, "save_profile", map[string]any{"item": l.Item}); err != nil {
+				return fmt.Errorf("not given back: saving the %s profile failed: %w", l.Profile, err)
+			}
+			return nil
 		} else if l.SigningIn {
 			if err := ds.saveProfile(ctx, d, p); err != nil {
 				return fmt.Errorf("not given back: saving the %s profile failed: %w", l.Profile, err)
