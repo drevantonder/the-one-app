@@ -114,7 +114,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
     }
-    let kernel_failed = deploy_kernel(&linux);
+    let kernel_failed = deploy_kernel(&linux, short);
 
     let Some(tag) = tag else {
         let after = finish(after);
@@ -307,29 +307,47 @@ fn turn() -> Result<std::fs::File> {
     Ok(file)
 }
 
-/// Deploys the kernel, with the build it now runs, from each of `linux` that has a kernel's settings: only there are its
-/// secrets (`kernel deploy` in its home's kernel/). True if one failed.
-fn deploy_kernel(linux: &[Value]) -> bool {
+/// Deploys the kernel, with the build being sent out (`commit`), from each of `linux` that has a kernel's settings: only
+/// there are its secrets (`kernel deploy` in its home's kernel/). It waits for each to run that build, so it never
+/// deploys the one before, and tries again what may pass (a link dropping as nodes restart, Cloudflare). Every install
+/// has a kernel, so it fails if no device deployed it. True if it failed.
+fn deploy_kernel(linux: &[Value], commit: &str) -> bool {
     let home = format!("${{{}_HOME:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", CLI.to_uppercase());
-    // As a login there would: its profile is where 1Password's sign-in, which the kernel's secrets are read with,
-    // usually is, and ~/.local/bin where op may be. The node's own build, which Shell's sh is a child of, deploys it:
-    // what's called the CLI there may be something else.
-    let deploy = format!(r#"[ -f "{home}/kernel/settings.json" ] || {{ echo none; exit 0; }}; node=/proc/$PPID/exe; . "$HOME/.profile" >/dev/null 2>&1; PATH="$HOME/.local/bin:$PATH" "$node" kernel deploy"#);
-    let mut failed = false;
+    // The node's own build, which Shell's sh is a child of, deploys it (what's called the CLI there may be something
+    // else), once it's the one sent out: 75 says it isn't yet. As a login there would: its profile is where 1Password's
+    // sign-in, which the kernel's secrets are read with, usually is, and ~/.local/bin where op may be.
+    let deploy = format!(
+        r#"[ -f "{home}/kernel/settings.json" ] || {{ echo none; exit 0; }}; node=/proc/$PPID/exe
+case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still on $("$node" version --json)"; exit 75 ;; esac
+. "$HOME/.profile" >/dev/null 2>&1; PATH="$HOME/.local/bin:$PATH" "$node" kernel deploy"#
+    );
+    let (mut failed, mut deployed) = (false, false);
     for device in linux.iter().filter(|d| d["online"] == true) {
         let name = device["name"].as_str().unwrap_or("");
-        // Its node and this one have only just started again on the new build: their link may drop once more.
-        let mut tries = 0;
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let mut failures = 0;
         let said = loop {
-            tries += 1;
-            match shell(device, &deploy, 600) {
-                Err(_) if tries < 5 => std::thread::sleep(Duration::from_secs(5)),
-                said => break said,
+            let said = shell(device, &deploy, 600);
+            let again = match &said {
+                Err(_) => true,
+                Ok(r) if r["exit"] == 75 => true,
+                Ok(r) if r["exit"] != 0 => {
+                    failures += 1;
+                    failures < 3
+                }
+                Ok(_) => false,
+            };
+            if !again || Instant::now() > deadline {
+                break said;
             }
+            std::thread::sleep(Duration::from_secs(10));
         };
         match said {
             Ok(r) if r["exit"] == 0 && r["stdout"].as_str().is_some_and(|o| o.trim() == "none") => {}
-            Ok(r) if r["exit"] == 0 => println!("  {name}: deployed the kernel"),
+            Ok(r) if r["exit"] == 0 => {
+                deployed = true;
+                println!("  {name}: deployed the kernel at {commit}");
+            }
             Ok(r) => {
                 failed = true;
                 println!("  {name}: couldn't deploy the kernel:\n{}{}", r["stdout"].as_str().unwrap_or(""), r["stderr"].as_str().unwrap_or("").trim());
@@ -340,7 +358,10 @@ fn deploy_kernel(linux: &[Value]) -> bool {
             }
         }
     }
-    failed
+    if !deployed && !failed {
+        println!("  no device deployed the kernel: none of them online has its settings");
+    }
+    failed || !deployed
 }
 
 /// This device's `after-update`, running beside the update that started it.
