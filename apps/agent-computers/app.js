@@ -84,7 +84,7 @@ const PAGE = `
     const k = key(c);
     const pic = pics[k] ? \`<img src="\${pics[k]}" alt="">\` : glyph(screenless(c));
     const opens = !paused(c) && !screenless(c);
-    return \`<div class="tile\${paused(c) ? " paused" : ""}\${opens ? " opens" : ""}" data-k="\${one.esc(k)}" title="\${one.esc(c.name)}"><div class="pic">\${pic}</div><div class="name">\${one.esc(name)}</div><div class="sub">\${one.esc(line)}</div></div>\`;
+    return \`<div class="tile\${paused(c) ? " paused" : ""}\${opens ? " opens" : ""}" data-k="\${one.esc(k)}"><div class="pic">\${pic}</div><div class="name">\${one.esc(name)}</div><div class="sub">\${one.esc(line)}</div></div>\`;
   }
 
   function draw() {
@@ -173,7 +173,7 @@ const COMPUTER = `
 
   function describe(c) {
     const b = c.borrowed;
-    const name = b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : c.name.charAt(0).toUpperCase() + c.name.slice(1);
+    const name = b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : c.spare ? "Spare computer" : c.name.charAt(0).toUpperCase() + c.name.slice(1);
     const line = b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : "";
     one.title(name);
     what.textContent = line;
