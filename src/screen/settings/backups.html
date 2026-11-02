@@ -1,0 +1,188 @@
+<style>
+  .status { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; }
+  .status .badge { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; color: var(--c); background: color-mix(in srgb, var(--c) 15%, transparent); }
+  .status .badge .i { width: 20px; height: 20px; }
+  .status .headline { font-size: 20px; font-weight: 600; }
+  .status .main > div + div { margin-top: 3px; }
+  .status .button { margin-top: 12px; }
+  .place { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; flex: none; color: white; background: var(--c); }
+  .place .i { width: 16px; height: 16px; }
+  .row.go { cursor: pointer; }
+  .row .sub.error { color: var(--danger); white-space: normal; }
+  .field input { flex: 1; min-width: 0; font: inherit; text-align: right; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
+  .field input::placeholder { color: var(--faint); }
+  .ok { color: var(--ok); }
+  .choice .check { color: var(--accent); visibility: hidden; }
+  .choice.on .check { visibility: visible; }
+  .actions { margin-top: 18px; text-align: right; }
+</style>
+<div class="large-title">Backups</div>
+<div id="backups"></div>
+<script>
+  // Backups, for admins: how they're going first, in words; then each place they go to, and the snapshots.
+  let backups = { places: [], snapshots: [], disks: [], here: "" };
+  let error = "";
+  let asked = 0;
+
+  const name = (server) => String(server || "").replace(/\.local$/, "");
+  // A time for people: "14:00" (today) or "3 Nov, 14:00"; with `day`, "Today, 14:00", "Yesterday, 14:00" or
+  // "Monday 3 November, 14:00".
+  function when(ms, day) {
+    const d = new Date(ms), time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(ms).setHours(0, 0, 0, 0)) / 86400000);
+    if (!day) return days === 0 ? time : `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${time}`;
+    if (days === 0) return `Today, ${time}`;
+    if (days === 1) return `Yesterday, ${time}`;
+    return d.toLocaleString(undefined, { weekday: "long", day: "numeric", month: "long", hour: "numeric", minute: "2-digit" });
+  }
+  const placeIcon = (kind) => `<span class="place" style="--c:${kind === "folder" ? "#8e8e93" : "#ff9500"}">${one.icon(kind === "folder" ? "hard-drive-fill" : "cloud-fill")}</span>`;
+  const list = (items) => [...items].join(", ");
+
+  const draw = () => one.render("#backups", async () => {
+    backups = await one.api("GET", "/v1/backups");
+    const places = backups.places || [];
+    const failing = places.filter((p) => p.problem).sort((a, b) => a.problem.since - b.problem.since)[0];
+    const problem = failing?.problem;
+    const newest = places.map((p) => p.last).filter(Boolean).sort((a, b) => b.time - a.time)[0];
+    let lines;
+    if (problem) {
+      const head = failing.last ? `Not backed up to ${failing.title} since ${one.ago(failing.last.time, { long: true })}` : `Not backed up to ${failing.title} yet`;
+      lines = [`<div class="headline">${one.esc(head)}</div>`, `<div class="error">${one.esc(problem.text)}</div>`, `<div class="error">${one.esc(problem.fix)}</div>`];
+    } else if (newest) lines = [`<div class="headline">Backed up ${one.esc(one.ago(newest.time, { long: true }))}</div>`];
+    else if (!places.length) lines = ['<div class="headline">Not backed up</div>', '<div class="muted">Add a disk or S3-compatible storage, and your servers back up to it every hour that something changes.</div>'];
+    else lines = ['<div class="headline">Backing up…</div>'];
+    const [icon, color] = problem ? ["exclamation-mark", "var(--danger)"] : newest ? ["check", "var(--ok)"] : ["hard-drive", "var(--muted)"];
+    const button = places.length ? `<button class="button" id="now"${Date.now() - asked < 10000 ? " disabled" : ""}>${problem ? "Try Again" : "Back Up Now"}</button>` : "";
+    const snapshots = (backups.snapshots || []).slice(0, 8);
+    return `<div class="list"><div class="status"><span class="badge" style="--c:${color}">${one.icon(icon)}</span><div class="main">${lines.join("")}${button}</div></div></div>
+      ${error ? `<p class="footer error">${one.esc(error)}</p>` : ""}
+      <h2 class="section">Places</h2>
+      <div class="list">${places.map((p, n) => `<div class="row go" data-place="${n}">${placeIcon(p.kind)}<div class="main">
+          <div class="title" style="font-weight:400"><span>${one.esc(p.title)}</span>${p.last && !p.problem ? `<span class="when">${one.esc(when(p.last.time))}</span>` : ""}</div>
+          ${p.problem ? `<div class="sub error">${one.esc(p.problem.text)}</div>` : `<div class="sub">${one.esc(p.kind === "folder" ? `Disk on ${name(p.server)}` : `Off-site · ${p.where}`)}</div>`}
+        </div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}
+        <div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--accent)">Add Place…</span></div></div></div></div>
+      <p class="footer">Encrypted before it leaves. The recovery key opens every backup, everyone's.</p>
+      ${snapshots.length ? `<h2 class="section">Snapshots</h2><div class="list">${snapshots.map((s, n) => `<div class="row plain go" data-snapshot="${n}"><div class="main"><div class="title"><span>${one.esc(when(s.time, true))}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}</div>` : ""}`;
+  });
+
+  document.addEventListener("click", async (e) => {
+    if (e.target.closest(".sheet")) return;
+    if (e.target.closest("#now")) {
+      asked = Date.now();
+      error = "";
+      e.target.closest("#now").disabled = true;
+      try {
+        await one.api("POST", "/v1/backups/now", {});
+      } catch (err) {
+        error = one.plain(err).title;
+      }
+      setTimeout(draw, 10000);
+      return draw();
+    }
+    if (e.target.closest("#add")) return addPlace();
+    const place = e.target.closest("[data-place]");
+    if (place) return openPlace(backups.places[place.dataset.place]);
+    const snapshot = e.target.closest("[data-snapshot]");
+    if (snapshot) return openSnapshot(backups.snapshots[snapshot.dataset.snapshot]);
+  });
+
+  // A place's own page: what's wrong and its fix, where it is, its last backup, its item in the Vault, and stopping.
+  async function openPlace(p) {
+    const sheet = one.sheet({ title: p.title, onClose: draw });
+    const item = await one.api("GET", "/v1/vault?scope=global").then((items) => items.find((it) => it.id === p.id)).catch(() => null);
+    const where = p.kind === "folder" ? [["Folder", p.where], ["Disk on", name(p.server)]] : [["Bucket", p.where], ["Endpoint", p.endpoint]];
+    sheet.body.innerHTML = `${p.problem ? `<div class="list"><div class="row plain"><div class="main"><div class="sub wrap error">${one.esc(p.problem.text)}</div><div class="sub wrap" style="color:var(--text)">${one.esc(p.problem.fix)}</div></div></div></div>` : ""}
+      <div style="margin-top:18px">${one.info([...where, ["Last backup", p.last && `${when(p.last.time, true)}, ${name(p.last.server)}`]])}</div>
+      ${item ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="vault"><div class="main"><div class="title"><span>Edit in Vault</span></div></div><span class="chev">${one.icon("caret-right")}</span></div></div>` : ""}
+      <div class="list" style="margin-top:18px"><div class="row plain go" id="stop"><div class="main"><div class="title"><span class="error">Stop Backing Up Here</span></div></div></div></div>
+      <div id="confirm"></div>`;
+    sheet.body.querySelector("#vault")?.addEventListener("click", () => one.open("vault", { scope: "global", id: p.id }));
+    sheet.body.querySelector("#stop").addEventListener("click", async () => {
+      const stopped = await one.confirm(sheet.body.querySelector("#confirm"), {
+        title: `Stop backing up to ${p.title}?`, detail: "What's there now stays there.", action: "Stop Backing Up", danger: true,
+        run: () => one.api("POST", "/v1/backups/place", { id: p.id, deleted: true }),
+      });
+      if (stopped) sheet.close();
+    });
+  }
+
+  // A snapshot of the install: when, where it went, whose data it holds, and which servers wrote it.
+  function openSnapshot(s) {
+    const sheet = one.sheet({ title: when(s.time, true) });
+    const taken = new Date(s.time).toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
+    sheet.body.innerHTML = one.info([["Taken", taken], ["Kept in", list(s.places)], ["Holds", list(s.scopes)], ["Written by", list(s.servers.map(name))]]);
+  }
+
+  // Adds a place: S3-compatible storage by its endpoint, bucket and key, or a disk plugged into the server. Each is
+  // tried (a test file written, read back and deleted) before it's added, so a typo shows here, not in a failed backup.
+  function addPlace() {
+    let cloud = true, tried = [], added = false, busy = false, problem = "";
+    const v = { endpoint: "", bucket: "", key_id: "", secret: "", title: "", path: "" };
+    const sheet = one.sheet({ title: "Add Place", done: "Cancel", onClose: draw });
+    const filled = (k) => v[k].trim() !== "";
+    const ready = () => (cloud ? ["endpoint", "bucket", "key_id", "secret"].every(filled) : filled("path"));
+    const field = (k, label, placeholder = "", type = "text") =>
+      `<label class="row plain field"><span>${label}</span><input data-v="${k}" type="${type}" placeholder="${one.esc(placeholder)}" value="${one.esc(v[k])}" autocapitalize="off" autocorrect="off" spellcheck="false"${added ? " disabled" : ""}></label>`;
+    const paint = () => {
+      const disks = backups.disks || [];
+      sheet.body.innerHTML = `<div class="segmented"><button data-cloud="1" class="${cloud ? "on" : ""}"${added ? " disabled" : ""}>Cloud Storage</button><button data-cloud="" class="${cloud ? "" : "on"}"${added ? " disabled" : ""}>Disk</button></div>
+        ${cloud
+          ? `<h2 class="section">S3-Compatible Storage</h2><div class="list">${field("endpoint", "Endpoint", "https://….r2.cloudflarestorage.com", "url")}${field("bucket", "Bucket", "one-backups")}${field("key_id", "Access Key ID")}${field("secret", "Secret Key", "", "password")}${field("title", "Name", "Cloudflare R2")}</div>
+             <p class="footer">Use a key that reaches only this bucket. It stays in the Vault.</p>`
+          : `<h2 class="section">A Disk on ${one.esc(name(backups.here))}</h2><div class="list">${disks.map((d) => `<div class="row plain go choice${v.path === d.path ? " on" : ""}" data-disk="${one.esc(d.path)}" data-name="${one.esc(d.name)}"><span class="place" style="--c:#8e8e93">${one.icon("hard-drive-fill")}</span><div class="main"><div class="title"><span>${one.esc(d.name)}</span></div><div class="sub">${one.esc(`Plugged into ${name(backups.here)} · ${size(d.free)} free`)}</div></div><span class="check">${one.icon("check")}</span></div>`).join("")}${field("path", "Folder", "/Volumes/…")}</div>
+             <p class="footer">It's backed up while it's plugged in.</p>`}
+        ${tried.length ? `<h2 class="section">Tried It</h2><div class="list">${tried.map((t) => `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(t.step)}</span><span class="${t.error ? "error" : "ok"}">${one.icon(t.error ? "x" : "check")}</span></div>${t.error ? `<div class="sub wrap error">${one.esc(t.error)}</div>` : ""}</div></div>`).join("")}</div>
+          ${added ? '<p class="footer">The first backup has started. After that, every hour that something changes.</p>' : ""}` : ""}
+        ${problem ? `<p class="footer error">${one.esc(problem)}</p>` : ""}
+        ${added ? "" : `<div class="actions"><button class="button primary" id="add-it"${ready() && !busy ? "" : " disabled"}>${busy ? '<span class="spinner small"></span>' : ""}Add</button></div>`}`;
+    };
+    paint();
+    sheet.body.addEventListener("input", (e) => {
+      if (!e.target.dataset.v) return;
+      v[e.target.dataset.v] = e.target.value;
+      const add = sheet.body.querySelector("#add-it");
+      if (add) add.disabled = !ready() || busy;
+    });
+    sheet.body.addEventListener("click", async (e) => {
+      const seg = e.target.closest("[data-cloud]");
+      if (seg) return (cloud = !!seg.dataset.cloud), (tried = []), paint();
+      const disk = e.target.closest("[data-disk]");
+      if (disk) return (v.path = disk.dataset.disk), (v.title = disk.dataset.name), paint();
+      if (!e.target.closest("#add-it") || !ready() || busy) return;
+      busy = true;
+      problem = "";
+      paint();
+      const keys = cloud ? ["endpoint", "bucket", "key_id", "secret"] : ["path"];
+      const body = Object.fromEntries(keys.map((k) => [k, v[k]]));
+      if (filled("title")) body.title = v.title;
+      try {
+        const reply = await one.api("POST", "/v1/backups/place", body);
+        tried = reply.tried || [];
+        added = !!reply.id;
+        if (added) {
+          v.secret = "";
+          sheet.body.closest(".sheet").querySelector("[data-done]").textContent = "Done";
+        }
+      } catch (err) {
+        problem = one.plain(err).title;
+      }
+      busy = false;
+      paint();
+    });
+  }
+
+  function size(bytes) {
+    const units = ["bytes", "KB", "MB", "GB", "TB"];
+    let n = bytes, u = 0;
+    while (n >= 1000 && u < units.length - 1) (n /= 1000), u++;
+    return `${n >= 100 || u === 0 ? Math.round(n) : n.toFixed(1)} ${units[u]}`;
+  }
+
+  one.title("Backups");
+  // Not while someone's typing in a sheet: their text would go.
+  one.on("changed", () => !document.querySelector(".sheet") && draw());
+  // Times like "12 minutes ago" stay true.
+  setInterval(() => !document.querySelector(".sheet") && draw(), 30000);
+  draw();
+</script>

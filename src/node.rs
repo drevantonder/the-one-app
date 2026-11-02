@@ -4145,6 +4145,8 @@ const SETTINGS_SCREENS: &[(&str, &str)] = &[
     ("requests", include_str!("screen/settings/requests.html")),
     ("groups", include_str!("screen/settings/groups.html")),
     ("users", include_str!("screen/settings/users.html")),
+    ("install", include_str!("screen/settings/install.html")),
+    ("backups", include_str!("screen/settings/backups.html")),
 ];
 
 /// Settings' items for `user`, in order, as every client draws them: each opens the Settings screen it names, but the

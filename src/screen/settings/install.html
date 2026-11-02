@@ -1,0 +1,133 @@
+<style>
+  .field input { flex: 1; min-width: 0; font: inherit; text-align: right; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
+  .field input::placeholder { color: var(--faint); }
+  .row.go { cursor: pointer; }
+  .row .value { color: var(--muted); margin-left: auto; }
+  .choice .check { color: var(--accent); visibility: hidden; }
+  .choice.on .check { visibility: visible; }
+</style>
+<div class="large-title">Install</div>
+<div id="settings"></div>
+<script>
+  // The install's settings, for admins: entries like everything else, so every server and client has the same ones.
+  // Empty puts back the white label's default.
+  let settings = {};
+  // The Vault item on Everyone switched on for push, by its title.
+  let pushKey = "";
+  let error = "";
+  const push = () => settings.push || "";
+
+  const draw = () => one.render("#settings", async () => {
+    const state = await one.api("GET", "/v1/state");
+    settings = state.install?.settings || {};
+    pushKey = push() ? (await one.api("GET", "/v1/vault?scope=global")).find((it) => (it.apps || []).includes(push()))?.title || "" : "";
+    return `<h2 class="section">App Store</h2>
+      <div class="list"><label class="row plain field"><span>Apps Made Here</span><input data-setting="made_here" placeholder="Made here" value="${one.esc(settings.made_here || "")}"></label></div>
+      <h2 class="section"></h2>
+      <div class="list">
+        <label class="row plain"><div class="main"><div class="title"><span>Push Notifications</span></div></div><input type="checkbox" class="switch" id="push"${push() ? " checked" : ""}></label>
+        ${push() ? `<div class="row plain go" id="push-key"><div class="main"><div class="title"><span>Apple Push Key</span><span class="value">${one.esc(pushKey)}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>` : ""}
+      </div>
+      <h2 class="section">Joining</h2>
+      <div class="list"><label class="row plain field"><span>Work Email Domain</span><input data-setting="join_domain" placeholder="example.org" autocapitalize="off" spellcheck="false" value="${one.esc(settings.join_domain || "")}"></label></div>
+      <p class="footer${error ? " error" : ""}">${one.esc(error || "People with an email at this domain join by signing in.")}</p>`;
+  });
+
+  async function set(name, value) {
+    error = "";
+    try {
+      await one.api("POST", "/v1/settings", { name, value });
+    } catch (e) {
+      error = one.plain(e).title;
+    }
+    draw();
+  }
+
+  document.addEventListener("change", (e) => {
+    if (e.target.id === "push") return set("push", e.target.checked ? null : "");
+    const name = e.target.dataset.setting;
+    if (!name) return;
+    const text = e.target.value.trim();
+    if (text !== (settings[name] || "")) set(name, text || null);
+  });
+  document.addEventListener("keydown", (e) => e.key === "Enter" && e.target.dataset.setting && e.target.blur());
+  document.addEventListener("click", (e) => e.target.closest("#push-key") && askKey());
+
+  // What push asks the Vault for: Apple's APNs key (its .p8 file), the team and key it's from, and the app's bundle id
+  // pushes go to, sent only to Apple's push servers. An item on Everyone that has them is switched on for push, or a
+  // new one is made.
+  const wanted = [{ name: "key", label: "Key", secret: true, file: true }, { name: "team_id", label: "Team ID" }, { name: "key_id", label: "Key ID" }, { name: "topic", label: "Topic" }];
+  const hosts = ["api.push.apple.com", "api.sandbox.push.apple.com"];
+
+  async function askKey() {
+    const app = push();
+    const items = (await one.api("GET", "/v1/vault?scope=global"))
+      .filter((it) => wanted.every((w) => (it.fields || []).some((f) => f.name === w.name)))
+      .sort((a, b) => (b.apps || []).includes(app) - (a.apps || []).includes(app));
+    let picked = items[0]?.id ?? null;
+    const values = {}, files = {};
+    let title = "Apple Push Key", problem = "";
+    const sheet = one.sheet({ title: "Vault", done: "Cancel", onClose: draw });
+    const choice = (id, icon, text) =>
+      `<div class="row plain go choice${picked === id ? " on" : ""}" data-pick="${one.esc(id ?? "")}">${icon}<div class="main"><div class="title"><span>${one.esc(text)}</span></div></div><span class="check">${one.icon("check")}</span></div>`;
+    const ready = () => picked !== null || wanted.every((w) => values[w.name]);
+    const paint = () => {
+      sheet.body.innerHTML = `<div class="list"><div class="row plain"><div class="main"><div class="title"><span>Apple Push Key</span></div><div class="sub wrap">Phones get notifications through Apple with it.</div></div></div></div>
+        <p class="footer">Everyone</p>
+        <div class="list" style="margin-top:18px">${items.map((it) => choice(it.id, one.icon("key"), it.title)).join("")}${choice(null, one.icon("plus-circle-fill"), "New Item")}</div>
+        ${picked === null ? `<div class="list" style="margin-top:18px">
+          <label class="row plain field"><span>Title</span><input data-new="title" value="${one.esc(title)}"></label>
+          ${wanted.map((w) => w.file
+            ? `<label class="row plain field go"><span>${w.label}</span><span class="value">${one.esc(files[w.name] || "Choose File…")}</span><input type="file" data-file="${w.name}" hidden></label>`
+            : `<label class="row plain field"><span>${w.label}</span><input data-value="${w.name}" autocapitalize="off" spellcheck="false" value="${one.esc(values[w.name] || "")}"></label>`).join("")}
+        </div><p class="footer">Sent only to ${hosts.join(", ")}</p>` : ""}
+        ${problem ? `<p class="footer error">${one.esc(problem)}</p>` : ""}
+        <div style="margin-top:18px;text-align:right"><button class="button primary" id="save"${ready() ? "" : " disabled"}>Save</button></div>`;
+    };
+    paint();
+    sheet.body.addEventListener("click", (e) => {
+      const row = e.target.closest("[data-pick]");
+      if (!row) return;
+      picked = row.dataset.pick || null;
+      paint();
+    });
+    sheet.body.addEventListener("input", (e) => {
+      if (e.target.dataset.value) values[e.target.dataset.value] = e.target.value;
+      if (e.target.dataset.new) title = e.target.value;
+      sheet.body.querySelector("#save").disabled = !ready();
+    });
+    sheet.body.addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!e.target.dataset.file || !file) return;
+      const text = await file.text();
+      // A key is text: a file that isn't (a picture, say) is the wrong one.
+      if (text.includes("�")) problem = `${file.name} isn't text.`;
+      else (values[e.target.dataset.file] = text), (files[e.target.dataset.file] = file.name), (problem = "");
+      paint();
+    });
+    sheet.body.addEventListener("click", async (e) => {
+      const save = e.target.closest("#save");
+      if (!save || !ready()) return;
+      save.disabled = true;
+      problem = "";
+      try {
+        if (picked !== null) {
+          const apps = [...(items.find((it) => it.id === picked).apps || []).filter((a) => a !== app), app];
+          await one.api("POST", "/v1/vault", { scope: "global", id: picked, apps });
+        } else {
+          const fields = Object.fromEntries(wanted.map((w) => [w.name, { value: values[w.name], secret: !!w.secret }]));
+          await one.api("POST", "/v1/vault", { scope: "global", title: title.trim() || "Apple Push Key", fields, hosts, apps: [app] });
+        }
+        sheet.close();
+      } catch (err) {
+        problem = one.plain(err).title;
+        paint();
+      }
+    });
+  }
+
+  one.title("Install");
+  // Not while someone's typing: their text would go.
+  one.on("changed", () => !document.activeElement?.matches("input:not(.switch)") && draw());
+  draw();
+</script>
