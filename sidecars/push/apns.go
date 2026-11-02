@@ -123,7 +123,7 @@ func (s *sender) run(ctx context.Context, c *call) (any, error) {
 			return map[string]any{"accepted": 0, "devices": 0, "why": "no phone of yours is registered for push"}, nil
 		}
 		if !s.on() {
-			return map[string]any{"accepted": 0, "devices": len(in.Devices), "why": "push is off in this install's settings"}, nil
+			return map[string]any{"accepted": 0, "devices": len(in.Devices), "why": "push is off: an admin turns it on in Settings, under General"}, nil
 		}
 		out, err := s.send(ctx, c.ID, in, link(c.From, in))
 		if err == nil && registered && len(out["gone"].([]string)) > 0 {

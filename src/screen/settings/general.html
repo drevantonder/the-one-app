@@ -6,7 +6,7 @@
   .choice .check { color: var(--accent); visibility: hidden; }
   .choice.on .check { visibility: visible; }
 </style>
-<div class="large-title">Install</div>
+<div class="large-title">General</div>
 <div id="settings"></div>
 <script>
   // The install's settings, for admins: entries like everything else, so every server and client has the same ones.
@@ -22,7 +22,8 @@
     settings = state.install?.settings || {};
     pushKey = push() ? (await one.api("GET", "/v1/vault?scope=global")).find((it) => (it.apps || []).includes(push()))?.title || "" : "";
     return `<h2 class="section">App Store</h2>
-      <div class="list"><label class="row plain field"><span>Apps Made Here</span><input data-setting="made_here" placeholder="Made here" value="${one.esc(settings.made_here || "")}"></label></div>
+      <div class="list"><label class="row plain field"><span>Apps Made Here</span><input data-setting="made_here" value="${one.esc(settings.made_here || "")}"></label></div>
+      <p class="footer">What the App Store calls the apps made here, beside the ones built in.</p>
       <h2 class="section"></h2>
       <div class="list">
         <label class="row plain"><div class="main"><div class="title"><span>Push Notifications</span></div></div><input type="checkbox" class="switch" id="push"${push() ? " checked" : ""}></label>
@@ -124,7 +125,7 @@
     });
   }
 
-  one.title("Install");
+  one.title("General");
   // Not while someone's typing: their text would go.
   one.on("changed", () => !document.activeElement?.matches("input:not(.switch)") && draw());
   draw();

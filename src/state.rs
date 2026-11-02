@@ -176,7 +176,7 @@ fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, st
         item("appearance", "Appearance", "circle-half", "#007aff"),
     ]);
     if me.role == Role::Admin {
-        out.extend([item("users", "Users", "user-gear", "#30b0c7"), item("install", "Install", "sliders-horizontal", "#8e8e93")]);
+        out.extend([item("users", "Users", "user-gear", "#30b0c7"), item("general", "General", "sliders-horizontal", "#8e8e93")]);
         let backed = item("backups", "Backups", "hard-drives", "#ff9500");
         out.push(if backups { with(backed, "badge", json!(1)) } else { backed });
     }

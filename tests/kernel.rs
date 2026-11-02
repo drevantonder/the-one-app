@@ -767,10 +767,10 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let items = |token: &str| state(token)["settings_items"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     let refused = |(status, body): (u16, Value)| status == 400 && body["error"].as_str().is_some_and(|e| !e.is_empty());
 
-    // Settings shows each their own: Sam first, as himself; only admins see Users, Install and Backups.
+    // Settings shows each their own: Sam first, as himself; only admins see Users, General and Backups.
     assert_eq!(state(&sams)["settings_items"][0], json!({ "name": "account", "title": "Sam", "icon": "user-circle", "color": "#8e8e93" }));
-    assert!(!items(&sams).iter().any(|i| ["users", "install", "backups"].contains(&i.as_str())), "{:?}", items(&sams));
-    assert!(["users", "install", "backups"].iter().all(|i| items(&andres).iter().any(|n| n == i)), "{:?}", items(&andres));
+    assert!(!items(&sams).iter().any(|i| ["users", "general", "backups"].contains(&i.as_str())), "{:?}", items(&sams));
+    assert!(["users", "general", "backups"].iter().all(|i| items(&andres).iter().any(|n| n == i)), "{:?}", items(&andres));
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
     let page = |path: &str| agent.get(format!("{api}{path}")).header("authorization", format!("Bearer {sams}")).call().unwrap().body_mut().read_to_string().unwrap();
     let vault = page("/v1/client-screens/vault");
