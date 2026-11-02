@@ -3737,11 +3737,12 @@ impl Node {
 
     /// Updates this node whenever a newer build for its platform is published, signed with the release key. A download
     /// that drops, or a release that fails to install, is tried again, waiting twice as long each time up to ten minutes.
+    /// The first wait is a restart's: the servers it would come from take the release too, and restart at once.
     async fn update_loop(self) {
-        let mut wait = Duration::from_secs(10);
+        let mut wait = Duration::from_secs(2);
         loop {
             let Some((r, author)) = self.wanted_release() else {
-                wait = Duration::from_secs(10);
+                wait = Duration::from_secs(2);
                 self.0.released.notified().await;
                 continue;
             };
