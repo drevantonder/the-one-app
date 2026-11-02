@@ -77,7 +77,8 @@ Usage:
                                        deploy the kernel's services to Cloudflare as Workers, with an API token that
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
                                        domains ({CLI}-<service>.<domain>, the install's address {CLI}.<domain> unless
-                                       --address says, for good: passkeys belong to it), or at its workers.dev address
+                                       --address says, for good: passkeys belong to it), or at its workers.dev address;
+                                       and the serverless node with it, once serverless deploy put it there
   {CLI} kernel invite <name> [--user <id>]
                                        a link that lets someone join, once and for a few days, by making their
                                        passkey, as who they are in the install (--user, or this machine's person for
@@ -387,6 +388,9 @@ fn run(args: Vec<String>) -> Result<()> {
             let modules = one::kernel::SERVICES.iter().map(|(_, entry, _)| one::kernel::module(entry)).collect::<Result<Vec<_>>>()?;
             let web = settings.web();
             one::kernel::deploy(&cf, &settings, &modules, &web)?;
+            if settings.serverless {
+                one::serverless::deploy(&cf, &settings)?;
+            }
             print!("Deployed.\n{}", kernel_said(&settings));
         }
         ["kernel", "keys"] => {

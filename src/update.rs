@@ -17,7 +17,9 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
-/// it in the background, and the node by building it, which every Linux device then takes.
+/// it in the background, and the node by building it, which every Linux device then takes, and which deploys the kernel
+/// (and the serverless node with it) from the device with the kernel's settings. Then it runs `after-update` in this
+/// device's home, if there is one: what else is built from main here, like another white label's update.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this white label names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
@@ -59,6 +61,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         }
         if !missed {
             std::fs::write(&done, &this)?;
+        }
+        if !parts.apps.is_empty() || parts.mac {
+            after_update()?;
         }
         return Ok(());
     }
@@ -115,13 +120,14 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
     }
+    failed |= deploy_kernel(&linux);
 
     let Some(tag) = tag else {
         ensure!(!failed, "not every device runs {short}");
         if !missed {
             std::fs::write(&done, &this)?;
         }
-        return Ok(());
+        return after_update();
     };
     let mut assets = Vec::new();
     let dir = cache().join("release").join(tag);
@@ -302,6 +308,42 @@ fn turn() -> Result<std::fs::File> {
         ensure!(unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0, "couldn't wait for the other update: {}", std::io::Error::last_os_error());
     }
     Ok(file)
+}
+
+/// Deploys the kernel, with the build it now runs, from each of `linux` that has a kernel's settings: only there are its
+/// secrets (`kernel deploy` in its home's kernel/). True if one failed.
+fn deploy_kernel(linux: &[Value]) -> bool {
+    let home = format!("${{{}_HOME:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", CLI.to_uppercase());
+    // As a login there would: its profile is where 1Password's sign-in, which the kernel's secrets are read with,
+    // usually is, and ~/.local/bin where the installer puts this.
+    let deploy = format!(r#"[ -f "{home}/kernel/settings.json" ] || {{ echo none; exit 0; }}; . "$HOME/.profile" >/dev/null 2>&1; PATH="$HOME/.local/bin:$PATH" {CLI} kernel deploy"#);
+    let mut failed = false;
+    for device in linux.iter().filter(|d| d["online"] == true) {
+        let name = device["name"].as_str().unwrap_or("");
+        match shell(device, &deploy, 600) {
+            Ok(r) if r["exit"] == 0 && r["stdout"].as_str().is_some_and(|o| o.trim() == "none") => {}
+            Ok(r) if r["exit"] == 0 => println!("  {name}: deployed the kernel"),
+            Ok(r) => {
+                failed = true;
+                println!("  {name}: couldn't deploy the kernel:\n{}{}", r["stdout"].as_str().unwrap_or(""), r["stderr"].as_str().unwrap_or("").trim());
+            }
+            Err(err) => {
+                failed = true;
+                println!("  {name}: couldn't deploy the kernel: {err:#}");
+            }
+        }
+    }
+    failed
+}
+
+/// Runs this device's `after-update`, if it has one, once an update sent something out.
+fn after_update() -> Result<()> {
+    let script = one::home().join("after-update");
+    if script.exists() {
+        println!("Running {}", script.display());
+        step(Command::new("sh").arg(&script))?;
+    }
+    Ok(())
 }
 
 /// Deploys this device's release's version of each built-in app the install has, where it runs another.
