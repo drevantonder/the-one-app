@@ -1,7 +1,7 @@
 //! What a call that came with a kernel access token gets from the vault: the keys of the databases it reaches, and URLs
 //! to read and create its objects in the bucket, so this server opens a person's data only while a session of theirs
-//! runs here. Keys are asked for once per token for each app, kept in memory until the token expires, then forgotten
-//! with the databases they opened (ARCHITECTURE.md, "Keys").
+//! runs here. Keys are asked for once per token for each app, kept in memory until the token expires (or its person
+//! may no longer use a scope they could), then forgotten with the databases they opened (ARCHITECTURE.md, "Keys").
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -12,6 +12,8 @@ use super::*;
 /// What the vault gave this server for one token, until it expires.
 #[derive(Default)]
 pub(super) struct Session {
+    /// Whose it is.
+    user: String,
     /// Until when its keys may be used: when its token expires, as the vault says.
     pub until: u64,
     /// Database keys, by `<scope>/<app>/<database>`.
@@ -113,6 +115,7 @@ impl Node {
         let now = now_ms();
         sessions.retain(|_, s| s.live(now));
         let session = sessions.entry(id).or_default();
+        session.user = me.user.clone();
         session.until = asked.1;
         for k in asked.0 {
             session.keys.insert(format!("{}/{}/{}", k.scope, k.app, k.database.unwrap_or_default()), k.key);
@@ -154,6 +157,17 @@ impl Node {
         let at = opened.entry(id).or_default();
         *at = (*at).max(until);
         Ok((db, bucket))
+    }
+
+    /// Forgets the sessions of people who may no longer use a scope they could, as soon as this server reads that they
+    /// can't: what they may still use, their next call asks the vault for again.
+    pub(super) fn forget_sessions_of(&self, users: &[String]) {
+        let mut kept = self.0.sessions.kept.lock().unwrap();
+        let before = kept.len();
+        kept.retain(|_, s| !users.contains(&s.user));
+        if kept.len() < before {
+            tracing::info!("forgot {} session(s) of {}, who may no longer use what they could", before - kept.len(), users.join(", "));
+        }
     }
 
     /// Forgets the sessions whose tokens expired, and the databases only they had open, with their keys.

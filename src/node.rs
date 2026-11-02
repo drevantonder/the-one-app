@@ -686,6 +686,9 @@ impl Node {
         if handled.new.iter().any(|e| e.content.app == release::APP && e.content.kind == "node-release") {
             self.0.released.notify_one();
         }
+        if !handled.lost.is_empty() {
+            self.forget_sessions_of(&handled.lost);
+        }
         if handled.members {
             self.0.changed.notify_one();
             self.emit(Event::Servers);

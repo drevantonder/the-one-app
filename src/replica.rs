@@ -36,6 +36,8 @@ pub struct Handled {
     pub dropped: Vec<String>,
     /// Whether this server now holds a scope it didn't, whose entries it should read.
     pub gained: bool,
+    /// People who may no longer use a scope they could, whose sessions this server forgets.
+    pub lost: Vec<String>,
 }
 
 impl Replica {
@@ -117,6 +119,12 @@ impl Replica {
         }
         let (me, m) = (self.id, &self.members);
         handled.gained |= m.scopes().iter().any(|s| m.holds(&me, s) && !before.holds(&me, s));
+        let after = m.roles();
+        for ((user, scope), (_, invited)) in before.roles() {
+            if !invited && !after.get(&(user.clone(), scope)).is_some_and(|(_, invited)| !invited) && !handled.lost.contains(&user) {
+                handled.lost.push(user);
+            }
+        }
         Ok(())
     }
 

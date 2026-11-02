@@ -281,6 +281,17 @@ pub fn groups(user: &str) -> Result<String, JsError> {
     Ok(json!(groups).to_string())
 }
 
+/// The scopes `user` may use, as the install's log says, and whether they were removed from it: `{ scopes, removed }`.
+#[wasm_bindgen]
+pub fn scopes_of(user: &str) -> Result<String, JsError> {
+    let out = replayed(&["global".into()], |m, _| {
+        let scopes: Vec<String> = m.scopes().into_iter().filter(|s| m.may_use(user, s)).map(|s| s.to_string()).collect();
+        json!({ "scopes": scopes, "removed": m.removed_user(user) })
+    })
+    .map_err(thrown)?;
+    Ok(out.to_string())
+}
+
 /// The install as `user` sees it, from the entries of `scopes` (JSON) this isolate read: `{ state, apps, me }`.
 /// `state` is `GET /v1/state`'s, for a node that knows of no server being on; `apps` is `GET /v1/apps`'s from the
 /// members alone, each with `reach`, the scopes it reaches for `user` (what its widgets and calls are given), for

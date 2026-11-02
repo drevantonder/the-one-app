@@ -16,7 +16,7 @@
 // deployed, is the shim; `icons.json` is the icons every device draws.
 
 import { RpcTarget } from "cloudflare:workers";
-import { initSync, verify, open, query, write, close, statements, screen, client_screen, config, prefix, following as after, read_log, groups, install, bundle } from "./one_serverless.js";
+import { initSync, verify, open, query, write, close, statements, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, install, bundle } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
 import icons from "./icons.json";
@@ -104,7 +104,7 @@ async function whom(request, env) {
   if (!aud.includes(env.ADDRESS)) refuse(401, `that sign-in isn't for ${env.ADDRESS}`);
   const session = await vault(env, token, "GET", "/session");
   if (session.user !== claims.sub) refuse(401, "that sign-in's session is someone else's");
-  const who = { token, user: claims.sub, client: claims.azp, clientName: session.name || "", name: await nameOf(env, token, claims.sub), keys: new Map(), urls: new Map() };
+  const who = { hash, token, user: claims.sub, client: claims.azp, clientName: session.name || "", name: await nameOf(env, token, claims.sub), keys: new Map(), urls: new Map() };
   for (const [h, s] of signedIn) if (s.until <= now) signedIn.delete(h);
   signedIn.set(hash, { who, until: Math.min(claims.exp * 1000, session.until) });
   return who;
@@ -201,12 +201,29 @@ async function readLogs(env, who, bucket, scopes) {
   }));
 }
 
+/// Forgets what a sign-in was given for scopes its person may no longer use, as soon as the install's log says so, and
+/// the sign-in itself once they're out of the install: what they may still use, they ask the vault for again.
+function forgetLost(who) {
+  const { scopes, removed } = JSON.parse(scopes_of(who.user));
+  // Someone not let in yet has lost nothing.
+  if (!removed && !scopes.length) return;
+  const may = new Set(scopes);
+  const folders = new Set(scopes.map((s) => s.replace(":", "-")));
+  for (const id of who.keys.keys()) if (!may.has(id.split("/")[0])) who.keys.delete(id);
+  for (const name of who.urls.keys()) if (!folders.has(name.split("/")[0]) && !(name.startsWith("log/") && may.has("global"))) who.urls.delete(name);
+  if (removed) {
+    signedIn.delete(who.hash);
+    refuse(403, "You were removed: an admin adds you back.");
+  }
+}
+
 /// The install as a request's person sees it (src/lib.rs: `install`): `{ state, apps, me }`, from the entries of
 /// Everyone's, their own and their groups'.
 async function installFor(env, who) {
   const bucket = new Bucket(env, who);
   const mine = ["global", `user:${who.user}`];
   await readLogs(env, who, bucket, mine);
+  forgetLost(who);
   const theirs = JSON.parse(groups(who.user)).map((g) => readLogs(env, who, bucket, [g]).then(() => g, () => null));
   const read = [...mine, ...(await Promise.all(theirs)).filter(Boolean)];
   return JSON.parse(install(who.user, who.clientName, JSON.stringify(read), Date.now()));
