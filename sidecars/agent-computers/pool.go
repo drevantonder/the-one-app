@@ -382,11 +382,11 @@ func (ds *computers) makesHere(ctx context.Context) bool {
 	return err == nil && len(spares(all, ds.loans())) > 0 || keepsSpare()
 }
 
-// roomForOne reports whether another small computer fits, leaving plenty for
-// everything else: a third of the memory, and at least 6 GB.
+// roomForOne reports whether another small computer fits: as much memory
+// available as it may use.
 func roomForOne() bool {
-	free, total := memory()
-	return total > 0 && free-int64(sizes[0].GB)<<30 >= max(total*3/10, 6<<30)
+	free, _ := memory()
+	return free >= int64(sizes[0].GB)<<30
 }
 
 // memory is this server's available and total memory, in bytes.
