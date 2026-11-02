@@ -18,7 +18,7 @@
       <div class="muted">${one.esc(`${me.role === "admin" ? "Admin" : "Member"} of ${install?.name || ""}`)}</div></div>
       <div class="lists"><div class="list"><div class="row plain"><div class="main"><div class="title"><span>${one.esc(device.name)}</span></div>
         ${device.build ? `<div class="sub build">${one.esc(device.build)}</div>` : ""}</div></div>
-      ${address ? `<a class="row plain" href="${one.esc(address.replace(/\/$/, ""))}/passkeys"><div class="main"><div class="title"><span>Passkeys</span></div></div><span class="chev">›</span></a>` : ""}</div>
+      ${address && one.config.passkeys ? `<a class="row plain" href="${one.esc(address.replace(/\/$/, ""))}/passkeys"><div class="main"><div class="title"><span>Passkeys</span></div></div><span class="chev">›</span></a>` : ""}</div>
       ${device.signOut ? `<div class="list"><button class="row plain out" data-out>Sign Out</button></div>` : ""}</div>`;
   });
   // What they signed in to, in their words: "your One App", or a workplace's, "the PTC App".
