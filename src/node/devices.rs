@@ -216,7 +216,7 @@ fn code_of(typed: &str) -> String {
 
 impl Node {
     /// The install's address, where its kernel is.
-    fn address(&self) -> Result<String> {
+    pub(super) fn address(&self) -> Result<String> {
         self.with(|i| Ok(i.r.members.settings.get("address").map(|a| a.trim_end_matches('/').to_string())))?.context("your One App has no address yet, so it has no sign-ins or requests to join")
     }
 
@@ -263,7 +263,7 @@ impl Node {
     }
 
     /// Tells the relay something now, signed by this device (`one/relay`), as `tell_relay` does in the background.
-    async fn tell_relay_now(&self, fields: Value) -> Result<()> {
+    pub(super) async fn tell_relay_now(&self, fields: Value) -> Result<()> {
         self.tell_relay_as(self.signing_key(), fields).await
     }
 

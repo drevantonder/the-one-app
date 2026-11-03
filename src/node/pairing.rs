@@ -102,7 +102,11 @@ impl Node {
         let roles = if user == pairing.user { MACHINE } else { &[members::Kind::Compute][..] };
         let listed = members::device(&endpoint, &user, &request.name, roles, None);
         self.member_content(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, listed).await.context("this device can no longer admit that machine")?;
-        self.tell_relay(json!({ "add": hex(&key), "role": "compute" }));
+        // Waited for: until the relay lets it in, the machine that joined reaches nothing.
+        if self.address().is_ok() {
+            let admin = self.with(|i| Ok(i.r.members.is_admin(&user)))?;
+            self.tell_relay_now(json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.context("your One App's network didn't take this machine: pair it again")?;
+        }
         Ok(JoinReply { root, user, bucket })
     }
 }
