@@ -3,9 +3,9 @@
 // over a BroadcastChannel. index.html loads this first, so the client's WebAssembly is on its way while the page draws,
 // and a person already signed in starts their session at once.
 
-/// The client's build (`/client/<version>/`), which the kernel's build writes into index.html: none, and there's no
-/// client, so the web client asks through the address instead.
-const version = document.querySelector('meta[name="one-client"]')?.content || "";
+/// The client's worker, as index.html started it, and where it is: none, and this build has no client.
+const started = self.oneNet || {};
+const url = started.url || "";
 
 /// Each request's id, and what's waiting on it: `{ answered, body }`.
 const waiting = new Map();
@@ -59,13 +59,13 @@ function lost() {
 /// Whether this browser has a client.
 let has = false;
 
-if (version && typeof SharedWorker === "function") {
+if (url && typeof SharedWorker === "function") {
   has = true;
-  const worker = new SharedWorker(`/net-worker.js?client=${encodeURIComponent(version)}`, { type: "module", name: "one" });
+  const worker = started.worker || new SharedWorker(url, { type: "module", name: "one" });
   worker.port.onmessage = (e) => received(e.data);
   worker.port.start();
   send = (m, transfer) => worker.port.postMessage(m, transfer || []);
-} else if (version && navigator.locks && typeof BroadcastChannel === "function") {
+} else if (url && navigator.locks && typeof BroadcastChannel === "function") {
   has = true;
   // The leader answers each tab's messages, its own too; the others' come over the channel, each saying whose it is.
   const channel = new BroadcastChannel("one.net");
@@ -80,8 +80,8 @@ if (version && typeof SharedWorker === "function") {
   };
   send = (m) => (mine ? mine(tab, m) : follows ? channel.postMessage({ from: tab, m }) : queued.push(m));
   const lead = async () => {
-    const { server } = await import(`/net-worker.js?client=${encodeURIComponent(version)}`);
-    const s = server(version);
+    const { server } = await import(url);
+    const s = server(new URL(url, location.href).searchParams.get("client"));
     const tabs = new Map();
     // What this tab asked the leader before is lost with it.
     if (follows) lost();

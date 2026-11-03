@@ -18,4 +18,10 @@ function kept(mode, act) {
 }
 
 export const get = (id) => kept("readonly", (s) => s.get(id));
+/// Several at once, in one transaction: → each's value, in order.
+export const getAll = (ids) =>
+  kept("readonly", (s) => {
+    const asked = ids.map((id) => s.get(id));
+    return { get result() { return asked.map((a) => a.result); } };
+  });
 export const put = (id, v) => kept("readwrite", (s) => s.put(v, id));

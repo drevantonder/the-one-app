@@ -535,14 +535,32 @@ impl Settings {
             use sha2::Digest;
             format!("/{path}?v={}", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(bytes))[..16])
         };
+        // The worker that reaches nodes names the modules it imports by theirs, so a cold open fetches nothing before it
+        // connects; then it's named by what it is with them, and start.js starts it by that name (`one-files`).
+        let imports: Vec<(String, String)> = files.iter().filter(|(path, _)| ["shared/crypto.js", "kept.js"].contains(&path.as_str())).map(|(path, bytes)| (format!("import(\"/{path}\")"), format!("import(\"{}\")", named(path, bytes)))).collect();
+        if let Some((_, worker)) = files.iter_mut().find(|(path, _)| path == "net-worker.js") {
+            let mut text = String::from_utf8_lossy(worker).into_owned();
+            for (path, name) in &imports {
+                text = text.replace(path, name);
+            }
+            *worker = text.into_bytes();
+        }
         // net.js keeps its own path: web.js imports it as ./net.js, and a second URL would be a second copy of it.
         let names: Vec<(String, String)> = files.iter().filter(|(path, _)| !["index.html", "sw.js", "net.js"].contains(&path.as_str())).map(|(path, bytes)| (path.clone(), named(path, bytes))).collect();
+        let start = files.iter().find(|(path, _)| path == "start.js").map(|(_, bytes)| String::from_utf8_lossy(bytes).into_owned());
         if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
             let mut text = String::from_utf8_lossy(page).into_owned();
+            // start.js runs inline, as the page arrives, before its styles and scripts are in: its hash is in the
+            // page's policy, so it's the one inline script that may.
+            if let Some(start) = start {
+                use sha2::Digest;
+                let hash = data_encoding::BASE64.encode(&sha2::Sha256::digest(start.as_bytes()));
+                text = text.replacen("<script src=\"/start.js\"></script>", &format!("<script>{start}</script>"), 1).replacen("script-src 'self'", &format!("script-src 'self' 'sha256-{hash}'"), 1);
+            }
             for (path, name) in &names {
                 text = text.replace(&format!("=\"/{path}\""), &format!("=\"{name}\""));
             }
-            let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json"].contains(&path.as_str())).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
+            let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json", "net-worker.js"].contains(&path.as_str())).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
             let label = format!(
                 "<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"one-files\" content=\"{asked}\">",
                 attr(crate::config::NAME),
