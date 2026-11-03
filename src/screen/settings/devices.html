@@ -37,14 +37,6 @@
     if (n.includes("imac") || n.includes("mac") || n.includes("windows") || n.includes("pc")) return "desktop";
     return "hard-drives";
   };
-  // "Memory 12.2 of 32 GB · CPU 12%", memory in GB as macOS counts them (2^30 bytes).
-  const load = (l) => {
-    const gb = (b) => (b / 1073741824).toFixed(1);
-    const parts = [];
-    if (l?.memory?.total > 0) parts.push(`Memory ${gb(l.memory.used)} of ${gb(l.memory.total)} GB`);
-    if (l?.cpu?.length) parts.push(`CPU ${l.cpu.at(-1)}%`);
-    return parts.join(" · ");
-  };
   const holds = (s) => s.privileged || s.owners.includes(`user:${me()}`) || (s.trusted_by || []).includes(me());
   // Whether they may choose to trust it: they may use it, but don't run it, and it isn't privileged.
   const mayTrust = (s) => !s.privileged && !s.owners.includes(`user:${me()}`) &&
@@ -69,7 +61,7 @@
     const trailing = mayTrust(s)
       ? `<input type="checkbox" class="switch" aria-label="Trust ${one.esc(shown(s.name))} to keep your data"${(s.trusted_by || []).includes(me()) ? " checked" : ""} data-trust="${one.esc(s.key)}">`
       : status(online);
-    return row({ key: s.key, name: s.name, online, lines: [s.me ? "This device" : runBy(s), online && load(s.load)], trailing, removable: s.user === me() && !s.me });
+    return row({ key: s.key, name: s.name, online, lines: [s.me ? "This device" : runBy(s)], trailing, removable: s.user === me() && !s.me });
   };
   // Where things run first: every device, and Cloudflare, Use First, When Needed or Last Resort, cheaper kinds first
   // within each (src/rank.rs); an admin moves one with its menu.

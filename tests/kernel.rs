@@ -960,14 +960,14 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert!(page("/v1/client-screens/nothing").contains("one.notFound()"));
 
     // What only admins may do, Sam can't; Andre can, signed in as on his Mac.
-    let setting = json!({ "name": "made_here", "value": "Ours" });
+    let setting = json!({ "name": "push", "value": "push" });
     assert!(refused(ask(&sams, "POST", "/v1/settings", setting.clone())), "a member changes no install setting");
     assert!(refused(ask(&sams, "POST", "/v1/role", json!({ "user": sam, "role": "admin" }))), "nor makes himself an admin");
     assert!(refused(ask(&sams, "POST", "/v1/remove", json!({ "user": andre }))), "nor removes anyone");
     assert!(refused(ask(&sams, "POST", "/v1/backups/place", json!({ "path": dir.join("backups"), "title": "Disk" }))), "nor adds backups");
     assert!(refused(ask(&sams, "POST", "/v1/pair", json!({ "user": andre }))), "nor pairs a machine as someone else");
     assert_eq!(ask(&andres, "POST", "/v1/settings", setting).0, 200);
-    assert_eq!(state(&andres)["install"]["settings"]["made_here"], "Ours");
+    assert_eq!(state(&andres)["install"]["settings"]["push"], "push");
 
     // A group Sam makes is his, not this device's person's; its members change only as its admins and invitees say.
     let (status, made) = ask(&sams, "POST", "/v1/group", json!({ "name": "Sam's" }));

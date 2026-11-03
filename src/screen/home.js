@@ -16,9 +16,9 @@ window.home = (() => {
   const named = (ids) => ids.slice().sort((a, b) => (a === me()?.id) - (b === me()?.id) || userName(a).localeCompare(userName(b)))
     .map((id) => (id === me()?.id ? "you" : userName(id)));
   const and = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
-  // Who a page is for, and who chooses its apps: a few people by name, more as how many; with only you, just you.
+  // Who a page is for, and who chooses its apps: a few people by name, more as how many; with only you, nothing.
   const whose = (ids, admins) =>
-    ids.length === 1 && ids[0] === me()?.id ? "Just you" : `${ids.length <= 3 ? and(named(ids)).replace(/^y/, "Y") : `${ids.length} people`} · ${chosenBy(admins)}`;
+    ids.length === 1 && ids[0] === me()?.id ? "" : `${ids.length <= 3 ? and(named(ids)).replace(/^y/, "Y") : `${ids.length} people`} · ${chosenBy(admins)}`;
 
   function chosenBy(admins) {
     const names = named(admins);
@@ -32,12 +32,12 @@ window.home = (() => {
   function allPages() {
     const i = install(), u = me();
     if (!i || !u) return [];
-    const out = [{ scope: "user", title: "You", subtitle: "Just you", whose: "For you only" }];
+    const out = [{ scope: "user", title: "You", subtitle: "" }];
     for (const g of i.groups.filter((g) => g.members.some((m) => m.user === u.id)).sort((a, b) => a.name.localeCompare(b.name))) {
       const admins = g.members.filter((m) => m.role === "admin").map((m) => m.user);
-      out.push({ scope: `group:${g.id}`, title: g.name, subtitle: whose(g.members.map((m) => m.user), admins), whose: `For ${g.name}` });
+      out.push({ scope: `group:${g.id}`, title: g.name, subtitle: whose(g.members.map((m) => m.user), admins) });
     }
-    out.push({ scope: "global", title: "Everyone", subtitle: whose(i.users.map((x) => x.id), i.users.filter((x) => x.role === "admin").map((x) => x.id)), whose: "For everyone" });
+    out.push({ scope: "global", title: "Everyone", subtitle: whose(i.users.map((x) => x.id), i.users.filter((x) => x.role === "admin").map((x) => x.id)) });
     return out;
   }
   /// How this person ordered their groups' pages and which they hid (Edit Pages…), kept with their own page's arrangement.

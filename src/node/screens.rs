@@ -148,9 +148,8 @@ impl Node {
     /// looking.
     pub(super) fn page(&self, viewer: &Caller, mut context: Value, body: &str, own: bool) -> Result<String> {
         context["me"] = json!(self.me_for(viewer)?);
-        let made_here = self.with(|i| Ok(crate::state::settings(&i.r.members).remove("made_here")))?;
         let api = format!("http://localhost:{}", crate::api::port());
-        context["config"] = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": made_here });
+        context["config"] = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": crate::config::MADE_HERE });
         Ok(crate::screen::page(&context, body, own))
     }
 

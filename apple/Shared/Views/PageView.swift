@@ -329,9 +329,11 @@ struct PageHeader: View {
             Text(title)
                 .font(.largeTitle.bold())
                 .foregroundStyle(.primary)
-            Text(subtitle)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            if !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.top, 4)
         .padding(.horizontal, 4)

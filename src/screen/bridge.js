@@ -91,7 +91,7 @@
 
   window.one = {
     app: ctx.app, screen: ctx.screen, params: ctx.params, me: ctx.me,
-    // The product: its `name` and `cli`, and `made_here`, what an App Store calls the apps made in the install (its setting).
+    // The product: its `name` and `cli`, and `made_here`, what an App Store calls the apps made in the install.
     config: ctx.config,
     // The page the shell opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
     scope: ctx.scope ?? null,

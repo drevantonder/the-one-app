@@ -23,11 +23,7 @@
     const admin = state.user?.role === "admin";
     pushKey = push() && admin ? (await one.api("GET", "/v1/vault?scope=global")).find((it) => (it.apps || []).includes(push()))?.title || "" : "";
     const shown = (title, value) => `<div class="row plain"><div class="main"><div class="title"><span>${title}</span><span class="value">${one.esc(value)}</span></div></div></div>`;
-    return `<h2 class="section">App Store</h2>
-      <div class="list">${admin ? `<label class="row plain field"><span>Apps Made Here</span><input data-setting="made_here" value="${one.esc(settings.made_here || "")}"></label>` : shown("Apps Made Here", settings.made_here || "")}</div>
-      <p class="footer">What the App Store calls the apps made here, beside the ones built in.</p>
-      <h2 class="section"></h2>
-      <div class="list">
+    return `<div class="list">
         ${admin ? `<label class="row plain"><div class="main"><div class="title"><span>Push Notifications</span></div></div><input type="checkbox" class="switch" id="push"${push() ? " checked" : ""}></label>` : shown("Push Notifications", push() ? "On" : "Off")}
         ${push() && admin ? `<div class="row plain go" id="push-key"><div class="main"><div class="title"><span>Apple Notifications Key</span><span class="value">${one.esc(pushKey)}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>` : ""}
       </div>
@@ -45,13 +41,8 @@
   }
 
   document.addEventListener("change", (e) => {
-    if (e.target.id === "push") return set("push", e.target.checked ? null : "");
-    const name = e.target.dataset.setting;
-    if (!name) return;
-    const text = e.target.value.trim();
-    if (text !== (settings[name] || "")) set(name, text || null);
+    if (e.target.id === "push") set("push", e.target.checked ? null : "");
   });
-  document.addEventListener("keydown", (e) => e.key === "Enter" && e.target.dataset.setting && e.target.blur());
   document.addEventListener("click", (e) => e.target.closest("#push-key") && askKey());
 
   // What push asks the Vault for: Apple's APNs key (its .p8 file), the team and key it's from, and the app's bundle id

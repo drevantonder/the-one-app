@@ -53,7 +53,7 @@
       const head = failing.last ? `Not backed up to ${failing.title} since ${one.ago(failing.last.time, { long: true })}` : `Not backed up to ${failing.title} yet`;
       lines = [`<div class="headline">${one.esc(head)}</div>`, `<div class="error">${one.esc(problem.text)}</div>`, `<div class="error">${one.esc(problem.fix)}</div>`];
     } else if (newest) lines = [`<div class="headline">Backed up ${one.esc(one.ago(newest.time, { long: true }))}</div>`];
-    else if (!places.length) lines = ['<div class="headline">Not backed up</div>', `<div class="muted">${admin ? "Add a disk or S3-compatible storage, and your devices" : "Once an admin adds a disk or S3-compatible storage, your devices"} back up to it every hour that something changes.</div>`];
+    else if (!places.length) lines = ['<div class="headline">Not backed up</div>'];
     else lines = ['<div class="headline">Backing up…</div>'];
     const [icon, color] = problem ? ["exclamation-mark", "var(--danger)"] : newest ? ["check", "var(--ok)"] : ["hard-drive", "var(--muted)"];
     const button = places.length ? `<button class="button" id="now"${Date.now() - asked < 10000 ? " disabled" : ""}>${problem ? "Try Again" : "Back Up Now"}</button>` : "";
@@ -66,7 +66,7 @@
           ${p.problem ? `<div class="sub error">${one.esc(p.problem.text)}</div>` : `<div class="sub">${one.esc(p.kind === "folder" ? `Disk on ${name(p.device)}` : `Off-site · ${p.where}`)}</div>`}
         </div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}
         ${admin ? `<div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--accent)">Add Place…</span></div></div></div>` : ""}</div>
-      <p class="footer">${admin ? "" : "Only admins add and remove places. "}Encrypted before it leaves. The recovery key opens every backup, everyone's.</p>
+      <p class="footer">${admin ? "" : "Only admins add and remove places. "}Encrypted before it leaves.</p>
       ${snapshots.length ? `<h2 class="section">Snapshots</h2><div class="list">${snapshots.map((s, n) => `<div class="row plain go" data-snapshot="${n}"><div class="main"><div class="title"><span>${one.esc(when(s.time, true))}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}</div>` : ""}`;
   });
 

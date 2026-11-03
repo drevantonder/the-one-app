@@ -32,8 +32,8 @@
             <option disabled>──────</option><option value="">Remove ${one.esc(u.name)}</option></select></label>`;
       return `<div class="row">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div></div>${trailing}</div>`;
     });
-    let html = `<div class="large-title">Users</div><h2 class="section">People in ${one.esc(ours)}</h2><div class="list">${rows.join("")}</div><div id="confirm"></div>`;
-    html += error ? `<p class="footer error">${one.esc(error)}</p>` : '<p class="footer">Admins keep the recovery key. It opens every backup, everyone\'s.</p>';
+    let html = `<div class="large-title">Users</div><div class="list">${rows.join("")}</div><div id="confirm"></div>`;
+    html += error ? `<p class="footer error">${one.esc(error)}</p>` : "";
     if (admin && one.config.join_domain) {
       const address = state.install?.settings?.address;
       const at = address ? ` at <b>${one.esc(address.replace(/^https?:\/\//, ""))}</b>` : "";
