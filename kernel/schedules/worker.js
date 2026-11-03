@@ -137,7 +137,9 @@ export class Schedules extends DurableObject {
     const { app, name, scope, op, node } = body;
     if (!NAME.test(app || "") || !NAME.test(name || "")) refuse(400, "name the app and its schedule");
     if (typeof op !== "string" || !op) refuse(400, "name the op it runs");
-    if (typeof node !== "string" || !node.startsWith("https://")) refuse(400, "name where it runs: the install's address, or a node's, over https");
+    // A try install's kernel (`SIGN_IN` is "try", which only `one try` sets) runs beside its node, at 127.0.0.1.
+    const reach = this.env.SIGN_IN === "try" ? /^(https:\/\/|http:\/\/127\.0\.0\.1[:/])/ : /^https:\/\//;
+    if (typeof node !== "string" || !reach.test(node)) refuse(400, "name where it runs: the install's address, or a node's, over https");
     const w = when(body);
     const title = String(body.title || name);
     const what = String(body.what || app);

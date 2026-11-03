@@ -387,6 +387,9 @@ impl Settings {
                 plain("VAULT", "service:vault".into());
                 plain("AUTH", "service:auth".into());
                 plain("ISSUER", issuer);
+                if self.try_person.is_some() {
+                    plain("SIGN_IN", "try".into());
+                }
             }
         }
         match service {
@@ -426,8 +429,8 @@ pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Ser
             bindings: settings.bindings(name).into_iter().map(|(n, v, _)| (n, v)).collect(),
             assets: (*name == "gateway").then(|| web.to_path_buf()),
             // The gateway's node may be on this machine or its private network, as a node behind a tunnel is; a try
-            // install's vault reaches its bucket on this machine.
-            outbound: (*name == "gateway" || *name == "vault" && settings.try_person.is_some()).then(|| NEARBY.to_string()),
+            // install's vault reaches its bucket on this machine, and its schedules its node.
+            outbound: (*name == "gateway" || matches!(*name, "vault" | "schedules") && settings.try_person.is_some()).then(|| NEARBY.to_string()),
         })
         .collect()
 }

@@ -1131,6 +1131,13 @@ fn only_a_try_installs_kernel_signs_its_person_in_with_nothing_to_show() {
     assert_eq!(status, 404, "a kernel people use let someone join with no passkey: {out}");
     let (status, _) = post(&format!("{}/internal/own", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": "0123456789abcdef", "to": "a code", "client": "web" }));
     assert_eq!(status, 403, "the vault of a kernel people use opened someone's keys itself");
+    // Nor do its schedules run at a node reached without https, as a try install's do at 127.0.0.1.
+    let mut andres = k.browser();
+    let (passkey, andre) = joins(&k, &mut andres, "Andre", None);
+    let token = signs_in(&mut andres, &passkey);
+    let schedule = json!({ "app": "board", "name": "daily", "scope": format!("user:{andre}"), "op": "summarise", "every": "1d", "node": "http://127.0.0.1:9" });
+    let (status, out) = ask_at(&k.settings.schedules_url, &token, "POST", "/schedules", schedule);
+    assert!(status == 400 && out["error"].as_str().unwrap_or_default().contains("https"), "a kernel people use runs schedules at a node without https: {out}");
     // Only `one try` makes such settings, and nothing puts them where anyone but this machine reaches them.
     let mut tried = k.settings.clone();
     tried.try_person = Some(("0123456789abcdef".into(), "Andre".into()));
