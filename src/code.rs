@@ -84,15 +84,17 @@ fn has(list: &[String], w: &str) -> bool {
 }
 
 /// How well an operation matches, how many of the query's words its name, its app's (or what the app is for) or its
-/// description has, and whether its name has one: its name counts most, then its app's, its description, and its
-/// app's guide, which alone never makes a match.
+/// description has, and whether its name has one: its name counts most, then its app's name, its own description, and
+/// last what its app is for and its guide, which alone never makes a match; so a word in an app's one line doesn't put
+/// every operation of that app above the one whose own description has it.
 fn score(app: &Value, op: &Value, query: &[String]) -> (u32, usize, bool) {
     let name = words(op["name"].as_str().unwrap_or(""));
-    let app_name = words(&format!("{} {} {}", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""), app["description"].as_str().unwrap_or("")));
+    let app_name = words(&format!("{} {}", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or("")));
+    let app_about = words(app["description"].as_str().unwrap_or(""));
     let about = words(op["description"].as_str().unwrap_or(""));
-    let guide = words(&format!("{} {}", app["description"].as_str().unwrap_or(""), app["instructions"].as_str().unwrap_or("")));
-    let score = query.iter().map(|w| if has(&name, w) { 6 } else { 0 } + if has(&app_name, w) { 4 } else { 0 } + if has(&about, w) { 2 } else { 0 } + if has(&guide, w) { 1 } else { 0 }).sum();
-    (score, query.iter().filter(|w| has(&name, w) || has(&app_name, w) || has(&about, w)).count(), query.iter().any(|w| has(&name, w)))
+    let guide = words(app["instructions"].as_str().unwrap_or(""));
+    let score = query.iter().map(|w| if has(&name, w) { 6 } else { 0 } + if has(&app_name, w) { 4 } else { 0 } + if has(&about, w) { 3 } else { 0 } + if has(&app_about, w) || has(&guide, w) { 1 } else { 0 }).sum();
+    (score, query.iter().filter(|w| has(&name, w) || has(&app_name, w) || has(&app_about, w) || has(&about, w)).count(), query.iter().any(|w| has(&name, w)))
 }
 
 /// How well an app the person could add matches, by its name and what it says it's for, as `score` does.
@@ -142,8 +144,15 @@ fn call(app: &Value, op: &Value, how: For) -> String {
 /// each app they're in; and the apps the person could add (`addable`) that match as well. A match is one whose name,
 /// app or description has most of the query's words, and as many as the best: fewer is a guess, not an answer.
 pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how: For) -> String {
-    // What people call the devices their One App runs on.
-    let query: Vec<String> = words(query).into_iter().map(|w| if matches!(w.as_str(), "server" | "machine" | "box") { "device".into() } else { w }).collect();
+    // What people call the devices their One App runs on, and keeping something.
+    let query: Vec<String> = words(query)
+        .into_iter()
+        .map(|w| match w.as_str() {
+            "server" | "machine" | "box" => "device".into(),
+            "save" | "store" | "remember" => "keep".into(),
+            _ => w,
+        })
+        .collect();
     let enough = |covers: usize| covers > 0 && covers * 2 > query.len().max(1);
     let mut found: Vec<(u32, usize, usize, &Value, &Value)> = Vec::new();
     let mut named = Vec::new();
