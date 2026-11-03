@@ -3,12 +3,15 @@
 // connector: each account is a browser profile signed in to Messenger.
 
 /// Runs one of the messenger sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
-/// says what's needed instead of how the call failed.
+/// says what's needed instead of how the call failed; when a chat isn't found, where to find it.
 async function sidecar(ctx, op, input) {
   try {
     return await ctx.sidecars.messenger[op](input);
   } catch (err) {
-    if (String(err.message).includes("no device runs messenger for you")) throw new Error(NEEDS);
+    const why = String(err.message);
+    if (why.includes("no device runs messenger for you")) throw new Error(NEEDS);
+    if (why.includes("matches several chats")) throw new Error(`${why}. Give more of the name`);
+    if (why.startsWith("no chat or person called")) throw new Error(`${why}: messenger_chats lists recent chats; anyone else by the name Messenger shows for them`);
     throw err;
   }
 }
@@ -39,6 +42,9 @@ async function keep(ctx, listed) {
   }
 }
 
+const ACCOUNT = { type: "string", description: "which account: the browser profile's name, as messenger_accounts lists them; default the first" };
+const CHAT = "the chat: its name as messenger_chats gives it, or a part of it only one recent chat has";
+
 export default {
   name: "messenger",
   title: "Messenger",
@@ -54,8 +60,8 @@ export default {
   ops: {
     accounts: {
       reads: true,
-      description: "The browser profiles Messenger reads, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
-      input: {"properties": {}, "type": "object"},
+      description: "The browser profiles Messenger reads, the default first: each { account, ok }, account the profile's name, with why when ok is false and it needs signing in again. Give account to the others to pick one.",
+      input: { type: "object", properties: {} },
       // A connector lists no accounts, rather than failing, where no device runs its sidecar; its settings say why.
       async run(ctx, input) {
         if (!(await running(ctx)).length) return [];
@@ -66,35 +72,47 @@ export default {
     },
     chats: {
       reads: true,
-      description: "Recent Messenger chats, newest first: who, when, their last message, and whether unread.",
-      input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}, "unread": {"description": "only unread chats", "type": "boolean"}}, "type": "object"},
+      description: "The recent Messenger chats messenger.com shows, newest first, to see what's new or find a chat to read: one a line, \"Sam (unread), <time>: last message\", the time as Messenger shows it. Older chats aren't reached.",
+      input: { type: "object", properties: { account: ACCOUNT, unread: { type: "boolean", description: "only chats with unread messages" } } },
       run: (ctx, input) => sidecar(ctx, "chats", input),
     },
     read: {
-      description: "A recent chat's latest messages. Opening a chat marks it read on Messenger, so one that was unread is marked unread again afterwards; the sender may still see it as seen.",
-      input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}, "chat": {"description": "the chat's name, or a part of it only one recent chat has", "type": "string"}}, "required": ["chat"], "type": "object"},
+      reads: false,
+      description: "A recent chat's latest messages, as messenger.com shows them when it opens, newest last: one a line, \"[time] Sam: text\", the time as Messenger shows it. Opening a chat marks it read, so one that was unread is marked unread again afterwards, but the sender may see it as seen.",
+      input: { type: "object", required: ["chat"], properties: { account: ACCOUNT, chat: { type: "string", description: CHAT } } },
       run: (ctx, input) => sidecar(ctx, "read", input),
     },
     search: {
       reads: true,
-      description: "Messages containing some words, across every chat: which chats have them, and the message when a chat has one.",
-      input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}, "query": {"description": "words to find", "type": "string"}}, "required": ["query"], "type": "object"},
+      description: "Messages containing some words, across every chat, as Messenger's search finds them: to find something said when you don't know which chat. One a line: the chat and the message when it has one match (\"Sam, <time>: text\"), or how many (\"Family: 3 matching messages\"), for messenger_read.",
+      input: { type: "object", required: ["query"], properties: { account: ACCOUNT, query: { type: "string", description: "words to find, as you'd type them in Messenger's search" } } },
       run: (ctx, input) => sidecar(ctx, "search", input),
     },
     send: {
+      reads: false,
       confirm: true,
-      description: "Send a real message, as the person, to a recent chat or to someone by their exact name. It can't be taken back: only when the person asked, with the text they approved.",
-      input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}, "chat": {"description": "the chat's name, or a part of it only one recent chat has; anyone else by their exact name", "type": "string"}, "text": {"description": "the message", "type": "string"}}, "required": ["chat", "text"], "type": "object"},
+      description: "Send a Messenger message, as the person, to a recent chat or to someone by their exact name. It sends a real message to a real person and can't be taken back: only what the person asked to send, to whom they asked. Says to whom it went.",
+      input: {
+        type: "object",
+        required: ["chat", "text"],
+        properties: {
+          account: ACCOUNT,
+          chat: { type: "string", description: `${CHAT}; or anyone else by their exact name, as Messenger shows it` },
+          text: { type: "string", description: "the message, exactly as the person approved it" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "send", input),
     },
     sign_in: {
-      description: "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, to sign in there themselves. The default profile's again when none is given.",
-      input: {"properties": {"profile": {"description": "the browser profile, like Personal or Work; agent-devices_profiles lists them", "type": "string"}}, "type": "object"},
+      reads: false,
+      description: "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, for them to sign in there themselves; never sign in for them. Signs the default profile in again when none is given.",
+      input: { type: "object", properties: { profile: { type: "string", description: "the browser profile's name, like Personal or Work; agent-devices_profiles lists them" } } },
       run: (ctx, input) => sidecar(ctx, "sign_in", input),
     },
     sign_out: {
-      description: "Stop reading a browser profile's Messenger. The profile, and its sign-ins to other sites, stay.",
-      input: {"properties": {"account": {"description": "which account: the browser profile, as messenger_accounts lists them; default the first", "type": "string"}}, "required": ["account"], "type": "object"},
+      reads: false,
+      description: "Stop reading a browser profile's Messenger. The profile, and its sign-ins to messenger.com and other sites, stay, so messenger_sign_in links it again.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the browser profile's name, as messenger_accounts lists them" } } },
       async run(ctx, input) {
         const out = await sidecar(ctx, "sign_out", input);
         await keep(ctx, await sidecar(ctx, "accounts", {}));
@@ -108,6 +126,7 @@ export default {
       run: (ctx, input) => sidecar(ctx, "_profiles", input),
     },
     _save: {
+      reads: false,
       description: "The settings screen's Done: saves the browser profile signed in.",
       input: { type: "object", properties: {} },
       run: (ctx, input) => sidecar(ctx, "_save", input),

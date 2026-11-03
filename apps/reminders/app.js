@@ -14,6 +14,10 @@ async function sidecar(ctx, op, input) {
 
 const NEEDS = "Reminders runs on a Mac with The One App open, and none of yours is online with it.";
 
+const ID = { type: "string", description: "the reminder's id, as reminders_list gives it" };
+const PRIORITY = { type: "string", enum: ["high", "medium", "low", "none"], description: "high, medium, low or none" };
+const REMINDER = "{ id, title, list, due, priority, notes, completed }, due a date or, with a time, an ISO 8601 date-time in the Mac's time zone, and completed when it was done";
+
 export default {
   name: "reminders",
   title: "Reminders",
@@ -28,42 +32,80 @@ export default {
   ops: {
     accounts: {
       reads: true,
-      description: "The Macs it runs on: each { account, ok }, the device’s name, ok while it’s online.",
+      description: "The Macs Reminders runs on: each { account, ok }, account the Mac's name, ok while it's online.",
       input: { type: "object", properties: {} },
       run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).includes("reminders")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
+      reads: false,
       confirm: true,
-      description: "Stop using Reminders on one of your devices: removes it from that device, for one of its owners.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device, by name" } } },
+      description: "Stop using Reminders on one of your Macs: removes it from that Mac, for one of its owners. The reminders themselves stay as they are.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the Mac's name, as reminders_accounts lists it" } } },
       run: (ctx, { account }) => {
         ctx.sidecar("reminders", account, false);
         return `Reminders is removed from ${account}.`;
       },
     },
     lists: {
-      description: "The reminder lists.",
-      input: {"properties": {}, "type": "object"},
+      reads: true,
+      description: "Every reminder list: each { name, id, account, default }, account being where it syncs (iCloud, Exchange). Use a name as list in reminders_list or reminders_create.",
+      input: { type: "object", properties: {} },
       run: (ctx, input) => sidecar(ctx, "lists", input),
     },
     list: {
-      description: "Reminders, soonest due first; only those not completed, unless asked.",
-      input: {"properties": {"completed": {"description": "include completed reminders", "type": "boolean"}, "limit": {"description": "at most this many; default 100", "type": "integer"}, "list": {"description": "a list's name; omit for every list", "type": "string"}, "query": {"description": "only reminders whose title or notes contain this", "type": "string"}, "until": {"description": "only reminders due by then: an ISO 8601 date or date-time", "type": "string"}}, "type": "object"},
+      reads: true,
+      description: `Reminders not yet done, soonest due first and those with no due date last, from every list or one; completed ones too if asked. Gives each ${REMINDER}.`,
+      input: {
+        type: "object",
+        properties: {
+          list: { type: "string", description: "only this list, by its name as reminders_lists lists them; default every list" },
+          until: { type: "string", description: "only those due by then: an ISO 8601 date (2026-11-01, the whole day) or date-time (2026-11-01T09:00)" },
+          query: { type: "string", description: "only those whose title or notes contain this text, any case" },
+          completed: { type: "boolean", description: "include completed reminders too" },
+          limit: { type: "integer", description: "at most this many, the soonest due; default 100. For more, narrow by list, until or query" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "list", input),
     },
     create: {
-      description: "Create a reminder.",
-      input: {"properties": {"due": {"description": "an ISO 8601 date (2026-11-01), or a date-time (2026-11-01T09:00) to be alerted then", "type": "string"}, "list": {"description": "a list's name; default is the default list", "type": "string"}, "notes": {"description": "more detail", "type": "string"}, "priority": {"description": "high, medium, low or none", "type": "string"}, "title": {"description": "what to be reminded of", "type": "string"}}, "required": ["title"], "type": "object"},
+      reads: false,
+      description: "Add a reminder to a list, which syncs to the person's other Apple devices; a due time alerts them then. Gives back the new reminder as reminders_list gives them, with its id for reminders_update or reminders_delete.",
+      input: {
+        type: "object",
+        required: ["title"],
+        properties: {
+          title: { type: "string", description: "what to be reminded of, as the list shows it" },
+          list: { type: "string", description: "a list's name, as reminders_lists lists them; default the Mac's default list" },
+          due: { type: "string", description: "an ISO 8601 date (2026-11-01), or a date-time (2026-11-01T09:00, in the Mac's time zone without an offset) to be alerted then" },
+          notes: { type: "string", description: "more detail, as plain text" },
+          priority: PRIORITY,
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "create", input),
     },
     update: {
-      description: "Change a reminder, or complete it.",
-      input: {"properties": {"completed": {"description": "true completes it; false makes it not done again", "type": "boolean"}, "due": {"description": "an ISO 8601 date or date-time, or \"none\" to clear it", "type": "string"}, "id": {"description": "the reminder's id, as list gives it", "type": "string"}, "list": {"description": "move it to this list", "type": "string"}, "notes": {"description": "new notes", "type": "string"}, "priority": {"description": "high, medium, low or none", "type": "string"}, "title": {"description": "a new title", "type": "string"}}, "required": ["id"], "type": "object"},
+      reads: false,
+      description: "Change a reminder, or mark it done with completed: only the fields given change. Gives back the reminder as it is now.",
+      input: {
+        type: "object",
+        required: ["id"],
+        properties: {
+          id: ID,
+          title: { type: "string", description: "a new title" },
+          list: { type: "string", description: "move it to this list, by its name as reminders_lists lists them" },
+          due: { type: "string", description: "an ISO 8601 date or date-time, or none to clear it" },
+          notes: { type: "string", description: "new notes, in place of the old" },
+          priority: PRIORITY,
+          completed: { type: "boolean", description: "true marks it done; false makes it not done again" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "update", input),
     },
     delete: {
-      description: "Delete a reminder.",
-      input: {"properties": {"id": {"description": "the reminder's id, as list gives it", "type": "string"}}, "required": ["id"], "type": "object"},
+      reads: false,
+      confirm: true,
+      description: "Delete a reminder from its list, on every Apple device. It can't be undone; to tick one off instead, reminders_update with completed.",
+      input: { type: "object", required: ["id"], properties: { id: ID } },
       run: (ctx, input) => sidecar(ctx, "delete", input),
     },
   },

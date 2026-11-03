@@ -28,22 +28,32 @@ export default {
   ops: {
     accounts: {
       reads: true,
-      description: "The devices it runs on: each { account, ok }, the device’s name, ok while it’s online.",
+      description: "The devices Shell runs on: each { account, ok }, account the device's name, ok while it's online. Give one as device to shell_run.",
       input: { type: "object", properties: {} },
       run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).includes("shell")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
+      reads: false,
       confirm: true,
-      description: "Stop using Shell on one of your devices: removes it from that device, for one of its owners.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device, by name" } } },
+      description: "Stop using Shell on one of your devices: removes it from that device, for one of its owners, so no command runs there.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device's name, as shell_accounts lists it" } } },
       run: (ctx, { account }) => {
         ctx.sidecar("shell", account, false);
         return `Shell is removed from ${account}.`;
       },
     },
     run: {
-      description: "Run a shell command on this device (or the device given) and return its exit code and output. Every command is logged.",
-      input: {"properties": {"command": {"description": "run by sh -c", "type": "string"}, "dir": {"description": "working directory; default is the home directory", "type": "string"}, "timeout": {"description": "seconds, default 60, at most 600", "type": "integer"}}, "required": ["command"], "type": "object"},
+      reads: false,
+      description: "Run a shell command on this device, or the device given, as its owner, and wait for it to finish. Gives { exit, stdout, stderr }: exit 0 when it worked, and what it printed, the last 64 KB of each when longer. Every command is logged where only you can read it.",
+      input: {
+        type: "object",
+        required: ["command"],
+        properties: {
+          command: { type: "string", description: "the command line, run by sh -c, like \"df -h\" or \"cd src && git status\"; it reads no input" },
+          dir: { type: "string", description: "the folder to run it in, as an absolute path; default the home folder" },
+          timeout: { type: "integer", description: "seconds to wait before stopping it, 1 to 600; default 60" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "run", input),
     },
   },
