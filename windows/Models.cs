@@ -39,6 +39,8 @@ public sealed class SettingsItem
     [JsonPropertyName("color")] public required string Color { get; init; }
     [JsonPropertyName("badge")] public int? Badge { get; init; }
     [JsonPropertyName("app")] public string? App { get; init; }
+    /// Where it's opened in the browser, in place of a screen (Passkeys, at the install's address).
+    [JsonPropertyName("url")] public string? Url { get; init; }
 }
 
 public sealed class SignedIn

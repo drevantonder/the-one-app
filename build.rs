@@ -45,6 +45,7 @@ fn main() {
         git(&["rev-parse", "--short=8", "HEAD"]).map(|c| (c, at, dirty))
     };
     let out = format!("{out}pub const CONFIG_FILE: &str = {:?};\npub const CONFIG_REPO: &str = {repo:?};\n", file.to_string_lossy());
+    let out = format!("{out}pub const MADE_HERE: &str = {:?};\n", config.get("made_here").and_then(|v| v.as_str()).unwrap_or("Made here"));
     let out = format!("{out}pub const RELEASE_KEY: &str = {:?};\npub const RELEASE_SIGNER: &str = {:?};\n", optional("release_key"), optional("release_signer"));
     // How people sign in: with a passkey, or with Google at the install's domain.
     let sign_in = config.get("sign_in").and_then(|v| v.as_str()).unwrap_or("passkey");

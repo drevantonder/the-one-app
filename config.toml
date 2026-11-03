@@ -4,6 +4,8 @@ name = "The One App"
 cli = "one"
 port = 4747
 accent = "#9E6E06"
+# What the App Store calls the apps made in the install, beside the ones built in.
+made_here = "Made here"
 # Where `one update` and `one release` get the code, and the installer the releases.
 repo = "drevantonder/the-one-app"
 # Nodes and the installer take only releases signed by this key (OpenSSH, Ed25519). Its private half stays with the
@@ -12,7 +14,7 @@ release_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJxXC8FYsJQXptCREC6fvoYzO1sNL
 release_signer = "op read 'op://van-tonder-nosudo/The One App release key/private key?ssh-format=openssh'"
 # Every folder in apps/ ships built into each release, for any install to add. These are the ones a new install
 # deploys and installs in global; each `one update` deploys the release's version of every one an install has.
-apps = ["board", "repos", "apps", "devices"]
+apps = ["board", "repos", "apps", "device-activity"]
 # The apps every agent needs from the start: MCP's instructions carry their guide in full (the rest come with search),
 # and `one mcp --code` keeps their tools as tools, beside search and execute.
 always_on = ["board"]
@@ -33,9 +35,7 @@ logo = "icons/Logo.png"
 
 # An install's settings until its admins change them in Settings (`setting` entries). Every install has:
 # store, the app the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.install);
-# push, the sidecar phones register their push tokens with and apps push through (src/push.rs), empty for off;
-# and made_here, what the App Store calls the apps made in the install, beside the ones built in.
+# and push, the sidecar phones register their push tokens with and apps push through (src/push.rs), empty for off.
 [settings]
 store = "apps"
 push = "push"
-made_here = "Made here"

@@ -5,7 +5,7 @@ import SwiftUI
 func agentPrompt(address: String?) -> String {
     let name = appName, cli = Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? ""
     if let address = address.flatMap({ URL(string: $0.contains("://") ? $0 : "https://\($0)") }).flatMap({ $0.host() }) {
-        return "Connect yourself to \(name): add the MCP server https://\(address)/mcp, and I'll sign in when it asks."
+        return "Connect yourself to \(name): add https://\(address)/mcp as a connector, and I'll sign in when it asks."
     }
     return "Connect yourself to \(name): run \"\(cli) guide\" in a terminal and set it up for me."
 }

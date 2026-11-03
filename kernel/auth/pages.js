@@ -191,7 +191,7 @@ export function tryPage(look) {
   const { name, person } = look;
   const body = `
     <h1 id="title">Sign in to ${escape(name)}</h1>
-    <p id="what">In a try install: no passkey here.</p>
+    <p id="what">For testing: no passkey needed.</p>
     <button class="button primary" id="go">Sign In as ${escape(person)}</button>`;
   const script = `
     const oauth_query = location.search.slice(1);
@@ -217,7 +217,7 @@ export function invitePage(look) {
     <section id="join">
       <h1 id="title">Join ${escape(name)}</h1>
       ${tried
-        ? `<p id="what">In a try install: no passkey here.</p>
+        ? `<p id="what">For testing: no passkey needed.</p>
       <button class="button primary" id="passkey" disabled>Join</button>`
         : `<p id="what">Make a passkey to join. It's how you sign in, and the only thing that unlocks your data.</p>
       <button class="button primary" id="passkey" disabled>Make a Passkey</button>

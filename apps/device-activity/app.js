@@ -1,5 +1,5 @@
-// Devices: every device in the install and how loaded it is (memory, CPU, GPU, disk), with the containers each one
-// hosts listed under it; and where things run first (ctx.order, src/rank.rs), which admins change in Settings > Devices, and agents with devices_use. Each device measures itself and says so when it syncs; this app only draws what
+// Device Activity: every device in the install and how loaded it is (memory, CPU, GPU, disk), with the containers each one
+// hosts listed under it; and where things run first (ctx.order, src/rank.rs), which admins change in Settings > Devices, and agents with device-activity_use. Each device measures itself and says so when it syncs; this app only draws what
 // ctx.devices() gives it.
 
 const GB = 1e9;
@@ -55,12 +55,12 @@ function line(d) {
 }
 
 export default {
-  name: "devices",
-  title: "Devices",
+  name: "device-activity",
+  title: "Device Activity",
   icon: "monitor",
   color: "#30b0c7",
-  description: "How loaded each device is: memory, CPU, GPU and disk, with its containers",
-  instructions: "Your One App runs each thing on the first device in its order that can run it, is on and has room: Use First, then When Needed, then Last Resort (Cloudflare among them, once there is one), a device far from the others only when it's nearer. devices_order shows that order; devices_use moves a device, for an admin, only when the person asks. devices_list shows every one of your devices, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU and GPU (percent busy, a sample every 5 seconds over the last two minutes, oldest first) and disk, and the containers each hosts under it. Use it to pick a device with room for a desktop, a model or a build.",
+  description: "How busy each device is",
+  instructions: "Your One App runs each thing on the first device in its order that can run it, is on and has room: Use First, then When Needed, then Last Resort (Cloudflare among them, once there is one), a device far from the others only when it's nearer. device-activity_order shows that order; device-activity_use moves a device, for an admin, only when the person asks. device-activity_list shows every one of your devices, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU and GPU (percent busy, a sample every 5 seconds over the last two minutes, oldest first) and disk, and the containers each hosts under it. Use it to pick a device with room for a desktop, a model or a build.",
 
   ops: {
     order: {
@@ -101,8 +101,8 @@ export default {
 
   widgets: {
     devices: {
-      title: "Devices",
-      description: "How busy each device is: memory, CPU, GPU and disk.",
+      title: "Device Activity",
+      description: "How busy each device is",
       size: "large",
       sizes: ["small", "medium", "large", "xl"],
       async render(ctx) {
@@ -115,7 +115,7 @@ export default {
 
   screens: {
     main: {
-      title: "Devices",
+      title: "Device Activity",
       html: `
 <style>
 .dev { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
@@ -167,22 +167,18 @@ function card(d, guests) {
   return \`<div class="dev\${d.online ? "" : " off"}\${d.host ? " sub" : ""}"><header><h3>\${one.esc(d.name)}</h3><span class="os">\${d.online ? sub : "Offline"}</span></header>
     \${stats ? '<div class="stats">' + stats + "</div>" : ""}\${rows ? '<div class="guests">' + rows + "</div>" : ""}</div>\`;
 }
-async function show() {
-  try {
-    const { devices } = await one.call("list", { history: true });
-    let html = "";
-    for (let i = 0; i < devices.length; i++) {
-      const d = devices[i];
-      if (d.kind) continue;
-      const guests = [];
-      for (let j = i + 1; j < devices.length && devices[j].host === d.name; j++) if (devices[j].kind) guests.push(devices[j]);
-      html += card(d, guests);
-    }
-    document.getElementById("list").innerHTML = html || '<div class="empty">No devices yet</div>';
-  } catch (err) {
-    document.getElementById("list").innerHTML = \`<div class="empty error">\${one.esc(err.message)}</div>\`;
+const show = () => one.render("#list", async () => {
+  const { devices } = await one.call("list", { history: true });
+  let html = "";
+  for (let i = 0; i < devices.length; i++) {
+    const d = devices[i];
+    if (d.kind) continue;
+    const guests = [];
+    for (let j = i + 1; j < devices.length && devices[j].host === d.name; j++) if (devices[j].kind) guests.push(devices[j]);
+    html += card(d, guests);
   }
-}
+  return html || '<div class="empty">No devices yet</div>';
+});
 show();
 setInterval(show, 5000);
 </script>`,
@@ -209,9 +205,10 @@ const LOGOS = {
 const level = (sp) => { const p = sp.used / sp.total; return p >= 0.85 ? "bad" : p >= 0.7 ? "warn" : "good"; };
 const cell = (w, n) => ({ t: "col", w, align: "center", c: [n || { t: "col", c: [] }] });
 const label = (text) => ({ t: "text", text, size: "xs", weight: "medium", tone: "muted", lines: 1 });
-const ring = (sp, w) => sp && sp.total ? { t: "gauge", value: sp.used / sp.total, tone: level(sp), w, label: "" } : null;
-const bar = (sp, w) => sp && sp.total ? { t: "progress", value: sp.used / sp.total, tone: level(sp), w } : null;
-const spark = (values, tone, w, h) => ({ t: "spark", values, max: 100, tone, w, h });
+// alt names each for readers that can't see the columns' header: "RAM 17%".
+const ring = (sp, w) => sp && sp.total ? { t: "gauge", value: sp.used / sp.total, tone: level(sp), w, label: "", alt: "RAM" } : null;
+const bar = (sp, w) => sp && sp.total ? { t: "progress", value: sp.used / sp.total, tone: level(sp), w, alt: "Disk" } : null;
+const spark = (values, tone, w, h, alt) => ({ t: "spark", values, max: 100, tone, w, h, alt });
 
 /// The widths of each size's columns, shared by its header and every row so they line up.
 const COLUMNS = {
@@ -247,8 +244,8 @@ function table(list, size) {
   const details = size !== "medium";
   const latest = usual(list);
   const stats = (d) => d.online
-    ? { t: "row", gap: k.gap, c: [cell(k.ram, ring(d.memory, k.ring)), cell(k.cpu, d.kind ? null : spark(d.cpu, "blue", k.cpu, k.spark)),
-        cell(k.gpu, d.kind ? null : spark(d.gpu, "purple", k.gpu, k.spark)), cell(k.disk, bar(d.disk, k.disk))] }
+    ? { t: "row", gap: k.gap, c: [cell(k.ram, ring(d.memory, k.ring)), cell(k.cpu, d.kind ? null : spark(d.cpu, "blue", k.cpu, k.spark, "CPU")),
+        cell(k.gpu, d.kind ? null : spark(d.gpu, "purple", k.gpu, k.spark, "GPU")), cell(k.disk, bar(d.disk, k.disk))] }
     : null;
   const row = (d) => ({
     t: "row", gap: 10, dim: !d.online,
@@ -297,7 +294,7 @@ function compact(list) {
     t: "row", gap: 6, dim: !d.online,
     c: [
       { t: "col", w: 28, c: [{ t: "text", text: short(d.name), size: "sm", lines: 1 }] },
-      ...(d.online ? [cell(24, ring(d.memory, 15)), cell(26, spark(d.cpu, "blue", 26, 12)), cell(26, bar(d.disk, 26))] : []),
+      ...(d.online ? [cell(24, ring(d.memory, 15)), cell(26, spark(d.cpu, "blue", 26, 12, "CPU")), cell(26, bar(d.disk, 26))] : []),
     ],
   });
   const header = { t: "row", gap: 6, c: [{ t: "col", w: 28, c: [] }, cell(24, label("RAM")), cell(26, label("CPU")), cell(26, label("DISK"))] };

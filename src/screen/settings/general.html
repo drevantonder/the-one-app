@@ -9,8 +9,8 @@
 <div class="large-title">General</div>
 <div id="settings"></div>
 <script>
-  // The install's settings, for admins: entries like everything else, so every device and client has the same ones.
-  // Empty puts back the white label's default.
+  // The install's settings: entries like everything else, so every device and client has the same ones. Admins change
+  // them; everyone else sees them. Empty puts back the white label's default.
   let settings = {};
   // The Vault item on Everyone switched on for push, by its title.
   let pushKey = "";
@@ -20,16 +20,14 @@
   const draw = () => one.render("#settings", async () => {
     const state = await one.api("GET", "/v1/state");
     settings = state.install?.settings || {};
-    pushKey = push() ? (await one.api("GET", "/v1/vault?scope=global")).find((it) => (it.apps || []).includes(push()))?.title || "" : "";
-    return `<h2 class="section">App Store</h2>
-      <div class="list"><label class="row plain field"><span>Apps Made Here</span><input data-setting="made_here" value="${one.esc(settings.made_here || "")}"></label></div>
-      <p class="footer">What the App Store calls the apps made here, beside the ones built in.</p>
-      <h2 class="section"></h2>
-      <div class="list">
-        <label class="row plain"><div class="main"><div class="title"><span>Push Notifications</span></div></div><input type="checkbox" class="switch" id="push"${push() ? " checked" : ""}></label>
-        ${push() ? `<div class="row plain go" id="push-key"><div class="main"><div class="title"><span>Apple Push Key</span><span class="value">${one.esc(pushKey)}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>` : ""}
+    const admin = state.user?.role === "admin";
+    pushKey = push() && admin ? (await one.api("GET", "/v1/vault?scope=global")).find((it) => (it.apps || []).includes(push()))?.title || "" : "";
+    const shown = (title, value) => `<div class="row plain"><div class="main"><div class="title"><span>${title}</span><span class="value">${one.esc(value)}</span></div></div></div>`;
+    return `<div class="list">
+        ${admin ? `<label class="row plain"><div class="main"><div class="title"><span>Push Notifications</span></div></div><input type="checkbox" class="switch" id="push"${push() ? " checked" : ""}></label>` : shown("Push Notifications", push() ? "On" : "Off")}
+        ${push() && admin ? `<div class="row plain go" id="push-key"><div class="main"><div class="title"><span>Apple Notifications Key</span><span class="value">${one.esc(pushKey)}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>` : ""}
       </div>
-      ${error ? `<p class="footer error">${one.esc(error)}</p>` : ""}`;
+      ${error ? `<p class="footer error">${one.esc(error)}</p>` : admin ? "" : `<p class="footer">Only admins change these.</p>`}`;
   });
 
   async function set(name, value) {
@@ -43,13 +41,8 @@
   }
 
   document.addEventListener("change", (e) => {
-    if (e.target.id === "push") return set("push", e.target.checked ? null : "");
-    const name = e.target.dataset.setting;
-    if (!name) return;
-    const text = e.target.value.trim();
-    if (text !== (settings[name] || "")) set(name, text || null);
+    if (e.target.id === "push") set("push", e.target.checked ? null : "");
   });
-  document.addEventListener("keydown", (e) => e.key === "Enter" && e.target.dataset.setting && e.target.blur());
   document.addEventListener("click", (e) => e.target.closest("#push-key") && askKey());
 
   // What push asks the Vault for: Apple's APNs key (its .p8 file), the team and key it's from, and the app's bundle id
@@ -65,13 +58,13 @@
       .sort((a, b) => (b.apps || []).includes(app) - (a.apps || []).includes(app));
     let picked = items[0]?.id ?? null;
     const values = {}, files = {};
-    let title = "Apple Push Key", problem = "";
+    let title = "Apple Notifications Key", problem = "";
     const sheet = one.sheet({ title: "Vault", done: "Cancel", onClose: draw });
     const choice = (id, icon, text) =>
       `<div class="row plain go choice${picked === id ? " on" : ""}" data-pick="${one.esc(id ?? "")}">${icon}<div class="main"><div class="title"><span>${one.esc(text)}</span></div></div><span class="check">${one.icon("check")}</span></div>`;
     const ready = () => picked !== null || wanted.every((w) => values[w.name]);
     const paint = () => {
-      sheet.body.innerHTML = `<div class="list"><div class="row plain"><div class="main"><div class="title"><span>Apple Push Key</span></div><div class="sub wrap">Phones get notifications through Apple with it.</div></div></div></div>
+      sheet.body.innerHTML = `<div class="list"><div class="row plain"><div class="main"><div class="title"><span>Apple Notifications Key</span></div><div class="sub wrap">Phones get notifications through Apple with it.</div></div></div></div>
         <p class="footer">Everyone</p>
         <div class="list" style="margin-top:18px">${items.map((it) => choice(it.id, one.icon("key"), it.title)).join("")}${choice(null, one.icon("plus-circle-fill"), "New Item")}</div>
         ${picked === null ? `<div class="list" style="margin-top:18px">
@@ -115,7 +108,7 @@
           await one.api("POST", "/v1/vault", { scope: "global", id: picked, apps });
         } else {
           const fields = Object.fromEntries(wanted.map((w) => [w.name, { value: values[w.name], secret: !!w.secret }]));
-          await one.api("POST", "/v1/vault", { scope: "global", title: title.trim() || "Apple Push Key", fields, hosts, apps: [app] });
+          await one.api("POST", "/v1/vault", { scope: "global", title: title.trim() || "Apple Notifications Key", fields, hosts, apps: [app] });
         }
         sheet.close();
       } catch (err) {

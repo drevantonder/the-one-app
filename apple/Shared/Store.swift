@@ -1,6 +1,9 @@
 import Foundation
 import Observation
 import WebKit
+#if os(macOS)
+import AppKit
+#endif
 
 /// A page: one scope the user can read, showing the apps installed there and their widgets.
 struct Page: Identifiable, Hashable {
@@ -11,14 +14,6 @@ struct Page: Identifiable, Hashable {
 
     var id: String { scope }
     var group: String? { scope.hasPrefix("group:") ? String(scope.dropFirst(6)) : nil }
-    /// Whose it is, as a folder's subtitle starts: "For you only".
-    var whose: String {
-        switch scope {
-        case "user": String(localized: "For you only")
-        case "global": String(localized: "For everyone")
-        default: String(localized: "For \(title)")
-        }
-    }
 }
 
 /// One thing on a page's grid: an app's icon, or a widget its person put there.
@@ -125,6 +120,14 @@ final class Store {
     var selection: Route? {
         didSet {
             guard selection != oldValue else { return }
+            // A Settings item with a url (Passkeys) opens in the browser, and the sidebar stays where it was.
+            if case .setting(let name, _) = selection, let url = settingsItem(name)?.url {
+                #if os(macOS)
+                NSWorkspace.shared.open(url)
+                #endif
+                selection = oldValue
+                return
+            }
             path = []
             editing = false
             UserDefaults.standard.set(selection.flatMap { try? JSONEncoder().encode($0) }, forKey: "selection")
@@ -194,9 +197,7 @@ final class Store {
         guard let install, let me else { return [] }
         let mine = install.groups.filter { $0.role(of: me.id) != nil }
             .sorted { (pageOrder.firstIndex(of: "group:\($0.id)") ?? .max, $0.name) < (pageOrder.firstIndex(of: "group:\($1.id)") ?? .max, $1.name) }
-        let devices = install.devices.filter { $0.user == me.id }.count + install.clients.filter { $0.user == me.id }.count
-        var pages = [Page(scope: "user", title: String(localized: "You"),
-                          subtitle: devices == 1 ? String(localized: "Just you · 1 device") : String(localized: "Just you · \(devices) devices"))]
+        var pages = [Page(scope: "user", title: String(localized: "You"), subtitle: "")]
         pages += mine.map { group in
             Page(scope: "group:\(group.id)", title: group.name, subtitle: "\(people(group.members.count)) · \(appsChosenBy(group.admins))")
         }

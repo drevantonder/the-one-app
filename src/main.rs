@@ -1733,6 +1733,11 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     if name == "groups_list" {
         return Ok(json!(groups_said(&get("/v1/state")?)));
     }
+    if name == "widgets_show" {
+        let out = mcp_apps::call(name, &Value::Object(input)).unwrap_or_default();
+        anyhow::ensure!(out["isError"] != true, "{}", out["content"][0]["text"].as_str().unwrap_or(""));
+        return Ok(out);
+    }
     let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = spec {
         anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");

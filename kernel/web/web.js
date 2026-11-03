@@ -332,7 +332,9 @@ window.__one = {};
     const sections = pages().map((p) => `<section>${head(own("pages", { scope: p.scope }), p.title)}` +
       appsOn(p).filter((a) => !settingsItems().some((i) => i.app === a.name)).map((a) => row({ kind: "screen", app: a.name, screen: "main", params: "{}", scope: p.scope }, one.appIcon(a, 20), label(a), appBadge(a.name, p))).join("") +
       row(own("services", { scope: p.scope }), folder(servicesOn(p), 20), "Services") + `</section>`).join("");
-    const items = settingsItems().map((item) => row(item.app ? { kind: "screen", app: item.app, screen: "main", params: "{}" } : { kind: "own", name: item.name, params: "{}" }, settingIcon(item, 20), item.title, item.badge)).join("");
+    // One with a url (Passkeys) opens it in a new tab.
+    const items = settingsItems().map((item) => item.url
+      ? `<a class="nav-row" href="${esc(item.url)}" target="_blank" rel="noopener">${settingIcon(item, 20)}<span class="nav-label">${esc(item.title)}</span></a>` : row(item.app ? { kind: "screen", app: item.app, screen: "main", params: "{}" } : { kind: "own", name: item.name, params: "{}" }, settingIcon(item, 20), item.title, item.badge)).join("");
     $(".sidebar", root).innerHTML = `<div class="nav-pages">${sections}<section>${head(own("pages", { scope: "settings" }), "Settings")}${items}</section></div>`;
   }
 
@@ -621,10 +623,8 @@ window.__one = {};
   const settingsItems = () => store.state?.settings_items || [];
   const settingTitle = (name) => settingsItems().find((i) => i.name === name)?.title || "Settings";
 
-  /// An item's icon: theirs is their avatar; the rest, its symbol on its colour, as an app's tile.
+  /// An item's icon: its symbol on its colour, as an app's tile.
   function settingIcon(item, size) {
-    const u = me();
-    if (item.name === "account" && u) return one.avatar(u.id, u.name).replace('class="avatar"', `class="avatar tile-avatar" data-size="${size}"`).replace('style="', `style="--size:${size}px;`);
     return one.appIcon({ name: item.name, title: item.title, icon: item.icon, color: item.color }, size);
   }
 

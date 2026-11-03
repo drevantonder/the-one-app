@@ -164,7 +164,6 @@ struct ServicesView: View {
         .listStyle(.insetGrouped)
         #endif
         .navigationTitle("Services")
-        .navigationSubtitle(page.whose)
         .toolbar {
             if !apps.isEmpty {
                 ToolbarItem(placement: .primaryAction) {

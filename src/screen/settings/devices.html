@@ -11,15 +11,17 @@
   .action-row .i { width: 22px; height: 22px; }
   a.row { cursor: pointer; }
   #page h2.section:first-of-type { margin-top: 8px; }
+  .footer.build { white-space: pre-line; }
+  .row.out { justify-content: center; color: var(--danger); font: inherit; border: 0; background: none; width: 100%; }
   .pair { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 8px 0 4px; }
   .code { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--code-bg); }
   .pair code { font: 0.92em var(--mono); }
   .code span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
 </style>
 <script>
-  // This person's devices, the shared ones they may use, and which hold their data: naming this device, trusting one,
-  // removing one, and pairing another with a code.
-  let state;
+  // This person's devices, the shared ones they may use, and which hold their data: naming this device, the build it
+  // runs and signing out of it, trusting one, removing one, and pairing another with a code.
+  let state, device;
   let error = "";
 
   const me = () => state.user?.id;
@@ -34,14 +36,6 @@
     if (n.includes("macbook") || n.includes("laptop")) return "laptop";
     if (n.includes("imac") || n.includes("mac") || n.includes("windows") || n.includes("pc")) return "desktop";
     return "hard-drives";
-  };
-  // "Memory 12.2 of 32 GB · CPU 12%", memory in GB as macOS counts them (2^30 bytes).
-  const load = (l) => {
-    const gb = (b) => (b / 1073741824).toFixed(1);
-    const parts = [];
-    if (l?.memory?.total > 0) parts.push(`Memory ${gb(l.memory.used)} of ${gb(l.memory.total)} GB`);
-    if (l?.cpu?.length) parts.push(`CPU ${l.cpu.at(-1)}%`);
-    return parts.join(" · ");
   };
   const holds = (s) => s.privileged || s.owners.includes(`user:${me()}`) || (s.trusted_by || []).includes(me());
   // Whether they may choose to trust it: they may use it, but don't run it, and it isn't privileged.
@@ -67,7 +61,7 @@
     const trailing = mayTrust(s)
       ? `<input type="checkbox" class="switch" aria-label="Trust ${one.esc(shown(s.name))} to keep your data"${(s.trusted_by || []).includes(me()) ? " checked" : ""} data-trust="${one.esc(s.key)}">`
       : status(online);
-    return row({ key: s.key, name: s.name, online, lines: [s.me ? "This device" : runBy(s), online && load(s.load)], trailing, removable: s.user === me() && !s.me });
+    return row({ key: s.key, name: s.name, online, lines: [s.me ? "This device" : runBy(s)], trailing, removable: s.user === me() && !s.me });
   };
   // Where things run first: every device, and Cloudflare, Use First, When Needed or Last Resort, cheaper kinds first
   // within each (src/rank.rs); an admin moves one with its menu.
@@ -103,8 +97,12 @@
     const mine = devices.filter((s) => s.user === me()), others = devices.filter((s) => s.user !== me());
     const here = [...devices, ...clients].find((m) => m.me);
     let html = '<div class="large-title">Devices</div>';
-    if (here) {
-      html += `<h2 class="section">This Device</h2><div class="list"><label class="row plain"><input class="field" id="name" aria-label="This device’s name" value="${one.esc(here.name)}" autocomplete="off" spellcheck="false" enterkeyhint="done"></label></div>`;
+    if (here || device.signOut) {
+      html += '<h2 class="section">This Device</h2><div class="list">' +
+        (here ? `<label class="row plain"><input class="field" id="name" aria-label="This device’s name" value="${one.esc(here.name)}" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>`
+          : `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(device.name)}</span></div></div></div>`) +
+        (device.signOut ? `<button class="row plain out" data-out>Sign Out</button>` : "") + "</div>";
+      if (device.build) html += `<p class="footer build">${one.esc(device.build)}</p>`;
     }
     html += '<h2 class="section">Your Devices</h2><div class="list">' + mine.map(deviceRow).join("") + clients.filter((c) => c.user === me()).map(clientRow).join("") +
       `<a class="row plain action-row" data-pair>${one.icon("desktop")}<span>Pair a Computer</span></a></div><div id="ask"></div>`;
@@ -121,7 +119,7 @@
   }
 
   const draw = () => one.render("#page", async () => {
-    state = await one.api("GET", "/v1/state");
+    [state, device] = await Promise.all([one.api("GET", "/v1/state"), one.device()]);
     const html = page();
     // Not while they're naming this device or answering a question.
     if (document.activeElement?.id === "name" || document.querySelector("#ask .confirm")) return;
@@ -146,8 +144,9 @@
     else if (t.dataset.place) place(t.dataset.place, t.value, t);
   });
   document.addEventListener("click", (e) => {
-    const t = e.target.closest?.("[data-remove], [data-pair]");
-    if (t?.dataset.remove) remove(t.dataset.remove);
+    const t = e.target.closest?.("[data-remove], [data-pair], [data-out]");
+    if (t?.hasAttribute("data-out")) signOut();
+    else if (t?.dataset.remove) remove(t.dataset.remove);
     else if (t) pair();
   });
   document.addEventListener("keydown", (e) => e.target.id === "name" && e.key === "Enter" && e.target.blur());
@@ -179,6 +178,12 @@
       run: () => one.api("POST", "/v1/remove", { key }),
     }).then((done) => done && draw());
     document.querySelector("#ask").scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  // What they signed in to, in their words: "your One App", or a workplace's, "the PTC App".
+  const ours = `${one.config.join_domain ? "the" : "your"} ${one.config.name.replace(/^The /, "")}`;
+  async function signOut() {
+    if (await one.alert({ title: `Sign Out of ${ours} on this device?`, action: "Sign Out", danger: true })) one.signOut();
   }
 
   function pair() {

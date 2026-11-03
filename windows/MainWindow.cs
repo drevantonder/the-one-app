@@ -452,6 +452,7 @@ public sealed class MainWindow : Window
         nav.ItemInvoked += (_, e) =>
         {
             if (e.InvokedItemContainer?.Tag is Route r) Go(r);
+            else if (e.InvokedItemContainer?.Tag is string url) Shell.Open(url);
         };
         nav.BackRequested += (_, _) => Back();
         body.Content = nav;
@@ -593,9 +594,10 @@ public sealed class MainWindow : Window
             nav.MenuItems.Add(Item(Route.Services(page.Scope), Labeled(Look.Folder(store.ServicesOn(page), 20), "Services")));
         }
         Head(Route.Settings, "Settings");
-        // An item with an app (the App Store) opens that app.
+        // An item with an app (the App Store) opens that app; one with a url (Passkeys), the browser.
         foreach (var item in store.SettingsItems)
-            nav.MenuItems.Add(Item(item.App is { } a ? Route.ScreenOf(a, null) : Route.OwnOf(item.Name), Labeled(Look.Setting(item, 20), item.Title), item.Badge ?? 0));
+            if (item.Url is { } url) nav.MenuItems.Add(new NavigationViewItem { Content = Labeled(Look.Setting(item, 20), item.Title), Tag = url, SelectsOnInvoked = false });
+            else nav.MenuItems.Add(Item(item.App is { } a ? Route.ScreenOf(a, null) : Route.OwnOf(item.Name), Labeled(Look.Setting(item, 20), item.Title), item.Badge ?? 0));
         nav.SelectedItem = selected;
     }
 }
