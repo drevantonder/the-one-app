@@ -153,6 +153,8 @@ pub struct Members {
     pub devices_at: u64,
     /// Each scope's current epoch, by its newest `epoch` entry that counts (src/keys.rs).
     pub epochs: BTreeMap<Scope, Epoch>,
+    /// The hash each counting `epoch` entry gave its key, by scope and number: what a key from the bucket must match.
+    pub epoch_hashes: BTreeMap<(Scope, u32), String>,
     /// Standing work: until when (milliseconds) each endpoint may hold an app's keys in a scope, by (endpoint, scope,
     /// app), as the latest `grant` of each said; one with `until: 0` is gone.
     pub grants: BTreeMap<(Key, Scope, String), Grant>,
@@ -172,6 +174,8 @@ pub struct Grant {
 pub struct Epoch {
     pub n: u32,
     pub to: Vec<Key>,
+    /// `keys::epoch_hash` of its key, so a device takes from the bucket only the key the entry made.
+    pub hash: Option<String>,
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
@@ -433,7 +437,12 @@ impl Members {
                 ensure!(n == self.epoch(&scope) as u64 + 1, "an epoch follows the one before it");
                 let to = data["to"].as_array().context("no to")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<Vec<_>>>()?;
                 ensure!(to.iter().all(|k| self.machine(k).is_some()), "an epoch is sealed only to the install's endpoints");
-                self.epochs.insert(scope, Epoch { n: n as u32, to });
+                let hash = data["hash"].as_str().map(str::to_string);
+                ensure!(hash.as_ref().is_none_or(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit())), "an epoch's hash is 64 hex characters");
+                if let Some(hash) = &hash {
+                    self.epoch_hashes.insert((scope.clone(), n as u32), hash.clone());
+                }
+                self.epochs.insert(scope, Epoch { n: n as u32, to, hash });
             }
             "grant" => {
                 let endpoint = key_of("endpoint")?;
@@ -886,6 +895,87 @@ pub fn device(endpoint: &crate::keys::Endpoint, user: &str, name: &str, roles: &
     node("device", data)
 }
 
+/// Lists a passkey as `user`'s device, by the credential it is: what's sealed to its keys (from its PRF) lets them back
+/// in on a new device.
+pub fn passkey(endpoint: &crate::keys::Endpoint, user: &str, name: &str, credential: &str) -> Content {
+    let mut content = device(endpoint, user, name, &[Kind::Client], None);
+    content.data["passkey"] = json!(credential);
+    content
+}
+
+// The rest of `global`'s member entries, as people's devices write them: the web client builds the same content
+// (kernel/web/members.js), and tests/contracts.rs checks it does.
+
+pub fn role(user: &str, role: Role) -> Content {
+    node("role", json!({ "user": user, "role": role }))
+}
+
+pub fn remove_user(user: &str) -> Content {
+    node("remove", json!({ "user": user }))
+}
+
+/// Takes a device out: `seq` is its last entry in `global` that the remover holds (none if it has none), and its later
+/// ones don't count.
+pub fn remove_device(key: &Key, seq: Option<u32>) -> Content {
+    node("remove", json!({ "key": hex(key), "seq": seq }))
+}
+
+/// One of the install's settings; `None` puts back the white label's default.
+pub fn setting(name: &str, value: Option<&str>) -> Content {
+    node("setting", json!({ "name": name, "value": value }))
+}
+
+pub fn group(id: &str, name: &str) -> Content {
+    node("group", json!({ "group": id, "name": name }))
+}
+
+pub fn invite(group: &str, user: &str, role: Role) -> Content {
+    node("invite", json!({ "group": group, "user": user, "role": role }))
+}
+
+pub fn accept(group: &str) -> Content {
+    node("accept", json!({ "group": group }))
+}
+
+/// A group member's role, or `None` to take them out.
+pub fn member(group: &str, user: &str, role: Option<Role>) -> Content {
+    node("member", json!({ "group": group, "user": user, "role": role }))
+}
+
+/// Renames a device (`key`), a person (`user`) or a group (`group`): `what` is which, `id` its key (hex) or id.
+pub fn rename(what: &str, id: &str, name: &str) -> Content {
+    let mut data = json!({ "name": name });
+    data[what] = json!(id);
+    node("rename", data)
+}
+
+/// A scope's new epoch, sealed to `to`, its key's `keys::epoch_hash` as `hash`.
+pub fn epoch(scope: &Scope, n: u32, to: &[Key], hash: &str) -> Content {
+    node("epoch", json!({ "scope": scope.to_string(), "n": n, "to": to.iter().map(hex).collect::<Vec<_>>(), "hash": hash }))
+}
+
+/// Standing work: `endpoint` keeps `app` running in `scope` until `until`, or no longer with 0.
+pub fn grant(endpoint: &Key, scope: &Scope, app: &str, until: u64) -> Content {
+    node("grant", json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until }))
+}
+
+/// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), as its owner (`owner`) says.
+pub fn retire(app: &str, owner: &str, how: &str) -> Result<Content> {
+    let mut data = json!({ "name": app, "owner": owner });
+    match how {
+        "deleted" => data["deleted"] = json!(true),
+        "restored" => data["deleted"] = json!(false),
+        "erased" => data["erased"] = json!(true),
+        other => bail!("an app is deleted, restored or erased, not {other}"),
+    }
+    Ok(node("app", data))
+}
+
+/// Puts an app on a scope's page, or takes it off.
+pub fn install(app: &str, installed: bool) -> Content {
+    node(if installed { "install" } else { "uninstall" }, json!({ "app": app }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1006,7 +1096,7 @@ mod tests {
         let bob = hex(&bobs.id());
         add(&mut entries, &mut bobs, BOB, node("epoch", json!({ "scope": format!("user:{BOB}"), "n": 1, "to": [bob] })));
         let m = members(&entries);
-        assert_eq!(m.epochs[&Scope::Global], Epoch { n: 1, to: vec![mac.id()] });
+        assert_eq!(m.epochs[&Scope::Global], Epoch { n: 1, to: vec![mac.id()], hash: None });
         assert_eq!(m.epoch(&Scope::User(BOB.into())), 1, "a person's own scope is theirs");
         assert_eq!(m.epoch(&Scope::User(ANDRE.into())), 0);
     }

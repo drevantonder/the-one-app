@@ -79,7 +79,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
             let kind = now.remove("kind").and_then(|k| k.as_str().filter(|k| !k.is_empty()).map(str::to_string)).unwrap_or_else(|| "always_on".into());
             let mut device = json!({
                 "kind": kind, "use": rank::place(&set, &hex(&s.key), &kind), "far": false,
-                "key": hex(&s.key), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
+                "key": hex(&s.key), "seal": hex(&s.seal), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
                 "roles": s.roles, "serves_me": m.serves(&s.key, me),
                 "runs_for": m.scopes().iter().filter(|scope| m.runs_for(&s.key, scope)).map(|scope| scope.to_string()).collect::<Vec<_>>(),
                 "build": null, "target": null, "sidecars": [], "installed_sidecars": [],
@@ -104,7 +104,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         .clients()
         .filter(|c| !c.is(Kind::Compute))
         .map(|c| {
-            let mut client = json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "roles": c.roles, "passkey": c.passkey, "me": false });
+            let mut client = json!({ "key": hex(&c.key), "seal": hex(&c.seal), "name": c.name, "user": c.user, "roles": c.roles, "passkey": c.passkey, "me": false });
             client.as_object_mut().unwrap().extend((here.client_now)(c));
             client
         })
@@ -121,6 +121,13 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         .collect();
     json!({
         "name": m.name, "root": m.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
+        // What a device seals a scope's new epoch to, beside its devices' seal keys.
+        "recovery": m.recovery.as_ref().map(hex),
+        // Each scope's newest epoch the viewer may use, and its epochs' hashes, which a key from the bucket must match.
+        "epochs": m.epochs.iter().filter(|(s, _)| m.may_use(me, s)).map(|(s, e)| {
+            let hashes: Map<String, Value> = m.epoch_hashes.range((s.clone(), 0)..=(s.clone(), u32::MAX)).map(|((_, n), h)| (n.to_string(), json!(h))).collect();
+            (s.to_string(), json!({ "n": e.n, "hashes": hashes }))
+        }).collect::<Map<String, Value>>(),
         "member": here.member,
         "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at, "clients": clients,
         // Standing work this person granted: which endpoint keeps which app running in which scope, until when.

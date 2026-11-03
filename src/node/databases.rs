@@ -142,7 +142,7 @@ impl Node {
         tracing::info!("made {scope}'s first epoch");
         // Written after: writing it needs `global`'s keys, which may be what's being made.
         let to: Vec<String> = to.iter().map(|(k, _)| hex(k)).collect();
-        self.0.epoch_entries.lock().unwrap().push(members::node("epoch", json!({ "scope": name, "n": 1, "to": to })));
+        self.0.epoch_entries.lock().unwrap().push(members::node("epoch", json!({ "scope": name, "n": 1, "to": to, "hash": crate::keys::epoch_hash(&key) })));
         Ok(Some(key))
     }
 
