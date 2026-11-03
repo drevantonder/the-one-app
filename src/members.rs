@@ -82,6 +82,8 @@ pub struct Machine {
     pub roles: BTreeSet<Kind>,
     /// A passkey listed as a device: its credential id.
     pub passkey: Option<String>,
+    /// For a service endpoint, the service it offers (`whatsapp`): what calls naming it reach.
+    pub service: Option<String>,
     pub removed: bool,
 }
 
@@ -260,6 +262,16 @@ impl Members {
 
     pub fn clients(&self) -> impl Iterator<Item = &Machine> {
         self.machines.values().filter(|m| m.is(Kind::Client) && self.machine(&m.key).is_some())
+    }
+
+    /// A service endpoint: one that offers a device's abilities, checking each caller itself.
+    pub fn service(&self, key: &Key) -> Option<&Machine> {
+        self.machine(key).filter(|m| m.is(Kind::Service) && m.service.is_some())
+    }
+
+    /// The service endpoints offering `name`.
+    pub fn services<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a Machine> {
+        self.machines.values().filter(move |m| m.service.as_deref() == Some(name) && self.service(&m.key).is_some())
     }
 
     /// A user's role in a group, if they're in it.
@@ -590,6 +602,9 @@ fn listed(data: &Value, user: &str) -> Result<Machine> {
     ensure!(!roles.is_empty(), "an endpoint does something: client, compute or service");
     let name = text("name")?.trim().to_string();
     ensure!(!name.is_empty(), "an endpoint has a name");
+    let service = data["service"].as_str().map(str::to_string);
+    ensure!(service.as_deref().is_none_or(valid_app_name), "a service's name is lowercase words joined by -");
+    ensure!(service.is_some() == roles.contains(&Kind::Service), "a service endpoint names the service it offers, and only it does");
     Ok(Machine {
         key: unhex(text("key")?)?,
         seal: unhex(text("seal")?)?,
@@ -597,6 +612,7 @@ fn listed(data: &Value, user: &str) -> Result<Machine> {
         name,
         roles,
         passkey: data["passkey"].as_str().map(str::to_string),
+        service,
         removed: false,
     })
 }
@@ -939,6 +955,11 @@ pub fn retire(app: &str, owner: &str, how: &str) -> Result<Content> {
 /// Puts an app on a scope's page, or takes it off.
 pub fn install(app: &str, installed: bool) -> Content {
     node(if installed { "install" } else { "uninstall" }, json!({ "app": app }))
+}
+
+/// Lists a service endpoint offering `service` as `user`'s, by one of their own devices.
+pub fn service(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str) -> Content {
+    node("device", json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service }))
 }
 
 #[cfg(test)]

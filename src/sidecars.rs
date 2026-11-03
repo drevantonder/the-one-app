@@ -188,10 +188,10 @@ impl Sidecars {
     }
 }
 
-/// A sidecar this program hosts as a process of its own beside its machine's node, `<cli> sidecars serve <name>`, which
-/// `sidecars/install.sh` installs as a service on a device whose owner wants it there. It registers over the local API
-/// as any sidecar does (`serve` is the one place it meets its callers), keeps what it keeps in `<home>/<name>`, and
-/// runs only where it's installed, unlike those `built_in`.
+/// A sidecar this program hosts as a service endpoint of its own, `<cli> sidecars serve <name>` (src/service.rs), which
+/// `sidecars/install.sh` installs on a device whose owner wants it there, with or without a node. It registers with
+/// its endpoint over a loopback as any hosted sidecar does (`answer_hosted` is the one place it meets its callers),
+/// keeps what it keeps in its folder, and runs only where it's installed, unlike those `built_in`.
 pub struct Hosted {
     pub name: &'static str,
     pub describe: fn() -> Value,
@@ -265,20 +265,20 @@ fn answer(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result
     Ok(Some(body))
 }
 
-/// Serves the hosted sidecar `name` until this program is replaced by an update, when the service manager starts the
-/// new one: registers with the node and answers its calls, registering again whenever the node forgets it (it keeps
-/// sidecars in memory) or restarts.
-pub fn serve(name: &str) -> Result<()> {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+/// Answers the calls for the hosted sidecar `name`, from the service endpoint at `at` (src/service.rs), on the
+/// loopback its local token lets this program in at, until `replaced` says this program was: registers and answers its
+/// calls, registering again whenever it's forgotten (sidecars are kept in memory).
+pub fn answer_hosted(name: &str, dir: std::path::PathBuf, at: String, token: String, replaced: impl Fn() -> bool) -> Result<()> {
     let hosted = hosted().into_iter().find(|h| h.name == name).ok_or_else(|| anyhow!("{name} isn't a sidecar this program hosts"))?;
-    let dir = crate::home().join(name);
-    std::fs::create_dir_all(&dir)?;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-    let host = std::sync::Arc::new(Host { name: hosted.name, dir, node: format!("http://{}", crate::api::addr()), agent: crate::api::agent() });
-    let poll: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(40))).middleware(crate::api::as_this_machine).build().into();
-    let exe = std::env::current_exe()?.canonicalize()?;
-    let ino = std::fs::metadata(&exe)?.ino();
-    let replaced = || std::fs::metadata(&exe).map(|m| m.ino()).ok() != Some(ino);
+    let as_this_program = move |mut req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext| {
+        if let Ok(value) = token.parse() {
+            req.headers_mut().insert(crate::api::LOCAL_TOKEN_HEADER, value);
+        }
+        next.handle(req)
+    };
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).middleware(as_this_program.clone()).build().into();
+    let poll: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(40))).middleware(as_this_program).build().into();
+    let host = std::sync::Arc::new(Host { name: hosted.name, dir, node: format!("http://{at}"), agent });
     let mut describe = (hosted.describe)();
     describe["version"] = json!(crate::config::BUILD);
     while !replaced() {
@@ -315,6 +315,5 @@ pub fn serve(name: &str) -> Result<()> {
             });
         }
     }
-    eprintln!("{name}: this program was replaced, so it stops for the new one");
     Ok(())
 }

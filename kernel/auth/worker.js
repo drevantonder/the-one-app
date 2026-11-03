@@ -12,7 +12,9 @@
 // with Google makes someone only with an invite for that Google account's email.
 //
 // A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
-// its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves.
+// its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves. A service (`one
+// sidecars serve`), which nobody signs in on, leaves one signed with its own key instead, naming the service: whoever
+// types its code on one of their devices makes it theirs.
 //
 // What an endpoint signs (`signedRequest` in shared/crypto.js, domain `one/auth`) names its route (`route: "POST
 // /api/auth/invites"`), is taken once, and counts only from one of the install's endpoints, as the relay's list says
@@ -60,6 +62,8 @@ const refuse = (status, message) => {
 const INVITE = 30 * 86_400_000;
 /// How long a device's request to join waits.
 const REQUEST = 15 * 60_000;
+// How many services' requests may wait at once: anyone may leave one.
+const SERVICES_WAITING = 16;
 /// How long a sign-in code works.
 const CODE = 10 * 60_000;
 /// How lately someone signed in for a client to be added as them, or a passkey added.
@@ -114,6 +118,8 @@ export class Auth extends DurableObject {
     sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null unique, email text, until integer not null, by text not null, used integer)");
     // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`.
     sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null)");
+    // Services' requests to join, by their key, signed by it: nobody's until one of the install's devices approves it.
+    sql.exec("create table if not exists services (key text primary key, seal text not null, name text not null, service text not null, made integer not null)");
     // The people who sign in only with a passkey: admins.
     sql.exec("create table if not exists passkey_only (user text primary key)");
     // Signed requests taken, until they're too old to take again.
@@ -302,12 +308,19 @@ export class Auth extends DurableObject {
     if (fields.route !== route) refuse(403, `That request was signed for ${fields.route}, not ${route}.`);
     const sql = this.ctx.storage.sql;
     sql.exec("delete from signed where at <= ?", Date.now() - 2 * 60_000);
-    if (sql.exec("select 1 from signed where sig = ?", asked.sig).toArray().length) refuse(403, "That request was sent already.");
-    sql.exec("insert into signed (sig, at) values (?, ?)", asked.sig, Date.now());
+    this.taken(asked.sig);
     if (!this.env.RELAY) refuse(503, "The install has no relay to say which devices are its own.");
     const allowed = await this.env.RELAY.allowed(by);
     if (!allowed) refuse(403, "That device isn't one of the install's.");
     return { by, fields, admin: allowed.admin === true };
+  }
+
+  /// Takes a signed request's signature once: one sent again is refused.
+  taken(sig) {
+    const sql = this.ctx.storage.sql;
+    sql.exec("delete from signed where at <= ?", Date.now() - 2 * 60_000);
+    if (sql.exec("select 1 from signed where sig = ?", sig).toArray().length) refuse(403, "That request was sent already.");
+    sql.exec("insert into signed (sig, at) values (?, ?)", sig, Date.now());
   }
 
   /// Someone signed in: by a session here, or an access token auth signed. → their user id, or null.
@@ -359,14 +372,17 @@ export class Auth extends DurableObject {
   /// Forgets requests to join that waited too long.
   expire() {
     this.ctx.storage.sql.exec("delete from requests where made <= ?", Date.now() - REQUEST);
+    this.ctx.storage.sql.exec("delete from services where made <= ?", Date.now() - REQUEST);
   }
 
   /// A device signed in asks to join: `{ key, seal, name, proof? }`, its endpoint keys (hex), its name, and for a
   /// newcomer's first device, `keys::invite_proof` of its invite's secret, key and seal key, kept with that invite for the
   /// inviting admin's device to check. → until when it waits.
   async ask(request) {
+    const body = await request.json().catch(() => refuse(400, "the body isn't JSON"));
+    if (body?.service != null) return this.askAsService(request, body);
     const user = (await this.person(request)) || refuse(401, "Sign in first.");
-    const { key, seal, name, proof } = await request.json().catch(() => refuse(400, "the body isn't JSON"));
+    const { key, seal, name, proof } = body;
     if (!KEY.test(key || "") || !KEY.test(seal || "")) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
     if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the device's name, up to 64 characters");
     if (proof != null && !KEY.test(proof)) refuse(400, "a proof is 64 hex characters");
@@ -381,6 +397,26 @@ export class Auth extends DurableObject {
     }
     const made = Date.now();
     sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made) values (?, ?, ?, ?, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made);
+    return { until: made + REQUEST };
+  }
+
+  /// A service asks to join, signed with its own key: `{ key, seal, name, service }`, `name` its machine's. A few wait
+  /// at once, since anyone may ask. → until when it waits.
+  async askAsService(request, body) {
+    const { by, fields } = await checkRequest(DOMAIN, body).catch((err) => refuse(403, `That request isn't signed as it should be: ${err.message}.`));
+    if (fields.route !== `${request.method} ${new URL(request.url).pathname}`) refuse(403, `That request was signed for ${fields.route}.`);
+    const { key, seal, name, service } = fields;
+    if (key !== by) refuse(403, "A service asks with the key it signs with.");
+    if (!KEY.test(seal || "")) refuse(400, "seal is an endpoint key, 64 hex characters");
+    if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the machine's name, up to 64 characters");
+    if (typeof service !== "string" || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(service) || service.length > 64) refuse(400, "a service's name is lowercase words joined by -");
+    this.taken(body.sig);
+    this.expire();
+    const sql = this.ctx.storage.sql;
+    const waiting = sql.exec("select count(*) as n from services where key != ?", key).toArray()[0].n;
+    if (waiting >= SERVICES_WAITING) refuse(429, "Too many services are waiting to be approved: try again in a few minutes.");
+    const made = Date.now();
+    sql.exec("insert or replace into services (key, seal, name, service, made) values (?, ?, ?, ?, ?)", key, seal, name.trim(), service, made);
     return { until: made + REQUEST };
   }
 
@@ -400,7 +436,10 @@ export class Auth extends DurableObject {
     this.expire();
     const sql = this.ctx.storage.sql;
     const signed = await this.signed(request);
-    if (signed) return { requests: this.shown(sql.exec("select * from requests order by made").toArray()) };
+    if (signed) {
+      const services = sql.exec("select * from services order by made").toArray().map((r) => ({ key: r.key, seal: r.seal, name: r.name, user: "", person: "", service: r.service, made: r.made, until: r.made + REQUEST }));
+      return { requests: [...this.shown(sql.exec("select * from requests order by made").toArray()), ...services] };
+    }
     const user = (await this.person(request)) || refuse(401, "Sign in first.");
     return { requests: this.shown(sql.exec("select * from requests where user = ? order by made", user).toArray()) };
   }
@@ -409,8 +448,12 @@ export class Auth extends DurableObject {
   async mayTouch(request, key) {
     this.expire();
     const sql = this.ctx.storage.sql;
-    const [row] = sql.exec("select * from requests where key = ?", key).toArray();
     const signed = await this.signed(request);
+    const [row] = sql.exec("select * from requests where key = ?", key).toArray();
+    if (!row && signed) {
+      const [service] = sql.exec("select * from services where key = ?", key).toArray();
+      if (service) return { key: service.key, seal: service.seal, name: service.name, user: "", service: service.service, made: service.made };
+    }
     const ok = row && (signed || row.user === ((await this.person(request)) || refuse(401, "Sign in first.")));
     if (!ok) refuse(404, "No request waits with that key: it was approved, refused or waited too long.");
     return row;
@@ -418,13 +461,15 @@ export class Auth extends DurableObject {
 
   /// One request, for its new device to see it still waits.
   async request(request, key) {
-    return this.shown([await this.mayTouch(request, key)])[0];
+    const row = await this.mayTouch(request, key);
+    return row.service ? { ...row, person: "", until: row.made + REQUEST } : this.shown([row])[0];
   }
 
   /// Forgets a request, approved or refused.
   async unask(request, key) {
     await this.mayTouch(request, key);
     this.ctx.storage.sql.exec("delete from requests where key = ?", key);
+    this.ctx.storage.sql.exec("delete from services where key = ?", key);
     return {};
   }
 

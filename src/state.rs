@@ -71,8 +71,11 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
 
 fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) -> Value {
     let set = rank::set(&m.settings);
+    // Service endpoints are listed as devices too, offering their service.
     let mut devices: Vec<Value> = m
-        .computes()
+        .machines
+        .values()
+        .filter(|s| m.compute(&s.key).is_some() || m.service(&s.key).is_some())
         .map(|s| {
             let mut now = (here.device_now)(s);
             // A device that hasn't said what it is, as one that's always on.
@@ -80,7 +83,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
             let mut device = json!({
                 "kind": kind, "use": rank::place(&set, &hex(&s.key), &kind), "far": false,
                 "key": hex(&s.key), "seal": hex(&s.seal), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
-                "roles": s.roles, "serves_me": m.serves(&s.key, me),
+                "roles": s.roles, "service": s.service, "serves_me": m.serves(&s.key, me),
                 "runs_for": m.scopes().iter().filter(|scope| m.runs_for(&s.key, scope)).map(|scope| scope.to_string()).collect::<Vec<_>>(),
                 "build": null, "target": null, "sidecars": [], "installed_sidecars": [],
                 "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),

@@ -245,6 +245,37 @@ impl Node {
                 }
             });
         }
+        self.hello_services();
+    }
+
+    /// Says hello to each service endpoint of the install, which says what it offers and whom it serves: it's listed
+    /// as a device offering that sidecar, as another device's hello lists those there.
+    pub(super) fn hello_services(&self) {
+        let Ok(services) = self.with(|i| Ok(i.r.members.machines.values().filter(|m| i.r.members.service(&m.key).is_some()).map(|m| (m.key, m.service.clone().unwrap_or_default())).collect::<Vec<_>>())) else {
+            return;
+        };
+        for (key, name) in services {
+            let node = self.clone();
+            tokio::spawn(async move {
+                let asked = Instant::now();
+                let offers = match node.hello_service(key).await {
+                    Ok(Some(offers)) => offers,
+                    Ok(None) => return tracing::debug!("service {} doesn't take calls from this device yet", short(&key)),
+                    Err(err) => return tracing::debug!("service {}: {err:#}", short(&key)),
+                };
+                let (mut describe, users) = offers;
+                describe["name"] = json!(name);
+                let sidecars: Vec<Sidecar> = vec![(name.clone(), users, describe)];
+                let changed = node.with(|i| {
+                    i.far.insert(key, asked.elapsed());
+                    let before = i.peers.insert(key, Peer { sidecars: sidecars.clone(), load: None, seen: Instant::now() });
+                    Ok(before.is_none_or(|p| p.sidecars != sidecars || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
+                });
+                if changed.unwrap_or(false) {
+                    node.emit(Event::Changed { apps: vec![name] });
+                }
+            });
+        }
     }
 }
 

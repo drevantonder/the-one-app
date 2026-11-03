@@ -52,7 +52,7 @@ impl std::fmt::Display for NotThere {
 impl std::error::Error for NotThere {}
 
 /// What devices of this white label speak: another's never meet them.
-fn alpn() -> Vec<u8> {
+pub fn alpn() -> Vec<u8> {
     format!("{}/1", crate::config::CLI).into_bytes()
 }
 
@@ -61,9 +61,14 @@ fn http_alpn() -> Vec<u8> {
     format!("{}/http/1", crate::config::CLI).into_bytes()
 }
 
+/// What service endpoints of this white label answer (src/service.rs): a node asks one with it.
+pub fn service_alpn() -> Vec<u8> {
+    format!("{}/service/1", crate::config::CLI).into_bytes()
+}
+
 /// The relay at the install's address, which serves no QUIC address discovery, a Worker having no UDP; with `ticket`,
 /// a pairing code's, which lets a computer joining in.
-fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)> {
+pub fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)> {
     let url: RelayUrl = address.trim_end_matches('/').parse().context("the install's address isn't a URL")?;
     let mut config = RelayConfig::from(url.clone());
     config.quic = None;
@@ -150,6 +155,9 @@ impl Node {
         }
         if !self.is_device(&remote) && self.is_serverless(&remote) {
             return self.take_serverless(conn).await;
+        }
+        if !self.is_device(&remote) && self.is_service(&remote) {
+            return self.take_service(conn).await;
         }
         if !self.is_device(&remote) {
             return self.take_joining(conn).await;
@@ -250,6 +258,31 @@ impl Node {
         }
     }
 
+    /// A service endpoint of the install, which asks only for calls, as its own person: a service doesn't write
+    /// itself, it asks a node to.
+    async fn take_service(&self, conn: Connection) {
+        let remote = *conn.remote_id().as_bytes();
+        while let Ok((mut send, mut recv)) = conn.accept_bi().await {
+            if !self.is_service(&remote) {
+                return conn.close(1u32.into(), b"not a service of this install");
+            }
+            let node = self.clone();
+            tokio::spawn(async move {
+                let msg: Value = match recv.read_to_end(MESSAGE_LIMIT).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
+                    Ok(msg) => msg,
+                    Err(err) => return tracing::debug!("what service {} sent: {err:#}", short(&remote)),
+                };
+                let answer = match msg["kind"].as_str() {
+                    Some("ask") => node.accept_service_call(remote, &msg["body"]["call"]).await.json(),
+                    _ => json!({ "error": "a service only asks for calls" }),
+                };
+                if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
+                    tracing::debug!("answering service {}: {err:#}", short(&remote));
+                }
+            });
+        }
+    }
+
     /// A computer that isn't the install's: → its one ask to join answered, then the connection closed.
     async fn take_joining(&self, conn: Connection) {
         use std::sync::atomic::Ordering::SeqCst;
@@ -305,6 +338,10 @@ impl Node {
         self.with(|i| Ok(i.r.members.compute(key).is_some())).unwrap_or(false)
     }
 
+    pub(super) fn is_service(&self, key: &Key) -> bool {
+        self.with(|i| Ok(i.r.members.service(key).is_some())).unwrap_or(false)
+    }
+
     /// Whether `key` is the install's serverless node's endpoint, as `serverless deploy` set it.
     fn is_serverless(&self, key: &Key) -> bool {
         self.with(|i| Ok(i.r.members.settings.get("serverless").is_some_and(|k| *k == hex(key)))).unwrap_or(false)
@@ -329,7 +366,8 @@ impl Node {
         }
         let (url, _) = relay(&address, None)?;
         let addr = EndpointAddr::new(PublicKey::from_bytes(to)?).with_relay_url(url);
-        let conn = match tokio::time::timeout(CONNECT, endpoint.connect(addr, &alpn())).await {
+        let alpn = if self.is_service(to) { service_alpn() } else { alpn() };
+        let conn = match tokio::time::timeout(CONNECT, endpoint.connect(addr, &alpn)).await {
             Ok(Ok(conn)) => conn,
             Ok(Err(err)) => bail!(NotThere(format!("{} couldn't be reached: {err:#}", short(to)))),
             Err(_) => bail!(NotThere(format!("{} isn't connected", short(to)))),
@@ -378,6 +416,28 @@ impl Node {
     /// reached that device.
     pub(super) async fn ask(&self, to: Key, call: Value, limit: Duration) -> Result<Value> {
         self.send(&to, "ask", &json!({ "call": call }), true, limit).await
+    }
+
+    /// Says hello to a service endpoint, with how many of `global`'s entries this device has: it answers what it
+    /// offers once it lists this device as one that may call it; until then, that it's behind, and is sent them all,
+    /// which it checks itself. → what it offers, and whom it serves.
+    pub(super) async fn hello_service(&self, to: Key) -> Result<Option<(Value, Vec<String>)>> {
+        let entries: Vec<Entry> = self.with(|i| Ok(i.r.store.scope("global")?))?;
+        let hello = json!({ "entries": entries.len() });
+        let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
+        if answer["behind"] == true {
+            let pack = data_encoding::BASE64.encode(&crate::entry::pack(&entries.iter().collect::<Vec<_>>()));
+            let taken = self.send(&to, "entries", &json!({ "pack": pack }), true, CONNECT).await?;
+            if let Some(err) = taken["error"].as_str() {
+                bail!("{} didn't take the install's entries: {err}", short(&to));
+            }
+            answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
+        }
+        if let Some(err) = answer["error"].as_str() {
+            bail!("{err}");
+        }
+        let users = answer["users"].as_array().into_iter().flatten().filter_map(|u| u.as_str().map(str::to_string)).collect();
+        Ok(answer.get("describe").filter(|d| d.is_object()).map(|d| (d.clone(), users)))
     }
 
     /// Tells each of `to` that something changed, expecting no answer.

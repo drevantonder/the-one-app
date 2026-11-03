@@ -85,7 +85,9 @@ impl Node {
     /// the nearest. A sidecar about its own machine runs here first.
     pub(super) fn candidates(&self, req: &CallRequest, me: &Caller) -> Result<Vec<Key>> {
         if let Some(device) = &req.device {
-            return Ok(vec![self.find_device(device)?]);
+            // A sidecar's call goes to the service offering it on that device, if one does.
+            let service = req.sidecar.as_ref().and_then(|_| self.find_service(&req.app, device));
+            return Ok(vec![service.map_or_else(|| self.find_device(device), Ok)?]);
         }
         let here = self.runs_sidecar_here(&req.app);
         // A sidecar, or one of its operations, that's about its own machine (`"prefer": "here"`: Shell, models_here) runs
@@ -130,7 +132,9 @@ impl Node {
 
     /// Asks another device to run a call.
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
-        let request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": me.token } });
+        // A service runs nothing as a sign-in: it isn't given one's token.
+        let token = if self.is_service(&device) { None } else { me.token.as_ref() };
+        let request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": token } });
         let reply = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await?;
         Ok(Reply::from_json(reply))
     }
@@ -707,7 +711,7 @@ impl Node {
             // Where things run first, as the person the call is for: only an admin changes it.
             ("GET", "/use") => {
                 let install = self.state_for(&grant.caller)["install"].take();
-                let mut order: Vec<Value> = install["devices"].as_array().cloned().unwrap_or_default().into_iter().map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "use": s["use"], "online": s["online"], "here": s["me"] })).collect();
+                let mut order: Vec<Value> = install["devices"].as_array().cloned().unwrap_or_default().into_iter().filter(|s| s["service"].is_null()).map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "use": s["use"], "online": s["online"], "here": s["me"] })).collect();
                 if let Some(use_) = install["serverless"]["use"].as_str() {
                     order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "use": use_, "online": true, "here": false }));
                 }
@@ -746,14 +750,34 @@ impl Node {
         self.run(&req, &me).await
     }
 
-    /// A call is taken only as a user from one of their devices, or a node that runs their calls, passed on by either.
+    /// Runs a call one of the install's services asked for, as its person, wherever it runs: a service writes nothing
+    /// itself, and asks for the calls the program it offers makes (`/v1/call` where it's hosted).
+    pub(super) async fn accept_service_call(&self, remote: Key, request: &Value) -> Reply {
+        let me = match self.check_caller(remote, request) {
+            Ok(me) => me,
+            Err(err) => return Reply::Error(format!("{err:#}")),
+        };
+        let mut req: CallRequest = match serde_json::from_value(request.clone()) {
+            Ok(req) => req,
+            Err(err) => return Reply::Error(format!("{err:#}")),
+        };
+        (req.from, req.depth) = (None, 0);
+        match self.call_as(req, me).await {
+            Ok(v) => Reply::Ok(v),
+            Err(err) => Reply::Error(format!("{err:#}")),
+        }
+    }
+
+    /// A call is taken only as a user from one of their devices, or a node that runs their calls, passed on by either;
+    /// or from one of their services, as it.
     pub(super) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
         let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
         self.with(|i| {
             let m = &i.r.members;
+            let theirs = m.service(&remote).is_some_and(|s| s.user == user) && remote == key;
             let mine = |k: &Key| m.client(k).is_some_and(|c| c.user == user) || m.serves(k, &user);
-            ensure!(mine(&key) && (remote == key || m.serves(&remote, &user)), "{} may not call as that user", short(&remote));
+            ensure!(theirs || (mine(&key) && (remote == key || m.serves(&remote, &user))), "{} may not call as that user", short(&remote));
             Ok(())
         })?;
         let agent = request["me"]["agent"].as_str().map(str::to_string);

@@ -165,6 +165,15 @@ impl Node {
         }
     }
 
+    /// The service endpoint offering `service` on the device called `name` (or by key prefix), if there's one.
+    pub(super) fn find_service(&self, service: &str, name: &str) -> Option<Key> {
+        let found: Vec<Key> = self.with(|i| Ok(i.r.members.services(service).filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect())).ok()?;
+        match found.as_slice() {
+            [one] => Some(*one),
+            _ => None,
+        }
+    }
+
     /// Finds a device or client of the install by name or key prefix.
     pub fn find_machine(&self, name: &str) -> Result<Key> {
         let found: Vec<Key> = self.with(|i| Ok(i.r.members.machines.values().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).map(|m| m.key).collect()))?;

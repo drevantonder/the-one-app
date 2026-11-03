@@ -1,13 +1,15 @@
 #!/bin/sh
-# Installs a sidecar as the one-<sidecar> service on a device, here or over ssh: ./install.sh whatsapp [host]. One
-# with a folder here is a Go program, built for the device; any other is one the node's own program hosts
-# (one sidecars serve <sidecar>), so the device's node must have the build that has it. On Linux it's a systemd
-# service; on a Mac, a launch agent of the user's. CONFIG=path/to/config.toml installs it as <cli>-<sidecar>, for that
-# white label's node: its port, CLI and data folder (the node service's <CLI>_HOME, if it has one).
+# Installs a sidecar as the one-<sidecar> service on a device, here or over ssh: ./install.sh whatsapp [host]. It's a
+# service endpoint of its own (src/service.rs), which needs no node there, only this program: one with a folder here is
+# a Go program, built for the device and started by `one sidecars host`; any other is one this program hosts (`one
+# sidecars serve`). It's for the One App of the device you run this on, and shows a code that one of your devices
+# approves it with (`one devices approve <code>`), which this prints. On Linux it's a systemd service; on a Mac, a
+# launch agent of the user's. CONFIG=path/to/config.toml installs it as <cli>-<sidecar>, for that white label: its CLI
+# and data folder (the node service's <CLI>_HOME there, if it has one).
 set -eu
 config=${CONFIG:+$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")}
 cd "$(dirname "$0")"
-sidecar=$1 name=one-$1 node=one env=
+sidecar=$1 name=one-$1 node=one env= home='$HOME/.local/share/one'
 host=${2:-}
 on() { if [ -n "$host" ]; then ssh "$host" "$@" </dev/null; else sh -c "$*"; fi; }
 if [ -n "$config" ]; then
@@ -17,22 +19,37 @@ if [ -n "$config" ]; then
 	home=$(on "systemctl show -p Environment $cli 2>/dev/null | tr ' ' '\n' | sed -n 's/^${upper}_HOME=//p'")
 	home=${home:-'$HOME'/.local/share/$cli}
 	env="${upper}_HOME=$home"
-	[ ! -d "$sidecar" ] || env="ONE_ADDR=127.0.0.1:$(field port) ONE_CLI=$cli ONE_HOME=$home $(echo "$sidecar" | tr a-z- A-Z_)_DATA=$home/$sidecar"
+	[ ! -d "$sidecar" ] || env="$env $(echo "$sidecar" | tr a-z- A-Z_)_DATA=$home/$sidecar"
 fi
-# Installed by the device's owner who runs this, and allowed there if an owner removed it before.
-allow() { on "~/.local/bin/$node sidecars add $sidecar" || echo "$node sidecars add $sidecar failed: the sidecar serves once an owner allows it there" >&2; }
+# The One App it's for: this device's.
+link=$($node sidecars install-link)
 set -- $(on uname -sm)
 os=$(echo "$1" | tr A-Z a-z)
 case $2 in x86_64) arch=amd64 ;; *) arch=arm64 ;; esac
+# This program, there: copied from here if it isn't, when here is the same kind of machine.
+if ! on "test -x ~/.local/bin/$node"; then
+	[ "$(uname -sm)" = "$*" ] || { echo "$node isn't on ${host:-this device}: install it there first" >&2; exit 1; }
+	on "mkdir -p ~/.local/bin"
+	if [ -n "$host" ]; then scp -q "$(command -v "$node")" "$host:.local/bin/$node"; else cp "$(command -v "$node")" ~/.local/bin/; fi
+fi
 if [ -d "$sidecar" ]; then
 	(cd "$sidecar" && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "-X main.built=$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- . || echo +dirty)" -o "../$name" .)
 	if [ -n "$host" ]; then scp -q "$name" "$host:/tmp/$name"; else cp "$name" "/tmp/$name"; fi
 	rm "$name"
-	run='$HOME/.local/bin/$name' install='mv /tmp/$name ~/.local/bin/$name'
+	run='$HOME/.local/bin/'"$node"' sidecars host '"$sidecar"' $HOME/.local/bin/'"$name"' --install '"$link" install='mv /tmp/$name ~/.local/bin/$name'
 else
 	# A Go program it was before goes.
-	run='$HOME/.local/bin/'"$node"' sidecars serve '"$sidecar" install='rm -f ~/.local/bin/$name'
+	run='$HOME/.local/bin/'"$node"' sidecars serve '"$sidecar"' --install '"$link" install='rm -f ~/.local/bin/$name'
 fi
+# Says the code to approve it with, once it's asked; or that it's approved already.
+code() {
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		c=$(on "cat $home/services/$sidecar/code 2>/dev/null" || true)
+		[ -z "$c" ] || { echo "Approve $sidecar on one of your devices: $node devices approve $c"; return; }
+		sleep 1
+	done
+	echo "$sidecar is running, approved already."
+}
 if [ "$os" = darwin ]; then
 [ -z "$config" ] || { echo "CONFIG installs on Linux only, for now" >&2; exit 1; }
 on "name=$name"'
@@ -54,7 +71,7 @@ cat >$plist <<EOF
 EOF
 launchctl bootout gui/$(id -u)/app.one.$name 2>/dev/null || true
 launchctl bootstrap gui/$(id -u) $plist'
-allow
+code
 exit
 fi
 on "name=$name"'
@@ -65,8 +82,6 @@ mkdir -p ~/.local/bin
 sudo tee /etc/systemd/system/$name.service >/dev/null <<EOF
 [Unit]
 Description=$name
-After='"$node"'.service
-Wants='"$node"'.service
 
 [Service]
 User=$user
@@ -84,4 +99,4 @@ sudo systemctl enable $name
 sudo systemctl restart $name
 sleep 3
 systemctl is-active --quiet $name || { journalctl -u $name -n 5 --no-pager; exit 1; }'
-allow
+code

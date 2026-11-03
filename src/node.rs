@@ -39,6 +39,7 @@ mod screens;
 mod sessions;
 pub use databases::NotGiven;
 pub use devices::{DeviceRequest, Invited};
+pub use net::{alpn, relay, service_alpn};
 pub use sessions::{Needs, client_token};
 mod sidecars;
 mod state;
@@ -742,7 +743,7 @@ impl Node {
         self.with(|i| {
             if handled.members {
                 let m = &i.r.members;
-                i.peers.retain(|peer, _| m.compute(peer).is_some());
+                i.peers.retain(|peer, _| m.compute(peer).is_some() || m.service(peer).is_some());
             }
             for log in &handled.dropped {
                 i.views.remove(log);

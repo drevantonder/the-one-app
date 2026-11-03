@@ -118,6 +118,10 @@ pub struct DeviceRequest {
     pub person: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proof: Option<String>,
+    /// For a service's request (`one sidecars serve`), signed by its own key and nobody's yet: the service it offers,
+    /// `name` being its machine's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
 }
 
 impl DeviceRequest {
@@ -250,6 +254,8 @@ impl Node {
         for r in asked {
             let Ok(device) = r.endpoint() else { continue };
             match (&r.proof, invites.get(&r.user)) {
+                // Whoever has a service's code makes it theirs: the code is what says which it is.
+                _ if r.service.is_some() => out.push(json!({ "device": r.name, "service": r.service })),
                 (None, _) if r.user == caller.user => out.push(json!({ "device": r.name, "person": r.person, "yours": true })),
                 (Some(proof), Some(i)) if *proof == crate::keys::invite_proof(i.secret.as_bytes(), &device) => {
                     out.push(json!({ "device": r.name, "person": i.name, "code": crate::keys::join_code(&device), "role": i.role }))
@@ -268,6 +274,16 @@ impl Node {
         let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let r = asked.into_iter().find(|r| r.endpoint().is_ok_and(|d| crate::keys::join_code(&d) == code)).context("no device is waiting with that code: it waits 15 minutes after it asks")?;
+        if let Some(service) = &r.service {
+            if !confirm {
+                return Ok(json!({ "device": r.name, "service": service }));
+            }
+            let approved = self.approve_service(caller, &r).await?;
+            if let Err(err) = self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}", r.key), json!({})).await {
+                tracing::warn!("forgetting an approved request at auth: {err:#}");
+            }
+            return Ok(approved);
+        }
         let invite = match &r.proof {
             Some(_) if caller.user == self.user()? => self.invites().await?.remove(&r.user),
             _ => None,
@@ -325,6 +341,29 @@ impl Node {
             }
         }
         Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not }))
+    }
+
+    /// Lets a service in as `caller`'s (`one sidecars serve` asked with its own key, and they typed the code it shows):
+    /// lists it as their service endpoint offering it, and tells the relay to let it in. It holds no keys: the nodes
+    /// that call it bring it the install's entries, which say who may. → what it is.
+    pub async fn approve_service(&self, caller: &Caller, r: &DeviceRequest) -> Result<Value> {
+        let service = r.service.as_deref().context("that request isn't a service's")?;
+        let endpoint = crate::keys::Endpoint { key: crate::keys::unhex(&r.key)?, seal: crate::keys::unhex(&r.seal)? };
+        ensure!(self.with(|i| Ok(i.r.members.machines.get(&endpoint.key).is_none()))?, "that service is listed already");
+        self.member_content(caller, members::service(&endpoint, &caller.user, &r.name, service)).await?;
+        self.tell_relay(json!({ "add": r.key, "admin": false }));
+        // Its first hello brings it the entries that say it's theirs: as soon as the relay lets it in.
+        let (node, key) = (self.clone(), endpoint.key);
+        tokio::spawn(async move {
+            for _ in 0..20 {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                if node.with(|i| Ok(i.online(&key))).unwrap_or(true) {
+                    return;
+                }
+                node.hello_services();
+            }
+        });
+        Ok(json!({ "device": r.name, "service": service, "approved": true }))
     }
 
     /// Seals each epoch of `scope` this device holds to `to`, where it isn't yet.

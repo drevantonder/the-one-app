@@ -72,6 +72,8 @@ pub mod schedules;
 pub mod serverless;
 #[cfg(not(target_family = "wasm"))]
 pub mod sidecars;
+#[cfg(not(target_family = "wasm"))]
+pub mod service;
 pub mod kernel;
 pub mod keys;
 pub mod log;

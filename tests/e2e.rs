@@ -570,7 +570,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     let new_key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let asks = |key: &ed25519_dalek::SigningKey, user: &str, proof: Option<String>| {
         let e = one::keys::Endpoint::of(key);
-        DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Chrome".into(), user: user.into(), person: String::new(), proof }
+        DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Chrome".into(), user: user.into(), person: String::new(), proof, service: None }
     };
     let opens = async |key: &ed25519_dalek::SigningKey, scope: &one::entry::Scope| -> Vec<u32> {
         let got = a.sealed_keys(&me, scope, Some(&one::entry::hex(&key.verifying_key().to_bytes())), None).await.unwrap();
@@ -624,7 +624,7 @@ async fn client_devices_ask_their_node_over_iroh_as_their_person() {
     eventually("hi to run", async || a.call(call("hi", "hi", json!({ "name": "a" }))).await.is_ok()).await;
     let (mine, sams, sam) = (ed25519_dalek::SigningKey::from_bytes(&rand::random()), ed25519_dalek::SigningKey::from_bytes(&rand::random()), one::entry::new_id());
     let listed = |k: &ed25519_dalek::SigningKey| one::keys::Endpoint::of(k);
-    let phone = one::node::DeviceRequest { key: one::entry::hex(&listed(&mine).key), seal: one::entry::hex(&listed(&mine).seal), name: "phone".into(), user: me.user.clone(), person: String::new(), proof: None };
+    let phone = one::node::DeviceRequest { key: one::entry::hex(&listed(&mine).key), seal: one::entry::hex(&listed(&mine).seal), name: "phone".into(), user: me.user.clone(), person: String::new(), proof: None, service: None };
     a.approve_request(&me, &phone, None).await.unwrap();
     a.member("device", json!({ "key": one::entry::hex(&listed(&sams).key), "seal": one::entry::hex(&listed(&sams).seal), "user": sam, "name": "sam's phone", "roles": ["client"], "user_name": "Sam", "role": "member" })).await.unwrap();
     // The relay lets in the install's endpoints, as each device that approves another tells it.
@@ -689,4 +689,51 @@ async fn client_devices_ask_their_node_over_iroh_as_their_person() {
     assert_eq!(answered.await, None, "a stranger's connection is closed");
     phone.close().await;
     sams.close().await;
+}
+
+/// A service on an endpoint of its own, with no node beside it, answers its person's calls from a node through the
+/// relay once one of their devices approves it, checking each caller itself: a stranger that reaches it is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_reaches_a_service_through_the_relay_and_a_stranger_does_not() {
+    let a = start("service-node").await;
+    a.create("Home", "Andre").await.unwrap();
+    let relay = relay(&a).await;
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let install = one::service::Install { address: relay.address.clone(), root: a.state()["install"]["root"].as_str().unwrap().to_string() };
+    let service = one::service::Service::open(&temp("service"), "echo", Some(install)).unwrap();
+    service.start().await.unwrap();
+    // The program offering it, as a Go sidecar registers with a node: it says who asked and what.
+    service.sidecars().register("echo", json!({ "title": "Echo", "ops": [{ "name": "say" }] }));
+    let offering = service.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Ok(Some(call)) = offering.sidecars().next("echo").await {
+                offering.sidecars().reply("echo", call.id, json!({ "ok": { "said": call.input["text"], "by": call.caller.user } })).unwrap();
+            }
+        }
+    });
+    let asks = one::node::DeviceRequest { key: one::entry::hex(&service.key()), seal: one::entry::hex(&service.endpoint().seal), name: "box".into(), user: String::new(), person: String::new(), proof: None, service: Some("echo".into()) };
+    a.approve_service(&me, &asks).await.unwrap();
+    assert_eq!(service.owner(), None, "it knows it's approved only once a node brings it the install's entries");
+
+    let say = CallRequest { app: "echo".into(), sidecar: Some("echo".into()), op: "say".into(), input: json!({ "text": "hi" }), ..Default::default() };
+    let mut said = Value::Null;
+    eventually("the node's call to reach the service", async || {
+        said = a.call(say.clone()).await.unwrap_or_default();
+        !said.is_null()
+    })
+    .await;
+    assert_eq!(said, json!({ "said": "hi", "by": me.user }));
+    assert_eq!(service.owner(), Some(me.user.clone()));
+
+    // A stranger that reaches it directly is answered nothing, calling as Andre too.
+    let stranger = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal).relay_mode(iroh::RelayMode::Disabled).bind().await.unwrap();
+    let at = service.addr().unwrap();
+    let conn = stranger.connect(iroh::EndpointAddr::from_parts(at.id, at.ip_addrs().map(|a| iroh::TransportAddr::Ip(*a))), &one::node::service_alpn()).await.unwrap();
+    let ask = json!({ "kind": "ask", "body": { "call": { "op": "say", "input": { "text": "let me in" }, "me": { "key": one::entry::hex(&a.id()), "user": me.user } } } });
+    let (mut send, mut recv) = conn.open_bi().await.unwrap();
+    send.write_all(ask.to_string().as_bytes()).await.unwrap();
+    send.finish().unwrap();
+    let answer: Value = serde_json::from_slice(&recv.read_to_end(1 << 20).await.unwrap()).unwrap();
+    assert_eq!(answer["error"], "only your One App's devices are answered", "{answer}");
 }

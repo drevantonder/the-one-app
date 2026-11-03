@@ -123,8 +123,16 @@ Usage:
   {CLI} sidecars remove|add <name> [--device <name>]
                                        remove a sidecar from a device you own (here by default), or allow it there
                                        again; sidecars/install.sh <name> [device] installs one and allows it
-  {CLI} sidecars serve <name>          run a sidecar this program hosts ({hosted}) beside this machine's node, as
-                                       the service sidecars/install.sh installs
+  {CLI} sidecars serve <name> [--install <link>]
+                                       run a sidecar this program hosts ({hosted}) as a service of its own, which
+                                       needs no node here: the first time, --install says which One App it's for (the
+                                       link install-link prints on one of its devices), and it shows a code to approve
+                                       it with ({CLI} devices approve <code> on one of your devices); as the service
+                                       sidecars/install.sh installs
+  {CLI} sidecars host <name> <program> [--install <link>]
+                                       the same for a sidecar in another language: starts the program, which registers
+                                       with it as it would with a node
+  {CLI} sidecars install-link          what --install takes: your One App's address and its first entry
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's operations
@@ -695,7 +703,17 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
-        ["sidecars", "serve", name] => one::sidecars::serve(name)?,
+        ["sidecars", "serve", name] => one::service::serve(name, flags.get("install").and_then(Value::as_str))?,
+        ["sidecars", "host", name, program @ ..] if !program.is_empty() => {
+            let program: Vec<String> = program.iter().map(|p| p.to_string()).collect();
+            one::service::host(name, &program, flags.get("install").and_then(Value::as_str))?
+        }
+        ["sidecars", "install-link"] => {
+            let state = get("/v1/state")?;
+            let i = &state["install"];
+            let (Some(address), Some(root)) = (i["settings"]["address"].as_str(), i["root"].as_str()) else { bail!("this device's One App has no address yet") };
+            println!("{}", one::service::Install { address: address.trim_end_matches('/').into(), root: root.into() }.link());
+        }
         ["sidecars", how @ ("remove" | "add"), name] => {
             let device = flags.get("device").and_then(Value::as_str);
             post("/v1/sidecar", json!({ "name": name, "device": device, "installed": *how == "add" }))?;
@@ -1612,6 +1630,12 @@ fn devices_tool(op: &str, input: &Map<String, Value>) -> Result<Value> {
 /// What approving said, in words: whose device it is, or what it was given.
 fn approved_said(r: &Value) -> String {
     let s = |k: &str| r[k].as_str().unwrap_or("").to_string();
+    if let Some(service) = r["service"].as_str() {
+        return match r.get("approved") {
+            Some(_) => format!("{service} on {} is in: it answers your devices' calls.", s("device")),
+            None => format!("{service} on {} wants to be yours. Approve it only if that's the code it shows.", s("device")),
+        };
+    }
     if r.get("sealed").is_none() {
         let new = if r["new"] == true { ", who you invited" } else { "" };
         return format!("{} is {}'s device{new}. Approve it only if they say it's theirs.", s("device"), s("person"));
