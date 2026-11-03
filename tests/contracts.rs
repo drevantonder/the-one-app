@@ -643,8 +643,8 @@ fn every_host_answers_each_message_of_the_bridge() {
         out
     };
     for path in [
-        "kernel/web/web.js",
-        "src/mcp_view.html",
+        // The web client's and a chat's.
+        "src/screen/host.js",
         "android/app/src/main/kotlin/app/client/Screens.kt",
         "windows/AppScreen.cs",
         "apple/Shared/Views/AppScreen.swift",

@@ -1393,12 +1393,23 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
 /// `execute`, which runs scripts with them, and the few tools every agent needs from the start.
 fn mcp(mode: Mode) -> Result<()> {
     let stdin = std::io::stdin();
-    let mut out = std::io::stdout();
     // The agent this serves, credited on its calls: the client's own name for itself, else what its environment says.
     let mut agent = agent_from_env();
     for line in stdin.lock().lines() {
         let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
+        // A chat's view waiting on a change is answered beside the rest, which go on meanwhile.
+        if msg["method"] == "tools/call" && msg["params"]["name"] == "screens_changes" {
+            let mut agent = agent.clone();
+            std::thread::spawn(move || {
+                if let Some(reply) = mcp_answer(&msg, &mut agent, mode, true) {
+                    let mut out = std::io::stdout().lock();
+                    let _ = writeln!(out, "{reply}").and_then(|_| out.flush());
+                }
+            });
+            continue;
+        }
         if let Some(reply) = mcp_answer(&msg, &mut agent, mode, true) {
+            let mut out = std::io::stdout().lock();
             writeln!(out, "{reply}")?;
             if TOOLS_CHANGED.take() {
                 writeln!(out, "{}", json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }))?;

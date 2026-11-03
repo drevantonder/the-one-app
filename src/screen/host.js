@@ -1,6 +1,6 @@
 // What a web page that holds screens does for them, the same in the web client (kernel/web/web.js) and in a chat's
-// MCP view (src/mcp_view.html): their look in its frames, and the bridge's menu, alert and files, each drawn in HTML
-// where a native shell uses its own. Its functions need the kit (kit.css, bridge.js, kit.js) on the page, though it
+// MCP view (src/mcp_view.html): their look in its frames, and the answer to each of the bridge's messages, with its
+// menu, alert and files drawn in HTML where a native shell uses its own. Its functions need the kit (kit.css, bridge.js, kit.js) on the page, though it
 // may load before them. Its styles come with it.
 window.oneHost = (() => {
   const css = `
@@ -134,5 +134,38 @@ window.oneHost = (() => {
     return html.includes("</head>") ? html.replace("</head>", `${style}${looks}</head>`) : style + looks + html;
   }
 
-  return { menu, alert, file, scheme, look };
+  /// The bridge's messages (src/screen/bridge.js) from a screen, answered as every web page that holds screens
+  /// answers them, the web client's and a chat's alike → what it replies; what it throws, it refuses with. `h` is what
+  /// each page does its own way: `frame`, the screen's; `call(op, input)`, as its app; `open(m)`, `close(value)` and
+  /// `title(text, m)`; `vault(need)` → whether it's set; `link(url)`; `icons(names)`; `blob(id)`, a file the node
+  /// keeps; `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; and `own`, what
+  /// only the client's own screens may do, by message, on a page that has them.
+  async function answer(m, h) {
+    switch (m.type) {
+      case "call": return h.call(String(m.op || ""), m.input ?? {});
+      case "open": return h.open(m);
+      case "close": return h.close(m.value);
+      case "title": return h.title(String(m.text ?? ""), m);
+      case "menu": return menu(h.frame, m);
+      case "alert": return alert(m);
+      case "save": case "preview":
+        if (h.elsewhere) return h.elsewhere();
+        await file(m.type, m.file || {}, h.blob);
+        return null;
+      case "copy":
+        await navigator.clipboard.writeText(String(m.text ?? ""));
+        return null;
+      case "link": return h.link(String(m.url ?? ""));
+      case "vault": return h.vault(String(m.need || ""));
+      case "icons": return h.icons(Array.isArray(m.names) ? m.names.map(String) : []);
+      case "scan": throw new Error("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
+      case "icon": case "haptic": return null;
+      case "api": case "signOut": case "appearance": case "device": case "request": case "cache":
+        if (!h.own) throw new Error("Only Settings can do that.");
+        return h.own[m.type](m);
+      default: throw new Error("Unknown message");
+    }
+  }
+
+  return { answer, menu, alert, file, scheme, look };
 })();

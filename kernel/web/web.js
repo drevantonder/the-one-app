@@ -806,53 +806,34 @@ window.__one = {};
     const reply = (ok) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*"));
     const fail = (err) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err) }, "*"));
     try {
-      if (["api", "signOut", "appearance", "device", "request", "cache"].includes(m.type) && !mine) return fail("Only Settings can do that.");
-      switch (m.type) {
-        case "call":
-          if (mine) return fail("Settings has no app to call.");
-          return reply(await call(r.app, String(m.op || ""), m.input ?? {}));
-        case "open": {
+      reply(await oneHost.answer(m, {
+        frame: f.frame,
+        call: (op, input) => {
+          if (mine) throw new Error("Settings has no app to call.");
+          return call(r.app, op, input);
+        },
+        open: (m) => {
           const params = JSON.stringify(m.params || {});
           // Any screen may send its person to choose the device that keeps its app running, in Settings › Devices.
           const to = m.app === "settings" && m.screen === "devices" ? { kind: "own", name: "devices", params }
             : typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope }
             : mine ? { kind: "own", name: String(m.screen || ""), params }
             : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope };
-          if (m.sheet) return reply(await openSheet(to));
-          reply(null);
+          if (m.sheet) return openSheet(to);
           // From a sheet, the sheet goes and it opens where the window is. What the sidebar lists (an app on a page,
           // Backups in Settings) opens as if picked there, with no Back; only what's deeper than it is pushed.
           f.sheet?.close(null);
-          return go(to, { pushed: phone.matches ? !isPage(to) : ![...document.querySelectorAll(".sidebar [data-go]")].some((a) => a.getAttribute("href") === href(to)) });
-        }
-        case "close":
-          reply(null);
-          if (f.sheet) return f.sheet.close(m.value);
-          if (history.state?.back || (phone.matches && !isPage(route()))) back();
-          return;
-        case "api":
-          return reply(await clientApi(m));
-        case "signOut":
-          reply(null);
-          return signOut();
-        case "appearance":
-          if (m.value != null) setAppearance(String(m.value));
-          return reply(appearance());
-        case "device":
-          return reply({ name: browserName(), signOut: true, keys: !!device });
-        case "request":
-          return reply((await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true);
-        case "vault": {
-          if (mine) return fail("Settings has no app to ask for.");
-          const scope = r.scope || "user";
-          const out = await api("/v1/vault/request", { method: "POST", body: { scope, app: r.app, need: String(m.need || "") } });
-          if (!out?.id) throw new Error("The Vault didn’t take the request");
-          return reply((await openSheet(own("request", { scope: out.scope, id: out.id }))) === true);
-        }
-        case "title": {
+          go(to, { pushed: phone.matches ? !isPage(to) : ![...document.querySelectorAll(".sidebar [data-go]")].some((a) => a.getAttribute("href") === href(to)) });
+          return null;
+        },
+        close: (value) => {
+          if (f.sheet) f.sheet.close(value);
+          else if (history.state?.back || (phone.matches && !isPage(route()))) back();
+          return null;
+        },
+        title: (title, m) => {
           // Empty while the screen shows its own large title, as the Mac app's bar is; the tab is named by what the
           // screen says it's called.
-          const title = String(m.text ?? "");
           if (f.sheet) f.sheet.title.textContent = title || titleOf(r);
           // A phone's pages have no bar: what's pushed over them has its own.
           else if (!f.home) {
@@ -860,42 +841,39 @@ window.__one = {};
             if (el) el.textContent = title;
             document.title = title || String(m.name || "") || titleOf(r);
           }
-          return reply(null);
-        }
-        case "menu":
-          return reply(await oneHost.menu(f.frame, m));
-        case "alert":
-          return reply(await oneHost.alert(m));
-        case "save": case "preview":
-          await oneHost.file(m.type, m.file || {}, async (id) => (await api(`/v1/blobs/${encodeURIComponent(id)}`, { raw: true })).blob());
-          return reply(null);
-        case "copy":
-          await navigator.clipboard.writeText(String(m.text ?? ""));
-          return reply(null);
-        case "link": {
-          const url = new URL(String(m.url), location.href);
+          return null;
+        },
+        vault: async (need) => {
+          if (mine) throw new Error("Settings has no app to ask for.");
+          const out = await api("/v1/vault/request", { method: "POST", body: { scope: r.scope || "user", app: r.app, need } });
+          if (!out?.id) throw new Error("The Vault didn’t take the request");
+          return (await openSheet(own("request", { scope: out.scope, id: out.id }))) === true;
+        },
+        link: (to) => {
+          const url = new URL(to, location.href);
           const item = settingAt(url.href);
-          if (item) { go(own(item.name)); return reply(null); }
-          if (["http:", "https:", "mailto:", "tel:"].includes(url.protocol)) window.open(url.href, "_blank", "noopener,noreferrer");
-          return reply(null);
-        }
-        case "scan":
-          return fail("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
-        case "icons":
-          return reply(await iconPaths(Array.isArray(m.names) ? m.names.map(String) : []));
-        case "icon": case "haptic":
-          return reply(null);
-        case "cache": {
-          const key = SCREENS + String(m.key || "");
-          if (!("value" in m)) return reply(JSON.parse(localStorage.getItem(key) || "null"));
-          try {
-            localStorage.setItem(key, JSON.stringify(m.value));
-          } catch {}
-          return reply(null);
-        }
-        default:
-          return fail("Unknown message");
-      }
+          if (item) go(own(item.name));
+          else if (["http:", "https:", "mailto:", "tel:"].includes(url.protocol)) window.open(url.href, "_blank", "noopener,noreferrer");
+          return null;
+        },
+        icons: iconPaths,
+        blob: async (id) => (await api(`/v1/blobs/${encodeURIComponent(id)}`, { raw: true })).blob(),
+        own: mine && {
+          api: clientApi,
+          signOut: () => (signOut(), null),
+          appearance: (m) => (m.value != null && setAppearance(String(m.value)), appearance()),
+          device: () => ({ name: browserName(), signOut: true, keys: !!device }),
+          request: async (m) => (await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true,
+          cache: (m) => {
+            const key = SCREENS + String(m.key || "");
+            if (!("value" in m)) return JSON.parse(localStorage.getItem(key) || "null");
+            try {
+              localStorage.setItem(key, JSON.stringify(m.value));
+            } catch {}
+            return null;
+          },
+        },
+      }));
     } catch (err) {
       fail(err);
     }

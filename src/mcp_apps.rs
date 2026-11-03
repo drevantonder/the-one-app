@@ -1,6 +1,6 @@
 //! Apps' widgets and screens as MCP Apps, so chat clients that support them draw them inline: one `ui://` view, and
-//! two tools that fill it, `widgets_show` and `screens_open` (and `screens_icons`, which only the view calls). Clients
-//! without MCP Apps get text from both.
+//! two tools that fill it, `widgets_show` and `screens_open` (and `screens_icons` and `screens_changes`, which only the
+//! view calls). Clients without MCP Apps get text from both.
 
 use serde_json::{Value, json};
 
@@ -38,7 +38,8 @@ pub fn read(uri: &str) -> Result<Value, Value> {
     ] {
         view = view.replacen(&format!("/*{name}*/"), text, 1);
     }
-    Ok(json!({ "contents": [{ "uri": uri, "mimeType": MIME, "text": view, "_meta": { "ui": { "prefersBorder": true } } }] }))
+    // A screen's `one.copy` writes to the clipboard, which the chat's frame lets it only if asked.
+    Ok(json!({ "contents": [{ "uri": uri, "mimeType": MIME, "text": view, "_meta": { "ui": { "prefersBorder": true, "permissions": { "clipboardWrite": {} } } } }] }))
 }
 
 pub fn tools() -> Vec<Value> {
@@ -77,6 +78,17 @@ pub fn tools() -> Vec<Value> {
             "annotations": one::skills::hints(true, false),
             "_meta": { "ui": { "visibility": ["app"] } },
         }),
+        // Only the view calls it, again and again while it's on screen, so what it shows keeps up: a chat sends a view
+        // nothing it isn't asked for.
+        json!({
+            "name": "screens_changes",
+            "description": "For the view that draws screens and widgets in a chat, not for you: waits up to 25 seconds for a change to these apps' data.",
+            "inputSchema": { "type": "object", "required": ["apps"], "properties": {
+                "apps": { "type": "array", "items": { "type": "string" }, "description": "the apps shown" },
+            } },
+            "annotations": one::skills::hints(true, false),
+            "_meta": { "ui": { "visibility": ["app"] } },
+        }),
     ]
 }
 
@@ -86,6 +98,7 @@ pub fn call(name: &str, input: &Value) -> Option<Value> {
         "widgets_show" => widgets(input),
         "screens_open" => screen(input),
         "screens_icons" => icons(input),
+        "screens_changes" => changes(input),
         _ => return None,
     };
     Some(result.unwrap_or_else(|e| json!({ "isError": true, "content": [{ "type": "text", "text": format!("{e:#}") }] })))
@@ -123,10 +136,45 @@ fn screen(input: &Value) -> anyhow::Result<Value> {
     let mut resp = to_node(agent().get(&url)).call()?;
     let html = resp.body_mut().read_to_string()?;
     anyhow::ensure!(resp.status().is_success(), "{}", html.trim());
+    // Its title, as the web client names it; and where the web client shows it, for what a chat can't do (give files).
+    let apps = get("/v1/apps").unwrap_or_default();
+    let found = apps.as_array().into_iter().flatten().find(|a| a["name"] == app);
+    let title = found
+        .and_then(|a| a["screens"].as_array().into_iter().flatten().find(|s| s["name"] == screen)?["title"].as_str())
+        .or_else(|| found.and_then(|a| a["title"].as_str().or(a["name"].as_str())))
+        .unwrap_or(app);
+    let address = get("/v1/state").ok().and_then(|s| s["install"]["settings"]["address"].as_str().map(|a| a.trim_end_matches('/').to_string()));
+    let web = address.map(|a| format!("{a}/app/{}/{}?{}", urlencode(app), urlencode(screen), query.iter().map(|(k, v)| format!("{k}={}", urlencode(v))).collect::<Vec<_>>().join("&")));
     Ok(json!({
         "content": [{ "type": "text", "text": format!("Opened {app}'s {screen} screen for the person.") }],
-        "structuredContent": { "app": app, "screen": screen, "scope": input["scope"], "html": html },
+        "structuredContent": { "app": app, "screen": screen, "scope": input["scope"], "title": title, "web": web, "html": html },
     }))
+}
+
+/// The node's next event that changes what the view shows of `apps` (their data, or which apps there are), within 25
+/// seconds; none if nothing does by then.
+fn changes(input: &Value) -> anyhow::Result<Value> {
+    use std::io::BufRead;
+    const WAIT: std::time::Duration = std::time::Duration::from_secs(25);
+    let apps: Vec<&str> = input["apps"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let mut events = vec![];
+    let resp = to_node(agent().get(format!("http://{}/v1/events", addr()))).config().timeout_global(Some(WAIT)).build().call()?;
+    if resp.status() == 204 {
+        // A node with none to say (the serverless node, while no machine is on): the view asks again after the wait.
+        std::thread::sleep(WAIT);
+    } else {
+        anyhow::ensure!(resp.status().is_success(), "the node's events didn't open ({})", resp.status());
+        // The wait ends the stream, as an error reading it.
+        for line in std::io::BufReader::new(resp.into_body().into_reader()).lines().map_while(Result::ok) {
+            let Some(event) = line.strip_prefix("data:").and_then(|d| serde_json::from_str::<Value>(d.trim()).ok()) else { continue };
+            let named = event["apps"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>()).unwrap_or_default();
+            if event["type"] == "changed" && (named.is_empty() || named.iter().any(|a| apps.contains(a))) {
+                events.push(event);
+                break;
+            }
+        }
+    }
+    Ok(json!({ "content": [{ "type": "text", "text": format!("{} changes.", events.len()) }], "structuredContent": { "events": events } }))
 }
 
 fn icons(input: &Value) -> anyhow::Result<Value> {
