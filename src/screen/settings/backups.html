@@ -51,7 +51,7 @@
     let lines;
     if (problem) {
       const head = failing.last ? `Not backed up to ${failing.title} since ${one.ago(failing.last.time, { long: true })}` : `Not backed up to ${failing.title} yet`;
-      lines = [`<div class="headline">${one.esc(head)}</div>`, `<div class="error">${one.esc(problem.text)}</div>`, `<div class="error">${one.esc(problem.fix)}</div>`];
+      lines = [`<div class="headline">${one.esc(head)}</div>`, `<div class="error">${one.esc(one.plain(problem.text).title)}</div>`, `<div class="error">${one.esc(problem.fix)}</div>`];
     } else if (newest) lines = [`<div class="headline">Backed up ${one.esc(one.ago(newest.time, { long: true }))}</div>`];
     else if (!places.length) lines = ['<div class="headline">Not backed up</div>'];
     else lines = ['<div class="headline">Backing up…</div>'];
@@ -63,7 +63,7 @@
       <h2 class="section">Places</h2>
       <div class="list"${places.length || admin ? "" : " hidden"}>${places.map((p, n) => `<div class="row go" data-place="${n}">${placeIcon(p.kind)}<div class="main">
           <div class="title" style="font-weight:400"><span>${one.esc(p.title)}</span>${p.last && !p.problem ? `<span class="when">${one.esc(when(p.last.time))}</span>` : ""}</div>
-          ${p.problem ? `<div class="sub error">${one.esc(p.problem.text)}</div>` : `<div class="sub">${one.esc(p.kind === "folder" ? `Disk on ${name(p.device)}` : `Off-site · ${p.where}`)}</div>`}
+          ${p.problem ? `<div class="sub error">${one.esc(one.plain(p.problem.text).title)}</div>` : `<div class="sub">${one.esc(p.kind === "folder" ? `Disk on ${name(p.device)}` : `Off-site · ${p.where}`)}</div>`}
         </div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}
         ${admin ? `<div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--tint)">Add Place…</span></div></div></div>` : ""}</div>
       <p class="footer">${admin ? "" : "Only admins add and remove places. "}Encrypted before it leaves.</p>
@@ -96,7 +96,7 @@
     const sheet = one.sheet({ title: p.title, onClose: draw });
     const item = await one.api("GET", "/v1/vault?scope=global").then((items) => items.find((it) => it.id === p.id)).catch(() => null);
     const where = p.kind === "folder" ? [["Folder", p.where], ["Disk on", name(p.device)]] : [["Bucket", p.where], ["Endpoint", p.endpoint]];
-    sheet.body.innerHTML = `${p.problem ? `<div class="list"><div class="row plain"><div class="main"><div class="sub wrap error">${one.esc(p.problem.text)}</div><div class="sub wrap" style="color:var(--text)">${one.esc(p.problem.fix)}</div></div></div></div>` : ""}
+    sheet.body.innerHTML = `${p.problem ? `<div class="list"><div class="row plain"><div class="main"><div class="sub wrap error">${one.esc(one.plain(p.problem.text).title)}</div><div class="sub wrap" style="color:var(--text)">${one.esc(p.problem.fix)}</div></div></div></div>` : ""}
       <div style="margin-top:18px">${one.info([...where, ["Last backup", p.last && `${when(p.last.time, true)}, ${name(p.last.device)}`]])}</div>
       ${item ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="vault"><div class="main"><div class="title"><span>Edit in Vault</span></div></div><span class="chev">${one.icon("caret-right")}</span></div></div>` : ""}
       ${admin ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="stop"><div class="main"><div class="title"><span class="error">Stop Backing Up Here</span></div></div></div></div>` : ""}
@@ -136,7 +136,7 @@
              <p class="footer">Use a key that reaches only this bucket. It stays in the Vault.</p>`
           : `<h2 class="section">A Disk on ${one.esc(name(backups.here))}</h2><div class="list">${disks.map((d) => `<div class="row plain go choice${v.path === d.path ? " on" : ""}" data-disk="${one.esc(d.path)}" data-name="${one.esc(d.name)}"><span class="place" style="--c:#8e8e93">${one.icon("hard-drive-fill")}</span><div class="main"><div class="title"><span>${one.esc(d.name)}</span></div><div class="sub">${one.esc(`Plugged into ${name(backups.here)} · ${size(d.free)} free`)}</div></div><span class="check">${one.icon("check")}</span></div>`).join("")}${field("path", "Folder", "/Volumes/…")}</div>
              <p class="footer">It's backed up while it's plugged in.</p>`}
-        ${tried.length ? `<h2 class="section">Tried It</h2><div class="list">${tried.map((t) => `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(t.step)}</span><span class="${t.error ? "error" : "ok"}">${one.icon(t.error ? "x" : "check")}</span></div>${t.error ? `<div class="sub wrap error">${one.esc(t.error)}</div>` : ""}</div></div>`).join("")}</div>
+        ${tried.length ? `<h2 class="section">Tried It</h2><div class="list">${tried.map((t) => `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(t.step)}</span><span class="${t.error ? "error" : "ok"}">${one.icon(t.error ? "x" : "check")}</span></div>${t.error ? `<div class="sub wrap error">${one.esc(one.plain(t.error).title)}</div>` : ""}</div></div>`).join("")}</div>
           ${added ? '<p class="footer">The first backup has started. After that, every hour that something changes.</p>' : ""}` : ""}
         ${problem ? `<p class="footer error">${one.esc(problem)}</p>` : ""}
         ${added ? "" : `<div class="actions"><button class="button primary" id="add-it"${ready() && !busy ? "" : " disabled"}>${busy ? '<span class="spinner small"></span>' : ""}Add</button></div>`}`;

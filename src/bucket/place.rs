@@ -80,13 +80,13 @@ impl Place {
         if let Some(path) = get("path") {
             return Ok(Place::Folder(path.into()));
         }
-        let endpoint = get("endpoint").context("a place has a folder's path, or S3's endpoint")?;
-        ensure!(endpoint.starts_with("https://") || endpoint.starts_with("http://"), "an endpoint is a URL, like https://s3.example.com");
+        let endpoint = get("endpoint").context("Enter a folder's path, or an S3 endpoint.")?;
+        ensure!(endpoint.starts_with("https://") || endpoint.starts_with("http://"), "Enter the endpoint as a web address, like https://s3.example.com.");
         Ok(Place::S3(S3 {
             endpoint: endpoint.trim_end_matches('/').to_string(),
-            bucket: get("bucket").context("which bucket?")?,
+            bucket: get("bucket").context("Enter the bucket's name.")?,
             region: get("region").unwrap_or_else(|| "auto".into()),
-            auth: Auth::Keys { key_id: get("key_id").context("which key ID?")?, secret: get("secret").context("the secret key?")? },
+            auth: Auth::Keys { key_id: get("key_id").context("Enter the access key ID.")?, secret: get("secret").context("Enter the secret key.")? },
         }))
     }
 
@@ -256,11 +256,11 @@ impl Place {
             true => self.can_hold_an_install().and_then(|()| self.create(&name, &bytes)).and_then(|new| if new { Ok(()) } else { bail!("a file had its name") }),
             false => self.put(&name, &bytes),
         };
-        let not_written = || anyhow!("not written");
+        let not_written = || anyhow!("Skipped, since writing failed.");
         let read = wrote.as_ref().map_err(|_| not_written()).and_then(|_| match self.get_object(&name)? {
             Some(o) if o.bytes == bytes => Ok(o),
-            Some(_) => bail!("it read back different"),
-            None => bail!("it wasn't there"),
+            Some(_) => bail!("It came back changed."),
+            None => bail!("It wasn't there."),
         });
         let mut steps = vec![("Wrote a test file", wrote.as_ref().err().map(|e| format!("{e:#}"))), ("Read it back", read.as_ref().err().map(|e| format!("{e:#}")))];
         if conditional {
@@ -346,8 +346,8 @@ impl S3 {
             (_, "InvalidAccessKeyId" | "SignatureDoesNotMatch") | (401, _) => (Trouble::Key, "rejected the key".to_string()),
             (_, "NoSuchBucket") => (Trouble::Bucket, format!("has no bucket {}", self.bucket)),
             (403, _) | (_, "AccessDenied") => (Trouble::Refused, format!("won't let the key write to {}", self.bucket)),
-            (500.., _) => (Trouble::Unreachable, format!("said {status}{}", if code.is_empty() { String::new() } else { format!(" ({code})") })),
-            _ => return anyhow!("{} said {status}{}", self.host(), if code.is_empty() { String::new() } else { format!(" ({code})") }),
+            (500.., _) => (Trouble::Unreachable, format!("isn't answering ({status}{})", if code.is_empty() { String::new() } else { format!(" {code}") })),
+            _ => return anyhow!("{} refused it ({status}{})", self.host(), if code.is_empty() { String::new() } else { format!(" {code}") }),
         };
         Failed(trouble, said).into()
     }

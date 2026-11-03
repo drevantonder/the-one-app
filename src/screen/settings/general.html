@@ -48,7 +48,7 @@
   // What push asks the Vault for: Apple's APNs key (its .p8 file), the team and key it's from, and the app's bundle id
   // pushes go to, sent only to Apple's push servers. An item on Everyone that has them is switched on for push, or a
   // new one is made.
-  const wanted = [{ name: "key", label: "Key", secret: true, file: true }, { name: "team_id", label: "Team ID" }, { name: "key_id", label: "Key ID" }, { name: "topic", label: "Topic" }];
+  const wanted = [{ name: "key", label: "Key", secret: true, file: true }, { name: "team_id", label: "Team ID" }, { name: "key_id", label: "Key ID" }, { name: "topic", label: "App ID" }];
   const hosts = ["api.push.apple.com", "api.sandbox.push.apple.com"];
 
   async function askKey() {
@@ -65,14 +65,14 @@
     const ready = () => picked !== null || wanted.every((w) => values[w.name]);
     const paint = () => {
       sheet.body.innerHTML = `<div class="list"><div class="row plain"><div class="main"><div class="title"><span>Apple Notifications Key</span></div><div class="sub wrap">Phones get notifications through Apple with it.</div></div></div></div>
-        <p class="footer">Everyone</p>
+        <p class="footer">Kept in Everyone’s Vault</p>
         <div class="list" style="margin-top:18px">${items.map((it) => choice(it.id, one.icon("key"), it.title)).join("")}${choice(null, one.icon("plus-circle-fill"), "New Item")}</div>
         ${picked === null ? `<div class="list" style="margin-top:18px">
           <label class="row plain field"><span>Title</span><input data-new="title" value="${one.esc(title)}"></label>
           ${wanted.map((w) => w.file
             ? `<label class="row plain field go"><span>${w.label}</span><span class="value">${one.esc(files[w.name] || "Choose File…")}</span><input type="file" data-file="${w.name}" hidden></label>`
             : `<label class="row plain field"><span>${w.label}</span><input data-value="${w.name}" autocapitalize="off" spellcheck="false" value="${one.esc(values[w.name] || "")}"></label>`).join("")}
-        </div><p class="footer">Sent only to ${hosts.join(", ")}</p>` : ""}
+        </div><p class="footer">Sent only to Apple</p>` : ""}
         ${problem ? `<p class="footer error">${one.esc(problem)}</p>` : ""}
         <div style="margin-top:18px;text-align:right"><button class="button primary" id="save"${ready() ? "" : " disabled"}>Save</button></div>`;
     };

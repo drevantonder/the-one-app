@@ -65,7 +65,7 @@
   // Where things run first: every device, and Cloudflare, Use First, When Needed or Last Resort, cheaper kinds first
   // within each (src/rank.rs); an admin moves one with its menu.
   const PLACES = { first: "Use First", needed: "When Needed", last: "Last Resort" };
-  const KINDS = { always_on: "Always on", laptop: "Laptop, sleeps", cloud: "Cloud server, paid by the hour", cloudflare: "On the web, costs a little each time it wakes" };
+  const KINDS = { always_on: "Always on", laptop: "Laptop, sleeps", cloud: "Cloud server, paid by the hour", cloudflare: "Online, paid per use" };
   const COST = { laptop: 1, cloudflare: 2, cloud: 3 };
   const places = () => {
     const all = (state.install?.devices || []).filter((s) => s.use).map((s) => ({ name: shown(s.name), key: s.key, kind: s.kind, use: s.use, online: !!s.online, here: s.me }));
@@ -170,7 +170,7 @@
     const m = [...state.install.devices, ...state.install.clients].find((x) => x.key === key);
     one.confirm("#ask", {
       title: `Remove ${shown(m.name) || "this device"}?`,
-      detail: "It stops being one of your devices, and can’t reach your data. To use it again, pair it again.",
+      detail: "It loses access to your data. Pair it again to use it.",
       action: "Remove",
       danger: true,
       run: () => one.api("POST", "/v1/remove", { key }),

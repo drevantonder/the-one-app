@@ -50,7 +50,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
             let trouble = last.trouble.as_deref().and_then(crate::bucket::Trouble::parse);
             let text = match trouble {
                 Some(_) => format!("{} {error}.", p.title),
-                None => format!("{}: {error}.", p.title),
+                None => format!("Couldn't back up to {} ({error}).", p.title),
             };
             let device = name(&last.device);
             let fix = match (trouble, &p.place) {
@@ -84,7 +84,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
         if let Some((since, backer)) = late {
             let fix = match &p.place {
                 Ok(Place::Folder(_)) => format!("Check {backer} is on, with the disk plugged in."),
-                _ => format!("{backer} backs it up: check it's on."),
+                _ => format!("Check {backer} is on: it backs this up."),
             };
             out.push(Problem { place: p.id.clone(), text: format!("Nothing has gone to {} for a day.", p.title), fix, since, push: Some(since + LATE) });
         }
@@ -520,7 +520,7 @@ impl Node {
     /// Stops backing up to a place: deletes its item. What's in the place stays there.
     pub async fn remove_place(&self, caller: &Caller, id: &str) -> Result<()> {
         let known = self.with(|i| Ok(i.views.get("global").is_some_and(|(_, s)| places(s).iter().any(|p| p.id == id))))?;
-        ensure!(known, "no place {id}");
+        ensure!(known, "That place was already removed: there's no place {id}");
         self.set_item(caller, &Scope::Global, json!({ "id": id, "deleted": true })).await?;
         Ok(())
     }
@@ -560,7 +560,7 @@ impl Node {
             ("GET", "/v1/backups") => self.backups()?,
             ("POST", "/v1/backups/now") => {
                 self.with(|i| {
-                    ensure!(i.r.members.may_use(&me.user, &Scope::Global), "not in this install");
+                    ensure!(i.r.members.may_use(&me.user, &Scope::Global), "You aren't a member here, so you can't back up.");
                     Ok(())
                 })?;
                 self.back_up_now();
@@ -608,17 +608,6 @@ fn backed_blobs(entries: &[Entry], forgotten: &BTreeSet<String>) -> BTreeSet<Str
     }
     out.extend(newest.into_values().map(|(_, b)| b));
     out
-}
-
-/// A scope as people call it: Everyone, a person's name, or a group's.
-fn scope_name(i: &Install, scope: &str) -> String {
-    let m = &i.r.members;
-    match Scope::parse(scope) {
-        Ok(Scope::Global) => "Everyone".to_string(),
-        Ok(Scope::User(u)) => m.user(&u).map(|u| u.name.clone()).unwrap_or(u),
-        Ok(Scope::Group(g)) => m.groups.get(&g).map(|g| g.name.clone()).unwrap_or(g),
-        Err(_) => scope.to_string(),
-    }
 }
 
 /// The disks plugged into this machine, where a folder place could go: each one's name, folder and free space.
