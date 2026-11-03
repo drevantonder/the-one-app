@@ -62,8 +62,9 @@ const PAGE = `
   .name { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .switch { transform: scale(0.78); transform-origin: right center; }
   .sub { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.3em; }
+  .sub.bad { color: var(--danger); }
 </style>
-<div class="grid" id="grid"><div class="empty" style="grid-column:1/-1">Loading…</div></div>
+<div class="grid" id="grid"></div>
 <div id="sessions-section" hidden>
 <h2 class="section">Recent Sessions</h2>
 <div class="list" id="sessions"></div>
@@ -73,55 +74,75 @@ const PAGE = `
   const grid = document.getElementById("grid");
   const pics = {}; // by device: a data URL
   const asking = new Set(); // devices this page is asking to let agents in
-  let devs = [], sessions = [];
+  const pending = new Map(); // by device: the switch's new state, until the device has it
+  const notes = {}; // by device: why a switch went back
+  let devs = [], sessions = [], drawn = "", listed = "", asked = 0;
   const host = (s) => String(s || "").split(".")[0];
   const laptop = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>';
 
   // A device: its picture while an agent uses it, its name with a switch, and one short line when there's something to say.
-  function tile(d) {
+  function view(d) {
     const allowed = d.permissions ? d.permissions.accessibility && d.permissions.screen_recording : true;
-    const line = d.why ? "Not answering"
+    const line = notes[d.device] || (d.why ? "Not answering"
       : asking.has(d.device) || d.asking ? "Asking on the device…"
       : !d.on ? (d.missing || "")
       : d.using ? \`\${d.using.agent} is using it\`
-      : allowed ? "" : "Allow it in System Settings on the device";
-    const pic = d.on && d.using && pics[d.device] ? \`<img src="\${pics[d.device]}" alt="">\` : laptop;
-    const off = d.why || d.missing || asking.has(d.device);
-    return \`<div><div class="pic">\${pic}</div><div class="head"><div class="name">\${one.esc(d.title || d.device)}</div>\` +
-      \`<input type="checkbox" class="switch" data-device="\${one.esc(d.device)}" aria-label="Let agents use it"\${d.on ? " checked" : ""}\${off ? " disabled" : ""}></div>\` +
-      \`<div class="sub">\${one.esc(line)}</div></div>\`;
+      : allowed ? "" : "Allow it in System Settings on the device");
+    return { src: (d.on && d.using && pics[d.device]) || "", line, bad: !!notes[d.device], on: !!d.on,
+      off: !!(d.why || d.missing || asking.has(d.device)), title: d.title || d.device };
   }
 
-  function draw() {
-    grid.innerHTML = devs.length ? devs.map(tile).join("")
-      : \`<div class="empty" style="grid-column:1/-1">Agents can use your Mac once you let them, in its menu bar.</div>\`;
-    for (const s of grid.querySelectorAll("[data-device]")) s.onchange = () => allow(s.dataset.device, s.checked);
-    document.getElementById("sessions-section").hidden = !sessions.length;
-    document.getElementById("sessions").innerHTML = sessions.slice(0, 10).map((s) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(s.agent)}</span></div>\` +
+  function tile(d) {
+    const v = view(d);
+    return \`<div data-tile="\${one.esc(d.device)}"><div class="pic">\${v.src ? \`<img src="\${v.src}" alt="">\` : laptop}</div><div class="head"><div class="name">\${one.esc(v.title)}</div>\` +
+      \`<input type="checkbox" class="switch" data-device="\${one.esc(d.device)}" aria-label="Let agents use it"\${v.on ? " checked" : ""}\${v.off ? " disabled" : ""}></div>\` +
+      \`<div class="sub\${v.bad ? " bad" : ""}">\${one.esc(v.line)}</div></div>\`;
+  }
+
+  // Changes only what changed in a tile, so it doesn't flicker and a tap on it isn't lost.
+  function patch(d) {
+    const t = grid.querySelector(\`[data-tile="\${CSS.escape(d.device)}"]\`);
+    if (!t) return;
+    const v = view(d), pic = t.querySelector(".pic"), img = pic.querySelector("img");
+    if (v.src && img) { if (img.getAttribute("src") !== v.src) img.src = v.src; }
+    else if (v.src) { const i = new Image(); i.alt = ""; i.src = v.src; pic.replaceChildren(i); }
+    else if (img) pic.innerHTML = laptop;
+    t.querySelector(".name").textContent = v.title;
+    const s = t.querySelector(".switch");
+    s.checked = v.on;
+    s.disabled = v.off;
+    const sub = t.querySelector(".sub");
+    sub.textContent = v.line;
+    sub.classList.toggle("bad", v.bad);
+  }
+
+  const html = () => devs.length ? devs.map(tile).join("")
+    : \`<div class="empty" style="grid-column:1/-1">Agents can use your Mac once you let them, in its menu bar.</div>\`;
+
+  // The same devices as last time are patched in place; a device added or gone draws the grid again.
+  function paint() {
+    const ids = devs.map((d) => d.device).join("\\n");
+    if (ids !== drawn || !grid.__drawn) {
+      drawn = ids;
+      one.render(grid, html);
+    } else devs.forEach(patch);
+    const s = sessions.slice(0, 10).map((s) => \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(s.agent)}</span></div>\` +
       \`<div class="sub small">\${one.esc(s.title || s.device)} · \${one.esc(one.ago(s.time, { long: true }))}\${s.came_from ? " · asked from " + one.esc(host(s.came_from)) : ""}</div></div></div>\`).join("");
+    const section = document.getElementById("sessions-section");
+    if (section.hidden !== !sessions.length) section.hidden = !sessions.length;
+    if (s !== listed) document.getElementById("sessions").innerHTML = listed = s;
   }
 
-  async function allow(device, on) {
-    if (on) asking.add(device);
-    draw();
-    try {
-      await one.call("_allow", { device, on });
-    } catch (err) {
-      alert(one.plain(err).title);
-    } finally {
-      asking.delete(device);
-      await refresh();
-    }
+  // Whether this is the newest answer: an older poll that comes back late is dropped.
+  async function load() {
+    const n = ++asked, r = await one.call("_devices", {});
+    if (n !== asked) return false;
+    ({ devices: devs, sessions } = r);
+    for (const d of devs) if (pending.has(d.device)) d.on = pending.get(d.device);
+    return true;
   }
 
-  async function refresh() {
-    try {
-      ({ devices: devs, sessions } = await one.call("_devices", {}));
-    } catch (e) {
-      grid.innerHTML = \`<div class="empty error" style="grid-column:1/-1">\${one.esc(one.plain(e).title)}</div>\`;
-      return;
-    }
-    draw();
+  async function pictures() {
     await Promise.all(devs.filter((d) => d.on && d.using).map(async (d) => {
       try {
         const r = await one.call("screen", { device: d.device, width: 480 });
@@ -129,16 +150,57 @@ const PAGE = `
         if (img) pics[d.device] = \`data:\${img.mimeType};base64,\${img.data}\`;
       } catch {}
     }));
-    draw();
+    paint();
   }
 
-  let busy = false;
+  grid.addEventListener("change", (e) => {
+    const s = e.target.closest("[data-device]");
+    if (s) allow(s.dataset.device, s.checked);
+  });
+
+  async function allow(device, on) {
+    const d = devs.find((x) => x.device === device);
+    if (!d) return;
+    const was = !!d.on;
+    delete notes[device];
+    pending.set(device, on);
+    d.on = on;
+    if (on) asking.add(device);
+    paint();
+    try {
+      await one.call("_allow", { device, on });
+    } catch (err) {
+      const now = devs.find((x) => x.device === device);
+      if (now) now.on = was;
+      notes[device] = one.plain(err).title;
+      setTimeout(() => (delete notes[device], paint()), 8000);
+    } finally {
+      pending.delete(device);
+      asking.delete(device);
+      paint();
+      refresh();
+    }
+  }
+
+  // A poll that fails keeps the grid as it was.
+  async function refresh() {
+    try { if (!(await load())) return; } catch { return; }
+    paint();
+    await pictures();
+  }
+
+  let busy = true;
+  one.render(grid, async () => {
+    await load();
+    drawn = devs.map((d) => d.device).join("\\n");
+    return html();
+  }, { skeleton: "cards" }).then(() => grid.__drawn && (paint(), pictures())).finally(() => (busy = false));
+
   async function tick() {
     if (busy || document.visibilityState === "hidden") return;
     busy = true;
     try { await refresh(); } finally { busy = false; }
   }
-  tick();
   setInterval(tick, 5000);
   document.addEventListener("visibilitychange", tick);
 </script>`;

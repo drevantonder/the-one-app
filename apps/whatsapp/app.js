@@ -142,6 +142,8 @@ export default {
   .card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
   button.primary { font: inherit; font-weight: 600; color: white; background: var(--tint); border: 0; border-radius: 10px; padding: 11px 16px; }
   button.plain { font: inherit; color: var(--tint); background: none; border: 0; padding: 4px 0; }
+  button:disabled { opacity: 0.6; }
+  button .spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
   input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
   ol { padding-left: 20px; margin: 8px 0; }
   .sub.warn { color: var(--warn); }
@@ -149,33 +151,55 @@ export default {
   .code { font: 600 24px ui-monospace, monospace; letter-spacing: 2px; text-align: center; margin: 8px 0; }
 </style>
 <div id="list"></div>
-<div class="card" id="connect"></div>
+<div id="ask"></div>
+<div class="card" id="connect" hidden><input id="phone" type="tel" placeholder="Its number, for a code to type instead (optional)"><button class="primary" id="start">Add account</button><div id="err" class="error small"></div></div>
+<div class="card" id="needs" hidden></div>
 <script>
 // Each account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
-let shown = 0;
-async function show() {
-  const accounts = await one.call("accounts");
-  shown = accounts.length;
-  document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok ? "" : " warn"}">\${one.esc(a.ok ? \`Linked on \${a.device}\${i ? "" : " · used first"}\` : one.plain(a.why || "Needs linking again").title)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
-    : '<p class="muted">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
-  for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => {
-    await one.confirm("#connect", { title: \`Sign out of \${b.dataset.out}?\`, detail: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
-      action: "Sign Out", danger: true, run: () => one.call("sign_out", { account: b.dataset.out }) });
-    show();
-  };
-  const c = document.getElementById("connect");
-  c.innerHTML = '<input id="phone" type="tel" placeholder="Its number, for a code to type instead (optional)"><button class="primary" id="start">Add account</button><div id="err" class="error small"></div>';
+const list = document.getElementById("list"), connect = document.getElementById("connect"), form = connect.innerHTML;
+let accounts = [], asked = 0;
+// Signed out here and maybe not yet on the device, so a redraw meanwhile doesn't bring them back.
+const leaving = new Set();
+function draw(fetch) {
+  return one.render(list, async () => {
+    if (fetch) {
+      const n = ++asked, got = await one.call("accounts");
+      if (n === asked) accounts = got;
+    }
+    const all = accounts.filter((a) => !leaving.has(a.account));
+    return all.length
+      ? '<h2 class="section">Accounts</h2><div class="list">' + all.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok ? "" : " warn"}">\${one.esc(a.ok ? \`Linked on \${a.device}\${i ? "" : " · used first"}\` : one.plain(a.why || "Needs linking again").title)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+      : '<p class="muted">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
+  }, { skeleton: 1 });
+}
+list.onclick = (e) => {
+  const account = e.target.closest("[data-out]")?.dataset.out;
+  if (!account) return;
+  one.confirm("#ask", { title: \`Sign out of \${account}?\`, detail: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
+    action: "Sign Out", danger: true, run: async () => {
+      leaving.add(account);
+      draw(false);
+      try {
+        await one.call("sign_out", { account });
+        accounts = accounts.filter((a) => a.account !== account);
+      } finally {
+        leaving.delete(account);
+        draw(true);
+      }
+    } });
+};
+function ready() {
+  connect.innerHTML = form;
   document.getElementById("start").onclick = start;
 }
 
 async function start(e) {
-  const phone = document.getElementById("phone").value.trim();
-  e.target.disabled = true;
-  e.target.textContent = "Asking WhatsApp…";
+  const b = e.currentTarget, phone = document.getElementById("phone").value.trim();
+  b.disabled = true;
+  b.innerHTML = '<span class="spinner small" aria-hidden="true"></span>Asking WhatsApp…';
   try { await one.call("sign_in", phone ? { phone } : {}); }
-  catch (err) { document.getElementById("err").textContent = one.plain(err).title; e.target.disabled = false; e.target.textContent = "Add account"; return; }
-  document.getElementById("connect").innerHTML = \`<ol><li>On the phone, open WhatsApp › Settings › Linked devices › Link a device.</li>
+  catch (err) { document.getElementById("err").textContent = one.plain(err).title; b.disabled = false; b.textContent = "Add account"; return; }
+  connect.innerHTML = \`<ol><li>On the phone, open WhatsApp › Settings › Linked devices › Link a device.</li>
     <li>Scan this code\${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.</li></ol>
     <img id="qr" alt=""><div class="code" id="code"></div><div class="small muted" id="note">The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes.</div>\`;
   watch();
@@ -183,33 +207,35 @@ async function start(e) {
 
 // Shows the current codes until the phone links, or the codes run out.
 async function watch() {
+  const had = accounts.length;
   for (let i = 0; i < 90; i++) {
     const p = await one.call("_pairing").catch(() => ({}));
     if (!p.qr) {
-      const accounts = await one.call("accounts").catch(() => []);
-      if (accounts.length > shown) return show();
+      const now = await one.call("accounts").catch(() => []);
+      if (now.length > had) return draw(true).then(ready);
       document.getElementById("note").textContent = "The codes ran out before the phone linked.";
       document.getElementById("qr").hidden = true;
-      return setTimeout(show, 3000);
+      return setTimeout(() => draw(true).then(ready), 3000);
     }
     document.getElementById("qr").src = p.qr;
     document.getElementById("code").textContent = p.code || "";
     await new Promise((r) => setTimeout(r, 2000));
   }
-  show();
+  draw(true).then(ready);
 }
 
-one.on("changed", show);
-show().then(() => { if (one.params.add) document.getElementById("phone").focus(); });
-</script>
-<div class="card" id="needs" hidden></div>
-<script>
-one.call("_running").then(({ devices, needs }) => {
-  if (devices.length) return;
-  const n = document.getElementById("needs");
-  n.textContent = one.plain(needs).title;
-  n.hidden = false;
-  document.getElementById("connect").hidden = true; 
+document.getElementById("start").onclick = start;
+one.on("changed", () => draw(true));
+// The accounts and whether any device runs WhatsApp come together, so the form shows once, or not at all.
+Promise.all([one.call("_running").catch(() => null), draw(true)]).then(([r]) => {
+  if (r && !r.devices.length) {
+    const n = document.getElementById("needs");
+    n.textContent = one.plain(r.needs).title;
+    n.hidden = false;
+    return;
+  }
+  connect.hidden = false;
+  if (one.params.add) document.getElementById("phone").focus();
 });
 </script>`,
     },

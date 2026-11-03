@@ -167,20 +167,50 @@ function card(d, guests) {
   return \`<div class="dev\${d.online ? "" : " off"}\${d.host ? " sub" : ""}"><header><h3>\${one.esc(d.name)}</h3><span class="os">\${d.online ? sub : "Offline"}</span></header>
     \${stats ? '<div class="stats">' + stats + "</div>" : ""}\${rows ? '<div class="guests">' + rows + "</div>" : ""}</div>\`;
 }
-const show = () => one.render("#list", async () => {
+async function html() {
   const { devices } = await one.call("list", { history: true });
-  let html = "";
+  let out = "";
   for (let i = 0; i < devices.length; i++) {
     const d = devices[i];
     if (d.kind) continue;
     const guests = [];
     for (let j = i + 1; j < devices.length && devices[j].host === d.name; j++) if (devices[j].kind) guests.push(devices[j]);
-    html += card(d, guests);
+    out += card(d, guests);
   }
-  return html || one.empty("No devices yet.");
-});
-show();
-setInterval(show, 5000);
+  return out || one.empty("No devices yet.");
+}
+// Brings \`a\` to look like \`b\`, changing only what differs, so a poll moves the numbers and bars without redrawing the cards.
+function morph(a, b) {
+  const as = [...a.childNodes], bs = [...b.childNodes];
+  if (as.length !== bs.length) return a.replaceChildren(...bs);
+  as.forEach((x, i) => {
+    const y = bs[i];
+    if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName) return x.replaceWith(y);
+    if (x.nodeType !== 1) return void (x.data !== y.data && (x.data = y.data));
+    for (const { name, value } of [...y.attributes]) if (x.getAttribute(name) !== value) x.setAttribute(name, value);
+    for (const { name } of [...x.attributes]) if (!y.hasAttribute(name)) x.removeAttribute(name);
+    morph(x, y);
+  });
+}
+const list = document.getElementById("list");
+let busy = false;
+// One poll at a time, and only while the screen can be seen; one that fails keeps what's there.
+async function poll() {
+  if (busy || document.visibilityState === "hidden") return;
+  busy = true;
+  try {
+    if (!list.__drawn) return await one.render(list, html);
+    const t = document.createElement("div");
+    t.innerHTML = await html();
+    morph(list, t);
+  } catch {
+  } finally {
+    busy = false;
+  }
+}
+poll();
+setInterval(poll, 5000);
+document.addEventListener("visibilitychange", poll);
 </script>`,
     },
   },

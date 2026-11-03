@@ -4,6 +4,9 @@ const at = P.path || "";
 one.title(at ? at.split("/").pop() : P.repo);
 
 const icons = { tree: "folder", blob: "file", commit: "folder-dashed" };
+// Each row's last commit, as last fetched: kept across redraws, so the columns don't blank while it's fetched again.
+let latest = {};
+const lastCommit = (d, c) => (c ? `<a onclick="event.stopPropagation();${go("commit", { repo: d.repo, sha: c.sha })}">${esc(c.subject)}</a>` : "");
 
 function entry(d, e) {
   const path = (at ? at + "/" : "") + e.name;
@@ -11,7 +14,7 @@ function entry(d, e) {
   return `<a class="row plain entry ${e.type}" data-name="${esc(e.name)}" onclick="${open}">
     ${one.icon(icons[e.type], "entry-icon")}
     <span class="entry-name">${esc(e.name)}${e.type === "commit" ? ` <span class="muted">@ ${short(e.sha)}</span>` : ""}</span>
-    <span class="entry-commit"></span><span class="entry-when"></span>
+    <span class="entry-commit">${lastCommit(d, latest[e.name])}</span><span class="entry-when">${latest[e.name] ? esc(one.ago(latest[e.name].time, { long: true })) : ""}</span>
   </a>`;
 }
 
@@ -79,7 +82,8 @@ async function retire(op) {
 
 async function restore(button) {
   button.disabled = true;
-  await one.call("restore", { repo: P.repo }).catch(() => (button.disabled = false));
+  button.innerHTML = '<span class="spinner small" aria-hidden="true"></span>Restore';
+  await one.call("restore", { repo: P.repo }).catch(() => ((button.disabled = false), (button.textContent = "Restore")));
 }
 
 async function show() {
@@ -99,12 +103,15 @@ async function show() {
 
 // Each row's last commit, on windows wide enough to show it.
 async function fill(d) {
-  const latest = await one.call("latest", { repo: d.repo, ref: refOf(d), path: at }).catch(() => ({}));
+  try {
+    latest = await one.call("latest", { repo: d.repo, ref: refOf(d), path: at });
+  } catch {
+    return;
+  }
   for (const row of document.querySelectorAll(".entry[data-name]")) {
     const c = latest[row.dataset.name];
-    if (!c) continue;
-    row.querySelector(".entry-commit").innerHTML = `<a onclick="event.stopPropagation();${go("commit", { repo: d.repo, sha: c.sha })}">${esc(c.subject)}</a>`;
-    row.querySelector(".entry-when").textContent = one.ago(c.time, { long: true });
+    row.querySelector(".entry-commit").innerHTML = lastCommit(d, c);
+    row.querySelector(".entry-when").textContent = c ? one.ago(c.time, { long: true }) : "";
   }
 }
 

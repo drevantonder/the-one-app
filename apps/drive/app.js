@@ -287,26 +287,67 @@ function settingsScreen(title, blurb) {
   .card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
   button.primary { font: inherit; font-weight: 600; color: white; background: var(--tint); border: 0; border-radius: 10px; padding: 11px 16px; }
   button.plain { font: inherit; color: var(--tint); background: none; border: 0; padding: 4px 0; margin-left: 12px; }
+  button:disabled { opacity: 0.6; }
+  button .spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
   input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
   ol { padding-left: 20px; margin: 8px 0; }
   .sub.warn { color: var(--warn); }
 </style>
 <div id="list"></div>
-<div class="card" id="connect"></div>
+<div class="card" id="connect"><button class="primary" id="start">Sign In to Google</button><div id="err" class="error small"></div></div>
 <script>
-async function show() {
-  const accounts = await one.call("accounts");
-  document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok ? "" : " warn"}">\${one.esc(a.ok ? (i ? "" : "Used first") : one.plain(a.why || "Needs signing in again").title)}</div></div>\${a.ok ? "" : \`<button class="plain" data-in="\${one.esc(a.account)}">Sign in</button>\`}<button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
-    : '<p class="muted">${blurb}</p>';
-  for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => { await one.call("sign_out", { account: b.dataset.out }); show(); };
-  for (const b of document.querySelectorAll("[data-in]")) b.onclick = () => start(b.dataset.in);
-  const c = document.getElementById("connect");
-  c.innerHTML = '<button class="primary" id="start">' + (accounts.length ? "Add Account" : "Sign In to Google") + '</button><div id="err" class="error small"></div>';
-  document.getElementById("start").onclick = () => start();
+const list = document.getElementById("list"), connect = document.getElementById("connect");
+let accounts = [], asked = 0;
+// Signed out here and maybe not yet on the device, so a redraw meanwhile doesn't bring them back.
+const leaving = new Set(), failed = {};
+const shown = () => accounts.filter((a) => !leaving.has(a.account));
+const label = () => (shown().length ? "Add Account" : "Sign In to Google");
+function busy(b, on, text = b?.textContent) {
+  if (!b) return;
+  b.disabled = on;
+  if (on) b.innerHTML = '<span class="spinner small" aria-hidden="true"></span>' + one.esc(text);
+  else b.textContent = text;
 }
-async function start(account) {
-  const c = document.getElementById("connect");
+function draw(fetch) {
+  return one.render(list, async () => {
+    if (fetch) {
+      const n = ++asked, got = await one.call("accounts");
+      if (n === asked) accounts = got;
+    }
+    const s = document.getElementById("start");
+    if (s && !s.disabled) s.textContent = label();
+    const all = shown();
+    return all.length
+      ? '<h2 class="section">Accounts</h2><div class="list">' + all.map((a, i) => {
+          const why = failed[a.account] || (a.ok ? (i ? "" : "Used first") : one.plain(a.why || "Needs signing in again").title);
+          return \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok && !failed[a.account] ? "" : " warn"}">\${one.esc(why)}</div></div>\${a.ok ? "" : \`<button class="plain" data-in="\${one.esc(a.account)}">Sign in</button>\`}<button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`;
+        }).join("") + "</div>"
+      : '<p class="muted">${blurb}</p>';
+  }, { skeleton: 1 });
+}
+list.onclick = async (e) => {
+  const b = e.target.closest("button");
+  if (b?.dataset.in) return start(b.dataset.in, b);
+  const account = b?.dataset.out;
+  if (!account) return;
+  leaving.add(account);
+  delete failed[account];
+  draw(false);
+  try {
+    await one.call("sign_out", { account });
+    accounts = accounts.filter((a) => a.account !== account);
+  } catch (err) {
+    failed[account] = one.plain(err).title;
+  }
+  leaving.delete(account);
+  draw(!failed[account]);
+};
+function ready() {
+  connect.innerHTML = '<button class="primary" id="start">' + label() + '</button><div id="err" class="error small"></div>';
+  document.getElementById("start").onclick = (e) => start(undefined, e.currentTarget);
+}
+async function start(account, b) {
+  busy(b, true);
   let link;
   try {
     const r = await one.call("sign_in", account ? { account } : {});
@@ -314,19 +355,32 @@ async function start(account) {
   } catch (e) {
     // No Google sign-in yet: the person picks one from their Vault, or makes one, then it goes on.
     if (/Choose a Google sign-in/.test(e.message) && one.vault) {
-      try { if (await one.vault("client")) return start(account); } catch (err) { e = err; }
+      try { if (await one.vault("client")) return start(account, b); } catch (err) { e = err; }
     }
+    busy(b, false, b?.id === "start" ? label() : b?.textContent);
     document.getElementById("err").textContent = one.plain(e).title;
     return;
   }
-  c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
+  connect.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
     <input id="code" placeholder="http://127.0.0.1:…/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign In</button><div id="err" class="error small"></div>\`;
-  document.getElementById("finish").onclick = async () => {
-    try { const r = await one.call("finish_sign_in", { code: document.getElementById("code").value }); if (r?.signed_in === false) throw new Error(r.why); show(); }
-    catch (e) { document.getElementById("err").textContent = one.plain(e).title; }
+  const finish = document.getElementById("finish");
+  finish.onclick = async () => {
+    busy(finish, true);
+    try {
+      const r = await one.call("finish_sign_in", { code: document.getElementById("code").value });
+      if (r?.signed_in === false) throw new Error(r.why);
+    } catch (e) {
+      busy(finish, false);
+      document.getElementById("err").textContent = one.plain(e).title;
+      return;
+    }
+    await draw(true);
+    ready();
   };
 }
-one.on("changed", show);
-show().then(() => { if (one.params.add) start(); });
+document.getElementById("start").onclick = (e) => start(undefined, e.currentTarget);
+one.on("changed", () => draw(true));
+draw(true);
+if (one.params.add) start(undefined, document.getElementById("start"));
 </script>`;
 }

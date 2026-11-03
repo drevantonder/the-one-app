@@ -129,33 +129,71 @@ export default {
   .card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
   button.primary { font: inherit; font-weight: 600; color: white; background: var(--tint); border: 0; border-radius: 10px; padding: 11px 16px; }
   button.plain { font: inherit; color: var(--tint); background: none; border: 0; padding: 4px 0; }
+  button:disabled { opacity: 0.6; }
+  button .spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
   input, select { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
   ol { padding-left: 20px; margin: 8px 0; }
   .sub.warn { color: var(--warn); }
 </style>
 <div id="list"></div>
-<div class="card" id="connect"></div>
+<div class="card" id="connect"><button class="primary" id="start">Add account</button><div id="err" class="error small"></div></div>
+<div class="card" id="needs" hidden></div>
 <script>
 // Messenger's accounts are browser profiles (Vault items of type Browser profile): adding one picks a profile, or makes one, and opens
 // messenger.com in it to sign in.
-async function show() {
-  const accounts = await one.call("accounts");
-  document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Browser profiles</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok ? "" : " warn"}">\${one.esc(a.ok ? (i ? "" : "Used first") : one.plain(a.why || "Needs signing in again").title)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
-    : '<p class="muted">Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.</p>';
-  for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => { await one.call("sign_out", { account: b.dataset.out }); show(); };
-  const c = document.getElementById("connect");
-  c.innerHTML = '<button class="primary" id="start">Add account</button><div id="err" class="error small"></div>';
-  document.getElementById("start").onclick = () => pick(accounts);
+const list = document.getElementById("list"), connect = document.getElementById("connect"), form = connect.innerHTML;
+let accounts = [], asked = 0;
+// Asked for as the screen opens, so Add account has them at once.
+const profiles = () => one.call("_profiles").then((r) => (r || []).map((p) => p.profile), () => []);
+let known = profiles();
+// Signed out here and maybe not yet on the device, so a redraw meanwhile doesn't bring them back.
+const leaving = new Set(), failed = {};
+function draw(fetch) {
+  return one.render(list, async () => {
+    if (fetch) {
+      const n = ++asked, got = await one.call("accounts");
+      if (n === asked) accounts = got;
+    }
+    const all = accounts.filter((a) => !leaving.has(a.account));
+    return all.length
+      ? '<h2 class="section">Browser profiles</h2><div class="list">' + all.map((a, i) => {
+          const why = failed[a.account] || (a.ok ? (i ? "" : "Used first") : one.plain(a.why || "Needs signing in again").title);
+          return \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok && !failed[a.account] ? "" : " warn"}">\${one.esc(why)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`;
+        }).join("") + "</div>"
+      : '<p class="muted">Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.</p>';
+  }, { skeleton: 1 });
+}
+list.onclick = async (e) => {
+  const account = e.target.closest("[data-out]")?.dataset.out;
+  if (!account) return;
+  leaving.add(account);
+  delete failed[account];
+  draw(false);
+  try {
+    await one.call("sign_out", { account });
+    accounts = accounts.filter((a) => a.account !== account);
+  } catch (err) {
+    failed[account] = one.plain(err).title;
+  }
+  leaving.delete(account);
+  draw(!failed[account]);
+};
+function ready() {
+  connect.innerHTML = form;
+  document.getElementById("start").onclick = pick;
 }
 
 // Picks a profile not linked yet, or names a new one.
-async function pick(accounts) {
-  const c = document.getElementById("connect");
-  let profiles = [];
-  try { profiles = ((await one.call("_profiles")) || []).map((p) => p.profile); } catch {}
-  const free = [...new Set(profiles)].filter((p) => !accounts.some((a) => a.account === p));
-  c.innerHTML = \`<div class="small muted">Which browser profile? Each has its own sign-ins, like Personal or Work.</div>
+async function pick(e) {
+  const b = e?.currentTarget;
+  if (b) {
+    b.disabled = true;
+    b.innerHTML = '<span class="spinner small" aria-hidden="true"></span>Add account';
+  }
+  const [all] = await Promise.all([known, loaded]);
+  known = profiles();
+  const free = [...new Set(all)].filter((p) => !accounts.some((a) => a.account === p));
+  connect.innerHTML = \`<div class="small muted">Which browser profile? Each has its own sign-ins, like Personal or Work.</div>
     <select id="profile">\${free.map((p) => \`<option>\${one.esc(p)}</option>\`).join("")}<option value="">New profile…</option></select>
     <input id="name" placeholder="Its name, like Personal or Work" autocapitalize="words" autocorrect="off" \${free.length ? "hidden" : ""}>
     <button class="primary" id="go">Sign in to Messenger</button><div id="err" class="error small"></div>\`;
@@ -165,36 +203,35 @@ async function pick(accounts) {
     const profile = select.value || name.value.trim();
     if (!profile) return name.focus();
     e.target.disabled = true;
-    e.target.textContent = "Opening a device…";
+    e.target.innerHTML = '<span class="spinner small" aria-hidden="true"></span>Opening a device…';
     try { signingIn(await one.call("sign_in", { profile })); }
     catch (err) { document.getElementById("err").textContent = one.plain(err).title; e.target.disabled = false; e.target.textContent = "Sign in to Messenger"; }
   };
 }
 
 function signingIn(r) {
-  const c = document.getElementById("connect");
-  c.innerHTML = \`<ol><li><a href="\${one.esc(r.url)}">Open the device</a>: its browser is on messenger.com, in the \${one.esc(r.profile)} profile.</li>
+  connect.innerHTML = \`<ol><li><a href="\${one.esc(r.url)}">Open the device</a>: its browser is on messenger.com, in the \${one.esc(r.profile)} profile.</li>
     <li>Sign in there, and tick Keep me signed in.</li><li>Come back and press Done.</li></ol>
     <button class="primary" id="done">Done</button><div id="err" class="error small"></div>\`;
   document.getElementById("done").onclick = async (e) => {
     e.target.disabled = true;
-    e.target.textContent = "Saving…";
-    try { await one.call("_save", { profile: r.profile }); show(); }
-    catch (err) { document.getElementById("err").textContent = one.plain(err).title; e.target.disabled = false; e.target.textContent = "Done"; }
+    e.target.innerHTML = '<span class="spinner small" aria-hidden="true"></span>Saving…';
+    try { await one.call("_save", { profile: r.profile }); }
+    catch (err) { document.getElementById("err").textContent = one.plain(err).title; e.target.disabled = false; e.target.textContent = "Done"; return; }
+    await draw(true);
+    ready();
   };
 }
 
-one.on("changed", show);
-show().then(() => { if (one.params.add) document.getElementById("start").click(); });
-</script>
-<div class="card" id="needs" hidden></div>
-<script>
+document.getElementById("start").onclick = pick;
+one.on("changed", () => draw(true));
+const loaded = draw(true);
+if (one.params.add) document.getElementById("start").click();
 one.call("_running").then(({ devices, needs }) => {
   if (devices.length) return;
   const n = document.getElementById("needs");
   n.textContent = one.plain(needs).title;
   n.hidden = false;
-  
 });
 </script>`,
     },
