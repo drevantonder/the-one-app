@@ -47,7 +47,6 @@ pub use standing::GRANT_DAYS;
 mod state;
 mod status;
 mod storage;
-mod tunnel;
 mod vault;
 
 /// How long a call may run before it's stopped.
@@ -361,8 +360,6 @@ pub struct Inner {
     recovery_told: Mutex<std::collections::BTreeSet<Key>>,
     /// Where the install's data went: every bucket this device has used writes there, after a move (`Copied`).
     moved: Arc<tokio::sync::RwLock<Option<Place>>>,
-    /// This device's connector for the install's tunnel, with the token it runs with.
-    tunnel: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
     /// Held while this device makes a scope's first epoch.
     making_keys: tokio::sync::Mutex<()>,
     /// Positions of each database (by prefix) holding a step under an epoch no entry made, which every read passes over.
@@ -496,7 +493,6 @@ impl Node {
             moving: Mutex::new(false),
             recovery_told: Mutex::new(Default::default()),
             moved: Arc::default(),
-            tunnel: Mutex::new(None),
             making_keys: tokio::sync::Mutex::new(()),
             junk: Mutex::new(HashMap::new()),
             written: Mutex::new(HashMap::new()),
@@ -924,7 +920,6 @@ impl Node {
         }
         if handled.members || handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
             self.follow_storage();
-            self.follow_tunnel();
             self.follow_net();
         }
         let forgotten: Vec<(String, String)> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| Some((e.log().to_string(), e.content.data["blob"].as_str()?.to_string()))).collect();

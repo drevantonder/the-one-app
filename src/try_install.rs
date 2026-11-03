@@ -109,7 +109,7 @@ recovery key; its kernel's settings are in {}.
 }
 
 /// Runs the try install's serverless node beside its kernel, in its workerd, as `serverless deploy` puts one in
-/// Cloudflare: the gateway sends `/v1/` to it, and its devices answer its endpoint.
+/// Cloudflare: its devices answer its endpoint.
 fn serverless(dir: &Path) -> Result<()> {
     anyhow::ensure!(one::serverless::modules().is_ok(), "this build has no serverless node: build it with SERVERLESS set, as {CLI} update does");
     let mut settings = load_kernel(dir)?;
@@ -122,7 +122,7 @@ fn serverless(dir: &Path) -> Result<()> {
     let addr = running(dir).context("the try install didn't start again")?;
     let key = settings.serverless_endpoint().context("the try install's kernel has no serverless key")?;
     crate::request(try_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": "serverless", "value": key })))?;
-    println!("The try install's serverless node runs beside its kernel, its endpoint {}; {} sends /v1/ to it.", &key[..8], settings.address);
+    println!("The try install's serverless node runs beside its kernel, its endpoint {}.", &key[..8]);
     Ok(())
 }
 
@@ -178,12 +178,7 @@ fn start(dir: &Path) -> Result<String> {
     // Its own statement: a listener made in spawn_node's arguments would hold the port while the node starts.
     let free = std::net::TcpListener::bind(&was).is_ok();
     let addr = spawn_node(dir, free.then_some(was.as_str()))?;
-    let mut settings = load_kernel(dir)?;
-    if settings.node_url.as_deref() != Some(&format!("http://{addr}")) {
-        settings.node_url = Some(format!("http://{addr}"));
-        with_home(dir, || settings.save())?;
-    }
-    spawn_kernel(dir, &settings)?;
+    spawn_kernel(dir, &load_kernel(dir)?, &addr)?;
     Ok(addr)
 }
 
@@ -208,11 +203,11 @@ fn start_new(dir: &Path) -> Result<String> {
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
     let state = crate::request(agent().get(on("/v1/state")).call())?;
     let person = (state["user"]["id"].as_str().context("the try install has no person")?.to_string(), me);
-    let settings = one::kernel::Settings::for_try(&addr, &bucket, person)?;
+    let settings = one::kernel::Settings::for_try(&bucket, person)?;
     with_home(dir, || settings.save())?;
     // Read back as the kernel reads it, with its secrets.
     let settings = load_kernel(dir)?;
-    spawn_kernel(dir, &settings)?;
+    spawn_kernel(dir, &settings, &addr)?;
     crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": "address", "value": &settings.address })))?;
     // Its data moves to the try bucket, which its node reaches only through the kernel's URL signer from then on.
     let moved = crate::request(agent().post(on("/v1/storage")).send_json(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try" })))?;
@@ -273,13 +268,12 @@ fn try_agent(dir: &Path) -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).middleware(with_token).build().into()
 }
 
-/// Starts the try install's kernel, and waits for its address to answer.
-fn spawn_kernel(dir: &Path, settings: &one::kernel::Settings) -> Result<()> {
+/// Starts the try install's kernel, beside its node at `node`, and waits for its address to answer.
+fn spawn_kernel(dir: &Path, settings: &one::kernel::Settings, node: &str) -> Result<()> {
     for port in settings.ports {
         anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the try install's kernel's port {port} is taken now: {CLI} try stop, then {CLI} try for a new one");
     }
     // Beside its node, which it asks for the install's devices, for its relay to take only them.
-    let node = settings.node_url.as_deref().unwrap_or("").trim_start_matches("http://");
     spawn(dir, std::process::Command::new(std::env::current_exe()?).args(["kernel", "serve"]).env(addr_var(), node), "kernel.log")?;
     wait_for(&agent(), &format!("{}/.well-known/oauth-authorization-server", settings.address), &dir.join("kernel.log"))
 }

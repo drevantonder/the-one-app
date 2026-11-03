@@ -1,6 +1,5 @@
 //! The serverless node (`serverless/`) on Cloudflare: a node of the install as a Worker in its kernel's account, with
-//! no address of its own, which the gateway sends `/v1/` to by service binding, and an iroh endpoint of its
-//! own key, which the relay wakes. A release carries its built
+//! no address of its own, and an iroh endpoint of its own key, which the relay wakes. A release carries its built
 //! WebAssembly (`update` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the install's
 //! bucket, each at its latest deploy.
 
@@ -45,21 +44,21 @@ pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u
         listen: None,
         bindings: settings.bindings(SERVICE).into_iter().map(|(n, v, _)| (n, v)).collect(),
         assets: None,
-        // Its node on a machine, and a try install's bucket, are on this machine.
+        // A try install's bucket is on this machine.
         outbound: Some(crate::kernel::NEARBY.to_string()),
     }
 }
 
 /// What its upload says besides its modules: its bindings (`Settings::bindings`), its endpoint's Durable Object class
 /// `Node` and that class's migration the first time, and its logs on.
-pub fn metadata(settings: &Settings, migrated: bool, exists: impl Fn(&str) -> bool) -> Value {
-    let (mut meta, _) = crate::kernel::metadata(settings, SERVICE, Some("Node"), migrated, exists);
+pub fn metadata(settings: &Settings, migration: Option<&str>, exists: impl Fn(&str) -> bool) -> Value {
+    let (mut meta, _) = crate::kernel::metadata(settings, SERVICE, Some("Node"), migration, exists);
     // Its logs say which calls ran here, for whoever owns the account.
     meta["observability"] = json!({ "enabled": true });
     meta
 }
 
-/// Puts the serverless node in the kernel's Cloudflare account, with no address but the gateway's binding to it, and
+/// Puts the serverless node in the kernel's Cloudflare account, with no address, and
 /// the relay again, which hands it the datagrams sent to its endpoint once it's there.
 pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
     anyhow::ensure!(settings.try_person.is_none(), "a try install's kernel runs only beside its try install");
@@ -67,8 +66,7 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
     let modules = modules()?;
     let name = worker_name(SERVICE);
     let scripts = cf.scripts()?;
-    let migrated = scripts.get(&name).is_some_and(|s| s.migration.as_deref() == Some("v1"));
-    let meta = metadata(settings, migrated, |other| scripts.contains_key(other));
+    let meta = metadata(settings, scripts.get(&name).and_then(|s| s.migration.as_deref()), |other| scripts.contains_key(other));
     let mut what = vec![meta.to_string().into_bytes()];
     what.extend(modules.iter().flat_map(|(n, k, b)| [n.as_bytes().to_vec(), k.as_bytes().to_vec(), b.clone()]));
     let what = Uploaded::hash(&what);

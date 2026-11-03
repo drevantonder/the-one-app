@@ -361,41 +361,40 @@ pub(crate) struct Kernel {
 const RESOURCE: &str = "https://node.test/mcp";
 
 impl Kernel {
-    /// Runs them as `one kernel serve` does, from new settings, with the stand-in sites as the bucket, the gateway
-    /// sending `/v1/` to `node_url` and serving a web client of two pages.
-    pub(crate) fn start(node_url: Option<String>) -> Kernel {
-        Kernel::start_as(node_url, false, vec![], None, None)
+    /// Runs them as `one kernel serve` does, from new settings, with the stand-in sites as the bucket and the gateway
+    /// serving a web client of two pages.
+    pub(crate) fn start() -> Kernel {
+        Kernel::start_as(false, vec![], None, None)
     }
 
     /// As `start`, its relay taking only `devices` (public keys, hex) and those they admit.
     pub(crate) fn for_devices(devices: Vec<String>) -> Kernel {
-        Kernel::start_as(None, false, devices, None, None)
+        Kernel::start_as(false, devices, None, None)
     }
 
     /// As `for_devices`, with the MCP Worker, which runs the serverless node's build `modules`.
     pub(crate) fn with_mcp(devices: Vec<String>, modules: kernel::Modules) -> Kernel {
-        Kernel::start_as(None, false, devices, None, Some(modules))
+        Kernel::start_as(false, devices, None, Some(modules))
     }
 
     /// As `for_devices`, with the serverless node of `modules` (`serverless::modules_from`) beside it, ending itself
     /// once it's idled `idle` ms.
     pub(crate) fn with_serverless(devices: Vec<String>, modules: Vec<(String, &'static str, Vec<u8>)>, idle: u64) -> Kernel {
-        Kernel::start_as(None, false, devices, Some((modules, idle)), None)
+        Kernel::start_as(false, devices, Some((modules, idle)), None)
     }
 
     /// As `for_devices`, for an install whose people sign in with Google at test.example, the stand-in sites as
     /// Google.
     fn google(devices: Vec<String>) -> Kernel {
-        Kernel::start_as(None, true, devices, None, None)
+        Kernel::start_as(true, devices, None, None)
     }
 
-    fn start_as(node_url: Option<String>, google: bool, devices: Vec<String>, serverless: Option<(Vec<(String, &'static str, Vec<u8>)>, u64)>, mcp: Option<kernel::Modules>) -> Kernel {
+    fn start_as(google: bool, devices: Vec<String>, serverless: Option<(Vec<(String, &'static str, Vec<u8>)>, u64)>, mcp: Option<kernel::Modules>) -> Kernel {
         let gateway = port();
         let mut settings = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), gateway];
         settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
         settings.resources = vec![RESOURCE.into()];
-        settings.node_url = node_url;
         // The install's first devices, its admin's machines that run its calls.
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).collect();
         settings.serverless = serverless.is_some();
@@ -704,46 +703,9 @@ impl GetWith for ureq::Agent {
     }
 }
 
-/// A stand-in node that answers every request with what it was sent, as a page that would run script, sets a cookie
-/// and may be framed: → its address.
-fn hostile_node() -> String {
-    use std::io::{BufRead, BufReader, Write};
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = format!("http://{}", listener.local_addr().unwrap());
-    std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            // Each connection on its own, and one that closes or resets before it's answered is let go: workerd may
-            // drop one it opened.
-            std::thread::spawn(move || -> std::io::Result<()> {
-                let mut reader = BufReader::new(stream.try_clone()?);
-                let mut line = String::new();
-                reader.read_line(&mut line)?;
-                let mut headers = serde_json::Map::new();
-                loop {
-                    let mut h = String::new();
-                    if reader.read_line(&mut h)? == 0 || h.trim().is_empty() {
-                        break;
-                    }
-                    if let Some((k, v)) = h.trim().split_once(':') {
-                        headers.insert(k.trim().to_lowercase(), json!(v.trim()));
-                    }
-                }
-                let body = json!({ "request": line.trim(), "headers": headers }).to_string();
-                write!(
-                    &stream,
-                    "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\nset-cookie: better-auth.session_token=planted; Path=/\r\naccess-control-allow-origin: *\r\nservice-worker-allowed: /\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                    body.len()
-                )
-            });
-        }
-    });
-    addr
-}
-
 #[test]
-fn the_gateway_sends_each_path_where_it_belongs_and_nothing_a_node_says_runs_at_its_origin() {
-    let node = hostile_node();
-    let k = Kernel::start(Some(node));
+fn the_gateway_sends_each_path_where_it_belongs_and_none_to_a_node() {
+    let k = Kernel::start();
     let at = |path: &str| format!("{}{path}", k.address);
 
     // The web client's files: its page at / and wherever it routes itself, the screens' kit, the frame screens load.
@@ -780,25 +742,12 @@ fn the_gateway_sends_each_path_where_it_belongs_and_nothing_a_node_says_runs_at_
     let (status, _, _) = ask("POST", &at("/internal/invite"), &[], Some(json!({ "name": "Mallory" })));
     assert_eq!(status, 405, "the kernel's own routes aren't reachable at the address");
 
-    // A node gets the token, never the browser's cookies, and what it says is stamped so it can't run here.
-    let (status, headers, body) = ask("GET", &at("/v1/screens/board/main?scope=user"), &[("authorization", "Bearer a token"), ("cookie", "better-auth.session_token=mine")], None);
-    assert_eq!(status, 200);
-    let seen: Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(seen["request"], "GET /v1/screens/board/main?scope=user HTTP/1.1");
-    assert_eq!(seen["headers"]["authorization"], "Bearer a token");
-    assert!(seen["headers"].get("cookie").is_none(), "{seen}");
-    assert!(seen["headers"]["forwarded"].as_str().is_some_and(|f| f.starts_with("host=")), "a node knows it came from elsewhere: {seen}");
-    assert_eq!(headers["content-security-policy"], "sandbox allow-scripts allow-forms allow-popups allow-downloads");
-    assert_eq!(headers["x-content-type-options"], "nosniff");
-    for header in ["set-cookie", "access-control-allow-origin", "service-worker-allowed"] {
-        assert!(!headers.contains_key(header), "a node's {header} reached the browser: {headers:?}");
-    }
-    assert_eq!(ask("POST", &at("/v1/call"), &[], Some(json!({}))).0, 200);
-    assert_eq!(ask("POST", &at("/mcp"), &[], Some(json!({}))).0, 503, "/mcp is the MCP Worker's, never a node's, and this kernel has none");
-    assert_eq!(ask("GET", &at("/v1/state"), &[("service-worker", "script")], None).0, 403, "no node's answer becomes a service worker");
+    // Devices reach nodes over iroh: the address passes nothing on to one.
+    assert_eq!(ask("POST", &at("/v1/call"), &[], Some(json!({}))).0, 405, "/v1/ is the web client's, which takes only GET");
+    assert_eq!(ask("POST", &at("/mcp"), &[], Some(json!({}))).0, 503, "/mcp is the MCP Worker's, and this kernel has none");
 }
 
-/// Settings' screens work for someone signed in, through the gateway, as they do on that person's own Mac: each route
+/// Settings' screens work for someone signed in as they do on that person's own Mac: each route
 /// acts as them and is checked as theirs, so a member can't do what only admins may, and nobody acts as anyone else.
 #[test]
 fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
@@ -891,7 +840,7 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert_eq!(signs("member", json!({ "group": group, "user": andre, "role": null })).0, 200);
     assert_eq!(members().as_array().unwrap().len(), 1);
 
-    // What only this machine's own programs do, no sign-in from elsewhere (through the gateway) does: renaming the
+    // What only this machine's own programs do, no sign-in from elsewhere does: renaming the
     // device, say.
     let renamed = agent.post(format!("{api}/v1/name")).header("authorization", format!("Bearer {andres}")).header("forwarded", "host=\"one.example\"").send_json(json!({ "name": "elsewhere" })).unwrap();
     assert_eq!(renamed.status(), 403);
@@ -928,7 +877,7 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
 /// apps' unless it comes back to the device as they do: one passkey tap gives a client the person's keys.
 #[test]
 fn a_client_is_shown_by_where_it_goes_and_none_is_named_as_the_install() {
-    let k = Kernel::start(None);
+    let k = Kernel::start();
     let register = |name: &str, back: &str| post(&format!("{}/api/auth/oauth2/register", k.address), &[], json!({ "client_name": name, "redirect_uris": [back], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"] }));
     for (name, back) in [("Test", "https://elsewhere.example/back"), (" the TEST ", "http://localhost:4000/back"), ("Test on Andre's Mac", "https://elsewhere.example/back")] {
         let (status, out) = register(name, back);

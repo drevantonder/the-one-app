@@ -1,6 +1,5 @@
 // The web client: the Mac app's window, in a browser. It signs in as an OAuth client of the install's auth service
-// (PKCE, and the person's passkey at its sign-in page), keeps its refresh token in this browser, and calls a node's `/v1` on its
-// own origin with the access token; the gateway sends each on. App screens are untrusted: each runs in a sandboxed
+// (PKCE, and the person's passkey at its sign-in page), keeps its refresh token in this browser, and asks the person's nodes over iroh (`net.js`). App screens are untrusted: each runs in a sandboxed
 // frame, and this page answers its bridge as the Mac app's web view does, making each call itself. It draws at once
 // what it showed last (the sidebar, and a still of the screen) and then what the node says now.
 

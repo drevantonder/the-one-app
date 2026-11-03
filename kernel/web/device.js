@@ -1,4 +1,4 @@
-// This browser as a device of its person (ARCHITECTURE.md, Being built: Devices): its own Ed25519 key, which signs, and
+// This browser as a device of its person (ARCHITECTURE.md): its own Ed25519 key, which signs, and
 // X25519 key, which what's sealed to it is sealed to, both made here, not extractable, kept in IndexedDB by person. It
 // gets in when one of their devices approves it; then it opens its scopes' epochs, sealed to it, and from them the keys
 // a call needs, which it hands the node with the call (`x-one-keys`). What it opens stays in this page's memory, as keys

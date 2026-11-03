@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<!-- The web client: its code comes only from the kernel's gateway, never a node, since it holds the browser's tokens.
+<!-- The web client: its code comes only from the kernel's gateway, since it holds the browser's tokens.
      App screens run in sandboxed frames (frame.html), so nothing an app or a node sends runs here. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'self'">
 <meta name="referrer" content="no-referrer">

@@ -1,5 +1,5 @@
 //! A node taking over from the one before it with no gap, for an update: the running node starts the new build with
-//! its listening socket, the new one starts, loads and warms its apps and takes over its tunnel connector, then says it's
+//! its listening socket, the new one starts, loads and warms its apps, then says it's
 //! ready (and to systemd, that it's the service's main process now), and the old one stops taking connections, lets
 //! what it's answering finish, and exits. What reaches the address meanwhile waits in the socket's queue, never refused.
 //! Only on Linux, and under systemd only where the service lets other processes tell it its main pid

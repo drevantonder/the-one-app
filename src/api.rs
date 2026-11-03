@@ -1,6 +1,6 @@
 //! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; how a client device
-//! reaches it over iroh (src/node/net.rs), as its person; and how someone signed in with the install's kernel (a
-//! browser, through the gateway, or the Mac app's window here) reaches it, as themselves, for what their sign-in opens.
+//! reaches it over iroh (src/node/net.rs), as its person; and how someone signed in with the install's kernel
+//! (this machine's CLI and MCP, after `sign-in`) reaches it, as themselves, for what their sign-in opens.
 
 use std::convert::Infallible;
 
@@ -91,8 +91,8 @@ pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io
 
 /// `serve`, until `stop`: then it takes no more connections, and returns once those it has are answered, or after
 /// `handoff::drain_within`. As a node hands over, it stops taking connections at once, leaving them to the next, and
-/// its answers say to close theirs for five seconds before it closes those left, so clients that keep one (the
-/// gateway's, through the tunnel, whose closing reaches it late) don't send on a closed one.
+/// its answers say to close theirs for five seconds before it closes those left, so clients that keep one don't send on
+/// a closed one.
 pub async fn serve_until(listener: tokio::net::TcpListener, router: Router, stop: impl std::future::Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
     let (stopped, after) = tokio::sync::oneshot::channel::<()>();
     let router = router.layer(axum::middleware::map_response(|mut resp: Response| async move {
@@ -208,7 +208,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/source/{app}", get(source))
         .route("/v1/storage", get(storage_get).post(storage_post))
         .route("/v1/storage/{op}", post(storage_post))
-        .route("/v1/tunnel", get(tunnel_get).post(tunnel_post))
         .route("/v1/backups", get(backups_get))
         .route("/v1/backups/{op}", post(backups_post))
         .route("/v1/vault", get(vault_get).post(vault_post))
@@ -237,7 +236,7 @@ pub fn guarded(routes: Router<Node>, node: Node) -> Router {
     routes.route_layer(axum::middleware::from_fn_with_state(node.clone(), only_this_machine)).layer(axum::middleware::map_response(sandboxed)).with_state(node)
 }
 
-/// Headers that say a request was passed on from elsewhere: the gateway sends `forwarded`, tunnels and proxies the rest.
+/// Headers that say a request was passed on from elsewhere, as proxies add them.
 pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip", "cf-worker"];
 
 /// What someone signed in with the kernel may ask; the rest is for this machine's own programs.
@@ -437,7 +436,7 @@ async fn from_client(node: &Node, key: crate::entry::Key, until: u64, path: &str
 
 /// Refuses a request once what it sends is read, dropped as it comes: refused mid-body, the rest unread, the connection
 /// closes with a reset that can reach the client before the refusal does, which it sees as a broken connection instead.
-/// One that sends more than 1 MiB, or takes longer than a few seconds (anyone can reach this through the gateway), is
+/// One that sends more than 1 MiB, or takes longer than a few seconds (anyone can reach this), is
 /// refused with the connection closed, holding nothing.
 async fn refuse(req: axum::extract::Request, mut refusal: Response) -> Response {
     let mut body = req.into_body().into_data_stream();
@@ -476,14 +475,14 @@ fn from_this_machine(node: &Node, req: &axum::extract::Request) -> bool {
     // Compared as hashes, so how long it takes says nothing of the token.
     let digest = |t: &str| <sha2::Sha256 as sha2::Digest>::digest(t.as_bytes());
     let token = header(LOCAL_TOKEN_HEADER).is_some_and(|t| digest(t.trim()) == digest(node.local_token()));
-    // The gateway, a tunnel or a proxy on this machine still says it passed on someone else's request.
+    // A proxy on this machine still says it passed on someone else's request.
     let forwarded = FORWARDED.iter().any(|h| req.headers().contains_key(*h));
     let page = header("origin").is_some() || header("sec-fetch-site").is_some_and(|s| s != "none");
     peer && token && !forwarded && !page
 }
 
 /// Nothing this node answers runs as script at its address, where a page would ask as this machine's own programs: a
-/// browser shows it as the gateway does, sandboxed with no script, and never sniffs it into another type.
+/// browser shows it sandboxed with no script, and never sniffs it into another type.
 async fn sandboxed(mut resp: Response) -> Response {
     let headers = resp.headers_mut();
     headers.insert(axum::http::header::CONTENT_SECURITY_POLICY, axum::http::HeaderValue::from_static("sandbox"));
@@ -964,15 +963,6 @@ async fn storage_get(State(node): State<Node>, uri: axum::http::Uri) -> Reply {
 
 async fn storage_post(State(node): State<Node>, uri: axum::http::Uri, Json(body): Json<Value>) -> Reply {
     Ok(Json(node.storage_route(&local(&node)?, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
-}
-
-/// The install's tunnel, `/v1/tunnel`.
-async fn tunnel_get(State(node): State<Node>) -> Reply {
-    Ok(Json(node.tunnel_route(&local(&node)?, "GET", &json!({})).await?))
-}
-
-async fn tunnel_post(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    Ok(Json(node.tunnel_route(&local(&node)?, "POST", &body).await?))
 }
 
 /// Backups' routes, `/v1/backups…`.

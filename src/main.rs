@@ -90,19 +90,13 @@ fn every_command() -> String {
                                        with. Nobody joins uninvited, the first person too
   {CLI} serverless deploy [--account <id>]
                                        put the install's serverless node in the kernel's Cloudflare account (a node as
-                                       a Worker, with the API token in CLOUDFLARE_API_TOKEN) and send the address's
-                                       /v1/ to it; what needs a machine goes on to node-url
-  {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/: a node's address, or
-                                       cloudflare:<id>, the Workers VPC service of a Cloudflare Tunnel to one),
-                                       auth-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or
+                                       a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over
+                                       iroh when none of your machines answers
+  {CLI} kernel set <setting> <value>   change one: auth-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or
                                        android (the SHA-256 fingerprints of the certificates the Android app is signed
                                        with, comma-separated, or -: links to the address open the app)
   {CLI} kernel use <address>
                                        point this install at its kernel: its nodes take sign-ins made at the address
-  {CLI} kernel tunnel                  whether this device runs a connector for the install's Cloudflare Tunnel, which
-                                       the address reaches nodes through (node-url cloudflare:<id>): piped the
-                                       tunnel's token, it keeps it in Everyone's Vault, and every device runs one, so
-                                       the address reaches whichever is up
   {CLI} storage                        where the install's data is kept
   {CLI} storage move --endpoint <url> --bucket <name> [--region <r>]
                                        move it to S3-compatible storage (R2, S3, GCS, MinIO), whose key is the
@@ -508,16 +502,11 @@ fn run(args: Vec<String>) -> Result<()> {
             one::serverless::deploy(&cf, &settings)?;
             if !was {
                 settings.save()?;
-                let gateway = one::kernel::SERVICES.iter().position(|(s, _, _)| *s == "gateway").unwrap();
-                let mut modules = vec![Vec::new(); one::kernel::SERVICES.len()];
-                modules[gateway] = one::kernel::module(one::kernel::SERVICES[gateway].1)?;
-                let web = settings.web();
-                one::kernel::deploy_some(&cf, &settings, &modules, &web, &["gateway"])?;
             }
             // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
             // things run in.
             post("/v1/settings", json!({ "name": "serverless", "value": settings.serverless_endpoint() }))?;
-            println!("The serverless node is in your Cloudflare account, and {} sends /v1/ to it; what needs a machine goes on to {}.", settings.address, settings.node_url.as_deref().unwrap_or("no machine yet: kernel set node-url"));
+            println!("The serverless node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
         }
         ["kernel", "invite", name] => {
             let settings = one::kernel::Settings::load()?;
@@ -542,7 +531,6 @@ fn run(args: Vec<String>) -> Result<()> {
             let mut settings = one::kernel::Settings::load()?;
             let piped = || -> Result<Value> { serde_json::from_reader(std::io::stdin()).context("pipe its JSON object on stdin") };
             match *name {
-                "node-url" => settings.node_url = Some(value.trim_end_matches('/').to_string()).filter(|v| !v.is_empty() && v != "-"),
                 "auth-url" => settings.auth_url = value.trim_end_matches('/').to_string(),
                 "resources" => settings.resources = value.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect(),
                 "bucket" if *value == "-" => {
@@ -561,7 +549,7 @@ fn run(args: Vec<String>) -> Result<()> {
                     }
                     settings.android = prints;
                 }
-                _ => bail!("no kernel setting {name}: node-url, auth-url, resources, bucket or android"),
+                _ => bail!("no kernel setting {name}: auth-url, resources, bucket or android"),
             }
             settings.save()?;
             println!("Set {name}. {CLI} kernel serve takes it at its next start, and {CLI} kernel deploy when it next runs.");
@@ -569,23 +557,6 @@ fn run(args: Vec<String>) -> Result<()> {
         ["kernel", "use", address] => {
             post("/v1/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
             println!("This install is at {address}: its nodes take sign-ins made there.");
-        }
-        ["kernel", "tunnel"] => {
-            let mut token = String::new();
-            if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                std::io::Read::read_to_string(&mut std::io::stdin(), &mut token)?;
-            }
-            if token.trim().is_empty() {
-                let t = get("/v1/tunnel")?;
-                match (t["set"] == true, t["running"] == true) {
-                    (false, _) => println!("This install has no tunnel: pipe its token into {CLI} kernel tunnel, and every device runs a connector for it."),
-                    (true, true) => println!("{} runs a connector for the install's tunnel, as every device does.", t["device"].as_str().unwrap_or("")),
-                    (true, false) => println!("{} runs no connector for the install's tunnel now: cloudflared.log in its folder says why.", t["device"].as_str().unwrap_or("")),
-                }
-                return Ok(());
-            }
-            let r = post("/v1/tunnel", json!({ "token": token.trim(), "agent": agent_from_env() }))?;
-            println!("Kept tunnel {}'s token in Everyone's Vault: every device runs a connector for it now.", r["tunnel"].as_str().unwrap_or(""));
         }
         ["storage"] => {
             let s = get("/v1/storage")?;
@@ -1770,7 +1741,6 @@ fn kernel_said(s: &one::kernel::Settings) -> String {
     if s.auth_url.starts_with("http://127.0.0.1") {
         out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth)\n", s.ports[1], s.ports[0]);
     }
-    out += &format!("  /v1/ to   {}\n", s.node_url.as_deref().unwrap_or("no node yet: kernel set node-url"));
     if !s.resources.is_empty() {
         out += &format!("  nodes     {}\n", s.resources.join(", "));
     }

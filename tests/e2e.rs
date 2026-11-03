@@ -471,20 +471,18 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     eventually("the badge to clear", async || a.state()["backups"].is_null()).await;
 
     // A folder named only by a Vault item, which anyone may write, is never written to: a folder is its own device's
-    // choice. Nor is an S3 place no admin's setting names, and the node's other items aren't places.
+    // choice. Nor is an S3 place no admin's setting names.
     let global = one::entry::Scope::Global;
     let planted = temp("backup-planted").join("home");
     let fields = json!({ "path": { "value": planted }, "device": { "value": one::entry::hex(&a.id()) } });
     a.set_item(&me, &global, json!({ "title": "Planted", "type": one::backups::KIND, "fields": fields, "apps": ["node"] })).await.unwrap();
     let s3 = json!({ "endpoint": { "value": "http://127.0.0.1:9" }, "bucket": { "value": "b" }, "key_id": { "value": "k" }, "secret": { "value": "s", "secret": true } });
     a.set_item(&me, &global, json!({ "title": "Unnamed bucket", "type": one::backups::KIND, "fields": s3, "hosts": ["127.0.0.1"], "apps": ["node"] })).await.unwrap();
-    let token = json!({ "token": { "value": "t", "secret": true } });
-    a.set_item(&me, &global, json!({ "title": "Cloudflare Tunnel", "type": "Tunnel", "fields": token, "hosts": ["example.com"], "apps": ["node"] })).await.unwrap();
     a.back_up_now();
     let place = |title: &str| a.backups().unwrap()["places"].as_array().unwrap().iter().find(|p| p["title"] == title).cloned();
     eventually("the planted folder's run to fail", async || place("Planted").is_some_and(|p| !p["problem"].is_null())).await;
     assert!(!planted.exists(), "nothing was written there");
-    assert!(place("Unnamed bucket").is_none() && place("Cloudflare Tunnel").is_none(), "{}", a.backups().unwrap());
+    assert!(place("Unnamed bucket").is_none(), "{}", a.backups().unwrap());
 
     // A place typed into the sheet on the person's device is a place too.
     let asked = a.request_place(&me, &json!({ "endpoint": "http://127.0.0.1:9", "title": "Sheet bucket" })).await.unwrap();

@@ -19,8 +19,11 @@ pub const SERVICES: &[(&str, &str, Option<&str>)] = &[
     ("relay", "relay/worker.js", Some("Relay")),
     ("signer", "signer/worker.js", None),
     ("mcp", "mcp/worker.js", Some("Client")),
-    ("gateway", "gateway/worker.js", Some("Relay")),
+    ("gateway", "gateway/worker.js", None),
 ];
+
+/// A Durable Object class a service had once, (service, class), which its next upload deletes on Cloudflare.
+const DELETED: &[(&str, &str)] = &[("gateway", "Relay")];
 
 /// A service's WebAssembly modules, (name, bytes): the `.wasm` files in its module's folder, as this release has them.
 pub fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
@@ -55,17 +58,13 @@ pub fn modules_of(service: &str, entry: &str, serverless: Option<&Modules>) -> O
 pub struct Settings {
     /// The install's name, as sign-in screens say it.
     pub name: String,
-    /// The install's address, the one people use: the gateway's, which sends sign-in to the auth service, `/v1/` to a
-    /// node and the rest to the web client. Passkeys belong to its host name, so it doesn't change.
+    /// The install's address, the one people use: the gateway's, which sends sign-in to the auth service, MCP to the MCP
+    /// Worker, the relay's paths to the relay and the rest to the web client. Passkeys belong to its host name, so it
+    /// doesn't change.
     pub address: String,
     /// Where the kernel's own tools reach the auth service; people reach it at the address.
     pub auth_url: String,
-    /// Where the gateway sends `/v1/`: a node's address, or `cloudflare:<id>` for a node behind a Cloudflare
-    /// Tunnel with no public address, which the gateway on Cloudflare reaches by that Workers VPC service.
-    #[serde(default)]
-    pub node_url: Option<String>,
-    /// Whether the gateway sends `/v1/` to the install's serverless node instead (`serverless deploy`),
-    /// which sends on to `node_url` what needs a machine.
+    /// Whether the install has a serverless node (`serverless deploy`), which the relay wakes.
     #[serde(default)]
     pub serverless: bool,
     /// The local ports the auth service and the gateway listen on, when this machine runs them. The other services
@@ -269,7 +268,6 @@ impl Settings {
             name: name.into(),
             address: address.trim_end_matches('/').into(),
             auth_url: format!("http://127.0.0.1:{}", ports[0]),
-            node_url: None,
             serverless: false,
             serverless_key: data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>()),
             ports,
@@ -285,15 +283,14 @@ impl Settings {
     }
 
     /// A try install's kernel (`one try`): on free ports here, its address its gateway's at 127.0.0.1, which `one try`
-    /// lets each device it borrows reach at the same address; its node `node`, its bucket where that node serves its
-    /// data (`bucket`), and `person` signed in with nothing to show.
-    pub fn for_try(node: &str, bucket: &str, person: (String, String)) -> Result<Settings> {
+    /// lets each device it borrows reach at the same address; its bucket where its node serves its data (`bucket`), and
+    /// `person` signed in with nothing to show.
+    pub fn for_try(bucket: &str, person: (String, String)) -> Result<Settings> {
         let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
         let ports = [free()?, free()?];
         let mut settings = Settings::new("Try", &format!("http://127.0.0.1:{}", ports[1]));
         settings.auth_url = format!("http://127.0.0.1:{}", ports[0]);
         settings.ports = ports;
-        settings.node_url = Some(format!("http://{node}"));
         settings.try_person = Some(person);
         // Its node serves its data there (try_install::bucket), signatures unchecked: the URL signer holds these.
         settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try", "region": "auto", "key_id": "try", "secret": "try" }));
@@ -336,16 +333,6 @@ impl Settings {
         write_private(&local(), &(lines.join("\n") + "\n"))
     }
 
-    /// How a Worker reaches the node on a machine, `node_url`, as the binding `name`: a Workers VPC service, or else
-    /// a URL (`<name>_URL`).
-    pub fn machine(&self, name: &str) -> (String, String, bool) {
-        let node = self.node_url.clone().unwrap_or_default();
-        match node.strip_prefix("cloudflare:") {
-            Some(id) => (name.into(), format!("vpc:{id}"), false),
-            None => (format!("{name}_URL"), node, false),
-        }
-    }
-
     /// The serverless node's endpoint (its public key, hex), once it has a key.
     pub fn serverless_endpoint(&self) -> Option<String> {
         let seed: [u8; 32] = data_encoding::HEXLOWER.decode(self.serverless_key.as_bytes()).ok()?.try_into().ok()?;
@@ -360,16 +347,12 @@ impl Settings {
     }
 
     /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service,
-    /// `object:<name>:<class>` another service's Durable Object class, `loader:` Worker Loader, `vpc:<id>` a Cloudflare
-    /// Workers VPC service, and `r2:<bucket>` an R2 bucket of the account's.
+    /// `object:<name>:<class>` another service's Durable Object class, `loader:` Worker Loader, and `r2:<bucket>` an R2
+    /// bucket of the account's.
     pub fn bindings(&self, service: &str) -> Vec<(String, String, bool)> {
         // The gateway holds no secrets.
         if service == "gateway" {
-            let node = match self.serverless {
-                true => ("NODE".into(), format!("service:{}", crate::serverless::SERVICE), false),
-                false => self.machine("NODE"),
-            };
-            return vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), ("SIGNER".into(), "service:signer".into(), false), ("MCP".into(), "service:mcp".into(), false), node];
+            return vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), ("SIGNER".into(), "service:signer".into(), false), ("MCP".into(), "service:mcp".into(), false)];
         }
         let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
         // Nor does the relay: only the keys of the install's first devices, which it starts its list with, and the
@@ -394,8 +377,7 @@ impl Settings {
             out.extend(location);
             return out;
         }
-        // The serverless node: its endpoint's key, the relay it's reached through, and the node on a machine the rest
-        // of what needs one goes on to.
+        // The serverless node: its endpoint's key, and the relay it's reached through.
         if service == crate::serverless::SERVICE {
             let mut out = vec![
                 ("AUTH".into(), "service:auth".into(), false),
@@ -407,9 +389,6 @@ impl Settings {
                 ("RELAY".into(), "service:relay:ServerlessNode".into(), false),
             ];
             out.extend(location);
-            if self.node_url.is_some() {
-                out.push(self.machine("MACHINE"));
-            }
             return out;
         }
         // The URL signer holds only the bucket's credentials, and asks the relay who's allowed.
@@ -490,10 +469,8 @@ pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, serve
             listen: settings.place(name).map(|(_, port)| format!("127.0.0.1:{port}")),
             bindings: settings.bindings(name).into_iter().filter(|(_, v, _)| mcp || !v.starts_with("service:mcp") && !v.starts_with("object:mcp:")).map(|(n, v, _)| (n, v)).collect(),
             assets: (*name == "gateway").then(|| web.to_path_buf()),
-            // The gateway's node may be on this machine or its private network, as a node behind a tunnel is; a try
-            // install's URL signer, and the MCP Worker's devices reading by its URLs, reach its bucket on this machine, and
-            // its schedules its node.
-            outbound: (*name == "gateway" || matches!(*name, "signer" | "mcp" | "schedules") && settings.try_person.is_some()).then(|| NEARBY.to_string()),
+            // A try install's URL signer, and the MCP Worker's devices reading by its URLs, reach its bucket on this machine.
+            outbound: (matches!(*name, "signer" | "mcp") && settings.try_person.is_some()).then(|| NEARBY.to_string()),
         })
         .chain(node)
         .collect()
@@ -846,7 +823,6 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
             bindings.push(format!("(name = \"ASSETS\", service = {})", quote(&format!("{}-assets", s.name))));
         }
         for (name, value) in &s.bindings {
-            ensure!(!value.starts_with("vpc:"), "a node behind a Cloudflare Tunnel is reached only by a kernel on Cloudflare: give kernel set node-url a node's address");
             // An R2 bucket is bound only on Cloudflare; here the URL signer reaches it by URL.
             if value.starts_with("r2:") {
                 continue;
@@ -1092,8 +1068,9 @@ pub fn worker_name(service: &str) -> String {
 }
 
 /// What a Worker's upload says besides its module: its bindings (another service's by its Worker's name), its Durable
-/// Object class, and that class's migration the first time.
-pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrated: bool, exists: impl Fn(&str) -> bool) -> (Value, bool) {
+/// Object class, and that class's migration the first time, or the migration that deletes a class it had (`migration`:
+/// the tag of the one the Worker has had).
+pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migration: Option<&str>, exists: impl Fn(&str) -> bool) -> (Value, bool) {
     let mut complete = true;
     let mut bindings: Vec<Value> = class.iter().map(|class| json!({ "type": "durable_object_namespace", "name": class.to_uppercase(), "class_name": class })).collect();
     for (name, value, secret) in settings.bindings(service) {
@@ -1117,16 +1094,21 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrate
                 }
             }
             None if value == "loader:" => bindings.push(json!({ "type": "worker_loader", "name": name })),
-            None => match (value.strip_prefix("vpc:"), value.strip_prefix("r2:")) {
-                (Some(id), _) => bindings.push(json!({ "type": "vpc_service", "name": name, "service_id": id })),
-                (_, Some(bucket)) => bindings.push(json!({ "type": "r2_bucket", "name": name, "bucket_name": bucket })),
-                _ => bindings.push(json!({ "type": if secret { "secret_text" } else { "plain_text" }, "name": name, "text": value })),
+            None => match value.strip_prefix("r2:") {
+                Some(bucket) => bindings.push(json!({ "type": "r2_bucket", "name": name, "bucket_name": bucket })),
+                None => bindings.push(json!({ "type": if secret { "secret_text" } else { "plain_text" }, "name": name, "text": value })),
             },
         }
     }
     let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::apps::COMPATIBILITY_DATE, "bindings": bindings });
-    if let Some(class) = class.filter(|_| !migrated) {
+    if let Some(class) = class.filter(|_| migration != Some("v1")) {
         meta["migrations"] = json!({ "new_tag": "v1", "new_sqlite_classes": [class] });
+    }
+    if class.is_none() && migration == Some("v1") {
+        let gone: Vec<&str> = DELETED.iter().filter(|(s, _)| *s == service).map(|(_, class)| *class).collect();
+        if !gone.is_empty() {
+            meta["migrations"] = json!({ "old_tag": "v1", "new_tag": "v2", "deleted_classes": gone });
+        }
     }
     (meta, complete)
 }
@@ -1153,8 +1135,8 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
         for i in left {
             let (service, _, class) = SERVICES[i];
             let name = worker_name(service);
-            let migrated = scripts.get(&name).is_some_and(|s| s.migration.as_deref() == Some("v1"));
-            let (mut meta, complete) = metadata(settings, service, class, migrated, |other| scripts.contains_key(other) || other == name);
+            let migration = scripts.get(&name).and_then(|s| s.migration.clone());
+            let (mut meta, complete) = metadata(settings, service, class, migration.as_deref(), |other| scripts.contains_key(other) || other == name);
             let url = settings.place(service).map(|(url, _)| url);
             let Some(wasm) = modules_of(service, SERVICES[i].1, crate::serverless::modules().ok().as_ref()) else { bail!("this build has no serverless node, which the {service} service runs: {} update builds one", crate::config::CLI) };
             let mut what = vec![meta.to_string().into_bytes(), modules[i].clone(), url.unwrap_or("").as_bytes().to_vec()];
@@ -1181,8 +1163,9 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
             parts.extend(wasm.iter().map(|(name, bytes)| (name.as_str(), if name.ends_with(".js") { "application/javascript+module" } else { "application/wasm" }, bytes.as_slice())));
             let version = cf.upload(&name, &parts, &meta)?;
             reach()?;
-            // Later services' bindings to it resolve in this pass, and its class has had its migration.
-            scripts.insert(name.clone(), Script { migration: class.map(|_| "v1".to_string()) });
+            // Later services' bindings to it resolve in this pass, and it has had its migration.
+            let migration = meta["migrations"]["new_tag"].as_str().map(str::to_string).or(migration);
+            scripts.insert(name.clone(), Script { migration });
             if complete {
                 sent.push((name, what, version));
             } else {
@@ -1266,5 +1249,16 @@ mod tests {
         std::fs::write(dir.join("settings.json"), "{}").unwrap();
         assert!(none_in(&dir).is_err(), "settings that didn't load aren't replaced");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_gateways_old_relay_class_is_deleted_once_and_no_other_service_loses_one() {
+        let settings = Settings::new("Test", "https://one.example");
+        let migrations = |service: &str, class: Option<&str>, had: Option<&str>| metadata(&settings, service, class, had, |_| true).0["migrations"].clone();
+        assert_eq!(migrations("gateway", None, Some("v1")), json!({ "old_tag": "v1", "new_tag": "v2", "deleted_classes": ["Relay"] }));
+        assert!(migrations("gateway", None, Some("v2")).is_null() && migrations("gateway", None, None).is_null(), "it's deleted once");
+        assert!(migrations("signer", None, Some("v1")).is_null(), "no other service's classes are touched");
+        assert_eq!(migrations("auth", Some("Auth"), None), json!({ "new_tag": "v1", "new_sqlite_classes": ["Auth"] }));
+        assert!(migrations("auth", Some("Auth"), Some("v1")).is_null());
     }
 }

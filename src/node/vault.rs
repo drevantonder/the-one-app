@@ -163,8 +163,8 @@ impl Node {
         tokio::spawn(async move { node.refresh_own_items().await });
     }
 
-    /// Reads `global`'s items with this device's own keys, for the secrets the node itself uses (its Tunnel's token, the
-    /// keys of the places it backs up to), and follows them if they changed: each only as an admin's setting names it,
+    /// Reads `global`'s items with this device's own keys, for the secrets the node itself uses (the keys of the
+    /// places it backs up to), and follows them if they changed: each only as an admin's setting names it,
     /// since anyone may write an item. A device that doesn't open `global` has none.
     async fn refresh_own_items(&self) {
         let read = async {
@@ -185,7 +185,6 @@ impl Node {
             .unwrap_or(false);
         if changed {
             self.follow_storage();
-            self.follow_tunnel();
         }
     }
 

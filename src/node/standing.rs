@@ -1,4 +1,4 @@
-//! Standing work (ARCHITECTURE.md, Being built): an app kept running in a scope on a machine its person chose, with
+//! Standing work (ARCHITECTURE.md): an app kept running in a scope on a machine its person chose, with
 //! that app's keys there sealed to the machine (`keys::grant_name`) while a `grant` entry says so. This device's person
 //! grants it here, and renews it as they use the app, so a grant nobody uses, or whose machine is off, ends by itself;
 //! a machine that holds one opens that app's databases there with the grant's keys alone, as a call opens what it was
