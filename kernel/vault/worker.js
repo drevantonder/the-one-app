@@ -27,8 +27,6 @@ const SCOPE = /^(global|user:[0-9a-f]{16}|group:[0-9a-f]{16})$/;
 const USER = /^[0-9a-f]{16}$/;
 /// How long a copy waiting for its client's first token (sealed under an authorization code) is kept.
 const PENDING = 10 * 60_000;
-/// How long presigned URLs last.
-const URLS = 900;
 
 class Refused extends Error {
   constructor(status, message) {
@@ -121,7 +119,6 @@ export class Vault extends DurableObject {
     switch (`${request.method} ${path}`) {
       case "GET /session": return json(await this.sessionAbout(token));
       case "POST /keys": return json(await this.keys(token, claims, body));
-      case "POST /urls": return json(await this.urls(token, claims, body));
       case "POST /erase": return json(await this.erase(token, claims, body));
       case "POST /invite": return json(await this.invite(token, claims, body));
       case "POST /role": return json(await this.role(token, claims, body));
@@ -599,31 +596,6 @@ export class Vault extends DurableObject {
     mayUse(held, app);
     const filled = await this.items.fill(held, app, text, host.toLowerCase()).catch((err) => refuse(400, err.message));
     return { text: filled };
-  }
-
-  /// Presigned URLs to read and create objects, and to replace a database's `newest` (only while it's still the
-  /// version named by its ETag): `{ read: [name], create: [name], replace: [{ name, etag }] }`. Each name is
-  /// `<scope's folder>/<app>/…` in a scope the session opens, or `log/…`, the install's log, for one that opens
-  /// Everyone's.
-  async urls(token, claims, { read = [], create = [], replace = [] }) {
-    if (![read, create, replace].every(Array.isArray) || read.length + create.length + replace.length > 256) refuse(400, "name at most 256 objects");
-    const bucket = this.bucket();
-    const { held } = await this.sessionOf(token);
-    const scopes = this.held(held);
-    const open = new Set(scopes.map(folderOf));
-    const reachable = (name) => {
-      const parts = String(name).split("/");
-      if (parts.some((p) => !p || p === "." || p === "..")) return false;
-      if (parts[0] === "log") return scopes.includes("global") && !held.apps && parts.length > 1;
-      return open.has(parts[0]) && NAME.test(parts[1] || "") && (!held.apps || held.apps.includes(parts[1])) && parts.length > 2;
-    };
-    for (const name of [...read, ...create, ...replace.map((r) => r?.name)]) {
-      if (!reachable(name)) refuse(403, `${name} isn't an object this session may reach`);
-    }
-    for (const r of replace) {
-      if (!r.name.endsWith("/newest") || typeof r.etag !== "string" || !r.etag) refuse(403, "only a database's newest is replaced, and only by its ETag");
-    }
-    return { ...(await bucketUrls(bucket, { read, create, replace }, URLS)), until: Date.now() + URLS * 1000 };
   }
 }
 

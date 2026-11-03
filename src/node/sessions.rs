@@ -1,10 +1,9 @@
 //! What a call that came with a kernel access token was handed: the keys of the databases it reaches, sealed to this
 //! device (`x-one-keys`, `keys::Handoff`), kept in memory for that token alone until it expires, then forgotten with
-//! the databases they opened; and URLs to read and create its objects in the bucket. This device never opens a
+//! the databases they opened. This device never opens a
 //! token caller's data with its own keys: a call that lacks one fails before it writes anything, saying what it needs
 //! (`Needs`, which the API answers with 428), and its caller sends it again with them.
 
-use crate::bucket::{Ask, Auth, S3, Sign};
 use crate::db::Keys;
 use crate::keys::Need;
 
@@ -19,8 +18,6 @@ pub(super) struct Session {
     pub until: u64,
     /// The database keys it was handed, by (scope, app, database), each by epoch.
     keys: HashMap<(String, String, String), Keys>,
-    /// Presigned URLs, by `read <name>` or `create <name>`, each with until when it works.
-    urls: Arc<Mutex<HashMap<String, (String, u64)>>>,
 }
 
 /// The sessions' state on a node.
@@ -55,7 +52,7 @@ impl std::error::Error for Needs {}
 impl Session {
     /// Whether anything it holds still works at `now`.
     fn live(&self, now: u64) -> bool {
-        self.until > now || self.urls.lock().unwrap().values().any(|(_, until)| *until > now)
+        self.until > now
     }
 }
 
@@ -87,13 +84,6 @@ impl Node {
         let asked = token.to_string();
         let claims = tokio::task::spawn_blocking(move || issuer.verify(&asked, now_ms())).await.ok()?.ok()?;
         (claims.sub == user).then(|| token.to_string())
-    }
-
-    /// The vault, for a call that came with a token, once the install's kernel is set up.
-    fn kernel_vault(&self, me: &Caller) -> Option<(String, crate::kernel::Vault)> {
-        let token = me.token.clone()?;
-        let (_, url) = self.kernel().ok()?;
-        Some((token, crate::kernel::Vault { url }))
     }
 
     /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for `token`'s calls, as `user`'s: only
@@ -138,7 +128,7 @@ impl Node {
         if me.token.is_none() {
             return Ok(());
         }
-        let bucket = self.call_bucket(me)?;
+        let bucket = self.bucket()?;
         let mut need = Vec::new();
         for (scope, app, database) in want {
             let newest = self.newest_epoch(scope).await?.max(1);
@@ -161,28 +151,10 @@ impl Node {
         Needs { need, to: hex(&me.key), seal: hex(&me.seal) }
     }
 
-    /// The bucket as a call reaches it: for one that came with a token, through URLs the vault signs for that
-    /// session, which can read and create but never delete or overwrite; otherwise as this device does.
-    pub(super) fn call_bucket(&self, me: &Caller) -> Result<Copied> {
-        let bucket = self.bucket()?;
-        let Some((token, vault)) = self.kernel_vault(me) else { return Ok(bucket) };
-        let Place::S3(s3) = &bucket.place else { return Ok(bucket) };
-        let urls = {
-            let mut kept = self.0.sessions.kept.lock().unwrap();
-            let session = kept.entry(hash(&token)).or_default();
-            // Whose it is, so a removal forgets its URLs too, even if it never asked for keys.
-            session.user = me.user.clone();
-            session.urls.clone()
-        };
-        let host = s3.endpoint.split("://").nth(1).unwrap_or(&s3.endpoint);
-        let signed = S3 { auth: Auth::Signed(signer(vault, token, urls, format!("https://{host}/{}/", s3.bucket))), ..s3.clone() };
-        Ok(Copied::new(Place::S3(signed), self.install_dir().join("copy")))
-    }
-
     /// A call's database: for a token caller, opened with the keys it was handed, and kept open here no longer than
     /// its token lasts; else with this device's own, for its own person alone.
     pub(super) async fn call_database(&self, me: &Caller, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
-        let bucket = self.call_bucket(me)?;
+        let bucket = self.bucket()?;
         let Some(token) = &me.token else {
             ensure!(me.user == self.user()?, "{} opens only its own person's data with its own keys", self.device_name());
             return Ok((self.database(scope, app, database, schema, None).await?, bucket));
@@ -229,55 +201,4 @@ impl Node {
             dbs.remove(&id);
         }
     }
-}
-
-/// Signs a call's bucket requests by asking the vault, as `token`'s session: a read, a create (`If-None-Match: *`) or
-/// a replace of the version an ETag names, and nothing else. Reading or creating a database's step asks for the next
-/// few too, which a call reads or writes next, and URLs are kept until a minute before they stop working.
-fn signer(vault: crate::kernel::Vault, token: String, urls: Arc<Mutex<HashMap<String, (String, u64)>>>, base: String) -> Sign {
-    Arc::new(move |ask: &Ask| {
-        let header = |h: &str| ask.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(h)).map(|(_, v)| *v);
-        ensure!(ask.query.is_empty() && !ask.name.is_empty(), "a call reads and writes objects only by name");
-        let (kind, tag) = match (ask.method, header("if-none-match"), header("if-match")) {
-            ("GET", None, None) => ("read", None),
-            ("PUT", Some("*"), None) => ("create", None),
-            ("PUT", None, Some(tag)) => ("replace", Some(tag)),
-            _ => bail!("a call only reads, creates, or replaces by ETag, in the bucket"),
-        };
-        let id = format!("{kind} {}", ask.name);
-        if let Some((url, until)) = urls.lock().unwrap().get(&id) {
-            if *until > now_ms() + 60_000 {
-                return Ok(url.clone());
-            }
-        }
-        let following = |n: u64| -> Vec<String> {
-            let Some((prefix, at)) = ask.name.rsplit_once('/') else { return vec![] };
-            match at.parse::<u64>().ok().filter(|at| crate::db::step_name(prefix, *at) == ask.name) {
-                Some(at) => (1..=n).map(|i| crate::db::step_name(prefix, at + i)).collect(),
-                None => vec![],
-            }
-        };
-        let names = |n| [vec![ask.name.to_string()], following(n)].concat();
-        let (read, create) = match kind {
-            "read" => (names(15), vec![]),
-            "create" => (vec![], names(3)),
-            _ => (vec![], vec![]),
-        };
-        let replace: Vec<(&str, &str)> = tag.map(|t| (ask.name, t)).into_iter().collect();
-        let given = vault.urls(&token, &read.iter().map(String::as_str).collect::<Vec<_>>(), &create.iter().map(String::as_str).collect::<Vec<_>>(), &replace)?;
-        tracing::debug!("the vault signed {kind} {} for a session", ask.name);
-        let mut kept = urls.lock().unwrap();
-        for (kind, list) in [("read", &given.read), ("create", &given.create)] {
-            for (name, url) in list {
-                kept.insert(format!("{kind} {name}"), (url.clone(), given.until));
-            }
-        }
-        let url = match kind {
-            "replace" => given.replace.get(ask.name).cloned(),
-            _ => kept.get(&id).map(|(url, _)| url.clone()),
-        }
-        .context("the vault didn't sign that")?;
-        ensure!(url.starts_with(&base), "the vault signs for another bucket than the install's, which this device uses");
-        Ok(url)
-    })
 }

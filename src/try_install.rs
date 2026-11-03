@@ -154,6 +154,14 @@ fn start_new(dir: &Path) -> Result<String> {
     for (name, value) in [("address", &settings.address), ("kernel_vault", &settings.vault_url), ("kernel_schedules", &settings.schedules_url)] {
         crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": name, "value": value })))?;
     }
+    // Its data moves to the try bucket, which its node reaches only through the kernel's URL signer from then on.
+    let moved = crate::request(agent().post(on("/v1/storage")).send_json(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try" })))?;
+    anyhow::ensure!(moved["id"].is_string(), "the try install's node couldn't reach its bucket through the URL signer: {moved}");
+    let started = std::time::Instant::now();
+    while crate::request(agent().get(on("/v1/storage")).call())?["kind"] != "s3" {
+        anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the try install's node didn't move to its bucket: node.log says why");
+        std::thread::sleep(Duration::from_millis(200));
+    }
     settings.try_person_keys()?;
     Ok(addr)
 }
@@ -285,9 +293,9 @@ pub fn stop_others(home: &Path) {
     let _ = std::fs::remove_file(home.join("pids"));
 }
 
-/// The try install's bucket as its kernel's vault reaches it, at `bucket-addr` in its folder: its node's folder of data,
-/// served S3's way for presigned URLs (read, create only if absent, replace while unchanged, delete), signatures
-/// unchecked, as it's only this machine's and only a try install's.
+/// The try install's bucket, at `bucket-addr` in its folder: the folder its node made the install in, served S3's way
+/// for the URLs its kernel's URL signer presigns (read, HEAD, list, create only if absent, replace while unchanged,
+/// delete), signatures unchecked, as it's only this machine's and only a try install's.
 pub async fn bucket(home: PathBuf) -> Result<()> {
     use axum::http::{HeaderMap, Method, StatusCode, Uri};
     let Ok(at) = std::fs::read_to_string(home.join("bucket-addr")) else { return Ok(()) };
@@ -296,6 +304,16 @@ pub async fn bucket(home: PathBuf) -> Result<()> {
     let answer = move |method: Method, uri: Uri, headers: HeaderMap, body: axum::body::Bytes| {
         let place = place.clone();
         async move {
+            if method == Method::GET && matches!(uri.path(), "/try" | "/try/") {
+                let query: Vec<(String, String)> = uri.query().unwrap_or("").split('&').filter_map(|p| p.split_once('=')).map(|(k, v)| (decode(k), decode(v))).collect();
+                let get = |k: &str| query.iter().find(|(q, _)| q == k).map(|(_, v)| v.clone());
+                let (prefix, delimit) = (get("prefix").unwrap_or_default(), get("delimiter").is_some());
+                let dir = home.join("install").join("bucket");
+                return match tokio::task::spawn_blocking(move || list(&dir, &prefix, delimit)).await {
+                    Ok(Ok(xml)) => (StatusCode::OK, HeaderMap::new(), xml.into_bytes()),
+                    _ => (StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new(), Vec::new()),
+                };
+            }
             let name = decode(uri.path().strip_prefix("/try/").unwrap_or(""));
             if name.is_empty() || name.split('/').any(|p| p.is_empty() || p == "." || p == "..") {
                 return (StatusCode::BAD_REQUEST, HeaderMap::new(), Vec::new());
@@ -304,8 +322,11 @@ pub async fn bucket(home: PathBuf) -> Result<()> {
             let done = |made: bool| if made { StatusCode::OK } else { StatusCode::PRECONDITION_FAILED };
             let answered = tokio::task::spawn_blocking(move || -> Result<(StatusCode, HeaderMap, Vec<u8>)> {
                 Ok(match method {
-                    Method::GET => match place.get_object(&name)? {
-                        Some(object) => (StatusCode::OK, [("etag".parse().unwrap(), format!("\"{}\"", object.tag).parse()?)].into_iter().collect(), object.bytes),
+                    Method::GET | Method::HEAD => match place.get_object(&name)? {
+                        Some(object) => {
+                            let tag = [("etag".parse().unwrap(), format!("\"{}\"", object.tag).parse()?)].into_iter().collect();
+                            (StatusCode::OK, tag, if method == Method::HEAD { Vec::new() } else { object.bytes })
+                        }
                         None => (StatusCode::NOT_FOUND, HeaderMap::new(), Vec::new()),
                     },
                     Method::PUT if header("if-none-match").as_deref() == Some("*") => (done(place.create(&name, &body)?), HeaderMap::new(), Vec::new()),
@@ -322,6 +343,29 @@ pub async fn bucket(home: PathBuf) -> Result<()> {
     };
     axum::serve(listener, axum::Router::new().fallback(answer)).await?;
     Ok(())
+}
+
+/// The names under `prefix` in the try bucket's folder `dir`, as S3's ListObjectsV2 answers, in one page: one level
+/// down with `delimit` (objects, and folders as common prefixes), else every object.
+fn list(dir: &Path, prefix: &str, delimit: bool) -> Result<String> {
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult><IsTruncated>false</IsTruncated>");
+    let (folder, start) = prefix.rsplit_once('/').map_or(("", prefix), |(f, s)| (f, s));
+    let place = one::bucket::Place::Folder(dir.to_path_buf());
+    let names: Vec<String> = match delimit {
+        true => place.list(folder)?.into_iter().filter(|n| n.starts_with(start)).map(|n| if folder.is_empty() { n } else { format!("{folder}/{n}") }).collect(),
+        false => place.names()?.into_iter().filter(|n| n.starts_with(prefix)).collect(),
+    };
+    for name in names {
+        let meta = std::fs::metadata(dir.join(&name))?;
+        if meta.is_dir() {
+            xml += &format!("<CommonPrefixes><Prefix>{}/</Prefix></CommonPrefixes>", esc(&name));
+            continue;
+        }
+        let written = jiff::Timestamp::try_from(meta.modified()?)?;
+        xml += &format!("<Contents><Key>{}</Key><LastModified>{written}</LastModified><Size>{}</Size></Contents>", esc(&name), meta.len());
+    }
+    Ok(xml + "</ListBucketResult>")
 }
 
 /// A URL's path, percent-decoded.

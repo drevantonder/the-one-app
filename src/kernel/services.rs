@@ -19,6 +19,7 @@ pub const SERVICES: &[(&str, &str, Option<&str>)] = &[
     ("vault", "vault/worker.js", Some("Vault")),
     ("schedules", "schedules/worker.js", Some("Schedules")),
     ("relay", "relay/worker.js", Some("Relay")),
+    ("signer", "signer/worker.js", None),
     ("gateway", "gateway/worker.js", Some("Relay")),
 ];
 
@@ -58,7 +59,7 @@ pub struct Settings {
     #[serde(default)]
     pub serverless: bool,
     /// The local ports the auth service, the vault, the schedules service and the gateway listen on, when this machine
-    /// runs them. The relay has none: the gateway reaches it by binding.
+    /// runs them. The relay and the URL signer have none: other Workers reach them by binding.
     pub ports: [u16; 4],
     /// The install's devices' public keys (hex), from the node on this machine when the kernel is deployed or served:
     /// the relay starts its list with them, as its admins', when it has none yet.
@@ -78,7 +79,8 @@ pub struct Settings {
     /// Nodes' own addresses MCP clients sign in for (each a resource, in OAuth's words), besides the install's.
     #[serde(default)]
     pub resources: Vec<String>,
-    /// The install's bucket: `{ endpoint, bucket, region, key_id, secret }`.
+    /// The install's bucket: `{ endpoint, bucket, region, key_id, secret }`, the URL signer's only secret: nothing else
+    /// holds its credentials.
     #[serde(default, skip_serializing)]
     pub bucket: Option<Value>,
     /// The SHA-256 fingerprints of the certificates the Android app is signed with: Android opens links to the address
@@ -117,6 +119,7 @@ const SCHEMA: &str = "\
 KERNEL_SECRET=
 AUTH_SECRET=
 SCHEDULES_KEY=
+# The install's bucket's credentials, which only the URL signer holds.
 # @optional
 BUCKET=
 # For an install whose people sign in with Google: the vault's own key, and their Google OAuth client.
@@ -292,7 +295,7 @@ impl Settings {
         settings.node_url = Some(format!("http://{node}"));
         settings.vault_key = B64U.encode(&rand::random::<[u8; 32]>());
         settings.try_person = Some(person);
-        // The try install's node serves its data there (try_install::bucket), signed or not.
+        // Its node serves its data there (try_install::bucket), signatures unchecked: the URL signer holds these.
         settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try", "region": "auto", "key_id": "try", "secret": "try" }));
         Ok(settings)
     }
@@ -348,15 +351,15 @@ impl Settings {
         }
     }
 
-    /// Where a service is reached, and the local port it listens on: none for the relay, which only the gateway's
-    /// binding reaches.
+    /// Where a service is reached, and the local port it listens on: none for the relay and the URL signer, which only
+    /// other Workers' bindings reach.
     pub fn place(&self, service: &str) -> Option<(&str, u16)> {
         let i = ["auth", "vault", "schedules", "gateway"].iter().position(|s| *s == service)?;
         Some(([&self.auth_url, &self.vault_url, &self.schedules_url, &self.address][i].as_str(), self.ports[i]))
     }
 
-    /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service, and
-    /// `vpc:<id>` a Cloudflare Workers VPC service.
+    /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service,
+    /// `vpc:<id>` a Cloudflare Workers VPC service, and `r2:<bucket>` an R2 bucket of the account's.
     pub fn bindings(&self, service: &str) -> Vec<(String, String, bool)> {
         // The gateway holds no secrets.
         if service == "gateway" {
@@ -364,13 +367,25 @@ impl Settings {
                 true => ("NODE".into(), format!("service:{}", crate::serverless::SERVICE), false),
                 false => self.machine("NODE"),
             };
-            return vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), node];
+            return vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), ("SIGNER".into(), "service:signer".into(), false), node];
         }
         // Nor does the relay: only the keys of the install's first devices, which it starts its list with.
         if service == "relay" {
             let devices = (!self.devices.is_empty()).then(|| ("DEVICES".into(), json!(self.devices).to_string(), false));
             let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
             return devices.into_iter().chain(location).collect();
+        }
+        // The URL signer holds only the bucket's credentials, and asks the relay who's allowed.
+        if service == "signer" {
+            let mut out = vec![("RELAY".into(), "service:relay".into(), false)];
+            if let Some(bucket) = &self.bucket {
+                out.push(("BUCKET".into(), bucket.to_string(), true));
+                let endpoint = bucket["endpoint"].as_str().unwrap_or("");
+                if endpoint.split("://").nth(1).unwrap_or(endpoint).trim_end_matches('/').ends_with(".r2.cloudflarestorage.com") {
+                    out.push(("R2".into(), format!("r2:{}", bucket["bucket"].as_str().unwrap_or("")), false));
+                }
+            }
+            return out;
         }
         let issuer = format!("{}/api/auth", self.address);
         let mut out = vec![("KERNEL_SECRET".into(), self.kernel_secret.clone(), true)];
@@ -420,9 +435,6 @@ impl Settings {
                 }
             }
             "vault" => {
-                if let Some(bucket) = &self.bucket {
-                    out.push(("BUCKET".into(), bucket.to_string(), true));
-                }
                 if google() || self.try_person.is_some() {
                     out.push(("VAULT_KEY".into(), self.vault_key.clone(), true));
                 }
@@ -448,8 +460,8 @@ pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Ser
             bindings: settings.bindings(name).into_iter().map(|(n, v, _)| (n, v)).collect(),
             assets: (*name == "gateway").then(|| web.to_path_buf()),
             // The gateway's node may be on this machine or its private network, as a node behind a tunnel is; a try
-            // install's vault reaches its bucket on this machine.
-            outbound: (*name == "gateway" || *name == "vault" && settings.try_person.is_some()).then(|| NEARBY.to_string()),
+            // install's URL signer reaches its bucket on this machine.
+            outbound: (*name == "gateway" || *name == "signer" && settings.try_person.is_some()).then(|| NEARBY.to_string()),
         })
         .collect()
 }
@@ -680,6 +692,10 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
         }
         for (name, value) in &s.bindings {
             ensure!(!value.starts_with("vpc:"), "a node behind a Cloudflare Tunnel is reached only by a kernel on Cloudflare: give kernel set node-url a node's address");
+            // An R2 bucket is bound only on Cloudflare; here the URL signer reaches it by URL.
+            if value.starts_with("r2:") {
+                continue;
+            }
             bindings.push(match value.strip_prefix("service:") {
                 Some(service) => format!("(name = {}, service = {})", quote(name), quote(service)),
                 None => format!("(name = {}, text = {})", quote(name), quote(value)),
@@ -958,9 +974,10 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrate
         match value.strip_prefix("service:") {
             Some(other) if exists(&worker_name(other)) => bindings.push(json!({ "type": "service", "name": name, "service": worker_name(other) })),
             Some(_) => complete = false,
-            None => match value.strip_prefix("vpc:") {
-                Some(id) => bindings.push(json!({ "type": "vpc_service", "name": name, "service_id": id })),
-                None => bindings.push(json!({ "type": if secret { "secret_text" } else { "plain_text" }, "name": name, "text": value })),
+            None => match (value.strip_prefix("vpc:"), value.strip_prefix("r2:")) {
+                (Some(id), _) => bindings.push(json!({ "type": "vpc_service", "name": name, "service_id": id })),
+                (_, Some(bucket)) => bindings.push(json!({ "type": "r2_bucket", "name": name, "bucket_name": bucket })),
+                _ => bindings.push(json!({ "type": if secret { "secret_text" } else { "plain_text" }, "name": name, "text": value })),
             },
         }
     }
@@ -1003,7 +1020,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
                 what.extend(web.iter().flat_map(|(path, bytes)| [path.as_bytes().to_vec(), bytes.clone()]));
             }
             let what = Uploaded::hash(&what);
-            // Its address may have been changed by hand.
+            // Its address may have been changed by hand; one with none is reached only by binding.
             let reach = || match url {
                 Some(url) => cf.reach(&name, url),
                 None => cf.hide(&name),

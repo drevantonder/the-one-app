@@ -63,8 +63,10 @@ impl Node {
             bail!("{}", err.as_str().unwrap_or("the pairing code was refused"));
         }
         let reply: JoinReply = serde_json::from_value(reply)?;
-        // A folder on another machine isn't here: the bucket is this install's only if it says so.
-        let bucket = reply.bucket.filter(|f| Place::from_fields(f).ok().and_then(|p| p.get(INSTALL_OBJECT).ok().flatten()).is_some_and(|r| r == reply.root.as_bytes()));
+        // A folder on another machine isn't here: it's this install's bucket only if it says so. S3 is reached through
+        // the URL signer, which this device can ask once it knows the install's address.
+        let here = |f: &BTreeMap<String, String>| Place::from_fields(f).ok().and_then(|p| p.get(INSTALL_OBJECT).ok().flatten()).is_some_and(|r| r == reply.root.as_bytes());
+        let bucket = reply.bucket.filter(|f| f.contains_key("endpoint") || here(f));
         if bucket.is_none() {
             tracing::warn!("this device can't reach the install's bucket: it keeps no app's data until the install moves to S3-compatible storage");
         }

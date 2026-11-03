@@ -205,7 +205,7 @@ impl Node {
         if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);
             let lease = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
-            if !reads && !crate::bucket::Bucket::create(&self.call_bucket(me)?, &lease, hex(&self.0.id).as_bytes()).await? {
+            if !reads && !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
                 return Ok(Reply::Error("it ran on another device already, whose answer was lost: look before trying again".into()));
             }
         }

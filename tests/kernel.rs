@@ -216,58 +216,98 @@ fn ask_at(server: &str, token: &str, method: &str, path: &str, body: Value) -> (
 const ANDRE: &str = "00000000000000a1";
 const SAM: &str = "00000000000000b2";
 
+/// The URL signer, with a stand-in relay that allows `allowed` (`{ <key hex>: { admin } }`), and the stand-in sites as
+/// its bucket.
+struct UrlSigner {
+    _running: Running,
+    url: String,
+    sites: String,
+}
+
+impl UrlSigner {
+    fn start(allowed: Value) -> UrlSigner {
+        let (signer, sites) = (port(), port());
+        let bucket = json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }).to_string();
+        let running = run(vec![
+            Served { name: "relay".into(), module: module("test/relay.js"), wasm: vec![], class: None, listen: None, bindings: vec![("ALLOWED".into(), allowed.to_string())], assets: None, outbound: None },
+            Served { name: "sites".into(), module: module("test/sites.js"), wasm: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None },
+            Served {
+                name: "signer".into(),
+                module: module("signer/worker.js"),
+                wasm: vec![],
+                class: None,
+                listen: Some(format!("127.0.0.1:{signer}")),
+                bindings: vec![("RELAY".into(), "service:relay".into()), ("BUCKET".into(), bucket)],
+                assets: None,
+                outbound: Some("sites".into()),
+            },
+        ]);
+        UrlSigner { _running: running, url: format!("http://127.0.0.1:{signer}"), sites: format!("http://127.0.0.1:{sites}") }
+    }
+
+    /// Asks as a device does, signed by `key` at `at`.
+    fn ask(&self, key: &ed25519_dalek::SigningKey, fields: Value, at: u64) -> (u16, Value) {
+        post(&format!("{}/urls", self.url), &[], one::keys::signed_request(key, "one/urls", fields, at))
+    }
+
+    /// A URL it gave, reaching the stand-in bucket here.
+    fn here(&self, url: &Value) -> String {
+        url.as_str().expect("a URL").replacen("https://s3.test", &self.sites, 1)
+    }
+}
+
 #[test]
-fn nodes_get_create_only_urls_for_objects_in_scopes_they_may_use() {
-    let v = Vault::start();
-    let vault = kernel::Vault { url: v.url.clone() };
-    v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
-    v.internal("passkey", json!({ "user": SAM, "secret": "sam's own passkey prf output" }));
-    let mine = one::bucket::folder(&format!("user:{ANDRE}"));
-    v.internal("grant", json!({ "user": ANDRE, "from": "andre's passkey prf output", "to": "andre's code here", "client": "iphone" }));
-    let (token, until) = v.token(ANDRE, "iphone");
-    v.internal("rekey", json!({ "from": "andre's code here", "to": "andre's refresh token", "token": token, "until": until }));
+fn the_url_signer_gives_urls_only_to_the_installs_devices_and_removes_only_for_admins() {
+    let key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let (device, admin, stranger) = (key(), key(), key());
+    let id = |k: &ed25519_dalek::SigningKey| data_encoding::HEXLOWER.encode(k.verifying_key().as_bytes());
+    let s = UrlSigner::start(json!({ id(&device): { "admin": false }, id(&admin): { "admin": true } }));
+    let db = format!("{}/board/main", one::bucket::folder(&format!("user:{ANDRE}")));
+    let (step, next, newest) = (format!("{db}/000000000001"), format!("{db}/000000000002"), format!("{db}/newest"));
 
-    let name = format!("{mine}/board/main/changes/00000000000000000001");
-    let newest = format!("{mine}/board/main/newest");
-    let urls = vault.urls(&token, &[&format!("{mine}/board/main/copy")], &[&name], &[(&newest, "\"etag-1\"")]).unwrap();
-    assert_eq!(url_query(&urls.replace[&newest])["X-Amz-SignedHeaders"], "host;if-match");
-    let create = url_query(&urls.create[&name]);
-    assert!(urls.create[&name].starts_with(&format!("https://s3.test/install/{mine}/board/main/changes/")));
-    assert_eq!(create["X-Amz-SignedHeaders"], "host;if-none-match");
-    assert!(urls.until > now());
-    assert_eq!(url_query(&urls.read[&format!("{mine}/board/main/copy")])["X-Amz-SignedHeaders"], "host");
+    // A device of the install gets, in one trip, URLs to read, HEAD and create (its next positions too), and to replace
+    // a newest by its ETag, each with what it must send signed in.
+    let (status, urls) = s.ask(&device, json!({ "read": [newest], "head": [newest], "create": [{ "steps": db, "from": 1, "to": 4 }], "replace": [{ "name": newest, "etag": "\"1\"" }] }), now());
+    assert_eq!(status, 200, "{urls}");
+    assert_eq!(urls["create"].as_object().unwrap().len(), 4);
+    assert!(urls["create"][&step].as_str().unwrap().starts_with(&format!("https://s3.test/install/{step}?")));
+    assert_eq!(url_query(urls["create"][&step].as_str().unwrap())["X-Amz-SignedHeaders"], "host;if-none-match");
+    assert_eq!(url_query(urls["replace"][&newest].as_str().unwrap())["X-Amz-SignedHeaders"], "host;if-match");
+    assert_eq!(url_query(urls["read"][&newest].as_str().unwrap())["X-Amz-SignedHeaders"], "host");
+    assert!(urls["until"].as_u64().unwrap() > now() + 10 * 60_000, "URLs last minutes, so devices reuse them");
 
-    // Sam's objects, and names that climb out of an app, aren't Andre's to reach; Everyone's are (he's its first).
-    let sams = format!("{}/board/main/copy", one::bucket::folder(&format!("user:{SAM}")));
-    assert!(vault.urls(&token, &[&sams], &[], &[]).is_err());
-    assert!(vault.urls(&token, &[], &[&format!("{mine}/board/../../x")], &[]).is_err());
-    assert!(vault.urls(&token, &[], &[&format!("{mine}/board")], &[]).is_err());
-    assert!(vault.urls(&token, &[], &[], &[(&name, "\"etag-1\"")]).is_err(), "only a newest is replaced");
-    assert!(vault.urls(&token, &["log/00aa/000000000001"], &["log/00aa/000000000002"], &[]).is_ok());
-    assert!(vault.urls(&token, &["global/board/main/newest"], &[], &[]).is_ok());
-
-    // Once an admin's machine says, from the install's log, that Sam may open Everyone, Sam's clients may reach it too.
-    let global = B64U.encode(&rand::random::<[u8; 32]>());
-    assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": global, "people": [ANDRE, SAM] })).0, 200);
-    v.internal("grant", json!({ "user": SAM, "from": "sam's own passkey prf output", "to": "sam's authorization code", "client": "iphone" }));
-    let (sam, until) = v.token(SAM, "iphone");
-    v.internal("rekey", json!({ "from": "sam's authorization code", "to": "sam's refresh token", "token": sam, "until": until }));
-    let andre = vault.keys_until(&token, &[("global", "board", None)]).map(|k| k.0).unwrap();
-    assert_eq!(vault.keys_until(&sam, &[("global", "board", None)]).map(|k| k.0).unwrap(), andre);
-    assert!(vault.keys_until(&sam, &[(&format!("user:{ANDRE}"), "board", None)]).is_err());
-    // Nobody opens a scope to anyone else on their own.
+    // A create URL makes an object once, never over one.
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-    let shared = agent.post(format!("{}/share", v.url)).header("authorization", format!("Bearer {token}")).send_json(json!({ "scope": format!("user:{ANDRE}"), "user": SAM })).unwrap();
-    assert_eq!(shared.status(), 404);
+    let put = |url: &Value, body: &str| agent.put(s.here(url)).header("if-none-match", "*").send(body).unwrap();
+    assert_eq!(put(&urls["create"][&step], "a step").status(), 200);
+    assert_eq!(put(&urls["create"][&step], "another step").status(), 412);
+    let tag = agent.get(s.here(&s.ask(&device, json!({ "read": [step] }), now()).1["read"][&step])).call().unwrap().headers()["etag"].to_str().unwrap().to_string();
 
-    // Once the log says Sam may not, it's taken away: his sessions get no key and no URL under it, while Andre's do.
-    assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": global, "people": [ANDRE] })).0, 200);
-    assert!(vault.keys_until(&sam, &[("global", "board", None)]).is_err());
-    assert!(vault.urls(&sam, &["global/board/main/newest"], &[], &[]).is_err());
-    assert_eq!(vault.keys_until(&token, &[("global", "board", None)]).map(|k| k.0).unwrap(), andre);
-    // Saying so never replaces the key it was settled with.
-    assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [ANDRE, SAM] })).0, 409);
-    assert!(vault.keys_until(&sam, &[("global", "board", None)]).is_err());
+    // It confirms which objects are there with an ETag, in one trip.
+    let (status, out) = s.ask(&device, json!({ "confirm": [{ "name": step, "etag": tag }, { "name": next, "etag": tag }, { "name": newest, "etag": "\"9\"" }] }), now());
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(out["confirm"], json!({ step.clone(): true, next.clone(): false, newest.clone(): false }));
+
+    // Only a newest is replaced; only an admin's device removes; names don't climb out, and there are at most 256.
+    assert_eq!(s.ask(&device, json!({ "replace": [{ "name": step, "etag": tag }] }), now()).0, 403);
+    assert_eq!(s.ask(&device, json!({ "remove": [step] }), now()).0, 403);
+    let (status, out) = s.ask(&admin, json!({ "remove": [step] }), now());
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(agent.delete(s.here(&out["remove"][&step])).call().unwrap().status(), 204);
+    for name in [format!("{db}/../../x"), format!("{db}//x"), "./x".into(), String::new()] {
+        assert_eq!(s.ask(&device, json!({ "read": [name] }), now()).0, 400, "{name}");
+    }
+    let many: Vec<String> = (1..=257).map(|n| format!("{db}/{n:012}")).collect();
+    assert_eq!(s.ask(&device, json!({ "read": many }), now()).0, 400);
+
+    // A key that isn't the install's gets nothing; nor does a request signed too long ago, for something else, or
+    // changed since it was signed.
+    assert_eq!(s.ask(&stranger, json!({ "read": [step] }), now()).0, 403);
+    assert_eq!(s.ask(&device, json!({ "read": [step] }), now() - one::keys::FRESH - 5_000).0, 401);
+    assert_eq!(post(&format!("{}/urls", s.url), &[], one::keys::signed_request(&device, "one/relay", json!({ "read": [step] }), now())).0, 401);
+    let mut changed = one::keys::signed_request(&device, "one/urls", json!({ "read": [step] }), now());
+    changed["read"] = json!([newest]);
+    assert_eq!(post(&format!("{}/urls", s.url), &[], changed).0, 401);
 }
 
 #[test]
@@ -354,7 +394,6 @@ fn who_opens_a_scope_changes_at_once_and_only_as_its_admins_say() {
         vault.role(&lee, SAM, None, false, &one(&group)).unwrap();
         assert!(opens(&sam, &group).is_none() && opens(&lee, &group).is_some() && opens(&sam, &everyone).is_some());
         assert!(vault.role(&sam, SAM, Some(Member), false, &one(&group)).is_err());
-        assert!(vault.urls(&sam, &[&format!("{}/board/main/newest", one::bucket::folder(&group.to_string()))], &[], &[]).is_err());
 
         // An admin who stops being one says so of himself, and from then on says nobody's role.
         vault.role(&lee, LEE, Some(Member), false, &one(&group)).unwrap();
@@ -364,7 +403,6 @@ fn who_opens_a_scope_changes_at_once_and_only_as_its_admins_say() {
         // Andre takes Lee out of the install: Lee opens nothing, and says nobody's role any more.
         vault.role(&andre, LEE, None, false, &[everyone.clone(), group.clone(), lees.clone()]).unwrap();
         assert!(opens(&lee, &everyone).is_none() && opens(&lee, &group).is_none() && opens(&lee, &lees).is_none());
-        assert!(vault.urls(&lee, &["global/board/main/newest"], &[], &[]).is_err());
         assert!(vault.role(&lee, SAM, Some(Member), true, &one(&group)).is_err());
         if google {
             // Google signing him in again opens Everyone's to him no more.
@@ -638,7 +676,11 @@ impl Kernel {
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
         std::fs::write(web.join("screen/kit.css"), include_str!("../src/screen/kit.css")).unwrap();
         let mut served = kernel::served(&settings, modules, &web);
+        // The vault's last uses of the bucket (app keys for /keys, /erase, /group) go with its keys; until then it's
+        // given the bucket here, which no deployed vault is.
+        served[1].bindings.push(("BUCKET".into(), settings.bucket.as_ref().unwrap().to_string()));
         served[1].outbound = Some("sites".into());
+        served.iter_mut().find(|s| s.name == "signer").unwrap().outbound = Some("sites".into());
         if google {
             let vault_key = B64U.encode(&rand::random::<[u8; 32]>());
             served[0].outbound = Some("sites".into());

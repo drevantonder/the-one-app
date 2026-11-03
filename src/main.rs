@@ -103,10 +103,9 @@ Usage:
                                        tunnel's token, it keeps it in Everyone's Vault, and every device runs one, so
                                        the address reaches whichever is up
   {CLI} storage                        where the install's data is kept
-  {CLI} storage move --endpoint <url>  move it to S3-compatible storage (R2, S3, GCS, MinIO), which every device
-                                       reaches: piped a JSON object of bucket, key_id and secret (and region) it tries
-                                       it, and every device moves there; otherwise it asks the person for them, with a
-                                       link to a sheet on their device
+  {CLI} storage move --endpoint <url> --bucket <name> [--region <r>]
+                                       move it to S3-compatible storage (R2, S3, GCS, MinIO), whose key is the
+                                       kernel's BUCKET: every device reaches it through the URL signer, and moves there
   {CLI} backups                        how backups are going: each place, its last backup, what's failing
   {CLI} backups now                    back up now, without waiting for the hour
   {CLI} backups place add <folder> [--title t]
@@ -514,21 +513,16 @@ fn run(args: Vec<String>) -> Result<()> {
         ["storage"] => {
             let s = get("/v1/storage")?;
             match s["kind"].as_str() {
-                Some("folder") => println!("The install's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other devices join: {CLI} storage move --endpoint <url>.", s["device"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
+                Some("folder") => println!("The install's data is kept in a folder on {}: {}. Move it to S3-compatible storage before other devices join: {CLI} storage move --endpoint <url> --bucket <name>.", s["device"].as_str().unwrap_or(""), s["where"].as_str().unwrap_or("")),
                 Some(_) => println!("The install's data is kept in {} at {}.", s["where"].as_str().unwrap_or(""), s["endpoint"].as_str().unwrap_or("")),
                 None => println!("This device can't reach the install's data: an admin moves it to S3-compatible storage with {CLI} storage move."),
             }
         }
         ["storage", "move"] => {
-            let endpoint = flags.get("endpoint").and_then(Value::as_str).context("give --endpoint, like https://<account>.r2.cloudflarestorage.com")?;
-            if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                let r = post("/v1/storage/request", json!({ "endpoint": endpoint, "agent": agent_from_env() }))?;
-                println!("Open this on your device to give the bucket and its key: {}\nIt's also waiting in Settings, under Requests.", r["link"].as_str().unwrap_or(""));
-                return Ok(());
-            }
-            let mut body: Value = serde_json::from_reader(std::io::stdin()).context("pipe a JSON object of bucket, key_id and secret")?;
-            body["endpoint"] = json!(endpoint);
-            let r = post("/v1/storage", body)?;
+            let get = |k: &str| flags.get(k).and_then(Value::as_str);
+            let endpoint = get("endpoint").context("give --endpoint, like https://<account>.r2.cloudflarestorage.com")?;
+            let bucket = get("bucket").context("give --bucket, the bucket's name: its key is the kernel's (BUCKET, which only the URL signer holds)")?;
+            let r = post("/v1/storage", json!({ "endpoint": endpoint, "bucket": bucket, "region": get("region") }))?;
             print!("{}", tried_said(&r));
             if r["id"].is_string() {
                 println!("Every device moves the install's data there now.");

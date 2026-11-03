@@ -1,7 +1,7 @@
 // The gateway: the install's address, the one people use. It holds no keys and runs no app code; it only sends each
 // request where its path says: sign-in to the auth service (with the gateway's host kept, since passkeys belong to
-// it), `/v1/` and `/mcp` to a node, `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything
-// else to the web client's files.
+// it), `/urls` to the URL signer, `/v1/` and `/mcp` to a node, `/relay` (and iroh's `/ping` and `/generate_204`) to the
+// relay, and everything else to the web client's files.
 //
 // What a node answers is stamped so it can't run as script at this origin, which holds browsers' tokens: it's
 // sandboxed into an opaque origin, can't be sniffed into another type, and sets no cookies here.
@@ -233,6 +233,7 @@ export default {
     const url = new URL(request.url);
     // The relay, iroh's: its WebSockets, its probes, and what devices tell it go to its own Worker (kernel/relay/).
     if (["/relay", "/relay/tell", "/ping", "/generate_204"].includes(url.pathname)) return env.IROH.fetch(request);
+    if (url.pathname === "/urls") return env.SIGNER.fetch(request);
     switch (where(url.pathname)) {
       case "auth": return env.AUTH.fetch(request);
       case "node": return toNode(request, env, url);

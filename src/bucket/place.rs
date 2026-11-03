@@ -42,15 +42,13 @@ pub struct S3 {
     pub auth: Auth,
 }
 
-/// How an S3 request is signed: here, with the bucket's keys, or by whoever holds them, as a presigned URL.
+/// How an S3 request is signed: here, with the bucket's keys (a backup place's), or by the URL signer, which alone
+/// holds the install's bucket's.
 #[derive(Clone)]
 pub enum Auth {
     Keys { key_id: String, secret: String },
-    Signed(Sign),
+    Signed(Arc<super::Signer>),
 }
-
-/// Signs a request as a presigned URL, its headers included, for a device that holds no keys.
-pub type Sign = Arc<dyn Fn(&Ask) -> Result<String> + Send + Sync>;
 
 /// A request to sign: its method, the object's name ("" for the bucket), its query, and the headers it must carry.
 #[derive(Debug)]
@@ -88,6 +86,31 @@ impl Place {
             region: get("region").unwrap_or_else(|| "auto".into()),
             auth: Auth::Keys { key_id: get("key_id").context("which key ID?")?, secret: get("secret").context("the secret key?")? },
         }))
+    }
+
+    /// The install's bucket, from the fields a device keeps of it: a folder's `path`, or S3's address (`endpoint`,
+    /// `bucket`, `region`), reached through the URL signer at the install's address, signing with `key`. A device
+    /// never keeps the bucket's credentials.
+    pub fn install(fields: &BTreeMap<String, String>, address: super::signed::Address, key: ed25519_dalek::SigningKey) -> Result<Place> {
+        ensure!(!fields.contains_key("key_id") && !fields.contains_key("secret"), "a device keeps only the bucket's address: the URL signer holds its key");
+        let get = |k: &str| fields.get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        if let Some(path) = get("path") {
+            return Ok(Place::Folder(path.into()));
+        }
+        let endpoint = get("endpoint").context("the install's bucket is a folder's path, or S3's endpoint")?.trim_end_matches('/').to_string();
+        ensure!(endpoint.starts_with("https://") || endpoint.starts_with("http://"), "an endpoint is a URL, like https://s3.example.com");
+        let bucket = get("bucket").context("which bucket?")?;
+        let signer = super::Signer::new(address, key, format!("{endpoint}/{bucket}"));
+        Ok(Place::S3(S3 { endpoint, bucket, region: get("region").unwrap_or_else(|| "auto".into()), auth: Auth::Signed(Arc::new(signer)) }))
+    }
+
+    /// Whether each object is there with the tag given: through the URL signer, in one trip.
+    pub fn confirm(&self, objects: &[(&str, &str)]) -> Result<BTreeMap<String, bool>> {
+        if let Place::S3(S3 { auth: Auth::Signed(signer), .. }) = self {
+            return signer.confirm(objects);
+        }
+        let bare = |t: &str| t.trim_matches('"').to_string();
+        objects.iter().map(|(name, tag)| Ok((name.to_string(), self.get_object(name)?.is_some_and(|o| bare(&o.tag) == bare(tag))))).collect()
     }
 
     /// Refuses a place that can't be an install's own bucket: S3-compatible storage known to write unconditionally.
@@ -192,7 +215,7 @@ impl Place {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
                 Err(e) => return Err(disk(dir, e)),
             },
-            Place::S3(s3) => s3.list(&format!("{}/", folder.trim_end_matches('/')))?.into_iter().map(|(name, _)| name).collect(),
+            Place::S3(s3) => s3.list(&prefix(folder))?.into_iter().map(|(name, _)| name).collect(),
         };
         out.sort();
         out.dedup();
@@ -243,7 +266,7 @@ impl Place {
                 }
                 Ok(out)
             }
-            Place::S3(s3) => Ok(s3.list(&format!("{folder}/"))?.into_iter().filter_map(|(name, about)| Some((name, about?.0, about?.1))).collect()),
+            Place::S3(s3) => Ok(s3.list(&prefix(folder))?.into_iter().filter_map(|(name, about)| Some((name, about?.0, about?.1))).collect()),
         }
     }
 
@@ -305,6 +328,14 @@ impl Bucket for Place {
 
     async fn wait(&self, ms: u64) {
         tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+    }
+}
+
+/// What names in a folder start with: nothing for the top.
+fn prefix(folder: &str) -> String {
+    match folder.trim_end_matches('/') {
+        "" => String::new(),
+        folder => format!("{folder}/"),
     }
 }
 
@@ -409,7 +440,7 @@ impl S3 {
     /// The URL a request goes to, signed: here with the keys, or by whoever signs for this device.
     fn url(&self, ask: &Ask) -> Result<String> {
         match &self.auth {
-            Auth::Signed(sign) => sign(ask),
+            Auth::Signed(signer) => signer.sign(ask),
             Auth::Keys { key_id, secret } => {
                 let stamp = jiff::Timestamp::now().strftime("%Y%m%dT%H%M%SZ").to_string();
                 let path = match ask.name {
@@ -525,6 +556,15 @@ mod tests {
         let create = Ask { method: "PUT", name: "test.txt", query: &[], headers: &[("If-None-Match", "*")] };
         let url = presign("examplebucket.s3.amazonaws.com", "/test.txt", "us-east-1", "AKIAIOSFODNN7EXAMPLE", "secret", "20130524T000000Z", 60, &create);
         assert!(url.contains("X-Amz-SignedHeaders=host%3Bif-none-match") || url.contains("X-Amz-SignedHeaders=if-none-match%3Bhost"), "{url}");
+    }
+
+    #[test]
+    fn a_device_keeps_only_the_install_buckets_address() {
+        let address: super::super::Address = Arc::new(|| Ok("http://127.0.0.1:1".into()));
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let fields = |more: &[(&str, &str)]| [("endpoint", "https://r2.example"), ("bucket", "install")].iter().chain(more).map(|(k, v)| (k.to_string(), v.to_string())).collect::<BTreeMap<_, _>>();
+        assert!(Place::install(&fields(&[("key_id", "id"), ("secret", "secret")]), address.clone(), key.clone()).is_err());
+        assert!(matches!(Place::install(&fields(&[]), address, key).unwrap(), Place::S3(S3 { auth: Auth::Signed(_), .. })));
     }
 
     #[test]

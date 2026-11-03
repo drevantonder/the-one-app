@@ -95,7 +95,11 @@ mod copied;
 #[cfg(not(target_family = "wasm"))]
 mod place;
 #[cfg(not(target_family = "wasm"))]
+mod signed;
+#[cfg(not(target_family = "wasm"))]
 pub use copied::Copied;
+#[cfg(not(target_family = "wasm"))]
+pub use signed::{Address, Signer};
 #[cfg(not(target_family = "wasm"))]
 pub use place::*;
 

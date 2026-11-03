@@ -1,6 +1,6 @@
-//! The kernel services (`kernel/`: auth, vault, schedules) as nodes meet them: the formats they agree on
+//! The kernel services (`kernel/`: auth, vault, schedules, the URL signer) as nodes meet them: the formats they agree on
 //! (`kernel/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
-//! asking the vault for keys and bucket URLs, and building and running the services in workerd.
+//! asking the vault for keys, and building and running the services in workerd.
 
 #[cfg(not(target_family = "wasm"))]
 use std::time::Duration;
@@ -214,17 +214,6 @@ pub struct Key {
     pub key: [u8; 32],
 }
 
-/// Presigned URLs, by object name, and until when (milliseconds) they work.
-#[derive(Debug, Default, Deserialize)]
-pub struct Urls {
-    pub read: std::collections::BTreeMap<String, String>,
-    /// Each works only with `If-None-Match: *`, so only while nothing has that name.
-    pub create: std::collections::BTreeMap<String, String>,
-    /// Each works only with `If-Match: <the ETag it was asked with>`.
-    pub replace: std::collections::BTreeMap<String, String>,
-    pub until: u64,
-}
-
 /// A token's session at the vault: whose it is.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Session {
@@ -304,12 +293,6 @@ impl Vault {
         let out = self.post(token, "/invite", json!({ "name": name }))?;
         Ok((out["token"].as_str().context("the vault gave no invite")?.to_string(), out["until"].as_u64().unwrap_or(0)))
     }
-
-    /// URLs to read and create objects named `<scope's folder>/<app>/…` (or `log/…`, the install's log), and to
-    /// replace a database's `…/newest` while it's the version an ETag names: (name, etag) each.
-    pub fn urls(&self, token: &str, read: &[&str], create: &[&str], replace: &[(&str, &str)]) -> Result<Urls> {
-        Ok(serde_json::from_value(self.post(token, "/urls", urls_asked(read, create, replace))?)?)
-    }
 }
 
 /// What a node posts to the vault's `/keys` for the keys a call names: (scope, app, database?) each.
@@ -333,12 +316,6 @@ pub fn keys_given(out: &Value) -> Result<Vec<Key>> {
             })
         })
         .collect()
-}
-
-/// What a node posts to the vault's `/urls`: names to read and create, and (name, etag) to replace.
-pub fn urls_asked(read: &[&str], create: &[&str], replace: &[(&str, &str)]) -> Value {
-    let replace: Vec<Value> = replace.iter().map(|(name, etag)| json!({ "name": name, "etag": etag })).collect();
-    json!({ "read": read, "create": create, "replace": replace })
 }
 
 #[cfg(not(target_family = "wasm"))]
