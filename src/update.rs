@@ -373,21 +373,29 @@ fn turn() -> Result<std::fs::File> {
 /// has a kernel, so it fails if no device deployed it. True if it failed.
 fn deploy_kernel(linux: &[Value], commit: &str) -> bool {
     let home = format!("${{{}_HOME:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", CLI.to_uppercase());
-    // The node's own build, which Shell's sh is a child of, deploys it (what's called the CLI there may be something
-    // else), once it's the one sent out: 75 says it isn't yet. As a login there would: its profile is where 1Password's
+    // The node's own build deploys it (what's called the CLI there may be something else), once it's the one sent
+    // out: 75 says it isn't yet. On another device that's Shell's sh's parent; on this one, which needs no Shell on
+    // anyone's pages, the node that wrote its pid. As a login there would: its profile is where 1Password's
     // sign-in, which the kernel's secrets are read with, usually is, and ~/.local/bin where op may be.
-    let deploy = format!(
-        r#"[ -f "{home}/kernel/settings.json" ] || {{ echo none; exit 0; }}; node=/proc/$PPID/exe
+    let script = |node: &str| format!(
+        r#"[ -f "{home}/kernel/settings.json" ] || {{ echo none; exit 0; }}; node=/proc/{node}/exe
 case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still on $("$node" version --json)"; exit 75 ;; esac
 . "$HOME/.profile" >/dev/null 2>&1; PATH="$HOME/.local/bin:$PATH" "$node" kernel deploy"#
     );
+    let (here, others): (Vec<&Value>, Vec<&Value>) = linux.iter().filter(|d| d["online"] == true).partition(|d| d["here"] == true);
     let (mut failed, mut deployed) = (false, false);
-    for device in linux.iter().filter(|d| d["online"] == true) {
+    // This device first: if its settings are here, nothing is asked of another's Shell.
+    for device in here.into_iter().chain(others) {
+        if deployed {
+            break;
+        }
         let name = device["name"].as_str().unwrap_or("");
+        let local = device["here"] == true;
+        let deploy = script(&if local { format!("$(cat \"{home}/pid\")") } else { "$PPID".into() });
         let deadline = Instant::now() + Duration::from_secs(180);
         let mut failures = 0;
         let said = loop {
-            let said = shell(device, &deploy, 600);
+            let said = if local { run_here(&deploy) } else { shell(device, &deploy, 600) };
             let again = match &said {
                 Err(_) => true,
                 Ok(r) if r["exit"] == 75 => true,
@@ -414,7 +422,8 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             }
             Err(err) => {
                 failed = true;
-                println!("  {name}: couldn't deploy the kernel: {err:#}");
+                let hint = if format!("{err:#}").contains("isn't on your pages") { " (add Shell in the App Store, or run one update on the device with the kernel's settings)" } else { "" };
+                println!("  {name}: couldn't deploy the kernel: {err:#}{hint}");
             }
         }
     }
@@ -640,6 +649,12 @@ fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit: Duration)
         }
         std::thread::sleep(Duration::from_secs(2));
     }
+}
+
+/// A command in this machine's own sh, answered as `shell` answers: its exit and what it said.
+fn run_here(command: &str) -> Result<Value> {
+    let out = Command::new("sh").args(["-c", command]).output().context("run sh")?;
+    Ok(json!({ "exit": out.status.code().unwrap_or(-1), "stdout": String::from_utf8_lossy(&out.stdout), "stderr": String::from_utf8_lossy(&out.stderr) }))
 }
 
 fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
