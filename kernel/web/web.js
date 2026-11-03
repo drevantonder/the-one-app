@@ -1089,7 +1089,8 @@ window.__one = {};
     const listed = () => [...(install()?.devices || []), ...(install()?.clients || [])].some((e) => e.key === keys.key);
     // Once it's in: their own things' first key and where they run, made by the first of their devices.
     const made = async () => {
-      device = new Device(keys, { state: () => store.state, api, bearer });
+      device = new Device(keys, { state: () => store.state, api, bearer, replay: net.global });
+      await device.load();
       await device.settleOwn().catch((err) => console.warn("making this person's own keys:", err));
       await refreshState().catch(() => {});
       return device;
@@ -1098,7 +1099,7 @@ window.__one = {};
     const prf = sessionStorage.getItem("one.prf"), credential = sessionStorage.getItem("one.prf.credential");
     if (prf && install()?.clients.some((c) => c.passkey === credential && c.user === user)) {
       try {
-        await new Device(keys, { state: () => store.state, api, bearer }).approveByPasskey(Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)));
+        await new Device(keys, { state: () => store.state, api, bearer, replay: net.global }).approveByPasskey(Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)));
         await refreshState();
         if (listed()) return await net.start(user, true).catch(() => {}), made();
       } catch (err) {

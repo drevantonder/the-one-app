@@ -3,6 +3,10 @@
 // gets in when one of their devices approves it; then it opens its scopes' epochs, sealed to it, and from them the keys
 // a call needs, which it hands the node with the call (`x-one-keys`). What it opens stays in this page's memory, as keys
 // that can't be read back, and goes with it. What changes who can do what it signs itself (members.js).
+//
+// Who's who it takes only from the install's own signed entries, checked here (`checked`), never from what a node says
+// (/v1/state): which seal key a device has, who opens a scope, which hash an epoch's key must have, and which nodes may
+// be handed a scope's keys. A hacked node holds no keys, and gets none this way.
 
 import { b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, x25519Public } from "../shared/crypto.js";
 import { get, put } from "./kept.js";
@@ -42,44 +46,31 @@ export async function joinAsk(keys, name, invite) {
 /// The code this browser shows to be approved: its key's, as 4 and 4.
 export const codeOf = async (key, seal) => (await joinCode(hex.decode(key), hex.decode(seal))).replace(/^(.{4})/, "$1 ");
 
-// MARK: Who opens what
+// MARK: Who opens what, as the install's signed entries say (`k`, one-client's members view)
 
-const clientOf = (e) => (e.roles || []).includes("client") && e.seal && e.seal !== e.key;
-
-/// The people who may open a scope.
-function people(st, scope) {
-  const i = st.install;
-  if (scope === "global") return i.users.map((u) => u.id);
-  if (scope.startsWith("user:")) return [scope.slice(5)];
-  return (i.groups.find((g) => `group:${g.id}` === scope)?.members || []).map((m) => m.user);
-}
-
-/// What a scope's epochs are sealed to: the client devices of the people who may open it, and nothing that only runs
+/// What a scope's epochs are sealed to: the client devices of the people who may use it, and nothing that only runs
 /// calls.
-function openers(st, scope) {
-  const who = people(st, scope);
-  const all = [...st.install.devices, ...st.install.clients];
-  return all.filter((e) => clientOf(e) && who.includes(e.user)).filter((e, i) => all.findIndex((x) => x.key === e.key) === i);
-}
+const openers = (k, scope) => k.openers[scope] || [];
 
 /// The scopes `user`'s devices open: everyone's, their own, and their groups'.
-const scopesOf = (st, user) => ["global", `user:${user}`, ...st.install.groups.filter((g) => g.members.some((m) => m.user === user)).map((g) => `group:${g.id}`)];
+const scopesOf = (k, user) => Object.keys(k.roles).filter((s) => k.roles[s][user]);
 
-/// Whether this person may start a scope's new epoch.
-function starts(st, scope) {
-  const me = st.user.id;
-  if (scope === "global") return st.install.role === "admin";
-  if (scope.startsWith("user:")) return scope === `user:${me}`;
-  return st.install.groups.find((g) => `group:${g.id}` === scope)?.role === "admin";
-}
+/// Whether `user` may start a scope's new epoch: an admin of it (everyone is of their own).
+const starts = (k, scope, user) => k.roles[scope]?.[user] === "admin";
+
+/// Whether a node runs each of `scopes`' calls, so it may be handed their keys.
+const runsAll = (k, node, scopes) => !!k?.runs_for[node] && scopes.every((s) => k.runs_for[node].includes(s));
 
 // MARK: The device
 
 export class Device {
-  /// `me`: this browser's keys; `state()`: the node's /v1/state as last read; `api(path, opts)`: a /v1 request as this
-  /// person; `bearer(path, init)`: one to the address with the access token.
-  constructor(me, { state, api, bearer }) {
-    Object.assign(this, { me, state, api, bearer });
+  /// `me`: this browser's keys; `state()`: the node's /v1/state as last read, for what it shows; `api(path, opts)`: a
+  /// /v1 request as this person; `bearer(path, init)`: one to the address with the access token; `replay(user, given)`:
+  /// `global`'s entries this browser kept and those `given` (a pack), checked and replayed by one-client (net.global).
+  constructor(me, { state, api, bearer, replay }) {
+    Object.assign(this, { me, state, api, bearer, replay });
+    /// The members as last checked (`checked`): what it seals and hands by.
+    this.known = null;
     /// Each scope's epochs this browser opened: n → an HKDF key, its bytes gone.
     this.epochs = new Map();
     /// Each app's key in a scope by epoch, the same: `scope app` → n → key.
@@ -94,13 +85,33 @@ export class Device {
     return this.state().user.id;
   }
 
+  /// The members as the install's signed entries say them, checked here: as last checked, or with what's new from a
+  /// node if `fresh` (before it changes who opens what) or never. The first time, the install's first entry is kept,
+  /// and an install that starts with any other refused.
+  async checked(fresh = false) {
+    if (fresh || !this.known) {
+      const kept = await get(`global:${this.user}`);
+      const r = await this.api(`/v1/entries/global?have=${kept?.have || ""}`, { raw: true });
+      const k = r.status === 204 && kept ? kept.members : await this.replay(this.user, r.status === 204 ? undefined : new Uint8Array(await r.arrayBuffer()));
+      if (!k.roles.global?.[this.user]) throw new Error("Your One App's entries don't list you, so this browser didn't use them.");
+      this.known = k;
+    }
+    return this.known;
+  }
+
+  /// The members as last checked, kept in this browser, to start with at once.
+  async load() {
+    this.known ||= (await get(`global:${this.user}`))?.members || null;
+  }
+
   // Epochs and keys.
 
   /// Opens epoch `n`'s key sealed to `as` from what the node gave, if its hash is the one its epoch entry gave.
   async openEpoch(scope, n, sealed, as = this.me) {
     const key = await openSealed(as.opens, b64u.decode(sealed));
-    const said = this.state().install.epochs?.[scope]?.hashes?.[n];
-    if (!said || said !== (await epochHash(key))) throw new Error("A key for this didn't check out, so it wasn't used.");
+    const hash = await epochHash(key);
+    const made = async (fresh) => (await this.checked(fresh)).epochs[scope]?.hashes?.[n];
+    if (hash !== ((await made(false)) ?? (await made(true)))) throw new Error("A key for this didn't check out, so it wasn't used.");
     return key;
   }
 
@@ -120,7 +131,7 @@ export class Device {
     const all = this.epochs.get(scope) || new Map();
     for (const [m, key] of keys) all.set(m, await hkdfKey(key));
     this.epochs.set(scope, all);
-    if (!all.has(n) && n === 1 && newest === 0 && starts(this.state(), scope)) await this.newEpoch(scope, 1);
+    if (!all.has(n) && n === 1 && newest === 0 && starts(await this.checked(true), scope, this.user)) await this.newEpoch(scope, 1);
     if (!all.has(n)) throw new Error("This browser hasn't been given the keys to that yet.");
     return all.get(n);
   }
@@ -129,16 +140,15 @@ export class Device {
   /// causal order, makes it), then sealed to the recovery key and each client device of the people who may open it but
   /// those in `except` (keys being taken out), before it's used.
   async newEpoch(scope, n, { except = [] } = {}) {
-    const st = this.state();
-    if (!st.install.recovery) throw new Error("Your One App has no recovery key to keep its keys with.");
+    const k = await this.checked(true);
+    if (!k.recovery) throw new Error("Your One App has no recovery key to keep its keys with.");
     const key = random(32);
     const hash = await epochHash(key);
-    const to = openers(st, scope).filter((e) => !except.includes(e.key));
+    const to = openers(k, scope).filter((e) => !except.includes(e.key));
     if (!to.some((e) => e.key === this.me.key)) to.push({ key: this.me.key, seal: this.me.seal });
     await this.write("global", members.epoch({ scope, n, to: to.map((e) => e.key), hash }));
-    const now = await this.api("/v1/state");
-    if (now.install.epochs?.[scope]?.hashes?.[n] !== hash) throw new Error("Another device made new keys for this just now. Try again.");
-    await this.api("/v1/keys", { method: "POST", body: { scope, n, to: "recovery", sealed: b64u.encode(await sealTo(twinPublic(hex.decode(st.install.recovery)), key)) } });
+    if ((await this.checked(true)).epochs[scope]?.hashes?.[n] !== hash) throw new Error("Another device made new keys for this just now. Try again.");
+    await this.api("/v1/keys", { method: "POST", body: { scope, n, to: "recovery", sealed: b64u.encode(await sealTo(twinPublic(hex.decode(k.recovery)), key)) } });
     for (const e of to) await this.api("/v1/keys", { method: "POST", body: { scope, n, to: e.key, sealed: b64u.encode(await sealTo(hex.decode(e.seal), key)) } });
     const all = this.epochs.get(scope) || new Map();
     all.set(n, await hkdfKey(key));
@@ -148,12 +158,15 @@ export class Device {
   /// This person's own things, once their device is in: where they run besides their own machines, if their devices
   /// never said (the machines that run everyone's, chosen without asking), and their own first key, if it isn't made.
   async settleOwn() {
-    const st = this.state(), mine = `user:${this.user}`;
-    if (st.install.runs == null) {
-      const on = st.install.devices.filter((d) => d.user !== this.user && (d.runs_for || []).includes("global")).map((d) => d.key);
+    const mine = `user:${this.user}`;
+    let k = await this.checked();
+    if (k.runs[this.user] == null || !k.epochs[mine]) k = await this.checked(true);
+    if (k.runs[this.user] == null) {
+      const whose = (key) => k.devices.find((d) => d.key === key)?.user;
+      const on = Object.keys(k.runs_for).filter((key) => whose(key) !== this.user && k.runs_for[key].includes("global"));
       if (on.length) await this.write("global", members.runs({ on }));
     }
-    if (!st.install.epochs?.[mine]) await this.newEpoch(mine, 1);
+    if (!k.epochs[mine]) await this.newEpoch(mine, 1);
   }
 
   /// An app's key in epoch `n` of a scope: the one sealed under the epoch, or a new one if it has none yet.
@@ -199,24 +212,30 @@ export class Device {
   /// so can't open it.
   async handoff(route, until) {
     const last = this.needs[route];
-    if (!last?.node || !last.need?.length) return null;
+    if (!last?.node || !last.seal || !last.need?.length || !runsAll(this.known, last.node, last.need.map((n) => n.scope))) return null;
     const keys = [];
     for (const n of last.need) keys.push({ ...n, key: b64u.encode(await this.databaseKey(n)) });
-    return sealHandoff(twinPublic(hex.decode(last.node)), { for: this.me.key, until, keys });
+    return sealHandoff(hex.decode(last.seal), { for: this.me.key, until, keys });
   }
 
   /// A node's 428, believed only from `node`, the one that answered it as its connection proved: it must name itself
-  /// and its own seal key, and a request that runs one app may need only that app's databases (and the Vault's of a
-  /// scope, which fills in its items). What it needed is all this kind of request hands next time, and only to it.
-  /// Throws if it asks for more, or this browser can't open it.
+  /// and the seal key the install's entries list for it, run every scope it needs keys of, as they say, and a request
+  /// that runs one app may need only that app's databases (and the Vault's of a scope, which fills in its items). What
+  /// it needed is all this kind of request hands next time, and only to it. Throws if it asks for more, or this browser
+  /// can't open it.
   async learn(route, answer, node) {
     const need = Array.isArray(answer.need) ? answer.need : [];
     if (!node || answer.to !== node) throw new Error("A device that didn’t answer asked for keys, so none were given.");
-    if (answer.seal && answer.seal !== hex.encode(twinPublic(hex.decode(node)))) throw new Error("A device asked for keys sealed to another, so none were given.");
+    const scopes = need.map((n) => n.scope);
+    let k = await this.checked();
+    if (!runsAll(k, node, scopes)) k = await this.checked(true);
+    if (!runsAll(k, node, scopes)) throw new Error("A device that doesn’t run that asked for its keys, so none were given.");
+    const seal = k.devices.find((d) => d.key === node)?.seal;
+    if (!seal || (answer.seal && answer.seal !== seal)) throw new Error("A device asked for keys sealed to another, so none were given.");
     const app = Device.appOf(route);
     if (need.length > 64 || (app && need.some((n) => n.app !== app && !(n.app === "node" && n.database === "vault")))) throw new Error("A device asked for keys that request doesn’t use, so none were given.");
     for (const n of need) await this.databaseKey(n);
-    this.needs[route] = { node, need };
+    this.needs[route] = { node, seal, need };
     try { localStorage.setItem("one.needs", JSON.stringify(this.needs)); } catch {}
   }
 
@@ -271,8 +290,8 @@ export class Device {
   /// Lets in a device that asked: lists it (and for a newcomer, them), seals it the epochs it may open, lets it onto the
   /// network and clears its request.
   async approve(r, as = this.me) {
-    const st = this.state();
-    const known = st.install.users.some((u) => u.id === r.user);
+    const k = await this.checked(true);
+    const known = !!k.roles.global?.[r.user];
     if (r.user !== this.user && known) throw new Error("Only their own devices approve one of theirs.");
     let newUser = null;
     if (r.user !== this.user) {
@@ -281,8 +300,8 @@ export class Device {
       newUser = { name: invite.name || r.person, role: "member" };
     }
     await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser }), as);
-    await this.sealTo(r, newUser ? ["global"] : scopesOf(st, r.user), as);
-    await this.tell({ add: r.key, role: "client", ...(!newUser && st.install.role === "admin" ? { admin: true } : {}) }, as);
+    await this.sealTo(r, newUser ? ["global"] : scopesOf(k, r.user), as);
+    await this.tell({ add: r.key, role: "client", ...(!newUser && k.roles.global?.[this.user] === "admin" ? { admin: true } : {}) }, as);
     if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`).catch(() => {});
     else await this.bearer(`/api/auth/devices/requests/${r.key}`, { method: "DELETE" }).catch(() => {});
   }
@@ -303,36 +322,38 @@ export class Device {
   /// Takes one of this person's devices out (or, for an admin, anyone's): off the network first, then unlisted, then
   /// each scope it opened that this person may move on gets a new epoch it doesn't have.
   async remove(key) {
-    const st = this.state();
-    const it = [...st.install.devices, ...st.install.clients].find((e) => e.key === key);
+    const k = await this.checked(true);
+    const it = k.devices.find((e) => e.key === key);
     if (!it) throw new Error("That device isn’t listed.");
     await this.tell({ remove: key }).catch((err) => {
       if (!/isn.t|not/.test(err.message)) throw err;
     });
-    const seq = (await this.api("/v1/entries?scope=global")).logs?.[key]?.seq ?? null;
-    await this.write("global", members.removeDevice({ key, seq }));
-    await this.renew(scopesOf(st, it.user), [key]);
+    // The last of its entries this browser checked, from which on none counts.
+    const next = (await get(`global:${this.user}`))?.have.split(",").find((h) => h.startsWith(`${key}.`))?.split(".")[1];
+    await this.write("global", members.removeDevice({ key, seq: next ? Number(next) - 1 : null }));
+    await this.renew(scopesOf(k, it.user), [key]);
   }
 
   /// Takes a person out, for an admin: each of their devices off the network first, then them, then each scope they
   /// could open but their own (everyone's and their groups') gets a new epoch they don't have. Their own stays as it is.
   async removePerson(user) {
-    const st = this.state();
+    const k = await this.checked(true);
     if (user === this.user) throw new Error("You can’t remove yourself. Another admin can.");
-    const theirs = [...st.install.devices, ...st.install.clients].filter((e) => e.user === user).map((e) => e.key);
+    const theirs = k.devices.filter((e) => e.user === user).map((e) => e.key);
     for (const key of theirs) {
       await this.tell({ remove: key }).catch((err) => {
         if (!/isn.t|not/.test(err.message)) throw err;
       });
     }
     await this.write("global", members.removeUser({ user }));
-    await this.renew(scopesOf(st, user).filter((s) => s !== `user:${user}`), theirs);
+    await this.renew(scopesOf(k, user).filter((s) => s !== `user:${user}`), theirs);
   }
 
   /// A new epoch of each scope this person may start one of, sealed to none of `except`.
   async renew(scopes, except) {
-    for (const scope of scopes.filter((s) => starts(this.state(), s))) {
-      const newest = (await this.api(`/v1/keys?scope=${encodeURIComponent(scope)}&to=${this.me.key}`)).epoch || 0;
+    const k = await this.checked(true);
+    for (const scope of scopes.filter((s) => starts(k, s, this.user))) {
+      const newest = k.epochs[scope]?.n || 0;
       if (newest) await this.newEpoch(scope, newest + 1, { except });
     }
   }
@@ -356,7 +377,7 @@ export class Device {
   async listPasskey(prf, credential) {
     const pk = await passkeyKeysOf(prf);
     await this.write("global", members.passkey({ key: pk.key, seal: pk.seal, user: this.user, name: "Passkey", credential }));
-    await this.sealTo(pk, scopesOf(this.state(), this.user));
+    await this.sealTo(pk, scopesOf(await this.checked(true), this.user));
     await this.tell({ add: pk.key, role: "client" });
   }
 

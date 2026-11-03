@@ -21,6 +21,29 @@ export function server(version) {
   glue.catch(() => {});
   // Imported here, not above, so the WebAssembly is fetched first.
   const code = Promise.all([import("../shared/crypto.js"), import("./kept.js")]);
+  /// Of `keys`, the nodes the install's signed entries, as this browser last checked them (`global`), list as running
+  /// something of `user`'s: all of them before it's checked any. A node the relay or a node names besides isn't asked.
+  async function theirs(user, keys) {
+    const k = (await (await code)[1].get(`global:${user}`))?.members;
+    if (!k) return keys;
+    const uses = Object.keys(k.roles).filter((s) => k.roles[s][user]);
+    return keys.filter((key) => (k.runs_for[key] || []).some((s) => uses.includes(s)));
+  }
+
+  /// `user`'s members from `global`'s entries kept and those `given` (a pack), checked and replayed by the client
+  /// (src/members.rs), then kept: the entries, the install's first, what to ask for next, and the members.
+  async function global(user, given) {
+    const [, { get, put }] = await code;
+    const kept = await get(`global:${user}`);
+    if (!given && kept) return kept.members;
+    const { Global } = await glue;
+    const g = new Global(kept?.root || "", kept?.pack || new Uint8Array(), given || new Uint8Array());
+    const members = JSON.parse(g.members);
+    await put(`global:${user}`, { root: g.root, pack: g.pack, have: g.have, members });
+    g.free();
+    return members;
+  }
+
   /// The session: its person and its client, once it's started; null if this browser isn't a device of theirs.
   let session = null;
   let renewal = null;
@@ -42,9 +65,9 @@ export function server(version) {
       // Not let in: this browser isn't one of its person's devices (yet, or any more).
       if (asked.status === 403) return null;
       if (!asked.ok) throw new Error("Your One App's network isn't answering.");
-      return (await asked.json()).computes;
+      return theirs(user, (await asked.json()).computes);
     });
-    const known = (await get(`nodes:${user}`)) || [];
+    const known = await theirs(user, (await get(`nodes:${user}`)) || []);
     const order = (computes) => [...known.filter((k) => computes.includes(k)), ...computes.filter((k) => !known.includes(k))];
     const first = known.length ? known : await computes;
     if (!first) return null;
@@ -102,10 +125,13 @@ export function server(version) {
             return post({ id, device: !!s });
           }
           case "nodes": {
-            await (await code)[1].put(`nodes:${m.user}`, m.nodes);
+            const nodes = await theirs(m.user, m.nodes);
+            await (await code)[1].put(`nodes:${m.user}`, nodes);
             const s = await session?.ready;
-            return s?.client.nodes(m.nodes);
+            return s?.client.nodes(nodes);
           }
+          case "global":
+            return post({ id, members: await global(m.user, m.given && new Uint8Array(m.given)) });
           case "reconnect":
             return (await session?.ready)?.client.reconnect();
           case "cancel":

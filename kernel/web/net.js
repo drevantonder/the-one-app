@@ -165,6 +165,15 @@ export const net = {
     if (net.has) send({ op: "nodes", user, nodes });
   },
 
+  /// `user`'s members as `global`'s entries say them, checked here: those kept and those `given` (a pack a node sent,
+  /// or none), replayed by the client's WebAssembly, and kept. Throws if one doesn't check, or they're another install's
+  /// than the one first kept.
+  async global(user, given) {
+    if (!net.has) throw new Error("This browser can't check who's who in your One App.");
+    const buffer = given && given.buffer.slice(given.byteOffset, given.byteOffset + given.byteLength);
+    return (await ask({ op: "global", user, given: buffer }, buffer ? [buffer] : [])).members;
+  },
+
   /// A fresh endpoint, after the network came back.
   reconnect() {
     if (net.has) send({ op: "reconnect" });
