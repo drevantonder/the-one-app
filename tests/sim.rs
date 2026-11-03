@@ -250,6 +250,33 @@ fn keys(seed: u64) -> (Keys, Keys) {
     (Keys::from([(1, one)]), Keys::from([(1, one), (2, two)]))
 }
 
+/// Opens the database and brings it to the schema as a device does: handed `newer`, epoch 2, when it meets a step under
+/// it, as its node is once it finds that epoch's entry; never handed it, it doesn't open.
+async fn open(link: &Link, older: &Keys, newer: Option<&Keys>) -> Option<Db> {
+    let ahead = |e: &anyhow::Error| e.is::<one::db::Ahead>();
+    let mut keys = older.clone();
+    let mut db = loop {
+        match retry(async || match Db::open(link, "global/sim/main", keys.clone()).await {
+            Err(e) if ahead(&e) && keys.len() == 1 => Ok(None),
+            other => other.map(Some),
+        })
+        .await
+        {
+            Some(db) => break db,
+            None => keys = newer?.clone(),
+        }
+    };
+    while !retry(async || match db.migrate(link, &[SCHEMA.to_string()]).await {
+        Err(e) if ahead(&e) && db.keys().len() == 1 => Ok(false),
+        other => other.map(|()| true),
+    })
+    .await
+    {
+        db.add_keys(newer?);
+    }
+    Some(db)
+}
+
 /// Writes `id` as `device`, from epoch 2 on once it's past `from` or meets a step under it, as a device is handed a
 /// scope's new epoch.
 async fn write_handed(link: &Link, db: &mut Db, id: u64, device: usize, from: bool, newer: &Keys) {
@@ -281,8 +308,7 @@ async fn run(seed: u64) {
     for device in 0..DEVICES {
         let (link, older, newer) = (link.clone(), older.clone(), newer.clone());
         devices.push(tokio::task::spawn_local(async move {
-            let mut db = retry(async || Db::open(&link, "global/sim/main", older.clone()).await).await;
-            retry(async || db.migrate(&link, &[SCHEMA.to_string()]).await).await;
+            let mut db = open(&link, &older, Some(&newer)).await.expect("handed every epoch");
             for i in 0..WRITES {
                 let id = (device * WRITES + i) as u64;
                 write_handed(&link, &mut db, id, device, changes && i >= WRITES / 2, &newer).await;
@@ -295,8 +321,7 @@ async fn run(seed: u64) {
     let stale = changes.then(|| {
         let (link, older) = (link.clone(), older.clone());
         tokio::task::spawn_local(async move {
-            let mut db = retry(async || Db::open(&link, "global/sim/main", older.clone()).await).await;
-            retry(async || db.migrate(&link, &[SCHEMA.to_string()]).await).await;
+            let mut db = open(&link, &older, None).await?;
             let mut own = None;
             for i in 0..WRITES {
                 let at = db.at();
