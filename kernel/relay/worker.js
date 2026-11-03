@@ -64,9 +64,11 @@ const PROTOCOL = "iroh-relay-v2";
 const TELL = "one/relay";
 const TELL_BYTES = 4096;
 /// How long a socket may take to answer its challenge, how many sockets that haven't may come from one place (an IPv4
-/// address, an IPv6 /64) and from everywhere, how long a pairing code may work, and how many one device may have.
+/// address, an IPv6 /64), from one IPv6 /48 (a site's, which holds 65,536 /64s) and from everywhere, how long a
+/// pairing code may work, and how many one device may have.
 const PROVE_WITHIN = 30_000;
 const UNPROVEN_PER_PLACE = 8;
+const UNPROVEN_PER_SITE = 32;
 const UNPROVEN = 256;
 const PAIRING_FOR = 7 * 86_400_000;
 const PAIRINGS_PER_DEVICE = 8;
@@ -93,15 +95,16 @@ function token(request, url) {
   return bearer ? bearer[1].trim() : url.searchParams.get("token");
 }
 
-/// Where a socket comes from, for counting those that haven't proved their key: an IPv4 address, or an IPv6 /64.
+/// Where a socket comes from, for counting those that haven't proved their key: an IPv4 address, or an IPv6 /64; and
+/// its site, an IPv6 /48 (an IPv4 address's is itself).
 function place(request) {
   const address = request.headers.get("cf-connecting-ip") || "";
-  if (!address.includes(":")) return address;
+  if (!address.includes(":")) return { from: address, site: address };
   const [head, tail = ""] = address.split("::");
   const groups = head.split(":").filter(Boolean);
   const rest = tail.split(":").filter(Boolean);
-  const full = [...groups, ...Array(Math.max(0, 8 - groups.length - rest.length)).fill("0"), ...rest];
-  return full.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":") + "::/64";
+  const full = [...groups, ...Array(Math.max(0, 8 - groups.length - rest.length)).fill("0"), ...rest].map((g) => parseInt(g, 16).toString(16));
+  return { from: full.slice(0, 4).join(":") + "::/64", site: full.slice(0, 3).join(":") + "::/48" };
 }
 
 export default class extends WorkerEntrypoint {
@@ -275,8 +278,9 @@ export class Relay extends DurableObject {
   /// The compute endpoints' keys, if `by` is on the list, or is a session's a client on it vouched for (`session`);
   /// null if neither. A request's (`at`) is taken once: → why not, if it was taken already.
   computes(by, { at, session } = {}) {
-    if (at !== undefined && !this.take(by, at)) return "that request was taken already";
+    // Who's asking first, as `tell` does, so a stranger's requests are never kept.
     if (session !== undefined ? !is(this.key(session), "client") : !this.key(by)) return null;
+    if (at !== undefined && !this.take(by, at)) return "that request was taken already";
     const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
     return this.env.BOUND ? [...keys, this.env.BOUND] : keys;
   }
@@ -322,9 +326,10 @@ export class Relay extends DurableObject {
     }
     // Who's let in is said only after the challenge, the same for every key that isn't, so this tells no one who's on
     // the list; sockets that haven't answered are few, from one place and in all.
-    const from = place(request);
+    const { from, site } = place(request);
     let unproven = 0;
     let here = 0;
+    let near = 0;
     for (const ws of this.ctx.getWebSockets()) {
       const said = ws.deserializeAttachment();
       if (!said?.challenge) continue;
@@ -335,12 +340,13 @@ export class Relay extends DurableObject {
       }
       unproven++;
       if (said.from === from) here++;
+      if (said.site === site) near++;
     }
-    if (here >= UNPROVEN_PER_PLACE || unproven >= UNPROVEN) return refuse(429, "too many sockets that haven't proved their key");
+    if (here >= UNPROVEN_PER_PLACE || near >= UNPROVEN_PER_SITE || unproven >= UNPROVEN) return refuse(429, "too many sockets that haven't proved their key");
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
     const made = challenge();
-    server.serializeAttachment({ challenge: hex(made.slice(0, 16)), at: now, from, joining, session });
+    server.serializeAttachment({ challenge: hex(made.slice(0, 16)), at: now, from, site, joining, session });
     server.send(made.slice(16));
     return new Response(null, { status: 101, webSocket: client, headers: { "Sec-WebSocket-Protocol": PROTOCOL } });
   }
@@ -621,13 +627,16 @@ export class Relay extends DurableObject {
       const wants = told.admin === true;
       const it = this.key(told.add);
       if (wants && !admin) return "only an admin's device adds an admin's";
-      if (it) {
+      // Adding a key again as it is, by the device that let it in (approving a device again to finish it), changes
+      // nothing and is done.
+      const same = it && it.by === told.by && it.role === told.role && it.admin === (wants ? 1 : 0);
+      if (it && !same) {
         if (!admin) return "that key is in already: only an admin's device changes it";
         if (it.admin === 1 && !wants && this.admins() === 1) return "that's the last admin's key";
         this.sql.exec("UPDATE keys SET admin = ?, role = ? WHERE key = ?", wants ? 1 : 0, told.role, told.add);
         // A key that's no longer a client vouches for no session.
         if (told.role !== "client") this.endSessionsOf(told.add);
-      } else {
+      } else if (!it) {
         if (told.role !== "client" && !admin && !is(by, "compute")) return "only an admin's device or a compute adds a compute or a service";
         this.sql.exec("INSERT INTO keys VALUES (?, ?, ?, ?)", told.add, told.by, wants ? 1 : 0, told.role);
       }

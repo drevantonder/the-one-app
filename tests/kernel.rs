@@ -1539,6 +1539,11 @@ mod relay {
             assert_eq!(tell(&address, &machine, json!({ "add": hex(&SecretKey::generate()), "role": "service" })), 204, "a compute didn't add its person's service");
             assert_eq!(tell(&address, &phone, json!({ "add": hex(&machine), "role": "client" })), 403, "a client changed a compute's role");
             assert_eq!(tell(&address, &machine, json!({ "add": hex(&phone), "role": "compute" })), 403, "a compute made a client a compute");
+            // A device that let a key in adds it again as it is (approving it again, to finish): done, nothing changed.
+            let laptop = SecretKey::generate();
+            assert_eq!(tell(&address, &phone, json!({ "add": hex(&laptop), "role": "client" })), 204);
+            assert_eq!(tell(&address, &phone, json!({ "add": hex(&laptop), "role": "client" })), 204, "a device approved again wasn't taken");
+            assert_eq!(tell(&address, &machine, json!({ "add": hex(&laptop), "role": "client" })), 403, "another device changed who let a key in");
 
             // A pairing code lets in one computer, which reaches only the device that made it until it's added.
             let code = ticket();
