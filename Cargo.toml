@@ -61,7 +61,10 @@ libc = "0.2"
 # Release signatures are OpenSSH signatures (sshsig), which install.sh checks with ssh-keygen; this reads the keys and
 # makes and checks the signatures.
 ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"] }
-tokio = { version = "1", features = ["full"] }
+# test-util is tests/sim.rs's paused clock, so links that wait seconds take none. It's here, not a dev-dependency, so
+# `cargo test` and `cargo build` build the same target/debug/one, which `one try` runs: as a dev-dependency it was a
+# second tokio, and every switch between them compiled this crate again. Unused, it does nothing.
+tokio = { version = "1", features = ["full", "test-util"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
@@ -97,7 +100,3 @@ incremental = true
 # wasm-bindgen reads which WebAssembly features the serverless node's build uses from what stripping would remove.
 [profile.release.package.one-serverless]
 strip = false
-
-[dev-dependencies]
-# tests/sim.rs runs on tokio's paused clock, so links that wait seconds take none.
-tokio = { version = "1", features = ["test-util"] }

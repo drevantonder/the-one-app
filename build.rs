@@ -140,10 +140,22 @@ fn main() {
         None => commit,
     };
     let commit = if dirty { format!("{commit}+dirty") } else { commit };
-    // Rebuild when HEAD moves; in a worktree .git is a file, so ask git where HEAD lives.
-    for what in ["HEAD", "refs/heads", "index"] {
-        if let Ok(o) = std::process::Command::new("git").args(["rev-parse", "--git-path", what]).output() {
-            println!("cargo:rerun-if-changed={}", String::from_utf8_lossy(&o.stdout).trim());
+    // Rebuild when HEAD moves: HEAD itself, or the branch it's on, never all of refs/heads, which every worktree shares,
+    // so another's commit would rebuild this one. In a worktree .git is a file, so ask git where they live; a branch
+    // whose ref is packed has no file of its own until its next commit.
+    let git_out = |args: &[&str]| {
+        let o = std::process::Command::new("git").args(args).output().ok().filter(|o| o.status.success())?;
+        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    // The index too, for "+dirty", in a release build only: `git status` rewrites it (T3 runs it all the time), and a
+    // test build isn't published.
+    let branch = git_out(&["symbolic-ref", "-q", "HEAD"]);
+    let index = (std::env::var("PROFILE").as_deref() == Ok("release")).then_some("index");
+    for what in ["HEAD"].into_iter().chain(index).chain(branch.as_deref()) {
+        let Some(path) = git_out(&["rev-parse", "--git-path", what]) else { continue };
+        let path = if std::path::Path::new(&path).exists() { Some(path) } else { git_out(&["rev-parse", "--git-path", "packed-refs"]) };
+        if let Some(path) = path {
+            println!("cargo:rerun-if-changed={path}");
         }
     }
     // When that commit (or the config's, if later) was made, so releases only ever move devices forward.
