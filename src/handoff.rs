@@ -148,11 +148,10 @@ pub fn stopped() -> bool {
 /// this node is to stop taking connections, finish what it's answering, and exit.
 #[cfg(unix)]
 pub async fn hand_over(listener: i32, args: &[String]) -> Result<()> {
-    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::fd::AsRawFd;
     use std::os::unix::process::CommandExt;
-    let mut fds = [0i32; 2];
-    anyhow::ensure!(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } == 0, "pipe: {}", std::io::Error::last_os_error());
-    let (read, write) = unsafe { (std::fs::File::from_raw_fd(fds[0]), std::fs::File::from_raw_fd(fds[1])) };
+    // Closed on exec, on Linux and macOS alike, but for the end handed to the new build.
+    let (read, write) = std::io::pipe().context("pipe")?;
     let next = if runtime() == RUNTIMES[0] { RUNTIMES[1] } else { RUNTIMES[0] };
     let exe = std::env::current_exe()?;
     // The path, not the program this process runs: an update replaced it.
