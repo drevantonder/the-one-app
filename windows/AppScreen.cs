@@ -29,7 +29,8 @@ public sealed class AppScreen : Grid
     readonly Action<string> retitle;
     /// The sheet it's in, if it's in one.
     readonly Sheet? sheet;
-    readonly WebView2 web = new() { DefaultBackgroundColor = Colors.Transparent, Opacity = 0 };
+    // Faded in as it first draws, not popped in.
+    readonly WebView2 web = new() { DefaultBackgroundColor = Colors.Transparent, Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(150) } };
     readonly string origin;
     string? html;
 
@@ -47,7 +48,10 @@ public sealed class AppScreen : Grid
         var name = new string((route.App ?? "").ToLowerInvariant().Select(c => char.IsAsciiLetterOrDigit(c) || c == '-' ? c : '-').ToArray()).Trim('-');
         origin = Own ? "https://own.localhost" : $"https://{(name.Length == 0 ? "app" : name)}.screen.localhost";
         Children.Add(web);
-        Children.Add(new ProgressRing { IsActive = true, Width = 28, Height = 28, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+        // A spinner only if it's slow: most screens are quicker than one would be worth.
+        var ring = new ProgressRing { IsActive = true, Width = 28, Height = 28, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
+        Children.Add(ring);
+        _ = Task.Delay(400).ContinueWith(_ => ring.Visibility = Visibility.Visible, TaskScheduler.FromCurrentSynchronizationContext());
         // Node events reach the screen as the bridge's `one.__event`, while it's in the window.
         Loaded += async (_, _) =>
         {
@@ -83,8 +87,12 @@ public sealed class AppScreen : Grid
 
     async Task Start()
     {
-        if (web.CoreWebView2 != null || !await Fetch()) return;
-        await web.EnsureCoreWebView2Async();
+        if (web.CoreWebView2 != null || starting) return;
+        starting = true;
+        // Its web view made while its page is fetched, not after: in the browser all screens share (App.Web).
+        var making = Make();
+        if (!await Fetch()) return;
+        await making;
         var core = web.CoreWebView2!;
         var settings = core.Settings;
         settings.AreHostObjectsAllowed = false;
@@ -128,7 +136,9 @@ public sealed class AppScreen : Grid
         core.Navigate($"{origin}/");
     }
 
-    bool shown;
+    bool shown, starting;
+
+    async Task Make() => await web.EnsureCoreWebView2Async(await App.Web);
 
     // MARK: Offline
 
@@ -194,14 +204,13 @@ public sealed class AppScreen : Grid
             if (offline != null) Children.Remove(offline);
             offline = null;
             ticking?.Stop();
-            web.Margin = new Thickness(0);
             return;
         }
-        // Below the bar, while it's there.
-        web.Margin = new Thickness(0, 64, 0, 0);
+        // Over the screen, and only once it's more than a blip.
         if (offline == null)
         {
-            offline = new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Informational, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 8, 12, 0) };
+            var bar = offline = new InfoBar { IsOpen = false, IsClosable = false, Severity = InfoBarSeverity.Informational, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 8, 12, 0) };
+            _ = Task.Delay(1500).ContinueWith(_ => bar.IsOpen = true, TaskScheduler.FromCurrentSynchronizationContext());
             var now = new Button { Content = "Try Now" };
             now.Click += (_, _) => waiting?.Cancel();
             offline.ActionButton = now;

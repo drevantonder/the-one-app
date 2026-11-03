@@ -32,6 +32,10 @@ public sealed class MainWindow : Window
     Route selection = Route.PageOf("user");
     readonly List<(Route route, FrameworkElement view)> pushed = [];
     FrameworkElement? shown;
+    /// The last few places the window was, kept as drawn (and keeping up by themselves), hidden, so going back to one
+    /// is at once: the latest last.
+    readonly List<(Route route, FrameworkElement view)> recent = [];
+    const int Recent = 4;
 
     public MainWindow()
     {
@@ -77,6 +81,7 @@ public sealed class MainWindow : Window
         root.ActualThemeChanged += (_, _) =>
         {
             Buttons();
+            drawn = [];
             DrawSidebar();
             detail.Background = Look.Page;
             detail.BorderBrush = Look.CardStroke;
@@ -265,6 +270,7 @@ public sealed class MainWindow : Window
     {
         root.RequestedTheme = Appearance.Theme;
         AppScreen.Restyle();
+        drawn = [];
         DrawSidebar();
     }
 
@@ -278,11 +284,16 @@ public sealed class MainWindow : Window
             Welcome(null);
             return;
         }
-        body.Content = Centered(new StackPanel
+        // Starting… only if it's slow, and Can't Reach Your Devices only once it's more than a blip: a second miss, or
+        // 3 seconds of them.
+        var starting = Centered(new StackPanel
         {
-            Spacing = 12,
+            Spacing = 12, Visibility = Visibility.Collapsed,
             Children = { new ProgressRing { IsActive = true, Width = 24, Height = 24 }, Look.Text($"Starting {WhiteLabel.Name}…", 13, Look.Secondary) },
         });
+        body.Content = starting;
+        _ = Task.Delay(400).ContinueWith(_ => starting.Visibility = Visibility.Visible, TaskScheduler.FromCurrentSynchronizationContext());
+        var since = DateTime.Now;
         for (var misses = 1; ; misses++)
         {
             try
@@ -297,7 +308,8 @@ public sealed class MainWindow : Window
             }
             catch (Exception e)
             {
-                body.Content = Look.Unavailable("Can’t Reach Your Devices", e.Message, Look.Text("Trying again…", 13, Look.Secondary));
+                if (misses >= 2 || DateTime.Now - since >= TimeSpan.FromSeconds(3))
+                    body.Content = Look.Unavailable("Can’t Reach Your Devices", e.Message, Look.Text("Trying again…", 13, Look.Secondary));
                 await Task.Delay(Node.RetryWait(misses));
             }
         }
@@ -443,7 +455,7 @@ public sealed class MainWindow : Window
         root.Children.Add(web);
         try
         {
-            await web.EnsureCoreWebView2Async();
+            await web.EnsureCoreWebView2Async(await App.Web);
             await web.CoreWebView2.Profile.ClearBrowsingDataAsync();
         }
         catch (Exception e)
@@ -470,6 +482,7 @@ public sealed class MainWindow : Window
         // A window of its own each sign-in: nothing of the last one's.
         detail = new Grid { Background = Look.Page, CornerRadius = new CornerRadius(8, 0, 0, 0), BorderBrush = Look.CardStroke, BorderThickness = new Thickness(1, 1, 0, 0) };
         pushed.Clear();
+        recent.Clear();
         shown = null;
         // A page this computer wasn't let into opens the first it was.
         if (OnNoPage(selection) && Store.Shared.Pages().FirstOrDefault() is { } first) selection = Route.PageOf(first.Scope);
@@ -485,6 +498,7 @@ public sealed class MainWindow : Window
             else if (e.InvokedItemContainer?.Tag is string url) Shell.Open(url);
         };
         body.Content = nav;
+        drawn = [];
         DrawSidebar();
         DrawDetail();
         Opening();
@@ -496,7 +510,7 @@ public sealed class MainWindow : Window
         if (nav == null) return;
         selection = r;
         pushed.Clear();
-        shown = null;
+        shown = recent.FirstOrDefault(v => v.route == r).view;
         DrawDetail();
         DrawSidebar();
     }
@@ -543,7 +557,13 @@ public sealed class MainWindow : Window
     void DrawDetail()
     {
         var view = pushed.Count > 0 ? pushed[^1].view : shown ??= Screen(selection);
-        var kept = pushed.Select(p => p.view).Append(shown).ToHashSet();
+        if (shown != null)
+        {
+            recent.RemoveAll(v => v.view == shown || v.route == selection);
+            recent.Add((selection, shown));
+            if (recent.Count > Recent) recent.RemoveAt(0);
+        }
+        var kept = pushed.Select(p => p.view).Concat(recent.Select(v => v.view)).ToHashSet();
         foreach (var gone in detail.Children.OfType<FrameworkElement>().Where(c => !kept.Contains(c)).ToList()) detail.Children.Remove(gone);
         foreach (var child in detail.Children.OfType<FrameworkElement>()) child.Visibility = child == view ? Visibility.Visible : Visibility.Collapsed;
         if (!detail.Children.Contains(view)) detail.Children.Add(view);
@@ -605,21 +625,16 @@ public sealed class MainWindow : Window
     }
 
     /// One section per page, listing its apps and its Services; then Settings', listing its items with their counts.
+    /// Its rows are made again only when they change (an app added, renamed or with a new icon); otherwise they stay,
+    /// with only their counts and which is chosen changed, so nothing flickers.
     void DrawSidebar()
     {
         if (nav == null) return;
         var store = Store.Shared;
-        nav.MenuItems.Clear();
-        nav.FooterMenuItems.Clear();
-        object? selected = null;
         var at = selection;
-        NavigationViewItem Item(Route route, FrameworkElement content, int badge = 0)
-        {
-            var item = new NavigationViewItem { Content = content, Tag = route };
-            if (badge > 0) item.InfoBadge = new InfoBadge { Value = badge };
-            if (route == at) selected = item;
-            return item;
-        }
+        // Each row: what it is and looks like, where it goes, and its count.
+        var rows = new List<(string look, object tag, Func<FrameworkElement> content, int badge, bool head)>();
+        static string Of(AppInfo a) => $"{a.Name}|{a.Label}|{a.Icon}|{a.Color}|{a.ImageKind}|{a.Image?.Length}|{a.Image?.GetHashCode()}";
         FrameworkElement Labeled(FrameworkElement icon, string text)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
@@ -629,30 +644,59 @@ public sealed class MainWindow : Window
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row, text);
             return row;
         }
-        var first = true;
         void Head(Route route, string title)
         {
-            var head = new TextBlock { Text = title, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Look.Secondary, TextWrapping = TextWrapping.WrapWholeWords, MaxLines = 3, Margin = new Thickness(0, first ? 0 : 10, 0, 0) };
-            first = false;
-            var headItem = Item(route, head);
-            headItem.MinHeight = 28;
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(headItem, title);
-            nav.MenuItems.Add(headItem);
+            var top = rows.Count == 0 ? 0 : 10;
+            rows.Add(($"head|{title}|{top}", route, () => new TextBlock { Text = title, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Look.Secondary, TextWrapping = TextWrapping.WrapWholeWords, MaxLines = 3, Margin = new Thickness(0, top, 0, 0) }, 0, true));
         }
         foreach (var page in store.Pages())
         {
             Head(Route.PageOf(page.Scope), page.Title);
             // Not an app Settings lists (the App Store): the sidebar shows it once, under Settings.
             foreach (var app in store.AppsOn(page).Where(a => !store.SettingsItems.Any(i => i.App == a.Name)))
-                nav.MenuItems.Add(Item(Route.ScreenOf(app.Name, page.Scope), Labeled(Look.Tile(app, 20), app.Label), store.Badge(app.Name, page)));
-            nav.MenuItems.Add(Item(Route.Services(page.Scope), Labeled(Look.Folder(store.ServicesOn(page), 20), "Services")));
+                rows.Add(($"app|{Of(app)}", Route.ScreenOf(app.Name, page.Scope), () => Labeled(Look.Tile(app, 20), app.Label), store.Badge(app.Name, page), false));
+            var services = store.ServicesOn(page);
+            rows.Add(($"services|{string.Join(",", services.Take(9).Select(Of))}", Route.Services(page.Scope), () => Labeled(Look.Folder(services, 20), "Services"), 0, false));
         }
         Head(Route.Settings, "Settings");
         // An item with an app (the App Store) opens that app; one with a url (Passkeys), the browser.
         foreach (var item in store.SettingsItems)
-            if (item.Url is { } url) nav.MenuItems.Add(new NavigationViewItem { Content = Labeled(Look.Setting(item, 20), item.Title), Tag = url, SelectsOnInvoked = false });
-            else nav.MenuItems.Add(Item(item.App is { } a ? Route.ScreenOf(a, null) : Route.OwnOf(item.Name), Labeled(Look.Setting(item, 20), item.Title), item.Badge ?? 0));
-        nav.SelectedItem = selected;
+            rows.Add(($"setting|{item.Title}|{item.Icon}|{item.Color}|{item.Url}", item.Url ?? (object)(item.App is { } a ? Route.ScreenOf(a, null) : Route.OwnOf(item.Name)),
+                () => Labeled(Look.Setting(item, 20), item.Title), item.Badge ?? 0, false));
+
+        var looks = rows.Select(r => $"{r.look}|{r.tag}").ToList();
+        if (!looks.SequenceEqual(drawn) || nav.MenuItems.Count != rows.Count)
+        {
+            nav.MenuItems.Clear();
+            nav.FooterMenuItems.Clear();
+            foreach (var r in rows)
+            {
+                var item = new NavigationViewItem { Content = r.content(), Tag = r.tag };
+                if (r.tag is string) item.SelectsOnInvoked = false;
+                if (r.head)
+                {
+                    item.MinHeight = 28;
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, ((TextBlock)item.Content).Text);
+                }
+                nav.MenuItems.Add(item);
+            }
+            drawn = looks;
+        }
+        object? selected = null;
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var item = (NavigationViewItem)nav.MenuItems[i];
+            var badge = rows[i].badge;
+            if (badge <= 0) item.InfoBadge = null;
+            else if (item.InfoBadge is { } b) b.Value = badge;
+            else item.InfoBadge = new InfoBadge { Value = badge };
+            if (rows[i].tag is Route route && route == at) selected = item;
+            if (rows[i].head && item.Content is TextBlock head) head.Foreground = Look.Secondary;
+        }
+        if (nav.SelectedItem != selected) nav.SelectedItem = selected;
     }
+
+    /// The sidebar's rows as last made (DrawSidebar); emptied to have them made again, as the theme changes.
+    List<string> drawn = [];
 }
 

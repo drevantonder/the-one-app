@@ -7,13 +7,18 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 
 namespace One;
 
 public static class WidgetArt
 {
-    /// Phosphor's icons (vendor/phosphor, beside the program): each a path on a 256-point grid, drawn filled.
-    public static readonly Dictionary<string, string> Icons = Load();
+    /// Phosphor's icons (vendor/phosphor, beside the program): each a path on a 256-point grid, drawn filled. Read on
+    /// a thread of their own from Read(); what needs them before they're read waits.
+    public static Dictionary<string, string> Icons => (reading ??= Task.Run(Load)).Result;
+    static Task<Dictionary<string, string>>? reading;
+
+    public static void Read() => reading ??= Task.Run(Load);
 
     static Dictionary<string, string> Load()
     {

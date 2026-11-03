@@ -12,6 +12,9 @@ public partial class App : Application
     /// The link this start opens, until the window opens it.
     public static Uri? Pending { get; set; }
 
+    /// The browser every screen's web view shares, started as the app is, so the first screen doesn't wait for it.
+    public static Task<Microsoft.Web.WebView2.Core.CoreWebView2Environment> Web { get; private set; } = null!;
+
     public App()
     {
         InitializeComponent();
@@ -27,6 +30,9 @@ public partial class App : Application
     {
         try
         {
+            Web = Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync().AsTask();
+            // Phosphor's icons (1 MB of JSON), read beside the window, not before it.
+            WidgetArt.Read();
             // Pages and screens sit on the window's backdrop alike, as the Mac app's do on its window.
             Resources["NavigationViewContentBackground"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
             Resources["NavigationViewContentGridBorderBrush"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
