@@ -199,10 +199,10 @@ pub fn none_said(app: &Value, op: &str, ok: &Value, cli: bool) -> Option<String>
         !state["install"]["devices"].as_array().into_iter().flatten().any(|d| d["sidecars"].as_array().into_iter().flatten().any(|s| parts.contains(&s)))
     };
     Some(match (signs_in, app["needs"].as_str()) {
-        (_, Some(needs)) if !parts.is_empty() && on_none() => format!("None: {title} isn't on any of your devices yet. {needs}."),
+        (_, Some(needs)) if !parts.is_empty() && on_none() => format!("No {title} accounts: {title} isn't on any of your devices yet. {needs}."),
         (true, _) => format!("No account is signed in to {title} yet: {} signs one in.", named(name, "sign_in", cli)),
-        (false, Some(needs)) => format!("None: {title} isn't on any of your devices yet. {needs}."),
-        (false, None) => format!("None: {title} has no accounts yet."),
+        (false, Some(needs)) => format!("No {title} accounts: {title} isn't on any of your devices yet. {needs}."),
+        (false, None) => format!("No {title} accounts yet."),
     })
 }
 

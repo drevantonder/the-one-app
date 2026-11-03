@@ -804,9 +804,17 @@ fn run(args: Vec<String>) -> Result<()> {
             let device = flags.get("device").and_then(Value::as_str);
             post("/v1/sidecar", json!({ "name": name, "device": device, "installed": *how == "add" }))?;
             let on = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
-            match *how {
-                "remove" => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} sidecars add {name})."),
-                _ => println!("{name} is installed {on}: it serves there while it runs."),
+            // Allowing it runs nothing: it serves only where it's installed and running.
+            let state = get("/v1/state")?;
+            let there = state["install"]["devices"].as_array().into_iter().flatten().find(|s| match device {
+                Some(d) => s["name"] == d,
+                None => s["here"] == true,
+            });
+            let runs = there.is_some_and(|s| s["sidecars"].as_array().into_iter().flatten().any(|n| n == *name));
+            match (*how, runs) {
+                ("remove", _) => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} sidecars add {name})."),
+                (_, true) => println!("{name} runs {on}."),
+                (_, false) => println!("{name} may run {on}, but it isn't installed there: sidecars/install.sh {name} in {NAME}'s code installs it, as the device's owner."),
             }
         }
         ["schedules"] => {
