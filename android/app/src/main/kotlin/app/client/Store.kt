@@ -25,8 +25,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 
 /** A screen the app shows: one of the client's own, by name (`/v1/client-screens/<name>`: the pages, Services, a Vault
@@ -60,10 +58,15 @@ class Sheet(val route: Route) {
 /** A page: a scope this person may read (theirs, a group's, everyone's), as the home screen's widgets name it. */
 data class Page(val scope: String, val title: String)
 
-/** The node as this person sees it, through the install's address with their sign-in, and where the app is: the pages,
- *  what's pushed over them, and the sheets over everything. */
+/** The node as this person sees it, reached over iroh as this phone's own device (Client), and where the app is: the
+ *  pages, what's pushed over them, and the sheets over everything. */
 class Store(private val application: android.app.Application, val signIn: SignIn, private val prefs: android.content.SharedPreferences) {
-    enum class Phase { Starting, SignedOut, Unreachable, Ready }
+    enum class Phase { Starting, SignedOut, Joining, Unreachable, Ready }
+
+    val client = Client(application, signIn)
+    /** The code this phone shows while it waits to be approved. */
+    var code by mutableStateOf<String?>(null)
+        private set
 
     /** Light, Dark or Automatic, as chosen in Settings on this phone. */
     var appearance by mutableStateOf(runCatching { Appearance.valueOf(prefs.getString("appearance", null) ?: "") }.getOrDefault(Appearance.Automatic))
@@ -119,31 +122,35 @@ class Store(private val application: android.app.Application, val signIn: SignIn
 
     // MARK: The node
 
-    /** A request to the node, as this person: JSON in, the reply's bytes out. A refused token is renewed once. */
+    /** A request to the node, as this person: JSON in, the reply's bytes out. */
     suspend fun api(path: String, method: String = "GET", body: JsonElement? = null, query: Map<String, String?> = emptyMap()): ByteArray {
-        val url = url(path, query)
         // Its id makes a call run once, however often it's sent.
         val body = if (path == "/v1/call" && body is JsonObject && "id" !in body) JsonObject(body + ("id" to JsonPrimitive(callId()))) else body
-        var token = signIn.token()
-        for (tries in 0..1) {
-            val r = retried { http(method, url, body?.toString()?.toByteArray(), "application/json", mapOf("authorization" to "Bearer $token")) }
-            if (r.status == 401 && tries == 0) {
-                token = signIn.token(stale = token)
-                continue
-            }
-            val error = runCatching { (json.parseToJsonElement(r.text) as? JsonObject)?.get("error")?.let { (it as? JsonPrimitive)?.content } }.getOrNull()
-            if (r.status == 401) throw NodeError(error ?: "Sign in again.", signedOut = true)
-            if (r.status !in 200..299 || error != null) {
-                throw NodeError(error ?: if (r.status >= 500) "Your devices aren’t answering." else "That didn’t work. Try again.")
-            }
-            return r.bytes
+        val r = client.fetch(method, url(path, query), body?.toString()?.toByteArray())
+        val bytes = r.read()
+        val status = r.status().toInt()
+        val error = runCatching { (json.parseToJsonElement(String(bytes)) as? JsonObject)?.get("error")?.let { (it as? JsonPrimitive)?.content } }.getOrNull()
+        if (status !in 200..299 || error != null) {
+            throw NodeError(error ?: if (status >= 500) "Your devices aren’t answering." else "That didn’t work. Try again.")
         }
-        error("unreachable")
+        return bytes
     }
 
     private fun url(path: String, query: Map<String, String?>): String {
         val q = query.filterValues { it != null }.entries.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, "UTF-8")}" }
-        return "${signIn.address}$path" + if (q.isEmpty()) "" else "?$q"
+        return path + if (q.isEmpty()) "" else "?$q"
+    }
+
+    /** This phone let in as its person's device: at once if it is, else it asks, shows its code, and waits for one of
+     *  their devices (or, for someone new, their inviter's) to approve it. */
+    private suspend fun join() {
+        if (client.connect()) return
+        code = client.ask()
+        phase = Phase.Joining
+        while (!client.waited()) delay(2000)
+        signIn.invite = null
+        code = null
+        phase = Phase.Starting
     }
 
     suspend inline fun <reified T> get(path: String, query: Map<String, String?> = emptyMap()): T = json.decodeFromString(String(api(path, query = query)))
@@ -172,6 +179,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
             val started = System.currentTimeMillis()
             while (true) {
                 try {
+                    join()
                     refreshState()
                     break
                 } catch (e: NodeError) {
@@ -191,7 +199,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     /** Can't Reach Your Devices, once it's more than a blip: a second miss, or 3 seconds of them. */
     private fun unreachable(message: String?, misses: Int, started: Long) {
         failure = message
-        if (state == null && (misses >= 2 || System.currentTimeMillis() - started >= 3000)) phase = Phase.Unreachable
+        if (state == null && phase != Phase.Joining && (misses >= 2 || System.currentTimeMillis() - started >= 3000)) phase = Phase.Unreachable
     }
 
     /** Back to the first screen, saying `why` when the install turned this phone away rather than the person signing out. */
@@ -203,6 +211,8 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         sheets.forEach { it.close(null) }
         phase = Phase.SignedOut
         apps = emptyList()
+        code = null
+        scope.launch { client.close() }
         forget()
     }
 
@@ -252,25 +262,23 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         while (true) {
             val started = System.currentTimeMillis()
             try {
-                val token = signIn.token()
-                withContext(Dispatchers.IO) {
-                    val c = URL(url("/v1/events", emptyMap())).openConnection() as HttpURLConnection
-                    c.setRequestProperty("authorization", "Bearer $token")
-                    c.setRequestProperty("accept", "text/event-stream")
-                    c.readTimeout = 0
-                    try {
-                        if (c.responseCode == 401) signIn.token(stale = token)
-                        if (c.responseCode == 200) c.inputStream.bufferedReader().useLines { lines ->
-                            for (line in lines) {
-                                if (!line.startsWith("data:")) continue
-                                val data = line.removePrefix("data:").trim()
-                                events.tryEmit(data)
-                                runCatching { json.decodeFromString<NodeEvent>(data) }.getOrNull()?.let { e -> scope.launch { runCatching { handle(e) } } }
-                            }
+                val r = client.fetch("GET", "/v1/events", accept = "text/event-stream")
+                try {
+                    var rest = ""
+                    while (r.status().toInt() == 200) {
+                        val part = io { r.chunk() } ?: break
+                        rest += String(part)
+                        val lines = rest.split("\n")
+                        rest = lines.last()
+                        for (line in lines.dropLast(1)) {
+                            if (!line.startsWith("data:")) continue
+                            val data = line.removePrefix("data:").trim()
+                            events.tryEmit(data)
+                            runCatching { json.decodeFromString<NodeEvent>(data) }.getOrNull()?.let { e -> scope.launch { runCatching { handle(e) } } }
                         }
-                    } finally {
-                        c.disconnect()
                     }
+                } finally {
+                    r.cancel()
                 }
             } catch (e: NodeError) {
                 if (e.signedOut) return signedOut(e.message)

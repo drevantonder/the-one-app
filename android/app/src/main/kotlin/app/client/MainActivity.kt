@@ -157,6 +157,7 @@ private fun Welcome(store: Store) {
         store.signIn.address = at
         MainActivity.welcomeError = null
         if (invite != null) {
+            store.signIn.invite = given.substringAfter("#")
             invited = true
             address = at
             SignIn.openInTab(context, Uri.parse(given))

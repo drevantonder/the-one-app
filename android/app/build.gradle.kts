@@ -139,6 +139,9 @@ android {
     sourceSets["release"].manifest.srcFile(linksManifest)
     sourceSets["main"].res.srcDir(generated.map { it.dir("res") })
     sourceSets["main"].assets.srcDir(generated.map { it.dir("assets") })
+    // The client library and its Kotlin, which build.sh makes (client/ffi).
+    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/client/jniLibs"))
+    sourceSets["main"].kotlin.srcDir(layout.buildDirectory.dir("generated/client/kotlin"))
 
     buildFeatures {
         compose = true
@@ -172,4 +175,6 @@ dependencies {
     implementation("androidx.glance:glance-appwidget:1.2.0")
     implementation("androidx.work:work-runtime:2.12.0")
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
+    // The client library's Kotlin (uniffi's) calls into it through JNA.
+    implementation("net.java.dev.jna:jna:5.17.0@aar")
 }

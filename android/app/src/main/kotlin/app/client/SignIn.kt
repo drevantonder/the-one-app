@@ -55,6 +55,21 @@ class SignIn(private val context: Context) {
 
     val signedIn get() = tokens != null && address != null
 
+    /** The secret of an invite link this person opened here, for their first device's request to be let in. */
+    var invite: String?
+        get() = prefs.getString("invite", null)
+        set(value) = prefs.edit().putString("invite", value).apply()
+
+    /** This phone's device key for `id` (an address and a person), made the first time and kept sealed by the
+     *  keystore: it's what the person's other devices approve, and what reaches their nodes. */
+    fun deviceSecret(id: String): ByteArray {
+        val name = "device:" + b64u(MessageDigest.getInstance("SHA-256").digest(id.toByteArray()))
+        prefs.getString(name, null)?.let { sealed -> runCatching { Base64.decode(Keystore.open(sealed), Base64.NO_WRAP) }.getOrNull()?.takeIf { it.size == 32 }?.let { return it } }
+        val secret = uniffi.one_client_ffi.newDeviceSecret()
+        prefs.edit().putString(name, Keystore.seal(Base64.encodeToString(secret, Base64.NO_WRAP))).commit()
+        return secret
+    }
+
     @Serializable
     private data class Meta(
         val authorization_endpoint: String,
@@ -175,6 +190,12 @@ class SignIn(private val context: Context) {
             CustomTabsClient.getPackageName(context, listOf("com.android.chrome"), true)?.let { tab.intent.setPackage(it) }
             tab.launchUrl(context, url)
         }
+
+        /** Who an access token is for: its `sub`. */
+        fun subject(token: String): String? = runCatching {
+            val payload = String(Base64.decode(token.split(".")[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP))
+            json.parseToJsonElement(payload).jsonObject["sub"]?.jsonPrimitive?.content
+        }.getOrNull()
 
         /** What the consent page and Devices call this phone: its name in Settings, else its model. */
         fun deviceName(context: Context): String =

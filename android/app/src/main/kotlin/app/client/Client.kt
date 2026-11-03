@@ -1,0 +1,86 @@
+package app.client
+
+import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import uniffi.one_client_ffi.Header
+import uniffi.one_client_ffi.OneException
+import uniffi.one_client_ffi.Response
+import java.io.File
+import java.security.MessageDigest
+
+// This phone as a device of its person (client/ffi, the same library every native app uses): its own key, made here
+// and kept sealed by a key in the phone's keystore (SignIn), one for each person at each address. It gets in when a
+// device of theirs approves the code it shows; then every request reaches their install's nodes over iroh, as this
+// device, with the keys each needs. Signing in only says who's asking.
+
+class Client(private val context: Context, private val signIn: SignIn) {
+    private var device: uniffi.one_client_ffi.ThisDevice? = null
+    private var deviceFor: String? = null
+
+    /** This phone's device for whoever's signed in, at their address. */
+    private suspend fun device(): uniffi.one_client_ffi.ThisDevice {
+        val token = signIn.token()
+        val at = signIn.address ?: throw NodeError("Sign in again.", signedOut = true)
+        val id = "$at ${SignIn.subject(token) ?: ""}"
+        device?.takeIf { deviceFor == id }?.let { return it }
+        val folder = File(context.filesDir, "client/" + MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString("") { "%02x".format(it) }.take(16))
+        val made = io { uniffi.one_client_ffi.ThisDevice(signIn.deviceSecret(id), at, folder.path) }
+        device?.let { old -> io { old.disconnect() } }
+        device = made
+        deviceFor = id
+        return made
+    }
+
+    /** Whether this phone is let in yet: it reaches a node as itself. */
+    suspend fun connect(): Boolean = device().let { d -> io { d.connect() } }
+
+    /** Asks to be let in, as the person signed in (with their invite, if they're new) → the code it shows. */
+    suspend fun ask(): String {
+        val d = device()
+        val token = signIn.token()
+        io { d.ask(token, SignIn.deviceName(context), signIn.invite) }
+        return d.code()
+    }
+
+    /** Whether it's been let in, asking again if its request waited too long. */
+    suspend fun waited(): Boolean {
+        val d = device()
+        val token = signIn.token()
+        return io { d.wait(token) }
+    }
+
+    /** A request to the person's nodes: `/v1/…`, with a body (JSON) or none. Its body is read by whoever asked. */
+    suspend fun fetch(method: String, path: String, body: ByteArray? = null, accept: String? = null): Response {
+        val d = device()
+        val headers = buildList {
+            if (body != null) add(Header("content-type", "application/json"))
+            if (accept != null) add(Header("accept", accept))
+        }
+        return io { d.fetch(method, path, headers, body ?: ByteArray(0)) }
+    }
+
+    /** A fresh connection, once the network's back. */
+    suspend fun reconnect() {
+        device?.let { d -> io { d.reconnect() } }
+    }
+
+    /** Signed out: its connections close. Its key stays, so signing in again as the same person needs no approval. */
+    suspend fun close() {
+        device?.let { d -> io { d.disconnect() } }
+        device = null
+        deviceFor = null
+    }
+}
+
+/** Runs a call into the library off the main thread, its failure a `NodeError`. */
+suspend fun <T> io(work: () -> T): T = withContext(Dispatchers.IO) {
+    try {
+        work()
+    } catch (e: OneException.Failed) {
+        throw NodeError(e.reason)
+    }
+}
+
+/** A response's body, whole. */
+suspend fun Response.read(): ByteArray = io { bytes() }

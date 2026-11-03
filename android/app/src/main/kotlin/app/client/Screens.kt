@@ -88,6 +88,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
 import androidx.webkit.WebViewCompat
@@ -211,7 +212,8 @@ private fun Starting(store: Store) {
     Box(Modifier.fillMaxSize().background(p.background).pointerInput(Unit) {
         awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
     }, contentAlignment = Alignment.Center) {
-        if (store.phase == Store.Phase.Unreachable) Unavailable("Can’t Reach Your Devices", (store.failure ?: "") + "\nTrying again…")
+        if (store.phase == Store.Phase.Joining) Approve(store)
+        else if (store.phase == Store.Phase.Unreachable) Unavailable("Can’t Reach Your Devices", (store.failure ?: "") + "\nTrying again…")
         else if (store.state != null && store.install == null) Unavailable("Not Set Up Yet", "Set it up on one of your computers first.")
         else {
             // Only if it's slow: most starts are quicker than a spinner would be worth.
@@ -219,6 +221,26 @@ private fun Starting(store: Store) {
             LaunchedEffect(Unit) { delay(400); slow = true }
             if (slow) CircularProgressIndicator(color = p.secondary)
         }
+    }
+}
+
+/** "Approve This Phone": the code one of the person's devices approves it by (or, for someone new, their inviter's). */
+@Composable
+private fun Approve(store: Store) {
+    val p = LocalPalette.current
+    Column(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Spacer(Modifier.weight(1f))
+        Text("Approve This Phone", fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, color = p.label, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(12.dp))
+        Text(
+            if (store.signIn.invite != null) "Whoever invited you approves it. Show them this code."
+            else "Open ${BuildConfig.NAME} on a device you already use, then Settings › Devices › Approve.",
+            style = Type.body, color = p.secondary, textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(28.dp))
+        Text(store.code ?: "", fontSize = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 4.sp, color = p.label, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+        Spacer(Modifier.weight(1.4f))
+        TextButton({ store.signOut() }) { Text("Sign Out", color = p.accent) }
     }
 }
 
