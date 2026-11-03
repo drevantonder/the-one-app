@@ -538,22 +538,29 @@ draw();
 const path = one.params.path || "";
 one.title(path || "Top of the board");
 document.getElementById("text").placeholder = "Post to " + (path || "the top");
-async function show() {
-  const r = await one.call("read", { format: "json", ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
-  document.getElementById("about").textContent = r.description || "";
+// Posts being sent show at once, greyed until the board has them.
+const sending = [];
+let posts = [];
+function feed() {
   let html = "", last = null;
-  for (const p of r.posts) {
+  for (const p of [...posts, ...sending]) {
     const day = new Date(p.time).toDateString();
     if (!last || new Date(last.time).toDateString() !== day) html += \`<div class="day">\${new Date(p.time).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</div>\`;
     const same = last && last.user === p.user && last.credit === p.credit && p.time - last.time < 10 * 60000;
+    const cls = p.sending ? " sending" : "";
     html += same
-      ? \`<div class="post more"><div class="text">\${one.esc(p.text)}</div></div>\`
-      : \`<div class="post">\${one.avatar(p.user, p.name)}<div><div class="who">\${one.esc(p.credit || p.name)}<span class="when">\${one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
+      ? \`<div class="post more\${cls}"><div class="text">\${one.esc(p.text)}</div></div>\`
+      : \`<div class="post\${cls}">\${one.avatar(p.user, p.name)}<div><div class="who">\${one.esc(p.credit || p.name)}<span class="when">\${p.sending ? "Sending…" : one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
     last = p;
   }
-  document.getElementById("feed").innerHTML = html || '<div class="empty">No posts yet</div>';
-  window.scrollTo(0, document.body.scrollHeight);
+  return html || '<div class="empty">No posts yet</div>';
 }
+const show = () => one.render("#feed", async () => {
+  const r = await one.call("read", { format: "json", ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
+  document.getElementById("about").textContent = r.description || "";
+  posts = r.posts;
+  return feed();
+}, { skeleton: "text" }).then(() => pinned && window.scrollTo(0, document.body.scrollHeight));
 // The feed stays on its newest post while the view resizes (a shell's navigation, the keyboard), unless scrolled up.
 let pinned = true;
 addEventListener("scroll", () => { pinned = innerHeight + scrollY >= document.body.scrollHeight - 40; });
@@ -563,14 +570,26 @@ const text = document.getElementById("text"), send = document.getElementById("se
 text.oninput = () => { send.disabled = !text.value.trim(); error.textContent = ""; };
 document.getElementById("form").onsubmit = async (e) => {
   e.preventDefault();
+  const said = text.value;
+  if (!said.trim()) return;
+  const me = one.me || {};
+  const mine = { text: said, user: me.user, name: me.name, credit: [[me.agent, me.name].filter(Boolean).join(" · "), me.user_name].filter(Boolean).join(" · "), time: Date.now(), sending: true };
+  sending.push(mine);
+  text.value = "";
   send.disabled = true;
+  pinned = true;
+  const draw = () => { document.getElementById("feed").innerHTML = document.getElementById("feed").__html = feed(); window.scrollTo(0, document.body.scrollHeight); };
+  draw();
   try {
-    await one.call("post", { text: text.value, ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
-    text.value = "";
-    show();
+    await one.call("post", { text: said, ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
+    sending.splice(sending.indexOf(mine), 1);
+    await show();
   } catch (err) {
+    sending.splice(sending.indexOf(mine), 1);
+    draw();
+    if (!text.value) text.value = said;
+    send.disabled = !text.value.trim();
     error.textContent = one.plain(err).title;
-    send.disabled = false;
   }
 };
 one.on("changed", show);

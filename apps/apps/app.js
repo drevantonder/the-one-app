@@ -150,17 +150,20 @@ function addTo(name, { apps, places, admin }) {
       + (error ? '<div class="footer error">' + one.esc(error) + "</div>" : "");
     for (const box of sheet.body.querySelectorAll("[data-scope]")) box.onchange = () => flip(box);
   };
+  // The switch stays where it was put, and goes back only if the change fails.
   const flip = async (box) => {
     one.tap();
-    box.disabled = true;
     error = "";
+    const a = apps.find((x) => x.name === name), id = places.find((p) => p.scope === box.dataset.scope)?.id, was = a.installed;
+    a.installed = box.checked ? [...was, id] : was.filter((x) => x !== id);
     try {
       await one.call(box.checked ? "add" : "remove", { app: name, scope: box.dataset.scope, confirm: true });
-      ({ apps, places, admin } = await one.call("list", { full: true }));
     } catch (err) {
+      a.installed = was;
       error = one.plain(err).title;
+      return draw();
     }
-    draw();
+    one.call("list", { full: true }).then((got) => (({ apps, places, admin } = got), draw()), () => {});
   };
   draw();
 }
@@ -385,7 +388,12 @@ document.getElementById("list").addEventListener("click", (e) => {
   const add = e.target.closest("[data-add]");
   if (add) return addTo(add.dataset.add, data);
   const restore = e.target.closest("[data-restore]");
-  if (restore) return (restore.disabled = true), one.call("restore", { app: restore.dataset.restore }).catch(show);
+  // Restored at once, into Built In or Made Here; put back if it fails.
+  if (restore) {
+    const a = data.apps.find((x) => x.name === restore.dataset.restore);
+    if (a) (a.deleted = null), draw();
+    return one.call("restore", { app: restore.dataset.restore }).catch(show);
+  }
   const r = e.target.closest("[data-app]");
   if (r) one.open("app", { app: r.dataset.app });
 });
@@ -528,15 +536,31 @@ function link(x) {
   return \`<a class="row plain" onclick='one.open("app", \${JSON.stringify({ app: x.name })})'>\${one.appIcon(x, 30)}<div class="main"><div class="title"><span>\${one.esc(x.title)}</span></div></div><div class="chev">›</div></a>\`;
 }
 
-async function show() {
-  const [list, code, health, where] = await Promise.all([one.call("list", { full: true }), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("devices", { app: name }).catch(() => null)]);
-  data = list;
-  const a = list.apps.find((x) => x.name === name);
-  if (!a) return (document.getElementById("app").innerHTML = one.notFound({ title: "This app isn't here.", text: "It may have been erased, or the link is old.", home: "Back to the App Store" }));
-  document.getElementById("app").innerHTML = sections.map((s) => s({ a, apps: list.apps, places: list.places, admin: list.admin, code, health, where })).join("");
-  new IntersectionObserver(([e]) => one.title(e.isIntersecting ? "" : a.title)).observe(document.querySelector(".hero h1"));
+// The page draws as soon as the app's own entry comes, and each section that waits on another call fills in as that
+// one answers; until then it shows what it showed before.
+const got = {};
+let watched = null;
+const titled = new IntersectionObserver(([e]) => one.title(e.isIntersecting ? "" : data?.apps.find((x) => x.name === name)?.title || ""));
+function paint() {
+  if (!got.list) return;
+  const el = document.getElementById("app");
+  const a = got.list.apps.find((x) => x.name === name);
+  const html = a ? sections.map((s) => s({ a, apps: got.list.apps, places: got.list.places, admin: got.list.admin, code: got.code, health: got.health, where: got.where })).join("")
+    : one.notFound({ title: "This app isn't here.", text: "It may have been erased, or the link is old.", home: "Back to the App Store" });
+  if (html === el.__html) return;
+  el.innerHTML = el.__html = html;
+  if (!a) return;
+  const h1 = document.querySelector(".hero h1");
+  if (watched) titled.unobserve(watched);
+  titled.observe((watched = h1));
   document.querySelector("[data-add]")?.addEventListener("click", () => addTo(name, data));
   for (const b of document.querySelectorAll("[data-op]")) b.onclick = () => place(b, b.dataset.op, b.dataset.device);
+}
+async function show() {
+  const later = { code: one.call("code", { app: name }), health: one.call("health", { app: name }), where: one.call("devices", { app: name }) };
+  for (const [k, p] of Object.entries(later)) p.then((v) => ((got[k] = v), paint()), () => {});
+  data = got.list = await one.call("list", { full: true });
+  paint();
 }
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 /// "just now", "5 min ago".
@@ -564,19 +588,24 @@ function soon(ms) {
   const m = Math.max(0, Math.round((ms - Date.now()) / 60000));
   return m < 1 ? "now" : m < 60 ? "in " + m + "m" : m < 1440 ? "in " + Math.round(m / 60) + "h" : "in " + Math.round(m / 1440) + "d";
 }
+// The switch stays where it was put while the call goes, and goes back only if it fails.
 async function switchIt(box, { schedule, scope }) {
-  box.disabled = true;
+  if (box.__busy) return void (box.checked = !box.checked);
+  box.__busy = true;
   document.getElementById("error").textContent = "";
   try {
     await one.call("switch", { app: name, schedule, scope, on: box.checked });
   } catch (err) {
+    box.checked = !box.checked;
     document.getElementById("error").textContent = one.plain(err).title;
   }
+  box.__busy = false;
   show();
 }
 /// Installs a service on a device, or removes it from one, then shows where it runs now.
 async function place(button, op, device) {
   button.disabled = true;
+  button.insertAdjacentHTML("afterbegin", '<span class="spinner small" aria-hidden="true"></span>');
   document.getElementById("error").textContent = "";
   try {
     await one.call(op, { app: name, device, confirm: true });
@@ -586,7 +615,7 @@ async function place(button, op, device) {
   show();
 }
 one.on("changed", show);
-one.render("#app", async () => void (await show()), { loading: "Loading" });
+one.render("#app", async () => void (await show()), { skeleton: 3 });
 </script>`,
     },
     activity: {
