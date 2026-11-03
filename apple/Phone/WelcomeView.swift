@@ -57,7 +57,7 @@ struct WelcomeView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 16)
                 }
-                Button("Or Ask Your Agent") { asking = true }
+                Button("Or Connect Your AI") { asking = true }
                     .font(.callout.weight(.medium))
             }
             .padding(.horizontal, 24)
@@ -91,7 +91,7 @@ struct WelcomeView: View {
         }
         .animation(.snappy, value: phone.joinError)
         .sheet(isPresented: $asking) {
-            AskYourAgentSheet(prompt: agentPrompt(address: given.isEmpty ? nil : given))
+            ConnectYourAISheet(prompt: agentPrompt(address: given.isEmpty ? nil : given))
         }
     }
 

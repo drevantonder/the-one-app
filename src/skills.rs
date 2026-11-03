@@ -37,7 +37,7 @@ pub fn rules() -> String {
 /// How to find what's possible, from the command line.
 pub fn finding() -> String {
     format!(
-        "- Each area has a skill of its own, listed below: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and which devices are in the install."
+        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and which devices are in the install."
     )
 }
 
@@ -64,11 +64,35 @@ fn install() -> String {
     }
 }
 
-/// Connecting for a person: by the install's address, or with the command line on one of their devices.
-pub fn connecting() -> String {
+/// Connecting for a person, at the install's `address` where it's known: a shell takes the command line, anything
+/// else adds the MCP server at the address.
+pub fn connecting(address: Option<&str>) -> String {
+    let mcp = match address {
+        Some(a) => format!("`{}/mcp`", web(a)),
+        None => format!("their {NAME}'s web address followed by `/mcp`, like `https://{CLI}.example.com/mcp`"),
+    };
     format!(
-        "When someone asks you to connect to {NAME}, do as much as you can yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- If you can add an MCP server by its address (Claude Code, Codex, ChatGPT and Claude can), add their {NAME}'s web address followed by `/mcp`, like `https://{CLI}.example.com/mcp`. They sign in when it asks, and you act as them.\n- With a terminal, if `{CLI} status` answers, you're on one of their devices already: use the command line, and add MCP as below. If there's no `{CLI}`, {}, then ask them for a pairing code (Settings, then Devices) and run `{CLI} join <code>`.",
+        "When someone asks you to connect to {NAME}, do it yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- If you can run commands (Claude Code, Codex, OpenCode, Cursor): run `{CLI} status`. If it answers, you're on one of their devices already: use the command line, and add MCP as below. If there's no `{CLI}`, {}, then ask them for a pairing code (Settings, then Devices) and run `{CLI} join <code>`.\n- If you can't (ChatGPT, Claude and other chat apps): add {mcp} as a connector, a custom MCP server. They sign in when it asks, and you act as them.",
         install()
+    )
+}
+
+/// An address as a URL: with https:// unless it says otherwise, and no trailing slash.
+fn web(address: &str) -> String {
+    let address = address.trim().trim_end_matches('/');
+    if address.contains("://") { address.to_string() } else { format!("https://{address}") }
+}
+
+/// The guide to connecting, the root skill's body without its list of skills: what anyone may read at the install's
+/// `address` (`/llms.txt`), since it says nothing of what apps an install has.
+pub fn guide(address: Option<&str>) -> String {
+    format!(
+        "# {NAME}\n\n{}\n\n## Rules\n\n{}\n\n## Connecting for a person\n\n{}\n\n## Adding MCP\n\n{}\n\n## Finding your way\n\n{}\n",
+        about(),
+        rules(),
+        connecting(address),
+        mcp_entries(),
+        finding()
     )
 }
 
@@ -108,15 +132,7 @@ fn root_description() -> String {
 /// The root skill, pointing to the others, each named by `link` (a skill's name in a harness, a URL in /llms.txt).
 pub fn root(others: &[Skill], link: impl Fn(&Skill) -> String) -> Skill {
     let list: Vec<String> = others.iter().map(|s| format!("- {}: {}", link(s), s.description)).collect();
-    let body = format!(
-        "# {NAME}\n\n{}\n\n## Rules\n\n{}\n\n## Connecting for a person\n\n{}\n\n## Adding MCP\n\n{}\n\n## Finding your way\n\n{}\n\n## Skills\n\n{}\n",
-        about(),
-        rules(),
-        connecting(),
-        mcp_entries(),
-        finding(),
-        list.join("\n")
-    );
+    let body = format!("{}\n## Skills\n\n{}\n", guide(None), list.join("\n"));
     Skill { name: server_name(), description: root_description(), body, files: vec![] }
 }
 

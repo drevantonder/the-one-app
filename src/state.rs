@@ -60,7 +60,7 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
         "backups": here.backups,
         // What Settings shows this user, in order (see `settings_items`).
         "settings_items": settings_items,
-        // What to paste into an agent so it connects itself, for Ask Your Agent.
+        // What to paste into an AI so it connects itself, for Connect Your AI.
         "agent_prompt": agent_prompt(address, here.guide.as_deref()),
     });
     if let Some(client) = here.client {
@@ -139,14 +139,14 @@ pub fn settings(m: &Members) -> Map<String, Value> {
     out
 }
 
-/// What to paste into an agent so it connects itself: the MCP server at the install's address, a connector in people's words, where it has one; else
-/// the skills a device serves on its tailnet (`guide`), or, where it serves none, the command line's guide.
+/// What to paste into an AI so it connects itself, for Connect Your AI: the guide at the install's address, where it
+/// has one; else the one a device serves on its tailnet (`guide`), or, where it serves none, the command line's guide.
 pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
-    let (name, cli) = (crate::config::NAME, crate::config::CLI);
+    let (yours, cli) = (crate::config::YOURS, crate::config::CLI);
     match (address.filter(|a| !a.is_empty()), guide) {
-        (Some(address), _) => format!("Connect yourself to {name}: add {}/mcp as a connector, and I'll sign in when it asks.", address.trim_end_matches('/')),
-        (None, Some(guide)) => format!("Connect yourself to {name}: read {guide} and set it up for me."),
-        (None, None) => format!("Connect yourself to {name}: run \"{cli} guide\" in a terminal and set it up for me."),
+        (Some(address), _) => format!("Read {}/llms.txt and connect yourself to {yours}.", address.trim_end_matches('/')),
+        (None, Some(guide)) => format!("Read {guide} and connect yourself to {yours}."),
+        (None, None) => format!("Run \"{cli} guide\" in a terminal, read what it says, and connect yourself to {yours}."),
     }
 }
 
@@ -176,7 +176,7 @@ fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, st
     out.extend([
         item("groups", "Groups", "users-three", "#34c759"),
         item("devices", "Devices", "devices", "#8e8e93"),
-        item("agents", "Agents", "sparkle", "#ff2d55"),
+        item("connect-ai", "Connect Your AI", "plugs-connected", "#ff2d55"),
         item("vault", "Vault", "lock", "#5856d6"),
         item("appearance", "Appearance", "circle-half", "#007aff"),
     ]);

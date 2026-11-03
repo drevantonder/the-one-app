@@ -544,6 +544,17 @@ fn the_address_lists_the_android_app_by_its_package() {
     assert_eq!(one::kernel::android_package(), format!("app.{}.android", one::config::CLI));
 }
 
+/// The Mac and iPhone ask a person's AI to connect itself in the words the node does, before there's a node to ask.
+#[test]
+fn the_apple_apps_ask_an_ai_to_connect_as_the_node_does() {
+    let swift = read("apple/Shared/Views/ConnectYourAIView.swift");
+    let as_swift = |text: String| text.replace('"', "\\\"").replace(one::config::YOURS, "\\(yours)").replace(one::config::CLI, "\\(cli)");
+    for (rust, base) in [(one::state::agent_prompt(Some("BASE"), None), "\\(base)"), (one::state::agent_prompt(None, None), "")] {
+        let said = format!("return \"{}\"", as_swift(rust).replace("BASE", base));
+        assert!(swift.contains(&said), "apple/Shared/Views/ConnectYourAIView.swift's agentPrompt doesn't say {said}: change it or src/state.rs's agent_prompt");
+    }
+}
+
 /// Every message a screen sends its host (`messages`, in src/screen/bridge.js) is one each host names, answering it
 /// or refusing it: the web client's page and a chat's view, which answer frames, and the shells' web views.
 #[test]

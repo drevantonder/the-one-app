@@ -441,9 +441,9 @@ pub fn android_package() -> String {
 }
 
 impl Settings {
-    /// The files the address serves itself: the web client's, as this release has them, and Android's App Links file
+    /// The files the address serves itself: the web client's, as this release has them, Android's App Links file
     /// (`.well-known/assetlinks.json`) and Windows' web links file (`.well-known/windows-app-web-link`), which let the
-    /// apps open links to the address.
+    /// apps open links to the address, and the guide to connecting an AI (`llms.txt`).
     pub fn web(&self) -> Vec<(String, Vec<u8>)> {
         let mut files: Vec<(String, Vec<u8>)> =
             crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
@@ -478,6 +478,8 @@ impl Settings {
             files.push((".well-known/assetlinks.json".into(), links.to_string().into_bytes()));
         }
         files.push((".well-known/windows-app-web-link".into(), windows_links()));
+        // How an AI connects itself, for anyone who has the address: never what apps the install has.
+        files.push(("llms.txt".into(), crate::skills::guide(Some(&self.address)).into_bytes()));
         files
     }
 }

@@ -202,7 +202,7 @@ private struct WelcomeView: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.snappy, value: mac.signInError)
-        .sheet(isPresented: $asking) { AskYourAgentSheet(prompt: agentPrompt(address: given.isEmpty ? nil : given)) }
+        .sheet(isPresented: $asking) { ConnectYourAISheet(prompt: agentPrompt(address: given.isEmpty ? nil : given)) }
         .onAppear {
             // The address this Mac's node is in, unless the person gave another.
             let known = Auth.address ?? store.install?.settings?["address"].flatMap(URL.init(string:))
@@ -243,7 +243,7 @@ private struct WelcomeView: View {
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
             .disabled(given.isEmpty || mac.signingIn)
-            Button("Or Ask Your Agent") { asking = true }
+            Button("Or Connect Your AI") { asking = true }
                 .buttonStyle(.link)
         }
     }
@@ -258,7 +258,7 @@ private struct WelcomeView: View {
             Button("Join with a Pairing Code…") { store.sheet = .join }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-            Button("Or Ask Your Agent") { asking = true }
+            Button("Or Connect Your AI") { asking = true }
                 .buttonStyle(.link)
         }
     }

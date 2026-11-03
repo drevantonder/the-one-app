@@ -1,17 +1,18 @@
 import SwiftUI
 
-/// What to paste into an agent so it connects itself, before there's a node to ask (`agent_prompt` in its state, from
-/// src/skills.rs, says it once there is): the MCP server at your One App's `address`, or the command line's guide.
+/// What to paste into an AI so it connects itself, before there's a node to ask (`agent_prompt` in its state, from
+/// src/state.rs, says it once there is): the guide at your One App's `address`, or the command line's guide.
 func agentPrompt(address: String?) -> String {
-    let name = appName, cli = Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? ""
-    if let address = address.flatMap({ URL(string: $0.contains("://") ? $0 : "https://\($0)") }).flatMap({ $0.host() }) {
-        return "Connect yourself to \(name): add https://\(address)/mcp as a connector, and I'll sign in when it asks."
+    let yours = Bundle.main.object(forInfoDictionaryKey: "Yours") as? String ?? "", cli = Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? ""
+    if let url = address.flatMap({ URL(string: $0.contains("://") ? $0 : "https://\($0)") }), let host = url.host() {
+        let base = "\(url.scheme ?? "https")://\(host)\(url.port.map { ":\($0)" } ?? "")"
+        return "Read \(base)/llms.txt and connect yourself to \(yours)."
     }
-    return "Connect yourself to \(name): run \"\(cli) guide\" in a terminal and set it up for me."
+    return "Run \"\(cli) guide\" in a terminal, read what it says, and connect yourself to \(yours)."
 }
 
 /// The prompt, and a button that copies it.
-struct AskYourAgent: View {
+struct ConnectYourAI: View {
     var prompt: String
     @State private var copied = false
 
@@ -38,8 +39,8 @@ struct AskYourAgent: View {
     }
 }
 
-/// Ask Your Agent, on its own, for the first screen.
-struct AskYourAgentSheet: View {
+/// Connect Your AI, on its own, for the first screen.
+struct ConnectYourAISheet: View {
     var prompt: String
     @Environment(\.dismiss) private var dismiss
 
@@ -47,11 +48,11 @@ struct AskYourAgentSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    AskYourAgent(prompt: prompt)
+                    ConnectYourAI(prompt: prompt)
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle("Ask Your Agent")
+            .navigationTitle("Connect Your AI")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
             }
