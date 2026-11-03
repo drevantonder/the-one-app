@@ -331,7 +331,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["create", name @ ..] if !name.is_empty() => {
             let user_name = flags.get("as").and_then(Value::as_str).context("say what to call you with --as <your name>")?;
-            let r = post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name }))?;
+            let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name }))?;
             println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
         }
         ["pair"] => {
@@ -339,7 +339,7 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for seven days.", r["code"].as_str().unwrap_or(""));
         }
         ["join", code] => {
-            post("/v1/join", json!({ "code": code }))?;
+            unsigned_post("/v1/join", json!({ "code": code }))?;
             println!("Joined. Syncing now; {CLI} status shows progress.");
         }
         ["remove", key] => {
@@ -1101,6 +1101,14 @@ fn get(path: &str) -> Result<Value> {
 
 fn post(path: &str, body: Value) -> Result<Value> {
     request(to_node(agent().post(format!("http://{}{path}", addr()))).send_json(&body))
+}
+
+/// For a node in no install yet, which no one is signed in to: a sign-in this CLI kept for its address was another
+/// node's there before, so it isn't sent, and once the node is in an install it's let go.
+fn unsigned_post(path: &str, body: Value) -> Result<Value> {
+    let r = request(agent().post(format!("http://{}{path}", addr())).send_json(&body))?;
+    let _ = one::sign_in::sign_out();
+    Ok(r)
 }
 
 fn status(state: &Value) {
