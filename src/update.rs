@@ -235,10 +235,12 @@ impl Parts {
                         parts.apps.push(app);
                     }
                 }
-                Some("apple" | "client") => parts.mac = true,
+                Some("apple") => parts.mac = true,
                 // The kernel's sources and the serverless node's are in the node, which deploys them; the Mac's needn't.
                 Some("kernel") if !file.starts_with("kernel/test/") => parts.node = true,
                 Some("serverless") => parts.node = true,
+                // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the serverless node's.
+                Some("client") => (parts.node, parts.mac) = (true, true),
                 Some("docs" | "tests" | "android" | "windows" | "sidecars" | "kernel") => {}
                 None if file.ends_with(".md") || file == "LICENSE" || file == ".gitignore" => {}
                 _ => (parts.node, parts.mac) = (true, true),
