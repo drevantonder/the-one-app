@@ -66,15 +66,17 @@ struct PagesView: View {
         }
         .screenSheets()
         .sheet(item: $store.sheet) { sheet in
-            switch sheet {
-            case .pages: PagesEditor()
-            case .addWidget(let scope): AddWidgetSheet(scope: scope)
-            case .pair, .join, .services: EmptyView()
-            case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
-            case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
+            Group {
+                switch sheet {
+                case .pages: PagesEditor()
+                case .addWidget(let scope): AddWidgetSheet(scope: scope)
+                case .pair, .join, .services: EmptyView()
+                case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
+                case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
+                }
             }
+            .environment(\.raised, true)
         }
-        .environment(\.raised, true)
         .onChange(of: store.pages) {
             if store.current != settingsID, !store.pages.contains(where: { $0.scope == store.current }) { store.current = "user" }
         }

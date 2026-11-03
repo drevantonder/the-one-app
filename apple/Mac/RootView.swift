@@ -32,17 +32,19 @@ struct RootView: View {
             }
         }
         .sheet(item: $store.sheet) { sheet in
-            switch sheet {
-            case .pair: PairSheet()
-            case .join: JoinSheet()
-            case .pages: PagesEditor()
-            case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
-            case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
-            case .addWidget(let scope): AddWidgetSheet(scope: scope)
-            case .services(let scope): ServicesSheet(scope: scope)
+            Group {
+                switch sheet {
+                case .pair: PairSheet()
+                case .join: JoinSheet()
+                case .pages: PagesEditor()
+                case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
+                case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
+                case .addWidget(let scope): AddWidgetSheet(scope: scope)
+                case .services(let scope): ServicesSheet(scope: scope)
+                }
             }
+            .environment(\.raised, true)
         }
-        .environment(\.raised, true)
         .task {
             // Once the first frame is up.
             try? await Task.sleep(for: .milliseconds(300))
