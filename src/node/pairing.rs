@@ -42,7 +42,9 @@ impl Node {
     pub(super) fn take_pairing(&self, secret: &[u8; 16]) -> Result<Option<Pairing>> {
         let mut pairings = self.0.pairings.lock().unwrap();
         let pairing = pairings.remove(secret);
-        self.save_pairings(&pairings)?;
+        if pairing.is_some() {
+            self.save_pairings(&pairings)?;
+        }
         Ok(pairing)
     }
 

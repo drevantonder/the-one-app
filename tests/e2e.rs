@@ -443,3 +443,28 @@ fn a_node_starts_in_a_new_home() {
     let _ = std::fs::remove_dir_all(&root);
     assert!(answered, "the node didn't start in a new home:\n{}", String::from_utf8_lossy(&out.stderr));
 }
+
+/// Anyone who reaches a node directly (its LAN, its tailnet, a port its router maps), which the relay never sees, gets
+/// no call answered: only a pairing code out lets one ask to join, and nothing else.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_answers_only_the_installs_devices() {
+    let a = start("strangers").await;
+    a.create("Test", "Andre").await.unwrap();
+    let _relay = relay(&a).await;
+    eventually("a's endpoint", async || a.endpoint_addr().is_some_and(|e| e.ip_addrs().next().is_some())).await;
+    let at = a.endpoint_addr().unwrap();
+    let alpn = format!("{}/1", one::config::CLI).into_bytes();
+    let stranger = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal).relay_mode(iroh::RelayMode::Disabled).bind().await.unwrap();
+    let ask = json!({ "kind": "ask", "body": { "call": { "app": "board", "op": "read", "input": {}, "me": { "key": one::entry::hex(&a.id()), "user": a.user().unwrap() } } } }).to_string();
+    let asked = async |stranger: &iroh::Endpoint| -> Option<Vec<u8>> {
+        let conn = stranger.connect(at.clone(), &alpn).await.ok()?;
+        let (mut send, mut recv) = conn.open_bi().await.ok()?;
+        send.write_all(ask.as_bytes()).await.ok()?;
+        send.finish().ok()?;
+        recv.read_to_end(1 << 20).await.ok()
+    };
+    assert_eq!(asked(&stranger).await, None, "with no pairing code out, a stranger's connection is closed");
+    let _code = a.pair().unwrap();
+    let answer: Value = serde_json::from_slice(&asked(&stranger).await.expect("a pairing code out lets it ask")).unwrap();
+    assert_eq!(answer["error"], "only your One App's devices are answered", "and only to join: {answer}");
+}

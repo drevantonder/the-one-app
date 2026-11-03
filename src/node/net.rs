@@ -4,7 +4,7 @@
 //! both ends' keys, so what devices say needs no sealing of its own: an ask is one stream, its answer the same stream
 //! back. Devices are found by the install's list of them, never n0's discovery.
 
-use iroh::endpoint::{Connection, presets};
+use iroh::endpoint::{Connection, QuicTransportConfig, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
 
 use super::*;
@@ -13,6 +13,12 @@ use super::*;
 const CONNECT: Duration = Duration::from_secs(10);
 /// The most an ask or its answer may carry: an email of a claim's receipts, base64, fits.
 const MESSAGE_LIMIT: usize = 64 << 20;
+/// The most a computer that isn't the install's yet may send: one ask to join.
+const JOIN_LIMIT: usize = 4 << 10;
+/// How many streams another device may have open on a connection at once.
+const STREAMS: u32 = 32;
+/// How many computers that aren't the install's yet may be connected at once, each asking to join.
+const JOINING: usize = 4;
 
 /// This device's endpoint, and its connections to other devices.
 #[derive(Default)]
@@ -23,6 +29,10 @@ pub(super) struct Net {
     task: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
     /// A connection to each device, opened by either end; each held while it's being opened.
     conns: Mutex<HashMap<Key, Arc<tokio::sync::Mutex<Option<Connection>>>>>,
+    /// How many computers that aren't the install's are connected, asking to join.
+    joining: std::sync::atomic::AtomicUsize,
+    /// The removed devices this device told the relay to take out.
+    removed: Mutex<std::collections::HashSet<Key>>,
 }
 
 /// Why an ask never reached the device.
@@ -57,6 +67,7 @@ fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)> {
 impl Node {
     /// Keeps this device's endpoint, once it's a device of an install with an address.
     pub(super) fn follow_net(&self) {
+        self.tell_removed();
         let wanted = self.with(|i| Ok(i.r.members.compute(&self.0.id).and(i.r.members.settings.get("address").cloned()))).ok().flatten();
         let mut task = self.0.net.task.lock().unwrap();
         if task.as_ref().map(|(a, _)| a) == wanted.as_ref() {
@@ -72,6 +83,11 @@ impl Node {
         if let Some(address) = wanted {
             *task = Some((address.clone(), tokio::spawn(self.clone().keep_net(address))));
         }
+    }
+
+    /// Where this device's endpoint is reached now: its key, its relay and the addresses it's bound to, once it has one.
+    pub fn endpoint_addr(&self) -> Option<EndpointAddr> {
+        self.0.net.endpoint.lock().unwrap().as_ref().map(|(_, e)| e.addr())
     }
 
     /// Binds this device's endpoint, then takes the connections other devices open, until it's replaced.
@@ -104,50 +120,89 @@ impl Node {
 
     async fn bind(&self, address: &str, ticket: Option<&str>) -> Result<Endpoint> {
         let (_, map) = relay(address, ticket)?;
+        let transport = QuicTransportConfig::builder().max_concurrent_bidi_streams(STREAMS.into()).max_concurrent_uni_streams(0u32.into()).build();
         let endpoint = Endpoint::builder(presets::Minimal)
             .secret_key(SecretKey::from_bytes(self.0.key.as_bytes()))
             .alpns(vec![alpn()])
+            .transport_config(transport)
             .relay_mode(RelayMode::Custom(map))
             .bind()
             .await?;
         Ok(endpoint)
     }
 
-    /// Answers what another device asks on a connection it opened; one that isn't the install's yet may only ask to
-    /// join it.
+    /// Answers what another device asks on a connection it opened. One that isn't the install's yet is let ask only to
+    /// join it, once, a few at a time, and only while this device has a pairing code out: anyone who reaches this
+    /// device directly (its LAN, its tailnet, a port its router maps) can connect, which the relay never sees.
     async fn take_conn(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
-        let device = self.is_device(&remote);
-        if device {
-            // Asks go back on it too, unless one's open already.
-            let slot = self.conn_slot(&remote);
-            if let Ok(mut held) = slot.try_lock() {
-                if held.as_ref().is_none_or(|c| c.close_reason().is_some()) {
-                    *held = Some(conn.clone());
-                }
+        if !self.is_device(&remote) {
+            return self.take_joining(conn).await;
+        }
+        // Asks go back on it too, unless one's open already.
+        let slot = self.conn_slot(&remote);
+        if let Ok(mut held) = slot.try_lock() {
+            if held.as_ref().is_none_or(|c| c.close_reason().is_some()) {
+                *held = Some(conn.clone());
             }
         }
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
+            // A device removed while connected is answered no more.
+            if !self.is_device(&remote) {
+                return conn.close(1u32.into(), b"not a device of this install");
+            }
             let node = self.clone();
             tokio::spawn(async move {
                 let msg: Value = match recv.read_to_end(MESSAGE_LIMIT).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
                     Ok(msg) => msg,
                     Err(err) => return tracing::debug!("what {} sent: {err:#}", short(&remote)),
                 };
-                let answer = match (msg["kind"].as_str(), device) {
-                    (Some("ask"), true) => node.accept_call(remote, &msg["body"]["call"]).await.json(),
-                    (Some("ask"), false) if msg["body"].get("join").is_some() => node.joining(remote, &msg["body"]["join"]).await,
-                    (Some("notice"), true) => {
+                let answer = match msg["kind"].as_str() {
+                    Some("ask") => node.accept_call(remote, &msg["body"]["call"]).await.json(),
+                    Some("notice") => {
                         node.changed_from(&msg["body"]["changed"]);
                         Value::Null
                     }
-                    _ => json!({ "error": "only your One App's devices are answered" }),
+                    _ => json!({ "error": "that isn't something devices ask each other" }),
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
                     tracing::debug!("answering {}: {err:#}", short(&remote));
                 }
             });
         }
+    }
+
+    /// A computer that isn't the install's: → its one ask to join answered, then the connection closed.
+    async fn take_joining(&self, conn: Connection) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let remote = *conn.remote_id().as_bytes();
+        let pairing = self.0.pairings.lock().unwrap().values().any(|p| p.until > now_ms());
+        if !pairing || self.0.net.joining.fetch_add(1, SeqCst) >= JOINING {
+            if pairing {
+                self.0.net.joining.fetch_sub(1, SeqCst);
+            }
+            tracing::debug!("{} isn't a device of your One App", short(&remote));
+            return conn.close(1u32.into(), b"not a device of this install");
+        }
+        let answered = tokio::time::timeout(Duration::from_secs(30), async {
+            let (mut send, mut recv) = conn.accept_bi().await?;
+            let msg: Value = serde_json::from_slice(&recv.read_to_end(JOIN_LIMIT).await?)?;
+            let answer = match msg["body"].get("join") {
+                Some(join) if msg["kind"] == "ask" => self.joining(remote, join).await,
+                _ => json!({ "error": "only your One App's devices are answered" }),
+            };
+            send.write_all(answer.to_string().as_bytes()).await?;
+            send.finish()?;
+            // Until the joiner has read it.
+            let _ = tokio::time::timeout(Duration::from_secs(5), conn.closed()).await;
+            anyhow::Ok(())
+        })
+        .await;
+        if let Ok(Err(err)) = answered {
+            tracing::debug!("{} asking to join: {err:#}", short(&remote));
+        }
+        conn.close(0u32.into(), b"answered");
+        self.0.net.joining.fetch_sub(1, SeqCst);
     }
 
     /// Admits a computer joining with a pairing code: → its reply, or why not.
@@ -271,6 +326,24 @@ impl Node {
         answer
     }
 
+    /// Tells the relay to take out the devices removed from the install, if this device is an admin's: the relay lets
+    /// in only its list, which nothing on it can read the install's log for.
+    fn tell_removed(&self) {
+        let Ok(removed) = self.with(|i| {
+            let m = &i.r.members;
+            let mine = m.machine(&self.0.id).is_some_and(|me| m.is_admin(&me.user));
+            Ok(if mine { m.machines.keys().filter(|k| m.machine(k).is_none()).copied().collect::<Vec<Key>>() } else { Vec::new() })
+        }) else {
+            return;
+        };
+        let mut told = self.0.net.removed.lock().unwrap();
+        for key in removed {
+            if told.insert(key) {
+                self.tell_relay(json!({ "remove": hex(&key) }));
+            }
+        }
+    }
+
     /// Tells the relay at the install's address something, signed by this device: a device it admitted (`add`), or a
     /// pairing code it made (`pairing`, the hash of its ticket, and `until`). Tried a few times, in the background.
     pub(super) fn tell_relay(&self, fields: Value) {
@@ -278,17 +351,19 @@ impl Node {
             return tracing::debug!("telling the relay: your One App has no address yet");
         };
         let key = ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes());
-        tokio::task::spawn_blocking(move || {
-            let url = format!("{}/relay/tell", address.trim_end_matches('/'));
+        let url = format!("{}/relay/tell", address.trim_end_matches('/'));
+        tokio::spawn(async move {
             let mut wait = Duration::from_secs(1);
             for _ in 0..5 {
                 let body = crate::keys::signed_request(&key, "one/relay", fields.clone(), now_ms());
-                match ureq::post(&url).send_json(&body) {
-                    Ok(_) => return,
-                    Err(ureq::Error::StatusCode(code)) if code < 500 => return tracing::warn!("the relay refused what this device told it ({code})"),
+                let url = url.clone();
+                match tokio::task::spawn_blocking(move || ureq::post(&url).send_json(&body).map(drop)).await {
+                    Ok(Ok(())) => return,
+                    Ok(Err(ureq::Error::StatusCode(code))) if code < 500 => return tracing::debug!("the relay refused what this device told it ({code})"),
+                    Ok(Err(err)) => tracing::debug!("telling the relay: {err}"),
                     Err(err) => tracing::debug!("telling the relay: {err}"),
                 }
-                std::thread::sleep(wait);
+                tokio::time::sleep(wait).await;
                 wait *= 2;
             }
         });
