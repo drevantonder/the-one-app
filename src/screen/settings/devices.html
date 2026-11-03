@@ -7,7 +7,7 @@
   .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
   .action-row { color: var(--tint); cursor: pointer; }
   .action-row .i { width: 22px; height: 22px; }
-  a.row { cursor: pointer; }
+  .more { width: 28px; height: 28px; flex: none; border: 0; border-radius: 14px; background: var(--fill); color: var(--tint); display: grid; place-items: center; font-size: 18px; cursor: pointer; }
   #page h2.section:first-of-type { margin-top: 8px; }
   .row.out { justify-content: center; color: var(--danger); font: inherit; border: 0; background: none; width: 100%; }
   .pair { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 8px 0 4px; }
@@ -48,11 +48,12 @@
   const status = (on) => (on ? "" : `<span class="status">Offline</span>`);
   const subs = (...lines) => lines.filter(Boolean).map((l) => `<div class="sub">${one.esc(l)}</div>`).join("");
 
-  // A row is tapped to remove it, unless it's the device looking.
+  // A row says what a device is; one that may be removed (not the device looking) has its menu, from its … or a right-click.
   const row = ({ key, name, online, lines, trailing, removable }) =>
-    `<${removable ? `a class="row" data-remove="${one.esc(key)}"` : 'div class="row still"'}>
+    `<div class="row still"${removable ? ` data-device="${one.esc(key)}"` : ""}>
       <div class="tile${online ? "" : " off"}">${one.icon(icon(name || "phone"))}</div>
-      <div class="main"><div class="title"><span>${one.esc(shown(name) || "Phone")}</span></div>${subs(...lines)}</div>${trailing}</${removable ? "a" : "div"}>`;
+      <div class="main"><div class="title"><span>${one.esc(shown(name) || "Phone")}</span></div>${subs(...lines)}</div>${trailing}` +
+    (removable ? `<button class="more" data-more aria-label="More for ${one.esc(shown(name) || "Phone")}">${one.icon("dots-three-outline-fill")}</button>` : "") + "</div>";
 
   const deviceRow = (s) => {
     const online = !!s.online;
@@ -141,10 +142,14 @@
     else if (t.dataset.place) place(t.dataset.place, t.value);
   });
   document.addEventListener("click", (e) => {
-    const t = e.target.closest?.("[data-remove], [data-pair], [data-out]");
+    const t = e.target.closest?.("[data-more], [data-pair], [data-out]");
     if (t?.hasAttribute("data-out")) signOut();
-    else if (t?.dataset.remove) remove(t.dataset.remove);
+    else if (t?.hasAttribute("data-more")) menu(t.closest("[data-device]").dataset.device, t);
     else if (t) pair();
+  });
+  document.addEventListener("contextmenu", (e) => {
+    const t = e.target.closest?.("[data-device]");
+    if (t) e.preventDefault(), menu(t.dataset.device, e.target.closest("[data-more]") || { x: e.clientX, y: e.clientY });
   });
   document.addEventListener("keydown", (e) => e.target.id === "name" && e.key === "Enter" && e.target.blur());
   function rename(input) {
@@ -171,6 +176,12 @@
     if (s) s.use = use;
     now();
     act(() => one.api("POST", "/v1/use", { device, use }));
+  }
+
+  async function menu(key, at) {
+    const m = [...state.install.devices, ...state.install.clients].find((x) => x.key === key);
+    const i = await one.menu([{ title: `Remove ${shown(m.name) || "This Device"}`, icon: "minus-circle", danger: true }], at).catch(() => null);
+    if (i === 0) remove(key);
   }
 
   function remove(key) {
