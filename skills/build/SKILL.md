@@ -12,8 +12,8 @@ An app is a folder with one JavaScript module, `app.js` (or `app.ts`): its opera
 3. Make a folder and write `app.js`. Its operations are for agents, which read them cold, so:
    - Every operation says `reads: true` or `reads: false`. What sends to a person or can't be undone also says `confirm: true`.
    - Its description says what it does, when to use it rather than its neighbour, and what comes back, in a sentence or two. Every input says what it takes, with its format (`an ISO 8601 date-time, 2026-11-01T09:00`) and where to get it (`a message's id, from gmail search`).
-   - The same words as every other app: `list`, `get`, `search`, `create`, `update`, `delete`, `send`; `title`, `start`, `end`; `limit` and `cursor` for paging, where a long list ends with `next`, the cursor for the rest. An operation that is a service's own API (Drive's files.list) keeps that API's names and paging, since agents already know them: give agents its primitives to combine, not a reshaped version.
-   - It gives back meaning: names next to ids, times in ISO 8601, sizes as `37 GB of 250 GB`, no images or fields nobody reads.
+   - Each operation is a primitive in its truest form: an app that wraps a service gives that service's own operations, with its names, inputs and paging (Drive's `q`, `fields` and `pageToken`), since agents know them and combine them. A clear contract matters, not words shared across apps.
+   - It gives back what the service gives, without bulk nobody reads (images, internal ids where a name will do); an app's own data in plain units (ISO 8601 times, `37 GB of 250 GB`).
    - An error says what was wrong and the fix: `no event 123: ids come from calendar events`.
 
    A key or password is a Vault item the person switches the app on for: never put one in code. Its data is a database per scope, made by `schema`: to change one later, make that kind's schema a list and add the change at the end, since a database keeps what it has. Its `icon` is a [Phosphor](https://phosphoricons.com) icon's name, like `git-branch`, which every device draws filled on its tile; `one.icon(name)` draws one in a screen.
