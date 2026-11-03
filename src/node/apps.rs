@@ -206,15 +206,23 @@ impl Node {
 
     /// What an app's latest deploy says it uses: (apps, sidecars). Waits a while for this device to run that deploy.
     pub(super) async fn uses(&self, app: &str) -> (Vec<String>, Vec<String>) {
+        self.runs_latest(app, CALL_LIMIT).await;
+        self.uses_here(app).await
+    }
+
+    /// Whether this device runs `app`'s latest deploy (or it has none), waiting up to `within` for it to.
+    async fn runs_latest(&self, app: &str, within: Duration) -> bool {
         let started = Instant::now();
-        while started.elapsed() < CALL_LIMIT {
+        loop {
             let latest = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone()))).ok().flatten();
             if latest.is_none() || self.0.bundles.lock().unwrap().get(app) == latest.as_ref() {
-                break;
+                return true;
+            }
+            if started.elapsed() >= within {
+                return false;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        self.uses_here(app).await
     }
 
     /// What the deploy of `app` this device runs says it uses: (apps, sidecars).
@@ -283,8 +291,9 @@ impl Node {
     }
 
     /// Deploys `bundle` as `app`'s code, for someone acting for its owner. Deploying an older bundle again rolls back.
-    /// `bundle` may be the start of an earlier deploy's.
-    pub async fn deploy(&self, caller: &Caller, app: &str, bundle: &str) -> Result<()> {
+    /// `bundle` may be the start of an earlier deploy's. With `wait`, → whether this device runs it within a few
+    /// seconds, as its next call here would.
+    pub async fn deploy(&self, caller: &Caller, app: &str, bundle: &str, wait: bool) -> Result<bool> {
         let bundle = self.with(|i| {
             let m = &i.r.members;
             let a = m.apps.get(app).with_context(|| format!("no app named {app}"))?;
@@ -295,7 +304,8 @@ impl Node {
             })
         })?;
         crate::bundle::module(&self.blob(&bundle).await?)?;
-        self.member_content(caller, deploy(app, &bundle)).await
+        self.member_content(caller, deploy(app, &bundle)).await?;
+        Ok(wait && self.runs_latest(app, Duration::from_secs(10)).await)
     }
 
     /// An app's code as deployed, its latest or an earlier deploy's: its files, or one of them. Everyone may read

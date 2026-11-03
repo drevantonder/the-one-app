@@ -393,8 +393,8 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["deploy", app] if flags.contains_key("version") => {
             let version = flags["version"].as_str().context("give --version <hash>")?;
-            post("/v1/deploy", json!({ "app": app, "bundle": version }))?;
-            println!("Deployed {app} ({version}) again. Every device runs it now.");
+            let here = post("/v1/deploy", json!({ "app": app, "bundle": version, "wait": true }))?["here"] == true;
+            println!("{}", deployed_said(&format!("Deployed {app} ({version}) again."), here));
         }
         ["deploy", dir] => deploy(std::path::Path::new(dir), &flags)?,
         ["deploys", app] => {
@@ -896,7 +896,7 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
 }
 
 /// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the install hasn't one by that
-/// name, and deploys it. Every device runs it now.
+/// name, and deploys it, saying whether this device runs it yet.
 fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     let name = match flags.get("name").and_then(Value::as_str) {
         Some(name) => name.to_string(),
@@ -913,9 +913,18 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
         };
         post("/v1/app", json!({ "name": name, "owner": owner }))?;
     }
-    post("/v1/deploy", json!({ "app": name, "bundle": blob }))?;
-    println!("Deployed {name} ({}). Every device runs it now.", &blob[..12]);
+    let here = post("/v1/deploy", json!({ "app": name, "bundle": blob, "wait": true }))?["here"] == true;
+    println!("{}", deployed_said(&format!("Deployed {name} ({}).", &blob[..12]), here));
     Ok(())
+}
+
+/// What a deploy did, after `done`: which devices run it yet, as far as this one knows (`here`, whether it does).
+fn deployed_said(done: &str, here: bool) -> String {
+    let device = get("/v1/state").ok().and_then(|s| s["device"]["name"].as_str().map(str::to_string)).unwrap_or_else(|| "This device".into());
+    match here {
+        true => format!("{done} {device} runs it now; your other devices take it within a few seconds."),
+        false => format!("{done} Your devices take it within a few seconds: until then, its calls say they don't have its latest version yet."),
+    }
 }
 
 /// A built-in command's help, for --help after it: every_command()'s lines for it, or help() when none are. None for

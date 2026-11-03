@@ -102,7 +102,7 @@ async fn deploy_module(node: &Node, app: &str, source: &str) {
     if node.source(app, None, None).await.is_err() {
         node.member("app", json!({ "name": app, "owner": format!("user:{}", me.user) })).await.unwrap();
     }
-    node.deploy(&me, app, &blob).await.unwrap();
+    node.deploy(&me, app, &blob, false).await.unwrap();
 }
 
 /// A device that answers every request with what it got: `{ host, authorization, body }`.

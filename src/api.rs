@@ -700,8 +700,8 @@ async fn app(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 }
 
 async fn deploy(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.deploy(&local(&node)?, text(&body, "app")?, text(&body, "bundle")?).await?;
-    done()
+    let here = node.deploy(&local(&node)?, text(&body, "app")?, text(&body, "bundle")?, body["wait"] == true).await?;
+    Ok(Json(json!({ "here": here })))
 }
 
 #[derive(Deserialize)]

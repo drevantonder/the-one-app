@@ -350,7 +350,7 @@ async fn the_apps_decode_what_the_node_sends() {
     let blob = node.put_blob(&bundle).unwrap();
     let me = one::node::Caller { key: node.id(), user: node.user().unwrap(), agent: None, token: None };
     node.member("app", json!({ "name": "lamps", "owner": format!("user:{}", me.user) })).await.unwrap();
-    node.deploy(&me, "lamps", &blob).await.unwrap();
+    node.deploy(&me, "lamps", &blob, false).await.unwrap();
     node.member("app", json!({ "name": "lamps", "owner": format!("user:{}", me.user), "source": "https://example.com/lamps" })).await.unwrap();
     api(&addr, &token, "POST", "/v1/install", json!({ "app": "lamps", "scope": "user", "installed": true })).await;
     api(&addr, &token, "POST", "/v1/arrange", json!({ "page": "user", "items": [{ "app": "lamps", "widget": "glance", "id": "w1", "size": "small", "options": { "room": "kitchen" } }, { "app": "lamps" }], "hidden": [] })).await;
