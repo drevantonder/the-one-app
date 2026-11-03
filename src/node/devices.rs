@@ -46,7 +46,7 @@ impl Node {
                 Ok(json!({ "epoch": newest, "sealed": sealed }))
             }
             (None, Some(app)) => {
-                ensure!(members::valid_app_name(app), "{app} isn't an app's name");
+                ensure!(app == members::APP || members::valid_app_name(app), "{app} isn't an app's name");
                 for n in 1..=newest {
                     if let Some(o) = Bucket::get(&bucket, &crate::keys::app_key_name(&name, app, n)).await? {
                         sealed.insert(n.to_string(), json!(B64U.encode(&o.bytes)));
@@ -90,7 +90,7 @@ impl Node {
                 Ok(json!({}))
             }
             (None, Some(app)) => {
-                ensure!(members::valid_app_name(app), "{app} isn't an app's name");
+                ensure!(app == members::APP || members::valid_app_name(app), "{app} isn't an app's name");
                 ensure!(self.with(|i| Ok(i.r.members.may_use(&caller.user, scope)))?, "you don't use {scope}");
                 ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
                 let key = crate::keys::app_key_name(&name, app, n);
