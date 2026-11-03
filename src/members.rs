@@ -143,6 +143,15 @@ pub struct Members {
     pub sidecars: BTreeMap<(Key, String), SidecarInstall>,
     /// When the install's devices last changed, by the newest genesis, admit or remove: the relay's list is as of then.
     pub devices_at: u64,
+    /// Each scope's current epoch, by its newest `epoch` entry that counts (src/keys.rs).
+    pub epochs: BTreeMap<Scope, Epoch>,
+}
+
+/// A scope's epoch: its number, and the endpoints it was sealed to (`keys::epoch_name`), besides the recovery key.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Epoch {
+    pub n: u32,
+    pub to: Vec<Key>,
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
@@ -174,6 +183,16 @@ impl Members {
             tracing::debug!("{} entry {} doesn't count", e.content.kind, e.id());
         }
         counted
+    }
+
+    /// A scope's current epoch: 0 while it has none yet.
+    pub fn epoch(&self, scope: &Scope) -> u32 {
+        self.epochs.get(scope).map_or(0, |e| e.n)
+    }
+
+    /// The key things are sealed to for an endpoint of the install.
+    pub fn seal_key(&self, key: &Key) -> Option<[u8; 32]> {
+        self.machine(key).and_then(|_| crate::kernel::twin_public(key).ok())
     }
 
     // Who is who.
