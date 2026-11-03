@@ -17,22 +17,6 @@ impl Node {
         self.with(|i| Ok(i.r.members.user(user).is_some())).unwrap_or(false)
     }
 
-    /// Lets in someone the install's kernel signed in who isn't a person of it yet, as a member, `name` as the kernel
-    /// knows them: it signs in only those an admin invited, or people at the install's domain signing in with Google.
-    /// This device's own person writes it, so it must be an admin.
-    pub async fn let_in(&self, user: &str, name: &str) -> Result<()> {
-        let me = self.user()?;
-        let (admin, removed) = self.with(|i| Ok((i.r.members.is_admin(&me), i.r.members.removed_user(user))))?;
-        ensure!(!removed, "you were removed from this install: an admin adds you back");
-        ensure!(admin, "you aren't a person of this install yet, and {} can't let you in: its person isn't an admin", self.device_name());
-        ensure!(!name.trim().is_empty(), "your sign-in doesn't say your name: sign in again");
-        // A key no machine holds, the same on every device, so two letting the same person in at once add them once.
-        let key: Key = <sha2::Sha256 as sha2::Digest>::digest(format!("{}/sign-in\0{user}", crate::config::CLI)).into();
-        let endpoint = crate::keys::Endpoint { key, seal: key };
-        let listed = members::device(&endpoint, user, &format!("{name}'s sign-in"), &[members::Kind::Client], Some((name.trim(), Role::Member)));
-        self.member_content(&Caller { key: self.0.id, user: me, agent: None, token: None }, listed).await
-    }
-
     /// Sets one of the install's settings, for an admin; `None` puts back the white label's default.
     pub async fn set_setting(&self, caller: &Caller, name: &str, value: Option<&str>) -> Result<()> {
         self.member_as(caller, "setting", json!({ "name": name, "value": value })).await

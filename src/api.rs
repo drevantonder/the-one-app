@@ -297,6 +297,7 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
                 next.run(req).await
             }
             Err(err) if path == "/mcp" => refuse(req, sign_in_first(&node, Some(format!("{err:#}")))).await,
+            Err(err) if err.is::<NotJoined>() => refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": NotJoined.to_string() }))).into_response()).await,
             Err(err) => refuse(req, (StatusCode::UNAUTHORIZED, Json(json!({ "error": format!("{err:#}") }))).into_response()).await,
         };
     }
@@ -432,6 +433,19 @@ impl axum::extract::FromRequestParts<Node> for Me {
     }
 }
 
+/// Someone signed in who isn't a person of the install yet: they are once one of their devices, or the admin who
+/// invited them, approves one of theirs.
+#[derive(Debug)]
+struct NotJoined;
+
+impl std::fmt::Display for NotJoined {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "you haven't joined yet: the person who invited you approves this device with the code it shows")
+    }
+}
+
+impl std::error::Error for NotJoined {}
+
 /// Sign-ins checked lately, by their token's hash, until they expire.
 static SIGNED_INS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>> = std::sync::LazyLock::new(Default::default);
 
@@ -455,10 +469,8 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
         Ok::<_, anyhow::Error>(claims)
     })
     .await??;
-    let (user, until, name) = (claims.sub.clone(), claims.exp * 1000, claims.name.clone());
-    if !node.is_user(&user) {
-        node.let_in(&user, &name).await?;
-    }
+    let (user, until) = (claims.sub.clone(), claims.exp * 1000);
+    anyhow::ensure!(node.is_user(&user), NotJoined);
     let me = Me { caller: Caller { key: node.id(), user, agent: None, token: Some(token) }, sign_in: Some(String::new()) };
     let mut kept = SIGNED_INS.lock().unwrap();
     kept.retain(|_, (_, until)| now < *until);

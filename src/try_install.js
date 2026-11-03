@@ -3,6 +3,7 @@
 //   sign-in <devtools port> <address> <picture> [invite link]: the web client is opened at the try install's address
 //     and signed in, as a person would, pressing Sign In, the try install's sign-in going straight on; then a picture
 //     of it. With an invite link, its person first opens it and joins, pictured as <picture>-invite and -joined.
+//     Prints its access token.
 const [, port, address, picture, invite] = process.argv.slice(2);
 const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
 const page = pages.find((p) => p.type === "page" && p.url.startsWith(address)) || pages.find((p) => p.type === "page");
@@ -60,4 +61,6 @@ for (;;) {
 // What signing in shows, drawn.
 await sleep(2500);
 await shoot(picture);
+// The sign-in's access token, for its first device's stand-in (try_install.rs's stand_in), never shown.
+console.log(await evaluate(`JSON.parse(localStorage.getItem("one.signin") || "null")?.access || ""`));
 ws.close();

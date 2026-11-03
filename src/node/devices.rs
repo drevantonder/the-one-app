@@ -353,15 +353,28 @@ impl Node {
         for scope in scopes {
             let starts = self.with(|i| Ok(starts_epochs(&i.r.members, &caller.user, &scope)))?;
             if !starts {
-                left.push(scope.to_string());
+                left.push(self.whose(&scope));
                 continue;
             }
             match self.new_epoch(caller, &scope).await {
                 Ok(n) => renewed.push(json!({ "scope": scope.to_string(), "epoch": n })),
-                Err(err) => left.push(format!("{scope} ({err:#})")),
+                Err(err) => left.push(format!("{} ({err:#})", self.whose(&scope))),
             }
         }
         Ok(json!({ "removed": gone, "new_epochs": renewed, "not_renewed": left, "relay": relay }))
+    }
+
+    /// A scope as a person reads it: "Sam's own", "Work's", or "everyone's".
+    fn whose(&self, scope: &Scope) -> String {
+        self.with(|i| {
+            let m = &i.r.members;
+            Ok(match scope {
+                Scope::Global => "everyone's".to_string(),
+                Scope::User(u) => format!("{}'s own", m.users.get(u).map_or(u.as_str(), |u| u.name.as_str())),
+                Scope::Group(g) => format!("{}'s", m.groups.get(g).map_or(g.as_str(), |g| g.name.as_str())),
+            })
+        })
+        .unwrap_or_default()
     }
 
     /// A scope's next epoch: a random key sealed to the recovery key (first, which says it's made) and to every client

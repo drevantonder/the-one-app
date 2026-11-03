@@ -14,7 +14,7 @@ const NODE = ["/v1/", "/mcp"];
 const SANDBOX = "sandbox allow-scripts allow-forms allow-popups allow-downloads";
 
 /// The request headers a node gets: never the browser's cookies, which are the auth service's.
-const TO_NODE = ["authorization", "content-type", "accept", "accept-language", "last-event-id", "mcp-session-id", "mcp-protocol-version"];
+const TO_NODE = ["authorization", "content-type", "accept", "accept-language", "last-event-id", "mcp-session-id", "mcp-protocol-version", "x-one-keys"];
 /// The answer headers a node may give: `www-authenticate` tells an MCP client where to sign in.
 const FROM_NODE = ["content-type", "cache-control", "etag", "last-modified", "content-disposition", "retry-after", "www-authenticate", "mcp-session-id"];
 

@@ -1629,7 +1629,7 @@ fn removed_said(r: &Value) -> String {
     let mut out = format!("Removed {}.", r["removed"].as_str().unwrap_or("it"));
     let left: Vec<&str> = r["not_renewed"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     if !left.is_empty() {
-        out.push_str(&format!(" These get new keys when one of their admins' devices is next on: {}.", left.join(", ")));
+        out.push_str(&format!(" New keys for {} come from one of their own devices, or their admins'.", left.join(", ")));
     }
     out
 }
