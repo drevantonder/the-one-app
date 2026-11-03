@@ -1552,6 +1552,23 @@ fn item_line(it: &Value) -> String {
     )
 }
 
+/// An item as an agent reads it: names, not scope ids or pictures, and when it last changed, in ISO 8601.
+fn item_said(it: &Value) -> Value {
+    let mut out = json!({
+        "id": it["id"], "title": it["title"], "page": it["scope_name"], "fields": it["fields"], "hosts": it["hosts"], "apps": it["apps"], "wanted_by": it["wanted_by"],
+        "changed": it["time"].as_i64().and_then(|ms| jiff::Timestamp::from_second(ms / 1000).ok()).map(|t| t.to_string()), "by": it["user"],
+    });
+    for k in ["type", "domain", "app"] {
+        if let Some(v) = it[k].as_str().filter(|v| !v.is_empty()) {
+            out[k] = json!(v);
+        }
+    }
+    if it["account"] == true {
+        out["account"] = json!(true);
+    }
+    out
+}
+
 /// The item `name` (its id or title) names in `scope`, if there's one.
 fn find_item(scope: &str, name: &str) -> Result<Option<Value>> {
     let items = get(&format!("/v1/vault?scope={scope}"))?;
@@ -1758,7 +1775,7 @@ fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Resu
     let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
     let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
     match op {
-        "list" => get(&format!("/v1/vault?scope={scope}")),
+        "list" => Ok(json!(get(&format!("/v1/vault?scope={scope}"))?.as_array().into_iter().flatten().map(item_said).collect::<Vec<_>>())),
         "set" => {
             let hosts = input.get("hosts").and_then(Value::as_array).map(|h| h.iter().filter_map(Value::as_str).map(str::to_string).collect());
             Ok(json!(vault_set(scope, text("item")?, text("field")?, text("value")?, input.get("secret").and_then(Value::as_bool), hosts, input.get("app").and_then(Value::as_str), agent)?))
@@ -1800,7 +1817,22 @@ fn tools() -> Result<Vec<Value>, Value> {
     Ok(tools)
 }
 
+/// A tool's answer, within the budget an agent reads (ops::BUDGET).
 fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
+    let mut out = answer_tool(params, agent, mode);
+    let name = params["name"].as_str().unwrap_or("");
+    let chars: usize = out["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).map(str::len).sum();
+    if chars > ops::BUDGET {
+        let op = match name {
+            "search" => Some(code::search_tool(mode)["inputSchema"].clone()).map(|input| json!({ "input": input })),
+            _ => name.split_once('_').and_then(|(a, o)| ops::find(a, o)).map(|(_, o)| o),
+        };
+        ops::within_budget(&mut out["content"], op.as_ref());
+    }
+    out
+}
+
+fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let input = params["arguments"].as_object().cloned().unwrap_or_default();
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });

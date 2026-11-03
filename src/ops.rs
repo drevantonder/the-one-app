@@ -935,6 +935,61 @@ fn on_the_internet(ip: std::net::IpAddr) -> bool {
     }
 }
 
+/// What an MCP result gives an agent to read, at most: about 10,000 tokens, below where harnesses warn.
+pub const BUDGET: usize = 40_000;
+
+/// Cuts a result's text to the budget, ending with a line that says how much isn't shown and how to ask for less: the
+/// operation's inputs that narrow it, by name. Images aren't text, and stay.
+pub fn within_budget(content: &mut Value, op: Option<&Value>) {
+    let Some(items) = content.as_array_mut() else { return };
+    let total: usize = items.iter().filter_map(|c| c["text"].as_str()).map(|t| t.chars().count()).sum();
+    if total <= BUDGET {
+        return;
+    }
+    let mut left = BUDGET;
+    for c in items.iter_mut() {
+        let Some(text) = c["text"].as_str() else { continue };
+        let n = text.chars().count();
+        if n <= left {
+            left -= n;
+            continue;
+        }
+        let mut cut: String = text.chars().take(left).collect();
+        // At the end of a line, when one ends near the cut.
+        if let Some(i) = cut.rfind('\n').filter(|i| cut.len() - i < 2_000) {
+            cut.truncate(i);
+        }
+        left = 0;
+        c["text"] = json!(cut);
+    }
+    let shown: usize = items.iter().filter_map(|c| c["text"].as_str()).map(|t| t.chars().count()).sum();
+    let narrows = ["limit", "query", "q", "search", "filter", "fields", "since", "after", "before", "start", "end", "range", "topic", "path"];
+    let names: Vec<&str> = op.and_then(|o| o["input"]["properties"].as_object()).into_iter().flatten().map(|(k, _)| k.as_str()).filter(|k| narrows.iter().any(|n| k.eq_ignore_ascii_case(n) || k.to_lowercase().starts_with(&format!("{n}_")) || k.to_lowercase().starts_with("max"))).collect();
+    let ask = match names.as_slice() {
+        [] => "Ask for less with a narrower call.".to_string(),
+        [one] => format!("Ask for less with {one}."),
+        [rest @ .., last] => format!("Ask for less with {} or {last}.", rest.join(", ")),
+    };
+    let line = format!("\n\n[Shown: the first {} of {} characters. {ask}]", group(shown), group(total));
+    match items.iter_mut().rev().find(|c| c["text"].is_string()) {
+        Some(c) => c["text"] = json!(format!("{}{line}", c["text"].as_str().unwrap_or(""))),
+        None => items.push(json!({ "type": "text", "text": line.trim_start() })),
+    }
+}
+
+/// A count as a person writes it: 40,000.
+fn group(n: usize) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// A result as MCP content: text, or JSON with each file in it kept as a file this device serves, given back as a
 /// reference (name, type, size, its id and a link), with images also shown.
 pub fn mcp_content(ok: &Value) -> Value {
@@ -944,6 +999,7 @@ pub fn mcp_content(ok: &Value) -> Value {
     let mut shown = Vec::new();
     let mut ok = ok.clone();
     keep_files(&mut ok, &mut shown, 0);
+    no_pictures(&mut ok);
     let text = match &ok {
         Value::String(s) => s.clone(),
         other => serde_json::to_string(other).unwrap_or_default(),
@@ -951,6 +1007,22 @@ pub fn mcp_content(ok: &Value) -> Value {
     let mut content = vec![json!({ "type": "text", "text": text })];
     content.extend(shown);
     json!(content)
+}
+
+/// Takes pictures given as `data:` URLs out of a result, to any depth: an agent reads them as a wall of base64, and
+/// screens, which draw them, ask the node themselves.
+fn no_pictures(v: &mut Value) {
+    match v {
+        Value::Array(items) => {
+            items.retain(|i| !i.as_str().is_some_and(|s| s.starts_with("data:image/")));
+            items.iter_mut().for_each(no_pictures);
+        }
+        Value::Object(map) => {
+            map.retain(|_, i| !i.as_str().is_some_and(|s| s.starts_with("data:image/")));
+            map.values_mut().for_each(no_pictures);
+        }
+        _ => {}
+    }
 }
 
 /// Replaces each file in `v` (to a few levels deep) with a reference to a blob that holds it.
