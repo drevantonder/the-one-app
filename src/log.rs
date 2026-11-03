@@ -73,7 +73,12 @@ pub async fn read(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str, fr
 /// Every one of `log`'s entries: its newest copy's, if it holds (`db::start`), and those in the steps after it, each
 /// once.
 pub async fn open(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str) -> Result<Read> {
-    let copied = match crate::db::start(bucket, prefix, keys).await? {
+    let started = match crate::db::start(bucket, prefix, keys, &BTreeSet::new()).await {
+        // Its steps say where it stops (`Read::ahead`).
+        Err(err) if err.is::<Ahead>() => None,
+        other => other?,
+    };
+    let copied = match started {
         Some((copy, epoch, bytes)) => match unpack(&bytes) {
             Ok(list) if list.iter().all(|e| e.log() == log) => Some((copy, epoch, list)),
             _ => None,

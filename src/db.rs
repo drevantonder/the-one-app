@@ -75,20 +75,26 @@ pub const EPOCHS_MAX: u32 = 10_000;
 
 /// Where a reader starts: the copy the newest hint names, as (its position, its epoch, its bytes), if it holds: it's
 /// there, its epoch is one `keys` reaches, at least that of the step at its position, and it opens. Otherwise none, and
-/// the reader reads every step. Fails with `Missing` for a copy under an epoch below the newest it was given but not given.
-pub async fn start(bucket: &impl Bucket, prefix: &str, keys: &Keys) -> Result<Option<(u64, u32, Vec<u8>)>> {
+/// the reader reads every step. Fails with `Missing` for a copy under an epoch below the newest it was given but not given,
+/// and with `Ahead` at the copy's step when both are under an epoch above every key it was given, unless that step is
+/// one of `junk`: a reader that reads every step could only stop at one such step, after reading all those before.
+pub async fn start(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>) -> Result<Option<(u64, u32, Vec<u8>)>> {
     let copy = match bucket.get(&newest_name(prefix)).await? {
         Some(o) => newest(&o.bytes).1,
         None => 0,
     };
-    if copy == 0 {
+    if copy == 0 || junk.contains(&copy) {
         return Ok(None);
     }
     let name = copy_name(prefix, copy);
     let Some(sealed) = bucket.get(&name).await? else { return Ok(None) };
     let Ok(epoch) = crate::keys::epoch_of(&sealed.bytes) else { return Ok(None) };
     let step = bucket.get(&step_name(prefix, copy)).await?.and_then(|s| crate::keys::epoch_of(&s.bytes).ok());
-    if epoch > keys.keys().next_back().copied().unwrap_or(0) || step.is_none_or(|s| s > epoch) {
+    let given = keys.keys().next_back().copied().unwrap_or(0);
+    if let Some(step) = step.filter(|s| *s > given && *s <= epoch) {
+        bail!(Ahead { epoch: step, at: copy });
+    }
+    if epoch > given || step.is_none_or(|s| s > epoch) {
         tracing::debug!("{name} isn't a copy to start from: reading every step");
         return Ok(None);
     }
@@ -160,7 +166,7 @@ impl Db {
     /// `open`, passing over the steps at `junk`.
     pub async fn open_passing(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>) -> Result<Db> {
         let mut db = Db { prefix: prefix.into(), keys, conn: Connection::open_in_memory()?, at: 0, copy: 0, epoch: 0, copy_epoch: 0, used: BTreeSet::new(), junk };
-        if let Some((copy, epoch, bytes)) = start(bucket, prefix, &db.keys).await? {
+        if let Some((copy, epoch, bytes)) = start(bucket, prefix, &db.keys, &db.junk).await? {
             db.conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
             (db.at, db.copy, db.epoch, db.copy_epoch) = (copy, copy, epoch, epoch);
             db.used.insert(epoch);
@@ -718,6 +724,8 @@ mod tests {
             let two_only = Db::open(&bucket, "p", keys(&[(2, two)])).await.unwrap();
             assert_eq!(notes(&two_only)[..3], ["before", "after", "later"]);
             assert!(two_only.opens_for(&keys(&[(2, two)])) && !new.opens_for(&keys(&[(2, two)])), "a call given epoch 2 alone doesn't use what epoch 1 opened");
+            // Given only epoch 1, it stops at the copy's step at once, rather than read every step to meet one under 2.
+            assert_eq!(Db::open(&bucket, "p", keys(&[(1, one)])).await.err().unwrap().downcast::<Ahead>().unwrap(), Ahead { epoch: 2, at: copy });
         });
     }
 
