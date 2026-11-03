@@ -30,7 +30,8 @@ struct PagesView: View {
             .scrollClipDisabled()
             .onChange(of: position) { if let position, position != settingsID, position != store.current { store.current = position } }
             .onChange(of: store.current, initial: true) { if position != store.current { withAnimation(.snappy) { position = store.current } } }
-            .safeAreaBar(edge: .bottom) { BottomBar(position: $position).padding(.bottom, 2) }
+            // Hidden till the pages come, not a flash of Settings' name.
+            .safeAreaBar(edge: .bottom) { BottomBar(position: $position).padding(.bottom, 2).opacity(store.pages.isEmpty ? 0 : 1) }
             // As on the Home Screen, Edit and Done take the status bar's place, either side of the Dynamic Island.
             .overlay(alignment: .top) {
                 if store.editing && position != settingsID { EditBar(page: store.page(store.current)).padding(.top, 14).ignoresSafeArea(edges: .top) }
@@ -78,6 +79,11 @@ struct PagesView: View {
             if store.current != settingsID, !store.pages.contains(where: { $0.scope == store.current }) { store.current = "user" }
         }
         .onChange(of: store.widgets, initial: true) { Task { await store.saveForHomeScreen() } }
+        // The same widgets, fetched again: the home screen's stop saying they're old, without redrawing at every fetch.
+        .onChange(of: store.widgetsFetched) {
+            guard let fetched = store.widgetsFetched, fetched.timeIntervalSince(WidgetCache.load()?.fetched ?? .distantPast) > 600 else { return }
+            Task { await store.saveForHomeScreen() }
+        }
         .onChange(of: scenePhase) {
             if scenePhase == .active { Task { try? await store.refreshState(); await store.refreshApps() } }
             if scenePhase == .background { store.editing = false }
@@ -197,7 +203,7 @@ extension Store {
         guard Phone.nodeURL != nil || Auth.signedIn, !items.isEmpty || WidgetCache.load()?.signedOut == true else { return }
         let trees = items.flatMap { [$0.root] + ($0.sizes ?? [:]).values }
         Icons.keep(Set(items.map(\.icon) + trees.flatMap(\.iconNames)))
-        WidgetCache(install: install?.name, widgets: items).save()
+        WidgetCache(install: install?.name, widgets: items, fetched: widgetsFetched).save()
         WidgetCenter.shared.reloadAllTimelines()
         let images = trees.flatMap(\.imageURLs)
         if !images.isEmpty {

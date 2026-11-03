@@ -28,6 +28,8 @@ struct WidgetCache: Codable {
     var widgets: [Item]
     /// The person signed out, so the home-screen widgets say to sign in.
     var signedOut: Bool?
+    /// When the app last had them from your devices.
+    var fetched: Date?
 
     private static var group: URL? {
         guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }

@@ -113,6 +113,8 @@ final class Store {
     private(set) var apps: [AppInfo] = []
     /// Each page's widgets, rendered for its scope.
     private(set) var widgets: [String: [WidgetInfo]] = [:]
+    /// When every page's widgets last came from the node.
+    private(set) var widgetsFetched: Date?
     /// Each page's apps' badges, by scope then app.
     private(set) var badges: [String: [String: Int]] = [:]
     /// The Mac's sidebar selection: the page, screen or view at the bottom of `path`. It's kept, so the app opens
@@ -411,6 +413,9 @@ final class Store {
     /// The pages whose widgets came from their device, the last time they were asked for.
     private var loadedWidgets = Set<String>()
 
+    /// Whether a page's apps and widgets have come from its device, so an empty one really is.
+    func loaded(_ page: Page) -> Bool { loadedWidgets.contains(page.scope) }
+
     private func keepWidgetsShownBefore() {
         guard showedPagesBefore, state?.arrangements != nil else { return }
         let defaults = UserDefaults.standard
@@ -639,14 +644,16 @@ final class Store {
         guard let install, !install.joining, signedIn else { return }
         let node = node
         var fresh: [String: [WidgetInfo]] = [:]
+        var answered = true
         await withTaskGroup(of: (String, [WidgetInfo]?).self) { tasks in
             for page in allPages { tasks.addTask { (page.scope, try? await node.widgets(scope: page.scope)) } }
             for await (scope, widgets) in tasks {
                 fresh[scope] = widgets ?? self.widgets[scope] ?? []
-                if widgets != nil { loadedWidgets.insert(scope) }
+                if widgets != nil { loadedWidgets.insert(scope) } else { answered = false }
             }
         }
         if fresh != widgets { widgets = fresh }
+        if answered { widgetsFetched = .now }
         keepWidgetsShownBefore()
         scheduleRedraw()
         var counts: [String: [String: Int]] = [:]
