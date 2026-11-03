@@ -33,7 +33,10 @@
     const list = accounts[a.name], signIn = home.settings(a, p, true), of = `data-of="${esc(a.name)}"`;
     if (list === undefined) return `<div class="row plain" ${of} role="status" aria-label="Loading"><div class="main"><div class="title"><span class="sk-line" style="width:45%;align-self:center"></span>&#8203;</div></div></div>`;
     if (list instanceof Error) return `<div class="row plain warn" ${of}>${esc(one.plain(list).title)}</div>`;
-    if (!list.length) return `<div class="row plain muted" ${of}>No accounts yet</div>`;
+    // An app with no sign-in of its own, like Calendar, gets its accounts from a device: with none, what it needs,
+    // opening its App Store page, which says where it can go.
+    if (!list.length) return !signIn && a.needs && home.inStore(a) ? `<button class="row plain muted" ${of} data-open="${esc(a.name)}"><div class="main">${esc(a.needs)}</div><span class="chev">›</span></button>`
+      : `<div class="row plain muted" ${of}>No accounts yet</div>`;
     return list.map((x) => `<div class="row plain" ${of}><div class="main"><div class="title"><span>${esc(x.account)}</span></div>` +
       `${x.ok ? "" : `<div class="sub warn">${one.icon("warning-circle-fill")}${esc(one.plain(x.why || "Needs signing in again").title)}</div>`}</div>${x.ok || !signIn ? "" : `<button class="button plain" data-signin="${esc(a.name)}">Sign In</button>`}</div>`).join("");
   }
