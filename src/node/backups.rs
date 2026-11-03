@@ -417,7 +417,7 @@ impl Node {
 
     /// Backups as a person sees them: each place, how its last run went, the recent snapshots, and the disks here.
     pub fn backups(&self) -> Result<Value> {
-        let mut out = self.with(|i| {
+        self.with(|i| {
             let m = &i.r.members;
             let empty = ScopeState::default();
             let global = i.views.get("global").map(|(_, s)| s).unwrap_or(&empty);
@@ -469,14 +469,7 @@ impl Node {
                 })
                 .collect();
             Ok(json!({ "places": out, "snapshots": snapshots, "here": self.device_name(), "disks": disks() }))
-        })?;
-        // A place in a company's storage shows that company's logo.
-        for place in out["places"].as_array_mut().into_iter().flatten() {
-            if let Some((image, kind)) = place["endpoint"].as_str().and_then(storage_site).and_then(|site| self.logo(&site, "backups")) {
-                (place["image"], place["image_kind"]) = (json!(image), json!(kind));
-            }
-        }
-        Ok(out)
+        })
     }
 
     /// Tries a place (writes, reads and deletes a test file), and if that works, keeps it as a Vault item in
@@ -655,20 +648,4 @@ fn free_space(path: &Path) -> Option<u64> {
     let c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
     let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
     (unsafe { libc::statvfs(c.as_ptr(), &mut s) } == 0).then(|| s.f_bavail as u64 * s.f_frsize as u64)
-}
-
-/// The site whose logo an S3-compatible endpoint shows: its company's, where the storage's own host has none to give
-/// (Cloudflare's R2, Amazon's S3, Backblaze's B2), else the host's last two names.
-fn storage_site(endpoint: &str) -> Option<String> {
-    let host = endpoint.split("://").nth(1)?.split(['/', ':']).next()?.to_ascii_lowercase();
-    let site = if host.ends_with(".r2.cloudflarestorage.com") {
-        "cloudflare.com".to_string()
-    } else if host.ends_with(".amazonaws.com") {
-        "aws.amazon.com".to_string()
-    } else if host.ends_with(".backblazeb2.com") {
-        "backblaze.com".to_string()
-    } else {
-        host.rsplitn(3, '.').take(2).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(".")
-    };
-    crate::logos::valid(&site).then_some(site)
 }

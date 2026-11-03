@@ -521,8 +521,10 @@ async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>)
     })
 }
 
-async fn apps(State(node): State<Node>, me: Me) -> Reply {
-    Ok(Json(json!(node.apps(&me.caller).await?)))
+async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap) -> Result<Response, Error> {
+    let body = serde_json::to_string(&node.apps(&me.caller).await?)?;
+    let tag = crate::screen::tag(&body);
+    Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))
 }
 
 /// `{ name, device?, installed? }`: removes a sidecar from a device (this one by default), or with `installed` lets it
@@ -861,16 +863,30 @@ struct ScreenQuery {
 }
 
 /// An app screen as a page, for shells' web views and the web client's frames.
-async fn screen(State(node): State<Node>, me: Me, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
+async fn screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
     let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref()).await?;
-    Ok(axum::response::Html(html).into_response())
+    Ok(page(&headers, html))
+}
+
+/// A screen's page, named by its content but for its nonce (its ETag).
+fn page(headers: &axum::http::HeaderMap, html: String) -> Response {
+    let tag = crate::screen::tag(&html);
+    tagged(headers, tag, axum::response::Html(html))
+}
+
+/// An answer named by its content (`tag`, its ETag): to a client that has it already, only that.
+fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl IntoResponse) -> Response {
+    if headers.get(axum::http::header::IF_NONE_MATCH).is_some_and(|had| had.as_bytes() == tag.as_bytes()) {
+        return (StatusCode::NOT_MODIFIED, [(axum::http::header::ETAG, tag)]).into_response();
+    }
+    ([(axum::http::header::ETAG, tag)], answer).into_response()
 }
 
 /// A client's own screen as a page (see `Node::client_screen`).
-async fn client_screen(State(node): State<Node>, me: Me, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
+async fn client_screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    Ok(axum::response::Html(node.client_screen(me.caller, &name, params)?).into_response())
+    Ok(page(&headers, node.client_screen(me.caller, &name, params)?))
 }
 
 async fn events(State(node): State<Node>) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {

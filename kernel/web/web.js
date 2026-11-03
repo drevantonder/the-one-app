@@ -8,6 +8,8 @@
 window.__one = {};
 
 (() => {
+  // What start.js, inline in the page's head, began and says: the token, the places, the pages kept.
+  const first = window.__oneStart;
   const $ = (sel, el = document) => el.querySelector(sel);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
@@ -20,23 +22,15 @@ window.__one = {};
   // it showed (KEPT_SCREENS, `kept`): all forgotten with the sign-in.
   const SCREENS = "one.screens.";
   const LAST = "one.last.window";
-  const KEPT_SCREENS = "one.screens";
   const forgetScreens = () => {
     Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k === LAST).forEach((k) => localStorage.removeItem(k));
-    window.caches?.delete(KEPT_SCREENS).catch(() => {});
+    window.caches?.delete("one.screens").catch(() => {});
   };
   const CLIENT = "one.client";
 
   const auth = {
     kept: () => JSON.parse(localStorage.getItem(KEPT) || "null"),
     keep: (tokens) => localStorage.setItem(KEPT, JSON.stringify(tokens)),
-
-    /// The auth service's endpoints, as it says them.
-    async meta() {
-      const r = await fetch("/.well-known/oauth-authorization-server");
-      if (!r.ok) throw new Error("The sign-in service isn’t answering. Try again in a moment.");
-      return r.json();
-    },
 
     /// This browser, as a client of the auth service: registered the first time it signs in.
     async client(meta) {
@@ -61,7 +55,7 @@ window.__one = {};
 
     /// Off to the auth service's sign-in, coming back to /callback, then to where this was.
     async start() {
-      const meta = await auth.meta();
+      const meta = await first.meta({ fresh: true });
       const client = await auth.client(meta);
       const verifier = random(32), state = random(16);
       const challenge = b64u(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
@@ -80,40 +74,20 @@ window.__one = {};
       sessionStorage.removeItem("one.pkce");
       if (q.get("error")) throw new Error(q.get("error_description") || q.get("error"));
       if (!pkce || q.get("state") !== pkce.state || !q.get("code")) throw new Error("That sign-in didn't start here. Sign in again.");
-      const meta = await auth.meta();
+      const meta = await first.meta({ fresh: true });
       const client = JSON.parse(localStorage.getItem(CLIENT) || "null")?.id;
-      auth.keep(await auth.grant(meta, { grant_type: "authorization_code", code: q.get("code"), redirect_uri: `${location.origin}/callback`, client_id: client, code_verifier: pkce.verifier }));
+      auth.keep(await first.grant(meta, { grant_type: "authorization_code", code: q.get("code"), redirect_uri: `${location.origin}/callback`, client_id: client, code_verifier: pkce.verifier }));
       return pkce.back && pkce.back !== "/callback" ? pkce.back : "/";
     },
 
-    async grant(meta, fields) {
-      const r = await fetch(meta.token_endpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields) });
-      const out = await r.json().catch(() => ({}));
-      if (!r.ok || !out.access_token) throw Object.assign(new Error(out.error_description || out.error || "Signing in didn't work."), { signedOut: r.status === 400 || r.status === 401 });
-      return { access: out.access_token, refresh: out.refresh_token, until: Date.now() + (out.expires_in || 3600) * 1000 };
-    },
-
-    /// An access token good for a minute more, new from the refresh token if it's older: one tab at a time, since
-    /// each refresh token works once.
+    /// An access token good for a minute more (start.js's); signed out, this browser forgets what it kept.
     async token(stale) {
-      const fresh = (t) => t && t.access !== stale && t.until > Date.now() + 60_000;
-      if (fresh(auth.kept())) return auth.kept().access;
-      const refresh = async () => {
-        const kept = auth.kept();
-        if (fresh(kept)) return kept.access;
-        if (!kept?.refresh) throw Object.assign(new Error("Signed out."), { signedOut: true });
-        const meta = await auth.meta();
-        const client = JSON.parse(localStorage.getItem(CLIENT) || "null")?.id;
-        try {
-          const tokens = await auth.grant(meta, { grant_type: "refresh_token", refresh_token: kept.refresh, client_id: client });
-          auth.keep({ ...tokens, refresh: tokens.refresh || kept.refresh });
-          return tokens.access;
-        } catch (err) {
-          if (err.signedOut) localStorage.removeItem(KEPT), forgetScreens();
-          throw err;
-        }
-      };
-      return navigator.locks ? navigator.locks.request("one.refresh", refresh) : refresh();
+      try {
+        return await first.token(stale);
+      } catch (err) {
+        if (err.signedOut) localStorage.removeItem(KEPT), forgetScreens();
+        throw err;
+      }
     },
 
     async signOut() {
@@ -121,7 +95,7 @@ window.__one = {};
       localStorage.removeItem(KEPT);
       forgetScreens();
       try {
-        const meta = await auth.meta();
+        const meta = await first.meta({ fresh: true });
         const client = JSON.parse(localStorage.getItem(CLIENT) || "null")?.id;
         if (kept?.refresh && meta.revocation_endpoint) {
           await fetch(meta.revocation_endpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: kept.refresh, token_type_hint: "refresh_token", client_id: client }) });
@@ -151,20 +125,26 @@ window.__one = {};
   /// No node answered: the gateway, or Cloudflare before it, couldn't reach one, so nothing ran.
   const unanswered = (status) => [502, 503, 530].includes(status);
 
-  /// A request to the node, as this person: JSON in and out, or with `raw` the response itself. Asked again for a few
-  /// seconds while no node answers, as one restarting doesn't; a call carries an id, so it runs once however often
-  /// it's sent.
-  async function api(path, { method = "GET", body, query, raw, signal } = {}) {
+  /// A request to the node, as this person: JSON in and out, or with `raw` the response itself (a 304 too). Asked again
+  /// for a few seconds while no node answers, as one restarting doesn't; a call carries an id, so it runs once however
+  /// often it's sent. What start.js already asked for is its answer, the first time.
+  async function api(path, { method = "GET", body, query, raw, signal, headers: extra } = {}) {
     const url = new URL(path, location.origin);
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
     if (url.pathname === "/v1/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
-    let token = await auth.token();
+    let early = method === "GET" ? first.take(url.pathname + url.search) : null;
+    let token = early ? null : await auth.token();
     for (let renewed = false, misses = 0; ; ) {
-      const headers = { authorization: `Bearer ${token}` };
-      if (body !== undefined) headers["content-type"] = "application/json";
       let r;
       try {
-        r = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal });
+        if (early) r = await early.catch(() => null);
+        early = null;
+        if (!r) {
+          token ||= await auth.token();
+          const headers = { authorization: `Bearer ${token}`, ...extra };
+          if (body !== undefined) headers["content-type"] = "application/json";
+          r = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal });
+        }
       } catch (err) {
         if (signal?.aborted || misses >= 5) throw err;
         await sleep(retryWait(misses++));
@@ -176,11 +156,12 @@ window.__one = {};
       }
       if (r.status === 401 && !renewed) {
         renewed = true;
-        token = await auth.token(token);
+        // Refused start.js's ask: the token it sent was the one kept.
+        token = await auth.token(token ?? auth.kept()?.access);
         continue;
       }
       if (r.status === 401) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
-      if (raw && r.ok) return r;
+      if (raw && (r.ok || r.status === 304)) return r;
       const out = await r.json().catch(() => null);
       if (!r.ok || out?.error) throw new NodeError(out?.error || (r.status >= 500 ? UNANSWERED : "That didn’t work. Try again."));
       return out;
@@ -191,24 +172,29 @@ window.__one = {};
   const files = Object.fromEntries((document.querySelector('meta[name="one-files"]')?.content || "").split(" ").filter(Boolean).map((f) => f.split("=")));
   const asset = (name) => (files[name] ? `/${name}?v=${files[name]}` : `/${name}`);
 
-  /// Phosphor's icons, from the address once (and then the browser's cache), for those the bridge asks for: on this
-  /// page, and in screens' frames.
-  let icons;
+  /// Phosphor's icons, those the bridge asks for (on this page, and in screens' frames), from the address by name, then
+  /// the browser's cache: each named once.
+  const icons = {};
   async function iconPaths(names = []) {
-    icons ||= fetch(asset("icons.json")).then((r) => (r.ok ? r.json() : Promise.reject(new Error("No icons.")))).catch((err) => ((icons = null), Promise.reject(err)));
-    const all = await icons;
-    return Object.fromEntries(names.map((n) => [n, all[n]]));
+    const missing = [...new Set(names.filter((n) => typeof n === "string" && !(n in icons)))].sort();
+    if (missing.length) {
+      const asking = fetch(`/icons?names=${encodeURIComponent(missing.join(","))}&v=${files["icons.json"] || ""}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error("No icons."))));
+      for (const n of missing) icons[n] = asking.then((got) => got[n] || "");
+      asking.catch(() => missing.forEach((n) => delete icons[n]));
+    }
+    return Object.fromEntries(await Promise.all(names.map(async (n) => [n, await icons[n]])));
   }
   window.__one.host = async (m) => (m.type === "copy" ? navigator.clipboard.writeText(m.text) : m.type === "icons" ? iconPaths(m.names) : null);
 
   /// Names a call wherever it's sent, so sent again it runs once.
   const callId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
 
-  /// The node's state or apps, asked for once a second at most: the window and its own screens (Home, Settings) ask
-  /// together as it opens, and share the answer.
+  /// The node's state or apps, asked for once a second at most, and not again while the node's events say nothing
+  /// changed: the window and its own screens (Home, Settings) share the answer.
   const recent = {};
+  let live = false;
   function shared(path) {
-    if (recent[path] && Date.now() - recent[path].at < 1000) return recent[path].answer;
+    if (recent[path] && (live || Date.now() - recent[path].at < 1000)) return recent[path].answer;
     const answer = api(path);
     recent[path] = { at: Date.now(), answer };
     answer.catch(() => delete recent[path]);
@@ -302,6 +288,7 @@ window.__one = {};
       const started = Date.now();
       try {
         const r = await api("/v1/events", { raw: true, signal: mine.signal });
+        live = true;
         const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
         let buffer = "";
         for (;;) {
@@ -317,15 +304,16 @@ window.__one = {};
           }
         }
       } catch (err) {
-        if (err.signedOut) return showSignedOut();
+        if (err.signedOut) return (live = false), showSignedOut();
       }
+      live = false;
       // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting longer
       // each miss.
       if (Date.now() - started > 10_000) misses = 0;
       if (!mine.signal.aborted) await sleep(retryWait(misses++));
     }
   }
-  addEventListener("pagehide", () => events?.abort());
+  addEventListener("pagehide", () => ((live = false), events?.abort()));
   // Back to a page the browser kept: what changed while it was away, then its events again.
   addEventListener("pageshow", (e) => e.persisted && auth.kept() && (refreshState().catch(() => {}), listen()));
 
@@ -342,19 +330,8 @@ window.__one = {};
 
   // MARK: Where the window is
 
-  /// The URL is the place: `/` (You), `/page/<scope>`, `/services/<scope>`, `/settings`, `/settings/<screen>?params=`
-  /// (a Settings screen), `/app/<app>/<screen>?params=&scope=`; and `/vault?id=&scope=`, a request for an item, as a sheet
-  /// over You. Each is a screen: the client's own (`own`, by name), or an app's.
-  function route() {
-    const path = location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-    const q = new URLSearchParams(location.search);
-    if (path[0] === "page" && path[1]) return own("pages", { scope: path[1] });
-    if (path[0] === "services" && path[1]) return own("services", { scope: path[1] });
-    if (path[0] === "app" && path[1]) return { kind: "screen", app: path[1], screen: path[2] || "main", params: q.get("params") || "{}", scope: q.get("scope") || undefined };
-    if (path[0] === "settings") return path[1] ? { kind: "own", name: path[1], params: q.get("params") || "{}" } : own("pages", { scope: "settings" });
-    return own("pages", { scope: "user" });
-  }
-  const own = (name, params = {}) => ({ kind: "own", name, params: JSON.stringify(params) });
+  /// The URL is the place (start.js's `route`): each is a screen, the client's own (`own`, by name), or an app's.
+  const { route, own, phone, isPage, swiped, kept } = first;
 
   function href(r) {
     const q = new URLSearchParams();
@@ -370,10 +347,8 @@ window.__one = {};
     return `/app/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen || "main")}${q.size ? `?${q}` : ""}`;
   }
 
-  /// A phone's width has no sidebar, as the iPhone and Android apps have none: the pages fill the window, swiped
-  /// between, and every screen opened from them is pushed over them, with Back.
-  const phone = matchMedia("(max-width: 700px)");
-  const isPage = (r) => r.kind === "own" && r.name === "pages";
+  // A phone's width (start.js's `phone`) has no sidebar, as the iPhone and Android apps have none: the pages fill the
+  // window, swiped between, and every screen opened from them is pushed over them, with Back.
   /// The page a screen is under, for Back on a phone when nothing in this tab came before it: a page's Services and apps
   /// under that page, Settings' screens and apps under Settings.
   function under(r) {
@@ -469,19 +444,20 @@ window.__one = {};
   }
 
   /// A phone's window: every page side by side then Settings, to swipe between with their dots (pages.html, as the
-  /// phones have them), kept under what's pushed over them so Back finds them as they were.
+  /// phones have them), kept under what's pushed over them so Back finds them as they were. Opened straight at a
+  /// screen, the pages load once it has what it asked for, so they don't hold it up.
   let home = null;
   function drawPhone(detail, r, key) {
     if (!home?.layer.isConnected) {
       frames = frames.filter((f) => f.sheet);
       detail.innerHTML = `<div class="home"></div><div class="pushed" hidden></div>`;
-      const layer = $(".home", detail), at = isPage(r) ? r : under(r);
-      home = { layer, f: frameFor(own("pages", { swipe: true, scope: JSON.parse(at.params).scope || "user" }), layer) };
-      home.f.home = true;
+      const layer = $(".home", detail), at = swiped(isPage(r) ? r : under(r));
+      const h = (home = { layer, f: null, load: () => h.f || ((h.f = frameFor(at, layer)), (h.f.home = true)) });
       shown = "";
     }
     const pushed = $(".pushed", detail);
     if (isPage(r)) {
+      home.load();
       shown = key;
       frames = frames.filter((f) => f.sheet || f.home);
       pushed.hidden = true;
@@ -496,6 +472,15 @@ window.__one = {};
     pushed.hidden = false;
     home.layer.inert = true;
     screen.show(pushed, r);
+    if (!home.f) settled(frames.find((f) => !f.sheet && !f.home)).then(home.load);
+  }
+
+  /// Once a screen is written in and has had what it asked for answered (or a few seconds, whatever it waits on).
+  function settled(f, until = Date.now() + 4000) {
+    return new Promise((done) => {
+      const check = () => (f && (!f.loaded || f.busy || Date.now() - f.quiet < 300) && Date.now() < until ? setTimeout(check, 50) : done());
+      check();
+    });
   }
 
   /// The detail's bar: its title, as a Mac window's toolbar, with Back when a screen was pushed, and on a phone under
@@ -512,27 +497,20 @@ window.__one = {};
   /// person.
   let frames = [];
 
-  /// What this browser keeps of the screens it showed, until it signs out: each route's page as the node last gave it
-  /// (`page`), and its still (`still`), the page as it last looked here without its scripts, which bridge.js sends.
-  const kept = {
-    url: (kind, key) => `/${kind}/${encodeURIComponent(key)}`,
-    async get(kind, key) {
-      try {
-        return (await (await (await caches.open(KEPT_SCREENS)).match(kept.url(kind, key)))?.text()) ?? null;
-      } catch {
-        return null;
-      }
-    },
-    put(kind, key, html) {
-      if (typeof html !== "string" || html.length > 2_000_000) return;
-      window.caches?.open(KEPT_SCREENS).then((c) => c.put(kept.url(kind, key), new Response(html))).catch(() => {});
-    },
-  };
+  // What this browser keeps of the screens it showed (start.js's `kept`), until it signs out: each route's page as the
+  // node last gave it (`page`), and its still (`still`), the page as it last looked here without its scripts, which
+  // bridge.js sends.
+  const NONCE = /nonce(-|=")[0-9a-f]{32}/g;
   /// Two pages the same but for their nonce.
-  const same = (a, b) => a?.replace(/nonce(-|=")[0-9a-f]{32}/g, "") === b?.replace(/nonce(-|=")[0-9a-f]{32}/g, "");
+  const same = (a, b) => a?.replace(NONCE, "") === b?.replace(NONCE, "");
+  /// A kept page with a nonce of its own, so no two loads share one.
+  const renonce = (html) => {
+    const nonce = callId() + callId();
+    return html.replace(NONCE, (_, sep) => `nonce${sep}${nonce}`);
+  };
 
   /// A route's page from the node, asked for once (the one the window opens on as it starts, beside the sidebar's),
-  /// and kept.
+  /// and kept. Asked as having the one kept, if there is: unchanged, it's that.
   let asked = null;
   function screenPage(r) {
     const key = JSON.stringify(r);
@@ -541,8 +519,16 @@ window.__one = {};
       asked = null;
       return page;
     }
-    const path = r.kind === "own" ? `/v1/client-screens/${encodeURIComponent(r.name)}` : `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
-    return api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html));
+    return kept.get("page", key).then(async (was) => {
+      const headers = was?.tag ? { "if-none-match": was.tag } : {};
+      let resp = await api(first.address(r), { raw: true, headers });
+      if (resp.status === 304 && was) return renonce(was.text);
+      // Kept no longer: asked again for all of it.
+      if (resp.status === 304) resp = await api(first.address(r), { raw: true });
+      const html = await resp.text();
+      kept.put("page", key, html, resp.headers.get("etag"));
+      return html;
+    });
   }
   const ask = (r) => (asked = { key: JSON.stringify(r), page: screenPage(r) }).page.catch(() => {});
 
@@ -567,24 +553,19 @@ window.__one = {};
     // A spinner only for a wait that's long enough to notice.
     into.innerHTML = "";
     setTimeout(() => f.loaded || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status">${one.loading()}</div>`), 400);
+    // The frame loads while its page is on its way, and shows once it's written in (`write`).
+    frame.style.visibility = "hidden";
+    into.append(frame);
     const draw = (page) => {
       f.page = page;
       f.html = look(page);
-      if (!into.isConnected) return;
-      if (f.still) frame.style.visibility = "hidden";
-      into.append(frame);
-      frame.addEventListener("load", () => {
-        f.loaded = true;
-        $(".screen-status", into)?.remove();
-        // A screen that asks nothing shows in place of its still soon after it loads.
-        if (f.still) setTimeout(() => watch(f), 1500);
-      }, { once: true });
+      if (f.waiting) write(f);
     };
     const fresh = screenPage(r);
     Promise.all([kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
       if (f.html) return;
-      if (still) showStill(f, still);
-      if (page) draw(page);
+      if (still) showStill(f, still.text);
+      if (page) draw(renonce(page.text));
     });
     fresh.then((page) => {
       if (!f.html) return draw(page);
@@ -594,6 +575,20 @@ window.__one = {};
       frame.src = asset("frame.html");
     }, (err) => f.html || ((f.loaded = true), (into.innerHTML = message("Can’t Open This", esc(one.plain(err).title)))));
     return f;
+  }
+
+  /// A frame's page, written in once both are ready: it shows, or with a still, shows in its place once it's drawn.
+  function write(f) {
+    if (!f.html) return void (f.waiting = true);
+    f.waiting = false;
+    f.frame.contentWindow.postMessage({ oneScreen: f.html }, "*");
+    if (f.loaded) return;
+    f.loaded = true;
+    f.quiet = Date.now();
+    $(".screen-status", f.into)?.remove();
+    // A screen that asks nothing shows in place of its still soon after it's written in.
+    if (f.still) setTimeout(() => watch(f), 1500);
+    else f.frame.style.visibility = "";
   }
 
   // MARK: Stills
@@ -711,7 +706,7 @@ window.__one = {};
     const f = frames.find((x) => x.frame.contentWindow === e.source);
     if (!f) return;
     const r = f.route, mine = r.kind === "own";
-    if (e.data?.oneFrame) return void f.frame.contentWindow.postMessage({ oneScreen: f.html }, "*");
+    if (e.data?.oneFrame) return write(f);
     if (typeof e.data?.oneSheets === "number") return void shade(f, e.data.oneSheets > 0);
     if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill));
     const { one: m, id } = e.data || {};
@@ -994,7 +989,7 @@ window.__one = {};
     }
     // Everything the window opens on, asked for at once: its screen, beside the node's state and apps; meanwhile the
     // window as it was last.
-    ask(route());
+    ask(phone.matches && isPage(route()) ? swiped(route()) : route());
     if (lastWindow()) render();
     else root.innerHTML = `<div class="starting">${one.loading("Starting")}</div>`;
     // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.

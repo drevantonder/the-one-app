@@ -31,6 +31,14 @@ pub fn page(context: &serde_json::Value, body: &str, own: bool) -> String {
     )
 }
 
+/// What names a page's content, or any answer's (its ETag): the same for two pages that differ only in their nonce.
+pub fn tag(page: &str) -> String {
+    use sha2::Digest;
+    let nonce = page.split("'nonce-").nth(1).and_then(|rest| rest.get(..32));
+    let content = nonce.map_or_else(|| page.to_string(), |nonce| page.replace(nonce, ""));
+    format!("\"{}\"", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(content.as_bytes()))[..32])
+}
+
 /// The clients' own screens, by name, the same on every client: the person's pages, a page's Services, a request for a
 /// Vault item, and Settings' (`settings/`). They act through the bridge's `one.api` as the person looking, which a
 /// client answers only for these.

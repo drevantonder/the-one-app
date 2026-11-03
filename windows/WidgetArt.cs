@@ -106,9 +106,9 @@ public static class WidgetArt
 
     public static string Dot(string color, double size) => Image(size, size, $"<circle cx='{F(size / 2)}' cy='{F(size / 2)}' r='{F(size / 2)}' {Fill(color)}/>");
 
-    /// A switch, on (the tint, its knob at the end) or off (grey, its knob at the start).
-    public static string Switch(bool on, string tint) => Image(40, 20,
-        $"<rect width='40' height='20' rx='10' {Fill(on ? tint : "#8a8a8a99")}/><circle cx='{(on ? 30 : 10)}' cy='10' r='7' fill='#ffffff'/>");
+    /// A switch, on (the accent, its knob at the end) or off (grey, its knob at the start).
+    public static string Switch(bool on, string accent) => Image(40, 20,
+        $"<rect width='40' height='20' rx='10' {Fill(on ? accent : "#8a8a8a99")}/><circle cx='{(on ? 30 : 10)}' cy='10' r='7' fill='#ffffff'/>");
 
     /// A badge (an SVG path on a 24-point grid) at the bottom trailing corner of an icon `w` across.
     static string Badge(string? badge, string color, double w) =>
