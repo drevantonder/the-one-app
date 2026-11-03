@@ -142,15 +142,15 @@ function folder(files, dir) {
   return '<div class="list code-list">' + names.map(row).join("") + "</div>";
 }
 
-/// The Add to… sheet, from an app's row or its page: a switch for each of the person's pages, dimmed with two words of
-/// reason where they can't use it. Runs in the page: the screens include it.
+/// The Add to… sheet, from an app's row or its page: a switch for each of the person's pages, dimmed with a few words
+/// of why where they can't use it. Runs in the page: the screens include it.
 function addTo(name, { apps, places, admin }) {
   let error = "";
   const sheet = one.sheet({ title: apps.find((a) => a.name === name)?.title || name });
   const draw = () => {
     const a = apps.find((x) => x.name === name);
     if (!a) return sheet.close();
-    const first = !a.added && !admin ? "Only admins" : null;
+    const first = !a.added && !admin ? "Ask an admin to add it first" : null;
     const row = (p) => {
       const why = first || p.why, on = a.installed.includes(p.id);
       return '<div class="row plain' + (why ? " dim" : "") + '"><div class="main"><div class="title"><span>' + one.esc(p.name) + "</span></div>"

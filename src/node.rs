@@ -624,13 +624,14 @@ impl Node {
         self.0.name.lock().unwrap().clone()
     }
 
-    /// Creates this device's install, with its local user as the first admin, and deploys the config's apps in
+    /// Creates this device's install, with its local user as the first admin, and installs the config's apps in
     /// `global`. Returns the recovery key's secret, given only this once.
     pub async fn create(&self, name: &str, user_name: &str) -> Result<String> {
         self.create_with(name, user_name, crate::config::STARTERS).await
     }
 
-    /// Creates the install, starting with these built-in apps.
+    /// Creates the install, with every built-in app added (owned by admins), so anyone may add one to their own page,
+    /// and these installed in `global`.
     pub async fn create_with(&self, name: &str, user_name: &str, apps: &[&str]) -> Result<String> {
         self.ensure_no_install()?;
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the install a name, and yourself one");
@@ -652,6 +653,9 @@ impl Node {
             Ok(())
         })?;
         let me = Caller { key: self.0.id, user, agent: None, token: None };
+        for (app, _) in crate::config::BUILT_IN {
+            self.bring_in(&me, app).await?;
+        }
         for app in apps {
             self.bring_in(&me, app).await?;
             self.append(&Scope::Global, members::node("install", json!({ "app": app }))).await?;
