@@ -144,6 +144,8 @@ impl Link {
             }
             match wrote {
                 Err(e) if e.is::<Missing>() => Ok(Err(*e.downcast_ref::<Missing>().unwrap())),
+                // A step under an epoch newer than it was given: its node finds that epoch's entry, and hands it the key.
+                Err(e) if e.is::<one::db::Ahead>() => Ok(Err(Missing { epoch: e.downcast_ref::<one::db::Ahead>().unwrap().epoch })),
                 other => other.map(Ok),
             }
         })

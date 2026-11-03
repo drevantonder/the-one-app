@@ -134,7 +134,7 @@ impl Node {
         let mut keys = Vec::new();
         for (scope, app, database) in want {
             ensure!(self.with(|i| Ok(i.r.members.may_use(&me.user, scope)))?, "you may not use {scope}");
-            for (epoch, key) in self.database_keys(scope, app, database).await? {
+            for (epoch, key) in self.database_keys(scope, app, database, false).await? {
                 keys.push(crate::keys::Handed { scope: scope.to_string(), epoch, app: app.clone(), database: database.clone(), key });
             }
         }
@@ -148,15 +148,10 @@ impl Node {
         kept.get(&hash(token)).filter(|s| s.until > now_ms()).and_then(|s| s.keys.get(&(scope.to_string(), app.to_string(), database.to_string())).cloned()).unwrap_or_default()
     }
 
-    /// A scope's newest epoch as this device knows it: the members', or the newest the bucket has a copy of for the
-    /// recovery key, which is sealed first. 0 while it has none.
+    /// A scope's newest epoch: the newest an `epoch` entry that counts made, whatever the bucket holds. 0 while it has
+    /// none.
     pub(super) async fn newest_epoch(&self, scope: &Scope) -> Result<u32> {
-        let (bucket, name) = (self.bucket()?, scope.to_string());
-        let mut n = self.with(|i| Ok(i.r.members.epoch(scope)))?;
-        while crate::bucket::Bucket::get(&bucket, &crate::keys::epoch_name(&name, n + 1, "recovery")).await?.is_some() {
-            n += 1;
-        }
-        Ok(n)
+        self.with(|i| Ok(i.r.members.epoch(scope)))
     }
 
     /// The keys a token caller needs for `want`'s databases, (scope, app, database) each, that it wasn't handed: every
@@ -171,7 +166,7 @@ impl Node {
             let newest = self.newest_epoch(scope).await?.max(1);
             let prefix = format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()));
             let oldest = match crate::bucket::Bucket::get(&bucket, &crate::db::newest_name(&prefix)).await? {
-                Some(o) => match crate::db::newest(&o.bytes)? {
+                Some(o) => match crate::db::newest(&o.bytes) {
                     (_, 0, _) => 1,
                     (_, _, epoch) => epoch.clamp(1, newest),
                 },
@@ -199,10 +194,13 @@ impl Node {
         self.needs(me, &[(scope.clone(), app, database)]).await?;
         let keys = self.handed(me, scope, app, database);
         let db = match self.database(scope, app, database, schema, Some((keys, &bucket))).await {
-            Err(err) => match err.downcast::<crate::db::Missing>() {
-                Ok(m) => return Err(self.need(vec![Need { scope: scope.to_string(), epoch: m.epoch, app: app.into(), database: database.into() }]).into()),
-                Err(err) => return Err(err),
-            },
+            Err(err) => {
+                let epoch = err.downcast_ref::<crate::db::Missing>().map(|m| m.epoch).or(err.downcast_ref::<crate::db::Ahead>().map(|a| a.epoch));
+                return match epoch {
+                    Some(epoch) => Err(self.need(vec![Need { scope: scope.to_string(), epoch, app: app.into(), database: database.into() }]).into()),
+                    None => Err(err),
+                };
+            }
             Ok(db) => db,
         };
         let until = self.0.sessions.kept.lock().unwrap().get(&hash(token)).map(|s| s.until).unwrap_or(0);

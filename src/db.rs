@@ -14,6 +14,10 @@
 //! Along a database's positions epochs never go down: a step under an epoch lower than the step before it, or that
 //! doesn't open with the key of the epoch it names, is skipped by every reader, its position taken, and the next write
 //! takes the following one. A writer writes under the newest epoch it was given, at once; the next copy is under it.
+//! A step under an epoch above every key a reader was given stops it (`Ahead`): its caller looks for that epoch's
+//! entry, which is written before anything is sealed under it, and if there's none, the step is junk, passed over.
+//! The newest hint is only a hint, and a copy is used only if it opens and its epoch is at least its step's: otherwise
+//! a reader reads the steps from the start.
 //!
 //! No clock, disk or network: the bucket is all it reads and writes, so it runs wherever SQLite does. A database's key
 //! in each epoch comes from its app's key in that epoch (`app_key`, `kernel::database_key`).
@@ -50,6 +54,54 @@ impl std::fmt::Display for Missing {
 
 impl std::error::Error for Missing {}
 
+/// What a read stopped at: step `at`, under an epoch above every key it was given, which is either a new epoch's (its
+/// entry says so) or junk (none does).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ahead {
+    pub epoch: u32,
+    pub at: u64,
+}
+
+impl std::fmt::Display for Ahead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "step {} is under epoch {}, newer than any key it was given", self.at, self.epoch)
+    }
+}
+
+impl std::error::Error for Ahead {}
+
+/// The most epochs a scope looks for sealed to a device that knows none of its entries yet.
+pub const EPOCHS_MAX: u32 = 10_000;
+
+/// Where a reader starts: the copy the newest hint names, as (its position, its epoch, its bytes), if it holds: it's
+/// there, its epoch is one `keys` reaches, at least that of the step at its position, and it opens. Otherwise none, and
+/// the reader reads every step. Fails with `Missing` for a copy under an epoch below the newest it was given but not given.
+pub async fn start(bucket: &impl Bucket, prefix: &str, keys: &Keys) -> Result<Option<(u64, u32, Vec<u8>)>> {
+    let copy = match bucket.get(&newest_name(prefix)).await? {
+        Some(o) => newest(&o.bytes).1,
+        None => 0,
+    };
+    if copy == 0 {
+        return Ok(None);
+    }
+    let name = copy_name(prefix, copy);
+    let Some(sealed) = bucket.get(&name).await? else { return Ok(None) };
+    let Ok(epoch) = crate::keys::epoch_of(&sealed.bytes) else { return Ok(None) };
+    let step = bucket.get(&step_name(prefix, copy)).await?.and_then(|s| crate::keys::epoch_of(&s.bytes).ok());
+    if epoch > keys.keys().next_back().copied().unwrap_or(0) || step.is_none_or(|s| s > epoch) {
+        tracing::debug!("{name} isn't a copy to start from: reading every step");
+        return Ok(None);
+    }
+    let key = keys.get(&epoch).ok_or(Missing { epoch })?;
+    match crate::keys::open(key, &name, &sealed.bytes) {
+        Ok(bytes) => Ok(Some((copy, epoch, bytes))),
+        Err(err) => {
+            tracing::debug!("{name}: {err:#}: reading every step");
+            Ok(None)
+        }
+    }
+}
+
 /// An app's key in epoch `n` of a scope, from its copy in the bucket (`keys::app_key_name`), sealed under that epoch's
 /// key. The first to need it makes it, at random, unless `make` is false (an epoch nothing was written under yet,
 /// where a reader has nothing to open): whichever is written first is the key.
@@ -84,37 +136,34 @@ pub struct Db {
     copy_epoch: u32,
     /// The epochs of what it read: the copy it started from and the steps it applied.
     used: BTreeSet<u32>,
+    /// Positions its caller found hold junk under an epoch no entry made (`Ahead`), passed over.
+    junk: BTreeSet<u64>,
 }
 
 impl Db {
-    /// Reads a database as its newest steps leave it, with its keys by epoch: empty if it has none. Fails with
-    /// `Missing` at a copy or step under an epoch whose key it wasn't given.
+    /// Reads a database as its newest steps leave it, with its keys by epoch: empty if it has none. Fails with `Missing` at a copy or step under an epoch whose key it wasn't given, and with
+    /// `Ahead` at a step under an epoch above them all.
     pub async fn open(bucket: &impl Bucket, prefix: &str, keys: Keys) -> Result<Db> {
-        let (at, copy, _) = match bucket.get(&newest_name(prefix)).await? {
-            Some(o) => newest(&o.bytes)?,
-            None => (0, 0, 0),
-        };
-        let mut db = Db { prefix: prefix.into(), keys, conn: Connection::open_in_memory()?, at: 0, copy: 0, epoch: 0, copy_epoch: 0, used: BTreeSet::new() };
-        if copy > 0 {
-            let name = copy_name(prefix, copy);
-            let sealed = bucket.get(&name).await?.with_context(|| format!("{name} is missing"))?;
-            let epoch = crate::keys::epoch_of(&sealed.bytes)?;
-            let key = db.keys.get(&epoch).ok_or(Missing { epoch })?;
-            // A copy that doesn't open is someone's junk: the steps say the same.
-            match crate::keys::open(key, &name, &sealed.bytes) {
-                Ok(bytes) => {
-                    db.conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
-                    (db.at, db.copy, db.epoch, db.copy_epoch) = (copy, copy, epoch, epoch);
-                    db.used.insert(epoch);
-                }
-                Err(err) => tracing::debug!("{name}: {err:#}"),
-            }
+        Db::open_passing(bucket, prefix, keys, BTreeSet::new()).await
+    }
+
+    /// `open`, passing over the steps at `junk`.
+    pub async fn open_passing(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>) -> Result<Db> {
+        let mut db = Db { prefix: prefix.into(), keys, conn: Connection::open_in_memory()?, at: 0, copy: 0, epoch: 0, copy_epoch: 0, used: BTreeSet::new(), junk };
+        if let Some((copy, epoch, bytes)) = start(bucket, prefix, &db.keys).await? {
+            db.conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
+            (db.at, db.copy, db.epoch, db.copy_epoch) = (copy, copy, epoch, epoch);
+            db.used.insert(epoch);
         }
         // After the copy, which SQLite reads in by attaching it.
         confine(&mut db.conn)?;
         db.catch_up(bucket).await?;
-        ensure!(db.at >= at, "{prefix}/newest says step {at} was written, but it's missing");
         Ok(db)
+    }
+
+    /// Passes over step `at`, under an epoch no entry made, as every reader does.
+    pub fn pass_over(&mut self, at: u64) {
+        self.junk.insert(at);
     }
 
     pub fn at(&self) -> u64 {
@@ -139,9 +188,10 @@ impl Db {
         }
     }
 
-    /// Whether `keys` open everything it read, each the same: so a call given them may use it as it is.
+    /// Whether `keys` open everything it read, and are the same as its own for every epoch both have: so a call given
+    /// them may use it as it is.
     pub fn opens_for(&self, keys: &Keys) -> bool {
-        self.used.iter().all(|e| keys.get(e).is_some_and(|k| self.keys.get(e) == Some(k)))
+        self.used.iter().all(|e| keys.contains_key(e)) && keys.iter().all(|(e, k)| self.keys.get(e).is_none_or(|mine| mine == k))
     }
 
     pub fn prefix(&self) -> &str {
@@ -154,7 +204,11 @@ impl Db {
         loop {
             let name = self.step(self.at + 1);
             let Some(o) = bucket.get(&name).await? else { break };
-            if let Some((epoch, step)) = self.unseal(&name, &o.bytes)? {
+            if self.junk.contains(&(self.at + 1)) {
+                self.at += 1;
+                continue;
+            }
+            if let Some((epoch, step)) = self.unseal(self.at + 1, &name, &o.bytes)? {
                 self.apply(&step)?;
                 self.epoch = epoch;
                 self.used.insert(epoch);
@@ -164,13 +218,16 @@ impl Db {
         Ok(self.at > from)
     }
 
-    /// A step, opened: None for one every reader passes over, under an epoch lower than the step before it or that
+    /// Step `at`, opened: None for one every reader passes over, under an epoch lower than the step before it or that
     /// doesn't open with the key of the epoch it names.
-    fn unseal(&self, name: &str, sealed: &[u8]) -> Result<Option<(u32, Vec<u8>)>> {
+    fn unseal(&self, at: u64, name: &str, sealed: &[u8]) -> Result<Option<(u32, Vec<u8>)>> {
         let Ok(epoch) = crate::keys::epoch_of(sealed) else { return Ok(None) };
         if epoch < self.epoch {
             tracing::debug!("{name} is under epoch {epoch}, after {}: passed over", self.epoch);
             return Ok(None);
+        }
+        if self.keys.keys().next_back().is_none_or(|newest| epoch > *newest) {
+            bail!(Ahead { epoch, at });
         }
         let key = self.keys.get(&epoch).ok_or(Missing { epoch })?;
         match crate::keys::open(key, name, sealed) {
@@ -361,11 +418,18 @@ pub async fn hint(bucket: &impl Bucket, prefix: &str, at: u64, copy: u64, epoch:
     let name = newest_name(prefix);
     for _ in 0..TRIES {
         let current = bucket.get(&name).await?;
-        let said = current.as_ref().map(|o| newest(&o.bytes)).transpose()?;
+        let mut said = current.as_ref().map(|o| newest(&o.bytes));
+        // One that says a step is written that isn't is someone's junk, not raised on.
+        if let Some((was_at, _, _)) = said
+            && was_at > at
+            && bucket.get(&step_name(prefix, was_at)).await?.is_none()
+        {
+            said = Some((0, 0, 0));
+        }
         let (was_at, was_copy, was_epoch) = said.unwrap_or((0, 0, 0));
         let epoch = if copy >= was_copy { epoch } else { was_epoch };
         let (at, copy) = (at.max(was_at), copy.max(was_copy));
-        if said == Some((at, copy, epoch)) {
+        if current.as_ref().map(|o| newest(&o.bytes)) == Some((at, copy, epoch)) {
             return Ok(());
         }
         if bucket.replace(&name, &serde_json::to_vec(&json!({ "at": at, "copy": copy, "epoch": epoch }))?, current.as_ref().map(|o| o.tag.as_str())).await? {
@@ -375,10 +439,11 @@ pub async fn hint(bucket: &impl Bucket, prefix: &str, at: u64, copy: u64, epoch:
     Ok(())
 }
 
-/// What a database's newest hint says: (its last step, its newest copy, the epoch that copy is sealed under).
-pub fn newest(bytes: &[u8]) -> Result<(u64, u64, u32)> {
-    let v: Value = serde_json::from_slice(bytes)?;
-    Ok((v["at"].as_u64().unwrap_or(0), v["copy"].as_u64().unwrap_or(0), v["epoch"].as_u64().unwrap_or(0) as u32))
+/// What a database's newest hint says: (its last step, its newest copy, the epoch that copy is sealed under). One
+/// that isn't a hint says nothing.
+pub fn newest(bytes: &[u8]) -> (u64, u64, u32) {
+    let v: Value = serde_json::from_slice(bytes).unwrap_or_default();
+    (v["at"].as_u64().unwrap_or(0), v["copy"].as_u64().unwrap_or(0), u32::try_from(v["epoch"].as_u64().unwrap_or(0)).unwrap_or(0))
 }
 
 /// Keeps an app's SQL inside its own database: every statement it gives (queries, writes and schema changes, which run on
@@ -614,7 +679,7 @@ mod tests {
             assert_eq!(notes(&new), ["before", "after"]);
 
             // A writer still on epoch 1 can't read past epoch 2, so writes nothing after it.
-            assert_eq!(old.write(&bucket, |_| Ok(())).await.unwrap_err().downcast::<Missing>().unwrap(), Missing { epoch: 2 });
+            assert_eq!(old.write(&bucket, |_| Ok(())).await.unwrap_err().downcast::<Ahead>().unwrap(), Ahead { epoch: 2, at: 3 });
             // A step under epoch 1 after it anyway (a device that didn't read first) is passed over, its position taken.
             let stale = {
                 let mut scratch = Db::open(&Memory::default(), "q", keys(&[(1, one)])).await.unwrap();
@@ -638,7 +703,7 @@ mod tests {
             for n in 0..COPY_EVERY {
                 note(&mut new, &bucket, &format!("{n}")).await;
             }
-            let (_, copy, epoch) = newest(&bucket.get(&newest_name("p")).await.unwrap().unwrap().bytes).unwrap();
+            let (_, copy, epoch) = newest(&bucket.get(&newest_name("p")).await.unwrap().unwrap().bytes);
             assert!(copy > 0 && epoch == 2, "the routine copy is under the newest epoch");
             let two_only = Db::open(&bucket, "p", keys(&[(2, two)])).await.unwrap();
             assert_eq!(notes(&two_only)[..3], ["before", "after", "later"]);

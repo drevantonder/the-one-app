@@ -84,6 +84,8 @@ pub struct Machine {
     pub passkey: Option<String>,
     /// For a service endpoint, the service it offers (`whatsapp`): what calls naming it reach.
     pub service: Option<String>,
+    /// Who listed it: its person, from one of their own devices, or an admin.
+    pub by: String,
     pub removed: bool,
 }
 
@@ -155,11 +157,34 @@ pub struct Members {
     pub devices_at: u64,
     /// Each scope's current epoch, by its newest `epoch` entry that counts (src/keys.rs).
     pub epochs: BTreeMap<Scope, Epoch>,
-    /// The hash each counting `epoch` entry gave its key, by scope and number: what a key from the bucket must match.
+    /// Each epoch's hash (`keys::epoch_hash`), by scope and number, as its `epoch` entry (or the genesis, for
+    /// `global`'s first) named it: a device takes a key from the bucket as epoch n only if it has this hash.
     pub epoch_hashes: BTreeMap<(Scope, u32), String>,
     /// Standing work: until when (milliseconds) each endpoint may hold an app's keys in a scope, by (endpoint, scope,
     /// app), as the latest `grant` of each said; one with `until: 0` is gone.
     pub grants: BTreeMap<(Key, Scope, String), Grant>,
+    /// Where each endpoint's entries stop counting, by (endpoint, log): the first seq that doesn't, wherever it sorts.
+    /// A removed device's in `global` after the last its remover had seen (`remove`'s `seq`), and a device's in a log
+    /// it forked from the fork on (`Store::forks`).
+    pub cuts: Cuts,
+    /// Devices that forked `global` (two entries at one seq): removed once it's replayed.
+    forked: BTreeSet<Key>,
+}
+
+/// Where endpoints' entries stop counting: (endpoint, log) → the first seq that doesn't.
+pub type Cuts = BTreeMap<(Key, String), u32>;
+
+/// Adds `more` to `cuts`, each the lower where both have one: → whether that changed anything.
+fn merge(cuts: &mut Cuts, more: &Cuts) -> bool {
+    let mut changed = false;
+    for (k, seq) in more {
+        let at = cuts.entry(k.clone()).or_insert(u32::MAX);
+        if *seq < *at {
+            *at = *seq;
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// A grant of standing work: who gave it, and until when.
@@ -169,19 +194,19 @@ pub struct Grant {
     pub until: u64,
 }
 
-/// A scope's epoch: its number, and the endpoints it was first sealed to (`keys::epoch_name`), besides the recovery key.
+/// A scope's epoch: its number, the endpoints it was first sealed to (`keys::epoch_name`), besides the recovery key,
+/// and its key's hash.
 /// A new one starts only when a person or device is removed; one added is sealed the current one by the device that
 /// approves it, so who may open a scope comes from roles and devices, not from `to`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Epoch {
     pub n: u32,
     pub to: Vec<Key>,
-    /// `keys::epoch_hash` of its key, so a device takes from the bucket only the key the entry made.
-    pub hash: Option<String>,
+    pub hash: String,
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
-const SCOPE_ONLY: &[&str] = &["schedule", "vault-request", "keep", "forget", "backup-key"];
+const SCOPE_ONLY: &[&str] = &["schedule", "vault-request", "keep", "forget"];
 
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
@@ -193,13 +218,42 @@ impl Members {
         Members { root, ..Default::default() }
     }
 
-    /// Replays `global`'s node entries, sorted in replay order.
-    pub fn replay(root: Option<Hash>, member_entries: &[Entry]) -> Members {
-        let mut m = Members::new(root);
+    /// Replays `global`'s node entries, sorted in replay order, with the forks `Store::forks` found. A removal's cut
+    /// applies to entries that sort before it too, so where one stops entries that counted, it's replayed again with the
+    /// cuts known from the start, until they don't change.
+    pub fn replay(root: Option<Hash>, member_entries: &[Entry], forks: &Cuts) -> Members {
+        let forked: BTreeSet<Key> = forks.keys().filter(|(_, log)| log == "global").map(|(k, _)| *k).collect();
+        let mut known = forks.clone();
+        loop {
+            let m = Members::replay_with(root, member_entries, &known, &forked);
+            if !merge(&mut known, &m.cuts) {
+                return m;
+            }
+        }
+    }
+
+    /// Replays with cuts known from the start.
+    fn replay_with(root: Option<Hash>, member_entries: &[Entry], cuts: &Cuts, forked: &BTreeSet<Key>) -> Members {
+        let mut m = Members::with_cuts(root, cuts, forked);
         for e in member_entries {
             m.step(e);
         }
+        m.end();
         m
+    }
+
+    /// Members before any entry, with the cuts a full replay found, and the devices that forked `global`.
+    fn with_cuts(root: Option<Hash>, cuts: &Cuts, forked: &BTreeSet<Key>) -> Members {
+        Members { root, cuts: cuts.clone(), forked: forked.clone(), ..Default::default() }
+    }
+
+    /// Once every member entry is replayed: a device that forked `global` is removed.
+    pub fn end(&mut self) {
+        for key in &self.forked {
+            if let Some(m) = self.machines.get_mut(key) {
+                m.removed = true;
+            }
+        }
     }
 
     /// Applies one of `global`'s node entries, if it counts. Returns whether it did.
@@ -209,6 +263,16 @@ impl Members {
             tracing::debug!("{} entry {} doesn't count", e.content.kind, e.id());
         }
         counted
+    }
+
+    /// Whether an entry is at or after where its device's entries in its log stop counting.
+    pub fn cut(&self, e: &Entry) -> bool {
+        self.cuts.get(&(e.author(), e.log().to_string())).is_some_and(|c| e.seq() >= *c)
+    }
+
+    /// The hash of a scope's epoch `n`, if an entry that counts made it.
+    pub fn epoch_hash(&self, scope: &Scope, n: u32) -> Option<&str> {
+        self.epoch_hashes.get(&(scope.clone(), n)).map(String::as_str)
     }
 
     /// A scope's current epoch: 0 while it has none yet.
@@ -338,13 +402,14 @@ impl Members {
         self.machine(key).is_some_and(|m| m.user == user) || self.is_admin(user)
     }
 
-    /// Whether a scope's calls run on `endpoint`: a compute endpoint its owners trust, which is one listed as a device
-    /// of the scope's person, for a user's own scope; of an admin of the group or of the install, for a group's; of an
-    /// admin of the install, for `global`.
+    /// Whether a scope's calls run on `endpoint`: a compute endpoint its owners trust, which is one of the scope's
+    /// person's that they listed from one of their own devices, for a user's own scope (one an admin listed for them
+    /// runs only what that admin's could); of an admin of the group or of the install, for a group's; of an admin of
+    /// the install, for `global`.
     pub fn runs_for(&self, endpoint: &Key, scope: &Scope) -> bool {
         let Some(m) = self.compute(endpoint) else { return false };
         match scope {
-            Scope::User(u) => m.user == *u,
+            Scope::User(u) => m.user == *u && m.by == *u,
             Scope::Group(g) => self.manages(&m.user, g),
             Scope::Global => self.is_admin(&m.user),
         }
@@ -369,7 +434,7 @@ impl Members {
     /// checked as it's applied (`apply`), or, for one in a user or group scope, by `apply_in_scope`.
     pub fn counts(&self, e: &Entry) -> bool {
         let scope = e.scope();
-        if !self.may_use(e.user(), &scope) || e.epoch() > self.epoch(&scope) {
+        if !self.may_use(e.user(), &scope) || e.epoch() > self.epoch(&scope) || self.cut(e) {
             return false;
         }
         let author = e.author();
@@ -398,16 +463,28 @@ impl Members {
                 let device = &data["device"];
                 let machine = listed(device, &user)?;
                 ensure!(machine.key == author && machine.is(Kind::Client), "genesis is signed by the first device it lists, a client");
+                let hash = epoch_hash_of(&data["epoch"])?;
                 self.name = text("name")?;
                 self.recovery = Some(key_of("recovery")?);
                 self.users.insert(user.clone(), User { id: user.clone(), name: text("user_name")?, role: Role::Admin, removed: false });
                 self.machines.insert(author, machine);
                 self.devices_at = e.time();
+                // `global`'s first epoch, made with the install, before anything is sealed under it.
+                self.epoch_hashes.insert((Scope::Global, 1), hash.clone());
+                self.epochs.insert(Scope::Global, Epoch { n: 1, to: vec![author], hash });
             }
             "device" => {
                 let user = id_of("user")?;
-                let machine = listed(data, &user)?;
-                ensure!(!self.machines.contains_key(&machine.key), "that key is listed already");
+                let mut machine = listed(data, &user)?;
+                machine.by = w.clone();
+                // A machine an admin listed for someone is listed again by that person's own device to be theirs: then it
+                // runs their own scope too (`runs_for`).
+                if let Some(was) = self.machines.get(&machine.key) {
+                    ensure!(!was.removed && was.user == user && w == user && was.by != user && was.seal == machine.seal, "that key is listed already");
+                    self.machines.insert(machine.key, machine);
+                    self.devices_at = self.devices_at.max(e.time());
+                    return Ok(());
+                }
                 match self.users.get(&user) {
                     Some(u) => ensure!(!u.removed && (w == user || (self.is_admin(&w) && !machine.is(Kind::Client))), "only a person's own device lists their devices; an admin's lists compute and services"),
                     None => {
@@ -433,6 +510,13 @@ impl Members {
                     let key = key_of("key")?;
                     ensure!(self.machine(&key).is_some(), "no such key");
                     ensure!(self.looks_after(&w, &key), "only its person or an admin removes a device");
+                    // The last of its entries in `global` its remover had seen: those after never count, wherever they sort.
+                    let first_not = match &data["seq"] {
+                        Value::Null => 0,
+                        seq => u32::try_from(seq.as_u64().context("seq is the device's last seq in global, or null")?)?.checked_add(1).context("seq is too big")?,
+                    };
+                    ensure!(data.get("seq").is_some(), "a device's removal says the last of its entries its remover had seen (seq)");
+                    merge(&mut self.cuts, &BTreeMap::from([((key, "global".to_string()), first_not)]));
                     self.machines.get_mut(&key).unwrap().removed = true;
                 }
                 self.devices_at = self.devices_at.max(e.time());
@@ -449,11 +533,8 @@ impl Members {
                 ensure!(n == self.epoch(&scope) as u64 + 1, "an epoch follows the one before it");
                 let to = data["to"].as_array().context("no to")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<Vec<_>>>()?;
                 ensure!(to.iter().all(|k| self.machine(k).is_some()), "an epoch is sealed only to the install's endpoints");
-                let hash = data["hash"].as_str().map(str::to_string);
-                ensure!(hash.as_ref().is_none_or(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit())), "an epoch's hash is 64 hex characters");
-                if let Some(hash) = &hash {
-                    self.epoch_hashes.insert((scope.clone(), n as u32), hash.clone());
-                }
+                let hash = epoch_hash_of(&data["hash"])?;
+                self.epoch_hashes.insert((scope.clone(), n as u32), hash.clone());
                 self.epochs.insert(scope, Epoch { n: n as u32, to, hash });
             }
             "grant" => {
@@ -595,6 +676,13 @@ impl Members {
     }
 }
 
+/// The `hash` an `epoch` entry (or `epoch`, the genesis) names its key by: `keys::epoch_hash`, 64 hex characters.
+fn epoch_hash_of(hash: &Value) -> Result<String> {
+    let hash = hash.as_str().context("an epoch names its key's hash")?;
+    ensure!(hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "an epoch's hash is 64 hex characters");
+    Ok(hash.to_string())
+}
+
 /// An endpoint as a `device` entry (or the genesis's `device`) lists it, for `user`.
 fn listed(data: &Value, user: &str) -> Result<Machine> {
     let text = |key: &str| data[key].as_str().with_context(|| format!("no {key}"));
@@ -613,6 +701,7 @@ fn listed(data: &Value, user: &str) -> Result<Machine> {
         roles,
         passkey: data["passkey"].as_str().map(str::to_string),
         service,
+        by: user.to_string(),
         removed: false,
     })
 }
@@ -649,8 +738,6 @@ pub struct ScopeState {
     /// In a user's own scope: how they arranged each page, by page (`user`, `group:<id>` or `global`):
     /// `{ items, hidden }`, as their latest `arrange` of it said.
     pub arrangements: BTreeMap<String, Value>,
-    /// The key this scope's backups are encrypted with: the first `backup-key` written here.
-    pub backup_key: Option<[u8; 32]>,
 }
 
 /// An app's or agent's request for a person's item that an app may use: the fields it wants (name, and whether
@@ -744,14 +831,11 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let on = data["on"].as_bool().context("on or off?")?;
             state.switches.insert((app, name), (on, w.to_string(), e.time()));
         }
-        "backup-key" => {
-            ensure!(state.backup_key.is_none(), "the scope has its backup key");
-            let key = unhex(e.content.data["key"].as_str().context("no key")?)?;
-            state.backup_key = Some(key);
-        }
         // A blob the scope keeps, which its `blobs` names.
         "keep" => {}
+        // Only someone who may write there says a blob is no longer needed: its data goes from the bucket.
         "forget" => {
+            ensure!(m.may_use(w, &scope), "not allowed to forget blobs there");
             let blob = e.content.data["blob"].as_str().filter(|b| b.len() == 64 && b.bytes().all(|c| c.is_ascii_hexdigit())).context("no blob")?;
             state.forgotten.insert(blob.to_string());
         }
@@ -820,13 +904,14 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
 /// Replays a scope: `global`'s member entries and the scope's own, merged in replay order (both sorted). Calls `f`
 /// with each of the scope's entries that counts, the members as they were then, and the scope's node state.
 /// For `global`, pass its entries as both.
-pub fn replay(root: Option<Hash>, member_entries: &[Entry], scope_entries: &[Entry], f: impl FnMut(&Entry, &Members, &ScopeState)) -> (Members, ScopeState) {
-    replay_from(root, member_entries, scope_entries, ScopeState::default(), f)
+/// `known` are the members a full replay of `global` made, whose cuts (and forks) apply from the start.
+pub fn replay(known: &Members, member_entries: &[Entry], scope_entries: &[Entry], f: impl FnMut(&Entry, &Members, &ScopeState)) -> (Members, ScopeState) {
+    replay_from(known, member_entries, scope_entries, ScopeState::default(), f)
 }
 
 /// Replays more of a scope's entries onto `state`, what its earlier ones added up to.
-pub fn replay_from(root: Option<Hash>, member_entries: &[Entry], scope_entries: &[Entry], mut state: ScopeState, mut f: impl FnMut(&Entry, &Members, &ScopeState)) -> (Members, ScopeState) {
-    let mut m = Members::new(root);
+pub fn replay_from(known: &Members, member_entries: &[Entry], scope_entries: &[Entry], mut state: ScopeState, mut f: impl FnMut(&Entry, &Members, &ScopeState)) -> (Members, ScopeState) {
+    let mut m = Members::with_cuts(known.root, &known.cuts, &known.forked);
     let mut members = member_entries.iter().peekable();
     for e in scope_entries {
         let order = e.order();
@@ -851,6 +936,7 @@ pub fn replay_from(root: Option<Hash>, member_entries: &[Entry], scope_entries: 
     for me in members {
         m.step(me);
     }
+    m.end();
     (m, state)
 }
 
@@ -860,10 +946,11 @@ pub fn node(kind: &str, data: Value) -> Content {
     Content::new(APP, kind, data)
 }
 
-/// The install's first entry: its name, its first person, the first device (signing it) and the recovery key.
-pub fn genesis(name: &str, user: &str, user_name: &str, device: &crate::keys::Endpoint, device_name: &str, roles: &[Kind], recovery: &Key) -> Content {
+/// The install's first entry: its name, its first person, the first device (signing it), the recovery key, and the
+/// hash of `global`'s first epoch (`keys::epoch_hash`), made with it.
+pub fn genesis(name: &str, user: &str, user_name: &str, device: &crate::keys::Endpoint, device_name: &str, roles: &[Kind], recovery: &Key, epoch: &str) -> Content {
     let device = json!({ "key": hex(&device.key), "seal": hex(&device.seal), "name": device_name, "roles": roles });
-    node("genesis", json!({ "name": name, "user": user, "user_name": user_name, "device": device, "recovery": hex(recovery) }))
+    node("genesis", json!({ "name": name, "user": user, "user_name": user_name, "device": device, "recovery": hex(recovery), "epoch": epoch }))
 }
 
 /// Lists an endpoint as `user`'s, and with `new_user` lets them in, by an admin's device.
@@ -996,16 +1083,17 @@ mod tests {
     const ANDRE: &str = "a000000000000001";
     const BOB: &str = "b000000000000002";
     const BOTH: &[Kind] = &[Kind::Client, Kind::Compute];
+    const H: &str = "e";
 
     fn setup() -> (Dev, Vec<Entry>) {
         let mut mac = Dev::new(1);
-        let g = mac.write("global", ANDRE, genesis("Home", ANDRE, "Andre", &mac.endpoint(), "mac", BOTH, &[7; 32]), &[]);
+        let g = mac.write("global", ANDRE, genesis("Home", ANDRE, "Andre", &mac.endpoint(), "mac", BOTH, &[7; 32], &H.repeat(64)), &[]);
         (mac, vec![g])
     }
 
     fn members(entries: &[Entry]) -> Members {
         let sorted = causal(entries.to_vec(), &Default::default());
-        Members::replay(Some(entries[0].hash()), &sorted)
+        Members::replay(Some(entries[0].hash()), &sorted, &Cuts::new())
     }
 
     /// Writes `content` as `user` from `dev` after everything in `entries`, and keeps it there.
@@ -1018,9 +1106,9 @@ mod tests {
     #[test]
     fn only_this_installs_genesis_counts() {
         let mut other = Dev::new(2);
-        let fake = other.write("global", ANDRE, genesis("Home", ANDRE, "x", &other.endpoint(), "y", BOTH, &[7; 32]), &[]);
+        let fake = other.write("global", ANDRE, genesis("Home", ANDRE, "x", &other.endpoint(), "y", BOTH, &[7; 32], &H.repeat(64)), &[]);
         let (_, entries) = setup();
-        let m = Members::replay(Some(entries[0].hash()), &[fake]);
+        let m = Members::replay(Some(entries[0].hash()), &[fake], &Cuts::new());
         assert!(m.users.is_empty());
         let m = members(&entries);
         assert_eq!(m.users.len(), 1);
@@ -1051,38 +1139,94 @@ mod tests {
         // The compute endpoint runs Andre's scope and the install's, not Bob's.
         assert!(m.runs_for(&linux.id(), &Scope::User(ANDRE.into())) && m.runs_for(&linux.id(), &Scope::Global));
         assert!(!m.runs_for(&linux.id(), &Scope::User(BOB.into())) && !m.runs_for(&bobs.id(), &Scope::User(BOB.into())));
+        // A machine an admin lists as Bob's runs what Bob may run elsewhere, never Bob's own scope, until Bob's own
+        // device lists it.
+        let server = Dev::new(7);
+        add(&mut entries, &mut mac, ANDRE, device(&server.endpoint(), BOB, "bob's server", &[Kind::Compute], None));
+        assert!(!members(&entries).runs_for(&server.id(), &Scope::User(BOB.into())), "not by an admin's say");
+        add(&mut entries, &mut bobs, BOB, device(&server.endpoint(), BOB, "bob's server", &[Kind::Compute], None));
+        assert!(members(&entries).runs_for(&server.id(), &Scope::User(BOB.into())));
+        add(&mut entries, &mut mac, ANDRE, device(&server.endpoint(), ANDRE, "mine now", &[Kind::Compute], None));
+        assert_eq!(members(&entries).machines[&server.id()].user, BOB, "an admin can't take it back");
     }
 
     #[test]
-    fn a_removed_devices_later_entries_dont_count() {
+    fn a_removed_devices_later_entries_dont_count_wherever_they_sort() {
+        let (mut mac, mut entries) = setup();
+        let mut laptop = Dev::new(3);
+        add(&mut entries, &mut mac, ANDRE, device(&laptop.endpoint(), ANDRE, "laptop", &[Kind::Client], None));
+        let before = add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "before", "value": "1" })));
+        let read = entries.clone();
+        add(&mut entries, &mut mac, ANDRE, node("setting", json!({ "name": "busy", "value": "1" })));
+        let removed = add(&mut entries, &mut mac, ANDRE, node("remove", json!({ "key": hex(&laptop.id()), "seq": before.seq() })));
+        // The laptop, never having read its removal, writes after what it had read: it sorts before the removal.
+        let sneaky = laptop.write("global", ANDRE, node("setting", json!({ "name": "sneaky", "value": "1" })), &read);
+        entries.push(sneaky.clone());
+        add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "after", "value": "1" })));
+        let sorted = causal(entries.clone(), &Default::default());
+        let at = |h: Hash| sorted.iter().position(|e| e.hash() == h).unwrap();
+        assert!(at(sneaky.hash()) < at(removed.hash()), "it sorts before its removal");
+        let m = members(&entries);
+        assert!(m.settings.contains_key("before"), "what its remover had seen still counts");
+        assert!(!m.settings.contains_key("sneaky") && !m.settings.contains_key("after"));
+        assert!(m.machine(&laptop.id()).is_none());
+        // A removal that doesn't say what its remover had seen doesn't count.
+        let (mut mac, mut entries) = setup();
+        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(4).endpoint(), ANDRE, "phone", &[Kind::Client], None));
+        add(&mut entries, &mut mac, ANDRE, node("remove", json!({ "key": hex(&Dev::new(4).id()) })));
+        assert!(members(&entries).machine(&Dev::new(4).id()).is_some());
+    }
+
+    #[test]
+    fn a_device_that_forks_its_log_counts_no_more_from_the_fork_on_wherever_its_sides_arrive() {
         let (mut mac, mut entries) = setup();
         let mut laptop = Dev::new(3);
         add(&mut entries, &mut mac, ANDRE, device(&laptop.endpoint(), ANDRE, "laptop", &[Kind::Client], None));
         add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "before", "value": "1" })));
-        add(&mut entries, &mut mac, ANDRE, node("remove", json!({ "key": hex(&laptop.id()) })));
+        let fork_at = laptop.last.get("global").copied();
+        let one = add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "one", "value": "1" })));
+        laptop.last.insert("global".into(), fork_at.unwrap());
+        let two = add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "two", "value": "1" })));
         add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "after", "value": "1" })));
-        let m = members(&entries);
-        assert!(m.settings.contains_key("before"), "what it wrote before still counts");
-        assert!(!m.settings.contains_key("after"));
-        assert!(m.machine(&laptop.id()).is_none());
+        add(&mut entries, &mut mac, ANDRE, node("setting", json!({ "name": "mac", "value": "1" })));
+        assert_eq!(one.seq(), two.seq());
+        // Two devices that took the sides in opposite orders count the same.
+        let replayed = |list: Vec<Entry>| {
+            let store = crate::store::Store::memory().unwrap();
+            store.take(list).unwrap();
+            let member_entries: Vec<Entry> = store.scope("global").unwrap().into_iter().filter(is_member_entry).collect();
+            Members::replay(Some(entries[0].hash()), &member_entries, &store.forks().unwrap())
+        };
+        let a = replayed(entries.clone());
+        let b = replayed(entries.iter().rev().cloned().collect());
+        for m in [&a, &b] {
+            assert_eq!(m.settings.keys().collect::<Vec<_>>(), ["before", "mac"], "nothing from the fork on");
+            assert!(m.machine(&laptop.id()).is_none(), "it's removed");
+        }
     }
 
     #[test]
-    fn a_new_epoch_counts_only_from_the_scopes_admins() {
+    fn a_new_epoch_counts_only_from_the_scopes_admins_and_names_its_key() {
         let (mut mac, mut entries) = setup();
         let mut bobs = Dev::new(3);
         add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
-        let to = json!([hex(&mac.id())]);
-        add(&mut entries, &mut bobs, BOB, node("epoch", json!({ "scope": "global", "n": 1, "to": to })));
-        add(&mut entries, &mut bobs, BOB, node("epoch", json!({ "scope": format!("user:{ANDRE}"), "n": 1, "to": to })));
-        assert!(members(&entries).epochs.is_empty(), "not Bob's to start");
-        add(&mut entries, &mut mac, ANDRE, node("epoch", json!({ "scope": "global", "n": 2, "to": to })));
-        assert_eq!(members(&entries).epoch(&Scope::Global), 0, "epochs go one at a time");
-        add(&mut entries, &mut mac, ANDRE, node("epoch", json!({ "scope": "global", "n": 1, "to": to })));
-        let bob = hex(&bobs.id());
-        add(&mut entries, &mut bobs, BOB, node("epoch", json!({ "scope": format!("user:{BOB}"), "n": 1, "to": [bob] })));
         let m = members(&entries);
-        assert_eq!(m.epochs[&Scope::Global], Epoch { n: 1, to: vec![mac.id()], hash: None });
+        assert_eq!(m.epochs[&Scope::Global], Epoch { n: 1, to: vec![mac.id()], hash: H.repeat(64) }, "global's first is the genesis's");
+        let to = json!([hex(&mac.id())]);
+        let epoch = |scope: &str, n: u32, hash: Option<String>| node("epoch", json!({ "scope": scope, "n": n, "to": to, "hash": hash }));
+        add(&mut entries, &mut bobs, BOB, epoch("global", 2, Some(H.repeat(64))));
+        add(&mut entries, &mut bobs, BOB, epoch(&format!("user:{ANDRE}"), 1, Some(H.repeat(64))));
+        assert_eq!(members(&entries).epochs.len(), 1, "not Bob's to start");
+        add(&mut entries, &mut mac, ANDRE, epoch("global", 3, Some(H.repeat(64))));
+        add(&mut entries, &mut mac, ANDRE, epoch("global", 2, None));
+        assert_eq!(members(&entries).epoch(&Scope::Global), 1, "epochs go one at a time, each naming its key");
+        add(&mut entries, &mut mac, ANDRE, epoch("global", 2, Some("f".repeat(64))));
+        let bob = hex(&bobs.id());
+        add(&mut entries, &mut bobs, BOB, node("epoch", json!({ "scope": format!("user:{BOB}"), "n": 1, "to": [bob], "hash": H.repeat(64) })));
+        let m = members(&entries);
+        assert_eq!(m.epoch(&Scope::Global), 2);
+        assert_eq!(m.epoch_hash(&Scope::Global, 2), Some("f".repeat(64).as_str()));
+        assert_eq!(m.epoch_hash(&Scope::Global, 1), Some(H.repeat(64).as_str()), "each epoch's hash is kept");
         assert_eq!(m.epoch(&Scope::User(BOB.into())), 1, "a person's own scope is theirs");
         assert_eq!(m.epoch(&Scope::User(ANDRE.into())), 0);
     }

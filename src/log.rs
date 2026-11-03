@@ -2,7 +2,8 @@
 //! write is a step at the first free position, a pack of its entries, sealed under the scope's newest epoch; and a
 //! newest hint and now and then a copy of every entry in the steps before it, so a node that holds nothing (the
 //! serverless node) reads one copy and the few steps after it, not every step. As in a database, a step under an
-//! epoch lower than the step before it, or that doesn't open, is passed over.
+//! epoch lower than the step before it, or that doesn't open, is passed over, one under an epoch above every key the
+//! reader has stops it, and a copy is used only if it holds (`db::start`).
 //!
 //! ```text
 //! <prefix>/newest            {"at": n, "copy": m, "epoch": e}, as a database's
@@ -17,8 +18,8 @@ use std::collections::BTreeSet;
 use anyhow::{Context, Result};
 
 use crate::bucket::Bucket;
-use crate::db::{COPY_EVERY, Keys, Missing, copy_name, newest, newest_name, step_name};
-use crate::entry::{Entry, Key, pack, unpack};
+use crate::db::{Ahead, COPY_EVERY, Keys, Missing, copy_name, newest, newest_name, step_name};
+use crate::entry::{Entry, pack, unpack};
 
 /// Where a scope's entries are in the bucket: the node's (`members::APP`) database `log`.
 pub fn prefix(scope: &str) -> String {
@@ -34,70 +35,86 @@ pub fn seal(keys: &Keys, name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(crate::keys::seal(*epoch, key, name, bytes))
 }
 
-/// The entries in the steps after `from` of `log`'s entries at `prefix`: (the last step there, the entries). A step
-/// that doesn't open, is under an epoch lower than the one before it, or holds another scope's entries, is passed
-/// over; one under an epoch `keys` lacks stops it with `Missing`.
-pub async fn read(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str, from: u64) -> Result<(u64, Vec<Entry>)> {
-    // The epoch of the step read last, which those after it may not go below.
-    let mut floor = 0;
-    if from > 0
-        && let Some(o) = bucket.get(&step_name(prefix, from)).await?
-    {
-        floor = step(keys, &step_name(prefix, from), &o.bytes, log, &mut 0)?.map_or(0, |(epoch, _)| epoch);
-    }
-    read_from(bucket, keys, prefix, log, from, &mut floor).await
+/// What reading a log's steps came to.
+#[derive(Debug, Default)]
+pub struct Read {
+    /// The last step read or passed over.
+    pub at: u64,
+    pub entries: Vec<Entry>,
+    /// The epoch of the last step read, which those after it may not go below.
+    pub floor: u32,
+    /// Where it stopped, before the end: a step under an epoch above every key it was given (`db::Ahead`).
+    pub ahead: Option<Ahead>,
 }
 
-async fn read_from(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str, from: u64, floor: &mut u32) -> Result<(u64, Vec<Entry>)> {
-    let (mut at, mut entries) = (from, Vec::new());
-    while let Some(o) = bucket.get(&step_name(prefix, at + 1)).await? {
-        if let Some((_, list)) = step(keys, &step_name(prefix, at + 1), &o.bytes, log, floor)? {
-            entries.extend(list);
+/// The entries in the steps after `from` of `log`'s entries at `prefix`, from `floor`, the epoch of the last step
+/// read before. A step that doesn't open, is under an epoch lower than the one before it, or holds another scope's
+/// entries, is passed over; one under an epoch above every key in `keys` stops it there (`Read::ahead`); one under an
+/// epoch below that `keys` lacks fails with `Missing`.
+pub async fn read(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str, from: u64, floor: u32) -> Result<Read> {
+    let mut read = Read { at: from, floor, ..Default::default() };
+    while let Some(o) = bucket.get(&step_name(prefix, read.at + 1)).await? {
+        match step(keys, &step_name(prefix, read.at + 1), &o.bytes, log, read.floor)? {
+            Step::Took(epoch, list) => {
+                read.entries.extend(list);
+                read.floor = epoch;
+            }
+            Step::Passed => {}
+            Step::Ahead(epoch) => {
+                read.ahead = Some(Ahead { epoch, at: read.at + 1 });
+                break;
+            }
         }
-        at += 1;
+        read.at += 1;
     }
-    Ok((at, entries))
+    Ok(read)
 }
 
-/// Every one of `log`'s entries: its newest copy's and those in the steps after it, each once. → (the last step, the
-/// entries).
-pub async fn open(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str) -> Result<(u64, Vec<Entry>)> {
-    let copy = match bucket.get(&newest_name(prefix)).await? {
-        Some(o) => newest(&o.bytes)?.1,
-        None => 0,
+/// Every one of `log`'s entries: its newest copy's, if it holds (`db::start`), and those in the steps after it, each
+/// once.
+pub async fn open(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str) -> Result<Read> {
+    let copied = match crate::db::start(bucket, prefix, keys).await? {
+        Some((copy, epoch, bytes)) => match unpack(&bytes) {
+            Ok(list) if list.iter().all(|e| e.log() == log) => Some((copy, epoch, list)),
+            _ => None,
+        },
+        None => None,
     };
-    let (mut entries, mut floor) = (Vec::new(), 0);
-    if copy > 0 {
-        let name = copy_name(prefix, copy);
-        let o = bucket.get(&name).await?.with_context(|| format!("{name} is missing"))?;
-        entries = step(keys, &name, &o.bytes, log, &mut floor)?.map(|(_, list)| list).unwrap_or_default();
-    }
-    let (at, after) = read_from(bucket, keys, prefix, log, copy, &mut floor).await?;
-    let mut seen: BTreeSet<(Key, u32)> = entries.iter().map(|e| (e.author(), e.seq())).collect();
-    entries.extend(after.into_iter().filter(|e| seen.insert((e.author(), e.seq()))));
-    Ok((at, entries))
+    let (copy, floor, entries) = copied.unwrap_or_default();
+    let mut read = read(bucket, keys, prefix, log, copy, floor).await?;
+    let mut seen: BTreeSet<crate::entry::Hash> = entries.iter().map(Entry::hash).collect();
+    let after = std::mem::take(&mut read.entries);
+    read.entries = entries;
+    read.entries.extend(after.into_iter().filter(|e| seen.insert(e.hash())));
+    Ok(read)
 }
 
-/// A step or copy's entries and epoch, moving `floor` up to it; None for one passed over.
-fn step(keys: &Keys, name: &str, sealed: &[u8], log: &str, floor: &mut u32) -> Result<Option<(u32, Vec<Entry>)>> {
-    let Ok(epoch) = crate::keys::epoch_of(sealed) else { return Ok(None) };
-    if epoch < *floor {
+enum Step {
+    Took(u32, Vec<Entry>),
+    Passed,
+    Ahead(u32),
+}
+
+/// A step's entries and epoch, after `floor`.
+fn step(keys: &Keys, name: &str, sealed: &[u8], log: &str, floor: u32) -> Result<Step> {
+    let Ok(epoch) = crate::keys::epoch_of(sealed) else { return Ok(Step::Passed) };
+    if epoch < floor {
         tracing::debug!("{name} is under epoch {epoch}, after {floor}: passed over");
-        return Ok(None);
+        return Ok(Step::Passed);
+    }
+    if keys.keys().next_back().is_none_or(|newest| epoch > *newest) {
+        return Ok(Step::Ahead(epoch));
     }
     let key = keys.get(&epoch).ok_or(Missing { epoch })?;
     match crate::keys::open(key, name, sealed).and_then(|b| unpack(&b)) {
-        Ok(list) if list.iter().all(|e| e.log() == log) => {
-            *floor = epoch;
-            Ok(Some((epoch, list)))
-        }
+        Ok(list) if list.iter().all(|e| e.log() == log) => Ok(Step::Took(epoch, list)),
         Ok(_) => {
             tracing::debug!("{name} is another scope's");
-            Ok(None)
+            Ok(Step::Passed)
         }
         Err(err) => {
             tracing::debug!("{name}: {err:#}");
-            Ok(None)
+            Ok(Step::Passed)
         }
     }
 }
@@ -105,10 +122,7 @@ fn step(keys: &Keys, name: &str, sealed: &[u8], log: &str, floor: &mut u32) -> R
 /// Once a device has read the steps up to `at`: a copy of `entries` (every entry in them) under the newest epoch
 /// `keys` has, if steps have piled up since the newest, and the newest hint moved on. Both only save readers work.
 pub async fn hint(bucket: &impl Bucket, keys: &Keys, prefix: &str, at: u64, entries: impl FnOnce() -> Result<Vec<Entry>>) -> Result<()> {
-    let (copy, epoch) = match bucket.get(&newest_name(prefix)).await? {
-        Some(o) => newest(&o.bytes).map(|(_, copy, epoch)| (copy, epoch))?,
-        None => (0, 0),
-    };
+    let (_, copy, epoch) = bucket.get(&newest_name(prefix)).await?.map_or((0, 0, 0), |o| newest(&o.bytes));
     let (copy, epoch) = if at >= copy + COPY_EVERY {
         let name = copy_name(prefix, at);
         let entries = entries()?;
@@ -147,9 +161,9 @@ mod tests {
                 }
             }
             assert!(bucket.get(&copy_name(&prefix, COPY_EVERY + 4)).await.unwrap().is_some());
-            let (at, read) = open(&bucket, &key, &prefix, "global").await.unwrap();
-            assert_eq!(at, COPY_EVERY + 20);
-            let seqs: Vec<u32> = read.iter().map(|e| e.seq()).collect();
+            let read = open(&bucket, &key, &prefix, "global").await.unwrap();
+            assert_eq!(read.at, COPY_EVERY + 20);
+            let seqs: Vec<u32> = read.entries.iter().map(|e| e.seq()).collect();
             assert_eq!(seqs, (0..(COPY_EVERY + 20) as u32).collect::<Vec<_>>(), "every entry, once, in order");
         });
     }

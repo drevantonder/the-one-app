@@ -3,6 +3,9 @@
 
 use super::*;
 
+/// How many times a database is opened again after finding junk or a newer epoch before it gives up.
+const TRIES: usize = 20;
+
 /// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.
 #[derive(Debug)]
 pub struct NotGiven(pub Scope, pub String);
@@ -38,8 +41,9 @@ impl Node {
 
     /// `app`'s `database` in `scope`'s keys by epoch, as this device opens them for its own person's work: from the
     /// app's key in each epoch, sealed under the epoch's. The app's key in the newest epoch is made if it isn't yet.
-    pub(super) async fn database_keys(&self, scope: &Scope, app: &str, database: &str) -> Result<crate::db::Keys> {
-        let epochs = self.epoch_keys(scope).await?;
+    /// With `make`, a scope with no epoch yet gets its first (`epoch_keys`).
+    pub(super) async fn database_keys(&self, scope: &Scope, app: &str, database: &str, make: bool) -> Result<crate::db::Keys> {
+        let epochs = self.epoch_keys(scope, make).await?;
         let newest = epochs.keys().next_back().copied().unwrap_or(0);
         let id = (scope.clone(), format!("{app}/{database}"));
         if let Some((n, keys)) = self.0.database_keys.lock().unwrap().get(&id)
@@ -58,54 +62,50 @@ impl Node {
         Ok(out)
     }
 
-    /// The epochs of a scope this device opens, by number: those sealed to it in the bucket (`keys::epoch_name`), up to
-    /// the scope's newest, which it must be one of. A scope with no epoch yet gets its first here, if this device's person
-    /// may make it: an admin of `global` or of the group, or the person whose scope it is.
-    pub(crate) async fn epoch_keys(&self, scope: &Scope) -> Result<crate::db::Keys> {
-        let known = self.with(|i| Ok(i.r.members.epoch(scope)))?;
-        let fresh = |kept: &HashMap<Scope, crate::db::Keys>| kept.get(scope).filter(|k| k.keys().next_back().is_some_and(|n| *n >= known)).cloned();
-        if let Some(keys) = fresh(&self.0.epochs.lock().unwrap()) {
+    /// The epochs of a scope this device opens, by number: each one an `epoch` entry that counts made (or for
+    /// `global`'s first, the genesis), from its copy in the bucket sealed to this device (`keys::epoch_name`) whose
+    /// hash is the one the entry names. A copy that isn't is someone's junk, passed over; nothing in the bucket makes an
+    /// epoch but its entry. The newest must be one of them. With `make`, a scope with no epoch yet gets its first here,
+    /// if this device's person may make it: an admin of the group, or the person whose scope it is.
+    pub(crate) async fn epoch_keys(&self, scope: &Scope, make: bool) -> Result<crate::db::Keys> {
+        let hashes = self.with(|i| Ok(epoch_hashes(&i.r.members, scope)))?;
+        let newest = hashes.keys().next_back().copied().unwrap_or(0);
+        let kept = self.0.epochs.lock().unwrap().get(scope).cloned().unwrap_or_default();
+        // Kept only while each is still the one its entry made.
+        let mut keys: crate::db::Keys = kept.into_iter().filter(|(n, k)| hashes.get(n) == Some(&crate::keys::epoch_hash(k))).collect();
+        if newest > 0 && keys.contains_key(&newest) {
             return Ok(keys);
         }
-        // One at a time here, so this device never makes two first epochs of a scope.
-        let _making = self.0.making_keys.lock().await;
-        if let Some(keys) = fresh(&self.0.epochs.lock().unwrap()) {
-            return Ok(keys);
-        }
-        let bucket = self.bucket()?;
-        let (me, secret, name) = (hex(&self.0.id), self.seal_secret(), scope.to_string());
-        let mut keys = self.0.epochs.lock().unwrap().get(scope).cloned().unwrap_or_default();
-        let mut n = keys.keys().next_back().map_or(1, |n| n + 1);
-        let mut newest = n - 1;
-        let mut waited = 0;
-        loop {
-            if let Some(o) = crate::bucket::Bucket::get(&bucket, &crate::keys::epoch_name(&name, n, &me)).await? {
-                let key = crate::kernel::open_sealed(&secret, &o.bytes).with_context(|| format!("{scope}'s epoch {n} sealed to {} doesn't open", self.device_name()))?;
-                keys.insert(n, key.try_into().map_err(|_| anyhow!("an epoch's key is 32 bytes"))?);
-                (newest, n) = (n, n + 1);
-                continue;
+        if newest == 0 {
+            if make && *scope != Scope::Global {
+                return Box::pin(self.make_first_epoch(scope)).await;
             }
-            // An epoch sealed to others: there's always a copy for the recovery key, sealed first.
-            if crate::bucket::Bucket::get(&bucket, &crate::keys::epoch_name(&name, n, "recovery")).await?.is_some() {
-                // One made just now, by a device that seals it to this one next.
-                if keys.is_empty() && n == 1 && waited < 50 {
-                    waited += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    continue;
-                }
-                (newest, n) = (n, n + 1);
-                continue;
+            bail!(NotGiven(scope.clone(), self.device_name()));
+        }
+        for (n, hash) in &hashes {
+            if !keys.contains_key(n)
+                && let Some(key) = self.sealed_epoch(scope, *n, hash).await?
+            {
+                keys.insert(*n, key);
             }
-            break;
         }
-        if newest == 0
-            && let Some(key) = self.make_first_epoch(scope).await?
-        {
-            (keys, newest) = ([(1, key)].into(), 1);
-        }
-        ensure!(keys.keys().next_back().is_some_and(|n| *n >= newest.max(known)), NotGiven(scope.clone(), self.device_name()));
+        ensure!(keys.contains_key(&newest), NotGiven(scope.clone(), self.device_name()));
         self.0.epochs.lock().unwrap().insert(scope.clone(), keys.clone());
         Ok(keys)
+    }
+
+    /// Epoch `n` of a scope as it's sealed to this device in the bucket, if it's there and its hash is `hash`.
+    async fn sealed_epoch(&self, scope: &Scope, n: u32, hash: &str) -> Result<Option<[u8; 32]>> {
+        let name = crate::keys::epoch_name(&scope.to_string(), n, &hex(&self.0.id));
+        let Some(o) = crate::bucket::Bucket::get(&self.bucket()?, &name).await? else { return Ok(None) };
+        let key = crate::kernel::open_sealed(&self.seal_secret(), &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok());
+        match key.filter(|k| crate::keys::epoch_hash(k) == hash) {
+            Some(key) => Ok(Some(key)),
+            None => {
+                tracing::warn!("{name} isn't the key {scope}'s epoch {n} entry made: passed over");
+                Ok(None)
+            }
+        }
     }
 
     /// Forgets the epochs this device knows of a scope, so the next use looks in the bucket for newer ones: after a
@@ -115,74 +115,119 @@ impl Node {
         self.0.database_keys.lock().unwrap().retain(|(s, _), _| s != scope);
     }
 
-    /// A scope's first epoch, made here: a random key, sealed to the recovery key (first, which says the epoch is
-    /// made, so two devices can't both make it) and to each device that holds the scope, then an `epoch` entry in
-    /// `global`. None when this device's person may not make it, or another device made it first.
-    async fn make_first_epoch(&self, scope: &Scope) -> Result<Option<[u8; 32]>> {
-        let me = self.endpoint();
-        let (may, recovery, to) = self.with(|i| {
-            let m = &i.r.members;
-            let mut to: Vec<(Key, [u8; 32])> = vec![(me.key, me.seal)];
-            to.extend(m.computes().filter(|d| d.key != me.key && m.runs_for(&d.key, scope)).filter_map(|d| Some((d.key, m.seal_key(&d.key)?))));
-            Ok((m.role_in(&i.user, scope) == Some(Role::Admin), m.recovery, to))
-        })?;
-        if !may {
-            return Ok(None);
+    /// `global`'s epochs, for a device that has read none of its entries yet, so knows no epoch's hash: those sealed to
+    /// it in the bucket, each kept only once the entries it opens say it's theirs (the genesis, whose hash is the
+    /// install's, names the first's hash, and each `epoch` entry the next's). → (the keys, what was read with them).
+    pub(super) async fn first_global_read(&self) -> Result<(crate::db::Keys, crate::log::Read)> {
+        let (bucket, me, secret, root) = (self.bucket()?, hex(&self.0.id), self.seal_secret(), self.with(|i| Ok(i.r.root))?);
+        let mut candidates = crate::db::Keys::new();
+        for n in 1..=crate::db::EPOCHS_MAX {
+            let Some(o) = crate::bucket::Bucket::get(&bucket, &crate::keys::epoch_name("global", n, &me)).await? else { break };
+            if let Some(key) = crate::kernel::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
+                candidates.insert(n, key);
+            }
         }
+        let prefix = crate::log::prefix("global");
+        loop {
+            ensure!(!candidates.is_empty(), NotGiven(Scope::Global, self.device_name()));
+            let mut log_keys = crate::db::Keys::new();
+            for (n, epoch) in &candidates {
+                if let Ok(Some(app)) = crate::db::app_key(&bucket, epoch, "global", members::APP, *n, false).await {
+                    log_keys.insert(*n, crate::kernel::database_key(&app, crate::log::NAME));
+                }
+            }
+            let read = crate::log::open(&bucket, &log_keys, &prefix, "global").await?;
+            let member_entries: Vec<Entry> = crate::entry::causal(read.entries.clone(), &HashMap::new()).into_iter().filter(members::is_member_entry).collect();
+            let m = Members::replay(root, &member_entries, &Default::default());
+            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| m.epoch_hash(&Scope::Global, **n) != Some(crate::keys::epoch_hash(k).as_str())).map(|(n, _)| *n).collect();
+            if wrong.is_empty() {
+                self.0.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());
+                return Ok((candidates, read));
+            }
+            tracing::warn!("global's epochs {wrong:?} sealed to {} aren't the keys their entries made: passed over", self.device_name());
+            for n in wrong {
+                candidates.remove(&n);
+            }
+        }
+    }
+
+    /// A scope's first epoch, made here: its `epoch` entry first, naming its key's hash, then the key sealed to the
+    /// recovery key and to each client device of someone who uses the scope, and only then used. The recovery key's
+    /// copy is made first, so two devices rarely make it at once: one that finds it there waits for the other's entry.
+    /// If two are made at once all the same, the one first in causal order counts, and the other's key is dropped.
+    async fn make_first_epoch(&self, scope: &Scope) -> Result<crate::db::Keys> {
+        let _making = self.0.making_keys.lock().await;
+        if self.with(|i| Ok(i.r.members.epoch(scope)))? > 0 {
+            return Box::pin(self.epoch_keys(scope, false)).await;
+        }
+        let (may, recovery) = self.with(|i| Ok((i.r.members.role_in(&i.user, scope) == Some(Role::Admin), i.r.members.recovery)))?;
+        ensure!(may, NotGiven(scope.clone(), self.device_name()));
         let recovery = recovery.context("the install has no recovery key to seal its keys to")?;
         let key: [u8; 32] = rand::random();
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let sealed = crate::kernel::seal_to(&crate::kernel::twin_public(&recovery)?, &key)?;
         if !crate::db::created(&bucket, &crate::keys::epoch_name(&name, 1, "recovery"), &sealed).await? {
-            return Ok(None);
+            // Another device is making it: its entry says so soon. If none does, what's there is junk, and this one's made.
+            for _ in 0..50 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                self.read_log(&Scope::Global).await?;
+                if self.with(|i| Ok(i.r.members.epoch(scope)))? > 0 {
+                    return self.settled_first_epoch(scope).await;
+                }
+            }
+            tracing::warn!("{scope}'s first epoch was begun but no entry made it: making it here");
+        }
+        let to = self.with(|i| Ok(clients_of(&i.r.members, scope)))?;
+        let hash = crate::keys::epoch_hash(&key);
+        self.append(&Scope::Global, members::node("epoch", json!({ "scope": name, "n": 1, "to": to.iter().map(|(k, _)| hex(k)).collect::<Vec<_>>(), "hash": hash }))).await?;
+        if self.with(|i| Ok(i.r.members.epoch_hash(scope, 1) != Some(hash.as_str())))? {
+            tracing::info!("another device made {scope}'s first epoch first: its key is used");
+            return self.settled_first_epoch(scope).await;
         }
         for (device, seal) in &to {
-            crate::bucket::Bucket::create(&bucket, &crate::keys::epoch_name(&name, 1, &hex(device)), &crate::kernel::seal_to(seal, &key)?).await?;
+            crate::db::created(&bucket, &crate::keys::epoch_name(&name, 1, &hex(device)), &crate::kernel::seal_to(seal, &key)?).await?;
         }
         tracing::info!("made {scope}'s first epoch");
-        // Written after: writing it needs `global`'s keys, which may be what's being made.
-        let to: Vec<String> = to.iter().map(|(k, _)| hex(k)).collect();
-        self.0.epoch_entries.lock().unwrap().push(members::node("epoch", json!({ "scope": name, "n": 1, "to": to, "hash": crate::keys::epoch_hash(&key) })));
-        Ok(Some(key))
+        let keys = crate::db::Keys::from([(1, key)]);
+        self.0.epochs.lock().unwrap().insert(scope.clone(), keys.clone());
+        Ok(keys)
     }
 
-    /// Writes the `epoch` entries of the epochs this device made, in `global`.
-    pub(super) async fn write_epoch_entries(&self) {
-        let made = std::mem::take(&mut *self.0.epoch_entries.lock().unwrap());
-        for (i, entry) in made.iter().enumerate() {
-            if let Err(err) = self.append(&Scope::Global, entry.clone()).await {
-                tracing::warn!("writing an epoch's entry, to try again: {err:#}");
-                self.0.epoch_entries.lock().unwrap().extend(made[i..].iter().cloned());
-                return;
+    /// A first epoch another device made: its copy for this one, which it seals right after its entry.
+    async fn settled_first_epoch(&self, scope: &Scope) -> Result<crate::db::Keys> {
+        for _ in 0..50 {
+            match Box::pin(self.epoch_keys(scope, false)).await {
+                Err(err) if err.is::<NotGiven>() => tokio::time::sleep(Duration::from_millis(100)).await,
+                other => return other,
             }
         }
+        Box::pin(self.epoch_keys(scope, false)).await
     }
 
-    /// Seals the newest epoch of each scope this device opens to each device that holds the scope and lacks it: a
-    /// device added since it was made.
+    /// Seals each epoch this device opens of each scope to each client device of someone who uses the scope that
+    /// lacks it: a device added since it was made. Compute is never sealed one: it's handed what a call needs.
     pub(super) fn seal_epochs(&self) {
         let node = self.clone();
         tokio::spawn(async move {
-            let known: Vec<(Scope, u32, [u8; 32])> = node.0.epochs.lock().unwrap().iter().filter_map(|(s, k)| k.last_key_value().map(|(n, k)| (s.clone(), *n, *k))).collect();
-            for (scope, n, key) in known {
-                if let Err(err) = node.seal_epoch(&scope, n, &key).await {
-                    tracing::warn!("sealing {scope}'s epoch {n}: {err:#}");
+            let known: Vec<(Scope, crate::db::Keys)> = node.0.epochs.lock().unwrap().iter().map(|(s, k)| (s.clone(), k.clone())).collect();
+            for (scope, keys) in known {
+                if let Err(err) = node.seal_epoch(&scope, &keys).await {
+                    tracing::warn!("sealing {scope}'s epochs: {err:#}");
                 }
             }
         });
     }
 
-    async fn seal_epoch(&self, scope: &Scope, n: u32, key: &[u8; 32]) -> Result<()> {
+    async fn seal_epoch(&self, scope: &Scope, keys: &crate::db::Keys) -> Result<()> {
         use crate::bucket::Bucket;
         let bucket = self.bucket()?;
-        let to = self.with(|i| {
-            let m = &i.r.members;
-            Ok(m.computes().filter(|d| d.key != self.0.id && m.runs_for(&d.key, scope)).filter_map(|d| Some((d.key, m.seal_key(&d.key)?))).collect::<Vec<_>>())
-        })?;
-        for (device, seal) in to {
-            let name = crate::keys::epoch_name(&scope.to_string(), n, &hex(&device));
-            if Bucket::get(&bucket, &name).await?.is_none() {
-                Bucket::create(&bucket, &name, &crate::kernel::seal_to(&seal, key)?).await?;
+        let to = self.with(|i| Ok(clients_of(&i.r.members, scope).into_iter().filter(|(k, _)| *k != self.0.id).collect::<Vec<_>>()))?;
+        for (n, key) in keys {
+            for (device, seal) in &to {
+                let name = crate::keys::epoch_name(&scope.to_string(), *n, &hex(device));
+                if Bucket::get(&bucket, &name).await?.is_none() {
+                    Bucket::create(&bucket, &name, &crate::kernel::seal_to(seal, key)?).await?;
+                }
             }
         }
         Ok(())
@@ -200,8 +245,46 @@ impl Node {
                 Err(_) => tracing::debug!("{}: reading this device's copy, as the bucket didn't answer", db.prefix()),
             }
         }
-        db.catch_up(&bucket.here_only()).await?;
-        Ok(())
+        for _ in 0..TRIES {
+            match db.catch_up(&bucket.here_only()).await {
+                Err(err) => match err.downcast_ref::<crate::db::Ahead>() {
+                    Some(ahead) if !self.judge_ahead(&id.0, db.prefix(), ahead).await? => db.pass_over(ahead.at),
+                    _ => return Err(err),
+                },
+                Ok(_) => return Ok(()),
+            }
+        }
+        bail!("{} has too much junk in it to read", db.prefix())
+    }
+
+    /// Writes to a database as `Db::write` does, passing over a step it meets under an epoch no entry made, as a read
+    /// does (`judge_ahead`).
+    pub(super) async fn write_in<R>(&self, scope: &Scope, db: &mut Db, bucket: &Copied, mut f: impl FnMut(&rusqlite::Connection) -> Result<R>) -> Result<R> {
+        for _ in 0..TRIES {
+            match db.write(bucket, &mut f).await {
+                Err(err) => match err.downcast_ref::<crate::db::Ahead>() {
+                    Some(ahead) if !self.judge_ahead(scope, db.prefix(), ahead).await? => db.pass_over(ahead.at),
+                    _ => return Err(err),
+                },
+                ok => return ok,
+            }
+        }
+        bail!("{} has too much junk in it to write to", db.prefix())
+    }
+
+    /// A step a database's reader stopped at, under an epoch above all its keys: once `global` is read again, a new
+    /// epoch's (true), since its entry is written before anything is sealed under it; or, if no entry made it, junk
+    /// (false), which every read of it here passes over from now on.
+    async fn judge_ahead(&self, scope: &Scope, prefix: &str, ahead: &crate::db::Ahead) -> Result<bool> {
+        if self.with(|i| Ok(i.r.members.epoch(scope)))? < ahead.epoch {
+            tokio::time::timeout(Duration::from_secs(10), self.read_log(&Scope::Global)).await.map_err(|_| anyhow!("global's entries didn't come in time to say what {prefix}'s step {} is", ahead.at))??;
+        }
+        if self.with(|i| Ok(i.r.members.epoch(scope)))? >= ahead.epoch {
+            return Ok(true);
+        }
+        tracing::warn!("{prefix}'s step {} is under epoch {}, which no entry made: passed over", ahead.at, ahead.epoch);
+        self.0.junk.lock().unwrap().entry(prefix.to_string()).or_default().insert(ahead.at);
+        Ok(false)
     }
 
     /// Fetches into this device's copy what the bucket has of each database open here that it lacks, every tick: what
@@ -231,7 +314,7 @@ impl Node {
         let own = given.is_none();
         let (keys, bucket) = match given {
             Some((keys, bucket)) => (keys, bucket.clone()),
-            None => (self.database_keys(scope, app, database).await?, self.bucket()?),
+            None => (self.database_keys(scope, app, database, true).await?, self.bucket()?),
         };
         let id = (scope.clone(), format!("{app}/{database}"));
         let cached = self.0.dbs.lock().unwrap().get(&id).cloned();
@@ -249,13 +332,28 @@ impl Node {
             }
         }
         let prefix = format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()));
-        let mut db = match Db::open(&bucket, &prefix, keys.clone()).await {
-            // A step under an epoch this device hasn't looked for yet: it looks once.
-            Err(err) if own && err.is::<crate::db::Missing>() => {
-                self.forget_epochs(scope);
-                Db::open(&bucket, &prefix, self.database_keys(scope, app, database).await?).await?
+        let (mut keys, mut tries) = (keys, 0);
+        let mut db = loop {
+            tries += 1;
+            let junk = self.0.junk.lock().unwrap().get(&prefix).cloned().unwrap_or_default();
+            let err = match Db::open_passing(&bucket, &prefix, keys.clone(), junk).await {
+                Ok(db) => break db,
+                Err(err) if tries > TRIES => return Err(err),
+                Err(err) => err,
+            };
+            let new = match err.downcast_ref::<crate::db::Ahead>() {
+                Some(ahead) => self.judge_ahead(scope, &prefix, ahead).await?,
+                // A step under an epoch this device hasn't looked for yet: it looks once.
+                None => err.is::<crate::db::Missing>() && tries == 1,
+            };
+            match new {
+                false if err.is::<crate::db::Ahead>() => {}
+                true if own => {
+                    self.forget_epochs(scope);
+                    keys = self.database_keys(scope, app, database, true).await?;
+                }
+                _ => return Err(err),
             }
-            other => other?,
         };
         let schema = match schema {
             Some(schema) => schema,
@@ -273,6 +371,8 @@ impl Node {
         let mut dbs = self.0.dbs.lock().unwrap();
         match dbs.get(&id) {
             Some(open) if open.try_lock().is_ok_and(|d| d.opens_for(&keys) && d.keys().last_key_value() == keys.last_key_value()) => Ok(open.clone()),
+            // One opened with keys a caller handed doesn't replace the one kept, which opens with others: it's the call's.
+            Some(_) if !own => Ok(db),
             _ => Ok(dbs.entry(id).insert_entry(db).get().clone()),
         }
     }
@@ -298,4 +398,15 @@ impl Node {
         })
         .await?
     }
+}
+
+/// Each epoch of a scope an entry that counts made, by number: its hash.
+fn epoch_hashes(m: &Members, scope: &Scope) -> BTreeMap<u32, String> {
+    m.epoch_hashes.range((scope.clone(), 0)..=(scope.clone(), u32::MAX)).map(|((_, n), h)| (*n, h.clone())).collect()
+}
+
+/// The client devices of everyone who uses a scope, with the keys they're sealed to: whom its epochs are sealed to,
+/// besides the recovery key. A machine that is its person's client is one; compute alone never is.
+pub(super) fn clients_of(m: &Members, scope: &Scope) -> Vec<(Key, [u8; 32])> {
+    m.clients().filter(|d| m.may_use(&d.user, scope)).map(|d| (d.key, d.seal)).collect()
 }

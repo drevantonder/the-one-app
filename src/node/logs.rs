@@ -40,28 +40,58 @@ impl Node {
     }
 
     /// `read_log`, while this device holds its writes. A device that has read none of a scope's entries starts from
-    /// their newest copy.
+    /// their newest copy. A scope with no epoch yet has nothing to read. A step under an epoch newer than any this
+    /// device opens is read once that epoch's entry is (in `global`, which is read again for it), or if no entry made
+    /// it, passed over as junk: an epoch's entry is always written before anything is sealed under it.
     pub(super) async fn read_log_now(&self, scope: &Scope) -> Result<bool> {
-        let (bucket, key, log) = (self.bucket()?, self.log_key(scope).await?, scope.to_string());
-        let prefix = crate::log::prefix(&log);
-        let from = self.with(|i| i.r.store.position(&log))?;
-        let (at, entries) = match from {
-            0 => crate::log::open(&bucket, &key, &prefix, &log).await?,
-            _ => crate::log::read(&bucket, &key, &prefix, &log, from).await?,
-        };
-        if at == from {
-            self.hint_log(scope, &bucket, &key, at).await;
+        let log = scope.to_string();
+        let (genesis, epoch) = self.with(|i| Ok((!i.r.members.users.is_empty(), i.r.members.epoch(scope))))?;
+        if *scope != Scope::Global && epoch == 0 {
             return Ok(false);
         }
-        let handled = self.with(|i| {
-            let handled = i.r.receive(entries)?;
-            i.r.store.set_position(&log, at)?;
-            Ok(handled)
-        })?;
-        let gained = handled.gained;
-        self.after(handled).await?;
-        self.hint_log(scope, &bucket, &key, at).await;
-        Ok(gained)
+        let bucket = self.bucket()?;
+        let prefix = crate::log::prefix(&log);
+        let mut gained = false;
+        loop {
+            let (from, floor) = self.with(|i| i.r.store.position(&log))?;
+            let (key, read) = match (from, genesis) {
+                (0, false) if *scope == Scope::Global => {
+                    let (epochs, read) = self.first_global_read().await?;
+                    (self.log_key_of(&epochs).await?, read)
+                }
+                _ => {
+                    let key = self.log_key(scope).await?;
+                    let read = match from {
+                        0 => crate::log::open(&bucket, &key, &prefix, &log).await?,
+                        _ => crate::log::read(&bucket, &key, &prefix, &log, from, floor).await?,
+                    };
+                    (key, read)
+                }
+            };
+            let at = read.at;
+            if at > from {
+                let handled = self.with(|i| {
+                    let handled = i.r.receive(read.entries)?;
+                    i.r.store.set_position(&log, at, read.floor)?;
+                    Ok(handled)
+                })?;
+                gained |= handled.gained;
+                self.after(handled).await?;
+            }
+            let Some(ahead) = read.ahead else {
+                self.hint_log(scope, &bucket, &key, at).await;
+                return Ok(gained);
+            };
+            if *scope != Scope::Global {
+                Box::pin(self.read_log_now(&Scope::Global)).await?;
+            }
+            if self.with(|i| Ok(i.r.members.epoch(scope)))? >= ahead.epoch {
+                self.forget_epochs(scope);
+            } else {
+                tracing::warn!("{log}'s step {} is under epoch {}, which no entry made: passed over", ahead.at, ahead.epoch);
+                self.with(|i| i.r.store.set_position(&log, ahead.at, read.floor))?;
+            }
+        }
     }
 
     /// Once this device has read a scope's entries up to step `at`, and hasn't said so since it started: a copy of them
@@ -71,7 +101,8 @@ impl Node {
         if self.0.hinted.lock().unwrap().get(&log) == Some(&at) {
             return;
         }
-        let entries = || self.with(|i| i.r.store.scope(&log));
+        // With any fork's evidence, so a device that reads only the copy finds the fork too.
+        let entries = || self.with(|i| Ok([i.r.store.scope(&log)?, i.r.store.forked(&log)?].concat()));
         match crate::log::hint(bucket, key, &crate::log::prefix(&log), at, entries).await {
             Ok(()) => drop(self.0.hinted.lock().unwrap().insert(log, at)),
             Err(err) => tracing::debug!("{log}'s copy: {err:#}"),
@@ -84,7 +115,7 @@ impl Node {
         let (bucket, key, prefix) = (self.bucket()?, self.log_key(scope).await?, crate::log::prefix(&scope.to_string()));
         let bytes = crate::entry::pack(&[entry]);
         let written = self.0.written.lock().unwrap().get(scope).copied().unwrap_or(0);
-        let mut at = self.with(|i| i.r.store.position(&scope.to_string()))?.max(written);
+        let mut at = self.with(|i| i.r.store.position(&scope.to_string()))?.0.max(written);
         for _ in 0..1000 {
             at += 1;
             let name = crate::db::step_name(&prefix, at);
@@ -98,7 +129,19 @@ impl Node {
 
     /// The keys a scope's entries are sealed with in the bucket, by epoch: the node's `log` of the scope.
     pub(super) async fn log_key(&self, scope: &Scope) -> Result<crate::db::Keys> {
-        self.database_keys(scope, members::APP, crate::log::NAME).await
+        self.database_keys(scope, members::APP, crate::log::NAME, false).await
+    }
+
+    /// The keys of `global`'s entries in each of its epochs given.
+    async fn log_key_of(&self, epochs: &crate::db::Keys) -> Result<crate::db::Keys> {
+        let bucket = self.bucket()?;
+        let mut out = crate::db::Keys::new();
+        for (n, epoch) in epochs {
+            if let Some(app) = crate::db::app_key(&bucket, epoch, "global", members::APP, *n, false).await? {
+                out.insert(*n, crate::kernel::database_key(&app, crate::log::NAME));
+            }
+        }
+        Ok(out)
     }
 
     /// Tells the devices that hold `scope` it changed, so they read it now rather than at their next look: its entries,

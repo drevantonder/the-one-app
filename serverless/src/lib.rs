@@ -126,7 +126,7 @@ pub async fn needs(bucket: JsValue, wants: String) -> Result<String, JsError> {
         let have: Vec<u32> = serde_json::from_value(w["have"].clone()).unwrap_or_default();
         let prefix = format!("{}/{app}/{database}", one::bucket::folder(scope));
         let hint = match bucket.get(&one::db::newest_name(&prefix)).await.map_err(thrown)? {
-            Some(o) => Some(one::db::newest(&o.bytes).map_err(thrown)?),
+            Some(o) => Some(one::db::newest(&o.bytes)),
             None => None,
         };
         let mut newest = hint.map(|(_, _, e)| e).unwrap_or(0).max(have.iter().copied().max().unwrap_or(0)).max(1);
@@ -373,12 +373,12 @@ pub async fn read_log(bucket: JsValue, scope: String, keys: String) -> Result<()
     let same = |l: &Log| l.keys.iter().all(|(n, k)| keys.get(n).is_none_or(|x| x == k)) && keys.keys().any(|n| l.keys.contains_key(n));
     let from = LOGS.with(|l| l.borrow().get(&scope).filter(|l| same(l)).map(|l| l.at));
     let Some(from) = from else {
-        let (at, entries) = one::log::open(&bucket, &keys, &prefix, &scope).await.map_err(failed)?;
+        let one::log::Read { at, entries, .. } = one::log::open(&bucket, &keys, &prefix, &scope).await.map_err(failed)?;
         let entries = if scope == "global" { causal(entries, &HashMap::new()) } else { entries };
         LOGS.with(|l| l.borrow_mut().insert(scope, Log { keys, at, entries }));
         return Ok(());
     };
-    let (at, new) = one::log::read(&bucket, &keys, &prefix, &scope, from).await.map_err(failed)?;
+    let one::log::Read { at, entries: new, .. } = one::log::read(&bucket, &keys, &prefix, &scope, from, 0).await.map_err(failed)?;
     LOGS.with(|l| {
         if let Some(log) = l.borrow_mut().get_mut(&scope).filter(|l| same(l)) {
             let fresh: Vec<Entry> = new.into_iter().filter(|e| !log.entries.iter().any(|k| k.author() == e.author() && k.seq() == e.seq())).collect();
@@ -407,6 +407,8 @@ fn replayed<R>(scopes: &[String], f: impl FnOnce(&Members, &BTreeMap<String, Sco
         let global = logs.get("global").context("read global's entries first")?;
         let member_entries: Vec<Entry> = global.entries.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
         let root = root(&global.entries);
+        // The serverless node keeps no fork's evidence: its members are replayed from the entries alone.
+        let known = Members::replay(root, &member_entries, &Default::default());
         REPLAYED.with(|r| {
             let mut r = r.borrow_mut();
             let mut states = BTreeMap::new();
@@ -419,14 +421,14 @@ fn replayed<R>(scopes: &[String], f: impl FnOnce(&Members, &BTreeMap<String, Sco
                         "global" => log.entries.clone(),
                         _ => causal(log.entries.clone(), &global.entries.iter().map(|e| (e.hash(), e.depth)).collect()),
                     };
-                    let (members, state) = members::replay(root, &member_entries, &entries, |_, _, _| {});
+                    let (members, state) = members::replay(&known, &member_entries, &entries, |_, _, _| {});
                     r.insert(scope.clone(), Replayed { at, members, state });
                 }
                 let x = &r[scope];
                 m.get_or_insert_with(|| x.members.clone());
                 states.insert(scope.clone(), x.state.clone());
             }
-            let m = m.unwrap_or_else(|| Members::replay(root, &member_entries));
+            let m = m.unwrap_or(known);
             Ok(f(&m, &states))
         })
     })

@@ -35,13 +35,15 @@ pub struct Handled {
     pub gained: bool,
     /// People who may no longer use a scope they could, whose sessions this device forgets.
     pub lost: Vec<String>,
+    /// Whether where devices' entries stop counting changed (a removal or a fork), so every scope is replayed again.
+    pub recount: bool,
 }
 
 impl Replica {
     pub fn new(key: SigningKey, store: Store, root: Option<Hash>) -> Result<Replica> {
         let id = key.verifying_key().to_bytes();
         let member_entries: Vec<Entry> = store.scope("global")?.into_iter().filter(members::is_member_entry).collect();
-        let members = Members::replay(root, &member_entries);
+        let members = Members::replay(root, &member_entries, &store.forks()?);
         Ok(Replica { key, id, store, root, members, member_entries, stale: false })
     }
 
@@ -129,9 +131,10 @@ impl Replica {
     /// Replays the members again, deletes every scope this device no longer holds, and says what changed since `before`.
     pub fn refresh(&mut self, before: &Members, handled: &mut Handled) -> Result<()> {
         if std::mem::take(&mut self.stale) {
-            self.members = Members::replay(self.root, &self.member_entries);
+            self.members = Members::replay(self.root, &self.member_entries, &self.store.forks()?);
         }
         handled.members = true;
+        handled.recount |= before.cuts != self.members.cuts;
         let logs = self.store.logs()?;
         for log in &logs {
             if !self.holds_log(log) {
@@ -166,8 +169,11 @@ impl Replica {
     /// Keeps entries, with any that waited for them, and follows the members if they changed.
     fn took(&mut self, entries: Vec<Entry>, handled: &mut Handled) -> Result<()> {
         let before = self.members.clone();
-        let mut changed = false;
-        for entry in self.store.take(entries)? {
+        let (taken, forked) = self.store.take(entries)?;
+        // A fork stops its device's entries counting from there, wherever they sort: replayed again.
+        self.stale |= forked;
+        let mut changed = forked;
+        for entry in taken {
             if members::is_member_entry(&entry) {
                 self.add_member_entry(entry.clone());
                 changed = true;

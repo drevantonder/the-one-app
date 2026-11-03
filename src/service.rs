@@ -515,7 +515,7 @@ pub fn may_call(m: &Members, me: &Key, remote: &Key, key: &Key, user: &str, ever
 fn replay(root: Hash, entries: &[Entry]) -> Members {
     let ordered = crate::entry::causal(entries.to_vec(), &HashMap::new());
     let member_entries: Vec<Entry> = ordered.into_iter().filter(members::is_member_entry).collect();
-    Members::replay(Some(root), &member_entries)
+    Members::replay(Some(root), &member_entries, &Default::default())
 }
 
 fn now_ms() -> u64 {
@@ -689,12 +689,15 @@ mod tests {
         let id = |k: &SigningKey| *k.verifying_key().as_bytes();
         let (andre, sam) = ("a000000000000000", "b000000000000000");
         let mut prev = None;
-        let genesis = entry(&mac, andre, &mut prev, members::genesis("Home", andre, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client, Kind::Compute], &id(&key())));
-        let entries = vec![
+        let genesis = entry(&mac, andre, &mut prev, members::genesis("Home", andre, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client, Kind::Compute], &id(&key()), &"e".repeat(64)));
+        let mut entries = vec![
             genesis.clone(),
             entry(&mac, andre, &mut prev, members::device(&Endpoint::of(&sams), sam, "sam's box", &[Kind::Client, Kind::Compute], Some(("Sam", Role::Member)))),
             entry(&mac, andre, &mut prev, members::service(&Endpoint::of(&service), andre, "linux", "whatsapp")),
         ];
+        // Sam's box runs his own scope once his own device lists it, not on an admin's say.
+        let ext = Ext { log: "global".into(), time: 1, user: sam.into(), epoch: 0, previous: vec![entries.last().unwrap().hash()] };
+        entries.push(Entry::create(&sams, ext, None, members::device(&Endpoint::of(&sams), sam, "sam's box", &[Kind::Client, Kind::Compute], None)));
         let m = replay(genesis.hash(), &entries);
         assert_eq!(m.service(&id(&service)).map(|s| s.user.as_str()), Some(andre));
         let may = |node: &SigningKey, user: &str, everyone: bool| may_call(&m, &id(&service), &id(node), &id(node), user, everyone);

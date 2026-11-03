@@ -212,7 +212,7 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
         for database in bucket.list(&format!("{folder}/{app}"))?.into_iter().filter(|d| !d.starts_with('_')) {
             let prefix = format!("{folder}/{app}/{database}");
             let Some(hint) = bucket.get(&crate::db::newest_name(&prefix))? else { continue };
-            let (_, newest_copy, epoch) = crate::db::newest(&hint)?;
+            let (_, newest_copy, epoch) = crate::db::newest(&hint);
             let (mut at, mut copied) = snap.databases.get(&format!("{app}/{database}")).copied().unwrap_or((0, 0));
             if newest_copy > copied && copy(&crate::db::copy_name(&prefix, newest_copy), false)? {
                 copied = newest_copy;
@@ -457,7 +457,7 @@ pub fn restore(place: &Place, install: &str, scope: &str, keys: &[[u8; 32]]) -> 
 
 /// Puts restored entries in a store as sync does, each once everything it follows is there, so every chain is checked.
 pub fn import(store: &crate::store::Store, entries: &[Entry]) -> Result<usize> {
-    Ok(store.take(entries.to_vec())?.len())
+    Ok(store.take(entries.to_vec())?.0.len())
 }
 
 /// Restores every scope `keys` opens from a place into a throwaway store, checking every signature, chain and blob,
@@ -478,7 +478,7 @@ pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>
     let all = store.ordered()?;
     let root = root.or_else(|| all.iter().find(|e| e.content.app == crate::members::APP && e.content.kind == "genesis").map(|e| e.hash()));
     let member_entries: Vec<Entry> = all.iter().filter(|e| crate::members::is_member_entry(e)).cloned().collect();
-    let m = crate::members::Members::replay(root, &member_entries);
+    let m = crate::members::Members::replay(root, &member_entries, &store.forks()?);
     let bytes: u64 = place.objects(&format!("{install}/objects"))?.iter().map(|o| o.2).sum();
     Ok(serde_json::json!({
         "install": m.name,

@@ -348,7 +348,7 @@ impl Node {
         let scopes = self.with(|i| Ok(i.r.members.scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
         let mut out = BTreeMap::new();
         for scope in scopes {
-            if let Some((_, key)) = self.epoch_keys(&scope).await.ok().and_then(|k| k.last_key_value().map(|(n, k)| (*n, *k))) {
+            if let Some((_, key)) = self.epoch_keys(&scope, false).await.ok().and_then(|k| k.last_key_value().map(|(n, k)| (*n, *k))) {
                 out.insert(scope.to_string(), key);
             }
         }
@@ -359,7 +359,7 @@ impl Node {
     /// place has a snapshot of it from within the hour, which a device that just started doesn't know of yet.
     async fn back_up_scope(&self, place: &Place, place_id: &str, install: &str, d: &Due, now: u64, force: bool) -> Result<Option<Snapshot>> {
         let scope = Scope::parse(&d.scope)?;
-        let (n, key) = self.epoch_keys(&scope).await?.pop_last().context("no epoch")?;
+        let (n, key) = self.epoch_keys(&scope, false).await?.pop_last().context("no epoch")?;
         ensure!(d.key.is_none_or(|k| k == key), "{scope}'s newest epoch changed: it's backed up on the next run");
         let name = crate::keys::epoch_name(&d.scope, n, "recovery");
         let sealed = crate::bucket::Bucket::get(&self.bucket()?, &name).await?.with_context(|| format!("{name} is missing"))?.bytes;

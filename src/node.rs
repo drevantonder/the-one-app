@@ -351,10 +351,10 @@ pub struct Inner {
     moved: Arc<tokio::sync::RwLock<Option<Place>>>,
     /// This device's connector for the install's tunnel, with the token it runs with.
     tunnel: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
-    /// The `epoch` entries of epochs this device made, which it writes next.
-    epoch_entries: Mutex<Vec<Content>>,
-    /// Held while this device looks for or makes a scope's epochs.
+    /// Held while this device makes a scope's first epoch.
     making_keys: tokio::sync::Mutex<()>,
+    /// Positions of each database (by prefix) holding a step under an epoch no entry made, which every read passes over.
+    junk: Mutex<HashMap<String, std::collections::BTreeSet<u64>>>,
     /// The last position this device wrote an entry of each scope at.
     written: Mutex<HashMap<Scope, u64>>,
     /// The step of each scope's entries this device last moved their newest hint on to, by scope.
@@ -473,7 +473,7 @@ impl Node {
             moved: Arc::default(),
             tunnel: Mutex::new(None),
             making_keys: tokio::sync::Mutex::new(()),
-            epoch_entries: Mutex::new(Vec::new()),
+            junk: Mutex::new(HashMap::new()),
             written: Mutex::new(HashMap::new()),
             hinted: Mutex::new(HashMap::new()),
             shared: Mutex::new(Default::default()),
@@ -626,7 +626,9 @@ impl Node {
         let user = new_id();
         let recovery = SigningKey::from_bytes(&rand::random());
         let me = crate::keys::Endpoint::of(&self.0.key);
-        let genesis = members::genesis(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes());
+        // `global`'s first epoch, named by the genesis before anything is sealed under it.
+        let global: [u8; 32] = rand::random();
+        let genesis = members::genesis(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&global));
         let ext = crate::entry::Ext { log: "global".into(), time: now_ms(), user: user.clone(), epoch: 0, previous: Vec::new() };
         let entry = Entry::create(&self.0.key, ext, None, genesis);
         // Until it's moved to S3-compatible storage, the install's bucket is a folder here.
@@ -636,6 +638,12 @@ impl Node {
         Store::open(&self.install_dir().join("entries.db"))?.insert_own(&entry, None)?;
         self.open_install()?;
         self.replay_all().await?;
+        let bucket = self.bucket()?;
+        let recovery_seal = crate::kernel::twin_public(recovery.verifying_key().as_bytes())?;
+        for (to, seal) in [("recovery".to_string(), recovery_seal), (hex(&me.key), me.seal)] {
+            crate::db::created(&bucket, &crate::keys::epoch_name("global", 1, &to), &crate::kernel::seal_to(&seal, &global)?).await?;
+        }
+        self.0.epochs.lock().unwrap().insert(Scope::Global, crate::db::Keys::from([(1, global)]));
         self.put_entry(&Scope::Global, &entry).await?;
         self.with(|i| {
             i.read = true;
@@ -646,7 +654,6 @@ impl Node {
             self.bring_in(&me, app).await?;
             self.append(&Scope::Global, members::node("install", json!({ "app": app }))).await?;
         }
-        self.write_epoch_entries().await;
         self.settle().await?;
         self.emit(Event::Install);
         Ok(hex(&recovery.to_bytes()))
@@ -660,6 +667,7 @@ impl Node {
 
     /// Writes an entry to this device's log of `scope`, signed by this device, as `user`.
     async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {
+        self.first_epoch(scope).await?;
         let _write = self.0.writes.lock().await;
         // What's in the bucket first, so the entry comes after all of it.
         self.read_log_now(scope).await?;
@@ -682,9 +690,19 @@ impl Node {
         Ok(entry)
     }
 
-    /// One of a scope's node entries that its replay would skip is never written: it would say it was done.
+    /// A scope's first epoch, before anything is written there, made outside this device's writes, since its entry is
+    /// one: a scope with none has nothing to read or write until it has.
+    async fn first_epoch(&self, scope: &Scope) -> Result<()> {
+        if *scope != Scope::Global && self.with(|i| Ok(i.r.members.epoch(scope)))? == 0 {
+            self.epoch_keys(scope, true).await?;
+        }
+        Ok(())
+    }
+
+    /// One of a scope's node entries that its replay would skip is never written: it would say it was done. In
+    /// `global` too, for those only a scope's replay checks.
     fn check_in_scope(&self, entry: &Entry) -> Result<()> {
-        if entry.log() != "global" && entry.content.app == members::APP {
+        if entry.content.app == members::APP && !members::is_member_entry(entry) {
             self.with(|i| members::applies_in_scope(&i.r.members, &i.views.get(entry.log()).map(|(_, s)| s.clone()).unwrap_or_default(), entry))?;
         }
         Ok(())
@@ -718,6 +736,7 @@ impl Node {
         for entry in entries {
             ensure!(entry.user() == caller.user, "entry {} isn't written as you", entry.id());
             let scope = entry.scope();
+            self.first_epoch(&scope).await?;
             {
                 let _write = self.0.writes.lock().await;
                 self.read_log_now(&scope).await?;
@@ -747,6 +766,11 @@ impl Node {
             }
             for log in &handled.dropped {
                 i.views.remove(log);
+            }
+            if handled.recount {
+                i.views.clear();
+                let all = i.r.store.ordered()?;
+                return update_views(i, &all);
             }
             update_views(i, &handled.new)
         })?;
@@ -852,7 +876,6 @@ impl Node {
                     tracing::debug!("reading the bucket: {err:#}");
                 }
                 self.fill_copies().await;
-                self.write_epoch_entries().await;
                 self.forget_sessions();
                 self.read_all_status();
                 self.read_own_items();
@@ -898,7 +921,7 @@ fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
             false => (fresh, view.unwrap().1.clone()),
         };
         let Some(last) = entries.last().map(Entry::order) else { continue };
-        let (_, state) = members::replay_from(i.r.root, &i.r.member_entries, &entries, state, |_, _, _| {});
+        let (_, state) = members::replay_from(&i.r.members, &i.r.member_entries, &entries, state, |_, _, _| {});
         let position = match view {
             Some((pos, _)) if !rebuild => pos.clone().max(last),
             _ => last,

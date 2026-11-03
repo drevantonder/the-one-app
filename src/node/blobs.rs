@@ -18,7 +18,7 @@ impl Node {
         for scope in self.scopes_naming(hash)? {
             let name = crate::bucket::blob_name(&scope.to_string(), hash);
             let Some(sealed) = Bucket::get(&bucket.place, &name).await? else { continue };
-            let keys = self.database_keys(&scope, members::APP, crate::bucket::BLOBS).await?;
+            let keys = self.database_keys(&scope, members::APP, crate::bucket::BLOBS, false).await?;
             let epoch = crate::keys::epoch_of(&sealed.bytes)?;
             let key = keys.get(&epoch).with_context(|| format!("{} wasn't given {scope}'s epoch {epoch}", self.device_name()))?;
             let bytes = crate::keys::open(key, &name, &sealed.bytes)?;
@@ -39,7 +39,7 @@ impl Node {
             return Ok(());
         }
         let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) else { return Ok(()) };
-        let keys = self.database_keys(scope, members::APP, crate::bucket::BLOBS).await?;
+        let keys = self.database_keys(scope, members::APP, crate::bucket::BLOBS, false).await?;
         let name = crate::bucket::blob_name(&scope.to_string(), hash);
         Bucket::create(&self.bucket()?.place, &name, &crate::log::seal(&keys, &name, &bytes)?).await?;
         self.0.shared.lock().unwrap().insert(marker.clone());

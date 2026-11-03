@@ -92,8 +92,9 @@ impl Node {
         let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no install")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
         let endpoint = crate::keys::Endpoint { key, seal: crate::kernel::twin_public(&key)? };
-        // A machine of the person's own is their device too; an admin lists another person's as compute, which that
-        // person makes their device from one of theirs.
+        // A machine of the person's own is their device too. An admin lists another person's as compute, which runs
+        // what that admin's listing may (`global`, groups) but never that person's own scope, until a device of theirs
+        // lists it again (`Members::runs_for`).
         let roles = if user == pairing.user { MACHINE } else { &[members::Kind::Compute][..] };
         let listed = members::device(&endpoint, &user, &request.name, roles, None);
         self.member_content(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, listed).await.context("this device can no longer admit that machine")?;

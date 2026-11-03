@@ -369,7 +369,7 @@ impl Node {
     /// Seals each epoch of `scope` this device holds to `to`, where it isn't yet.
     async fn seal_held(&self, scope: &Scope, to: &crate::keys::Endpoint) -> Result<()> {
         let (bucket, name) = (self.bucket()?, scope.to_string());
-        for (n, key) in self.epoch_keys(scope).await? {
+        for (n, key) in self.epoch_keys(scope, false).await? {
             let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
             if Bucket::get(&bucket, &at).await?.is_none() {
                 crate::db::created(&bucket, &at, &crate::kernel::seal_to(&to.seal, &key)?).await?;
@@ -394,7 +394,9 @@ impl Node {
         })?;
         ensure!(key != self.0.id, "{gone} is this device: remove it from another of your devices");
         let relay = self.tell_relay_now(json!({ "remove": hex(&key) })).await.err().map(|err| format!("{err:#}"));
-        self.member_as(caller, "remove", json!({ "key": hex(&key) })).await?;
+        // The last of its entries in `global` this device had seen: those after never count, wherever they sort.
+        let seq = self.with(|i| Ok(i.r.store.last(&key, "global")?.map(|e| e.seq())))?;
+        self.member_as(caller, "remove", json!({ "key": hex(&key), "seq": seq })).await?;
         let (mut renewed, mut left) = (Vec::new(), Vec::new());
         for scope in scopes {
             let starts = self.with(|i| Ok(starts_epochs(&i.r.members, &caller.user, &scope)))?;
