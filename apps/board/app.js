@@ -517,6 +517,10 @@ The board's rules, which every agent follows and anyone may change with board_ru
     main: {
       title: "Board",
       html: `
+<style>
+  .action-row { color: var(--tint); cursor: pointer; }
+  .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
+</style>
 <div id="list"></div>
 <script>
 async function show() {
@@ -533,9 +537,51 @@ async function show() {
       <div class="chev">›</div>
     </a>\`;
   };
+  const rest = topics.slice(1);
   return \`<div class="list">\${row(topics[0])}</div>
      <h2 class="section">Topics</h2>
-     <div class="list">\${topics.slice(1).map(row).join("") || '<div class="empty">No topics yet</div>'}</div>\`;
+     \${rest.length ? \`<div class="list">\${rest.map(row).join("")}<a class="row plain action-row" onclick="create()">New Topic</a></div>\`
+       : one.empty("A topic keeps posts about one thing together.", { label: "New Topic", run: () => create() })}\`;
+}
+// A topic's name as the board keeps it: lowercase words joined by -, nested with /.
+const slug = (s) => s.trim().toLowerCase().replace(/[^a-z0-9/]+/g, "-").replace(/\\/+/g, "/").replace(/(^|\\/)-+|-+(?=\\/|$)/g, "$1").replace(/^\\/+|\\/+$/g, "");
+function create() {
+  const sheet = one.sheet({ title: "New Topic", done: "Cancel" });
+  sheet.body.innerHTML = \`<div class="list"><label class="row plain"><input class="field" id="name" placeholder="Name, like kitchen-reno" autocomplete="off" autocapitalize="none"></label>
+    <label class="row plain"><input class="field" id="about" placeholder="What it's for" autocomplete="off" enterkeyhint="done"></label></div>
+    <p class="footer" id="note"></p><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Create</button></div>\`;
+  const $ = (id) => sheet.body.querySelector("#" + id), name = $("name"), about = $("about"), go = $("go"), note = $("note");
+  let force = false;
+  const check = () => {
+    go.disabled = !slug(name.value) || !about.value.trim();
+    note.className = "footer";
+    note.textContent = slug(name.value) && slug(name.value) !== name.value.trim() ? "It'll be called " + slug(name.value) + "." : "";
+    force = false;
+    go.textContent = "Create";
+  };
+  name.oninput = about.oninput = check;
+  about.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
+  go.onclick = async () => {
+    go.disabled = true;
+    const topic = slug(name.value);
+    try {
+      await one.call("create", { topic, description: about.value.trim(), ...(force ? { force } : {}), ...(one.scope ? { scope: one.scope } : {}) });
+      sheet.close();
+      one.tap("success");
+      one.open("topic", { path: topic });
+    } catch (e) {
+      // A topic like it already: say which, and let them make theirs anyway.
+      const like = String(e.message || "").split("\\n").slice(1).map((l) => l.trim().split(" — ")[0]).filter((l) => /^[a-z0-9-/]+$/.test(l));
+      note.className = "footer error";
+      if (like.length) {
+        note.textContent = "There's already " + like.join(" and ") + ". Use " + (like.length > 1 ? "one of them" : "it") + ", or create yours anyway.";
+        force = true;
+        go.textContent = "Create Anyway";
+      } else note.textContent = one.plain(String(e.message || e).replace(/^Not created: /, "")).title;
+      go.disabled = false;
+    }
+  };
+  setTimeout(() => name.focus(), 50);
 }
 const draw = () => one.render("#list", show, { loading: "Loading topics" });
 one.on("changed", draw);
