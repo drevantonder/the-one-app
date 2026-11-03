@@ -273,6 +273,9 @@ pub struct Need {
 /// who there.
 const VAULT: &str = "vault";
 const LOG: &str = "log";
+/// An app's own databases: its data, and its sidecars' records.
+const APP_DATABASE: &str = "main";
+const SIDECAR_DATABASE: &str = "sidecar";
 
 /// The app a kind of request runs, as clients name kinds to remember what each needed: an app's call (`call <app>`),
 /// or its screens (`/v1/screens/<app>`). None for any other.
@@ -281,13 +284,32 @@ pub fn app_of(route: &str) -> Option<&str> {
 }
 
 /// Whether a client hands a node the key of `need`'s database with a kind of request (`route`, as `app_of` reads it),
-/// when the node asks (428): a request that runs one app, only that app's databases, and the node's Vault and log of a
-/// scope (which fill in its items, and say who's who there). `kernel/shared/crypto.js`'s `mayHand` is the same.
+/// when the node asks (428): only what that kind of request can use. One that runs an app, that app's databases; an
+/// MCP request (`/mcp`), which may run any, or widgets and badges, which run every app's, apps' own databases; and each
+/// of those the node's Vault and log of a scope too (which fill in its items, and say who's who there). The Vault's
+/// routes, its Vault and log; any other, the log alone. `kernel/shared/crypto.js`'s `mayHand` is the same.
 pub fn may_hand(route: &str, need: &Need) -> bool {
     let node = |of: &[&str]| need.app == crate::members::APP && of.contains(&need.database.as_str());
-    match app_of(route) {
-        Some(app) => need.app == app || node(&[VAULT, LOG]),
-        None => true,
+    let apps = need.app != crate::members::APP && [APP_DATABASE, SIDECAR_DATABASE].contains(&need.database.as_str());
+    match (app_of(route), route) {
+        (Some(app), _) => need.app == app || node(&[VAULT, LOG]),
+        (None, "/mcp" | "/v1/widgets" | "/v1/badges") => apps || node(&[VAULT, LOG]),
+        (None, r) if r == "/v1/vault" || r.starts_with("/v1/vault/") => node(&[VAULT, LOG]),
+        (None, _) => node(&[LOG]),
+    }
+}
+
+/// The oldest epoch of a database whose key a reader needs, of a scope whose newest epoch is `newest`: the one its
+/// newest copy is under, as its newest hint (`hint`, if it has one) says, which holds all before it; every epoch from
+/// the first while it has no copy; the newest if it has no hint, being new. Nodes ask for no older, and clients hand no
+/// older. `kernel/shared/crypto.js`'s `oldestNeeded` is the same.
+pub fn oldest_needed(hint: Option<&[u8]>, newest: u32) -> u32 {
+    let newest = newest.max(1);
+    let Some(hint) = hint else { return newest };
+    let v: Value = serde_json::from_slice(hint).unwrap_or_default();
+    match (v["copy"].as_u64().unwrap_or(0), v["epoch"].as_u64().unwrap_or(0)) {
+        (0, _) => 1,
+        (_, epoch) => u32::try_from(epoch).unwrap_or(u32::MAX).clamp(1, newest),
     }
 }
 

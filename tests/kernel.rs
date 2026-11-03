@@ -1243,7 +1243,7 @@ mod relay {
                         let msg: Value = serde_json::from_str(body).unwrap_or(Value::Null);
                         let database = match msg["params"]["name"].as_str() {
                             Some("board_read") => Some("main"),
-                            Some("notes_read") => Some("notes"),
+                            Some("notes_read") => Some("sidecar"),
                             _ => None,
                         };
                         let has_keys = {
@@ -1453,7 +1453,7 @@ mod relay {
                 assert_eq!((h.for_.as_str(), h.until), (device.as_str(), exp * 1000));
             }
             assert_eq!(databases(&handed[0]), vec![(scope.as_str(), 1, "board", "main", key_of("main"))]);
-            assert_eq!(databases(&handed[1]), vec![(scope.as_str(), 1, "board", "notes", key_of("notes"))], "a tool's call hands only what it needs");
+            assert_eq!(databases(&handed[1]), vec![(scope.as_str(), 1, "board", "sidecar", key_of("sidecar"))], "a tool's call hands only what it needs");
             let mcps = requests.iter().filter(|r| r.line.starts_with("POST /mcp ")).count();
             assert_eq!(mcps, 16, "each MCP request reached the node once, and each tool's first once more once it had the keys: {requests:?}");
 

@@ -3,13 +3,16 @@
 // asked `allowed(key)`), for a request each signs with its own key (src/keys.rs `signed_request`, domain `one/urls`):
 //
 //   POST /urls { read, head, create: [item], replace: [{ name, etag }], remove: [name],
-//                list: [{ prefix, delimiter?, token? }], confirm: [{ name, etag }], at, by, sig }
-//   → { read, head, create, replace, remove: { name: url }, list: [url], confirm: { name: bool }, until }
+//                list: [{ prefix, delimiter?, token? }], confirm: [{ name, etag }], newest: [prefix], at, by, sig }
+//   → { read, head, create, replace, remove: { name: url }, list: [url], confirm: { name: bool },
+//       newest: { prefix: text | null }, until }
 //
 // An item is a name, or a database's steps from one position to another (`{ steps: prefix, from, to }`), so a node
 // asks for the positions it reads or writes next in one trip. Any endpoint of the install may read, list and create
 // (only if absent: `If-None-Match: *` is signed in); a `…/newest` is replaced only by its ETag (`If-Match`); only an
-// admin's endpoint removes. `confirm` says whether each object is there with that ETag, which opens nothing. It knows
+// admin's endpoint removes. `confirm` says whether each object is there with that ETag, and `newest` what each
+// database's newest hint says (`<prefix>/newest`, never sealed), for browsers, which can't read the bucket: both open
+// nothing. It knows
 // nobody's scopes and checks none: everything in the bucket is sealed, so what it hands out opens nothing without keys.
 
 import { checkRequest } from "../shared/crypto.js";
@@ -74,6 +77,20 @@ async function confirm(env, bucket, asked) {
   return out;
 }
 
+/// Each database's newest hint, by its prefix: its text, or null if it has none.
+async function newest(env, bucket, prefixes) {
+  const names = prefixes.map((p) => `${p}/newest`);
+  const reads = env.R2 ? null : (await bucketUrls(bucket, { read: names }, 60)).read;
+  const out = {};
+  await Promise.all(prefixes.map(async (p, i) => {
+    if (env.R2) return void (out[p] = (await (await env.R2.get(names[i]))?.text()) ?? null);
+    const r = await fetch(reads[names[i]]);
+    if (!r.ok && r.status !== 404) throw new Error(`the bucket said ${r.status}`);
+    out[p] = r.ok ? await r.text() : null;
+  }));
+  return out;
+}
+
 async function urls(request, env) {
   if (!env.BUCKET) fail(503, "your One App has no bucket yet");
   const body = await request.json().catch(() => fail(400, "the body isn't JSON"));
@@ -93,8 +110,10 @@ async function urls(request, env) {
   const remove = list(fields.remove);
   const pages = list(fields.list);
   const confirms = list(fields.confirm);
+  const hints = list(fields.newest);
   if (read.length + head.length + create.length + replace.length + remove.length + pages.length > MOST) fail(400, `at most ${MOST} URLs at once`);
-  if (confirms.length > CONFIRM) fail(400, `at most ${CONFIRM} objects confirmed at once`);
+  if (confirms.length + hints.length > CONFIRM) fail(400, `at most ${CONFIRM} objects confirmed or hints read at once`);
+  if (!hints.every(isName)) fail(400, "each newest is a database's prefix");
   for (const r of [...replace, ...confirms]) if (!isName(r?.name) || typeof r.etag !== "string" || !r.etag) fail(400, "give each a name and its ETag");
   if (!replace.every((r) => r.name.endsWith("/newest"))) fail(403, "only a database's newest is replaced");
   for (const name of remove) if (!isName(name)) fail(400, `${name} isn't a name in the bucket`);
@@ -106,7 +125,7 @@ async function urls(request, env) {
   const bucket = JSON.parse(env.BUCKET);
   const until = Date.now() + EXPIRES * 1000;
   const out = await bucketUrls(bucket, { read, head, create, replace, remove, list: pages }, EXPIRES);
-  return { ...out, confirm: confirms.length ? await confirm(env, bucket, confirms) : {}, until };
+  return { ...out, confirm: confirms.length ? await confirm(env, bucket, confirms) : {}, newest: hints.length ? await newest(env, bucket, hints) : {}, until };
 }
 
 export default {

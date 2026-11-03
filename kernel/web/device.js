@@ -8,7 +8,7 @@
 // (/v1/state): which seal key a device has, who opens a scope, which hash an epoch's key must have, and which nodes may
 // be handed a scope's keys. A hacked node holds no keys, and gets none this way.
 
-import { b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, x25519Public } from "../shared/crypto.js";
+import { b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, mayHand, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, x25519Public } from "../shared/crypto.js";
 import { get, put } from "./kept.js";
 import { members } from "./members.js";
 
@@ -260,12 +260,6 @@ export class Device {
     return at === "/v1/call" ? `call ${body?.app || ""}` : at.replace(/^\/v1\/screens\/([^/]+)\/.*/, "/v1/screens/$1");
   }
 
-  /// The app a kind of request runs, if it names one: an app's call, or its screens.
-  static appOf(route) {
-    const m = /^call (.+)$/.exec(route) || /^\/v1\/screens\/([^/]+)$/.exec(route);
-    return m ? decodeURIComponent(m[1]) : null;
-  }
-
   /// The `x-one-keys` a request goes with: what its kind of request needed the last time, sealed to the node that said
   /// so (to its key's twin, as every node's seal key is), for this browser's key, until `until`. A node that didn't say
   /// so can't open it.
@@ -278,11 +272,10 @@ export class Device {
   }
 
   /// A node's 428, believed only from `node`, the one that answered it as its connection proved: it must name itself
-  /// and the seal key the install's entries list for it, run every scope it needs keys of, as they say, and a request
-  /// that runs one app may need only that app's databases (and a scope's Vault, which fills in its items, and its log,
-  /// which the serverless node reads who's who from). What
-  /// it needed is all this kind of request hands next time, and only to it. Throws if it asks for more, or this browser
-  /// can't open it.
+  /// and the seal key the install's entries list for it, run every scope it needs keys of, as they say, and need only
+  /// databases this kind of request uses (`mayHand`). Of each, only epochs from the one its newest copy is under are
+  /// handed (`oldestNeeded`): older ones open only its history. What it needed is all this kind of request hands next
+  /// time, and only to it. Throws if it asks for more, or this browser can't open it.
   async learn(route, answer, node) {
     const need = Array.isArray(answer.need) ? answer.need : [];
     if (!node || answer.to !== node) throw new Error("A device that didn’t answer asked for keys, so none were given.");
@@ -292,11 +285,23 @@ export class Device {
     if (!runsAll(k, node, scopes)) throw new Error("A device that doesn’t run that asked for its keys, so none were given.");
     const seal = k.devices.find((d) => d.key === node)?.seal;
     if (!seal || (answer.seal && answer.seal !== seal)) throw new Error("A device asked for keys sealed to another, so none were given.");
-    const app = Device.appOf(route);
-    if (need.length > 64 || (app && need.some((n) => n.app !== app && !(n.app === "node" && ["vault", "log"].includes(n.database))))) throw new Error("A device asked for keys that request doesn’t use, so none were given.");
-    for (const n of need) await this.databaseKey(n);
-    this.needs[route] = { node, seal, need };
+    if (need.length > 64 || !need.every((n) => mayHand(route, n))) throw new Error("A device asked for keys that request doesn’t use, so none were given.");
+    const hints = await this.hints(need);
+    const handed = hints ? need.filter((n) => n.epoch >= oldestNeeded(hints[prefixOf(n)] ?? null, k.epochs[n.scope]?.n || 0)) : need;
+    if (!handed.length) throw new Error("A device asked for older keys than it needs, so none were given.");
+    for (const n of handed) await this.databaseKey(n);
+    this.needs[route] = { node, seal, need: handed };
     try { localStorage.setItem("one.needs", JSON.stringify(this.needs)); } catch {}
+  }
+
+  /// Each database of `needs`' newest hint, by its prefix in the bucket (`prefixOf`): its text, or null if it has
+  /// none, as the URL signer reads it, which a browser can't itself. Null if the signer doesn't say (an older one).
+  async hints(needs) {
+    const newest = [...new Set(needs.map(prefixOf))];
+    const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { newest })) });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(out.error || "Your One App's storage didn't answer. Try again.");
+    return out.newest || null;
   }
 
   // Signing.
@@ -455,6 +460,9 @@ export class Device {
     await this.approve({ key: this.me.key, seal: this.me.seal, user: this.user, name: browserName() }, pk);
   }
 }
+
+/// Where a database of `need`'s is in the bucket (src/bucket.rs `folder`).
+const prefixOf = (n) => `${n.scope.replace(":", "-")}/${n.app}/${n.database}`;
 
 /// A response's JSON, or its error, thrown.
 async function answer(r) {

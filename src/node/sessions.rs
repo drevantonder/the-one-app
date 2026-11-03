@@ -268,13 +268,8 @@ impl Node {
         for (scope, app, database) in want {
             let newest = self.newest_epoch(scope).await?.max(1);
             let prefix = format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()));
-            let oldest = match crate::bucket::Bucket::get(&bucket, &crate::db::newest_name(&prefix)).await? {
-                Some(o) => match crate::db::newest(&o.bytes) {
-                    (_, 0, _) => 1,
-                    (_, _, epoch) => epoch.clamp(1, newest),
-                },
-                None => newest,
-            };
+            let hint = crate::bucket::Bucket::get(&bucket, &crate::db::newest_name(&prefix)).await?;
+            let oldest = crate::keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), newest);
             let handed = self.handed(me, scope, app, database);
             need.extend((oldest..=newest).filter(|n| !handed.contains_key(n)).map(|epoch| Need { scope: scope.to_string(), epoch, app: app.to_string(), database: database.to_string() }));
         }

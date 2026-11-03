@@ -574,6 +574,33 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         }
     }
 
+    // What a node is handed with each kind of request (`keys::may_hand`), and how old an epoch (`keys::oldest_needed`):
+    // browsers and the MCP Worker hand by the same rule as native apps.
+    {
+        use one::keys::{Need, app_of, may_hand, oldest_needed};
+        let routes = ["call board", "call node", "/v1/screens/board", "/v1/screens/board/main", "/mcp", "/v1/widgets", "/v1/badges", "/v1/vault", "/v1/vault/requests", "/v1/state", "/v1/entries", "/v1/apps", "call "];
+        let dbs = [("board", "main"), ("board", "sidecar"), ("notes", "main"), ("board", "other"), ("node", "vault"), ("node", "log"), ("node", "main"), ("node", "blobs")];
+        let hands: Vec<(String, Need)> = routes.iter().flat_map(|r| dbs.iter().map(|(app, database)| (r.to_string(), Need { scope: "user:ab".into(), epoch: 1, app: app.to_string(), database: database.to_string() }))).collect();
+        let hints: Vec<(Option<String>, u32)> = [None, Some(r#"{"at":9,"copy":0,"epoch":0}"#), Some(r#"{"at":9,"copy":7,"epoch":2}"#), Some(r#"{"at":9,"copy":7,"epoch":5}"#), Some(r#"{"at":9,"copy":7}"#), Some("not a hint"), Some(r#"{"copy":-1,"epoch":2}"#)]
+            .into_iter()
+            .flat_map(|h| [0, 1, 3].map(|n| (h.map(str::to_string), n)))
+            .collect();
+        let out = js(json!({ "op": "handed", "hands": hands.iter().map(|(r, n)| json!([r, n])).collect::<Vec<_>>(), "hints": hints.iter().map(|(h, n)| json!([h, n])).collect::<Vec<_>>() }));
+        for ((route, need), (js, app)) in hands.iter().zip(out["hands"].as_array().unwrap().iter().zip(out["apps"].as_array().unwrap())) {
+            assert_eq!(js.as_bool(), Some(may_hand(route, need)), "{route} handed {}/{}", need.app, need.database);
+            assert_eq!(app.as_str(), app_of(route), "{route}'s app");
+        }
+        for ((hint, newest), js) in hints.iter().zip(out["oldest"].as_array().unwrap()) {
+            assert_eq!(js.as_u64(), Some(oldest_needed(hint.as_deref().map(str::as_bytes), *newest) as u64), "{hint:?} at {newest}");
+        }
+        // And what it says, for what matters most: another app's, or anything but the log with a request that runs none.
+        let need = |app: &str, database: &str| Need { scope: "global".into(), epoch: 1, app: app.into(), database: database.into() };
+        assert!(may_hand("call board", &need("board", "main")) && !may_hand("call board", &need("notes", "main")));
+        assert!(may_hand("/v1/entries", &need("node", "log")) && !may_hand("/v1/entries", &need("board", "main")) && !may_hand("/v1/state", &need("node", "vault")));
+        assert!(may_hand("/v1/vault", &need("node", "vault")) && !may_hand("/v1/vault", &need("board", "main")));
+        assert_eq!(oldest_needed(Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
+    }
+
     let _ = child.kill();
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&dir);

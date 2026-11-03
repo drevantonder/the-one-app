@@ -382,3 +382,37 @@ export async function inviteProof(secret, key, seal) {
 export async function passkeyKeys(prf) {
   return { sign: await hkdf(prf, "one/passkey-device/sign"), seal: await hkdf(prf, "one/passkey-device/seal") };
 }
+
+// MARK: What a node is handed
+
+/// The app a kind of request runs, as clients name kinds to remember what each needed: an app's call (`call <app>`),
+/// or its screens (`/v1/screens/<app>`). Null for any other. (src/keys.rs `app_of`.)
+export function appOf(route) {
+  const m = /^call (.+)$/.exec(route) || /^\/v1\/screens\/([^/]+)$/.exec(route);
+  return m ? m[1] : null;
+}
+
+/// Whether a client hands a node the key of `need`'s database (`{ scope, app, database }`) with a kind of request
+/// (`route`), when the node asks (428): only what that kind of request can use. As src/keys.rs `may_hand`, which says
+/// why.
+export function mayHand(route, need) {
+  const node = (of) => need.app === "node" && of.includes(need.database);
+  const app = appOf(route);
+  if (app) return need.app === app || node(["vault", "log"]);
+  if (["/mcp", "/v1/widgets", "/v1/badges"].includes(route)) return (need.app !== "node" && ["main", "sidecar"].includes(need.database)) || node(["vault", "log"]);
+  if (route === "/v1/vault" || route.startsWith("/v1/vault/")) return node(["vault", "log"]);
+  return node(["log"]);
+}
+
+/// The oldest epoch of a database whose key a reader needs, of a scope whose newest is `newest`, from its newest hint
+/// (`hint`, its text, or null if it has none). As src/keys.rs `oldest_needed`, which says why.
+export function oldestNeeded(hint, newest) {
+  newest = Math.max(1, newest || 0);
+  if (hint == null) return newest;
+  let v = {};
+  try {
+    v = JSON.parse(hint) || {};
+  } catch {}
+  const n = (x) => (Number.isSafeInteger(x) && x > 0 ? x : 0);
+  return n(v.copy) === 0 ? 1 : Math.min(Math.max(n(v.epoch), 1), newest);
+}

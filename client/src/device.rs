@@ -8,8 +8,8 @@
 //! the epochs sealed to it, and replays them by the node's own rules (`crate::members`, as browsers and the MCP
 //! Worker's devices do). It asks only endpoints those list
 //! as compute that run its person's things, takes a 428 only from the node that answered, naming the seal key they list
-//! for it, and only for scopes they say it runs and databases that kind of request uses (`keys::may_hand`), and hands
-//! what it named only to that node, sealed to that key.
+//! for it, and only for scopes they say it runs, databases that kind of request uses (`keys::may_hand`) and epochs
+//! from each one's newest copy (`keys::oldest_needed`), and hands what it named only to that node, sealed to that key.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -484,6 +484,23 @@ impl Device {
         }
         if !runs(self) {
             return Err(failed("A device that doesn't run that asked for its keys. Nothing was handed."));
+        }
+        // Of each database, only epochs from the one its newest copy is under (`keys::oldest_needed`): older ones open
+        // only its history.
+        let bucket = Signed::new(self.address.clone(), self.key.to_bytes());
+        let prefix = |n: &Need| format!("{}/{}/{}", one::bucket::folder(&n.scope), n.app, n.database);
+        let mut oldest: BTreeMap<String, u32> = BTreeMap::new();
+        for (n, scope) in need.iter().zip(&scopes) {
+            if oldest.contains_key(&prefix(n)) {
+                continue;
+            }
+            let hint = one::bucket::Bucket::get(&bucket, &one::db::newest_name(&prefix(n))).await.map_err(failed)?;
+            let newest = self.known.lock().unwrap().as_ref().map_or(0, |k| k.members.epoch(scope));
+            oldest.insert(prefix(n), keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), newest));
+        }
+        need.retain(|n| n.epoch >= oldest[&prefix(n)]);
+        if need.is_empty() {
+            return Err(failed("A device asked for older keys than it needs. Nothing was handed."));
         }
         for n in &need {
             self.database_key(n).await?;

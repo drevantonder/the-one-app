@@ -19,8 +19,9 @@
 //
 // It trusts no node for who's who or for keys: it reads the install's signed entries from the bucket itself, through
 // the URL signer, and replays them as nodes do (serverless/src/clients.rs). It asks only the compute endpoints they
-// list as running its person's calls, hands each only the keys of the scopes it runs, and takes a 428 only from the
-// node that answered, for its own listed seal key. What a tool needed is kept per tool, so a call hands only its own.
+// list as running its person's calls, hands each only the keys of the scopes it runs, of databases an MCP request uses
+// (`mayHand`) and epochs from each one's newest copy, and takes a 428 only from the node that answered, for its own
+// listed seal key. What a tool needed is kept per tool, so a call hands only its own.
 //
 // Bindings: AUTH (the auth service), RELAY (the relay's `McpDevices` entrypoint), SIGNER (the URL signer), CLIENT
 // (this Worker's `Client`), ADDRESS (the install's), NAME (its name), LOCATION (where objects are made), IDLE (ms,
@@ -29,7 +30,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view, device_keys, following } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
-import { b64u, ed25519Public, hex, joinCode, random, sealHandoff, signedRequest } from "../shared/crypto.js";
+import { b64u, ed25519Public, hex, joinCode, mayHand, random, sealHandoff, signedRequest } from "../shared/crypto.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
 
@@ -476,6 +477,7 @@ export class Client extends DurableObject {
         const wanted = (Array.isArray(need.need) ? need.need : []).map(needOf).filter(Boolean).slice(0, NEEDS_MOST);
         const runs = wanted.filter((n) => node.scopes.has(n.scope));
         if (runs.length < wanted.length) return answerAll(body, "That needs keys of a scope the device that answered doesn't run for you: it was given none.");
+        if (!wanted.every((n) => mayHand("/mcp", n))) return answerAll(body, "A device asked for keys an MCP request doesn't use: it was given none.");
         await this.remember(tool, runs);
         const handOver = tool ? await this.needsOf(tool) : runs;
         handing = await this.handoff(me, r.node, tool, handOver.concat(runs.filter((n) => !handOver.some((k) => sameNeed(k, n)))), true).catch(() => null);

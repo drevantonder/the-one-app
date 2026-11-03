@@ -301,8 +301,8 @@ pub async fn device_view(me: String, user: String, seal: Vec<u8>, bucket: JsValu
 }
 
 /// The keys of the databases `need` (JSON, `[{ scope, app, database }]`) names, for the running device `me` (hex), as
-/// `device_view` last read who's who: each epoch of the scope this device opens, the app's key in it from the bucket
-/// (made in the newest, if no one has yet). → `[{ scope, epoch, app, database, key }]`, `key` base64url: what it
+/// `device_view` last read who's who: each epoch of the scope this device opens from the one the database's newest copy
+/// is under (`keys::oldest_needed`), the app's key in it from the bucket (made in the newest, if no one has yet). → `[{ scope, epoch, app, database, key }]`, `key` base64url: what it
 /// hands a node, sealed to it.
 #[wasm_bindgen]
 pub async fn device_keys(me: String, need: String, bucket: JsValue) -> Result<String, JsError> {
@@ -315,12 +315,15 @@ pub async fn device_keys(me: String, need: String, bucket: JsValue) -> Result<St
         for n in &need {
             let field = |k: &str| n[k].as_str().ok_or_else(|| anyhow!("a need names its {k}"));
             let (scope, app, database) = (field("scope")?, field("app")?, field("database")?);
-            crate::prefix_of(scope, app, database)?;
+            let prefix = crate::prefix_of(scope, app, database)?;
             let scope = Scope::parse(scope)?;
             ensure!(view.members.may_use(&view.user, &scope), "you don't use {scope}");
             let epochs = view.epoch_keys(&bucket, &me, &scope).await?;
             let newest = epochs.keys().next_back().copied().unwrap_or(0);
-            for (epoch, epoch_key) in &epochs {
+            // From the epoch its newest copy is under: older ones open only its history.
+            let hint = one::bucket::Bucket::get(&bucket, &one::db::newest_name(&prefix)).await?;
+            let oldest = one::keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), view.members.epoch(&scope));
+            for (epoch, epoch_key) in epochs.range(oldest..) {
                 let id = (scope.clone(), app.to_string(), *epoch);
                 let app_key = match view.apps.get(&id) {
                     Some(k) => Some(*k),
