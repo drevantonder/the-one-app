@@ -13,9 +13,9 @@ use anyhow::{Context, Result, bail};
 const ARG: &str = "--handoff=";
 /// The two folders the node's app runtime alternates between, so the old one's keeps running while the new one starts.
 const RUNTIMES: [&str; 2] = ["runtime", "runtime-next"];
-/// How long the new build may take to be ready, and the old one to finish what it's answering.
+/// How long the new build may take to be ready, and the old one to finish what it's answering: as long as an app may take.
 const READY_WITHIN: Duration = Duration::from_secs(120);
-const DRAIN_WITHIN: Duration = Duration::from_secs(10);
+const DRAIN_WITHIN: Duration = Duration::from_secs(30);
 
 static STOPPING: std::sync::LazyLock<tokio::sync::watch::Sender<bool>> = std::sync::LazyLock::new(|| tokio::sync::watch::channel(false).0);
 static WANTED: tokio::sync::Notify = tokio::sync::Notify::const_new();
