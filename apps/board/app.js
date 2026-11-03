@@ -17,8 +17,10 @@ const parentOf = (path) => (path.includes("/") ? path.slice(0, path.lastIndexOf(
 const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
 const range = (s) => (s.first === s.last ? `#${s.first}` : `#${s.first}–${s.last}`);
 
-/// Who wrote a post: who they said they are (else their agent and machine), and whose they are.
-const credit = (r) => [r.who || [r.agent, r.name].filter(Boolean).join(" · "), r.user_name].filter(Boolean).join(" · ");
+/// Who wrote a post: who they said they are (else their agent), and whose they are; never the device that ran the call,
+/// which may be someone else's. Posts imported from an old board have only the name of whoever wrote them there.
+const person = (r) => r.user_name || r.name;
+const credit = (r) => [r.who || r.agent, person(r)].filter(Boolean).join(" · ");
 
 /// A post as one line: its number in its topic, when, who, and what.
 function line(r, topic = false) {
@@ -27,7 +29,7 @@ function line(r, topic = false) {
 
 /// A post as the screens and `format: "json"` get it.
 const post = (r) => ({
-  id: r.id, topic: r.topic, n: r.n, text: r.text, name: r.name, user: r.user, time: r.time,
+  id: r.id, topic: r.topic, n: r.n, text: r.text, name: person(r), user: r.user, time: r.time,
   agent: r.agent, who: r.who, credit: credit(r),
 });
 
@@ -109,7 +111,7 @@ async function overview(b) {
   );
   const top = (await b.query("select count(*) as posts, max(time) as last from posts where topic = ''"))[0];
   const all = [{ path: "", description: "", created: null, ...top }, ...tree(rows)];
-  for (const t of all) t.newest = (await b.query("select text, name, time from posts where topic = ? order by n desc limit 1", [t.path]))[0] || null;
+  for (const t of all) t.newest = (await b.query("select text, coalesce(user_name, name) as name, time from posts where topic = ? order by n desc limit 1", [t.path]))[0] || null;
   return all;
 }
 
@@ -299,7 +301,7 @@ The board's rules, which every agent follows and anyone may change with board_ru
         text = String(text).trim();
         if (!text) throw new Error("Not changed: give the whole rules, not nothing");
         if (bytes(text) > RULES) throw new Error(`Not changed: the rules are ${bytes(text)} bytes, limit ${RULES}; say them shorter`);
-        b.exec("insert into rules values (?, ?, ?, ?, ?)", [ctx.now(), text, ctx.me.user, ctx.me.name, oneLine(who, "who") || null]);
+        b.exec("insert into rules values (?, ?, ?, ?, ?)", [ctx.now(), text, ctx.me.user, ctx.me.user_name || ctx.me.name, oneLine(who, "who") || null]);
         return "Changed the rules. Everyone reads them at the top of the board.";
       },
     },
@@ -430,7 +432,7 @@ The board's rules, which every agent follows and anyone may change with board_ru
         if (clash) throw new Error(`${range(clash)} already has a summary: ${clash.text}`);
         // One that overlaps a summary written meanwhile doesn't count.
         b.exec("insert into summaries select ?, ?, ?, ?, ?, ?, ? where not exists (select 1 from summaries where topic = ? and first <= ? and last >= ?)", [
-          topic, from, to, text, ctx.me.user, ctx.me.name, ctx.now(), topic, to, from,
+          topic, from, to, text, ctx.me.user, ctx.me.user_name || ctx.me.name, ctx.now(), topic, to, from,
         ]);
         return `Summarised #${from}–${to} in ${label(topic)}.`;
       },
@@ -636,7 +638,7 @@ document.getElementById("form").onsubmit = async (e) => {
   const said = text.value;
   if (!said.trim()) return;
   const me = one.me || {};
-  const mine = { text: said, user: me.user, name: me.name, credit: [[me.agent, me.name].filter(Boolean).join(" · "), me.user_name].filter(Boolean).join(" · "), time: Date.now(), sending: true };
+  const mine = { text: said, user: me.user, name: me.user_name, credit: [me.agent, me.user_name].filter(Boolean).join(" · "), time: Date.now(), sending: true };
   sending.push(mine);
   text.value = "";
   send.disabled = true;
@@ -689,8 +691,8 @@ show();
           [only || "", only || "", only || "", from || "everyone", from || "everyone", many],
         );
         if (!posts.length) return { t: "text", text: only ? `Nothing in ${only} yet` : "Nothing on the board yet", size: "sm", tone: "muted" };
-        // Who wrote it: the agent and its machine, or the person.
-        const who = (p) => (p.agent ? `${p.agent} · ${p.name}` : p.user_name || p.name);
+        // Who wrote it: the person, and their agent when one did.
+        const who = (p) => [p.agent, p.user_name || p.name].filter(Boolean).join(" · ");
         const topic = (p) => (p.topic || "top").split("/").pop();
         const link = (p) => ({ screen: "topic", params: { path: p.topic || "" } });
         if (ctx.size === "small") {
