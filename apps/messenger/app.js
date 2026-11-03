@@ -44,7 +44,6 @@ export default {
   title: "Messenger",
   icon: "messenger-logo",
   color: "#0866ff",
-  domain: "messenger.com",
   description: "Your Messenger chats, for your agents: read, search and send",
   connector: true,
   needs: "Needs Agent Devices on one of your devices",

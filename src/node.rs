@@ -294,7 +294,7 @@ pub struct Inner {
     bundles: Mutex<BTreeMap<String, String>>,
     /// The bundle of each app this release has built in, kept as a blob: any install may add them.
     built_in: BTreeMap<String, String>,
-    /// Each bundle's `icon.png` as a data URL, once read, or none.
+    /// Each bundle's `icon.png`, its finished app icon, as a data URL, once read, or none.
     images: Mutex<HashMap<String, Option<String>>>,
     /// The logos of the sites apps and sidecars connect to.
     logos: crate::logos::Logos,

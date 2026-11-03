@@ -124,14 +124,11 @@ impl Node {
         out.extend(missing);
         for info in &mut out {
             if let Some(image) = info["bundle"].as_str().or(info["built_in"].as_str()).and_then(|b| self.image(b)) {
-                info["image"] = json!(image);
+                (info["image"], info["image_kind"]) = (json!(image), json!("icon"));
             } else if let (Some(domain), Some(name)) = (info["domain"].as_str(), info["name"].as_str()) {
                 if let Some((image, kind)) = self.logo(domain, name) {
                     (info["image"], info["image_kind"]) = (json!(image), json!(kind));
                 }
-            } else if let Some((image, kind)) = info["name"].as_str().and_then(|n| self.sidecar_image(n)) {
-                // An app over a sidecar of its name shows the picture the sidecar gives (a Mac app's icon).
-                (info["image"], info["image_kind"]) = (image, kind);
             }
         }
         Ok(out)
@@ -161,7 +158,8 @@ impl Node {
         url
     }
 
-    /// The picture a bundle's app shows on its tile instead of its symbol: `icon.png` in its folder, as a data URL.
+    /// The picture a bundle's app shows on its tile instead of its symbol: `icon.png` in its folder, a finished app icon
+    /// (an external brand's own), as a data URL.
     /// Only from bundles this device has.
     pub(super) fn image(&self, bundle: &str) -> Option<String> {
         if let Some(image) = self.0.images.lock().unwrap().get(bundle) {

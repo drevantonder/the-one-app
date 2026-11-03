@@ -67,15 +67,15 @@ func steadyHash(_ text: String) -> Int {
     text.unicodeScalars.reduce(5381) { ($0 &* 33 &+ Int($1.value)) & 0x7FFF_FFFF }
 }
 
-/// An app's icon tile, as a phone's Home Screen draws one: a finished app icon edge to edge in its own shape, a logo
-/// (`icon.png` in its folder, a site's favicon) on white, or its icon filled (else its first letter) in white on its
+/// An app's icon tile, as a phone's Home Screen draws one: a finished app icon (`icon.png` in its folder) edge to edge
+/// in its own shape, a logo (a site's favicon) on white, or its icon filled (else its first letter) in white on its
 /// colour, the one it declares or else one picked by its name, so apps side by side differ.
 struct AppTile: View {
     var icon: String?
     var seed: String
     var color: String? = nil
     var image: String? = nil
-    /// `icon` when `image` is a finished app icon (a Mac app's, a site's apple-touch-icon); else it's a logo.
+    /// `icon` when `image` is a finished app icon (`icon.png`, a Mac app's, a site's apple-touch-icon); else it's a logo.
     var imageKind: String? = nil
     var size: CGFloat
 
