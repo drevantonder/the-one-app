@@ -7,8 +7,9 @@
 //! It trusts no node, nor the relay, for who's who: it reads `global`'s entries from the bucket itself, opens them with
 //! the epochs sealed to it, and replays them by the node's own rules (`crate::members`, as browsers and the MCP
 //! Worker's devices do). It asks only endpoints those list
-//! as compute that run its person's things, seals what it hands each to the seal key they list for it, takes a 428 only
-//! from the node that answered, naming that key, and hands only what that 428 named, for that kind of request.
+//! as compute that run its person's things, takes a 428 only from the node that answered, naming the seal key they list
+//! for it, and only for scopes they say it runs and databases that kind of request uses (`keys::may_hand`), and hands
+//! what it named only to that node, sealed to that key.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -78,8 +79,9 @@ pub struct Device {
     /// Each scope's epochs opened, by (scope, n), and apps' keys by (scope, app, n).
     epochs: Mutex<HashMap<(String, u32), [u8; 32]>>,
     app_keys: Mutex<HashMap<(String, String, u32), [u8; 32]>>,
-    /// What each kind of request needed, by its route (`route`): the last 428's.
-    needs: Mutex<BTreeMap<String, Vec<Need>>>,
+    /// What each kind of request needed, by its route (`route`): the last 428's, and the node that sent it (hex), the
+    /// only one they're handed to.
+    needs: Mutex<BTreeMap<String, (String, Vec<Need>)>>,
 }
 
 impl Device {
@@ -357,7 +359,7 @@ impl Device {
         for tries in 0..4 {
             let handed = self.handed(&route).await;
             let request = Request { method: method.into(), path: path.into(), headers: headers.clone(), body: body.clone() };
-            let response = self.send(request, &handed).await?;
+            let response = self.send(request, handed.as_ref()).await?;
             if response.status == 428 && tries < 3 {
                 let node = response.node;
                 let answer: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
@@ -381,17 +383,18 @@ impl Device {
         Err(failed("Your device needed keys it didn't name. Try again."))
     }
 
-    /// A request with keys `handed`, each node's sealed to the seal key its entries list, saying whose it is
-    /// (`x-one-user`), which a node checks against this device's key.
-    async fn send(&self, mut request: Request, handed: &[Handed]) -> Result<Response, Error> {
+    /// A request saying whose it is (`x-one-user`), which a node checks against this device's key, with keys `handed`
+    /// to the node that asked for them alone, sealed to the seal key its entries list: any other is asked without.
+    async fn send(&self, mut request: Request, handed: Option<&([u8; 32], Vec<Handed>)>) -> Result<Response, Error> {
         let client = self.client.lock().await.clone().ok_or_else(refused)?;
         let (seals, user) = self.known.lock().unwrap().as_ref().map(|k| (k.nodes.clone(), k.user.clone())).unwrap_or_default();
         request.headers.push(("x-one-user".into(), user));
         let me = self.key();
         client
             .fetch_with(request, |node| {
-                let Some(seal) = seals.get(node).filter(|_| !handed.is_empty()) else { return Vec::new() };
-                let handoff = Handoff { for_: me.clone(), until: now() + HANDED_FOR, keys: handed.to_vec() };
+                let Some((_, keys)) = handed.filter(|(to, keys)| to == node && !keys.is_empty()) else { return Vec::new() };
+                let Some(seal) = seals.get(node) else { return Vec::new() };
+                let handoff = Handoff { for_: me.clone(), until: now() + HANDED_FOR, keys: keys.clone() };
                 keys::seal_handoff(seal, &handoff).map(|k| vec![("x-one-keys".to_string(), k)]).unwrap_or_default()
             })
             .await
@@ -404,7 +407,7 @@ impl Device {
             headers.push(("content-type".into(), "application/json".into()));
         }
         let body = body.map(|b| keys::canonical(&b)).unwrap_or_default();
-        let response = self.send(Request { method: method.into(), path: path.into(), headers, body }, &[]).await?;
+        let response = self.send(Request { method: method.into(), path: path.into(), headers, body }, None).await?;
         let status = response.status;
         let out: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
         if status != 200 {
@@ -441,21 +444,25 @@ impl Device {
 
     // Keys.
 
-    /// The keys a kind of request needed last time, opened: none it can't open.
-    async fn handed(&self, route: &str) -> Vec<Handed> {
-        let needs = self.needs.lock().unwrap().get(route).cloned().unwrap_or_default();
+    /// The keys a kind of request needed last time, opened, and the node that asked for them, which alone is handed
+    /// them: none it can't open, nor of a scope its entries no longer say that node runs.
+    async fn handed(&self, route: &str) -> Option<([u8; 32], Vec<Handed>)> {
+        let (node, needs) = self.needs.lock().unwrap().get(route).cloned()?;
+        let node: [u8; 32] = keys::unhex(&node).ok()?;
+        let runs = |scope: &str| Scope::parse(scope).is_ok_and(|s| self.known.lock().unwrap().as_ref().is_some_and(|k| k.nodes.contains_key(&node) && k.members.runs_for(&node, &s)));
         let mut handed = Vec::new();
-        for n in needs {
+        for n in needs.into_iter().filter(|n| runs(&n.scope)) {
             if let Ok(key) = self.database_key(&n).await {
                 handed.push(Handed { key, scope: n.scope, epoch: n.epoch, app: n.app, database: n.database });
             }
         }
-        handed
+        Some((node, handed))
     }
 
-    /// A node's 428, taken only from the node that answered (`node`), naming itself and the seal key its entries list:
-    /// what the request needed, remembered for that kind of request, in place of what it needed before. Fails if
-    /// this device can't open them.
+    /// A node's 428, taken only from the node that answered (`node`), naming itself and the seal key its entries list,
+    /// asking only keys of scopes they say it runs, and of databases that kind of request uses (`keys::may_hand`): what
+    /// the request needed, remembered for that kind of request and that node, in place of what it needed before. Fails,
+    /// remembering nothing, if it asks for more, or this device can't open them.
     async fn learn(&self, route: &str, node: &[u8; 32], answer: &Value) -> Result<(), Error> {
         let listed = self.known.lock().unwrap().as_ref().and_then(|k| k.nodes.get(node).copied());
         let to = keys::unhex(answer["to"].as_str().unwrap_or("")).ok();
@@ -466,14 +473,23 @@ impl Device {
         let mut need: Vec<Need> = serde_json::from_value(answer["need"].clone()).unwrap_or_default();
         need.sort();
         need.dedup();
-        if need.is_empty() || need.len() > MOST_NEEDED {
-            return Err(failed("Your device asked for more keys than that needs. Nothing was handed."));
+        if need.is_empty() || need.len() > MOST_NEEDED || !need.iter().all(|n| keys::may_hand(route, n)) {
+            return Err(failed("A device asked for keys that request doesn't use. Nothing was handed."));
+        }
+        let scopes: Vec<Scope> = need.iter().map(|n| Scope::parse(&n.scope)).collect::<Result<_, _>>().map_err(|_| failed("A device asked for keys of something that isn't. Nothing was handed."))?;
+        let runs = |device: &Device| device.known.lock().unwrap().as_ref().is_some_and(|k| scopes.iter().all(|s| k.members.runs_for(node, s)));
+        // What it runs may be newer than this device read: read again, now and then, before refusing.
+        if !runs(self) && self.known.lock().unwrap().as_ref().is_some_and(|k| now() > k.at + REREAD) {
+            self.read_members().await?;
+        }
+        if !runs(self) {
+            return Err(failed("A device that doesn't run that asked for its keys. Nothing was handed."));
         }
         for n in &need {
             self.database_key(n).await?;
         }
         let mut needs = self.needs.lock().unwrap();
-        needs.insert(route.to_string(), need);
+        needs.insert(route.to_string(), (hex(node), need));
         if let Ok(bytes) = serde_json::to_vec(&*needs) {
             let _ = std::fs::create_dir_all(&self.dir);
             let _ = std::fs::write(self.dir.join("needs.json"), bytes);
@@ -623,8 +639,9 @@ async fn http(method: &str, url: &str, token: Option<&str>, body: Option<Value>)
 mod tests {
     use super::*;
 
-    /// A device hands keys only to a node its own reading of `global` lists, sealed to the seal key listed for it, only
-    /// what its 428 named, and never more than a request needs.
+    /// A device hands keys only to a node its own reading of `global` lists, which runs every scope it asks keys of,
+    /// sealed to the seal key listed for it, only what its 428 named of the databases that kind of request uses, and only
+    /// to the node that asked.
     #[tokio::test]
     async fn keys_go_only_to_listed_nodes_as_their_428_names() {
         let device = Device::new(new_secret(), "http://127.0.0.1:1", &std::env::temp_dir().join(format!("one-client-{}", hex(&new_secret()))).display().to_string());
@@ -637,6 +654,12 @@ mod tests {
         assert!(refused(&node, answer(&other, &seal, 1)).await, "a 428 naming another node than the one that answered");
         assert!(refused(&node, answer(&node, &other, 1)).await, "a seal key other than the one listed for it");
         assert!(refused(&node, answer(&node, &seal, MOST_NEEDED + 1)).await, "more keys than a request needs");
+        assert!(refused(&node, answer(&node, &seal, 1)).await, "a node the entries don't say runs the scope");
+        let other_app = json!({ "to": hex(&node), "seal": hex(&seal), "need": [{ "scope": "global", "epoch": 1, "app": "notes", "database": "main" }] });
+        assert!(device.learn("call board", &node, &other_app).await.unwrap_err().to_string().contains("doesn't use"), "another app's database");
         assert!(device.needs.lock().unwrap().is_empty(), "nothing refused is remembered, so nothing is handed");
+        // What a node asked for goes to it alone.
+        device.needs.lock().unwrap().insert("call board".into(), (hex(&other), vec![]));
+        assert_eq!(device.handed("call board").await.map(|h| h.0), Some(other), "remembered with the node that asked");
     }
 }

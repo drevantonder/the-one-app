@@ -269,6 +269,28 @@ pub struct Need {
     pub database: String,
 }
 
+/// The node's databases of a scope: its Vault's items (`vault::DATABASE`) and its log (`log::NAME`), which hold who's
+/// who there.
+const VAULT: &str = "vault";
+const LOG: &str = "log";
+
+/// The app a kind of request runs, as clients name kinds to remember what each needed: an app's call (`call <app>`),
+/// or its screens (`/v1/screens/<app>`). None for any other.
+pub fn app_of(route: &str) -> Option<&str> {
+    route.strip_prefix("call ").or_else(|| route.strip_prefix("/v1/screens/").filter(|a| !a.contains('/'))).filter(|a| !a.is_empty())
+}
+
+/// Whether a client hands a node the key of `need`'s database with a kind of request (`route`, as `app_of` reads it),
+/// when the node asks (428): a request that runs one app, only that app's databases, and the node's Vault and log of a
+/// scope (which fill in its items, and say who's who there). `kernel/shared/crypto.js`'s `mayHand` is the same.
+pub fn may_hand(route: &str, need: &Need) -> bool {
+    let node = |of: &[&str]| need.app == crate::members::APP && of.contains(&need.database.as_str());
+    match app_of(route) {
+        Some(app) => need.app == app || node(&[VAULT, LOG]),
+        None => true,
+    }
+}
+
 // Devices joining.
 
 /// The code a new device shows, which a device of its person types or scans to approve it: the first 8 base32
