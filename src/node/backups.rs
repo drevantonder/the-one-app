@@ -404,7 +404,7 @@ impl Node {
             let forgotten = i.views.get(&d.scope).map(|(_, s)| s.forgotten.clone()).unwrap_or_default();
             Ok((entries.clone(), backed_blobs(&entries, &forgotten)))
         })?;
-        let dir = self.0.dir.clone();
+        let (node, runtime) = (self.clone(), tokio::runtime::Handle::current());
         let bucket = self.bucket().ok().map(|b| b.place);
         let (place, install, scope_name, device) = (place.clone(), install.to_string(), d.scope.clone(), self.0.id);
         let snap = tokio::task::spawn_blocking(move || -> Result<(Option<Snapshot>, Option<Snapshot>)> {
@@ -419,7 +419,8 @@ impl Node {
                 return Ok((None, previous));
             }
             let job = b::Job { place: &place, install: &install, scope: &scope_name, key, sealed, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
-            let written = b::back_up(job, |hash| std::fs::read(release::blob_path(&dir, hash).ok()?).ok())?;
+            // A blob this device doesn't keep is read from the bucket, where the device that wrote it put it.
+            let written = b::back_up(job, |hash| runtime.block_on(node.blob(hash)).inspect_err(|err| tracing::debug!("backing up blob {hash}: {err:#}")).ok())?;
             Ok((written.clone(), written.or(previous)))
         })
         .await??;
