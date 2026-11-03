@@ -29,6 +29,7 @@ mod backups;
 mod blobs;
 mod calls;
 mod databases;
+mod devices;
 mod logs;
 mod net;
 mod pairing;

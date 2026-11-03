@@ -468,3 +468,22 @@ async fn a_node_answers_only_the_installs_devices() {
     let answer: Value = serde_json::from_slice(&asked(&stranger).await.expect("a pairing code out lets it ask")).unwrap();
     assert_eq!(answer["error"], "only your One App's devices are answered", "and only to join: {answer}");
 }
+
+/// A scope's epoch is sealed only to an endpoint listed as someone's who uses it, and only by someone who uses it.
+#[tokio::test(flavor = "multi_thread")]
+async fn epochs_are_sealed_only_to_the_scopes_endpoints() {
+    let a = start("keys").await;
+    a.create("Home", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    eventually("the board to run", async || a.call(board("post", json!({ "text": "hi" }))).await.is_ok()).await;
+    let global = one::entry::Scope::Global;
+    let mine = a.sealed_keys(&me, &global, Some(&one::entry::hex(&a.id())), None).await.unwrap();
+    assert_eq!(mine["epoch"], 1, "{mine}");
+    assert!(mine["sealed"]["1"].is_string(), "{mine}");
+    let stranger = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let sealed = data_encoding::BASE64URL_NOPAD.encode(&one::kernel::seal_to(&stranger.seal, &[1; 32]).unwrap());
+    let refused = a.seal_key(&me, &global, 1, Some(&one::entry::hex(&stranger.key)), None, &sealed).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("isn't one of the install's"), "{refused:#}");
+    let again = a.seal_key(&me, &global, 1, Some(&one::entry::hex(&a.id())), None, &sealed).await.unwrap_err();
+    assert!(format!("{again:#}").contains("already"), "what's sealed is never replaced: {again:#}");
+}

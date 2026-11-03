@@ -69,6 +69,7 @@ pub fn routes() -> Router<Node> {
         .route("/skills/{name}/{*path}", get(skill_file))
         .route("/v1/state", get(state))
         .route("/v1/endpoint", get(endpoint))
+        .route("/v1/keys", get(keys_get).post(keys_post))
         .route("/v1/apps", get(apps))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .route("/v1/widgets", get(widgets))
@@ -135,6 +136,7 @@ pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-ho
 pub const SIGNED_IN: &[&str] = &[
     "/v1/state",
     "/v1/endpoint",
+    "/v1/keys",
     "/v1/apps",
     "/v1/call",
     "/v1/widgets",
@@ -478,6 +480,20 @@ async fn kernel_run(State(node): State<Node>, me: Me, Json(run): Json<crate::ker
 /// This device as an endpoint, `{ key, seal }` (hex): what a caller seals the keys it hands a call to (`x-one-keys`).
 async fn endpoint(State(node): State<Node>) -> Json<Value> {
     Json(json!(node.endpoint()))
+}
+
+/// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
+async fn keys_get(State(node): State<Node>, me: Me, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
+    let scope = crate::entry::Scope::parse(q.get("scope").map(String::as_str).unwrap_or(""))?;
+    Ok(Json(node.sealed_keys(&me.caller, &scope, q.get("to").map(String::as_str), q.get("app").map(String::as_str)).await?))
+}
+
+/// `{ scope, n, to, sealed }` or `{ scope, n, app, sealed }`: keeps a key sealed by the caller's device (`Node::seal_key`).
+async fn keys_post(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    only(&body, &["scope", "n", "to", "app", "sealed"])?;
+    let scope = crate::entry::Scope::parse(text(&body, "scope")?)?;
+    let n = body["n"].as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| anyhow::anyhow!("give n, the epoch"))?;
+    Ok(Json(node.seal_key(&me.caller, &scope, n, body["to"].as_str(), body["app"].as_str(), text(&body, "sealed")?).await?))
 }
 
 async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Json<Value> {
