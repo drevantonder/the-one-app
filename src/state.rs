@@ -45,7 +45,7 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
     let address = settings.get("address").and_then(|a| a.as_str()).filter(|a| !a.is_empty());
     let passkeys = address.filter(|_| here.passkeys).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
     let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), settings["store"].as_str().unwrap_or(""), passkeys.as_deref())).unwrap_or_default();
-    let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "accent": crate::config::ACCENT, "store": settings["store"], "push": settings["push"] });
+    let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "store": settings["store"], "push": settings["push"] });
     let mut state = json!({
         "config": config,
         "me": here.me,

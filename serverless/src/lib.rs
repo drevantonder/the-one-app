@@ -171,10 +171,10 @@ pub fn client_screen(context: &str, name: &str) -> Result<String, JsError> {
     Ok(one::screen::page(&serde_json::from_str(context)?, one::screen::client_screen(name), true))
 }
 
-/// The white label this node is: `{ name, cli, accent, port, made_here }`.
+/// The white label this node is: `{ name, cli, port, made_here }`.
 #[wasm_bindgen]
 pub fn config() -> String {
-    json!({ "name": one::config::NAME, "cli": one::config::CLI, "accent": one::config::ACCENT, "port": one::config::PORT, "made_here": one::config::MADE_HERE }).to_string()
+    json!({ "name": one::config::NAME, "cli": one::config::CLI, "port": one::config::PORT, "made_here": one::config::MADE_HERE }).to_string()
 }
 
 /// Where an app's database of a scope is in the bucket (`src/db.rs`).

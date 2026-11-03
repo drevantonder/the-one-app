@@ -3,7 +3,6 @@
 name = "The One App"
 cli = "one"
 port = 4747
-accent = "#9E6E06"
 # What the App Store calls the apps made in the install, beside the ones built in.
 made_here = "Made here"
 # Where `one update` and `one release` get the code, and the installer the releases.

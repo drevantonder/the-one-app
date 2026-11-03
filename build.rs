@@ -7,11 +7,10 @@ fn main() {
     let config: toml::Table = text.parse().expect("parse config file");
     let get = |key: &str| config.get(key).unwrap_or_else(|| panic!("config file lacks {key}")).clone();
     let out = format!(
-        "pub const NAME: &str = {:?};\npub const CLI: &str = {:?};\npub const PORT: u16 = {};\npub const ACCENT: &str = {:?};\npub const REPO: &str = {:?};\n",
+        "pub const NAME: &str = {:?};\npub const CLI: &str = {:?};\npub const PORT: u16 = {};\npub const REPO: &str = {:?};\n",
         get("name").as_str().unwrap(),
         get("cli").as_str().unwrap(),
         get("port").as_integer().unwrap(),
-        get("accent").as_str().unwrap(),
         // The GitHub repo releases come from; a white label without one isn't released.
         config.get("repo").and_then(|r| r.as_str()).unwrap_or(""),
     );
