@@ -55,6 +55,16 @@ function goesTo(uri, origin) {
 }
 const [ON_DEVICE, BY_CODE] = ["an app on this device", "where you got your code"];
 
+/// The client a token request names in its HTTP Basic authorization, if it does.
+function basicClient(headers) {
+  const basic = /^basic (.+)$/i.exec(headers?.get?.("authorization") || "");
+  try {
+    return basic ? decodeURIComponent(atob(basic[1].trim()).split(":")[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /// Refuses, as Better Auth does, since some refusals are made inside its routes.
 const refuse = (status, message) => {
   throw new APIError({ 400: "BAD_REQUEST", 401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 503: "SERVICE_UNAVAILABLE" }[status], { message });
@@ -196,12 +206,12 @@ export class Auth extends DurableObject {
       hooks: {
         before: createAuthMiddleware(async (ctx) => {
           if (ctx.path === "/oauth2/authorize" && ctx.query) {
-            if (!ctx.query.resource && resources[0]) ctx.query.resource = resources[0];
+            ctx.query.resource = await self.audience(ctx.query.client_id);
             // Every client gets a refresh token, asked for or not, so it stays signed in.
             const scopes = String(ctx.query.scope || "").split(" ").filter(Boolean);
             if (!scopes.includes("offline_access")) ctx.query.scope = [...scopes, "offline_access"].join(" ");
           }
-          if (ctx.path === "/oauth2/token" && ctx.body && !ctx.body.resource && resources[0]) ctx.body.resource = resources[0];
+          if (ctx.path === "/oauth2/token" && ctx.body) ctx.body.resource = await self.audience(ctx.body.client_id || basicClient(ctx.headers));
         }),
       },
       plugins: [
@@ -521,6 +531,25 @@ export class Auth extends DurableObject {
     const session = await this.auth.api.getSession({ headers: request.headers });
     if (!session) throw Object.assign(new Error("sign in first"), { status: 401 });
     return session;
+  }
+
+  /// What a client's tokens are for, whatever it asks: the install's address (a sign-in at its nodes, through the
+  /// gateway) only for its own apps, each a client whose every redirect comes back to one of them (`firstParty`);
+  /// any other, a remote MCP client, gets `<address>/mcp`, the MCP Worker's, where it's a device of its person's,
+  /// which nodes refuse.
+  async audience(clientId) {
+    const address = JSON.parse(this.env.RESOURCES || "[]")[0] || this.env.ADDRESS;
+    const client = clientId && (await this.client(String(clientId)).catch(() => null));
+    return client && this.firstParty(client) ? address : `${address}/mcp`;
+  }
+
+  /// Whether a client is one of the install's own apps, by where its sign-ins come back: the web client's page, the
+  /// page a machine's sign-in code is shown on, the native apps' `<cli>://signed-in/`, or Windows' loopback.
+  firstParty(client) {
+    const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
+    const origin = new URL(this.env.ADDRESS).origin;
+    const ours = [`${origin}/callback`, `${origin}/sign-in/code/done`, `${this.env.CLI || "one"}://signed-in/`, "http://127.0.0.1/callback"];
+    return uris.length > 0 && uris.every((u) => ours.includes(u));
   }
 
   async client(clientId) {

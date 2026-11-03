@@ -102,6 +102,9 @@ export class Schedules extends DurableObject {
     const token = bearer(request) || refuse(401, "bring an access token");
     this.issuer ||= new Issuer(this.env.ISSUER, () => this.env.AUTH.fetch(new Request(`${this.env.ISSUER}/jwks`)));
     const claims = await this.issuer.verify(token).catch((err) => refuse(401, `that access token won't do: ${err.message}`));
+    // Only the install's own apps sign in for its address; a remote MCP client's token is for `<address>/mcp`.
+    const address = this.env.ISSUER.replace(/\/api\/auth$/, "");
+    if (![claims.aud].flat().includes(address)) refuse(401, `that sign-in isn't for ${address}`);
     const one = url.pathname.match(/^\/schedules\/([0-9a-f]{16})(\/run)?$/);
     if (request.method === "GET" && url.pathname === "/schedules") return json(this.list(claims.sub));
     if (request.method === "POST" && url.pathname === "/schedules") return json(await this.add(token, claims, await request.json()));

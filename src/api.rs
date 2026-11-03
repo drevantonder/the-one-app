@@ -52,6 +52,38 @@ pub const ENDPOINT_HEADER: &str = "x-one-endpoint";
 #[derive(Clone, Copy)]
 pub struct FromClient(pub crate::entry::Key, pub u64);
 
+/// The client devices whose MCP requests this node's own MCP is answering (`mcp_http`), each by a ticket made for that
+/// request alone: a random secret only this process sees, so nothing a request says names a device, and the keys
+/// handed for one are reached only as its connection proved it.
+static ASKING_AS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (crate::entry::Key, u64)>>> = std::sync::LazyLock::new(Default::default);
+
+/// What this node's own MCP asks its API with while it answers a client device's request: its ticket, until dropped.
+pub struct AskingAs(String);
+
+impl AskingAs {
+    /// For the client device `key`, whose handed keys count until `until` (`FromClient`'s).
+    pub fn new(key: crate::entry::Key, until: u64) -> AskingAs {
+        let ticket = format!("ask.{}", data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>()));
+        ASKING_AS.lock().unwrap().insert(ticket.clone(), (key, until));
+        AskingAs(ticket)
+    }
+
+    pub fn ticket(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Drop for AskingAs {
+    fn drop(&mut self) {
+        ASKING_AS.lock().unwrap().remove(&self.0);
+    }
+}
+
+/// The client device a ticket is for, and until when what it hands counts, while its request is answered.
+fn asking_as(ticket: &str) -> Option<(crate::entry::Key, u64)> {
+    ASKING_AS.lock().unwrap().get(ticket).copied()
+}
+
 /// Serves the local API on `listener`, knowing each request's peer, which `from_this_machine` checks.
 pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io::Result<()> {
     serve_until(listener, router, std::future::pending()).await
@@ -341,12 +373,13 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
         return from_client(&node, key, until, &path, req, next).await;
     }
     let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
-    // This machine's own MCP, answering a client device's request (`mcp_http`), asks as that device.
-    if let Some(key) = token.as_deref().and_then(crate::node::client_of) {
+    // This machine's own MCP, answering a client device's request (`mcp_http`), asks as that device, by the ticket it
+    // made for that request.
+    if let Some((key, until)) = token.as_deref().and_then(asking_as) {
         if !from_this_machine(&node, &req) {
             return refuse(req, (StatusCode::UNAUTHORIZED, Json(json!({ "error": "that isn't a sign-in" }))).into_response()).await;
         }
-        return from_client(&node, key, u64::MAX, &path, req, next).await;
+        return from_client(&node, key, until, &path, req, next).await;
     }
     if let Some(token) = token {
         // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `SIGNED_IN`.
@@ -541,9 +574,10 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     let asked = token.clone();
     let claims = tokio::task::spawn_blocking(move || {
         let claims = issuer.verify(&asked, now)?;
-        // MCP clients sign in for the address's MCP endpoint, as MCP names a server.
+        // Only the install's own apps sign in for its address; a remote MCP client's token is for `<address>/mcp`, the
+        // MCP Worker, whose device it is, and never a sign-in here.
         let address = address.trim_end_matches('/');
-        anyhow::ensure!(claims.for_resource(address) || claims.for_resource(&format!("{address}/mcp")), "that sign-in isn't for {address}");
+        anyhow::ensure!(claims.for_resource(address), "that sign-in isn't for {address}");
         Ok::<_, anyhow::Error>(claims)
     })
     .await??;

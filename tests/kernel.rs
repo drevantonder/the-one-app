@@ -130,9 +130,14 @@ impl StandIn {
 
     /// An access token for `user` from `client`, good for an hour, for the install at `auth`'s address.
     fn token(&self, user: &str, client: &str) -> String {
+        self.token_for(user, client, &self.auth)
+    }
+
+    /// A token for `aud`.
+    fn token_for(&self, user: &str, client: &str, aud: &str) -> String {
         let exp = now() / 1000 + 3600;
         let agent: ureq::Agent = ureq::Agent::config_builder().build().into();
-        agent.post(format!("{}/sign", self.auth)).send_json(json!({ "iss": self.issuer, "sub": user, "azp": client, "client_id": client, "aud": self.auth, "scope": "openid", "exp": exp, "jti": B64U.encode(&rand::random::<[u8; 16]>()) })).unwrap().body_mut().read_to_string().unwrap()
+        agent.post(format!("{}/sign", self.auth)).send_json(json!({ "iss": self.issuer, "sub": user, "azp": client, "client_id": client, "aud": aud, "scope": "openid", "exp": exp, "jti": B64U.encode(&rand::random::<[u8; 16]>()) })).unwrap().body_mut().read_to_string().unwrap()
     }
 }
 
@@ -830,6 +835,18 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
         let entry = one::entry::Entry::create(&phone, ext, backlink, one::members::node(kind, data));
         ask(&sams, "POST", "/v1/entries", json!([entry.to_json()]))
     };
+
+    // A remote MCP client's token is for the MCP Worker (`<address>/mcp`), whose device it is: no sign-in here. Nor
+    // is naming a client device as a token any way to act as it and use what it was handed, even from this machine's
+    // own programs: only a connection that proves its key is.
+    let mcps = v.token_for(&andre, "claude", &format!("{}/mcp", v.auth.trim_end_matches('/')));
+    assert_eq!(ask(&mcps, "GET", "/v1/state", Value::Null).0, 401, "an MCP client's token signs in at a node");
+    let named = |local: bool| {
+        let req = ureq::Agent::from(ureq::Agent::config_builder().http_status_as_error(false).build()).get(format!("{api}/v1/apps")).header("authorization", format!("Bearer client.{}", one::entry::hex(&sams_phone.key)));
+        let req = if local { req.header(one::api::LOCAL_TOKEN_HEADER, node.local_token()) } else { req };
+        req.call().unwrap().status().as_u16()
+    };
+    assert_eq!((named(true), named(false)), (401, 401), "a header named a client device");
 
     // Settings shows each their own: Passkeys first, at the install's address (no try install has it, so it's seen only
     // here); only admins see Users, General and Backups.

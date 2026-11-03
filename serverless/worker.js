@@ -104,7 +104,8 @@ async function signIn(env, token, kept) {
   if (was && now < was.until) return was;
   const claims = await claimsOf(env, token);
   const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-  if (!aud.includes(env.ADDRESS) && !aud.includes(`${env.ADDRESS}/mcp`)) refuse(401, `that sign-in isn't for ${env.ADDRESS}`);
+  // A remote MCP client's token is for the MCP Worker (`<address>/mcp`), whose device it is, and never a sign-in here.
+  if (!aud.includes(env.ADDRESS)) refuse(401, `that sign-in isn't for ${env.ADDRESS}`);
   const who = { hash, token, user: claims.sub, client: claims.azp, clientName: claims.azp || "", until: claims.exp * 1000 };
   if (kept.size >= SIGN_INS_MOST * 16) {
     for (const [h, s] of kept) if (s.until <= now) kept.delete(h);

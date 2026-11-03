@@ -94,8 +94,8 @@ async function mcp(request, env) {
   } catch (err) {
     return signInFirst(env, `that sign-in won't do: ${err.message}`);
   }
-  const aud = [claims.aud].flat();
-  if (!aud.includes(env.ADDRESS) && !aud.includes(`${origin(env)}/mcp`)) return signInFirst(env, `that sign-in isn't for ${origin(env)}`);
+  // An MCP client's sign-in is for this, `<address>/mcp`; the install's own apps' (`<address>`) open no device here.
+  if (![claims.aud].flat().includes(`${origin(env)}/mcp`)) return signInFirst(env, `that sign-in isn't for ${origin(env)}/mcp`);
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
   const headers = {};
   for (const name of TO_NODE) if (request.headers.has(name)) headers[name] = request.headers.get(name);

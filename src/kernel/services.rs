@@ -435,6 +435,8 @@ impl Settings {
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
                 plain("YOURS", crate::config::YOURS.into());
+                // Its own apps' sign-ins come back to `<cli>://signed-in/`.
+                plain("CLI", crate::config::CLI.into());
                 if let Some((id, name)) = &self.try_person {
                     plain("SIGN_IN", "try".into());
                     plain("TRY_USER", id.clone());

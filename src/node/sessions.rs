@@ -59,7 +59,8 @@ impl Session {
 }
 
 /// What a client device's calls over iroh are kept by here, as a sign-in's are by its token: its key, proven by QUIC.
-/// It's never a token anyone sends: no auth service signs it, so another device passing it on with a call gets none.
+/// It's never a token anyone sends: no auth service signs it, and the API takes a bearer token only as a sign-in it
+/// checks (or its own MCP's ticket, `api::AskingAs`), so no request reaches what a device was handed by naming it.
 pub fn client_token(key: &Key) -> String {
     format!("{CLIENT}{}", hex(key))
 }
@@ -70,7 +71,7 @@ pub(super) const CLIENT: &str = "client.";
 const CLIENT_KEYS: u64 = 3_600_000;
 
 /// The client device a token `client_token` made is for.
-pub fn client_of(token: &str) -> Option<Key> {
+fn client_of(token: &str) -> Option<Key> {
     data_encoding::HEXLOWER.decode(token.strip_prefix(CLIENT)?.as_bytes()).ok()?.try_into().ok()
 }
 

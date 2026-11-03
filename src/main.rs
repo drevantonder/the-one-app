@@ -1373,8 +1373,10 @@ fn mcp(mode: Mode) -> Result<()> {
 /// name, credited on its calls.
 async fn mcp_http(client: Option<axum::Extension<api::FromClient>>, headers: axum::http::HeaderMap, body: String) -> axum::response::Response {
     use axum::response::IntoResponse;
-    let token = match client {
-        Some(axum::Extension(api::FromClient(key, _))) => Some(one::node::client_token(&key)),
+    // A client device's request is asked of the API by a ticket made for it alone, which ends with it.
+    let asking = client.map(|axum::Extension(api::FromClient(key, until))| api::AskingAs::new(key, until));
+    let token = match &asking {
+        Some(asking) => Some(asking.ticket().to_string()),
         None => headers.get("authorization").and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string()),
     };
     let mut agent = headers.get("mcp-session-id").and_then(|s| s.to_str().ok()).and_then(|s| s.split_once('.')).and_then(|(_, name)| data_encoding::BASE64URL_NOPAD.decode(name.as_bytes()).ok()).and_then(|n| String::from_utf8(n).ok());
@@ -1394,6 +1396,7 @@ async fn mcp_http(client: Option<axum::Extension<api::FromClient>>, headers: axu
         (reply, agent, NEEDED.with(|n| n.borrow_mut().take()))
     })
     .await;
+    drop(asking);
     if let Ok((_, _, Some(needed))) = &answered {
         return (axum::http::StatusCode::PRECONDITION_REQUIRED, axum::Json(needed.clone())).into_response();
     }
