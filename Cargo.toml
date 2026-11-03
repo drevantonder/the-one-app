@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "serverless"]
+members = [".", "serverless", "client"]
 
 [package]
 name = "one"
@@ -73,8 +73,10 @@ jsonc-parser = { version = "0.34", features = ["cst", "serde"] }
 toml_edit = "0.25"
 # Push (src/push.rs) reaches Apple's push service, which speaks only HTTP/2: hyper's (axum already builds hyper; this
 # adds h2) over the rustls ureq and iroh already build, and signs its ES256 tokens with ring, which rustls builds.
-hyper = { version = "1", features = ["client", "http2"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
+# Client devices ask a node's local API over iroh, HTTP/1.1 on each stream (src/node/net.rs), which hyper's server
+# answers as axum's does over TCP.
+hyper = { version = "1", features = ["client", "http2", "server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }
 http-body-util = "0.1"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 webpki-roots = "1"
@@ -100,6 +102,18 @@ incremental = true
 [profile.release.package.one-serverless]
 strip = false
 
+# The client's WebAssembly for browsers (client/src/wasm.rs), as small as it builds: every page load downloads it once.
+[profile.web]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+incremental = false
+strip = false
+
 [dev-dependencies]
+# The tests ask a node as a client device does.
+one-client = { path = "client" }
 # tests/sim.rs runs on tokio's paused clock, so links that wait seconds take none.
 tokio = { version = "1", features = ["test-util"] }

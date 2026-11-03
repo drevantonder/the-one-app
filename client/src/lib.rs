@@ -1,0 +1,408 @@
+//! How a client device reaches its install's nodes: an iroh endpoint of the device's own key, through the relay at
+//! the install's address (and natively, directly where a path opens), a connection kept open to each node it asks,
+//! and each request HTTP/1.1 on a stream of its own, which the node answers with its local API as the device's person
+//! (src/node/net.rs). The same natively, for the CLI and the apps, and in browsers as WebAssembly (src/wasm.rs).
+//!
+//! Every method takes `&self`, so many requests run at once on one client: on a connection, opening a stream costs no
+//! round trip, so a request takes one.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use iroh::endpoint::{Connection, RecvStream, presets};
+use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
+use n0_future::time::{Duration, timeout};
+
+#[cfg(target_family = "wasm")]
+mod wasm;
+
+mod config {
+    include!(concat!(env!("OUT_DIR"), "/config.rs"));
+}
+
+/// How long reaching a node may take.
+const CONNECT: Duration = Duration::from_secs(10);
+/// The most a response's head may be.
+const HEAD_LIMIT: usize = 64 << 10;
+/// How much of a body is read at once.
+const READ: usize = 64 << 10;
+
+/// What this white label's clients speak to its nodes.
+fn alpn() -> Vec<u8> {
+    format!("{}/http/1", config::CLI).into_bytes()
+}
+
+/// Why a request failed; `sent` if it may have reached the node, so that sending it again might run it twice.
+#[derive(Debug)]
+pub struct Error {
+    pub sent: bool,
+    message: String,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Error {}
+
+fn unsent(message: impl std::fmt::Display) -> Error {
+    Error { sent: false, message: message.to_string() }
+}
+
+fn sent(message: impl std::fmt::Display) -> Error {
+    Error { sent: true, message: message.to_string() }
+}
+
+/// A request to a node's local API: `path` with its query, from `/`.
+pub struct Request {
+    pub method: String,
+    pub path: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+/// A node's response, its body read as it comes.
+pub struct Response {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Body,
+}
+
+/// A client device's way to its install's nodes. Clones share it.
+#[derive(Clone)]
+pub struct Client(Arc<Inner>);
+
+struct Inner {
+    secret: SecretKey,
+    relay: (RelayUrl, RelayMap),
+    /// The nodes to ask, in the order things run on them: the first that answers is asked.
+    nodes: Mutex<Vec<PublicKey>>,
+    /// The endpoint, made again after the network was lost.
+    endpoint: tokio::sync::Mutex<Option<Endpoint>>,
+    /// A connection to each node asked, held while it's being opened.
+    conns: Mutex<HashMap<PublicKey, Arc<tokio::sync::Mutex<Option<Connection>>>>>,
+}
+
+impl Client {
+    /// The client of the device whose key is `secret`, in the install at `address`, asking `nodes` (in the order things
+    /// run on them). It starts connecting to the first at once.
+    pub async fn start(secret: [u8; 32], address: &str, nodes: &[[u8; 32]]) -> Result<Client, Error> {
+        let url: RelayUrl = address.trim_end_matches('/').parse().map_err(|_| unsent("the install's address isn't a URL"))?;
+        // A Worker has no UDP, so the relay serves no QUIC address discovery.
+        let mut config = RelayConfig::from(url.clone());
+        config.quic = None;
+        let client = Client(Arc::new(Inner {
+            secret: SecretKey::from_bytes(&secret),
+            relay: (url, config.into()),
+            nodes: Mutex::default(),
+            endpoint: tokio::sync::Mutex::default(),
+            conns: Mutex::default(),
+        }));
+        client.endpoint().await?;
+        client.set_nodes(nodes)?;
+        Ok(client)
+    }
+
+    /// This device's key.
+    pub fn id(&self) -> [u8; 32] {
+        *self.0.secret.public().as_bytes()
+    }
+
+    /// The nodes to ask, in the order things run on them, as the install's state says; the first is connected to now.
+    pub fn set_nodes(&self, nodes: &[[u8; 32]]) -> Result<(), Error> {
+        let nodes = nodes.iter().map(PublicKey::from_bytes).collect::<Result<Vec<_>, _>>().map_err(|_| unsent("a node's key isn't a key"))?;
+        let first = nodes.first().copied();
+        *self.0.nodes.lock().unwrap() = nodes;
+        if let Some(first) = first {
+            let client = self.clone();
+            n0_future::task::spawn(async move {
+                let _ = client.conn(&first, false).await;
+            });
+        }
+        Ok(())
+    }
+
+    /// Starts again with a fresh endpoint: after the network comes back, which an endpoint that lost it waits out its
+    /// relay's backoff to notice (seconds), where a fresh one connects at once.
+    pub async fn reconnect(&self) {
+        let old = self.0.endpoint.lock().await.take();
+        self.0.conns.lock().unwrap().clear();
+        if let Some(old) = old {
+            // The relay keeps the newest connection of a key, so the new one needn't wait for the old to close.
+            n0_future::task::spawn(async move { old.close().await });
+        }
+        let nodes: Vec<[u8; 32]> = self.0.nodes.lock().unwrap().iter().map(|k| *k.as_bytes()).collect();
+        if self.endpoint().await.is_ok() {
+            let _ = self.set_nodes(&nodes);
+        }
+    }
+
+    /// Closes the client: its connections and its endpoint.
+    pub async fn close(&self) {
+        self.0.conns.lock().unwrap().clear();
+        if let Some(endpoint) = self.0.endpoint.lock().await.take() {
+            endpoint.close().await;
+        }
+    }
+
+    /// Asks the first node that answers. A request that never reached one is tried on the next; one whose connection
+    /// was lost, again once (after a fresh endpoint, if this device lost the relay), unless it may have reached the
+    /// node and isn't a GET or HEAD.
+    pub async fn fetch(&self, req: Request) -> Result<Response, Error> {
+        let head = head(&req)?;
+        let again = matches!(req.method.as_str(), "GET" | "HEAD");
+        let nodes = self.0.nodes.lock().unwrap().clone();
+        let mut why = unsent("there's no node to ask");
+        for node in &nodes {
+            for fresh in [false, true] {
+                let (err, reused) = match self.exchange(node, &head, &req, fresh).await {
+                    Ok(response) => return Ok(response),
+                    Err(e) => e,
+                };
+                if err.sent && !again {
+                    return Err(err);
+                }
+                why = err;
+                if !self.on_relay().await {
+                    self.reconnect().await;
+                } else if !reused {
+                    // A node this device couldn't reach while on the relay: the next.
+                    break;
+                }
+            }
+        }
+        Err(why)
+    }
+
+    /// Whether this device's endpoint is connected to the relay.
+    async fn on_relay(&self) -> bool {
+        self.0.endpoint.lock().await.as_ref().is_some_and(|e| e.home_relay_status().get().iter().any(|r| r.is_connected()))
+    }
+
+    async fn endpoint(&self) -> Result<Endpoint, Error> {
+        let mut held = self.0.endpoint.lock().await;
+        if let Some(endpoint) = held.as_ref().filter(|e| !e.is_closed()) {
+            return Ok(endpoint.clone());
+        }
+        let endpoint = Endpoint::builder(presets::Minimal)
+            .secret_key(self.0.secret.clone())
+            .relay_mode(RelayMode::Custom(self.0.relay.1.clone()))
+            .bind()
+            .await
+            .map_err(unsent)?;
+        *held = Some(endpoint.clone());
+        Ok(endpoint)
+    }
+
+    /// A connection to `node`: the one open (and true), or a new one (`fresh`, or if that one closed).
+    async fn conn(&self, node: &PublicKey, fresh: bool) -> Result<(Connection, bool), Error> {
+        let slot = self.0.conns.lock().unwrap().entry(*node).or_default().clone();
+        let mut held = slot.lock().await;
+        if let Some(conn) = held.as_ref().filter(|c| !fresh && c.close_reason().is_none()) {
+            return Ok((conn.clone(), true));
+        }
+        let endpoint = self.endpoint().await?;
+        let addr = EndpointAddr::new(*node).with_relay_url(self.0.relay.0.clone());
+        let conn = match timeout(CONNECT, endpoint.connect(addr, &alpn())).await {
+            Ok(Ok(conn)) => conn,
+            Ok(Err(err)) => return Err(unsent(format!("the node couldn't be reached: {err}"))),
+            Err(_) => return Err(unsent("the node isn't connected")),
+        };
+        *held = Some(conn.clone());
+        Ok((conn, false))
+    }
+
+    /// One request on a stream of its own: → the response, or why not and whether the connection was one already open.
+    async fn exchange(&self, node: &PublicKey, head: &[u8], req: &Request, fresh: bool) -> Result<Response, (Error, bool)> {
+        let (conn, reused) = self.conn(node, fresh).await.map_err(|e| (e, false))?;
+        let (mut send, mut recv) = conn.open_bi().await.map_err(|e| (unsent(e), reused))?;
+        let sending = async {
+            send.write_all(head).await?;
+            send.write_all(&req.body).await?;
+            send.finish()?;
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        sending.await.map_err(|e| (sent(e), reused))?;
+        let (status, headers, body) = read_response(&mut recv, req.method == "HEAD").await.map_err(|e| (e, reused))?;
+        Ok(Response { status, headers, body: Body { recv: Some(recv), ..body } })
+    }
+}
+
+/// A request's head, checked: nothing in it can start another header or request.
+fn head(req: &Request) -> Result<Vec<u8>, Error> {
+    let token = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
+    if !token(&req.method) {
+        return Err(unsent("that isn't a method"));
+    }
+    if !req.path.starts_with('/') || req.path.bytes().any(|b| b <= b' ' || b == 0x7f) {
+        return Err(unsent("a path starts with / and has no spaces"));
+    }
+    let mut head = format!("{} {} HTTP/1.1\r\nhost: node\r\n", req.method, req.path);
+    for (name, value) in &req.headers {
+        if !token(name) || value.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0) {
+            return Err(unsent(format!("{name} isn't a header")));
+        }
+        // How the request is framed is this library's to say.
+        if ["host", "content-length", "transfer-encoding", "connection"].iter().any(|h| name.eq_ignore_ascii_case(h)) {
+            continue;
+        }
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    head.push_str(&format!("content-length: {}\r\n\r\n", req.body.len()));
+    Ok(head.into_bytes())
+}
+
+/// Reads a response's head: → its status, headers, and its body as it's framed, with what was read past the head.
+async fn read_response(recv: &mut RecvStream, head_only: bool) -> Result<(u16, Vec<(String, String)>, Body), Error> {
+    let mut buf = Vec::new();
+    loop {
+        let mut list = [httparse::EMPTY_HEADER; 100];
+        let mut parsed = httparse::Response::new(&mut list);
+        match parsed.parse(&buf).map_err(|e| sent(format!("the node's response: {e}")))? {
+            httparse::Status::Complete(len) => {
+                let status = parsed.code.unwrap_or(0);
+                let headers: Vec<(String, String)> = parsed.headers.iter().map(|h| (h.name.to_ascii_lowercase(), String::from_utf8_lossy(h.value).into_owned())).collect();
+                let header = |name: &str| headers.iter().find(|h| h.0 == name).map(|h| h.1.to_ascii_lowercase());
+                let framing = if head_only || status < 200 || status == 204 || status == 304 {
+                    Framing::Done
+                } else if header("transfer-encoding").is_some_and(|t| t.contains("chunked")) {
+                    Framing::Size
+                } else if let Some(length) = header("content-length") {
+                    Framing::Length(length.trim().parse().map_err(|_| sent("the node's response has a bad length"))?)
+                } else {
+                    Framing::Close
+                };
+                let body = Body { recv: None, buf: buf.split_off(len), framing };
+                return Ok((status, headers, body));
+            }
+            httparse::Status::Partial if buf.len() > HEAD_LIMIT => return Err(sent("the node's response's head is too long")),
+            httparse::Status::Partial => {
+                if !more(recv, &mut buf).await? {
+                    return Err(sent("the node closed the stream without answering"));
+                }
+            }
+        }
+    }
+}
+
+/// Reads more of a stream onto `buf`: false at its end.
+async fn more(recv: &mut RecvStream, buf: &mut Vec<u8>) -> Result<bool, Error> {
+    match recv.read_chunk(READ).await.map_err(|e| sent(format!("reading the node's response: {e}")))? {
+        Some(chunk) => {
+            buf.extend_from_slice(&chunk);
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// Where a body's reading is, by how it's framed.
+#[derive(Clone, Copy)]
+enum Framing {
+    /// This many bytes are left.
+    Length(u64),
+    /// A chunk's size line is next.
+    Size,
+    /// This many bytes of a chunk are left.
+    Data(u64),
+    /// A chunk's closing line is next.
+    DataEnd,
+    /// Until the stream ends.
+    Close,
+    Done,
+}
+
+/// A response's body, read as it comes: dropping it before the end stops the node sending it.
+pub struct Body {
+    recv: Option<RecvStream>,
+    buf: Vec<u8>,
+    framing: Framing,
+}
+
+impl Body {
+    /// The next part of the body as it arrives, or none at its end.
+    pub async fn chunk(&mut self) -> Result<Option<Vec<u8>>, Error> {
+        loop {
+            match self.framing {
+                Framing::Done => {
+                    self.recv = None;
+                    return Ok(None);
+                }
+                Framing::Length(0) => self.framing = Framing::Done,
+                Framing::Length(n) | Framing::Data(n) => {
+                    if self.buf.is_empty() && !self.more().await? {
+                        return Err(sent("the node's response ended early"));
+                    }
+                    let take = self.buf.len().min(n.try_into().unwrap_or(usize::MAX));
+                    let part: Vec<u8> = self.buf.drain(..take).collect();
+                    let left = n - take as u64;
+                    self.framing = match self.framing {
+                        Framing::Length(_) => Framing::Length(left),
+                        _ if left == 0 => Framing::DataEnd,
+                        _ => Framing::Data(left),
+                    };
+                    return Ok(Some(part));
+                }
+                Framing::Close => {
+                    if !self.buf.is_empty() {
+                        return Ok(Some(std::mem::take(&mut self.buf)));
+                    }
+                    if !self.more().await? {
+                        self.framing = Framing::Done;
+                    }
+                }
+                Framing::DataEnd => {
+                    let line = self.line().await?;
+                    if !line.is_empty() {
+                        return Err(sent("the node's response is badly chunked"));
+                    }
+                    self.framing = Framing::Size;
+                }
+                Framing::Size => {
+                    let line = self.line().await?;
+                    let size = line.split(|b| *b == b';').next().and_then(|s| std::str::from_utf8(s).ok()).and_then(|s| u64::from_str_radix(s.trim(), 16).ok());
+                    match size {
+                        Some(0) => {
+                            // Trailers, to the empty line.
+                            while !self.line().await?.is_empty() {}
+                            self.framing = Framing::Done;
+                        }
+                        Some(n) => self.framing = Framing::Data(n),
+                        None => return Err(sent("the node's response is badly chunked")),
+                    }
+                }
+            }
+        }
+    }
+
+    /// The rest of the body, whole.
+    pub async fn bytes(mut self) -> Result<Vec<u8>, Error> {
+        let mut out = Vec::new();
+        while let Some(part) = self.chunk().await? {
+            out.extend_from_slice(&part);
+        }
+        Ok(out)
+    }
+
+    async fn more(&mut self) -> Result<bool, Error> {
+        match self.recv.as_mut() {
+            Some(recv) => more(recv, &mut self.buf).await,
+            None => Ok(false),
+        }
+    }
+
+    /// The next line, without its CRLF.
+    async fn line(&mut self) -> Result<Vec<u8>, Error> {
+        loop {
+            if let Some(at) = self.buf.windows(2).position(|w| w == b"\r\n") {
+                let line = self.buf.drain(..at + 2).take(at).collect();
+                return Ok(line);
+            }
+            if self.buf.len() > 4096 || !self.more().await? {
+                return Err(sent("the node's response is badly chunked"));
+            }
+        }
+    }
+}

@@ -156,7 +156,7 @@ pub struct Handed {
 }
 
 /// What a caller hands a node, sealed to it: the database keys a call needs, for calls with one access token (`for`,
-/// its sha256 in hex), until it expires (`until`, milliseconds).
+/// its sha256 in hex) or from one client device over iroh (`for`, its key in hex), until `until` (milliseconds).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Handoff {
     #[serde(rename = "for")]

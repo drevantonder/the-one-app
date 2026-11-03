@@ -1,6 +1,6 @@
-//! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; and how someone
-//! signed in with the install's kernel (a browser, through the gateway, or the Mac app's window here) reaches it, as
-//! themselves, for what their sign-in opens.
+//! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; how a client device
+//! reaches it over iroh (src/node/net.rs), as its person; and how someone signed in with the install's kernel (a
+//! browser, through the gateway, or the Mac app's window here) reaches it, as themselves, for what their sign-in opens.
 
 use std::convert::Infallible;
 
@@ -33,6 +33,11 @@ pub const LOCAL_TOKEN: &str = "local-token";
 pub const LOCAL_TOKEN_HEADER: &str = "x-one-local-token";
 /// The keys a token caller hands this device for its calls: `keys::seal_handoff`'s.
 pub const KEYS_HEADER: &str = "x-one-keys";
+
+/// A request a client device sent over iroh (src/node/net.rs), with the key its connection proved it holds: only the
+/// node puts this on a request, as an extension, which nothing a client sends can set.
+#[derive(Clone, Copy)]
+pub struct FromClient(pub crate::entry::Key);
 
 /// Serves the local API on `listener`, knowing each request's peer, which `from_this_machine` checks.
 pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io::Result<()> {
@@ -273,6 +278,9 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
 /// instead, for what `SIGNED_IN` lists.
 async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
+    if let Some(FromClient(key)) = req.extensions().get::<FromClient>().copied() {
+        return from_client(&node, key, &path, req, next).await;
+    }
     let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
     if let Some(token) = token {
         // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `SIGNED_IN`.
@@ -308,6 +316,25 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
         }
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine() }))).into_response()).await;
     }
+    next.run(req).await
+}
+
+/// A client device's request over iroh is its person's, as a sign-in's is, for what `SIGNED_IN` lists: the device
+/// must still be one of the install's, and the keys it hands are for its key.
+async fn from_client(node: &Node, key: crate::entry::Key, path: &str, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    if !SIGNED_IN.contains(&path) || path == "/v1/kernel/run" {
+        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
+    }
+    let Some((user, name)) = node.client(&key) else {
+        return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "this isn't one of your devices: approve it on one that is" }))).into_response()).await;
+    };
+    let token = crate::node::client_token(&key);
+    if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
+        && let Err(err) = node.hand(&token, &user, handed)
+    {
+        return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
+    }
+    req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, token: Some(token) }, sign_in: Some(name) });
     next.run(req).await
 }
 

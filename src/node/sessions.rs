@@ -56,6 +56,14 @@ impl Session {
     }
 }
 
+/// What a client device's calls over iroh are kept by here, as a sign-in's are by its token: its key, proven by QUIC.
+/// It's never a token anyone sends: no auth service signs it, so another device passing it on with a call gets none.
+pub fn client_token(key: &Key) -> String {
+    format!("{CLIENT}{}", hex(key))
+}
+
+const CLIENT: &str = "client.";
+
 fn hash(token: &str) -> [u8; 32] {
     use sha2::Digest;
     sha2::Sha256::digest(token.as_bytes()).into()
@@ -86,11 +94,17 @@ impl Node {
         (claims.sub == user).then(|| token.to_string())
     }
 
+    /// Whose client device `key` is, and its name: none if it isn't a device of the install, or was removed.
+    pub fn client(&self, key: &Key) -> Option<(String, String)> {
+        self.with(|i| Ok(i.r.members.client(key).map(|m| (m.user.clone(), m.name.clone())))).ok().flatten()
+    }
+
     /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for `token`'s calls, as `user`'s: only
-    /// if they were sealed to it, for that token (`for`), and not yet expired.
+    /// if they were sealed to it, for that token (`for`: its sha256, or a client device's key), and not yet expired.
     pub fn hand(&self, token: &str, user: &str, sealed: &str) -> Result<()> {
         let handoff = crate::keys::open_handoff(&self.seal_secret(), sealed)?;
-        ensure!(handoff.for_ == crate::keys::token_id(token), "the keys handed are for another sign-in");
+        let for_ = token.strip_prefix(CLIENT).map_or_else(|| crate::keys::token_id(token), str::to_string);
+        ensure!(handoff.for_ == for_, "the keys handed are for another sign-in");
         let now = now_ms();
         ensure!(handoff.until > now, "the keys handed have expired");
         let mut kept = self.0.sessions.kept.lock().unwrap();

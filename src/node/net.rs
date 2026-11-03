@@ -21,6 +21,8 @@ const JOIN_LIMIT: usize = 4 << 10;
 const STREAMS: u32 = 32;
 /// How many computers that aren't the install's yet may be connected at once, each asking to join.
 const JOINING: usize = 4;
+/// How long a client device may take to send a request's head on a stream.
+const REQUEST_HEAD: Duration = Duration::from_secs(30);
 
 /// This device's endpoint, and its connections to other devices.
 #[derive(Default)]
@@ -52,6 +54,11 @@ impl std::error::Error for NotThere {}
 /// What devices of this white label speak: another's never meet them.
 fn alpn() -> Vec<u8> {
     format!("{}/1", crate::config::CLI).into_bytes()
+}
+
+/// What client devices of this white label speak to a node: HTTP/1.1, one request on each stream, to its local API.
+fn http_alpn() -> Vec<u8> {
+    format!("{}/http/1", crate::config::CLI).into_bytes()
 }
 
 /// The relay at the install's address, which serves no QUIC address discovery, a Worker having no UDP; with `ticket`,
@@ -125,7 +132,7 @@ impl Node {
         let transport = QuicTransportConfig::builder().max_concurrent_bidi_streams(STREAMS.into()).max_concurrent_uni_streams(0u32.into()).build();
         let endpoint = Endpoint::builder(presets::Minimal)
             .secret_key(SecretKey::from_bytes(self.0.key.as_bytes()))
-            .alpns(vec![alpn()])
+            .alpns(vec![alpn(), http_alpn()])
             .transport_config(transport)
             .relay_mode(RelayMode::Custom(map))
             .bind()
@@ -138,6 +145,9 @@ impl Node {
     /// device directly (its LAN, its tailnet, a port its router maps) can connect, which the relay never sees.
     async fn take_conn(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
+        if conn.alpn() == http_alpn() {
+            return self.take_client(conn).await;
+        }
         if !self.is_device(&remote) && self.is_serverless(&remote) {
             return self.take_serverless(conn).await;
         }
@@ -198,6 +208,43 @@ impl Node {
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
                     tracing::debug!("answering the serverless node: {err:#}");
+                }
+            });
+        }
+    }
+
+    /// Answers a client device's requests to the local API, as its person's (`api::FromClient`), each stream one
+    /// request and its response. Anything else that connects for it is closed at once.
+    async fn take_client(&self, conn: Connection) {
+        let remote = *conn.remote_id().as_bytes();
+        if self.client(&remote).is_none() {
+            tracing::debug!("{} isn't a client device of this install", short(&remote));
+            return conn.close(1u32.into(), b"not a device of this install");
+        }
+        let api = crate::api::router(self.clone()).layer(axum::middleware::map_request(move |mut req: axum::extract::Request| async move {
+            // Who asks is the key the connection proved, and nothing it says of itself.
+            for header in [axum::http::header::AUTHORIZATION.as_str(), crate::api::LOCAL_TOKEN_HEADER] {
+                req.headers_mut().remove(header);
+            }
+            req.extensions_mut().insert(crate::api::FromClient(remote));
+            req
+        }));
+        let service = hyper_util::service::TowerToHyperService::new(api);
+        while let Ok((send, recv)) = conn.accept_bi().await {
+            // A device removed while connected is answered no more.
+            if self.client(&remote).is_none() {
+                return conn.close(1u32.into(), b"not a device of this install");
+            }
+            let http = hyper::server::conn::http1::Builder::new()
+                .keep_alive(false)
+                // A client finishes its side once it has sent its request, and still reads the response.
+                .half_close(true)
+                .timer(hyper_util::rt::TokioTimer::new())
+                .header_read_timeout(REQUEST_HEAD)
+                .serve_connection(hyper_util::rt::TokioIo::new(Stream { send, recv }), service.clone());
+            tokio::spawn(async move {
+                if let Err(err) = http.await {
+                    tracing::debug!("answering {}: {err:#}", short(&remote));
                 }
             });
         }
@@ -434,4 +481,30 @@ pub(super) fn pairing_ticket(secret: &[u8; 16]) -> String {
 pub(super) fn ticket_hash(ticket: &str) -> String {
     use sha2::Digest;
     data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(ticket.as_bytes()))
+}
+
+/// A stream a client device opened, as one connection to the local API.
+struct Stream {
+    send: iroh::endpoint::SendStream,
+    recv: iroh::endpoint::RecvStream,
+}
+
+impl tokio::io::AsyncRead for Stream {
+    fn poll_read(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> {
+        tokio::io::AsyncRead::poll_read(std::pin::Pin::new(&mut self.recv), cx, buf)
+    }
+}
+
+impl tokio::io::AsyncWrite for Stream {
+    fn poll_write(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &[u8]) -> std::task::Poll<std::io::Result<usize>> {
+        tokio::io::AsyncWrite::poll_write(std::pin::Pin::new(&mut self.send), cx, buf)
+    }
+
+    fn poll_flush(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        tokio::io::AsyncWrite::poll_flush(std::pin::Pin::new(&mut self.send), cx)
+    }
+
+    fn poll_shutdown(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        tokio::io::AsyncWrite::poll_shutdown(std::pin::Pin::new(&mut self.send), cx)
+    }
 }

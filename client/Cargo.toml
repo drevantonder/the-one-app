@@ -1,0 +1,32 @@
+[package]
+name = "one-client"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+# A library for every client (the CLI, native apps by FFI), and WebAssembly for browsers, built alone as a cdylib (with
+# an rlib beside it, LTO leaves a quarter more):
+#   RUSTFLAGS='--cfg getrandom_backend="wasm_js"' cargo rustc -p one-client --profile web --target wasm32-unknown-unknown --crate-type cdylib
+# then wasm-bindgen --target web, and wasm-opt -Oz.
+[lib]
+doctest = false
+
+[dependencies]
+# A client reaches nodes over iroh, as they reach each other (src/node/net.rs): only ring's TLS, no n0 discovery or
+# metrics. Pinned with the node's, since the relay runs iroh-relay's own code of this version.
+iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring"] }
+# iroh's own task and timer abstraction, which works the same natively (tokio) and in browsers.
+n0-future = "0.3"
+# Reads a response's head (hyper's own parser, already built).
+httparse = "1"
+data-encoding = "2"
+tokio = { version = "1", default-features = false, features = ["sync"] }
+
+# In browsers: how the page's JavaScript calls it (src/wasm.rs).
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen = "=0.2.130"
+wasm-bindgen-futures = "0.4"
+
+[build-dependencies]
+toml = "0.9"

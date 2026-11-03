@@ -558,3 +558,84 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     assert_eq!(opens(&sams, &global).await, vec![1, 2]);
     a.call(board("post", json!({ "text": "after" }))).await.unwrap();
 }
+
+/// A client device asks its node's local API over iroh (`<cli>/http/1`) as its own person, and as no one else: the
+/// key its connection proves is who it is, whatever headers it sends. A key that isn't a client device of the install
+/// gets nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn client_devices_ask_their_node_over_iroh_as_their_person() {
+    let a = start("clients").await;
+    a.create("Clients", "Andre").await.unwrap();
+    deploy_module(&a, "hi", r#"export default { name: "hi", ops: { hi: { description: "", input: {}, run: (ctx, input) => ({ hi: input.name }) } } };"#).await;
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let mine_scope = one::entry::Scope::User(me.user.clone());
+    a.install(&me, "hi", &mine_scope, true).await.unwrap();
+    eventually("hi to run", async || a.call(call("hi", "hi", json!({ "name": "a" }))).await.is_ok()).await;
+    let (mine, sams, sam) = (ed25519_dalek::SigningKey::from_bytes(&rand::random()), ed25519_dalek::SigningKey::from_bytes(&rand::random()), one::entry::new_id());
+    let listed = |k: &ed25519_dalek::SigningKey| one::keys::Endpoint::of(k);
+    let phone = one::node::DeviceRequest { key: one::entry::hex(&listed(&mine).key), seal: one::entry::hex(&listed(&mine).seal), name: "phone".into(), user: me.user.clone(), person: String::new(), proof: None };
+    a.approve_request(&me, &phone, None).await.unwrap();
+    a.member("device", json!({ "key": one::entry::hex(&listed(&sams).key), "seal": one::entry::hex(&listed(&sams).seal), "user": sam, "name": "sam's phone", "roles": ["client"], "user_name": "Sam", "role": "member" })).await.unwrap();
+    // The relay lets in the install's endpoints, as each device that approves another tells it.
+    let k = tokio::task::block_in_place(|| crate::kernel::Kernel::for_devices([a.id(), mine.verifying_key().to_bytes(), sams.verifying_key().to_bytes()].iter().map(one::entry::hex).collect()));
+    a.set_setting(&me, "address", Some(&k.address)).await.unwrap();
+    eventually("a's endpoint", async || a.endpoint_addr().is_some_and(|e| e.relay_urls().next().is_some())).await;
+
+    let get = |path: &str| one_client::Request { method: "GET".into(), path: path.into(), headers: Vec::new(), body: Vec::new() };
+    let json = async |r: one_client::Response| -> (u16, Value) { (r.status, serde_json::from_slice(&r.body.bytes().await.unwrap()).unwrap()) };
+    let phone = one_client::Client::start(mine.to_bytes(), &k.address, &[a.id()]).await.unwrap();
+    let (status, state) = json(phone.fetch(get("/v1/state")).await.unwrap()).await;
+    assert_eq!((status, state["me"]["user"].as_str()), (200, a.user().ok().as_deref()), "{state}");
+    let hi = |body: Value, headers: Vec<(String, String)>| one_client::Request { method: "POST".into(), path: "/v1/call".into(), headers: [vec![("content-type".into(), "application/json".into())], headers].concat(), body: body.to_string().into_bytes() };
+    let asked = json!({ "app": "hi", "op": "hi", "input": { "name": "phone" } });
+    // A call whose data it hasn't handed the keys of says what it needs, and whom to seal them to.
+    let (status, need) = json(phone.fetch(hi(asked.clone(), Vec::new())).await.unwrap()).await;
+    assert_eq!((status, need["to"].as_str()), (428, Some(one::entry::hex(&a.id()).as_str())), "{need}");
+    // The phone opens them as any client does, from what the node keeps sealed, and hands them for its key.
+    let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
+    let (scope, phone_hex) = (mine_scope.to_string(), one::entry::hex(&mine.verifying_key().to_bytes()));
+    let (_, epochs) = json(phone.fetch(get(&format!("/v1/keys?scope={scope}&to={phone_hex}"))).await.unwrap()).await;
+    let epoch: [u8; 32] = one::kernel::open_sealed(&one::keys::seal_secret(&mine), &b64(&epochs["sealed"]["1"])).unwrap().try_into().unwrap();
+    // The app's key in the epoch, made by the first to need it: the node keeps whichever is there.
+    let made = json!({ "scope": scope, "n": 1, "app": "hi", "sealed": data_encoding::BASE64URL_NOPAD.encode(&one::kernel::seal_app_key(&epoch, "hi", &rand::random())) });
+    let (_, app) = json(phone.fetch(one_client::Request { method: "POST".into(), path: "/v1/keys".into(), headers: vec![("content-type".into(), "application/json".into())], body: made.to_string().into_bytes() }).await.unwrap()).await;
+    let app_key = one::kernel::open_app_key(&epoch, "hi", &b64(&app["sealed"])).unwrap();
+    let handed = one::keys::Handed { scope: scope.clone(), epoch: 1, app: "hi".into(), database: "main".into(), key: one::kernel::database_key(&app_key, "main") };
+    let handoff = one::keys::Handoff { for_: phone_hex.clone(), until: one::node::now_ms() + 3_600_000, keys: vec![handed] };
+    let seal: [u8; 32] = one::keys::unhex(need["seal"].as_str().unwrap()).unwrap();
+    let sealed = one::keys::seal_handoff(&seal, &handoff).unwrap();
+    let (status, said) = json(phone.fetch(hi(asked.clone(), vec![(one::api::KEYS_HEADER.into(), sealed.clone())])).await.unwrap()).await;
+    assert_eq!((status, &said["ok"]), (200, &json!({ "hi": "phone" })), "{said}");
+    let (status, _) = json(phone.fetch(hi(asked.clone(), Vec::new())).await.unwrap()).await;
+    assert_eq!(status, 200, "what it handed is kept for its later calls");
+    // Many at once, on the one connection.
+    let mut many = tokio::task::JoinSet::new();
+    for _ in 0..20 {
+        let (phone, req) = (phone.clone(), get("/v1/state"));
+        many.spawn(async move { phone.fetch(req).await.map(|r| r.status).ok() });
+    }
+    assert!(many.join_all().await.iter().all(|s| *s == Some(200)));
+
+    // Sam's phone shows the node's own token and a sign-in: it's still Sam's, and asks nothing only this machine may.
+    let sams = one_client::Client::start(sams.to_bytes(), &k.address, &[a.id()]).await.unwrap();
+    let posing = |path: &str| one_client::Request { headers: vec![(one::api::LOCAL_TOKEN_HEADER.into(), a.local_token().into()), ("authorization".into(), "Bearer x".into())], ..get(path) };
+    let (status, state) = json(sams.fetch(posing("/v1/state")).await.unwrap()).await;
+    assert_eq!((status, state["me"]["user"].as_str()), (200, Some(sam.as_str())), "{state}");
+    assert_eq!(sams.fetch(posing("/v1/storage")).await.unwrap().status, 403, "only this machine's own programs ask that");
+    let (status, refused) = json(sams.fetch(hi(asked.clone(), vec![(one::api::KEYS_HEADER.into(), sealed)])).await.unwrap()).await;
+    assert_eq!(status, 400, "the keys Andre's phone handed are for its key alone: {refused}");
+
+    // A key the install doesn't list, reaching the node directly as anyone on its network can.
+    let stranger = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal).relay_mode(iroh::RelayMode::Disabled).bind().await.unwrap();
+    let alpn = format!("{}/http/1", one::config::CLI).into_bytes();
+    let answered = async {
+        let conn = stranger.connect(a.endpoint_addr().unwrap(), &alpn).await.ok()?;
+        let (mut send, mut recv) = conn.open_bi().await.ok()?;
+        send.write_all(b"GET /v1/state HTTP/1.1\r\nhost: node\r\n\r\n").await.ok()?;
+        send.finish().ok()?;
+        recv.read_to_end(1 << 20).await.ok()
+    };
+    assert_eq!(answered.await, None, "a stranger's connection is closed");
+    phone.close().await;
+    sams.close().await;
+}

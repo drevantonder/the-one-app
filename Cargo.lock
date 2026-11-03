@@ -2563,6 +2563,7 @@ dependencies = [
  "jsonc-parser",
  "libc",
  "md-5",
+ "one-client",
  "rand 0.8.8",
  "ring",
  "rusqlite",
@@ -2579,6 +2580,20 @@ dependencies = [
  "tracing-subscriber",
  "ureq",
  "webpki-roots",
+]
+
+[[package]]
+name = "one-client"
+version = "0.1.0"
+dependencies = [
+ "data-encoding",
+ "httparse",
+ "iroh",
+ "n0-future",
+ "tokio",
+ "toml",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

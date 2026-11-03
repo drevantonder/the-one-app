@@ -39,7 +39,7 @@ mod screens;
 mod sessions;
 pub use databases::NotGiven;
 pub use devices::{DeviceRequest, Invited};
-pub use sessions::Needs;
+pub use sessions::{Needs, client_token};
 mod sidecars;
 mod state;
 mod status;
