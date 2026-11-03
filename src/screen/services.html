@@ -13,7 +13,7 @@
 <div id="services"></div>
 <script>
   // A page's Services: a section per app that keeps accounts, its accounts (one that needs signing in again says so),
-  // then Add Account; then the rest, a row each opening its page in the App Store; then Add a Service, for this page.
+  // then Add Account; then the rest, a row each opening its page in the App Store; then Add a Service.
   const scope = one.params?.scope || "user";
   const esc = one.esc;
   const accounts = {};
@@ -38,14 +38,14 @@
       const opens = home.inStore(a) || home.settings(a, p);
       return `<button class="row${opens ? "" : " still"}" data-open="${esc(a.name)}">${one.appIcon(a, 36)}<div class="main"><div class="title"><span>${esc(home.label(a))}</span></div>${a.description ? `<div class="sub">${esc(a.description)}</div>` : ""}</div>${opens ? `<span class="chev">›</span>` : ""}</button>`;
     }).join("")}</div>` : "";
-    const addService = home.canArrange(p.scope) && home.addService(p) ? `<div class="list"><button class="row plain add" data-add-service><span class="plus">+</span>Add a Service</button></div>` : "";
+    const addService = home.canArrange(p.scope) && home.addService() ? `<div class="list"><button class="row plain add" data-add-service><span class="plus">+</span>Add a Service</button></div>` : "";
     el.innerHTML = `<div class="lists">${sections}${rest}${all.length ? "" : one.empty("Services give your apps and agents your email, calendar, chats and files.")}${addService}</div>`;
     const app = (b, key) => home.app(b.dataset[key]);
     el.querySelectorAll("[data-add]").forEach((b) => (b.onclick = () => addAccount(app(b, "add"), p)));
     el.querySelectorAll("[data-signin]").forEach((b) => (b.onclick = home.settings(app(b, "signin"), p, true)));
     el.querySelectorAll("[data-open]").forEach((b) => { const opens = home.inStore(app(b, "open")) || home.settings(app(b, "open"), p); if (opens) b.onclick = opens; });
     el.querySelectorAll("[data-more]").forEach((b) => (b.onclick = () => home.menu(home.actions(app(b, "more"), p), b)));
-    el.querySelector("[data-add-service]")?.addEventListener("click", home.addService(p));
+    el.querySelector("[data-add-service]")?.addEventListener("click", home.addService());
     // Each app's accounts, listed once; a change to the app lists them again.
     for (const a of withAccounts) {
       if (accounts[a.name] !== undefined && !stale.has(a.name)) continue;
