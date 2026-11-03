@@ -54,6 +54,11 @@ public static class WhiteLabel
     public static string Folder => System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), Name);
 }
 CS
+# The client library (client/ffi) for Windows, built here with mingw-w64, and its C#, which the app builds with.
+(cd "$root" && CONFIG=$config nice cargo build -q -p one-client-ffi --release --target x86_64-pc-windows-gnu)
+cp "$root/target/x86_64-pc-windows-gnu/release/one_client_ffi.dll" "$stage/"
+"$root/client/ffi/bindings.sh" cs "$stage/client"
+mv "$stage/client/one_client_ffi.cs" "$stage/" && rmdir "$stage/client"
 printf '{"name":%s,"file":%s,"publisher":%s}\n' "$(quote "$name")" "$(quote "$file")" "$(quote "CN=${name//[^A-Za-z0-9 ]/}")" > "$stage/build.json"
 
 # The device's SSH port and folder, as Agent Devices keeps them.

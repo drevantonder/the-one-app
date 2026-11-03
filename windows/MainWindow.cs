@@ -298,6 +298,7 @@ public sealed class MainWindow : Window
         {
             try
             {
+                await Join();
                 await Store.Shared.RefreshState();
                 break;
             }
@@ -330,6 +331,25 @@ public sealed class MainWindow : Window
         }
         listening = new CancellationTokenSource();
         _ = Store.Shared.Listen(() => DispatcherQueue.TryEnqueue(() => Welcome(null)), listening.Token);
+    }
+
+    /// This computer let in as its person's device: at once if it is, else it asks, shows its code, and waits for one of
+    /// their devices (or, for someone new, their inviter's) to approve it.
+    async Task Join()
+    {
+        if (await Client.Connect()) return;
+        var code = await Client.Ask();
+        var panel = new StackPanel { Spacing = 14, MaxWidth = 460 };
+        panel.Children.Add(new TextBlock { Text = "Approve This Computer", FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
+        panel.Children.Add(Look.Text(Auth.Shared.Invite != null ? "Whoever invited you approves it. Show them this code." : $"Open {WhiteLabel.Name} on a device you already use, then Settings › Devices › Approve.", 14, Look.Secondary, wrap: true));
+        panel.Children.Add(new TextBlock { Text = code, FontSize = 40, FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas"), CharacterSpacing = 200, IsTextSelectionEnabled = true, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, 0) });
+        var signOut = new Button { Content = "Sign Out", HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 24, 0, 0) };
+        signOut.Click += async (_, _) => await SignOut();
+        panel.Children.Add(signOut);
+        body.Content = Centered(panel);
+        while (!await Client.Waited()) await Task.Delay(2000);
+        Auth.Shared.Invite = null;
+        body.Content = Centered(new ProgressRing { IsActive = true, Width = 24, Height = 24 });
     }
 
     static FrameworkElement Centered(FrameworkElement el)
@@ -470,6 +490,7 @@ public sealed class MainWindow : Window
     {
         listening?.Cancel();
         await Auth.Shared.SignOut();
+        await Client.Close();
         pushed.Clear();
         selection = Route.PageOf("user");
         Welcome(null);

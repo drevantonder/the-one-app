@@ -31,6 +31,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
+    <!-- The client library's C# (uniffi-bindgen-cs) passes buffers to it by pointer. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <!-- WinUI 3 and what it stands on (Mica, the window, WebView2), without the rest of the Windows App SDK. -->
@@ -40,5 +42,7 @@
     <!-- The runtime's packages, which the app depends on and build.ps1 installs. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.6.4" />
     <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The client library (client/ffi), which build.sh puts beside the sources. -->
+    <Content Include="one_client_ffi.dll" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

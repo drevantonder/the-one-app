@@ -37,6 +37,17 @@ public sealed class Auth
 
     /// The install's address: the config's, or the one the person gave.
     public string? Address { get; private set; }
+    /// The secret of the invite link this person opened here, for their first device's request to be let in.
+    public string? Invite
+    {
+        get => invite;
+        set
+        {
+            invite = value;
+            Save();
+        }
+    }
+    string? invite;
     string? client;
     string? clientFor;
 
@@ -48,6 +59,7 @@ public sealed class Auth
             Address = kept?["address"]?.GetValue<string>();
             client = kept?["client"]?.GetValue<string>();
             clientFor = kept?["client_for"]?.GetValue<string>();
+            invite = kept?["invite"]?.GetValue<string>();
         }
         catch { }
         if (!string.IsNullOrEmpty(WhiteLabel.Address)) Address = WhiteLabel.Address;
@@ -56,7 +68,7 @@ public sealed class Auth
     void Save()
     {
         Directory.CreateDirectory(WhiteLabel.Folder);
-        File.WriteAllText(Kept, new JsonObject { ["address"] = Address, ["client"] = client, ["client_for"] = clientFor }.ToJsonString());
+        File.WriteAllText(Kept, new JsonObject { ["address"] = Address, ["client"] = client, ["client_for"] = clientFor, ["invite"] = invite }.ToJsonString());
     }
 
     /// Takes what the person typed: an address, or an invite link (`<address>/invite#…`). → the invite link, if it was one.
@@ -76,7 +88,9 @@ public sealed class Auth
         }
         Save();
         _ = Shell.Claim(Address);
-        return url.AbsolutePath == "/invite" && url.Fragment.Length > 1 ? url : null;
+        if (url.AbsolutePath != "/invite" || url.Fragment.Length <= 1) return null;
+        Invite = url.Fragment[1..];
+        return url;
     }
 
     /// Forgets the install, to sign in to another.

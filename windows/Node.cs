@@ -1,17 +1,15 @@
-// Requests to a node, through the install's address, as this person: each with the access token, as the web client
-// makes them (kernel/web/web.js). A refused token is refreshed once; refused again, the person is signed out.
+// Requests to the person's nodes, over iroh as this computer's own device (Client), with the keys each needs.
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using uniffi.one_client_ffi;
 
 namespace One;
 
@@ -19,89 +17,42 @@ public sealed class NodeException(string message) : Exception(message);
 
 public static class Node
 {
-    static readonly HttpClient http = new() { Timeout = Timeout.InfiniteTimeSpan };
-
     public static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
     /// How long to wait before asking again the `misses`th time running (from 0) after the node didn't answer: at once,
     /// then a quarter second, doubling, up to five. A node restarting for an update is back within a moment.
     public static TimeSpan RetryWait(int misses) => TimeSpan.FromMilliseconds(misses == 0 ? 0 : Math.Min(5000, 125 << Math.Min(misses, 6)));
 
-    /// No node answered: the gateway, or Cloudflare before it, couldn't reach one, so nothing ran.
-    static bool Unanswered(HttpStatusCode status) => (int)status is 502 or 503 or 530;
-
     /// Names a call wherever it's sent, so sent again it runs once.
     static string CallId() => Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8));
 
-    /// A request → its response, once it's ok; with the person's token, refreshed once if it's refused. Sent again for
-    /// a few seconds while nothing answers or no node does, as one restarting doesn't; a call carries an id, so it runs
-    /// once however often it's sent.
-    static async Task<HttpResponseMessage> Send(HttpMethod method, string path, Dictionary<string, string?>? query = null, JsonNode? body = null,
-        bool stream = false, TimeSpan? timeout = null, CancellationToken cancel = default)
+    /// A request → its response, once it's ok; a call carries an id, so it runs once however often it's sent.
+    static async Task<Response> Send(HttpMethod method, string path, Dictionary<string, string?>? query = null, JsonNode? body = null, string? accept = null)
     {
-        var url = $"{Auth.Shared.Address}{path}";
         var q = (query ?? []).Where(kv => kv.Value != null).Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value!)}").ToList();
-        if (q.Count > 0) url += "?" + string.Join("&", q);
+        if (q.Count > 0) path += "?" + string.Join("&", q);
         if (path.StartsWith("/v1/call") && body is JsonObject call && call["id"] == null) call["id"] = CallId();
-        var token = await Auth.Shared.Token();
-        for (int tries = 0, misses = 0; ; tries++)
-        {
-            using var request = new HttpRequestMessage(method, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            if (body != null) request.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
-            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-            if (!stream) limit.CancelAfter(timeout ?? TimeSpan.FromSeconds(60));
-            HttpResponseMessage r;
-            try
-            {
-                r = await http.SendAsync(request, stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, limit.Token);
-            }
-            catch (HttpRequestException) when (!cancel.IsCancellationRequested && misses < 5)
-            {
-                await Task.Delay(RetryWait(misses++), cancel);
-                tries--;
-                continue;
-            }
-            catch (Exception) when (!cancel.IsCancellationRequested)
-            {
-                throw new NodeException("Your devices aren’t answering.");
-            }
-            if (Unanswered(r.StatusCode) && misses < 5)
-            {
-                r.Dispose();
-                await Task.Delay(RetryWait(misses++), cancel);
-                tries--;
-                continue;
-            }
-            if (r.StatusCode == HttpStatusCode.Unauthorized && tries == 0)
-            {
-                r.Dispose();
-                token = await Auth.Shared.Token(token);
-                continue;
-            }
-            if (r.StatusCode == HttpStatusCode.Unauthorized) throw new SignedOutException("Signed out.");
-            if (r.IsSuccessStatusCode) return r;
-            var text = await r.Content.ReadAsStringAsync(cancel);
-            r.Dispose();
-            string? error = null;
-            try { error = JsonNode.Parse(text)?["error"]?.GetValue<string>(); } catch { }
-            throw new NodeException(error ?? ((int)r.StatusCode >= 500 ? "Your devices aren’t answering." : "That didn’t work. Try again."));
-        }
+        var r = await Client.Fetch(method.Method, path, body == null ? null : Encoding.UTF8.GetBytes(body.ToJsonString()), accept);
+        if (r.Status() is >= 200 and < 300) return r;
+        var text = Encoding.UTF8.GetString(await Client.Off(r.Bytes));
+        string? error = null;
+        try { error = JsonNode.Parse(text)?["error"]?.GetValue<string>(); } catch { }
+        throw new NodeException(error ?? (r.Status() >= 500 ? "Your devices aren’t answering." : "That didn’t work. Try again."));
     }
+
+    static async Task<string> Text(Response r) => Encoding.UTF8.GetString(await Client.Off(r.Bytes));
 
     /// JSON in and out: a failure the node says (`{ error }`) is thrown.
     public static async Task<JsonNode?> Ask(HttpMethod method, string path, Dictionary<string, string?>? query = null, JsonNode? body = null, TimeSpan? timeout = null)
     {
-        using var r = await Send(method, path, query, body, timeout: timeout);
-        var reply = JsonNode.Parse(await r.Content.ReadAsStringAsync());
+        var reply = JsonNode.Parse(await Text(await Send(method, path, query, body)));
         if (reply is JsonObject o && o["error"]?.GetValue<string>() is { } error) throw new NodeException(error);
         return reply;
     }
 
     public static async Task<T> Get<T>(string path, Dictionary<string, string?>? query = null)
     {
-        using var r = await Send(HttpMethod.Get, path, query);
-        return JsonSerializer.Deserialize<T>(await r.Content.ReadAsStringAsync(), Json)!;
+        return JsonSerializer.Deserialize<T>(await Text(await Send(HttpMethod.Get, path, query)), Json)!;
     }
 
     public static Task<JsonNode?> Post(string path, JsonNode body) => Ask(HttpMethod.Post, path, body: body);
@@ -121,15 +72,13 @@ public static class Node
     /// An app's screen, as its page.
     public static async Task<string> Screen(string app, string screen, string parameters, string? scope)
     {
-        using var r = await Send(HttpMethod.Get, $"/v1/screens/{Uri.EscapeDataString(app)}/{Uri.EscapeDataString(screen)}", new() { ["params"] = parameters, ["scope"] = scope }, timeout: TimeSpan.FromSeconds(20));
-        return await r.Content.ReadAsStringAsync();
+        return await Text(await Send(HttpMethod.Get, $"/v1/screens/{Uri.EscapeDataString(app)}/{Uri.EscapeDataString(screen)}", new() { ["params"] = parameters, ["scope"] = scope }));
     }
 
     /// One of this app's own screens (a page, Services, a Vault request, Settings'), as its page: the same on every client.
     public static async Task<string> ClientScreen(string name, string parameters)
     {
-        using var r = await Send(HttpMethod.Get, $"/v1/client-screens/{Uri.EscapeDataString(name)}", new() { ["params"] = parameters }, timeout: TimeSpan.FromSeconds(20));
-        return await r.Content.ReadAsStringAsync();
+        return await Text(await Send(HttpMethod.Get, $"/v1/client-screens/{Uri.EscapeDataString(name)}", new() { ["params"] = parameters }));
     }
 
     /// An own screen's `one.api`: the node's /v1 at your One App's address, as this person; nothing else there. A call
@@ -149,8 +98,8 @@ public static class Node
     /// A file the node keeps, by its hash.
     public static async Task<byte[]> Blob(string hash)
     {
-        using var r = await Send(HttpMethod.Get, $"/v1/blobs/{Uri.EscapeDataString(hash)}", timeout: TimeSpan.FromMinutes(5));
-        return await r.Content.ReadAsByteArrayAsync();
+        var r = await Send(HttpMethod.Get, $"/v1/blobs/{Uri.EscapeDataString(hash)}");
+        return await Client.Off(r.Bytes);
     }
 
     /// Asks for an item an app declares → the request's id, and the scope it's in (their own, where they can't change
@@ -165,16 +114,23 @@ public static class Node
     /// The node's events, as they come, until `cancel`: what changed, so the window and the open screen keep up.
     public static async Task Events(Action<JsonNode> each, CancellationToken cancel)
     {
-        using var r = await Send(HttpMethod.Get, "/v1/events", stream: true, cancel: cancel);
-        using var reader = new StreamReader(await r.Content.ReadAsStreamAsync(cancel));
+        var r = await Send(HttpMethod.Get, "/v1/events", accept: "text/event-stream");
+        using var stop = cancel.Register(r.Cancel);
+        var rest = new List<byte>();
         var data = new StringBuilder();
-        while (await reader.ReadLineAsync(cancel) is { } line)
+        while (!cancel.IsCancellationRequested && await Client.Off(r.Chunk) is { } part)
         {
-            if (line.StartsWith("data:")) data.Append(line[5..].Trim());
-            else if (line.Length == 0 && data.Length > 0)
+            rest.AddRange(part);
+            for (int end; (end = rest.IndexOf((byte)'\n')) >= 0; )
             {
-                try { if (JsonNode.Parse(data.ToString()) is { } e) each(e); } catch { }
-                data.Clear();
+                var line = Encoding.UTF8.GetString(rest.GetRange(0, end).ToArray()).TrimEnd('\r');
+                rest.RemoveRange(0, end + 1);
+                if (line.StartsWith("data:")) data.Append(line[5..].Trim());
+                else if (line.Length == 0 && data.Length > 0)
+                {
+                    try { if (JsonNode.Parse(data.ToString()) is { } e) each(e); } catch { }
+                    data.Clear();
+                }
             }
         }
     }
