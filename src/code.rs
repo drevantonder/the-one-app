@@ -271,11 +271,11 @@ pub fn execute(script: &str, agent: Option<&str>, client: &str) -> Result<Value>
         let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
         if let Some(id) = msg.get("call") {
             let (app, op) = (msg["app"].as_str().unwrap_or(""), msg["op"].as_str().unwrap_or(""));
-            let spec = apps.iter().find(|a| a["name"] == app).and_then(|a| a["ops"].as_array()?.iter().find(|o| o["name"] == op)).cloned();
+            let spec = apps.iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["ops"].as_array()?.iter().find(|o| o["name"] == op)?.clone())));
             let input = msg["input"].clone();
             let answer = (|| {
                 let spec = spec.with_context(|| format!("no operation {app}_{op}"))?;
-                crate::ops::check(&spec["input"], &input, "input")?;
+                anyhow::ensure!(input.is_object() || input.is_null(), "an operation's input is an object, not {input}");
                 crate::dispatch(&format!("{app}_{op}"), input.as_object().cloned().unwrap_or_default(), agent, client, Some(spec))
             })();
             let reply = match answer {

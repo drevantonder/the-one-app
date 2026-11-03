@@ -70,11 +70,12 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
             if missing.len() == 1 { "it" } else { "them" }
         );
     }
+    check(&o["input"], &Value::Object(input.clone()))?;
     if o["confirm"] == true {
         agreed(confirmed, &format!("{CLI} {app} {op}"))?;
     }
     let call = match node_app(app) {
-        true => crate::dispatch(&format!("{app}_{op}"), input, agent_from_env().as_deref(), "cli", Some(o.clone())).map(|ok| json!({ "ok": ok })),
+        true => crate::dispatch(&format!("{app}_{op}"), input, agent_from_env().as_deref(), "cli", Some((a.clone(), o.clone()))).map(|ok| json!({ "ok": ok })),
         false => post("/v1/call", json!({ "device": device, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })),
     };
     let mut r = match call {
@@ -329,14 +330,14 @@ fn value(flag: &str, values: &[Option<String>], prop: Option<&Value>) -> Result<
         };
         Ok(match ty {
             Some("string") => json!(v),
-            Some("integer") => json!(v.parse::<i64>().with_context(|| format!("--{} takes a whole number, not {v}", kebab(flag)))?),
-            Some("number") => json!(v.parse::<f64>().with_context(|| format!("--{} takes a number, not {v}", kebab(flag)))?),
+            Some("integer") => json!(v.parse::<i64>().ok().with_context(|| format!("--{} takes a whole number, not {v}", kebab(flag)))?),
+            Some("number") => json!(v.parse::<f64>().ok().with_context(|| format!("--{} takes a number, not {v}", kebab(flag)))?),
             Some("boolean") => match v.as_str() {
                 "true" | "yes" | "1" => json!(true),
                 "false" | "no" | "0" => json!(false),
                 _ => bail!("--{} is true or false, not {v}", kebab(flag)),
             },
-            Some("object") => serde_json::from_str(v).with_context(|| format!("--{} takes a JSON object", kebab(flag)))?,
+            Some("object") => serde_json::from_str(v).ok().filter(Value::is_object).with_context(|| format!("--{} takes a JSON object, like '{{\"a\": 1}}'", kebab(flag)))?,
             // Untyped: JSON if it is, else text.
             _ => serde_json::from_str(v).ok().filter(|v: &Value| !v.is_string()).unwrap_or_else(|| json!(v)),
         })
@@ -633,7 +634,9 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
         schema = json!({ "type": "object", "properties": {} });
     }
     if !schema["properties"].is_object() {
+        // One that lists no inputs takes any, as it did before it was listed with device or confirm.
         schema["properties"] = json!({});
+        schema["additionalProperties"] = json!(true);
     }
     for prop in schema["properties"].as_object_mut().into_iter().flat_map(|p| p.values_mut()) {
         if takes_file(prop).is_some() {
@@ -650,11 +653,16 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
     schema
 }
 
-/// Checks `v` against an input schema, as code mode's interpreter doesn't: types, choices, required inputs, and no
-/// inputs an operation doesn't take. `at` names it in what's wrong.
-pub fn check(schema: &Value, v: &Value, at: &str) -> Result<()> {
+/// Checks an operation's input against its schema before anything runs: types, choices, required inputs, and no
+/// inputs it doesn't take. What's wrong names the input (`limit takes a whole number, not "many"`).
+pub fn check(schema: &Value, input: &Value) -> Result<()> {
+    check_at(schema, input, "")
+}
+
+fn check_at(schema: &Value, v: &Value, at: &str) -> Result<()> {
+    let named = if at.is_empty() { "the input" } else { at };
     if let Some(choices) = schema["enum"].as_array() {
-        ensure!(choices.contains(v), "{at} is one of {}, not {v}", choices.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", "));
+        ensure!(choices.contains(v), "{named} is one of {}, not {v}", choices.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", "));
     }
     let types: Vec<&str> = match &schema["type"] {
         Value::String(t) => vec![t.as_str()],
@@ -673,30 +681,73 @@ pub fn check(schema: &Value, v: &Value, at: &str) -> Result<()> {
     };
     if !types.is_empty() && !types.iter().any(|t| is(t)) {
         let want = types.iter().map(|t| match *t { "string" => "text", "integer" => "a whole number", "number" => "a number", "boolean" => "true or false", "array" => "a list", "object" => "an object", t => t }).collect::<Vec<_>>().join(" or ");
-        bail!("{at} takes {want}, not {v}");
+        bail!("{named} takes {want}, not {v}");
     }
     if let (Some(items), Some(list)) = (schema.get("items"), v.as_array()) {
         for (i, x) in list.iter().enumerate() {
-            check(items, x, &format!("{at}[{i}]"))?;
+            check_at(items, x, &format!("{named}[{i}]"))?;
         }
     }
-    if let (Some(props), Some(o)) = (schema["properties"].as_object(), v.as_object()) {
+    if let Some(o) = v.as_object() {
+        let props = schema["properties"].as_object().cloned().unwrap_or_default();
+        let inner = |k: &str| if at.is_empty() { k.to_string() } else { format!("{at}.{k}") };
         for r in required(schema) {
-            ensure!(o.get(&r).is_some_and(|x| !x.is_null()), "{at} needs {r}");
+            if o.get(&r).is_none_or(Value::is_null) {
+                let about = props.get(&r).and_then(|p| p["description"].as_str()).map(|d| format!(": {d}")).unwrap_or_default();
+                bail!("missing {}{about}", inner(&r));
+            }
         }
         for (k, x) in o {
             match props.get(k) {
                 Some(_) if x.is_null() => {}
-                Some(p) => check(p, x, &format!("{at}.{k}"))?,
-                // An operation's own inputs are all listed; deeper objects may hold more, unless they say not.
-                None if (at == "input" && !props.is_empty()) || schema["additionalProperties"] == false => {
-                    bail!("{at} has no {k}: it takes {}", props.keys().cloned().collect::<Vec<_>>().join(", "))
+                Some(p) => check_at(p, x, &inner(k))?,
+                // An operation's own inputs are all listed, unless it says it takes any; deeper objects may hold more,
+                // unless they say not.
+                None if (at.is_empty() && !takes(schema, k)) || schema["additionalProperties"] == false => {
+                    let names: Vec<&str> = props.keys().map(String::as_str).collect();
+                    let near = nearest(k, &names);
+                    match (names.is_empty(), near.first()) {
+                        (true, _) => bail!("{} isn't an input: this takes none", inner(k)),
+                        (_, Some(n)) => bail!("{} isn't an input: did you mean {n}? It takes {}", inner(k), names.join(", ")),
+                        (_, None) => bail!("{} isn't an input: it takes {}", inner(k), names.join(", ")),
+                    }
                 }
                 None => {}
             }
         }
     }
     Ok(())
+}
+
+/// The few of `names` nearest to `word`, nearest first: a typo's fix, by edit distance (a swap of two letters is one
+/// edit), within one edit for a short word and up to three for a long one.
+pub fn nearest(word: &str, names: &[&str]) -> Vec<String> {
+    let w: Vec<char> = word.to_lowercase().chars().collect();
+    let most = match w.len() { 0..=3 => 1, 4..=6 => 2, _ => 3 };
+    let mut found: Vec<(usize, &str)> = names.iter().map(|n| (distance(&w, &n.to_lowercase().chars().collect::<Vec<_>>()), *n)).filter(|(d, _)| *d <= most).collect();
+    found.sort();
+    found.into_iter().take(3).map(|(_, n)| n.to_string()).collect()
+}
+
+/// Edits from `a` to `b`: a letter added, taken out, changed, or two side by side swapped.
+fn distance(a: &[char], b: &[char]) -> usize {
+    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in d.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for j in 0..=b.len() {
+        d[0][j] = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            d[i][j] = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                d[i][j] = d[i][j].min(d[i - 2][j - 2] + 1);
+            }
+        }
+    }
+    d[a.len()][b.len()]
 }
 
 /// An operation's MCP hints, from what it says: `reads`, and `confirm`.

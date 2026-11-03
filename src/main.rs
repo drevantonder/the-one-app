@@ -1402,8 +1402,7 @@ fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode) -> Option<Val
             t.extend(mcp_apps::tools());
             json!({ "tools": t })
         }),
-        "tools/call" => Ok(mcp_apps::call(msg["params"]["name"].as_str().unwrap_or(""), &msg["params"]["arguments"])
-            .unwrap_or_else(|| call_tool(&msg["params"], agent.as_deref(), mode))),
+        "tools/call" => Ok(call_tool(&msg["params"], agent.as_deref(), mode)),
         // Apps' widgets and screens, as MCP Apps (src/mcp_apps.rs).
         "resources/list" => Ok(json!({ "resources": mcp_apps::resources() })),
         "resources/read" => match msg["params"]["uri"].as_str().unwrap_or("") {
@@ -1756,6 +1755,14 @@ fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let input = params["arguments"].as_object().cloned().unwrap_or_default();
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
+    // This server's own tools, checked as apps' are, in dispatch.
+    let own = [code::search_tool(mode), code::execute_tool()].into_iter().chain(mcp_apps::tools()).find(|t| t["name"] == name);
+    if let Some(Err(e)) = own.map(|t| ops::check(&t["inputSchema"], &Value::Object(input.clone()))) {
+        return failed(format!("{e:#}"));
+    }
+    if let Some(out) = mcp_apps::call(name, &Value::Object(input.clone())) {
+        return out;
+    }
     match name {
         "search" => {
             let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
@@ -1781,13 +1788,17 @@ fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
 
 /// Runs one tool as the person, an app's operation or the Vault's, for MCP or a code mode script: what can't be undone
 /// only with confirm: true. `spec` is the operation, when the caller has it already.
-fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, client: &str, spec: Option<Value>) -> Result<Value> {
+fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, client: &str, spec: Option<(Value, Value)>) -> Result<Value> {
     let (app, op) = name.split_once('_').with_context(|| format!("no tool {name}"))?;
-    let spec = spec.or_else(|| ops::find(app, op).map(|(_, spec)| spec));
-    let device = if ops::node_app(app) || spec.as_ref().is_some_and(ops::own_device) { None } else { input.remove("device") };
-    if let Some(other) = spec.as_ref().and_then(|spec| input.keys().find(|k| *k != "confirm" && !ops::takes(&spec["input"], k))) {
-        anyhow::bail!("{other} isn't an input of {name}: see its inputSchema");
+    let (a, spec) = match spec.or_else(|| ops::find(app, op)) {
+        Some((a, spec)) => (a, Some(spec)),
+        None => (Value::Null, None),
+    };
+    // Checked as MCP lists it, before anything runs: a wrong input says what's wrong, never runs as something else.
+    if let Some(spec) = &spec {
+        ops::check(&ops::mcp_schema(&a, spec), &Value::Object(input.clone()))?;
     }
+    let device = if ops::node_app(app) || spec.as_ref().is_some_and(ops::own_device) { None } else { input.remove("device") };
     let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = &spec {
         anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
