@@ -3,6 +3,7 @@
 //! reads and writes apps' databases in the bucket (`src/db.rs`), through the presigned URLs `worker.js` gets. It holds
 //! no keys but those handed it for a sign-in's calls.
 
+mod clients;
 mod net;
 
 use std::cell::RefCell;

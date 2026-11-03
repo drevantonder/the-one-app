@@ -254,7 +254,6 @@ export class Auth extends DurableObject {
       const name = this.auth.options.appName;
       // What its pages look like: the white label's name and accent.
       const look = { name, accent: this.env.ACCENT };
-      if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp") return this.protectedResource(path, name);
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
       const tried = this.env.SIGN_IN === "try";
       if (path === "/sign-in" && request.method === "GET") return html(tried ? tryPage({ ...look, person: this.env.TRY_NAME }) : signInPage({ ...look, google }));
@@ -471,19 +470,6 @@ export class Auth extends DurableObject {
     this.ctx.storage.sql.exec("delete from requests where key = ?", key);
     this.ctx.storage.sql.exec("delete from services where key = ?", key);
     return {};
-  }
-
-  /// What an MCP client asks first (RFC 9728): the address's MCP endpoint (or the address) is signed in to here.
-  protectedResource(path, name) {
-    const origin = new URL(this.env.ADDRESS).origin;
-    const meta = {
-      resource: path.endsWith("/mcp") ? `${origin}/mcp` : origin,
-      resource_name: name,
-      authorization_servers: [`${origin}/api/auth`],
-      scopes_supported: ["openid", "profile", "offline_access"],
-      bearer_methods_supported: ["header"],
-    };
-    return Response.json(meta, { headers: { "access-control-allow-origin": "*" } });
   }
 
   async session(request) {

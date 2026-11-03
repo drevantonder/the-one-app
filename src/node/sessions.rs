@@ -64,6 +64,11 @@ pub fn client_token(key: &Key) -> String {
 
 const CLIENT: &str = "client.";
 
+/// The client device a token `client_token` made is for.
+pub fn client_of(token: &str) -> Option<Key> {
+    data_encoding::HEXLOWER.decode(token.strip_prefix(CLIENT)?.as_bytes()).ok()?.try_into().ok()
+}
+
 fn hash(token: &str) -> [u8; 32] {
     use sha2::Digest;
     sha2::Sha256::digest(token.as_bytes()).into()

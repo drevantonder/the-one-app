@@ -1,4 +1,4 @@
-// The serverless node: a node of the install on Cloudflare Workers, which the gateway sends `/v1/` and `/mcp` to by
+// The serverless node: a node of the install on Cloudflare Workers, which the gateway sends `/v1/` to by
 // service binding. It holds no keys. Each request brings its person's access token, checked as every node checks one
 // (src/lib.rs, which is the machine node's own Rust), and the keys of the databases its call reaches, sealed to this
 // node (`x-one-keys`); one that lacks some is answered 428 with what it needs, as a node on a machine answers. Who can do

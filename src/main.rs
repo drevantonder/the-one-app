@@ -87,7 +87,7 @@ Usage:
   {CLI} serverless deploy [--account <id>]
                                        put the install's serverless node in the kernel's Cloudflare account (a node as
                                        a Worker, with the API token in CLOUDFLARE_API_TOKEN) and send the address's
-                                       /v1/ and /mcp to it; what needs a machine goes on to node-url
+                                       /v1/ to it; what needs a machine goes on to node-url
   {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/: a node's address, or
                                        cloudflare:<id>, the Workers VPC service of a Cloudflare Tunnel to one),
                                        auth-url, schedules-url, resources (nodes' own addresses,
@@ -441,7 +441,7 @@ fn run(args: Vec<String>) -> Result<()> {
             // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
             // things run in.
             post("/v1/settings", json!({ "name": "serverless", "value": settings.serverless_endpoint() }))?;
-            println!("The serverless node is in your Cloudflare account, and {} sends /v1/ and /mcp to it; what needs a machine goes on to {}.", settings.address, settings.node_url.as_deref().unwrap_or("no machine yet: kernel set node-url"));
+            println!("The serverless node is in your Cloudflare account, and {} sends /v1/ to it; what needs a machine goes on to {}.", settings.address, settings.node_url.as_deref().unwrap_or("no machine yet: kernel set node-url"));
         }
         ["kernel", "invite", name] => {
             let settings = one::kernel::Settings::load()?;
@@ -929,6 +929,9 @@ fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Resul
     let mut resp = resp.with_context(|| format!("{NAME} isn't running here: start it with {CLI} serve"))?;
     let body: Value = resp.body_mut().read_json()?;
     if let Some(err) = body.get("error") {
+        if body.get("need").is_some() {
+            NEEDED.with(|n| *n.borrow_mut() = Some(body.clone()));
+        }
         bail!("{}", err.as_str().unwrap_or("failed"));
     }
     Ok(body)
@@ -937,6 +940,12 @@ fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Resul
 thread_local! {
     /// The access token of the person an MCP request over HTTP came from, while it's answered (`mcp_http`).
     static SIGNED_IN: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+thread_local! {
+    /// What a call this thread asked for an MCP request over HTTP needed and wasn't handed (`{ error, need, to, seal }`),
+    /// which its caller is answered with 428, to hand them and ask again.
+    static NEEDED: std::cell::RefCell<Option<Value>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Whether what this thread asks the node, it asks for someone signed in elsewhere, not this machine's person.
@@ -1132,8 +1141,8 @@ async fn serve(is_try: bool) -> Result<()> {
     let node = Node::start(&dir, one::sidecars::built_in()).await?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
-    let routes = api::routes().route("/mcp", axum::routing::post(mcp_http));
-    let mut routes = api::guarded(routes, node);
+    api::serve_mcp(axum::routing::post(mcp_http));
+    let mut routes = api::guarded(api::routes(), node);
     if is_try {
         let home = dir.clone();
         tokio::spawn(async move {
@@ -1245,14 +1254,18 @@ fn mcp(mode: Mode) -> Result<()> {
     Ok(())
 }
 
-/// MCP over Streamable HTTP, at `/mcp`: what `mcp` answers over stdio, for an MCP client elsewhere, as the person it
-/// signed in as with the install's kernel (the gateway sends it here), or for a program on this machine, as its
-/// person. Each POST is answered with JSON; the server sends nothing unasked, so there's no stream to GET. Nothing is
-/// kept between requests, since the next may reach another node: the session id carries only the client's name,
-/// credited on its calls.
-async fn mcp_http(headers: axum::http::HeaderMap, body: String) -> axum::response::Response {
+/// MCP over Streamable HTTP, at `/mcp`: what `mcp` answers over stdio, for a client device over iroh, as its person (the
+/// MCP Worker, kernel/mcp/, is remote MCP clients' device), or for a program on this machine, as its person. Each POST
+/// is answered with JSON; the server sends nothing unasked, so there's no stream to GET. A tool that needs keys it
+/// wasn't handed is answered 428 with what it needs, as `/v1/call` is, for its caller to hand them and ask again.
+/// Nothing is kept between requests, since the next may reach another node: the session id carries only the client's
+/// name, credited on its calls.
+async fn mcp_http(client: Option<axum::Extension<api::FromClient>>, headers: axum::http::HeaderMap, body: String) -> axum::response::Response {
     use axum::response::IntoResponse;
-    let token = headers.get("authorization").and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
+    let token = match client {
+        Some(axum::Extension(api::FromClient(key))) => Some(one::node::client_token(&key)),
+        None => headers.get("authorization").and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string()),
+    };
     let mut agent = headers.get("mcp-session-id").and_then(|s| s.to_str().ok()).and_then(|s| s.split_once('.')).and_then(|(_, name)| data_encoding::BASE64URL_NOPAD.decode(name.as_bytes()).ok()).and_then(|n| String::from_utf8(n).ok());
     let Ok(msg) = serde_json::from_str::<Value>(&body) else {
         let error = json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "the body isn't JSON" } });
@@ -1261,14 +1274,19 @@ async fn mcp_http(headers: axum::http::HeaderMap, body: String) -> axum::respons
     let initialize = msg["method"] == "initialize";
     let answered = tokio::task::spawn_blocking(move || {
         SIGNED_IN.with(|t| *t.borrow_mut() = token);
+        NEEDED.with(|n| *n.borrow_mut() = None);
         let reply = match &msg {
             Value::Array(batch) => Some(json!(batch.iter().filter_map(|m| mcp_answer(m, &mut agent, Mode::All)).collect::<Vec<_>>())).filter(|r| r.as_array().is_some_and(|r| !r.is_empty())),
             msg => mcp_answer(msg, &mut agent, Mode::All),
         };
         SIGNED_IN.with(|t| *t.borrow_mut() = None);
-        (reply, agent)
+        (reply, agent, NEEDED.with(|n| n.borrow_mut().take()))
     })
     .await;
+    if let Ok((_, _, Some(needed))) = &answered {
+        return (axum::http::StatusCode::PRECONDITION_REQUIRED, axum::Json(needed.clone())).into_response();
+    }
+    let answered = answered.map(|(reply, agent, _)| (reply, agent));
     match answered {
         Ok((None, _)) => axum::http::StatusCode::ACCEPTED.into_response(),
         Ok((Some(reply), agent)) => {

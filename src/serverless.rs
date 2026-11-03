@@ -1,5 +1,5 @@
 //! The serverless node (`serverless/`) on Cloudflare: a node of the install as a Worker in its kernel's account, with
-//! no address of its own, which the gateway sends `/v1/` and `/mcp` to by service binding, and an iroh endpoint of its
+//! no address of its own, which the gateway sends `/v1/` to by service binding, and an iroh endpoint of its
 //! own key, which the relay wakes. A release carries its built
 //! WebAssembly (`update` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the install's
 //! bucket, each at its latest deploy.

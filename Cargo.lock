@@ -2616,6 +2616,7 @@ dependencies = [
  "n0-watcher",
  "noq-udp",
  "one",
+ "one-client",
  "serde_json",
  "sqlite-wasm-rs",
  "wasm-bindgen",

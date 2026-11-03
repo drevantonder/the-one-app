@@ -27,6 +27,15 @@ pub fn router(node: Node) -> Router {
     guarded(routes(), node)
 }
 
+/// MCP over HTTP, at `/mcp` (the CLI's `mcp_http`), which this crate can't name: set once, before the node serves.
+static MCP: std::sync::OnceLock<axum::routing::MethodRouter<Node>> = std::sync::OnceLock::new();
+
+/// Serves MCP at `/mcp`, for this machine's own programs and the install's client devices over iroh: the MCP Worker,
+/// remote MCP clients' device, among them (kernel/mcp/).
+pub fn serve_mcp(handler: axum::routing::MethodRouter<Node>) {
+    let _ = MCP.set(handler);
+}
+
 /// The file in a node's home holding the token its machine's own programs send, in `LOCAL_TOKEN_HEADER`, to say they
 /// are: only the machine's user can read it. The CLI, its MCP, sidecars and the Mac app read it there.
 pub const LOCAL_TOKEN: &str = "local-token";
@@ -68,7 +77,11 @@ pub fn local_token(home: &std::path::Path) -> Option<String> {
 
 /// Every route of the local API, unguarded: `guarded` lets only this machine's programs and sign-ins in.
 pub fn routes() -> Router<Node> {
-    Router::new()
+    let routes = match MCP.get() {
+        Some(mcp) => Router::new().route("/mcp", mcp.clone()),
+        None => Router::new(),
+    };
+    routes
         .route("/llms.txt", get(llms))
         .route("/skills/{name}/{*path}", get(skill_file))
         .route("/v1/state", get(state))
@@ -161,7 +174,6 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/vault/request",
     "/v1/vault/answer",
     "/v1/vault/fetch",
-    "/mcp",
     // What Settings' screens ask: each checked as its person.
     "/v1/pair",
     "/v1/remove",
@@ -282,6 +294,13 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
         return from_client(&node, key, &path, req, next).await;
     }
     let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
+    // This machine's own MCP, answering a client device's request (`mcp_http`), asks as that device.
+    if let Some(key) = token.as_deref().and_then(crate::node::client_of) {
+        if !from_this_machine(&node, &req) {
+            return refuse(req, (StatusCode::UNAUTHORIZED, Json(json!({ "error": "that isn't a sign-in" }))).into_response()).await;
+        }
+        return from_client(&node, key, &path, req, next).await;
+    }
     if let Some(token) = token {
         // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `SIGNED_IN`.
         if !SIGNED_IN.contains(&path.as_str()) && !from_this_machine(&node, &req) {
@@ -305,24 +324,20 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
                 req.extensions_mut().insert(me);
                 next.run(req).await
             }
-            Err(err) if path == "/mcp" => refuse(req, sign_in_first(&node, Some(format!("{err:#}")))).await,
             Err(err) if err.is::<NotJoined>() => refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": NotJoined.to_string() }))).into_response()).await,
             Err(err) => refuse(req, (StatusCode::UNAUTHORIZED, Json(json!({ "error": format!("{err:#}") }))).into_response()).await,
         };
     }
     if !from_this_machine(&node, &req) {
-        if path == "/mcp" {
-            return refuse(req, sign_in_first(&node, None)).await;
-        }
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": not_this_machine() }))).into_response()).await;
     }
     next.run(req).await
 }
 
-/// A client device's request over iroh is its person's, as a sign-in's is, for what `SIGNED_IN` lists: the device
-/// must still be one of the install's, and the keys it hands are for its key.
+/// A client device's request over iroh is its person's, as a sign-in's is, for what `SIGNED_IN` lists and MCP: the
+/// device must still be one of the install's, and the keys it hands are for its key.
 async fn from_client(node: &Node, key: crate::entry::Key, path: &str, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
-    if !SIGNED_IN.contains(&path) || path == "/v1/kernel/run" {
+    if !(SIGNED_IN.contains(&path) || path == "/mcp") || path == "/v1/kernel/run" {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
     }
     let Some((user, name)) = node.client(&key) else {
@@ -392,18 +407,6 @@ async fn sandboxed(mut resp: Response) -> Response {
     headers.insert(axum::http::header::CONTENT_SECURITY_POLICY, axum::http::HeaderValue::from_static("sandbox"));
     headers.insert(axum::http::header::X_CONTENT_TYPE_OPTIONS, axum::http::HeaderValue::from_static("nosniff"));
     resp
-}
-
-/// An MCP client elsewhere is told where to sign in, as MCP's authorization spec says: the install's
-/// protected-resource metadata, at its address, which names the kernel's auth service.
-fn sign_in_first(node: &Node, error: Option<String>) -> Response {
-    let Ok(address) = node.kernel() else {
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": "this install has no address to sign in at yet, so only this machine's own programs may use this" }))).into_response();
-    };
-    let invalid = if error.is_some() { r#"error="invalid_token", "# } else { "" };
-    let challenge = format!(r#"Bearer {invalid}resource_metadata="{}/.well-known/oauth-protected-resource/mcp", scope="openid profile offline_access""#, address.trim_end_matches('/'));
-    let error = error.unwrap_or_else(|| format!("sign in at {address} first"));
-    (StatusCode::UNAUTHORIZED, [(axum::http::header::WWW_AUTHENTICATE, challenge)], Json(json!({ "error": error }))).into_response()
 }
 
 struct Error(anyhow::Error);

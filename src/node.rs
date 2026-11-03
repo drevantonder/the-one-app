@@ -40,7 +40,7 @@ mod sessions;
 pub use databases::NotGiven;
 pub use devices::{DeviceRequest, Invited};
 pub use net::{alpn, relay, service_alpn};
-pub use sessions::{Needs, client_token};
+pub use sessions::{Needs, client_of, client_token};
 mod sidecars;
 mod state;
 mod status;

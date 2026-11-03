@@ -19,6 +19,7 @@ pub const SERVICES: &[(&str, &str, Option<&str>)] = &[
     ("schedules", "schedules/worker.js", Some("Schedules")),
     ("relay", "relay/worker.js", Some("Relay")),
     ("signer", "signer/worker.js", None),
+    ("mcp", "mcp/worker.js", Some("Client")),
     ("gateway", "gateway/worker.js", Some("Relay")),
 ];
 
@@ -32,6 +33,20 @@ pub fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
             (name.ends_with(".wasm") && !name.contains('/')).then(|| (name.to_string(), bytes.to_vec()))
         })
         .collect()
+}
+
+/// The serverless node's modules, as `serverless::modules` gives them.
+pub type Modules = Vec<(String, &'static str, Vec<u8>)>;
+
+/// A service's modules besides its own, (name, bytes): its WebAssembly, and for the MCP Worker the serverless node's
+/// build (`serverless`), which runs its devices' endpoints. None if there's none.
+pub fn modules_of(service: &str, entry: &str, serverless: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
+    let mut out = wasm(entry);
+    if service == "mcp" {
+        let built = serverless?.clone();
+        out.extend(built.into_iter().filter(|(name, _, _)| name.starts_with("one_serverless")).map(|(name, _, bytes)| (name, bytes)));
+    }
+    Some(out)
 }
 
 /// How an install's kernel is set up, wherever it runs: kept in `<home>/kernel/settings.json`, with its secrets in
@@ -48,11 +63,11 @@ pub struct Settings {
     pub auth_url: String,
     /// Where nodes reach the schedules service.
     pub schedules_url: String,
-    /// Where the gateway sends `/v1/` and `/mcp`: a node's address, or `cloudflare:<id>` for a node behind a Cloudflare
+    /// Where the gateway sends `/v1/`: a node's address, or `cloudflare:<id>` for a node behind a Cloudflare
     /// Tunnel with no public address, which the gateway on Cloudflare reaches by that Workers VPC service.
     #[serde(default)]
     pub node_url: Option<String>,
-    /// Whether the gateway sends `/v1/` and `/mcp` to the install's serverless node instead (`serverless deploy`),
+    /// Whether the gateway sends `/v1/` to the install's serverless node instead (`serverless deploy`),
     /// which sends on to `node_url` what needs a machine.
     #[serde(default)]
     pub serverless: bool,
@@ -332,7 +347,7 @@ impl Settings {
                 true => ("NODE".into(), format!("service:{}", crate::serverless::SERVICE), false),
                 false => self.machine("NODE"),
             };
-            return vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), ("SIGNER".into(), "service:signer".into(), false), node];
+            return vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), ("SIGNER".into(), "service:signer".into(), false), ("MCP".into(), "service:mcp".into(), false), node];
         }
         let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
         // Nor does the relay: only the keys of the install's first devices, which it starts its list with, and the
@@ -340,7 +355,20 @@ impl Settings {
         if service == "relay" {
             let devices = (!self.devices.is_empty()).then(|| ("DEVICES".into(), json!(self.devices).to_string(), false));
             let bound = self.serverless_endpoint().filter(|_| self.serverless).map(|key| [("BOUND".into(), key, false), ("NODE".into(), format!("object:{}:Node", crate::serverless::SERVICE), false)]);
-            return devices.into_iter().chain(bound.into_iter().flatten()).chain(location).collect();
+            // And the MCP Worker's devices, each bound to its object while it runs.
+            let mcp = ("MCP".into(), "object:mcp:Client".into(), false);
+            return devices.into_iter().chain(bound.into_iter().flatten()).chain([mcp]).chain(location).collect();
+        }
+        // The MCP Worker: remote MCP clients' devices, whose secrets open only with their clients' tokens.
+        if service == "mcp" {
+            let mut out = vec![
+                ("AUTH".into(), "service:auth".into(), false),
+                ("RELAY".into(), "object:relay:Relay".into(), false),
+                ("ADDRESS".into(), self.address.clone(), false),
+                ("NAME".into(), self.name.clone(), false),
+            ];
+            out.extend(location);
+            return out;
         }
         // The serverless node: its endpoint's key, the relay it's reached through, and the node on a machine the rest
         // of what needs one goes on to.
@@ -413,17 +441,25 @@ impl Settings {
 /// The kernel's services as one workerd runs them, with `modules` in `SERVICES`' order, and the gateway serving the
 /// web client's files from `web`; and the serverless node, if the install has one and this build carries it.
 pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Served> {
-    let node = crate::serverless::modules().ok().filter(|_| settings.serverless).map(|modules| crate::serverless::served(settings, modules));
+    served_with(settings, modules, web, crate::serverless::modules().ok())
+}
+
+/// `served`, with the serverless node's build `serverless` (this build's, or a test's).
+pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, serverless: Option<Modules>) -> Vec<Served> {
+    let node = serverless.clone().filter(|_| settings.serverless).map(|modules| crate::serverless::served(settings, modules));
+    // A build without the serverless node's WebAssembly has no MCP Worker, and nothing binds one.
+    let mcp = serverless.is_some();
     SERVICES
         .iter()
         .zip(modules)
-        .map(|((name, entry, class), module)| Served {
+        .filter_map(|((name, entry, class), module)| Some((name, class, module, modules_of(name, entry, serverless.as_ref())?)))
+        .map(|(name, class, module, modules)| Served {
             name: name.to_string(),
             module,
-            modules: wasm(entry),
+            modules,
             class: class.map(str::to_string),
             listen: settings.place(name).map(|(_, port)| format!("127.0.0.1:{port}")),
-            bindings: settings.bindings(name).into_iter().map(|(n, v, _)| (n, v)).collect(),
+            bindings: settings.bindings(name).into_iter().filter(|(_, v, _)| mcp || !v.starts_with("service:mcp") && !v.starts_with("object:mcp:")).map(|(n, v, _)| (n, v)).collect(),
             assets: (*name == "gateway").then(|| web.to_path_buf()),
             // The gateway's node may be on this machine or its private network, as a node behind a tunnel is; a try
             // install's URL signer reaches its bucket on this machine.
@@ -601,7 +637,7 @@ pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
         run(&["install", "--frozen-lockfile"])?;
     }
     let out = dir.join("out.js");
-    run(&["build", entry, "--target=browser", "--format=esm", "--external=cloudflare:*", "--external=node:*", "--external=*.wasm", &format!("--outfile={}", out.display())])?;
+    run(&["build", entry, "--target=browser", "--format=esm", "--external=cloudflare:*", "--external=node:*", "--external=*.wasm", "--external=*/one_serverless.js", &format!("--outfile={}", out.display())])?;
     Ok(std::fs::read(out)?)
 }
 
@@ -962,7 +998,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
             let migrated = scripts.get(&name).is_some_and(|s| s.migration.as_deref() == Some("v1"));
             let (mut meta, complete) = metadata(settings, service, class, migrated, |other| scripts.contains_key(other) || other == name);
             let url = settings.place(service).map(|(url, _)| url);
-            let wasm = wasm(SERVICES[i].1);
+            let Some(wasm) = modules_of(service, SERVICES[i].1, crate::serverless::modules().ok().as_ref()) else { bail!("this build has no serverless node, which the {service} service runs: {} update builds one", crate::config::CLI) };
             let mut what = vec![meta.to_string().into_bytes(), modules[i].clone(), url.unwrap_or("").as_bytes().to_vec()];
             what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));
             if service == "gateway" {
@@ -984,7 +1020,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
                 meta["bindings"].as_array_mut().unwrap().push(json!({ "type": "assets", "name": "ASSETS" }));
             }
             let mut parts: Vec<(&str, &str, &[u8])> = vec![("worker.js", "application/javascript+module", &modules[i])];
-            parts.extend(wasm.iter().map(|(name, bytes)| (name.as_str(), "application/wasm", bytes.as_slice())));
+            parts.extend(wasm.iter().map(|(name, bytes)| (name.as_str(), if name.ends_with(".js") { "application/javascript+module" } else { "application/wasm" }, bytes.as_slice())));
             let version = cf.upload(&name, &parts, &meta)?;
             reach()?;
             // Later services' bindings to it resolve in this pass, and its class has had its migration.

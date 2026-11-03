@@ -29,6 +29,8 @@ js-sys = "0.3"
 iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "unstable-custom-transports"] }
 iroh-base = { version = "=1.4.1", default-features = false, features = ["key", "relay"] }
 n0-future = "0.3"
+# The MCP Worker's devices (src/clients.rs, kernel/mcp/) ask nodes as every client does, with no socket.
+one-client = { path = "../client", features = ["relayed"] }
 n0-watcher = "1"
 noq-udp = "1.4"
 # iroh's randomness, from the Worker's crypto.getRandomValues, for each version of getrandom it builds.

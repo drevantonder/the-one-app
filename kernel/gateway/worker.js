@@ -1,22 +1,25 @@
 // The gateway: the install's address, the one people use. It holds no keys and runs no app code; it only sends each
 // request where its path says: sign-in to the auth service (with the gateway's host kept, since passkeys belong to
-// it), `/urls` to the URL signer, `/v1/` and `/mcp` to a node, `/relay` (and iroh's `/ping` and `/generate_204`) to the
-// relay, and everything else to the web client's files.
+// it), `/urls` to the URL signer, `/v1/` to a node, `/mcp` and what MCP clients read to sign in to the MCP Worker,
+// `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything else to the web client's files.
 //
 // What a node answers is stamped so it can't run as script at this origin, which holds browsers' tokens: it's
 // sandboxed into an opaque origin, can't be sniffed into another type, and sets no cookies here.
 
 /// Paths the auth service answers: exactly these, or under the ones ending in `/`.
-const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration", "/.well-known/oauth-protected-resource"];
-const NODE = ["/v1/", "/mcp"];
+const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"];
+const NODE = ["/v1/"];
+/// The MCP Worker's: MCP, its token endpoint, the resource's metadata, and the authorization server's as MCP clients
+/// find it (RFC 8414's path for the issuer `<address>/api/auth`), which names its token endpoint.
+const MCP = ["/mcp", "/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server/api/auth", "/.well-known/openid-configuration/api/auth"];
 
 /// What a node's answer is stamped with.
 const SANDBOX = "sandbox allow-scripts allow-forms allow-popups allow-downloads";
 
 /// The request headers a node gets: never the browser's cookies, which are the auth service's.
-const TO_NODE = ["authorization", "content-type", "accept", "accept-language", "last-event-id", "mcp-session-id", "mcp-protocol-version", "x-one-keys"];
-/// The answer headers a node may give: `www-authenticate` tells an MCP client where to sign in.
-const FROM_NODE = ["content-type", "cache-control", "etag", "last-modified", "content-disposition", "retry-after", "www-authenticate", "mcp-session-id"];
+const TO_NODE = ["authorization", "content-type", "accept", "accept-language", "last-event-id", "x-one-keys"];
+/// The answer headers a node may give.
+const FROM_NODE = ["content-type", "cache-control", "etag", "last-modified", "content-disposition", "retry-after"];
 
 const TYPES = {
   html: "text/html; charset=utf-8", js: "text/javascript; charset=utf-8", mjs: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8",
@@ -26,8 +29,9 @@ const TYPES = {
 
 const under = (path, prefixes) => prefixes.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p || path.startsWith(`${p}/`)));
 
-/// Where a path goes: `auth`, `node` or `web`.
+/// Where a path goes: `mcp`, `auth`, `node` or `web`.
 function where(path) {
+  if (under(path, MCP)) return "mcp";
   if (under(path, AUTH)) return "auth";
   if (under(path, NODE)) return "node";
   return "web";
@@ -235,6 +239,7 @@ export default {
     if (["/relay", "/relay/tell", "/ping", "/generate_204"].includes(url.pathname)) return env.IROH.fetch(request);
     if (url.pathname === "/urls") return env.SIGNER.fetch(request);
     switch (where(url.pathname)) {
+      case "mcp": return env.MCP ? env.MCP.fetch(request) : refuse(503, "this install's MCP isn't set up yet");
       case "auth": return env.AUTH.fetch(request);
       case "node": return toNode(request, env, url);
       default: return toWeb(request, env, url);

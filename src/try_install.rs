@@ -90,7 +90,7 @@ recovery key; its kernel's settings are in {}.
 }
 
 /// Runs the try install's serverless node beside its kernel, in its workerd, as `serverless deploy` puts one in
-/// Cloudflare: the gateway sends `/v1/` and `/mcp` to it, and its devices answer its endpoint.
+/// Cloudflare: the gateway sends `/v1/` to it, and its devices answer its endpoint.
 fn serverless(dir: &Path) -> Result<()> {
     anyhow::ensure!(one::serverless::modules().is_ok(), "this build has no serverless node: build it with SERVERLESS set, as {CLI} update does");
     let mut settings = load_kernel(dir)?;
@@ -103,7 +103,7 @@ fn serverless(dir: &Path) -> Result<()> {
     let addr = running(dir).context("the try install didn't start again")?;
     let key = settings.serverless_endpoint().context("the try install's kernel has no serverless key")?;
     crate::request(try_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": "serverless", "value": key })))?;
-    println!("The try install's serverless node runs beside its kernel, its endpoint {}; {} sends /v1/ and /mcp to it.", &key[..8], settings.address);
+    println!("The try install's serverless node runs beside its kernel, its endpoint {}; {} sends /v1/ to it.", &key[..8], settings.address);
     Ok(())
 }
 

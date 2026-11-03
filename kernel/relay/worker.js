@@ -24,6 +24,11 @@
 // One endpoint isn't a socket: the serverless node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
 // sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
 // comes back by RPC (`fromNode`) and goes out as from it. It's one of the install's endpoints, as compute.
+//
+// Nor are the MCP Worker's devices (kernel/mcp/), one per remote MCP client, each in a Durable Object of that Worker's
+// (`MCP`) while it runs: one binds its key (`bind`, a request signed by that key, which must be on the list) to its
+// object, which then gets the datagrams sent to that key by RPC (`deliver`), and passes back by RPC what it sends
+// (`fromClient`), until it unbinds or its binding lapses.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
@@ -127,7 +132,8 @@ export class Relay extends DurableObject {
     // they let in, once one has; and the tells taken.
     this.sql.exec(`CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, by TEXT NOT NULL, admin INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS pairings (hash TEXT PRIMARY KEY, until INTEGER NOT NULL, by TEXT NOT NULL, key TEXT);
-      CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));`);
+      CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
+      CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL);`);
     if (!this.sql.exec("SELECT 1 FROM keys LIMIT 1").toArray().length) {
       for (const key of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
         if (isKey(key)) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'install', 1)", key);
@@ -139,6 +145,9 @@ export class Relay extends DurableObject {
       const said = ws.deserializeAttachment();
       if (said?.id) this.sockets.set(said.id, ws);
     }
+    /// The MCP Worker's devices bound here: key → `{ name, until }`, its object's name.
+    this.bound = new Map();
+    for (const b of this.sql.exec("SELECT key, name, until FROM bound WHERE until > ?", Date.now()).toArray()) this.bound.set(b.key, { name: b.name, until: b.until });
     /// When each sender was last told an endpoint isn't here, `<from> <to>` → ms; lost on hibernation, which is fine.
     this.told = new Map();
   }
@@ -217,6 +226,8 @@ export class Relay extends DurableObject {
     const to = hex(out.subarray(1, 33));
     if (said.pairing && to !== said.to) return;
     if (to === this.env.BOUND && this.env.NODE) return this.toNode(said.id, bytes);
+    const client = this.boundTo(to);
+    if (client) return this.toClient(to, client, said.id, bytes);
     const other = this.sockets.get(to);
     if (other) {
       try {
@@ -270,6 +281,81 @@ export class Relay extends DurableObject {
   /// Which of `keys` are connected here now.
   connected(keys) {
     return keys.filter((k) => this.sockets.has(k));
+  }
+
+  /// The endpoints connected here now that could be nodes: every socket that's on the list. Until the list says which
+  /// are compute, a device asking a node finds which answer as one.
+  computes() {
+    return [...this.sockets.keys()].filter((k) => this.key(k));
+  }
+
+  /// The MCP Worker's object a key is bound to, if it is: its name.
+  boundTo(key) {
+    const b = this.env.MCP && this.bound.get(key);
+    if (!b) return null;
+    if (b.until > Date.now()) return b.name;
+    this.unbind(key);
+    return null;
+  }
+
+  /// Binds a key to the MCP Worker's object `name` for an hour: `request` signed by that key (`{ bind: true }`, as a
+  /// tell is), which is on the list. → why not, or nothing.
+  async bind(request, name) {
+    let fields;
+    try {
+      ({ fields } = await checkRequest(TELL, request));
+    } catch (e) {
+      return String(e.message || e);
+    }
+    if (fields.bind !== true || typeof name !== "string" || !name) return "a binding is a key's signed bind, to an object's name";
+    if (!this.key(fields.by)) return "that key isn't one of the install's: a device of its person approves it";
+    if (this.sockets.has(fields.by)) return "that key is connected here itself";
+    const until = Date.now() + 3_600_000;
+    this.sql.exec("INSERT OR REPLACE INTO bound VALUES (?, ?, ?)", fields.by, name, until);
+    this.bound.set(fields.by, { name, until });
+    return null;
+  }
+
+  unbind(key) {
+    this.bound.delete(key);
+    this.sql.exec("DELETE FROM bound WHERE key = ?", key);
+  }
+
+  /// Datagrams for one of the MCP Worker's devices, `to`, from `src`: gathered this turn, then handed to its object.
+  toClient(to, name, src, frame) {
+    let d;
+    try {
+      d = datagrams_of(frame);
+    } catch {
+      return;
+    }
+    const waiting = (this.forClients ||= new Map());
+    if (!waiting.has(to)) {
+      waiting.set(to, []);
+      queueMicrotask(() => {
+        const batch = waiting.get(to);
+        waiting.delete(to);
+        const object = this.env.MCP.get(this.env.MCP.idFromName(name), near(this.env));
+        this.ctx.waitUntil(object.deliver(to, batch).catch((err) => console.log(JSON.stringify({ client: "unreached", why: String(err?.message ?? err) }))));
+      });
+    }
+    waiting.get(to).push([src, (d[0] << 8) | d[1], d.slice(2)]);
+  }
+
+  /// Datagrams one of the MCP Worker's devices sends, `[dst, segment size, contents]` each, passed on as from it, if
+  /// it's bound: → the keys of those not here.
+  fromClient(key, items) {
+    if (!this.boundTo(key)) return items.map(([dst]) => dst);
+    const gone = new Set();
+    for (const [dst, seg, contents] of items) {
+      const to = this.sockets.get(dst);
+      if (!to) gone.add(dst);
+      else
+        try {
+          to.send(to_client(unhex(key), seg, contents));
+        } catch {}
+    }
+    return [...gone];
   }
 
   /// A socket's answer to its challenge: it's let in if it proves a key on the list, or the key its pairing code let in.
@@ -413,6 +499,7 @@ export class Relay extends DurableObject {
     }
     for (const k of gone) {
       this.sql.exec("DELETE FROM keys WHERE key = ?", k);
+      this.unbind(k);
       for (const { key: joined } of this.sql.exec("SELECT key FROM pairings WHERE by = ? AND key IS NOT NULL", k).toArray()) this.end(joined, "taken out");
       this.sql.exec("DELETE FROM pairings WHERE by = ?", k);
       this.end(k, "taken out");

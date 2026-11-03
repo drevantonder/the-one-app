@@ -582,14 +582,14 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
                     headers.push(h.split(':').next().unwrap().trim().to_lowercase());
                 }
                 let body = json!({ "line": line.trim(), "headers": headers }).to_string();
-                write!(&stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nwww-authenticate: Bearer\r\nmcp-session-id: s\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len())
+                write!(&stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len())
             });
         }
     });
 
     // A node behind a Cloudflare Tunnel, as the gateway's `NODE` binding reaches it: it answers each request with the
     // request's line, its Host, and its headers' names.
-    let tunnelled = br#"export default { fetch(r) { const u = new URL(r.url); return Response.json({ line: `${r.method} ${u.pathname}${u.search} HTTP/1.1`, host: u.host, headers: [...r.headers.keys()] }, { headers: { "www-authenticate": "Bearer", "mcp-session-id": "s" } }); } };"#;
+    let tunnelled = br#"export default { fetch(r) { const u = new URL(r.url); return Response.json({ line: `${r.method} ${u.pathname}${u.search} HTTP/1.1`, host: u.host, headers: [...r.headers.keys()] }); } };"#;
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
     let files = vec![("gateway/worker.js".to_string(), std::fs::read(root.join("gateway/worker.js")).unwrap())];
@@ -616,19 +616,11 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         for route in one::api::SIGNED_IN {
             let path = route.replace("{app}", "board").replace("{screen}", "main").replace("{hash}", "00").replace("{name}", "vault").replace("{op}", "now");
-            let mut resp = agent.get(format!("http://{addr}{path}")).header("host", "one.example").header("mcp-session-id", "s").call().unwrap();
-            if path == "/mcp" {
-                for h in ["www-authenticate", "mcp-session-id"] {
-                    assert!(resp.headers().contains_key(h), "the gateway kept the node's {h} from an MCP client");
-                }
-            }
+            let mut resp = agent.get(format!("http://{addr}{path}")).header("host", "one.example").call().unwrap();
             let seen: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
             assert_eq!(seen["line"], format!("GET {path} HTTP/1.1"), "the gateway didn't send {path} to the node");
             let marked = seen["headers"].as_array().unwrap().iter().any(|h| one::api::FORWARDED.contains(&h.as_str().unwrap()));
             assert!(marked, "the gateway sent {path} without saying it came from elsewhere: {seen}");
-            if path == "/mcp" {
-                assert!(seen["headers"].as_array().unwrap().iter().any(|h| h == "mcp-session-id"), "the gateway kept an MCP client's session id from the node");
-            }
             if tunnel {
                 assert_eq!(seen["host"], "one.example", "through a tunnel, the gateway addressed the node by a host not its own");
             }
