@@ -252,10 +252,11 @@ window.__one = {};
   const asset = (name) => (files[name] ? `/${name}?v=${files[name]}` : `/${name}`);
 
   /// Phosphor's icons, from the address once (and then the browser's cache), for those the bridge asks for: on this
-  /// page, and in screens' frames.
+  /// page, and in screens' frames. Asked for last, so that on a first visit the client's WebAssembly, which the first
+  /// answer from the person's machines waits for, gets the connection first.
   let icons;
   async function iconPaths(names = []) {
-    icons ||= fetch(asset("icons.json")).then((r) => (r.ok ? r.json() : Promise.reject(new Error("No icons.")))).catch((err) => ((icons = null), Promise.reject(err)));
+    icons ||= fetch(asset("icons.json"), { priority: "low" }).then((r) => (r.ok ? r.json() : Promise.reject(new Error("No icons.")))).catch((err) => ((icons = null), Promise.reject(err)));
     const all = await icons;
     return Object.fromEntries(names.map((n) => [n, all[n]]));
   }

@@ -58,14 +58,27 @@ async function toWeb(request, env, url) {
   if (resp.status === 404 && !/\.[a-z0-9]+$/i.test(url.pathname)) resp = await ask((path = "/index.html"));
   const headers = new Headers(resp.headers);
   headers.set("x-content-type-options", "nosniff");
+  headers.set("vary", "accept-encoding");
   // No other site frames the web client; its own page frames frame.html. Each page carries its own CSP.
   headers.set("x-frame-options", "SAMEORIGIN");
   const type = TYPES[path.split(".").pop().toLowerCase()];
   if (resp.ok && type) headers.set("content-type", type);
+  // The large files are also kept brotli-compressed at its best (`<file>.br`, made when the kernel's files are), a
+  // fifth smaller than the edge's own compression: sent as they are to a browser that takes brotli, as the file itself.
+  const packed = resp.ok && request.method === "GET" && /\bbr\b/.test(request.headers.get("accept-encoding") || "") && !path.endsWith(".br") ? await ask(`${path}.br`) : null;
+  const send = (body) => {
+    if (!packed?.ok) return new Response(body, { status: resp.status, headers });
+    resp.body?.cancel().catch(() => {});
+    headers.set("content-encoding", "br");
+    if (packed.headers.has("content-length")) headers.set("content-length", packed.headers.get("content-length"));
+    else headers.delete("content-length");
+    headers.delete("etag");
+    return new Response(packed.body, { status: resp.status, headers, encodeBody: "manual" });
+  };
   // The client's WebAssembly is at a path named by what it is, so it's never fetched twice.
   if (resp.ok && path.startsWith("/client/")) {
     headers.set("cache-control", "public, max-age=31536000, immutable");
-    return new Response(resp.body, { status: resp.status, headers });
+    return send(resp.body);
   }
   // A file named by its content (`?v=`, the start of its SHA-256, as index.html names it) is kept for good, by the
   // browser and Cloudflare's edge, once it's checked to be that content; anything else is asked about each time.
@@ -74,10 +87,10 @@ async function toWeb(request, env, url) {
     const body = await resp.arrayBuffer();
     const named = (await sha256(body)).startsWith(v) && v.length >= 12;
     headers.set("cache-control", named ? "public, max-age=31536000, immutable" : "no-cache");
-    return new Response(body, { status: resp.status, headers });
+    return send(body);
   }
   headers.set("cache-control", "no-cache");
-  return new Response(resp.body, { status: resp.status, headers });
+  return send(resp.body);
 }
 
 export default {

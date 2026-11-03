@@ -654,8 +654,9 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
     ensure!(settings.try_person.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a try install's kernel signs in anyone who reaches it, so it runs only beside its try install, at 127.0.0.1");
     let _ = std::fs::remove_dir_all(&web);
-    let files = settings.web();
+    let mut files = settings.web();
     parses(&files)?;
+    files.extend(precompressed(&files)?);
     for (file, bytes) in files {
         let path = web.join(file);
         std::fs::create_dir_all(path.parent().unwrap())?;
@@ -665,6 +666,53 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let mut child = start(&config, Vec::new())?;
     let status = child.wait()?;
     bail!("the kernel's workerd stopped: {status}")
+}
+
+/// What makes each file in `in/` brotli at its best in `out/`: quality 11 with the largest window.
+const BROTLI: &str = r#"import { brotliCompressSync, constants as c } from "node:zlib";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+for (const name of readdirSync("in")) {
+  const data = readFileSync(`in/${name}`);
+  writeFileSync(`out/${name}`, brotliCompressSync(data, { params: { [c.BROTLI_PARAM_QUALITY]: 11, [c.BROTLI_PARAM_LGWIN]: 24, [c.BROTLI_PARAM_SIZE_HINT]: data.length } }));
+}
+"#;
+
+/// Brotli at its best of each large file the address serves that a browser reads as text or code (`<file>.br`, which the
+/// gateway answers with `Content-Encoding: br` to a browser that takes it, so the client's WebAssembly is a fifth
+/// smaller than the edge's own quicker brotli makes it, the first thing a first visit waits on). The pinned Bun makes
+/// them, which is why it isn't a dependency of ours; one copy of each, by what the file is, is kept in the cache.
+pub fn precompressed(web: &[(String, Vec<u8>)]) -> Result<Vec<(String, Vec<u8>)>> {
+    use sha2::Digest;
+    let wanted: Vec<&(String, Vec<u8>)> = web
+        .iter()
+        .filter(|(path, bytes)| bytes.len() >= 1024 && path != "index.html" && ["js", "css", "json", "html", "wasm", "svg"].contains(&path.rsplit('.').next().unwrap_or("")))
+        .collect();
+    let kept = crate::cache().join("brotli");
+    let names: Vec<PathBuf> = wanted.iter().map(|(_, bytes)| kept.join(data_encoding::HEXLOWER.encode(&Sha256::digest(bytes)))).collect();
+    let missing: Vec<usize> = (0..wanted.len()).filter(|&i| !names[i].is_file()).collect();
+    if !missing.is_empty() {
+        let dir = std::env::temp_dir().join(format!("{}-brotli-{}", crate::config::CLI, rand::random::<u64>()));
+        let made = (|| {
+            std::fs::create_dir_all(&kept)?;
+            std::fs::create_dir_all(dir.join("in"))?;
+            std::fs::create_dir_all(dir.join("out"))?;
+            for &i in &missing {
+                std::fs::write(dir.join("in").join(i.to_string()), &wanted[i].1)?;
+            }
+            std::fs::write(dir.join("brotli.mjs"), BROTLI)?;
+            let out = std::process::Command::new(crate::deploy::bun()?).args(["brotli.mjs"]).current_dir(&dir).env("DO_NOT_TRACK", "1").output()?;
+            ensure!(out.status.success(), "couldn't compress the files the address serves:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            for &i in &missing {
+                let part = names[i].with_extension(format!("{}.part", rand::random::<u64>()));
+                std::fs::copy(dir.join("out").join(i.to_string()), &part)?;
+                std::fs::rename(part, &names[i])?;
+            }
+            Ok(())
+        })();
+        let _ = std::fs::remove_dir_all(&dir);
+        made?;
+    }
+    wanted.iter().zip(&names).map(|((path, _), name)| Ok((format!("{path}.br"), std::fs::read(name)?))).collect()
 }
 
 /// Fails, naming what's wrong, unless every script among `web` parses: its `.js` files and the HTML's inline scripts,

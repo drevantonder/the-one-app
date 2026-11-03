@@ -406,6 +406,9 @@ impl Kernel {
         std::fs::write(web.join("index.html"), "<!doctype html><title>The web client</title>").unwrap();
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
         std::fs::write(web.join("screen/kit.css"), include_str!("../src/screen/kit.css")).unwrap();
+        for (path, bytes) in kernel::precompressed(&[("screen/kit.css".into(), include_bytes!("../src/screen/kit.css").to_vec())]).unwrap() {
+            std::fs::write(web.join(path), bytes).unwrap();
+        }
         let mut served = kernel::served_with(&settings, modules, &web, mcp);
         for s in served.iter_mut().filter(|s| s.name == "signer" || s.name == "mcp") {
             s.outbound = Some("sites".into());
@@ -739,6 +742,14 @@ fn the_gateway_sends_each_path_where_it_belongs_and_none_to_a_node() {
     let (_, headers, _) = ask("GET", &at("/screen/kit.css?v=0123456789abcdef"), &[], None);
     assert_eq!(headers["cache-control"], "no-cache", "a name that isn't its content");
     assert_eq!(ask("GET", &at("/nothing.js"), &[], None).0, 404, "a missing file isn't the page");
+    // The large ones are kept compressed at brotli's best (the client's WebAssembly is the first thing a first visit
+    // waits on), sent as they are to a browser that takes it, the file itself to one that doesn't.
+    let (status, headers, _) = ask("GET", &at("/screen/kit.css"), &[("accept-encoding", "gzip, br")], None);
+    let (plain_status, plain, _) = ask("GET", &at("/screen/kit.css"), &[("accept-encoding", "gzip")], None);
+    assert_eq!((status, plain_status), (200, 200));
+    assert_eq!((headers["content-encoding"].as_str(), headers["content-type"].as_str(), headers["vary"].as_str()), ("br", "text/css; charset=utf-8", "accept-encoding"));
+    assert!(headers["content-length"].parse::<usize>().unwrap() * 3 < include_bytes!("../src/screen/kit.css").len(), "it's brotli's, not the file or a second compression of it: {headers:?}");
+    assert!(!plain.contains_key("content-encoding"), "{plain:?}");
 
     // Sign-in goes to the auth service, as the install's address; its own routes don't.
     let (status, _, meta) = ask("GET", &at("/.well-known/oauth-authorization-server"), &[], None);

@@ -482,7 +482,8 @@ fn run(args: Vec<String>) -> Result<()> {
             };
             let settings = devices_here(settings, !flags.contains_key("new"))?;
             let modules = one::kernel::SERVICES.iter().map(|(_, entry, _)| one::kernel::module(entry)).collect::<Result<Vec<_>>>()?;
-            let web = settings.web();
+            let mut web = settings.web();
+            web.extend(one::kernel::precompressed(&web)?);
             one::kernel::deploy(&cf, &settings, &modules, &web)?;
             if settings.serverless {
                 one::serverless::deploy(&cf, &settings)?;
