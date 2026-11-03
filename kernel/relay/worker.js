@@ -37,12 +37,15 @@
 //
 // One endpoint isn't a socket: the serverless node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
 // sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
-// comes back by RPC (`fromNode`) and goes out as from it. It's one of the install's endpoints, as compute.
+// comes back by RPC (`fromNode`, on the `ServerlessNode` entrypoint, which only its Worker binds) and goes out as from
+// it. It's one of the install's endpoints, as compute.
 //
 // Nor are the MCP Worker's devices (kernel/mcp/), one per remote MCP client, each in a Durable Object of that Worker's
 // (`MCP`) while it runs: one binds its key (`bind`, a request signed by that key, which must be on the list) to its
 // object, which then gets the datagrams sent to that key by RPC (`deliver`), and passes back by RPC what it sends
-// (`fromClient`), until it unbinds or its binding lapses.
+// (`fromClient`), until it unbinds or its binding lapses. Binding gives it a ticket, which sending and unbinding must
+// show, so one device's object sends only as itself. The MCP Worker binds the `McpDevices` entrypoint, never the
+// relay's object, so it can't tell the relay anything a device didn't sign.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
@@ -112,15 +115,17 @@ export default class extends WorkerEntrypoint {
     return refuse(404, "not the relay's");
   }
 
-  /// A tell's signature is checked here, where it costs the install's one relay nothing; the relay checks the rest.
+  /// A tell's signature is checked here first, where a forged one costs the install's one relay nothing; the relay
+  /// checks it again, and the rest.
   async tell(request) {
     try {
       if (request.method !== "POST") throw new Error("a tell is a POST");
       if (Number(request.headers.get("content-length") || 0) > TELL_BYTES) throw new Error("a tell is small");
       const body = await request.arrayBuffer();
       if (body.byteLength > TELL_BYTES) throw new Error("a tell is small");
-      const { fields } = await checkRequest(TELL, JSON.parse(new TextDecoder().decode(body)));
-      const error = await this.relay().tell(fields);
+      const signed = JSON.parse(new TextDecoder().decode(body));
+      await checkRequest(TELL, signed);
+      const error = await this.relay().tell(signed);
       return error ? refuse(403, error) : new Response(null, { status: 204 });
     } catch (e) {
       return refuse(403, String(e.message || e));
@@ -165,6 +170,48 @@ export default class extends WorkerEntrypoint {
 const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 const relay = (env) => env.RELAY.get(env.RELAY.idFromName("relay"), near(env));
 
+/// What the MCP Worker asks the relay, by its binding: its devices' own bindings, and who's here. Nothing else of the
+/// relay's object, so a hacked MCP Worker tells it nothing and sends as no endpoint but a device it holds the key of.
+export class McpDevices extends WorkerEntrypoint {
+  /// Binds a device's key to its object, by `request` signed with that key: → `{ ticket }`, or `{ error }`.
+  bind(request, name) {
+    return relay(this.env).bind(request, name);
+  }
+
+  /// Unbinds a device's key, by the ticket its binding gave.
+  unbind(key, ticket) {
+    return relay(this.env).unbind(key, ticket);
+  }
+
+  /// Datagrams a device sends, as from its key, by the ticket its binding gave: → the keys of those not here.
+  fromClient(key, ticket, items) {
+    return relay(this.env).fromClient(key, ticket, items);
+  }
+
+  allowed(key) {
+    return isKey(key) ? relay(this.env).allowed(key) : null;
+  }
+
+  computes(by) {
+    return relay(this.env).computes(by);
+  }
+
+  connected(keys) {
+    return Array.isArray(keys) ? relay(this.env).connected(keys.filter(isKey)) : [];
+  }
+}
+
+/// What the serverless node asks the relay, by its binding: sending as itself, and who's here.
+export class ServerlessNode extends WorkerEntrypoint {
+  fromNode(items) {
+    return relay(this.env).fromNode(items);
+  }
+
+  connected(keys) {
+    return Array.isArray(keys) ? relay(this.env).connected(keys.filter(isKey)) : [];
+  }
+}
+
 export class Relay extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -174,7 +221,12 @@ export class Relay extends DurableObject {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, by TEXT NOT NULL, admin INTEGER NOT NULL, role TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pairings (hash TEXT PRIMARY KEY, until INTEGER NOT NULL, by TEXT NOT NULL, key TEXT);
       CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
-      CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');`);
+    // A binding made before tickets: none shows one, so each is made again.
+    try {
+      this.sql.exec("ALTER TABLE bound ADD COLUMN ticket TEXT NOT NULL DEFAULT ''");
+    } catch {}
+    this.sql.exec("DELETE FROM bound WHERE ticket = ''");
     if (!this.sql.exec("SELECT 1 FROM keys LIMIT 1").toArray().length) {
       for (const key of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
         // The install's first devices are machines, which run its calls.
@@ -187,9 +239,9 @@ export class Relay extends DurableObject {
       const said = ws.deserializeAttachment();
       if (said?.id) this.sockets.set(said.id, ws);
     }
-    /// The MCP Worker's devices bound here: key → `{ name, until }`, its object's name.
+    /// The MCP Worker's devices bound here: key → `{ name, until, ticket }`, its object's name, and what it shows.
     this.bound = new Map();
-    for (const b of this.sql.exec("SELECT key, name, until FROM bound WHERE until > ?", Date.now()).toArray()) this.bound.set(b.key, { name: b.name, until: b.until });
+    for (const b of this.sql.exec("SELECT key, name, until, ticket FROM bound WHERE until > ?", Date.now()).toArray()) this.bound.set(b.key, { name: b.name, until: b.until, ticket: b.ticket });
     /// When each sender was last told an endpoint isn't here, `<from> <to>` → ms; lost on hibernation, which is fine.
     this.told = new Map();
   }
@@ -339,6 +391,7 @@ export class Relay extends DurableObject {
   /// Datagrams the serverless node sends, `[dst, segment size, contents]` each, passed on as from it: → the keys of
   /// those not here, so it stops waiting for them.
   fromNode(items) {
+    if (!this.env.BOUND || !Array.isArray(items)) return [];
     const gone = new Set();
     for (const [dst, seg, contents] of items) {
       const to = this.sockets.get(dst);
@@ -366,26 +419,36 @@ export class Relay extends DurableObject {
   }
 
   /// Binds a key to the MCP Worker's object `name` for an hour: `request` signed by that key (`{ bind: true }`, as a
-  /// tell is), which is on the list. → why not, or nothing.
+  /// tell is), which is on the list. → `{ ticket }`, what sending as it and unbinding it show, or `{ error }`.
   async bind(request, name) {
     let fields;
     try {
       ({ fields } = await checkRequest(TELL, request));
+      if (!this.take(fields.by, fields.at)) throw new Error("that binding was taken already");
     } catch (e) {
-      return String(e.message || e);
+      return { error: String(e.message || e) };
     }
-    if (fields.bind !== true || typeof name !== "string" || !name) return "a binding is a key's signed bind, to an object's name";
-    if (!this.key(fields.by)) return "that key isn't one of the install's: a device of its person approves it";
-    if (this.sockets.has(fields.by)) return "that key is connected here itself";
+    if (fields.bind !== true || typeof name !== "string" || !name || name.length > 256) return { error: "a binding is a key's signed bind, to an object's name" };
+    if (!this.key(fields.by)) return { error: "that key isn't one of the install's: a device of its person approves it" };
+    if (this.sockets.has(fields.by)) return { error: "that key is connected here itself" };
     const until = Date.now() + 3_600_000;
-    this.sql.exec("INSERT OR REPLACE INTO bound VALUES (?, ?, ?)", fields.by, name, until);
-    this.bound.set(fields.by, { name, until });
-    return null;
+    const ticket = hex(crypto.getRandomValues(new Uint8Array(32)));
+    this.sql.exec("INSERT OR REPLACE INTO bound VALUES (?, ?, ?, ?)", fields.by, name, until, ticket);
+    this.bound.set(fields.by, { name, until, ticket });
+    return { ticket };
   }
 
-  unbind(key) {
+  /// Unbinds `key`: by the MCP Worker, with its binding's ticket, or here, as it's taken out or its binding lapses.
+  unbind(key, ticket) {
+    if (ticket !== undefined && !this.ticketed(key, ticket)) return;
     this.bound.delete(key);
     this.sql.exec("DELETE FROM bound WHERE key = ?", key);
+  }
+
+  /// Whether `ticket` is the one `key`'s binding gave.
+  ticketed(key, ticket) {
+    const b = this.bound.get(key);
+    return !!b && typeof ticket === "string" && ticket.length === 64 && b.ticket === ticket;
   }
 
   /// Datagrams for one of the MCP Worker's devices, `to`, from `src`: gathered this turn, then handed to its object.
@@ -411,8 +474,9 @@ export class Relay extends DurableObject {
 
   /// Datagrams one of the MCP Worker's devices sends, `[dst, segment size, contents]` each, passed on as from it, if
   /// it's bound: → the keys of those not here.
-  fromClient(key, items) {
-    if (!this.boundTo(key)) return items.map(([dst]) => dst);
+  fromClient(key, ticket, items) {
+    if (!Array.isArray(items)) return [];
+    if (!this.boundTo(key) || !this.ticketed(key, ticket)) return items.map(([dst]) => dst);
     const gone = new Set();
     for (const [dst, seg, contents] of items) {
       const to = this.sockets.get(dst);
@@ -499,9 +563,16 @@ export class Relay extends DurableObject {
     if (next) await this.ctx.storage.setAlarm(next);
   }
 
-  /// What a device told the relay, its signature checked by the Worker: → why it was refused, or nothing.
-  async tell(told) {
+  /// What a device told the relay, `signed` by it (`signedRequest`), checked here whoever passed it on: → why it was
+  /// refused, or nothing.
+  async tell(signed) {
     const now = Date.now();
+    let told;
+    try {
+      ({ fields: told } = await checkRequest(TELL, signed));
+    } catch (e) {
+      return String(e.message || e);
+    }
     const by = this.key(told.by);
     if (!by) return "only your One App's devices tell the relay";
     if (!this.take(told.by, told.at)) return "that tell was taken already";

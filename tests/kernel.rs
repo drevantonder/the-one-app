@@ -354,6 +354,8 @@ pub(crate) struct Kernel {
     _running: Running,
     pub(crate) address: String,
     settings: kernel::Settings,
+    /// The stand-in sites, the bucket among them.
+    sites: String,
 }
 
 const RESOURCE: &str = "https://node.test/mcp";
@@ -406,7 +408,9 @@ impl Kernel {
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
         std::fs::write(web.join("screen/kit.css"), include_str!("../src/screen/kit.css")).unwrap();
         let mut served = kernel::served_with(&settings, modules, &web, mcp);
-        served.iter_mut().find(|s| s.name == "signer").unwrap().outbound = Some("sites".into());
+        for s in served.iter_mut().filter(|s| s.name == "signer" || s.name == "mcp") {
+            s.outbound = Some("sites".into());
+        }
         if google {
             served[0].outbound = Some("sites".into());
             served[0].bindings.extend([("SIGN_IN", "google"), ("JOIN_DOMAIN", "test.example"), ("GOOGLE_CLIENT_ID", "a client id"), ("GOOGLE_CLIENT_SECRET", "a client secret")].map(|(n, v)| (n.into(), v.into())));
@@ -418,7 +422,7 @@ impl Kernel {
             served.push(node);
         }
         let running = run(served);
-        Kernel { _running: running, address: settings.address.clone(), settings }
+        Kernel { _running: running, address: settings.address.clone(), settings, sites: format!("http://127.0.0.1:{sites}") }
     }
 
     fn browser(&self) -> Browser {
@@ -1192,24 +1196,32 @@ mod relay {
         headers: std::collections::BTreeMap<String, String>,
     }
 
-    /// A stand-in node of key `key`, answering client devices over iroh (`<cli>/http/1`) as a node does, with the keys of
-    /// one scope's epoch 1: `/mcp` says with 428 that it needs the board's keys, until it's handed them sealed to it;
-    /// `/v1/keys` gives the epoch sealed to the device that asks, and the board's app key; `/v1/state` lists it. It keeps
-    /// what it was asked, and the handoffs it opened.
-    async fn stand_in_node(address: &str, key: &SecretKey, scope: String, seal_of: std::sync::Arc<std::sync::Mutex<String>>) -> (Endpoint, std::sync::Arc<std::sync::Mutex<(Vec<Asked>, Vec<one::keys::Handoff>)>>, [u8; 32]) {
+    /// What a stand-in node says with 428 to a tool's call it wasn't handed its database's key for: honestly (the
+    /// database, sealed to itself), or a lie, for the device to refuse.
+    #[derive(Clone)]
+    enum Says {
+        Honest,
+        SealedTo(one::keys::Endpoint),
+        Scope(String),
+    }
+
+    /// A stand-in node of key `key`, answering client devices over iroh (`<cli>/http/1`) as a node does: each tool in
+    /// `tools` needs one database of `scope`'s (`board_read` the board's), which `/mcp` says with 428, as `says` has it,
+    /// until it's handed its key sealed to it; `/v1/state` lists it. It keeps what it was asked, and the handoffs it
+    /// opened.
+    async fn stand_in_node(address: &str, key: &SecretKey, scope: String, says: std::sync::Arc<std::sync::Mutex<Says>>) -> (Endpoint, std::sync::Arc<std::sync::Mutex<(Vec<Asked>, Vec<one::keys::Handoff>)>>) {
         let alpn = format!("{}/http/1", one::config::CLI).into_bytes();
         let relay = RelayConfig::new(address.parse::<RelayUrl>().unwrap(), None);
         let ep = Endpoint::builder(presets::Minimal).secret_key(key.clone()).alpns(vec![alpn]).clear_ip_transports().clear_address_lookup().relay_mode(RelayMode::Custom(relay.into())).bind().await.unwrap();
         tokio::time::timeout(Duration::from_secs(5), ep.online()).await.expect("the stand-in node isn't let in");
         let signing = ed25519_dalek::SigningKey::from_bytes(&key.to_bytes());
         let me = one::keys::Endpoint::of(&signing);
-        let (epoch, app): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
         let seen = std::sync::Arc::new(std::sync::Mutex::new((Vec::new(), Vec::new())));
         let (serving, kept) = (ep.clone(), seen.clone());
         tokio::spawn(async move {
             while let Some(incoming) = serving.accept().await {
                 let Ok(conn) = incoming.await else { continue };
-                let (kept, scope, seal_of) = (kept.clone(), scope.clone(), seal_of.clone());
+                let (kept, scope, says) = (kept.clone(), scope.clone(), says.clone());
                 let secret = one::keys::seal_secret(&signing);
                 tokio::spawn(async move {
                     let by = data_encoding::HEXLOWER.encode(conn.remote_id().as_bytes());
@@ -1221,25 +1233,27 @@ mod relay {
                         let line = lines.next().unwrap_or("").to_string();
                         let headers: std::collections::BTreeMap<String, String> = lines.filter_map(|l| l.split_once(':')).map(|(k, v)| (k.trim().to_lowercase(), v.trim().to_string())).collect();
                         let handed = headers.get("x-one-keys").map(|h| one::keys::open_handoff(&secret, h).expect("keys handed weren't sealed to the node asked"));
+                        let msg: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+                        let database = match msg["params"]["name"].as_str() {
+                            Some("board_read") => Some("main"),
+                            Some("notes_read") => Some("notes"),
+                            _ => None,
+                        };
                         let has_keys = {
                             let mut held = kept.lock().unwrap();
                             held.0.push(Asked { by: by.clone(), line: line.clone(), headers: headers.clone() });
                             held.1.extend(handed);
-                            !held.1.is_empty()
+                            database.is_none_or(|d| held.1.iter().any(|h: &one::keys::Handoff| h.keys.iter().any(|k| k.database == d)))
                         };
-                        let b64 = |b: &[u8]| data_encoding::BASE64URL_NOPAD.encode(b);
+                        let need = |scope: &str, to: &one::keys::Endpoint| json!({ "error": "it needs keys", "need": [{ "scope": scope, "epoch": 1, "app": "board", "database": database }], "to": hex_of(&to.key), "seal": hex_of(&to.seal) });
                         let (status, out) = match line.split(' ').nth(1).unwrap_or("") {
-                            "/mcp" if !has_keys => (428, json!({ "error": "it needs keys", "need": [{ "scope": scope, "epoch": 1, "app": "board", "database": "main" }], "to": hex_of(&me.key), "seal": hex_of(&me.seal) })),
-                            "/mcp" => {
-                                let msg: Value = serde_json::from_str(body).unwrap_or(Value::Null);
-                                (200, json!({ "jsonrpc": "2.0", "id": msg["id"], "result": { "content": [{ "type": "text", "text": "the board" }] } }))
-                            }
+                            "/mcp" if !has_keys => match says.lock().unwrap().clone() {
+                                Says::Honest => (428, need(&scope, &me)),
+                                Says::SealedTo(other) => (428, need(&scope, &other)),
+                                Says::Scope(other) => (428, need(&other, &me)),
+                            },
+                            "/mcp" => (200, json!({ "jsonrpc": "2.0", "id": msg["id"], "result": { "content": [{ "type": "text", "text": "the board" }] } })),
                             "/v1/state" => (200, json!({ "install": { "devices": [{ "key": hex_of(&me.key), "order": 0 }] } })),
-                            path if path.starts_with("/v1/keys?") && path.contains("&to=") => {
-                                let seal: [u8; 32] = one::keys::unhex(&seal_of.lock().unwrap()).unwrap();
-                                (200, json!({ "epoch": 1, "sealed": { "1": b64(&one::kernel::seal_to(&seal, &epoch).unwrap()) } }))
-                            }
-                            path if path.starts_with("/v1/keys?") => (200, json!({ "sealed": { "1": b64(&one::kernel::seal_app_key(&epoch, "board", &app)) } })),
                             _ => (404, json!({ "error": "not here" })),
                         };
                         let out = out.to_string();
@@ -1250,7 +1264,48 @@ mod relay {
                 });
             }
         });
-        (ep, seen, one::kernel::database_key(&one::kernel::open_app_key(&epoch, "board", &one::kernel::seal_app_key(&epoch, "board", &app)).unwrap(), "main"))
+        (ep, seen)
+    }
+
+    /// Writes the install's `global` log and Andre's keys to the stand-in bucket at `sites`, as his device would have by
+    /// the time it approved the MCP client's (`device`, `seal`): the genesis (his `node`, client and compute), the MCP
+    /// client's device, Sam's box (compute that runs none of Andre's calls), and his own scope's first epoch, each epoch
+    /// sealed to the MCP client's device. → the key of the board's database `database` in his scope.
+    fn andres_install(sites: &str, node: &SecretKey, sams_box: &SecretKey, user: &str, device: &str, seal: &str) -> impl Fn(&str) -> [u8; 32] {
+        use one::entry::{Entry, Ext};
+        use one::members::{Kind, Role};
+        let signing = ed25519_dalek::SigningKey::from_bytes(&node.to_bytes());
+        let sams = ed25519_dalek::SigningKey::from_bytes(&sams_box.to_bytes());
+        let (global, own, log_app, board) = (rand::random::<[u8; 32]>(), rand::random::<[u8; 32]>(), rand::random::<[u8; 32]>(), rand::random::<[u8; 32]>());
+        let mcp = one::keys::Endpoint { key: one::keys::unhex(device).unwrap(), seal: one::keys::unhex(seal).unwrap() };
+        let scope = one::entry::Scope::User(user.into());
+        let mut prev = None;
+        let mut entry = |content| {
+            let e = Entry::create(&signing, Ext { log: "global".into(), time: 1, user: user.into(), epoch: 0, previous: Vec::new() }, prev, content);
+            prev = Some(e.head());
+            e
+        };
+        let entries = vec![
+            entry(one::members::genesis("Test", user, "Andre", &one::keys::Endpoint::of(&signing), "box", &[Kind::Client, Kind::Compute], &rand::random(), &one::keys::epoch_hash(&global))),
+            entry(one::members::device(&mcp, user, "Claude", &[Kind::Client], None)),
+            entry(one::members::device(&one::keys::Endpoint::of(&sams), &one::entry::new_id(), "Sam's box", &[Kind::Client, Kind::Compute], Some(("Sam", Role::Member)))),
+            entry(one::members::epoch(&scope, 1, &[mcp.key], &one::keys::epoch_hash(&own))),
+        ];
+        let prefix = one::log::prefix("global");
+        let step = one::db::step_name(&prefix, 1);
+        let log_keys = one::db::Keys::from([(1, one::kernel::database_key(&log_app, one::log::NAME))]);
+        let objects = [
+            (one::keys::epoch_name("global", 1, device), one::kernel::seal_to(&mcp.seal, &global).unwrap()),
+            (one::keys::app_key_name("global", one::members::APP, 1), one::kernel::seal_app_key(&global, one::members::APP, &log_app)),
+            (step.clone(), one::log::seal(&log_keys, &step, &one::entry::pack(&entries.iter().collect::<Vec<_>>())).unwrap()),
+            (one::keys::epoch_name(&scope.to_string(), 1, device), one::kernel::seal_to(&mcp.seal, &own).unwrap()),
+            (one::keys::app_key_name(&scope.to_string(), "board", 1), one::kernel::seal_app_key(&own, "board", &board)),
+        ];
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        for (name, bytes) in objects {
+            assert_eq!(agent.put(format!("{sites}/install/{name}")).header("if-none-match", "*").send(&bytes[..]).unwrap().status(), 200, "{name}");
+        }
+        move |database: &str| one::kernel::database_key(&board, database)
     }
 
     fn hex_of(key: &[u8; 32]) -> String {
@@ -1289,7 +1344,7 @@ mod relay {
         let client = client["client_id"].as_str().unwrap().to_string();
         let verifier = "a code verifier, long enough for PKCE's forty-three";
         let challenge = data_encoding::BASE64URL_NOPAD.encode(&sha2::Sha256::digest(verifier.as_bytes()));
-        let (_, _, sign_in) = browser.get(&format!("/api/auth/oauth2/authorize?response_type=code&client_id={client}&redirect_uri={}&scope=openid+profile+offline_access&state=s&code_challenge={challenge}&code_challenge_method=S256&resource={}", super::enc(back), super::enc(&at("/mcp"))));
+        let (_, _, sign_in) = browser.get(&format!("/api/auth/oauth2/authorize?response_type=code&client_id={client}&redirect_uri={}&scope=openid+profile+offline_access&state=s&code_challenge={challenge}&code_challenge_method=S256&resource={}", super::enc(back), super::enc(&k.address)));
         let query = sign_in.expect("authorizing goes to the sign-in page").split_once('?').unwrap().1.to_string();
         let (status, accepted) = browser.post("/sign-in/accept", json!({ "oauth_query": query, "passkey": true }));
         assert_eq!(status, 200, "{accepted}");
@@ -1299,15 +1354,20 @@ mod relay {
             let mut r = agent.post(at("/mcp/token")).send_form(form.iter().copied()).unwrap();
             (r.status().as_u16(), r.body_mut().read_json().unwrap_or(Value::Null))
         };
-        let (status, tokens) = token(&[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", back), ("client_id", &client), ("code_verifier", verifier), ("resource", &at("/mcp"))]);
+        // It asks for a token for the install's address, as a sign-in at its nodes: it's given one for the MCP Worker
+        // alone, which nodes refuse, as it isn't one of the install's own apps.
+        let (status, tokens) = token(&[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", back), ("client_id", &client), ("code_verifier", verifier), ("resource", &k.address)]);
         assert_eq!(status, 200, "{tokens}");
         let access = tokens["access_token"].as_str().unwrap().to_string();
+        let claims: Value = serde_json::from_slice(&data_encoding::BASE64URL_NOPAD.decode(access.split('.').nth(1).unwrap().as_bytes()).unwrap()).unwrap();
+        let aud: Vec<Value> = claims["aud"].as_array().cloned().unwrap_or_else(|| vec![claims["aud"].clone()]);
+        assert!(aud.contains(&json!(at("/mcp"))) && !aud.contains(&json!(k.address)), "{claims}");
         let mcp = |access: &str, body: Value| super::post(&at("/mcp"), &[("authorization", &format!("Bearer {access}")), ("accept", "application/json, text/event-stream")], body);
 
         // Its device asked to join, and until a device of Andre's approves it, it says how, by its code.
         let (_, asked, _) = browser.get("/api/auth/devices/requests");
         let request = &asked["requests"][0];
-        assert_eq!(request["name"], "Claude", "{asked}");
+        assert_eq!(request["name"], "Claude (claude.ai)", "its name is shown with where its sign-in goes: {asked}");
         let device = request["key"].as_str().unwrap().to_string();
         let seal = request["seal"].as_str().unwrap().to_string();
         let join = one::keys::join_code(&one::keys::Endpoint { key: one::keys::unhex(&device).unwrap(), seal: one::keys::unhex(&seal).unwrap() });
@@ -1315,28 +1375,57 @@ mod relay {
         let text = said["result"]["content"][0]["text"].as_str().unwrap_or("").to_string();
         assert!(status == 200 && text.contains("Approve Claude") && text.contains(&format!("{} {}", &join[..4], &join[4..])), "{said}");
 
-        // Approved: Andre's device lets it in at the relay (and lists it, and seals it his scopes' keys).
+        // Approved: Andre's device lets it in at the relay, lists it, and seals it his scopes' keys. Sam's box is
+        // compute too, but runs none of Andre's calls.
         let address = k.address.replace("localhost", "127.0.0.1");
         assert_eq!(tell(&address, &node, json!({ "add": device, "role": "client" })), 204);
+        let sams_box = SecretKey::generate();
+        assert_eq!(tell(&address, &node, json!({ "add": hex(&sams_box), "role": "compute" })), 204);
+        let key_of = andres_install(&k.sites, &node, &sams_box, &user, &device, &seal);
         let scope = format!("user:{user}");
+        let call = |id: u64, tool: &str| json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": tool, "arguments": {} } });
+        let text = |out: &Value| out["result"]["content"][0]["text"].as_str().unwrap_or("").to_string();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let (ep, seen, database) = stand_in_node(&address, &node, scope.clone(), std::sync::Arc::new(std::sync::Mutex::new(seal.clone()))).await;
-            let call = |id: u64| json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "board_read", "arguments": {} } });
+            // Only Sam's box is on: it isn't asked, as it doesn't run Andre's calls, so it's handed nothing.
+            let says = std::sync::Arc::new(std::sync::Mutex::new(Says::Honest));
+            let (sams_ep, sams_seen) = stand_in_node(&address, &sams_box, scope.clone(), says.clone()).await;
+            let (status, out) = tokio::task::block_in_place(|| mcp(&access, call(3, "board_read")));
+            assert!(status == 200 && text(&out).contains("None of your devices is on"), "{out}");
+            assert!(sams_seen.lock().unwrap().0.is_empty(), "a node that doesn't run Andre's calls was asked: {:?}", sams_seen.lock().unwrap().0);
+
+            // Andre's node is on, but its 428 asks for keys sealed to another endpoint (Sam's box), or of a scope it
+            // doesn't run for him: it's handed nothing.
+            let (ep, seen) = stand_in_node(&address, &node, scope.clone(), says.clone()).await;
+            *says.lock().unwrap() = Says::SealedTo(one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&sams_box.to_bytes())));
+            let (status, out) = tokio::task::block_in_place(|| mcp(&access, call(4, "board_read")));
+            assert!(status == 200 && text(&out).contains("sealed to another"), "{out}");
+            *says.lock().unwrap() = Says::Scope(format!("user:{}", one::entry::new_id()));
+            let (status, out) = tokio::task::block_in_place(|| mcp(&access, call(5, "board_read")));
+            assert!(status == 200 && text(&out).contains("doesn't run for you"), "{out}");
+            assert!(seen.lock().unwrap().1.is_empty(), "a node lying in its 428 was handed keys");
+            assert!(sams_seen.lock().unwrap().0.is_empty() && sams_seen.lock().unwrap().1.is_empty());
+            sams_ep.close().await;
+
+            // Honest, it's handed the board's keys, opened from the bucket by the device itself.
+            *says.lock().unwrap() = Says::Honest;
             let asked = tokio::task::block_in_place(|| {
                 let first = std::time::Instant::now();
-                let (status, out) = mcp(&access, call(3));
-                assert_eq!((status, &out["result"]["content"][0]["text"]), (200, &json!("the board")), "{out}");
+                let (status, out) = mcp(&access, call(6, "board_read"));
+                assert_eq!((status, text(&out).as_str()), (200, "the board"), "{out}");
                 let cold = first.elapsed();
                 let mut warm = Vec::new();
-                for id in 4..14 {
+                for id in 7..17 {
                     let t = std::time::Instant::now();
-                    let (status, _) = mcp(&access, call(id));
+                    let (status, _) = mcp(&access, call(id, "board_read"));
                     assert_eq!(status, 200);
                     warm.push(t.elapsed());
                 }
                 warm.sort();
-                eprintln!("a remote MCP call through the MCP Worker: first {cold:?} (starting its device, 428, opening its keys, again), then {:?} median, {:?} at most", warm[warm.len() / 2], warm[warm.len() - 1]);
+                eprintln!("a remote MCP call through the MCP Worker: first {cold:?} (428, opening its keys, again), then {:?} median, {:?} at most", warm[warm.len() / 2], warm[warm.len() - 1]);
+                // Another tool's call hands only what that tool needs.
+                let (status, out) = mcp(&access, call(17, "notes_read"));
+                assert_eq!((status, text(&out).as_str()), (200, "the board"), "{out}");
                 seen.lock().unwrap().clone()
             });
             let (requests, handed) = asked;
@@ -1349,23 +1438,27 @@ mod relay {
                 }
             }
             let exp = super::tokens_exp(&access);
-            assert!(!handed.is_empty(), "no keys were handed: {requests:?}");
+            fn databases(h: &one::keys::Handoff) -> Vec<(&str, u32, &str, &str, [u8; 32])> {
+                h.keys.iter().map(|k| (k.scope.as_str(), k.epoch, k.app.as_str(), k.database.as_str(), k.key)).collect()
+            }
+            assert_eq!(handed.len(), 2, "keys were handed once for each tool: {requests:?}");
             for h in &handed {
                 assert_eq!((h.for_.as_str(), h.until), (device.as_str(), exp * 1000));
-                assert_eq!(h.keys.iter().map(|k| (k.scope.as_str(), k.epoch, k.app.as_str(), k.database.as_str(), k.key)).collect::<Vec<_>>(), vec![(scope.as_str(), 1, "board", "main", database)]);
             }
+            assert_eq!(databases(&handed[0]), vec![(scope.as_str(), 1, "board", "main", key_of("main"))]);
+            assert_eq!(databases(&handed[1]), vec![(scope.as_str(), 1, "board", "notes", key_of("notes"))], "a tool's call hands only what it needs");
             let mcps = requests.iter().filter(|r| r.line.starts_with("POST /mcp ")).count();
-            assert_eq!(mcps, 12, "each MCP request reached the node once, and the first once more once it had the keys: {requests:?}");
+            assert_eq!(mcps, 16, "each MCP request reached the node once, and each tool's first once more once it had the keys: {requests:?}");
 
             // A refresh keeps the same device; the old refresh token, used again, gets nothing.
             let refresh = tokens["refresh_token"].as_str().unwrap().to_string();
-            let (status, again) = tokio::task::block_in_place(|| token(&[("grant_type", "refresh_token"), ("refresh_token", &refresh), ("client_id", &client), ("resource", &at("/mcp"))]));
+            let (status, again) = tokio::task::block_in_place(|| token(&[("grant_type", "refresh_token"), ("refresh_token", &refresh), ("client_id", &client)]));
             assert_eq!(status, 200, "{again}");
             let fresh = again["access_token"].as_str().unwrap().to_string();
-            let (status, out) = tokio::task::block_in_place(|| mcp(&fresh, call(20)));
-            assert_eq!((status, &out["result"]["content"][0]["text"]), (200, &json!("the board")), "{out}");
+            let (status, out) = tokio::task::block_in_place(|| mcp(&fresh, call(20, "board_read")));
+            assert_eq!((status, text(&out).as_str()), (200, "the board"), "{out}");
             assert!(seen.lock().unwrap().0.iter().all(|r| r.by == device), "a refresh made a new device");
-            let (status, _) = tokio::task::block_in_place(|| token(&[("grant_type", "refresh_token"), ("refresh_token", &refresh), ("client_id", &client), ("resource", &at("/mcp"))]));
+            let (status, _) = tokio::task::block_in_place(|| token(&[("grant_type", "refresh_token"), ("refresh_token", &refresh), ("client_id", &client)]));
             assert_ne!(status, 200, "a refresh token was used twice");
             ep.close().await;
         });

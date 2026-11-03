@@ -2,7 +2,7 @@
 import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, random, sealAppKey, sealTo, sealUnder } from "../shared/crypto.js";
 import { presign } from "../shared/s3.js";
 import { verify } from "../shared/token.js";
-import { Copies, GRACE } from "../mcp/copies.js";
+import { Copies } from "../mcp/copies.js";
 
 /// A Durable Object's storage, in memory.
 class Store {
@@ -89,8 +89,8 @@ export default {
   },
 };
 
-/// A remote MCP client's device secret opens only with its current refresh token, a live access token, or the refresh
-/// token before it for `GRACE` after it was used; a refresh token used after that opens nothing, nor rotates anything.
+/// A remote MCP client's device secret opens only with its current refresh token or a live access token; a refresh
+/// token used once opens nothing after, nor rotates anything.
 async function remoteMcpClientsSecrets() {
   let now = 1_000_000;
   const copies = new Copies(new Store(), () => now);
@@ -106,11 +106,8 @@ async function remoteMcpClientsSecrets() {
   same(await copies.open("refresh token two"), "the new refresh token opens it");
   same(await copies.open("access token two"), "the new access token opens it");
   same(await copies.open("access token one"), "an access token opens it until it expires");
-  now += GRACE - 1_000;
-  same(await copies.open("refresh token one"), "the old refresh token opens it within the grace");
-  now += 2_000;
-  equal(await copies.open("refresh token one"), null, "the old refresh token opens it after the grace");
-  equal(await copies.rotate("refresh token one", "refresh token stolen", "access token stolen", now + 3_600_000), null, "an old refresh token reused after the grace rotates it");
+  equal(await copies.open("refresh token one"), null, "the old refresh token opens it once used");
+  equal(await copies.rotate("refresh token one", "refresh token stolen", "access token stolen", now + 3_600_000), null, "an old refresh token reused rotates it");
   equal(await copies.open("refresh token stolen"), null, "a reused refresh token's new tokens open it");
 
   now += 3_600_000;

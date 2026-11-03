@@ -384,11 +384,13 @@ impl Settings {
             let mcp = ("MCP".into(), "object:mcp:Client".into(), false);
             return devices.into_iter().chain(bound.into_iter().flatten()).chain([mcp]).chain(location).collect();
         }
-        // The MCP Worker: remote MCP clients' devices, whose secrets open only with their clients' tokens.
+        // The MCP Worker: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches
+        // the relay only by its entrypoint for them, and reads the bucket through the URL signer as any device does.
         if service == "mcp" {
             let mut out = vec![
                 ("AUTH".into(), "service:auth".into(), false),
-                ("RELAY".into(), "object:relay:Relay".into(), false),
+                ("RELAY".into(), "service:relay:McpDevices".into(), false),
+                ("SIGNER".into(), "service:signer".into(), false),
                 ("ADDRESS".into(), self.address.clone(), false),
                 ("NAME".into(), self.name.clone(), false),
             ];
@@ -405,7 +407,7 @@ impl Settings {
                 ("ADDRESS".into(), self.address.clone(), false),
                 ("NAME".into(), self.name.clone(), false),
                 ("NODE_KEY".into(), self.serverless_key.clone(), true),
-                ("RELAY".into(), "object:relay:Relay".into(), false),
+                ("RELAY".into(), "service:relay:ServerlessNode".into(), false),
             ];
             out.extend(location);
             if self.node_url.is_some() {
@@ -492,8 +494,9 @@ pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, serve
             bindings: settings.bindings(name).into_iter().filter(|(_, v, _)| mcp || !v.starts_with("service:mcp") && !v.starts_with("object:mcp:")).map(|(n, v, _)| (n, v)).collect(),
             assets: (*name == "gateway").then(|| web.to_path_buf()),
             // The gateway's node may be on this machine or its private network, as a node behind a tunnel is; a try
-            // install's URL signer reaches its bucket on this machine, and its schedules its node.
-            outbound: (*name == "gateway" || matches!(*name, "signer" | "schedules") && settings.try_person.is_some()).then(|| NEARBY.to_string()),
+            // install's URL signer, and the MCP Worker's devices reading by its URLs, reach its bucket on this machine, and
+            // its schedules its node.
+            outbound: (*name == "gateway" || matches!(*name, "signer" | "mcp" | "schedules") && settings.try_person.is_some()).then(|| NEARBY.to_string()),
         })
         .chain(node)
         .collect()
@@ -777,7 +780,10 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
             }
             let object = value.strip_prefix("object:").and_then(|o| o.split_once(':'));
             bindings.push(match (value.strip_prefix("service:"), object) {
-                (Some(service), _) => format!("(name = {}, service = {})", quote(name), quote(service)),
+                (Some(service), _) => match service.split_once(':') {
+                    Some((service, entrypoint)) => format!("(name = {}, service = (name = {}, entrypoint = {}))", quote(name), quote(service), quote(entrypoint)),
+                    None => format!("(name = {}, service = {})", quote(name), quote(service)),
+                },
                 (_, Some((service, class))) => format!("(name = {}, durableObjectNamespace = (className = {}, serviceName = {}))", quote(name), quote(class), quote(service)),
                 _ if value == "loader:" => format!("(name = {}, workerLoader = ())", quote(name)),
                 _ => format!("(name = {}, text = {})", quote(name), quote(value)),
@@ -1019,8 +1025,16 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrate
     let mut bindings: Vec<Value> = class.iter().map(|class| json!({ "type": "durable_object_namespace", "name": class.to_uppercase(), "class_name": class })).collect();
     for (name, value, secret) in settings.bindings(service) {
         let object = value.strip_prefix("object:").and_then(|o| o.split_once(':'));
-        match value.strip_prefix("service:") {
-            Some(other) if exists(&worker_name(other)) => bindings.push(json!({ "type": "service", "name": name, "service": worker_name(other) })),
+        // `service:<name>` or `service:<name>:<entrypoint>`, one of its named entrypoints.
+        let service = value.strip_prefix("service:").map(|s| s.split_once(':').map_or((s, None), |(s, e)| (s, Some(e))));
+        match service {
+            Some((other, entrypoint)) if exists(&worker_name(other)) => {
+                let mut binding = json!({ "type": "service", "name": name, "service": worker_name(other) });
+                if let Some(entrypoint) = entrypoint {
+                    binding["entrypoint"] = json!(entrypoint);
+                }
+                bindings.push(binding)
+            }
             Some(_) => complete = false,
             // Another Worker's class, once it's there: the relay and the serverless node each bind the other's, so the
             // first of them deployed goes without, and has it when it's deployed again.

@@ -23,6 +23,9 @@ pub fn through_relay(key: &[u8]) -> CustomAddr {
     CustomAddr::from_parts(THROUGH_RELAY, key)
 }
 
+/// The most datagrams kept for one endpoint until iroh reads them: what comes faster is dropped, as a full socket does.
+const INBOX_MOST: usize = 1024;
+
 /// Datagrams the relay handed in for one endpoint, until iroh reads them.
 #[derive(Default)]
 struct Queue {
@@ -41,6 +44,9 @@ impl Inbox {
         let mut queue = self.0.lock().unwrap();
         let step = if segment_size == 0 { contents.len() } else { segment_size as usize };
         for chunk in contents.chunks(step.max(1)) {
+            if queue.packets.len() >= INBOX_MOST {
+                break;
+            }
             queue.packets.push_back((from.clone(), chunk.to_vec()));
         }
         if let Some(waker) = queue.waker.take() {

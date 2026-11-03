@@ -24,7 +24,7 @@
 // It ends itself once nobody has asked for a while, since iroh's timers would keep it awake, and billed, for good.
 //
 // Bindings: AUTH and SIGNER (the kernel's services), LOADER (Worker Loader), NODE (this Worker's `Node`),
-// NODE_KEY (its endpoint's key, a secret), RELAY (the relay's Durable Object), LOCATION (where objects are made),
+// NODE_KEY (its endpoint's key, a secret), RELAY (the relay's `ServerlessNode` entrypoint), LOCATION (where objects are made),
 // MACHINE (a node on a machine: a Workers VPC service; or MACHINE_URL, its address), ADDRESS (the install's) and NAME
 // (its name). `built.js`, made when it's deployed, is the shim.
 
@@ -1088,8 +1088,9 @@ export class Node extends DurableObject {
     if (!this.isEndpoint) throw new Error("only the serverless node's endpoint does that");
   }
 
+  /// The relay, by its `ServerlessNode` entrypoint: sending as this node, and who's here.
   relay() {
-    return this.env.RELAY.get(this.env.RELAY.idFromName("relay"), near(this.env));
+    return this.env.RELAY;
   }
 
   /// Its endpoint, started once in the object's life: the first packet or ask after it slept waits for this.

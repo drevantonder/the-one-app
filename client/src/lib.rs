@@ -440,9 +440,17 @@ impl Body {
     }
 
     /// The rest of the body, whole.
-    pub async fn bytes(mut self) -> Result<Vec<u8>, Error> {
+    pub async fn bytes(self) -> Result<Vec<u8>, Error> {
+        self.bytes_within(usize::MAX).await
+    }
+
+    /// The rest of the body, whole, if it's at most `most` bytes: a node that sends more is stopped.
+    pub async fn bytes_within(mut self, most: usize) -> Result<Vec<u8>, Error> {
         let mut out = Vec::new();
         while let Some(part) = self.chunk().await? {
+            if out.len() + part.len() > most {
+                return Err(sent(format!("the node's response is over {most} bytes")));
+            }
             out.extend_from_slice(&part);
         }
         Ok(out)
