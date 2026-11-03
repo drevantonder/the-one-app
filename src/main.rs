@@ -70,8 +70,7 @@ Usage:
   {CLI} kernel                         where this machine's kernel is: its services' addresses and what it's set to
   {CLI} kernel serve [--address <url>]
                                        run the kernel's services (auth, vault, schedules, and the gateway people reach
-                                       at the install's address) on this machine; the first time, with that address,
-                                       and it shows a new recovery key
+                                       at the install's address) on this machine; the first time, with that address
   {CLI} kernel deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]
                                        deploy the kernel's services to Cloudflare as Workers, with an API token that
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
@@ -79,13 +78,12 @@ Usage:
                                        --address says, for good: passkeys belong to it), or at its workers.dev address;
                                        and the serverless node with it, once serverless deploy put it there; beside a
                                        node of the install, whose devices its relay takes, unless --new
-  {CLI} kernel invite <name> [--user <id>]
-                                       a link that lets someone join, once and for a few days, by making their
-                                       passkey, as who they are in the install (--user, or this machine's person for
-                                       the first), so nodes know them; nobody joins uninvited, the first person too.
-                                       For someone who lost every passkey, --user them and pipe the recovery key.
-                                       Where people sign in with Google, --user <id> --email <email> instead says
-                                       who someone who was in the install before is, when they first sign in
+  {CLI} kernel invite <name> [--user <id>] [--email <email>]
+                                       a link that lets someone join, once and for a few days, as who they'll be in the
+                                       install (--user, or this machine's person if they're called that; else new),
+                                       made here and signed with this machine's key, an admin's device's; where people
+                                       sign in with Google, --email is the account they sign up with. Nobody joins
+                                       uninvited, the first person too
   {CLI} serverless deploy [--account <id>]
                                        put the install's serverless node in the kernel's Cloudflare account (a node as
                                        a Worker, with the API token in CLOUDFLARE_API_TOKEN) and send the address's
@@ -368,9 +366,8 @@ fn run(args: Vec<String>) -> Result<()> {
                 Err(err) => {
                     one::kernel::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
                     let url = flags.get("address").and_then(Value::as_str).context("say where people will reach the install, with --address https://…")?;
-                    let (settings, recovery) = one::kernel::Settings::new(NAME, url);
+                    let settings = one::kernel::Settings::new(NAME, url);
                     settings.save()?;
-                    println!("Its recovery key, shown only this once; keep it in your admins' password manager:\n\n  {recovery}\n");
                     settings
                 }
             };
@@ -398,10 +395,9 @@ fn run(args: Vec<String>) -> Result<()> {
                     };
                     let at = |service: &str| format!("https://{}.{domain}", one::kernel::worker_name(service));
                     let address = flags.get("address").and_then(Value::as_str).map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
-                    let (mut settings, recovery) = one::kernel::Settings::new(NAME, &address);
+                    let mut settings = one::kernel::Settings::new(NAME, &address);
                     (settings.auth_url, settings.vault_url, settings.schedules_url) = (at("auth"), at("vault"), at("schedules"));
                     settings.save()?;
-                    println!("Its recovery key, shown only this once; keep it in your admins' password manager:\n\n  {recovery}\n");
                     println!("Keep {} too: the kernel's secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an op(op://…) reference in its place.\n", one::kernel::Settings::path().with_file_name(".env.local").display());
                     // People signing in with Google need its OAuth client, which is put beside the secrets first.
                     match one::config::SIGN_IN {
@@ -436,26 +432,18 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/settings", json!({ "name": "serverless", "value": "on" }))?;
             println!("The serverless node is in your Cloudflare account, and {} sends /v1/ and /mcp to it; what needs a machine goes on to {}.", settings.address, settings.node_url.as_deref().unwrap_or("no machine yet: kernel set node-url"));
         }
-        ["kernel", "invite", name] if one::config::SIGN_IN == "google" => {
-            let settings = one::kernel::Settings::load()?;
-            let (user, email) = (flags.get("user").and_then(Value::as_str), flags.get("email").and_then(Value::as_str));
-            let (Some(user), Some(email)) = (user, email) else { bail!("people here join by signing in with Google: --user <id> --email <email> says who someone who was in the install before is, when they first sign in") };
-            one::kernel::known_as(&settings, name, user, email)?;
-            println!("When {email} first signs in with Google, they're {name} in the install.");
-        }
         ["kernel", "invite", name] => {
             let settings = one::kernel::Settings::load()?;
-            // The install's first person is this machine's.
+            // This machine's person, inviting themselves to their own install's kernel, is who they are in it.
             let user = match flags.get("user").and_then(Value::as_str) {
                 Some(user) => Some(user.to_string()),
-                None if one::kernel::people(&settings)?.is_empty() => get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
-                None => None,
+                None => get("/v1/state").ok().filter(|s| s["user"]["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name))).and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
             };
-            let piped = || (!std::io::IsTerminal::is_terminal(&std::io::stdin())).then(|| std::io::read_to_string(std::io::stdin()).ok()).flatten().filter(|r| !r.trim().is_empty());
-            let invite = one::kernel::invite(&settings, name, user.as_deref(), piped)?;
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64;
-            let days = (invite.until.saturating_sub(now) + 43_200_000) / 86_400_000;
-            println!("Send {name} this link. It works once, for {days} days: opening it, they make their passkey and join.\n\n  {}", invite.link);
+            let key = one::node::device_key(&one::home())?;
+            let invite = one::kernel::invite(&settings.address, &key, name, user.as_deref(), flags.get("email").and_then(Value::as_str))?;
+            let days = one::kernel::INVITE_DAYS;
+            let how = if one::config::SIGN_IN == "google" { "they sign in with Google and join" } else { "they make their passkey and join" };
+            println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
         }
         ["kernel", "set", name, value] => {
             let mut settings = one::kernel::Settings::load()?;

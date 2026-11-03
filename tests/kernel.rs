@@ -113,91 +113,26 @@ fn the_kernels_own_tests_pass() {
     assert!(out.status.success(), "the kernel's tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
 }
 
-/// A vault, and a stand-in auth service that signs any claims.
-struct Vault {
+/// A stand-in auth service that signs any claims.
+struct StandIn {
     _running: Running,
-    url: String,
-    /// The stand-in bucket, at `<sites>/install/<name>`.
-    sites: String,
     auth: String,
     issuer: String,
-    secret: String,
 }
 
-impl Vault {
-    fn start() -> Vault {
-        Vault::start_with(vec![])
-    }
-
-    /// A vault with `more` bindings besides its own.
-    fn start_with(more: Vec<(String, String)>) -> Vault {
-        let (vault, auth, sites) = (port(), port(), port());
-        let (_, recovery_public) = kernel::twin(&rand::random());
-        let secret = B64U.encode(&rand::random::<[u8; 32]>());
+impl StandIn {
+    fn start() -> StandIn {
+        let auth = port();
         // Nodes fetch its keys from the address their sign-ins are for, as from the auth service at an install's.
-        let issuer = format!("http://127.0.0.1:{auth}/api/auth");
-        let bucket = json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }).to_string();
-        let running = run(vec![
-            Served { name: "auth".into(), module: module("test/auth.js"), wasm: vec![], class: None, listen: Some(format!("127.0.0.1:{auth}")), bindings: vec![], assets: None, outbound: None },
-            Served { name: "sites".into(), module: module("test/sites.js"), wasm: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None },
-            Served {
-                name: "vault".into(),
-                module: module("vault/worker.js"),
-                wasm: vec![],
-                class: Some("Vault".into()),
-                listen: Some(format!("127.0.0.1:{vault}")),
-                bindings: vec![
-                    ("AUTH".into(), "service:auth".into()),
-                    ("ISSUER".into(), issuer.clone()),
-                    ("KERNEL_SECRET".into(), secret.clone()),
-                    ("RECOVERY_KEY".into(), B64U.encode(&recovery_public)),
-                    ("BUCKET".into(), bucket),
-                ]
-                .into_iter()
-                .chain(more)
-                .collect(),
-                assets: None,
-                outbound: Some("sites".into()),
-            },
-        ]);
-        Vault {
-            _running: running,
-            url: format!("http://127.0.0.1:{vault}"),
-            sites: format!("http://127.0.0.1:{sites}"),
-            auth: format!("http://127.0.0.1:{auth}"),
-            issuer,
-            secret,
-        }
-    }
-
-    /// Asks as the auth service does.
-    fn internal(&self, path: &str, body: Value) -> (u16, Value) {
-        post(&format!("{}/internal/{path}", self.url), &[("x-kernel-secret", &self.secret)], body)
+        let running = run(vec![Served { name: "auth".into(), module: module("test/auth.js"), wasm: vec![], class: None, listen: Some(format!("127.0.0.1:{auth}")), bindings: vec![], assets: None, outbound: None }]);
+        StandIn { _running: running, auth: format!("http://127.0.0.1:{auth}"), issuer: format!("http://127.0.0.1:{auth}/api/auth") }
     }
 
     /// An access token for `user` from `client`, good for an hour, for the install at `auth`'s address.
-    fn token(&self, user: &str, client: &str) -> (String, u64) {
+    fn token(&self, user: &str, client: &str) -> String {
         let exp = now() / 1000 + 3600;
         let agent: ureq::Agent = ureq::Agent::config_builder().build().into();
-        let token = agent.post(format!("{}/sign", self.auth)).send_json(json!({ "iss": self.issuer, "sub": user, "azp": client, "client_id": client, "aud": self.auth, "scope": "openid", "exp": exp, "jti": B64U.encode(&rand::random::<[u8; 16]>()) })).unwrap().body_mut().read_to_string().unwrap();
-        (token, exp * 1000)
-    }
-
-    /// A client of `user`'s, added with their passkey: → its access token.
-    fn client(&self, user: &str, passkey: &str, client: &str) -> String {
-        let code = format!("{client}'s authorization code for {user}");
-        assert_eq!(self.internal("grant", json!({ "user": user, "from": passkey, "to": code, "client": client })).0, 200);
-        let (token, until) = self.token(user, client);
-        assert_eq!(self.internal("rekey", json!({ "from": code, "to": format!("{client}'s refresh token for {user}"), "token": token, "until": until })).1["moved"], true);
-        token
-    }
-
-    fn ask(&self, token: &str, method: &str, path: &str, body: Value) -> (u16, Value) {
-        self.ask_at(&self.url, token, method, path, body)
-    }
-
-    fn ask_at(&self, server: &str, token: &str, method: &str, path: &str, body: Value) -> (u16, Value) {
-        ask_at(server, token, method, path, body)
+        agent.post(format!("{}/sign", self.auth)).send_json(json!({ "iss": self.issuer, "sub": user, "azp": client, "client_id": client, "aud": self.auth, "scope": "openid", "exp": exp, "jti": B64U.encode(&rand::random::<[u8; 16]>()) })).unwrap().body_mut().read_to_string().unwrap()
     }
 }
 
@@ -214,7 +149,6 @@ fn ask_at(server: &str, token: &str, method: &str, path: &str, body: Value) -> (
 }
 
 const ANDRE: &str = "00000000000000a1";
-const SAM: &str = "00000000000000b2";
 
 /// The URL signer, with a stand-in relay that allows `allowed` (`{ <key hex>: { admin } }`), and the stand-in sites as
 /// its bucket.
@@ -310,232 +244,9 @@ fn the_url_signer_gives_urls_only_to_the_installs_devices_and_removes_only_for_a
     assert_eq!(post(&format!("{}/urls", s.url), &[], changed).0, 401);
 }
 
-#[test]
-fn where_people_sign_in_with_google_the_vault_opens_their_keys_itself_and_only_there() {
-    let passkeys = Vault::start();
-    assert_eq!(passkeys.internal("own", json!({ "user": ANDRE, "to": "a code for andre", "client": "web" })).0, 403, "a passkey's install opens nobody's keys for them");
-
-    let v = Vault::start_with(vec![("SIGN_IN".into(), "google".into()), ("VAULT_KEY".into(), B64U.encode(&rand::random::<[u8; 32]>()))]);
-    let vault = kernel::Vault { url: v.url.clone() };
-    assert_eq!(v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" })).0, 403, "nor does a passkey open them here");
-    // Each time Google signs someone in, the vault gives their new client the same keys.
-    let signs_in = |user: &str, client: &str| {
-        let code = format!("{client}'s authorization code for {user}");
-        assert_eq!(v.internal("own", json!({ "user": user, "to": code, "client": client })).0, 200);
-        let (token, until) = v.token(user, client);
-        assert_eq!(v.internal("rekey", json!({ "from": code, "to": format!("{client}'s refresh token for {user}"), "token": token, "until": until })).1["moved"], true);
-        token
-    };
-    let mine = format!("user:{ANDRE}");
-    let (web, phone) = (signs_in(ANDRE, "web"), signs_in(ANDRE, "phone"));
-    let key = vault.keys_until(&web, &[(&mine, "board", None)]).unwrap().0;
-    assert_eq!(vault.keys_until(&phone, &[(&mine, "board", None)]).unwrap().0, key);
-    // Someone who joins after him opens Everyone's, and not his.
-    let sam = signs_in(SAM, "web");
-    assert_eq!(vault.keys_until(&sam, &[("global", "board", None)]).unwrap().0, vault.keys_until(&web, &[("global", "board", None)]).unwrap().0);
-    assert!(vault.keys_until(&sam, &[(&mine, "board", None)]).is_err());
-    // Only the auth service asks, once Google has said yes.
-    let (status, _) = post(&format!("{}/internal/own", v.url), &[("x-kernel-secret", "a guess")], json!({ "user": SAM, "to": "mallory's code", "client": "web" }));
-    assert_eq!(status, 403);
-}
-
-#[test]
-fn who_opens_a_scope_changes_at_once_and_only_as_its_admins_say() {
-    use one::entry::Scope;
-    use one::members::Role::{Admin, Member};
-    const LEE: &str = "00000000000000d4";
-    let group = Scope::parse("group:00000000000000c3").unwrap();
-    let (everyone, lees) = (Scope::Global, Scope::User(LEE.into()));
-    let one = |s: &Scope| vec![s.clone()];
-    // On an install whose people sign in with a passkey, and on one whose people Google signs in.
-    for google in [false, true] {
-        let v = if google { Vault::start_with(vec![("SIGN_IN".into(), "google".into()), ("VAULT_KEY".into(), B64U.encode(&rand::random::<[u8; 32]>()))]) } else { Vault::start() };
-        let vault = kernel::Vault { url: v.url.clone() };
-        let signs_in = |user: &str, client: &str| {
-            if !google {
-                v.internal("passkey", json!({ "user": user, "secret": format!("{user}'s passkey prf output") }));
-                return v.client(user, &format!("{user}'s passkey prf output"), client);
-            }
-            let code = format!("{client}'s authorization code for {user}");
-            assert_eq!(v.internal("own", json!({ "user": user, "to": code, "client": client })).0, 200);
-            let (token, until) = v.token(user, client);
-            v.internal("rekey", json!({ "from": code, "to": format!("{client}'s refresh token for {user}"), "token": token, "until": until }));
-            token
-        };
-        let (andre, sam, lee) = (signs_in(ANDRE, "web"), signs_in(SAM, "web"), signs_in(LEE, "web"));
-        // As the install's log says: Andre is its admin and all three are in it; Sam is the group's only one.
-        let key = || B64U.encode(&rand::random::<[u8; 32]>());
-        assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": key(), "people": [ANDRE, SAM, LEE], "admins": [ANDRE] })).0, 200);
-        assert_eq!(v.internal("scope-key", json!({ "scope": group.to_string(), "key": key(), "people": [SAM], "admins": [SAM] })).0, 200);
-        let opens = |token: &str, scope: &Scope| vault.keys_until(token, &[(&scope.to_string(), "board", None)]).map(|k| k.0[0].key).ok();
-        assert!(opens(&lee, &group).is_none());
-
-        // Lee, a member, lets nobody in, himself included, and takes nobody out; Andre, who doesn't open the group,
-        // can't let anyone in to it, though he's the install's admin.
-        assert!(vault.role(&lee, LEE, Some(Member), false, &one(&group)).is_err(), "nobody invited him");
-        assert!(vault.role(&lee, LEE, Some(Member), true, &one(&group)).is_err());
-        assert!(vault.role(&lee, SAM, None, false, &one(&group)).is_err());
-        assert!(vault.role(&lee, ANDRE, None, false, &one(&everyone)).is_err());
-        assert!(vault.role(&sam, LEE, None, false, &one(&everyone)).is_err(), "Sam isn't the install's admin");
-        assert!(vault.role(&andre, LEE, Some(Member), true, &one(&group)).is_err());
-        assert!(vault.role(&lee, LEE, Some(Admin), false, &one(&everyone)).is_err(), "nobody makes themselves an admin");
-        assert!(opens(&lee, &group).is_none() && opens(&sam, &group).is_some());
-
-        // Sam invites Lee as a member: Lee opens it once he accepts, as that and nothing more, with Sam's key.
-        vault.role(&sam, LEE, Some(Member), true, &one(&group)).unwrap();
-        assert!(opens(&lee, &group).is_none(), "an invite opens nothing yet");
-        assert!(vault.role(&lee, LEE, Some(Admin), false, &one(&group)).is_err(), "he was invited as a member");
-        vault.role(&lee, LEE, Some(Member), false, &one(&group)).unwrap();
-        assert_eq!(opens(&lee, &group), opens(&sam, &group));
-        assert!(vault.role(&lee, SAM, None, false, &one(&group)).is_err(), "a member takes nobody out");
-
-        // Made an admin, Lee takes Sam out of it; Sam, out, neither opens it nor lets himself back in.
-        vault.role(&sam, LEE, Some(Admin), false, &one(&group)).unwrap();
-        vault.role(&lee, SAM, None, false, &one(&group)).unwrap();
-        assert!(opens(&sam, &group).is_none() && opens(&lee, &group).is_some() && opens(&sam, &everyone).is_some());
-        assert!(vault.role(&sam, SAM, Some(Member), false, &one(&group)).is_err());
-
-        // An admin who stops being one says so of himself, and from then on says nobody's role.
-        vault.role(&lee, LEE, Some(Member), false, &one(&group)).unwrap();
-        assert!(vault.role(&lee, SAM, Some(Member), true, &one(&group)).is_err());
-        assert!(opens(&lee, &group).is_some(), "he's still in it");
-
-        // Andre takes Lee out of the install: Lee opens nothing, and says nobody's role any more.
-        vault.role(&andre, LEE, None, false, &[everyone.clone(), group.clone(), lees.clone()]).unwrap();
-        assert!(opens(&lee, &everyone).is_none() && opens(&lee, &group).is_none() && opens(&lee, &lees).is_none());
-        assert!(vault.role(&lee, SAM, Some(Member), true, &one(&group)).is_err());
-        if google {
-            // Google signing him in again opens Everyone's to him no more.
-            assert!(opens(&signs_in(LEE, "phone"), &everyone).is_none());
-        }
-        // A group the vault has no key for yet changes nothing here.
-        vault.role(&andre, SAM, Some(Member), true, &one(&Scope::parse("group:00000000000000e5").unwrap())).unwrap();
-        assert!(opens(&andre, &everyone).is_some() && opens(&sam, &everyone).is_some());
-
-        // A group made since is the vault's from the start: its maker opens it at once, and nobody else until they're
-        // let in; nobody makes one the vault has a key for already; and its key is the one its nodes give.
-        let kitchen = Scope::parse("group:00000000000000f7").unwrap();
-        let made = vault.group(&sam, "00000000000000f7").unwrap();
-        assert!(opens(&sam, &kitchen).is_some() && opens(&andre, &kitchen).is_none());
-        assert!(vault.group(&andre, "00000000000000f7").is_err() && vault.group(&andre, "00000000000000c3").is_err());
-        vault.role(&sam, ANDRE, Some(Member), true, &one(&kitchen)).unwrap();
-        vault.role(&andre, ANDRE, Some(Member), false, &one(&kitchen)).unwrap();
-        assert_eq!(opens(&andre, &kitchen), opens(&sam, &kitchen));
-        let given = |key: &[u8; 32]| v.internal("scope-key", json!({ "scope": kitchen.to_string(), "key": B64U.encode(key), "people": [SAM, ANDRE], "admins": [SAM] })).0;
-        assert_eq!(given(&rand::random()), 409);
-        assert_eq!(given(&made), 200);
-    }
-}
-
-#[test]
-fn the_vault_given_the_installs_keys_opens_what_its_nodes_wrote() {
-    let v = Vault::start();
-    let vault = kernel::Vault { url: v.url.clone() };
-    v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
-    let token = v.client(ANDRE, "andre's passkey prf output", "web");
-
-    // Before the install had a kernel, its nodes sealed the Board's key under Everyone's.
-    let (global, board): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
-    let agent: ureq::Agent = ureq::Agent::config_builder().build().into();
-    agent.put(format!("{}/install/global/board/_key", v.sites)).send(&kernel::seal_app_key(&global, "board", &board)[..]).unwrap();
-    agent.put(format!("{}/install/global/_key", v.sites)).send(one::backups::key_id(&global).as_bytes()).unwrap();
-
-    // Until an admin gives it, the vault gives out no key under its own, and seals no item under it.
-    assert_eq!(v.ask(&token, "POST", "/keys", json!({ "keys": [{ "scope": "global", "app": "board" }] })).0, 409);
-    let item = json!({ "id": "0123456789abcdef", "title": "A key", "hosts": ["api.example.com"], "apps": ["board"], "fields": { "key": { "generate": true } } });
-    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": "global", "item": item })).0, 409);
-
-    // An admin's machine gives the vault Everyone's key, for Andre and for Sam, who has no keys here yet.
-    let (status, out) = v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&global), "people": [ANDRE, SAM] }));
-    assert_eq!((status, out["granted"].clone()), (200, json!([ANDRE])), "{out}");
-    let given = vault.keys_until(&token, &[("global", "board", Some("main"))]).unwrap().0;
-    assert_eq!(given[0].key, kernel::database_key(&board, "main"), "the vault opens the Board the nodes wrote");
-
-    // An app whose data was written before app keys were random has no key in the bucket: the vault keys it as the
-    // nodes do, with the key its data was sealed with, never a new one that would open nothing.
-    agent.put(format!("{}/install/global/notes/main/000000000001", v.sites)).send(&b"a step"[..]).unwrap();
-    let given = vault.keys_until(&token, &[("global", "notes", Some("main"))]).unwrap().0;
-    let mut derived = [0; 32];
-    hkdf::Hkdf::<sha2::Sha256>::new(Some(&[]), &global).expand(b"one/app\0notes", &mut derived).unwrap();
-    assert_eq!(given[0].key, kernel::database_key(&derived, "main"), "the vault opens the Notes the nodes wrote");
-
-    // Once given, its key stays; and so does that of a scope nodes made none for, once an item is sealed under it.
-    assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [ANDRE] })).0, 409);
-    let mine = format!("user:{ANDRE}");
-    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": mine, "item": item })).0, 200);
-    assert_eq!(v.internal("scope-key", json!({ "scope": mine, "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [ANDRE] })).0, 409);
-}
-
 fn url_query(url: &str) -> std::collections::BTreeMap<String, String> {
     let query = url.split_once('?').unwrap().1;
     query.split('&').map(|p| p.split_once('=').unwrap()).map(|(k, v)| (k.to_string(), v.replace("%3B", ";"))).collect()
-}
-
-#[test]
-fn the_vault_fills_an_apps_requests_with_secrets_it_never_shows() {
-    let v = Vault::start();
-    v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
-    let token = v.client(ANDRE, "andre's passkey prf output", "mac");
-    let me = format!("user:{ANDRE}");
-    let id = "0123456789abcdef";
-    let item = json!({ "id": id, "title": "Google sign-in", "type": "Google account", "hosts": ["oauth2.googleapis.com"], "apps": ["gmail"],
-        "fields": { "client_id": { "value": "the client id" }, "refresh_token": { "value": "the refresh token itself", "secret": true } } });
-    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": item })).0, 200);
-
-    // Listed, a secret field says only that it's secret.
-    let (_, list) = v.ask(&token, "GET", "/items", json!({}));
-    assert!(!list.to_string().contains("the refresh token itself"));
-    assert_eq!(list["items"][0]["fields"], json!({ "client_id": { "value": "the client id" }, "refresh_token": { "secret": true } }));
-
-    // A field taken from a secret one stays secret, whatever it's asked to be.
-    let copied = json!({ "id": id, "fields": { "copied": { "from": "refresh_token", "secret": false } } });
-    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": copied })).0, 200);
-    let (_, list) = v.ask(&token, "GET", "/items", json!({}));
-    assert!(!list.to_string().contains("the refresh token itself"));
-    assert_eq!(list["items"][0]["fields"]["copied"], json!({ "secret": true }));
-
-    // Standing work, let use only some apps, changes no item.
-    let (_, standing) = v.internal("standing", json!({ "token": token, "scopes": [me], "apps": ["calendar"] }));
-    let (_, run) = v.internal("run", json!({ "secret": standing["secret"], "until": now() + 600_000 }));
-    let run = run["token"].as_str().unwrap();
-    let moved = json!({ "id": id, "hosts": ["evil.example.com"], "apps": ["calendar"] });
-    assert_eq!(v.ask(run, "POST", "/items", json!({ "scope": me, "item": moved })).0, 400);
-
-    // Gmail's refresh goes out with it filled in, to its host, through the vault.
-    let fetch = |app: &str, url: &str, body: &str| v.ask(&token, "POST", "/fetch", json!({ "app": app, "url": url, "method": "POST", "headers": { "content-type": "text/plain" }, "body": body }));
-    let (status, sent) = fetch("gmail", "https://oauth2.googleapis.com/token", &format!("grant_type=refresh_token&refresh_token={{{{{id}:refresh_token}}}}&client_id={{{{client_id}}}}"));
-    assert_eq!(status, 200, "{sent}");
-    let echoed: Value = serde_json::from_slice(&B64U.decode(sent["body64"].as_str().unwrap().as_bytes()).unwrap()).unwrap();
-    assert_eq!(echoed["body"], "grant_type=refresh_token&refresh_token=the refresh token itself&client_id=the client id");
-    assert_eq!(echoed["url"], "https://oauth2.googleapis.com/token");
-
-    // Never to another host, never for an app it isn't switched on for, never over plain http.
-    let (status, refused) = fetch("gmail", "https://evil.example.com/", &format!("{{{{{id}:refresh_token}}}}"));
-    assert_eq!(status, 400);
-    assert!(refused["error"].as_str().unwrap().contains("sent only to oauth2.googleapis.com"));
-    let (_, other) = fetch("calendar", "https://oauth2.googleapis.com/token", &format!("{{{{{id}:refresh_token}}}}"));
-    let echoed: Value = serde_json::from_slice(&B64U.decode(other["body64"].as_str().unwrap().as_bytes()).unwrap()).unwrap();
-    assert_eq!(echoed["body"], format!("{{{{{id}:refresh_token}}}}"));
-    assert_eq!(fetch("gmail", "http://oauth2.googleapis.com/token", "x").0, 400);
-
-    // Nor where a plain field filled in before the path would send it.
-    let moved = json!({ "id": id, "fields": { "client_id": { "value": "evil.example.com/?" } } });
-    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": moved })).0, 200);
-    let (status, refused) = fetch("gmail", &format!("https://{{{{client_id}}}}@oauth2.googleapis.com/?k={{{{{id}:refresh_token}}}}"), "");
-    assert_eq!(status, 400, "{refused}");
-
-    // A sidecar named among an item's hosts gets its field filled into what it sends on.
-    let key = json!({ "id": "00000000000000ff", "title": "Work browser", "hosts": ["agent-devices"], "apps": ["agent-devices"], "fields": { "key": { "generate": true } } });
-    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": key })).0, 200);
-    let (_, filled) = v.ask(&token, "POST", "/fill", json!({ "app": "agent-devices", "host": "agent-devices", "text": "{{00000000000000ff:key}}" }));
-    assert_eq!(filled["text"].as_str().unwrap().len(), 43, "a generated key: {filled}");
-    assert_eq!(v.ask(&token, "POST", "/fill", json!({ "app": "agent-devices", "host": "shell", "text": "{{00000000000000ff:key}}" })).0, 400);
-
-    // Deleted, it fills nothing.
-    assert_eq!(v.ask(&token, "POST", "/items", json!({ "scope": me, "item": { "id": id, "deleted": true } })).0, 200);
-    let (_, gone) = fetch("gmail", "https://oauth2.googleapis.com/token", &format!("{{{{{id}:refresh_token}}}}"));
-    let echoed: Value = serde_json::from_slice(&B64U.decode(gone["body64"].as_str().unwrap().as_bytes()).unwrap()).unwrap();
-    assert_eq!(echoed["body"], format!("{{{{{id}:refresh_token}}}}"));
 }
 
 /// A browser's cookies and Origin, for asking the auth service as its screens do.
@@ -551,6 +262,7 @@ impl Browser {
         let cookie = self.cookies.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; ");
         let mut resp = match (method, body, form) {
             ("GET", ..) => agent.get(&url).header("origin", &self.origin).header("cookie", &cookie).call().unwrap(),
+            ("DELETE", ..) => agent.delete(&url).header("origin", &self.origin).header("cookie", &cookie).call().unwrap(),
             (_, _, Some(form)) => agent.post(&url).header("origin", &self.origin).send_form(form.iter().copied()).unwrap(),
             (_, body, _) => agent.post(&url).header("origin", &self.origin).header("cookie", &cookie).send_json(body.unwrap_or(json!({}))).unwrap(),
         };
@@ -599,18 +311,8 @@ impl Passkey {
         sha2::Sha256::digest(self.rp.as_bytes()).to_vec()
     }
 
-    /// Its PRF output, as a browser gets it at the install's address.
-    fn prf(&self) -> String {
-        B64U.encode(&self.id.repeat(2))
-    }
-
-    /// What `navigator.credentials.create` gives, as JSON, for registration options: only whether it has PRF, as the
-    /// pages send it.
+    /// What `navigator.credentials.create` gives, as JSON, for registration options, as the pages send it: no PRF.
     fn create(&self, options: &Value) -> Value {
-        self.create_with(options, true)
-    }
-
-    fn create_with(&self, options: &Value, prf: bool) -> Value {
         use ciborium::Value as C;
         let cose = C::Map(vec![(C::Integer(1.into()), C::Integer(1.into())), (C::Integer(3.into()), C::Integer((-8).into())), (C::Integer((-1).into()), C::Integer(6.into())), (C::Integer((-2).into()), C::Bytes(self.key.verifying_key().to_bytes().to_vec()))]);
         let mut auth = self.rp_hash();
@@ -623,8 +325,22 @@ impl Passkey {
         let attestation = C::Map(vec![(C::Text("fmt".into()), C::Text("none".into())), (C::Text("attStmt".into()), C::Map(vec![])), (C::Text("authData".into()), C::Bytes(auth))]);
         let id = B64U.encode(&self.id);
         let client = self.client_data("webauthn.create", options["challenge"].as_str().unwrap());
-        json!({ "id": id, "rawId": id, "type": "public-key", "clientExtensionResults": if prf { json!({ "prf": { "enabled": true } }) } else { json!({}) },
+        json!({ "id": id, "rawId": id, "type": "public-key", "clientExtensionResults": {},
             "response": { "clientDataJSON": B64U.encode(&client), "attestationObject": B64U.encode(&cbor(&attestation)), "transports": ["internal"] } })
+    }
+
+    /// What `navigator.credentials.get` gives, as JSON, for authentication options.
+    fn get(&self, options: &Value) -> Value {
+        use ed25519_dalek::Signer;
+        use sha2::Digest;
+        let mut auth = self.rp_hash();
+        auth.push(0x05); // user present and verified
+        auth.extend(0u32.to_be_bytes());
+        let client = self.client_data("webauthn.get", options["challenge"].as_str().unwrap());
+        let signature = self.key.sign(&[auth.as_slice(), &sha2::Sha256::digest(&client)].concat());
+        let id = B64U.encode(&self.id);
+        json!({ "id": id, "rawId": id, "type": "public-key", "clientExtensionResults": {},
+            "response": { "clientDataJSON": B64U.encode(&client), "authenticatorData": B64U.encode(&auth), "signature": B64U.encode(&signature.to_bytes()) } })
     }
 }
 
@@ -632,10 +348,6 @@ impl Passkey {
 pub(crate) struct Kernel {
     _running: Running,
     pub(crate) address: String,
-    vault: String,
-    secret: String,
-    /// The recovery key, as its holder keeps it.
-    recovery_key: String,
     settings: kernel::Settings,
 }
 
@@ -653,14 +365,15 @@ impl Kernel {
         Kernel::start_as(None, false, devices)
     }
 
-    /// As `start`, for an install whose people sign in with Google at test.example, the stand-in sites as Google.
-    fn google() -> Kernel {
-        Kernel::start_as(None, true, vec![])
+    /// As `for_devices`, for an install whose people sign in with Google at test.example, the stand-in sites as
+    /// Google.
+    fn google(devices: Vec<String>) -> Kernel {
+        Kernel::start_as(None, true, devices)
     }
 
     fn start_as(node_url: Option<String>, google: bool, devices: Vec<String>) -> Kernel {
         let gateway = port();
-        let (mut settings, recovery) = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
+        let mut settings = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), port(), port(), gateway];
         settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
         (settings.vault_url, settings.schedules_url) = (format!("http://127.0.0.1:{}", settings.ports[1]), format!("http://127.0.0.1:{}", settings.ports[2]));
@@ -676,27 +389,14 @@ impl Kernel {
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
         std::fs::write(web.join("screen/kit.css"), include_str!("../src/screen/kit.css")).unwrap();
         let mut served = kernel::served(&settings, modules, &web);
-        // The vault's last uses of the bucket (app keys for /keys, /erase, /group) go with its keys; until then it's
-        // given the bucket here, which no deployed vault is.
-        served[1].bindings.push(("BUCKET".into(), settings.bucket.as_ref().unwrap().to_string()));
-        served[1].outbound = Some("sites".into());
         served.iter_mut().find(|s| s.name == "signer").unwrap().outbound = Some("sites".into());
         if google {
-            let vault_key = B64U.encode(&rand::random::<[u8; 32]>());
             served[0].outbound = Some("sites".into());
             served[0].bindings.extend([("SIGN_IN", "google"), ("JOIN_DOMAIN", "test.example"), ("GOOGLE_CLIENT_ID", "a client id"), ("GOOGLE_CLIENT_SECRET", "a client secret")].map(|(n, v)| (n.into(), v.into())));
-            served[1].bindings.extend([("SIGN_IN".into(), "google".into()), ("VAULT_KEY".into(), vault_key)]);
         }
         served.push(Served { name: "sites".into(), module: module("test/sites.js"), wasm: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None });
         let running = run(served);
-        Kernel {
-            _running: running,
-            address: settings.address.clone(),
-            vault: settings.vault_url.clone(),
-            secret: settings.kernel_secret.clone(),
-            recovery_key: recovery,
-            settings,
-        }
+        Kernel { _running: running, address: settings.address.clone(), settings }
     }
 
     fn browser(&self) -> Browser {
@@ -714,127 +414,222 @@ fn enc(s: &str) -> String {
     s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
-/// Someone joins with an invite link for `name` (as `user`, if given): → their passkey and user id.
-fn joins(k: &Kernel, browser: &mut Browser, name: &str, user: Option<&str>) -> (Passkey, String) {
-    let invite = kernel::invite(&k.settings, name, user, || None).unwrap();
-    joins_with(k, browser, invite.link.split_once('#').unwrap().1)
+/// An endpoint's key, as a device holds it, and its hex, as the relay lists it.
+fn endpoint() -> (ed25519_dalek::SigningKey, String) {
+    let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let hex = data_encoding::HEXLOWER.encode(key.verifying_key().as_bytes());
+    (key, hex)
 }
 
-/// Opening an invite link (its secret, `token`): they make a passkey with PRF, which signs them in, and its PRF output
-/// makes their keys, or opens those the link carries. → their passkey and user id.
-fn joins_with(k: &Kernel, browser: &mut Browser, token: &str) -> (Passkey, String) {
-    let (status, about) = k.browser().post("/invite/about", json!({ "token": token }));
+/// What `key`'s device signs for auth's `route`: `fields`, with the route, as devices sign requests.
+fn signed(key: &ed25519_dalek::SigningKey, route: &str, mut fields: Value) -> Value {
+    fields["route"] = json!(route);
+    one::keys::signed_request(key, "one/auth", fields, now())
+}
+
+/// A signed GET's or DELETE's request, as its `x-one-request` header carries it.
+fn header(request: &Value) -> String {
+    B64U.encode(request.to_string().as_bytes())
+}
+
+/// An invite `by` an endpoint for `name`, as its device makes one: → its secret and the user id it's for.
+fn invited(k: &Kernel, by: &ed25519_dalek::SigningKey, name: &str, email: Option<&str>) -> (String, String) {
+    let invite = kernel::invite(&k.address, by, name, None, email).unwrap();
+    (invite.link.split_once('#').unwrap().1.to_string(), invite.user)
+}
+
+/// Opening an invite link (its secret): they make a passkey, which signs them up and in, as who the invite says.
+/// → their passkey and user id.
+fn joins_with(k: &Kernel, browser: &mut Browser, secret: &str) -> (Passkey, String) {
+    let (status, about) = k.browser().post("/invite/about", json!({ "secret": secret }));
     assert_eq!(status, 200, "{about}");
     let passkey = k.passkey();
-    let (status, options, _) = browser.get(&format!("/api/auth/passkey/generate-register-options?context={}", enc(token)));
+    let (status, options, _) = browser.get(&format!("/api/auth/passkey/generate-register-options?context={}", enc(secret)));
     assert_eq!(status, 200, "{options}");
     let (status, made) = browser.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true }));
     assert_eq!(status, 200, "{made}");
     assert_eq!(made["user"]["name"], about["person"]);
-    let user = made["user"]["id"].as_str().unwrap().to_string();
-    let (status, keys) = browser.post("/invite/keys", json!({ "token": token, "prf": passkey.prf(), "credential": B64U.encode(&passkey.id) }));
-    assert_eq!(status, 200, "{keys}");
-    (passkey, user)
+    (passkey, made["user"]["id"].as_str().unwrap().to_string())
+}
+
+/// Signs in with a passkey in `browser`: → the status.
+fn signs_in_with_passkey(browser: &mut Browser, passkey: &Passkey) -> u16 {
+    let (status, options, _) = browser.get("/api/auth/passkey/generate-authenticate-options");
+    assert_eq!(status, 200, "{options}");
+    browser.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0
+}
+
+/// Who `browser` is signed in as here, if anyone.
+fn signed_in_as(browser: &mut Browser) -> Option<String> {
+    browser.get("/api/auth/get-session").1["user"]["id"].as_str().map(str::to_string)
 }
 
 #[test]
-fn someone_who_lost_every_passkey_joins_again_with_a_link_that_carries_their_keys() {
-    let k = Kernel::start(None);
-    let (lost, andre) = joins(&k, &mut k.browser(), "Andre", None);
-    assert_eq!(opens(&k, &andre, &lost.prf()), 200);
+fn an_invite_lets_one_person_sign_up_once_and_only_before_it_ends() {
+    let (admin, admin_hex) = endpoint();
+    let k = Kernel::for_devices(vec![admin_hex]);
+    let (secret, user) = invited(&k, &admin, "Sam", None);
+    let mut sams = k.browser();
+    let (_, sam) = joins_with(&k, &mut sams, &secret);
+    assert_eq!(sam, user, "they're who the invite says");
+    assert_eq!(signed_in_as(&mut sams).as_deref(), Some(sam.as_str()));
 
-    // He has keys, so his new link must carry them: only the recovery key opens them.
-    let err = kernel::invite(&k.settings, "Andre", Some(&andre), || None).err().unwrap().to_string();
-    assert!(err.contains("pipe the recovery key"), "{err}");
-    let other = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
-    assert!(kernel::invite(&k.settings, "Andre", Some(&andre), || Some(other)).is_err(), "another recovery key opens nothing");
-    let invite = kernel::invite(&k.settings, "Andre", Some(&andre), || Some(k.recovery_key.clone())).unwrap();
+    // It's spent: nobody else signs up with it, and Sam isn't invited again.
+    let (status, _) = k.browser().post("/invite/about", json!({ "secret": secret }));
+    assert_eq!(status, 404);
+    let (status, _, _) = k.browser().get(&format!("/api/auth/passkey/generate-register-options?context={}", enc(&secret)));
+    assert_eq!(status, 404, "a used invite let someone make a passkey");
+    let again = kernel::invite(&k.address, &admin, "Sam", Some(&sam), None).err().unwrap().to_string();
+    assert!(again.contains("joined already"), "{again}");
 
-    // Opening it on a new device, his new passkey opens what his lost one did.
-    let mut browser = k.browser();
-    let (passkey, user) = joins_with(&k, &mut browser, invite.link.split_once('#').unwrap().1);
-    assert_eq!(user, andre);
-    assert_eq!(opens(&k, &andre, &passkey.prf()), 200);
-
-    // Someone new's link carries nothing, and needs no recovery key; their passkey opens only their own keys.
-    let (sam, sam_id) = joins(&k, &mut k.browser(), "Sam", None);
-    assert_ne!(sam_id, andre);
-    assert_eq!(opens(&k, &sam_id, &sam.prf()), 200);
-    assert_eq!(opens(&k, &andre, &sam.prf()), 403);
-}
-
-/// Signs in to a new client of theirs with their passkey, in a browser signed in at the address, as joining leaves it:
-/// → the client's access token, whose session at the vault opens their keys.
-fn signs_in(browser: &mut Browser, passkey: &Passkey) -> String {
-    use sha2::Digest;
-    let back = "http://localhost:9/signed-in";
-    let (status, client) = browser.post("/api/auth/oauth2/register", json!({ "client_name": "Tester", "redirect_uris": [back], "token_endpoint_auth_method": "none" }));
-    assert_eq!(status, 201, "{client}");
-    let client = client["client_id"].as_str().unwrap().to_string();
-    let verifier = B64U.encode(&rand::random::<[u8; 32]>());
-    let challenge = B64U.encode(&sha2::Sha256::digest(verifier.as_bytes()));
-    let (_, _, sign_in) = browser.get(&format!("/api/auth/oauth2/authorize?response_type=code&client_id={client}&redirect_uri={}&scope=openid&state=s&code_challenge={challenge}&code_challenge_method=S256", enc(back)));
-    let query = sign_in.expect("authorizing goes to the sign-in page").split_once('?').unwrap().1.to_string();
-    let (status, accepted) = browser.post("/sign-in/accept", json!({ "oauth_query": query, "prf": passkey.prf(), "credential": B64U.encode(&passkey.id) }));
-    assert_eq!(status, 200, "{accepted}");
-    let code = url_query(accepted["url"].as_str().unwrap())["code"].clone();
-    let form = [("grant_type", "authorization_code"), ("code", code.as_str()), ("redirect_uri", back), ("client_id", client.as_str()), ("code_verifier", verifier.as_str())];
-    let (status, tokens, _) = browser.send("POST", "/api/auth/oauth2/token", None, Some(&form));
-    assert_eq!(status, 200, "{tokens}");
-    tokens["access_token"].as_str().unwrap().to_string()
-}
-
-#[test]
-fn someone_in_the_log_before_their_first_passkey_joins_after_kernel_keys() {
-    const KIM: &str = "00000000000000e6";
-    let k = Kernel::start(None);
-    joins(&k, &mut k.browser(), "Andre", None);
-    // An admin's kernel keys gives Kim's own scope, with the key the install's nodes made, before she has a passkey.
-    let key = B64U.encode(&rand::random::<[u8; 32]>());
-    let give = |people: Value| post(&format!("{}/internal/scope-key", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "scope": format!("user:{KIM}"), "key": key, "people": people }));
-    assert_eq!(give(json!([KIM])).0, 200);
-    // She joins all the same; the next kernel keys opens her own to her, with that key.
-    let mut kims = k.browser();
-    let (passkey, kim) = joins(&k, &mut kims, "Kim", Some(KIM));
-    assert_eq!(kim, KIM);
-    let token = signs_in(&mut kims, &passkey);
-    let vault = kernel::Vault { url: k.vault.clone() };
-    let mine = format!("user:{KIM}");
-    assert!(vault.keys_until(&token, &[(&mine, "board", None)]).is_err());
-    assert_eq!(give(json!([KIM])).0, 200);
-    assert!(vault.keys_until(&token, &[(&mine, "board", None)]).is_ok());
-}
-
-#[test]
-fn an_admin_signed_in_makes_an_invite_link_that_works_once() {
-    let k = Kernel::start(None);
-    let (mut andres, mut sams) = (k.browser(), k.browser());
-    let ((andre_key, andre), (sam_key, sam)) = (joins(&k, &mut andres, "Andre", None), joins(&k, &mut sams, "Sam", None));
-    // The install's log says Andre is its admin and Sam a member, as an admin's kernel keys tells the vault.
-    let everyone = json!({ "scope": "global", "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [andre, sam], "admins": [andre] });
-    let (status, out) = post(&format!("{}/internal/scope-key", k.vault), &[("x-kernel-secret", &k.secret)], everyone);
+    // One that has ended lets nobody in.
+    let secret = B64U.encode(&rand::random::<[u8; 32]>());
+    let id = data_encoding::HEXLOWER.encode(&one::keys::sha256(secret.as_bytes()));
+    let fields = json!({ "id": id, "name": "Kim", "user": one::entry::new_id(), "until": now() + 1500 });
+    let (status, out) = post(&format!("{}/api/auth/invites", k.address), &[], signed(&admin, "POST /api/auth/invites", fields));
     assert_eq!(status, 200, "{out}");
-    let vault = kernel::Vault { url: k.vault.clone() };
-    let (andres, sams) = (signs_in(&mut andres, &andre_key), signs_in(&mut sams, &sam_key));
-
-    let err = vault.invite(&sams, "Kim").err().expect("a member makes no invite link").to_string();
-    assert!(err.contains("only an admin"), "{err}");
-    let (secret, until) = vault.invite(&andres, "Kim").unwrap();
-    assert!(until > now() + 2 * 86_400_000, "it works for days");
-    let mut kims = k.browser();
-    let (kim_key, kim) = joins_with(&k, &mut kims, &secret);
-    assert!(kim != andre && kim != sam, "it's for someone new");
-    // She opens Everyone's as soon as she's joined, with no kernel keys after: Andre's key, sealed into the link.
-    let kims = signs_in(&mut kims, &kim_key);
-    let everyone = |token: &str| vault.keys_until(token, &[("global", "board", None)]).map(|k| k.0[0].key).unwrap();
-    assert_eq!(everyone(&kims), everyone(&andres));
-    let (status, used) = k.browser().post("/invite/about", json!({ "token": secret }));
-    assert_eq!(status, 404, "a used link lets nobody else in: {used}");
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+    let (status, out) = k.browser().post("/invite/about", json!({ "secret": secret }));
+    assert_eq!(status, 404, "{out}");
+    let (status, _, _) = k.browser().get(&format!("/api/auth/passkey/generate-register-options?context={}", enc(&secret)));
+    assert_eq!(status, 404, "an ended invite let someone make a passkey");
 }
 
-/// Whether a passkey's PRF output opens `user`'s keys at the vault, as signing in to a client asks: → its status.
-fn opens(k: &Kernel, user: &str, prf: &str) -> u16 {
-    post(&format!("{}/internal/grant", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": user, "from": prf, "to": "a code that no client is given" })).0
+#[test]
+fn only_an_admins_device_makes_invites_or_says_who_is_an_admin() {
+    let ((admin, admin_hex), (member, member_hex), (stranger, _)) = (endpoint(), endpoint(), endpoint());
+    let k = Kernel::for_devices(vec![admin_hex]);
+    // The admin's device lets in a member's, which isn't an admin's.
+    let tell = one::keys::signed_request(&admin, "one/relay", json!({ "add": member_hex }), now());
+    assert_eq!(post(&format!("{}/relay/tell", k.address), &[], tell).0, 204);
+    for key in [&member, &stranger] {
+        assert!(kernel::invite(&k.address, key, "Kim", None, None).is_err(), "a device that isn't an admin's made an invite");
+    }
+    let (secret, kim) = invited(&k, &admin, "Kim", None);
+    joins_with(&k, &mut k.browser(), &secret);
+    let admin_route = format!("{}/api/auth/people/admin", k.address);
+    for key in [&member, &stranger] {
+        let (status, out) = post(&admin_route, &[], signed(key, "POST /api/auth/people/admin", json!({ "user": kim, "admin": true })));
+        assert_eq!(status, 403, "a device that isn't an admin's made someone one: {out}");
+    }
+
+    // A request counts only as signed: not unsigned, nor at another route, nor twice.
+    let fields = json!({ "user": kim, "admin": true });
+    assert_eq!(post(&admin_route, &[], fields.clone()).0, 403);
+    assert_eq!(post(&format!("{}/api/auth/invites", k.address), &[], signed(&admin, "POST /api/auth/people/admin", fields.clone())).0, 403);
+    let request = signed(&admin, "POST /api/auth/people/admin", fields);
+    let mut changed = request.clone();
+    changed["user"] = json!(one::entry::new_id());
+    assert_eq!(post(&admin_route, &[], changed).0, 403, "a changed request was taken");
+    assert_eq!(post(&admin_route, &[], request.clone()).0, 200);
+    assert_eq!(post(&admin_route, &[], request).0, 403, "a request was taken twice");
+}
+
+/// Joining with Google, as the invite page does: its secret kept for Google's answer, as `email`. → where the
+/// callback goes on to.
+fn joins_with_google(browser: &mut Browser, secret: &str, email: &str) -> Option<String> {
+    let (status, out) = browser.post("/invite/google", json!({ "secret": secret }));
+    assert_eq!(status, 200, "{out}");
+    google_callback(browser, "/", &format!("/invite#{secret}"), email)
+}
+
+/// Signs in with Google as `email`, coming back to `back` (or `failed`): → where Google's callback goes on to.
+fn google_callback(browser: &mut Browser, back: &str, failed: &str, email: &str) -> Option<String> {
+    let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": back, "errorCallbackURL": failed }));
+    assert_eq!(status, 200, "{out}");
+    let state = url_query(out["url"].as_str().unwrap())["state"].clone();
+    let claims = json!({ "iss": "https://accounts.google.com", "sub": email, "email": email, "email_verified": true, "hd": "test.example", "name": email });
+    let (_, _, to) = browser.get(&format!("/api/auth/callback/google?code={}&state={state}", B64U.encode(claims.to_string().as_bytes())));
+    to
+}
+
+#[test]
+fn an_admin_signs_in_only_with_a_passkey() {
+    let (admin, admin_hex) = endpoint();
+    let k = Kernel::google(vec![admin_hex]);
+    let (secret, andre) = invited(&k, &admin, "Andre", Some("andre@test.example"));
+    // Signing up with Google takes the account the invite is for, and nobody signs up by the domain alone.
+    let mut lees = k.browser();
+    joins_with_google(&mut lees, &secret, "lee@test.example");
+    assert_eq!(signed_in_as(&mut lees), None, "someone else's Google account signed up with the invite");
+    let mut kims = k.browser();
+    google_callback(&mut kims, "/", "/", "kim@test.example");
+    assert_eq!(signed_in_as(&mut kims), None, "someone at the domain joined uninvited");
+    let mut andres = k.browser();
+    assert_eq!(joins_with_google(&mut andres, &secret, "andre@test.example").as_deref(), Some("/"));
+    assert_eq!(signed_in_as(&mut andres).as_deref(), Some(andre.as_str()));
+    let mut again = k.browser();
+    google_callback(&mut again, "/", "/", "andre@test.example");
+    assert_eq!(signed_in_as(&mut again).as_deref(), Some(andre.as_str()), "he signs in with Google again");
+
+    // With no passkey yet, he isn't made an admin, or he couldn't sign in. Just signed in, he adds one.
+    let admin_route = format!("{}/api/auth/people/admin", k.address);
+    let made_admin = || post(&admin_route, &[], signed(&admin, "POST /api/auth/people/admin", json!({ "user": andre, "admin": true }))).0;
+    assert_eq!(made_admin(), 409);
+    let passkey = k.passkey();
+    let (status, options, _) = andres.get("/api/auth/passkey/generate-register-options");
+    assert_eq!(status, 200, "{options}");
+    let (status, out) = andres.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options) }));
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(made_admin(), 200);
+
+    // An admin, Google signs him in no more; his passkey does.
+    let mut elsewhere = k.browser();
+    google_callback(&mut elsewhere, "/", "/", "andre@test.example");
+    assert_eq!(signed_in_as(&mut elsewhere), None, "an admin signed in with Google");
+    assert_eq!(signs_in_with_passkey(&mut elsewhere, &passkey), 200);
+    assert_eq!(signed_in_as(&mut elsewhere).as_deref(), Some(andre.as_str()));
+}
+
+#[test]
+fn a_person_sees_only_their_own_join_requests_and_an_inviter_only_its_invites() {
+    let ((a, a_hex), (b, b_hex)) = (endpoint(), endpoint());
+    let k = Kernel::for_devices(vec![a_hex, b_hex]);
+    let ((kim_secret, _), (lee_secret, _)) = (invited(&k, &a, "Kim", None), invited(&k, &b, "Lee", None));
+    let (mut kims, mut lees) = (k.browser(), k.browser());
+    joins_with(&k, &mut kims, &kim_secret);
+    joins_with(&k, &mut lees, &lee_secret);
+    let requests = format!("{}/api/auth/devices/requests", k.address);
+
+    // Each newcomer's first device asks to join, with its proof of their invite's secret.
+    let asks = |browser: &mut Browser, secret: &str| {
+        let (key, hex) = endpoint();
+        let seal = data_encoding::HEXLOWER.encode(&one::keys::Endpoint::of(&key).seal);
+        let proof = one::keys::invite_proof(secret.as_bytes(), &key.verifying_key().to_bytes());
+        let (status, out) = browser.post("/api/auth/devices/requests", json!({ "key": hex, "seal": seal, "name": "Chrome on Mac", "proof": proof }));
+        assert_eq!(status, 200, "{out}");
+        hex
+    };
+    let (kim_device, lee_device) = (asks(&mut kims, &kim_secret), asks(&mut lees, &lee_secret));
+    let keys = |out: &Value| out["requests"].as_array().unwrap().iter().map(|r| r["key"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(keys(&kims.get("/api/auth/devices/requests").1), vec![kim_device.clone()]);
+    assert_eq!(keys(&lees.get("/api/auth/devices/requests").1), vec![lee_device.clone()]);
+    let by = |key: &ed25519_dalek::SigningKey, method: &str, path: &str| {
+        let request = signed(key, &format!("{method} /api/auth/devices/requests{path}"), json!({}));
+        let (status, _, body) = ask(method, &format!("{requests}{path}"), &[("x-one-request", &header(&request))], None);
+        (status, serde_json::from_str::<Value>(&body).unwrap_or(Value::Null))
+    };
+    assert_eq!(keys(&by(&a, "GET", "").1), vec![kim_device.clone()], "the inviting device sees its invites' requests");
+    assert_eq!(keys(&by(&b, "GET", "").1), vec![lee_device.clone()]);
+
+    // Nobody else sees or removes one: not another person, nor another inviting device.
+    assert_eq!(lees.get(&format!("/api/auth/devices/requests/{kim_device}")).0, 404);
+    assert_eq!(lees.send("DELETE", &format!("/api/auth/devices/requests/{kim_device}"), None, None).0, 404);
+    assert_eq!(by(&b, "DELETE", &format!("/{kim_device}")).0, 404);
+    let (status, out) = lees.post("/api/auth/devices/requests", json!({ "key": kim_device, "seal": kim_device, "name": "Not Kim's" }));
+    assert_eq!(status, 409, "someone else's device's request was taken over: {out}");
+    assert_eq!(k.browser().post("/api/auth/devices/requests", json!({ "key": lee_device, "seal": lee_device, "name": "Nobody's" })).0, 401);
+
+    // Kim's new device sees it waits, until the device that invited her has approved it.
+    assert_eq!(kims.get(&format!("/api/auth/devices/requests/{kim_device}")).0, 200);
+    assert_eq!(by(&a, "DELETE", &format!("/{kim_device}")).0, 200);
+    assert_eq!(kims.get(&format!("/api/auth/devices/requests/{kim_device}")).0, 404);
+
+    // What took or gave keys is gone.
+    for path in ["/invite/keys", "/passkeys/add", "/internal/invite"] {
+        let (status, _) = k.browser().post(path, json!({}));
+        assert!([404, 405].contains(&status), "{path} is still there: {status}");
+    }
 }
 
 /// Asks `url` as a browser's script would: → (status, headers, body).
@@ -868,6 +663,7 @@ impl GetWith for ureq::Agent {
     fn request_builder_get(&self, method: &str, url: &str) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
         match method {
             "HEAD" => self.head(url),
+            "DELETE" => self.delete(url),
             _ => self.get(url),
         }
     }
@@ -964,7 +760,7 @@ fn the_gateway_sends_each_path_where_it_belongs_and_nothing_a_node_says_runs_at_
 /// acts as them and is checked as theirs, so a member can't do what only admins may, and nobody acts as anyone else.
 #[test]
 fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
-    let v = Vault::start();
+    let v = StandIn::start();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let dir = crate::temp("node");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "node" }).to_string()).unwrap();
@@ -985,11 +781,9 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     rt.block_on(async {
         node.member("device", json!({ "key": one::entry::hex(&sams_phone.key), "seal": one::entry::hex(&sams_phone.seal), "user": sam, "roles": ["client"], "name": "Sam's phone", "user_name": "Sam", "role": "member" })).await.unwrap();
         node.member("setting", json!({ "name": "address", "value": v.auth })).await.unwrap();
-        node.member("setting", json!({ "name": "kernel_vault", "value": v.url })).await.unwrap();
+        node.member("setting", json!({ "name": "kernel_vault", "value": "http://127.0.0.1:9" })).await.unwrap();
     });
-    v.internal("passkey", json!({ "user": andre, "secret": "andre's passkey's prf output" }));
-    v.internal("passkey", json!({ "user": sam, "secret": "sam's passkey's prf output" }));
-    let (andres, sams) = (v.client(&andre, "andre's passkey's prf output", "web"), v.client(&sam, "sam's passkey's prf output", "web"));
+    let (andres, sams) = (v.token(&andre, "web"), v.token(&sam, "web"));
     let ask = |token: &str, method: &str, path: &str, body: Value| ask_at(&api, token, method, path, body);
     let state = |token: &str| ask(token, "GET", "/v1/state", Value::Null).1;
     let items = |token: &str| state(token)["settings_items"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
@@ -1071,19 +865,9 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert_eq!(get(&sams, &sams_file), 200, "Sam reads back what he put");
     assert_eq!(get(&andres, &sams_file), 400, "and Andre doesn't, by its hash");
 
-    // Removing someone takes their keys at the vault as soon as the node writes it, with no kernel keys after.
-    let vault = kernel::Vault { url: v.url.clone() };
-    let opens = |token: &str, scope: &str| vault.keys_until(token, &[(scope, "board", None)]).is_ok();
-    let key = || B64U.encode(&rand::random::<[u8; 32]>());
-    v.internal("scope-key", json!({ "scope": "global", "key": key(), "people": [andre, sam], "admins": [andre] }));
-    assert!(opens(&sams, "global"));
+    // Someone removed signs nothing here.
     assert_eq!(ask(&andres, "POST", "/v1/remove", json!({ "user": sam })).0, 200);
-    assert!(!opens(&sams, "global") && opens(&andres, "global"));
-    assert!(refused(ask(&sams, "GET", "/v1/entries?scope=global", Value::Null)), "and a removed person's phone signs nothing here");
-    // An admin who makes himself a member is one at the vault no more, at once.
-    assert_eq!(ask(&andres, "POST", "/v1/role", json!({ "user": andre, "role": "member" })).0, 200);
-    let err = vault.invite(&andres, "Kim").err().expect("he's no admin there").to_string();
-    assert!(err.contains("only an admin"), "{err}");
+    assert!(refused(ask(&sams, "GET", "/v1/entries?scope=global", Value::Null)), "a removed person's phone signs nothing here");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1126,12 +910,7 @@ fn signs_in_with_google(browser: &mut Browser, query: &str, started: bool) {
         assert_eq!(status, 200, "{out}");
     }
     let back = format!("/sign-in?{query}");
-    let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": back, "errorCallbackURL": back }));
-    assert_eq!(status, 200, "{out}");
-    let state = url_query(out["url"].as_str().unwrap())["state"].clone();
-    let andre = json!({ "iss": "https://accounts.google.com", "sub": "1234", "email": "andre@test.example", "email_verified": true, "hd": "test.example", "name": "Andre" });
-    let (status, _, to) = browser.get(&format!("/api/auth/callback/google?code={}&state={state}", B64U.encode(andre.to_string().as_bytes())));
-    assert_eq!((status, to.as_deref()), (302, Some(back.as_str())));
+    assert_eq!(google_callback(browser, &back, &back, "andre@test.example"), Some(back));
 }
 
 /// Signing in to a client with Google goes straight on, with no second tap, only for the authorization the sign-in
@@ -1139,8 +918,11 @@ fn signs_in_with_google(browser: &mut Browser, query: &str, started: bool) {
 /// for the person.
 #[test]
 fn a_google_sign_in_goes_on_only_to_the_client_it_was_started_for() {
-    let k = Kernel::google();
+    let (admin, admin_hex) = endpoint();
+    let k = Kernel::google(vec![admin_hex]);
     let mut andres = k.browser();
+    let (secret, _) = invited(&k, &admin, "Andre", Some("andre@test.example"));
+    joins_with_google(&mut andres, &secret, "andre@test.example");
     let fresh = |b: &mut Browser, query: &str| b.get(&format!("/sign-in/about?{query}")).1["fresh"].clone();
     let accept = |b: &mut Browser, query: &str| b.post("/sign-in/accept", json!({ "oauth_query": query })).0;
     let ours = authorizes(&mut andres, "Andre's", "http://localhost:9/signed-in");
@@ -1170,17 +952,16 @@ fn a_google_sign_in_goes_on_only_to_the_client_it_was_started_for() {
 
 #[test]
 fn only_a_try_installs_kernel_signs_its_person_in_with_nothing_to_show() {
-    let k = Kernel::start(None);
+    let (admin, admin_hex) = endpoint();
+    let k = Kernel::for_devices(vec![admin_hex]);
     let (status, out) = k.browser().post("/api/auth/try/sign-in", json!({}));
     assert_eq!(status, 404, "a kernel people use signed someone in with no passkey: {out}");
     let (status, out) = k.browser().post("/api/auth/try/sign-in", json!({ "person": "Andre" }));
     assert_eq!(status, 404, "a kernel people use signed someone in by name: {out}");
     // Nor does an invite link join anyone there without a passkey.
-    let invite = kernel::invite(&k.settings, "Sam", None, || None).unwrap();
-    let (status, out) = k.browser().post("/api/auth/try/join", json!({ "token": invite.link.split_once('#').unwrap().1 }));
+    let (secret, _) = invited(&k, &admin, "Sam", None);
+    let (status, out) = k.browser().post("/api/auth/try/join", json!({ "secret": secret }));
     assert_eq!(status, 404, "a kernel people use let someone join with no passkey: {out}");
-    let (status, _) = post(&format!("{}/internal/own", k.vault), &[("x-kernel-secret", &k.secret)], json!({ "user": "0123456789abcdef", "to": "a code", "client": "web" }));
-    assert_eq!(status, 403, "the vault of a kernel people use opened someone's keys itself");
     // Only `one try` makes such settings, and nothing puts them where anyone but this machine reaches them.
     let mut tried = k.settings.clone();
     tried.try_person = Some(("0123456789abcdef".into(), "Andre".into()));
@@ -1191,40 +972,8 @@ fn only_a_try_installs_kernel_signs_its_person_in_with_nothing_to_show() {
 }
 
 #[test]
-fn signing_out_ends_a_clients_sessions_at_the_vault() {
-    let v = Vault::start();
-    let vault = kernel::Vault { url: v.url.clone() };
-    v.internal("passkey", json!({ "user": ANDRE, "secret": "andre's passkey prf output" }));
-    let laptop = v.client(ANDRE, "andre's passkey prf output", "web");
-    // Another browser of Andre's: the same client to auth, signed in on its own.
-    let code = "the phone's authorization code";
-    v.internal("grant", json!({ "user": ANDRE, "from": "andre's passkey prf output", "to": code, "client": "web" }));
-    let (phone, until) = v.token(ANDRE, "web");
-    v.internal("rekey", json!({ "from": code, "to": "the phone's refresh token", "token": phone, "until": until }));
-    // The laptop refreshes: its old access token's session is still its own.
-    let (fresh, until) = v.token(ANDRE, "web");
-    assert_eq!(v.internal("rekey", json!({ "from": format!("web's refresh token for {ANDRE}"), "to": "the laptop's next refresh token", "token": fresh, "until": until })).1["moved"], true);
-    let board = [("global", "board", None)];
-    assert!(vault.keys_until(&laptop, &board).is_ok() && vault.keys_until(&fresh, &board).is_ok());
-
-    // The laptop signs out: auth revokes its refresh token, and no access token it was given gets keys again.
-    assert_eq!(v.internal("forget", json!({ "secret": "the laptop's next refresh token" })).0, 200);
-    for token in [&laptop, &fresh] {
-        assert!(vault.keys_until(token, &board).is_err(), "a signed-out client's session still gets keys");
-        assert_eq!(v.ask(token, "GET", "/session", json!(null)).0, 403);
-    }
-    assert!(vault.keys_until(&phone, &board).is_ok(), "signing out one browser signs out another");
-
-    // Removing the phone from Andre's clients ends its session too.
-    let (_, copies) = v.ask(&phone, "GET", "/copies", json!(null));
-    let id = copies["copies"].as_array().unwrap().iter().find(|c| c["kind"] == "client").unwrap()["id"].as_str().unwrap().to_string();
-    assert_eq!(v.ask(&phone, "DELETE", &format!("/copies/{id}"), json!(null)).0, 200);
-    assert!(vault.keys_until(&phone, &board).is_err(), "a removed client's session still gets keys");
-}
-
-#[test]
 fn the_address_serves_only_scripts_that_parse() {
-    let (settings, _) = kernel::Settings::new("Test", "https://one.example.com");
+    let settings = kernel::Settings::new("Test", "https://one.example.com");
     kernel::parses(&settings.web()).unwrap();
     let broken = vec![("web.js".to_string(), b"const label = 1;\nconst label = 2;\n".to_vec())];
     assert!(kernel::parses(&broken).is_err(), "a script that doesn't parse is refused");

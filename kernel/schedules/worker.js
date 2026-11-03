@@ -1,21 +1,17 @@
 // The schedules service: work that runs while you're away. A person switches one of an app's schedules on in a scope
-// (say, Morning summary, using Gmail); the vault makes a copy of their keys limited to that scope and app, sealed
-// under a secret that only this service keeps, itself sealed to its own key. Each run is claimed with a
-// conditional write, so it runs once; it gets its own session at the vault, an hour at most, and the node
-// that runs it is handed that session's token. People see, and stop, what they've let run.
+// (say, Morning summary, using Gmail). Each run is claimed with a conditional write, so it runs once. People see, and
+// stop, what they've let run. Until standing work holds keys by a grant (a later piece), nothing is let run: the vault
+// holds no one's keys to give a run.
 //
 // A Durable Object alarm wakes it for the next run, on Cloudflare and on any workerd alike.
 
 import { DurableObject } from "cloudflare:workers";
-import { b64u, openSealed, sealTo } from "../shared/crypto.js";
 import { bearer, Issuer } from "../shared/token.js";
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 /// The latest a run still happens after its time (or its period, if shorter).
 const LATE = 3_600_000;
-/// How long a run's session lasts.
-const RUN = 3_600_000;
 
 class Refused extends Error {
   constructor(status, message) {
@@ -27,7 +23,6 @@ const refuse = (status, message) => {
   throw new Refused(status, message);
 };
 const json = (v, status = 200) => Response.json(v, { status });
-const hex16 = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 /// When a schedule runs: `{ every: "15m" }`, or `{ at: "09:00", tz?, days? }`, as apps declare it.
 export function when(spec) {
@@ -115,42 +110,15 @@ export class Schedules extends DurableObject {
     refuse(404, "no such route");
   }
 
-  async vault(path, body) {
-    const resp = await this.env.VAULT.fetch(new Request(`https://vault/internal/${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-kernel-secret": this.env.KERNEL_SECRET },
-      body: JSON.stringify(body),
-    }));
-    const out = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Refused(resp.status, out.error || "the vault failed");
-    return out;
-  }
-
-  get pair() {
-    const key = JSON.parse(this.env.SCHEDULES_KEY);
-    return { secret: b64u.decode(key.secret), public: b64u.decode(key.public) };
-  }
-
-  /// Lets one of an app's schedules run in a scope while its person is away: `{ app, name, scope, title, what?, op,
-  /// input?, every | at, tz?, days?, node }`, with the person's access token.
+  /// Would let one of an app's schedules run in a scope while its person is away: `{ app, name, scope, title, what?,
+  /// op, input?, every | at, tz?, days?, node }`, with the person's access token.
   async add(token, claims, body) {
-    const { app, name, scope, op, node } = body;
+    const { app, name, op, node } = body;
     if (!NAME.test(app || "") || !NAME.test(name || "")) refuse(400, "name the app and its schedule");
     if (typeof op !== "string" || !op) refuse(400, "name the op it runs");
     if (typeof node !== "string" || !node.startsWith("https://")) refuse(400, "name where it runs: the install's address, or a node's, over https");
-    const w = when(body);
-    const title = String(body.title || name);
-    const what = String(body.what || app);
-    const { secret } = await this.vault("standing", { token, scopes: [scope], apps: [app], name: title });
-    const id = hex16();
-    const sealed = await sealTo(this.pair.public, secret);
-    const spec = JSON.stringify(w.ms ? { every: w.every } : { at: w.at, tz: w.tz, days: w.days.map((d) => DAYS[d]) });
-    this.sql.exec(
-      "insert into schedules (id, user, app, name, scope, title, what, spec, op, input, node, sealed, next, made) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      id, claims.sub, app, name, scope, title, what, spec, op, JSON.stringify(body.input ?? {}), node, sealed, next(w, Date.now()), Date.now(),
-    );
-    await this.wake();
-    return { id };
+    when(body);
+    refuse(503, "Schedules can't run while you're away yet: standing work comes back as grants.");
   }
 
   /// What a person has let run: each with what it may use, when it runs next, and how its last run went.
@@ -164,10 +132,9 @@ export class Schedules extends DurableObject {
     };
   }
 
-  /// Stops it: the vault forgets its copy, so its secret opens nothing again.
+  /// Stops it.
   async stop(user, id) {
-    const row = this.mine(user, id);
-    await this.vault("forget", { secret: new TextDecoder().decode(await openSealed(this.pair, row.sealed)) });
+    this.mine(user, id);
     this.sql.exec("delete from schedules where id = ?", id);
     this.sql.exec("delete from runs where schedule = ?", id);
     return {};
@@ -210,20 +177,7 @@ export class Schedules extends DurableObject {
       this.sql.exec("delete from runs where schedule = ? and slot < (select min(slot) from (select slot from runs where schedule = ? order by slot desc limit 20))", row.id, row.id);
       return { run, status, detail };
     };
-    let session;
-    try {
-      session = await this.vault("run", { secret: new TextDecoder().decode(await openSealed(this.pair, row.sealed)), until: Date.now() + RUN });
-    } catch (err) {
-      if (err.status === 404) this.sql.exec("update schedules set next = null where id = ?", row.id);
-      return finish("failed", err.message);
-    }
-    const resp = await fetch(`${row.node.replace(/\/$/, "")}/v1/kernel/run`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${session.token}` },
-      body: JSON.stringify({ run, app: row.app, schedule: row.name, op: row.op, input: JSON.parse(row.input), scope: row.scope }),
-    }).catch((err) => ({ ok: false, status: 0, text: async () => String(err) }));
-    if (resp.ok) return finish("ran");
-    return finish("failed", `${row.node} said ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    return finish("failed", "nothing runs while you're away until standing work comes back as grants");
   }
 }
 

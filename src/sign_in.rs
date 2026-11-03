@@ -197,7 +197,7 @@ pub fn token() -> Result<Option<String>> {
     Ok(kept.access)
 }
 
-/// Signs this machine out: its refresh token is revoked, which deletes its keys at the vault, and forgotten here.
+/// Signs this machine out: its refresh token is revoked, and forgotten here.
 pub fn sign_out() -> Result<bool> {
     let Some(kept) = kept() else { return Ok(false) };
     let _ = std::fs::remove_file(path());

@@ -1,6 +1,6 @@
 //! The kernel services (`kernel/`: auth, vault, schedules, the URL signer) as nodes meet them: the formats they agree on
 //! (`kernel/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
-//! asking the vault for keys, and building and running the services in workerd.
+//! and building and running the services in workerd.
 
 #[cfg(not(target_family = "wasm"))]
 use std::time::Duration;
@@ -8,13 +8,11 @@ use std::time::Duration;
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
 use anyhow::{Context, Result, anyhow, ensure};
-#[cfg(not(target_family = "wasm"))]
-use anyhow::bail;
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use sha2::{Digest, Sha256, Sha512};
 
 // Keys.
@@ -203,28 +201,7 @@ impl Issuer {
     }
 }
 
-// The vault, as nodes ask it.
-
-/// A key a call names, and (from the vault) the key itself.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Key {
-    pub scope: String,
-    pub app: String,
-    pub database: Option<String>,
-    pub key: [u8; 32],
-}
-
-/// A token's session at the vault: whose it is.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Session {
-    pub user: String,
-    /// The client it's for: an OAuth client's id, or `schedules` for a scheduled run.
-    pub client: Option<String>,
-    /// The client's name, as its person sees it ("Chrome on Mac").
-    #[serde(default)]
-    pub name: Option<String>,
-    pub until: u64,
-}
+// The schedules service, as nodes meet it.
 
 /// A run the schedules service hands a node: `POST <address>/v1/kernel/run`, its token as the bearer. `run` names
 /// it, the same each time it's sent, so a node that leases by it runs it once.
@@ -236,86 +213,6 @@ pub struct Run {
     pub op: String,
     pub input: Value,
     pub scope: String,
-}
-
-/// The vault at `url`, asked with a caller's access token.
-#[cfg(not(target_family = "wasm"))]
-pub struct Vault {
-    pub url: String,
-}
-
-#[cfg(not(target_family = "wasm"))]
-impl Vault {
-    fn post(&self, token: &str, path: &str, body: Value) -> Result<Value> {
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-        let mut resp = agent.post(format!("{}{path}", self.url.trim_end_matches('/'))).header("authorization", format!("Bearer {token}")).send_json(body)?;
-        let status = resp.status().as_u16();
-        let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-        if status != 200 {
-            bail!("the vault said: {}", out["error"].as_str().unwrap_or("nothing"));
-        }
-        Ok(out)
-    }
-
-    /// Whose a token is, while its session lasts: a node asks before it runs anything as its person.
-    pub fn session(&self, token: &str) -> Result<Session> {
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-        let mut resp = agent.get(format!("{}/session", self.url.trim_end_matches('/'))).header("authorization", format!("Bearer {token}")).call()?;
-        let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-        ensure!(resp.status() == 200, "the vault said: {}", out["error"].as_str().unwrap_or("nothing"));
-        Ok(serde_json::from_value(out)?)
-    }
-
-    /// The keys a call names, (scope, app, database?) each, and until when (milliseconds) the session that gave them
-    /// lasts.
-    pub fn keys_until(&self, token: &str, want: &[(&str, &str, Option<&str>)]) -> Result<(Vec<Key>, u64)> {
-        let out = self.post(token, "/keys", keys_asked(want))?;
-        Ok((keys_given(&out)?, out["until"].as_u64().context("the vault didn't say until when")?))
-    }
-
-    /// Tells the vault that `user`'s role in `scopes` changed in the install's log, as the person who changed it: with
-    /// none, they open none of them there any more; invited, the vault keeps a group's key for them until they accept.
-    pub fn role(&self, token: &str, user: &str, role: Option<crate::members::Role>, invited: bool, scopes: &[crate::entry::Scope]) -> Result<()> {
-        let scopes: Vec<String> = scopes.iter().map(|s| s.to_string()).collect();
-        self.post(token, "/role", json!({ "user": user, "role": role, "invited": invited, "scopes": scopes }))?;
-        Ok(())
-    }
-
-    /// A new group's key, which the vault makes and seals to the token's person, its first admin.
-    pub fn group(&self, token: &str, group: &str) -> Result<[u8; 32]> {
-        let out = self.post(token, "/group", json!({ "group": group }))?;
-        decode_key(out["key"].as_str().context("the vault gave no key")?)
-    }
-
-    /// An invite link's secret for someone new called `name`, and until when (milliseconds) it works, asked by an
-    /// admin of the install.
-    pub fn invite(&self, token: &str, name: &str) -> Result<(String, u64)> {
-        let out = self.post(token, "/invite", json!({ "name": name }))?;
-        Ok((out["token"].as_str().context("the vault gave no invite")?.to_string(), out["until"].as_u64().unwrap_or(0)))
-    }
-}
-
-/// What a node posts to the vault's `/keys` for the keys a call names: (scope, app, database?) each.
-pub fn keys_asked(want: &[(&str, &str, Option<&str>)]) -> Value {
-    let keys: Vec<Value> = want.iter().map(|(s, a, d)| if let Some(d) = d { json!({ "scope": s, "app": a, "database": d }) } else { json!({ "scope": s, "app": a }) }).collect();
-    json!({ "keys": keys })
-}
-
-/// The keys in the vault's answer to `/keys`.
-pub fn keys_given(out: &Value) -> Result<Vec<Key>> {
-    out["keys"]
-        .as_array()
-        .context("the vault gave no keys")?
-        .iter()
-        .map(|k| {
-            Ok(Key {
-                scope: k["scope"].as_str().context("a key's scope")?.into(),
-                app: k["app"].as_str().context("a key's app")?.into(),
-                database: k["database"].as_str().map(str::to_string),
-                key: decode_key(k["key"].as_str().context("a key")?)?,
-            })
-        })
-        .collect()
 }
 
 #[cfg(not(target_family = "wasm"))]

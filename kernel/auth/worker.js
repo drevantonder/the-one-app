@@ -1,28 +1,29 @@
-// The auth service: who you are. Better Auth, in a Durable Object: sign-in by passkey only, since only a passkey's PRF
-// output opens a person's keys, or, on an install whose people sign in with their work Google account (`SIGN_IN`), by
-// Google only, every time, limited to the install's domain (`JOIN_DOMAIN`); and an OAuth server (per MCP's authorization spec) that every client signs in through: the iPhone and Mac apps,
-// and MCP clients like Claude Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at
-// /api/auth/jwks, so nodes and the vault check them offline.
+// The auth service: who you are, and nothing more. Better Auth, in a Durable Object: sign-in by passkey, or, on an
+// install whose people sign in with their work Google account (`SIGN_IN`), by Google at the install's domain
+// (`JOIN_DOMAIN`) too, though never for an admin (`passkey_only`), who signs in with a passkey; and an OAuth server (per
+// MCP's authorization spec) that every client signs in through: the iPhone and Mac apps, and MCP clients like Claude
+// Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at /api/auth/jwks, so nodes check them
+// offline. It opens nothing: keys are only on people's devices, so faking a sign-in opens nothing either. A passkey's
+// PRF output stays in the browser (pages.js).
 //
-// Keys open only with a passkey. Every client is its person, with everything they can use, so the only question is
-// who: signing in to a client with a passkey, its PRF output opens the person's keys at the vault, which seals a copy
-// for the client under its authorization code; each time the
-// client swaps a code or refresh token for new tokens, the vault moves the copy to the new refresh token and opens a
-// session under the new access token. Better Auth keeps refresh tokens only as hashes, so its database opens nothing.
+// Nobody signs up uninvited, the install's first person too: an admin's device makes a secret, and tells auth its hash,
+// who it's for and until when, signed with its endpoint key (`POST /api/auth/invites`); opening `<address>/invite#
+// <secret>` lets that person sign up once, as the id and name the invite gives them. At a workplace too: signing in
+// with Google makes someone only with an invite for that Google account's email.
 //
-// Nobody signs up uninvited, the install's first person too: `one kernel invite` makes a link that works once, for a
-// few days, and opening it lets its person make their first passkey, which makes their keys. A link for someone who
-// lost every passkey carries their keys, opened with the recovery key, for their new one.
+// A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
+// its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves.
 //
-// Signing in with Google, anyone at the domain joins by signing in, and the vault opens their keys itself once Google
-// says it's them. An invite there only says who someone with an email is in the install, for those who were in it
-// before it signed people in this way.
+// What an endpoint signs (`signedRequest` in shared/crypto.js, domain `one/auth`) names its route (`route: "POST
+// /api/auth/invites"`), is taken once, and counts only from one of the install's endpoints, as the relay's list says
+// (`RELAY.allowed(key)`), an admin's for what only admins do. A POST's body is the signed request; a GET's or DELETE's
+// is in `x-one-request`, as base64url of its JSON.
 //
 // A try install's kernel (`SIGN_IN` is "try") signs in its first person (`TRY_USER`, `TRY_NAME`) with no passkey and
-// no Google: its sign-in page goes straight on, and the vault opens their keys itself, as for Google. Someone it
-// invites joins by opening their link, again with no passkey, and is then who that browser signs in as. It's for
-// testing clients without a person: only `one try` turns it on (kernel::Settings::try_person), on a kernel that
-// listens only on its own machine, and `kernel deploy` refuses one, so no real install's kernel ever does this.
+// no Google: its sign-in page goes straight on. Someone it invites joins by opening their link, again with no passkey,
+// and is then who that browser signs in as. It's for testing clients without a person: only `one try` turns it on
+// (kernel::Settings::try_person), on a kernel that listens only on its own machine, and `kernel deploy` refuses one,
+// so no real install's kernel ever does this.
 
 import { DurableObject } from "cloudflare:workers";
 import { oauthProvider } from "@better-auth/oauth-provider";
@@ -32,12 +33,13 @@ import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx }
 import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
-import { NO_PRF, codePage, invitePage, passkeysPage, signInPage, tryPage } from "./pages.js";
+import { b64u, checkRequest } from "../shared/crypto.js";
+import { bearer, verify } from "../shared/token.js";
+import { codePage, invitePage, passkeysPage, signInPage, tryPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
 
 const json = (v, status = 200) => Response.json(v, { status });
 const hex16 = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
-/// Refuses, as Better Auth does, since some refusals are made inside its routes.
 /// Where a client's sign-in goes, in words: the site it goes back to, or an app on the person's device (one listening on
 /// it, or its own link scheme), or the device that showed them a code.
 function goesTo(uri, origin) {
@@ -50,26 +52,28 @@ function goesTo(uri, origin) {
 }
 const [ON_DEVICE, BY_CODE] = ["an app on this device", "where you got your code"];
 
+/// Refuses, as Better Auth does, since some refusals are made inside its routes.
 const refuse = (status, message) => {
-  throw new APIError({ 400: "BAD_REQUEST", 403: "FORBIDDEN", 404: "NOT_FOUND" }[status], { message });
+  throw new APIError({ 400: "BAD_REQUEST", 401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 503: "SERVICE_UNAVAILABLE" }[status], { message });
 };
-/// How long an invite link works.
-const INVITE = 3 * 86_400_000;
+/// The longest an invite works.
+const INVITE = 30 * 86_400_000;
+/// How long a device's request to join waits.
+const REQUEST = 15 * 60_000;
 /// How long a sign-in code works.
 const CODE = 10 * 60_000;
-/// How lately someone signed in with Google for a client to be added as them.
+/// How lately someone signed in for a client to be added as them, or a passkey added.
 const FRESH = 5 * 60_000;
-/// How long a Google sign-in started for a client's authorization goes on to it once it's back.
+/// How long a Google sign-in started for a client's authorization, or to join, goes on to it once it's back.
 const STARTED = 15 * 60_000;
 /// A sign-in code's letters: no vowels, so it spells no word, and none that look alike.
 const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
-
-/// The hash an invite is kept by, so the auth service's database holds no link that works.
-async function inviteId(token) {
-  if (!token) refuse(403, "Joining takes an invite link: ask an admin for one.");
-  if (typeof token !== "string" || token.length < 32) refuse(404, "That invite link isn't whole: open the link you were sent as it is.");
-  return hash(token);
-}
+/// What endpoints sign for auth.
+const DOMAIN = "one/auth";
+/// Where Better Auth makes a session with a passkey: the only places an admin's is made.
+const BY_PASSKEY = ["/passkey/verify-authentication", "/passkey/verify-registration"];
+const KEY = /^[0-9a-f]{64}$/;
+const USER = /^[0-9a-f]{16}$/;
 
 /// A SHA-256 hash, as hex, of a secret kept only that way.
 async function hash(secret) {
@@ -86,31 +90,42 @@ function passkeyName(aaguid, transports = [], agent = "") {
   return device ? `Passkey on ${device[1]}` : "Passkey";
 }
 
+/// A cookie this address set, by name: `__Host-` first on https.
+function cookieName(env, name) {
+  return `${env.ADDRESS.startsWith("https:") ? "__Host-" : ""}${name}`;
+}
+
+function cookieOf(headers, name) {
+  const prefix = `${name}=`;
+  return (headers?.get("cookie") || "").split(/;\s*/).find((c) => c.startsWith(prefix))?.slice(prefix.length) || null;
+}
+
+function setCookie(env, name, value, seconds) {
+  const secure = env.ADDRESS.startsWith("https:");
+  return `${cookieName(env, name)}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${secure ? "; Secure" : ""}`;
+}
+
 export class Auth extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    ctx.storage.sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null, until integer not null, used integer)");
-    if (!ctx.storage.sql.exec("select name from pragma_table_info('invites') where name = 'email'").toArray().length) ctx.storage.sql.exec("alter table invites add column email text");
-    ctx.storage.sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
-    ctx.storage.sql.exec("create table if not exists google_starts (id text primary key, query text not null, made integer not null)");
+    const sql = ctx.storage.sql;
+    // Invites, by their secret's hash, and `by`, the endpoint that made one; kept once used, for the requests of the
+    // device its person joined with.
+    sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null unique, email text, until integer not null, by text not null, used integer)");
+    // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`.
+    sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null)");
+    // The people who sign in only with a passkey: admins.
+    sql.exec("create table if not exists passkey_only (user text primary key)");
+    // Signed requests taken, until they're too old to take again.
+    sql.exec("create table if not exists signed (sig text primary key, at integer not null)");
+    sql.exec("create table if not exists codes (code text primary key, state text not null unique, query text not null, until integer not null, back text)");
+    sql.exec("create table if not exists google_starts (id text primary key, query text not null, made integer not null)");
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const options = this.options();
       const { runMigrations } = await getMigrations(options);
       await runMigrations();
       this.auth = betterAuth(options);
     });
-  }
-
-  /// Asks the vault, as only the auth service may.
-  async vault(path, body) {
-    const resp = await this.env.VAULT.fetch(new Request(`https://vault/internal/${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-kernel-secret": this.env.KERNEL_SECRET },
-      body: JSON.stringify(body),
-    }));
-    const out = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw Object.assign(new Error(out.error || "the vault failed"), { status: resp.status });
-    return out;
   }
 
   options() {
@@ -135,18 +150,28 @@ export class Auth extends DurableObject {
       databaseHooks: {
         user: {
           create: {
-            // Only someone invited signs up (their passkey's registration makes them), as who the invite says they
-            // are in the install, so nodes know them by the same id. Signing in with Google, anyone at the domain
-            // does, as who an invite for their email says, if there is one.
-            async before(user) {
-              if (tried) return user.id === env.TRY_USER || (self.admitting && user.id === self.admitting) ? undefined : false;
-              if (!google) return self.admitting && user.id === self.admitting ? undefined : false;
+            // Only someone invited signs up, as who the invite says they are in the install, so devices know them by
+            // the same id: with a passkey, as it's registered, or a try install's link (`admit`); with Google, as
+            // Google says the email is theirs, with the invite this browser opened to join.
+            async before(user, ctx) {
+              if (self.admitting && user.id === self.admitting) return;
+              if (tried) return user.id === env.TRY_USER ? undefined : false;
+              if (!google) return false;
+              const secret = cookieOf(ctx?.headers, cookieName(env, "one-invite"));
+              const invite = secret && sql.exec("select * from invites where id = ?", await hash(secret)).toArray()[0];
               const email = String(user.email || "").toLowerCase();
-              if (!user.emailVerified || !email.endsWith(`@${env.JOIN_DOMAIN}`)) return false;
-              const [invite] = sql.exec("select id, name, user from invites where email = ? and used is null order by until desc", email).toArray();
-              if (!invite) return;
+              if (!invite || invite.used || invite.until <= Date.now() || !user.emailVerified || invite.email !== email) return false;
               sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
               return { data: { ...user, id: invite.user, name: invite.name } };
+            },
+          },
+        },
+        session: {
+          create: {
+            // An admin signs in only with a passkey, which resists phishing.
+            async before(session, ctx) {
+              if (tried || BY_PASSKEY.includes(ctx?.path)) return;
+              if (sql.exec("select 1 from passkey_only where user = ?", session.userId).toArray().length) refuse(403, "You're an admin, so you sign in with your passkey.");
             },
           },
         },
@@ -155,28 +180,16 @@ export class Auth extends DurableObject {
         before: createAuthMiddleware(async (ctx) => {
           if (ctx.path === "/oauth2/authorize" && ctx.query) {
             if (!ctx.query.resource && resources[0]) ctx.query.resource = resources[0];
-            // A client's keys are kept under its refresh token, so every client gets one, asked for or not: without
-            // it, it'd be signed in and open nothing.
+            // Every client gets a refresh token, asked for or not, so it stays signed in.
             const scopes = String(ctx.query.scope || "").split(" ").filter(Boolean);
             if (!scopes.includes("offline_access")) ctx.query.scope = [...scopes, "offline_access"].join(" ");
           }
           if (ctx.path === "/oauth2/token" && ctx.body && !ctx.body.resource && resources[0]) ctx.body.resource = resources[0];
         }),
-        after: createAuthMiddleware(async (ctx) => {
-          if (ctx.path === "/oauth2/token") await self.tokensIssued(ctx.body || {}, ctx.context.returned);
-          if (ctx.path === "/oauth2/revoke" && ctx.body?.token) await self.vault("forget", { secret: ctx.body.token }).catch(() => {});
-          // A passkey removed opens nothing again.
-          if (ctx.path === "/passkey/delete-passkey" && ctx.context.session) {
-            const user = ctx.context.session.user.id;
-            const keep = sql.exec("select credentialID from passkey where userId = ?", user).toArray().map((r) => r.credentialID);
-            await self.vault("forget-passkeys", { user, keep });
-          }
-        }),
       },
       plugins: [
         jwt({ jwks: { keyPairConfig: { alg: "EdDSA", crv: "Ed25519" } }, jwt: { issuer: `${url.origin}/api/auth`, expirationTime: "1h" } }),
-        ...(tried ? [tryInstall(self, env.TRY_USER, env.TRY_NAME)] : []),
-        ...(google || tried ? [] : [passkey({
+        ...(tried ? [tryInstall(self, env.TRY_USER, env.TRY_NAME)] : [passkey({
           rpID: url.hostname,
           rpName: env.NAME || "The One App",
           origin: url.origin,
@@ -187,17 +200,18 @@ export class Auth extends DurableObject {
               const invite = await self.openInvite(context);
               return { id: invite.user, name: invite.name, displayName: invite.name };
             },
-            // A passkey without PRF opens nothing, so none is kept. The page says only whether it has PRF, never its output.
+            // Someone signed in adds one only just after signing in, so a session taken from them adds none.
             async afterVerification({ ctx, verification, user, clientData, context }) {
-              if (clientData.clientExtensionResults?.prf?.enabled !== true) throw new APIError("BAD_REQUEST", { message: NO_PRF });
-              if (!(await getSessionFromCtx(ctx))) await self.admit(await self.openInvite(context), user);
+              const session = await getSessionFromCtx(ctx);
+              if (session && !fresh(session)) refuse(403, "Sign in again, then add it.");
+              if (!session) await self.admit(await self.openInvite(context), user);
               return { name: passkeyName(verification.registrationInfo?.aaguid, clientData.response?.transports || [], ctx.headers?.get("user-agent") || "") };
             },
           },
         })]),
         oauthProvider({
-          // Signed in or not, a client's authorization is the sign-in page: its passkey (or Google) is what gives the
-          // client keys.
+          // Signed in or not, a client's authorization is the sign-in page, which asks for the passkey (or Google)
+          // each time.
           loginPage: "/sign-in",
           consentPage: "/sign-in",
           scopes: ["openid", "profile", "offline_access"],
@@ -217,22 +231,13 @@ export class Auth extends DurableObject {
     };
   }
 
-  /// After the token endpoint answers: moves the client's keys to its new refresh token and opens a session under
-  /// its new access token.
-  async tokensIssued(body, returned) {
-    const tokens = returned instanceof Response ? await returned.clone().json().catch(() => null) : returned;
-    if (!tokens?.access_token || !tokens.refresh_token) return;
-    const from = body.grant_type === "authorization_code" ? body.code : body.grant_type === "refresh_token" ? body.refresh_token : null;
-    if (!from) return;
-    const until = Date.now() + (tokens.expires_in || 3600) * 1000;
-    await this.vault("rekey", { from, to: tokens.refresh_token, token: tokens.access_token, until });
-  }
-
   async fetch(request) {
     await this.ready;
     const url = new URL(request.url);
     const path = url.pathname;
     try {
+      const ours = await this.route(request, url);
+      if (ours) return ours;
       if (path === "/api/auth/oauth2/register" && request.method === "POST") await this.notNamedAsUs(await request.clone().json().catch(() => ({})));
       if (path.startsWith("/api/auth/")) return await this.auth.handler(request);
       if (path.startsWith("/.well-known/oauth-authorization-server") || path.startsWith("/.well-known/openid-configuration")) {
@@ -247,33 +252,179 @@ export class Auth extends DurableObject {
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
       const tried = this.env.SIGN_IN === "try";
       if (path === "/sign-in" && request.method === "GET") return html(tried ? tryPage({ ...look, person: this.env.TRY_NAME }) : signInPage({ ...look, google }));
-      if (path === "/internal/invite" && request.method === "POST") return json(await this.invite(request, await request.json()));
       if (path === "/sign-in/about") return json(await this.about(request, url.searchParams));
       if (path === "/sign-in/google" && request.method === "POST" && google) return await this.startGoogle(request, await request.json());
       if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
       if (path === "/sign-in/code" && request.method === "GET") return this.codeOpened(url.searchParams.get("c"), look, google);
       if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ ...look, google, done: await this.codeDone(url.searchParams) }));
       if (path === "/sign-in/code/take" && request.method === "POST") return this.codeTaken(await request.json());
-      if (path === "/sign-in/accept" && request.method === "POST") {
-        const body = await request.json();
-        return json(await (tried ? this.acceptTry(request, body) : google ? this.acceptGoogle(request, body) : this.accept(request, body)));
-      }
-      // Invite links are for an install whose people sign in with a passkey, or a try install's; passkeys only the former.
-      if (google) return new Response("not found", { status: 404 });
-      if (path === "/invite" && request.method === "GET") return html(invitePage({ ...look, tried }));
+      if (path === "/sign-in/accept" && request.method === "POST") return json(await this.accept(request, await request.json()));
+      if (path === "/invite" && request.method === "GET") return html(invitePage({ ...look, tried, google }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
-      if (tried) return new Response("not found", { status: 404 });
-      if (path === "/invite/keys" && request.method === "POST") return json(await this.inviteKeys(request, await request.json()));
-      if (path === "/passkeys" && request.method === "GET") return html(passkeysPage(look));
-      if (path === "/passkeys/add" && request.method === "POST") return json(await this.addPasskey(request, await request.json()));
+      if (path === "/invite/google" && request.method === "POST" && google) return await this.joinWithGoogle(request, await request.json());
+      if (path === "/passkeys" && request.method === "GET" && !tried) return html(passkeysPage(look));
       return new Response("not found", { status: 404 });
     } catch (err) {
       // Our own refusals have a numeric status; Better Auth's say theirs in statusCode.
       const status = typeof err.status === "number" ? err.status : err.statusCode;
-      if (status >= 400 && status < 500) return json({ error: err.body?.error_description || err.body?.message || err.message }, status);
+      if (status >= 400 && status < 500 || status === 503) return json({ error: err.body?.error_description || err.body?.message || err.message }, status);
       console.error(err.stack || err);
       return json({ error: "the auth service failed" }, 500);
     }
+  }
+
+  /// The routes of auth's own under /api/auth/: invites, admins and devices' requests to join. → their answer, or
+  /// nothing for any other path.
+  async route(request, url) {
+    const path = url.pathname;
+    const method = request.method;
+    if (path === "/api/auth/invites" && method === "POST") return json(await this.invite(request));
+    if (path === "/api/auth/people/admin" && method === "POST") return json(await this.setAdmin(request));
+    if (path === "/api/auth/devices/requests" && method === "POST") return json(await this.ask(request));
+    if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
+    const one = path.match(/^\/api\/auth\/devices\/requests\/([0-9a-f]{64})$/);
+    if (one && method === "GET") return json(await this.request(request, one[1]));
+    if (one && method === "DELETE") return json(await this.unask(request, one[1]));
+    return null;
+  }
+
+  /// What an endpoint signed for this request's route, if it brought one (its body, or `x-one-request`), checked:
+  /// fresh, taken once, and from one of the install's endpoints. → `{ by, fields, admin }`, or null.
+  async signed(request, body) {
+    const route = `${request.method} ${new URL(request.url).pathname}`;
+    let asked = body;
+    if (asked === undefined) {
+      const header = request.headers.get("x-one-request");
+      if (!header) return null;
+      try { asked = JSON.parse(new TextDecoder().decode(b64u.decode(header))); } catch { refuse(400, "x-one-request isn't a signed request"); }
+    }
+    const { by, fields } = await checkRequest(DOMAIN, asked).catch((err) => refuse(403, `That request isn't signed as it should be: ${err.message}.`));
+    if (fields.route !== route) refuse(403, `That request was signed for ${fields.route}, not ${route}.`);
+    const sql = this.ctx.storage.sql;
+    sql.exec("delete from signed where at <= ?", Date.now() - 2 * 60_000);
+    if (sql.exec("select 1 from signed where sig = ?", asked.sig).toArray().length) refuse(403, "That request was sent already.");
+    sql.exec("insert into signed (sig, at) values (?, ?)", asked.sig, Date.now());
+    if (!this.env.RELAY) refuse(503, "The install has no relay to say which devices are its own.");
+    const allowed = await this.env.RELAY.allowed(by);
+    if (!allowed) refuse(403, "That device isn't one of the install's.");
+    return { by, fields, admin: allowed.admin === true };
+  }
+
+  /// Someone signed in: by a session here, or an access token auth signed. → their user id, or null.
+  async person(request) {
+    const token = bearer(request);
+    if (token) {
+      const origin = new URL(this.env.ADDRESS).origin;
+      const jwks = await (await this.auth.handler(new Request(`${origin}/api/auth/jwks`))).json();
+      const claims = await verify(token, jwks, `${origin}/api/auth`).catch((err) => refuse(401, `That access token won't do: ${err.message}.`));
+      return claims.sub;
+    }
+    return (await this.auth.api.getSession({ headers: request.headers }))?.user.id || null;
+  }
+
+  /// An invite, made by an admin's device: `{ id, name, user, email?, until }`, `id` the sha256 (hex) of the secret
+  /// its link carries, `user` the id they'll have. On an install whose people sign in with Google, `email` is the
+  /// Google account they sign up with. Another invite for the same person, not yet used, replaces it.
+  async invite(request) {
+    const signed = await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")));
+    if (!signed?.admin) refuse(403, "Only an admin's device invites someone.");
+    const { id, name, user, email, until } = signed.fields;
+    if (!KEY.test(id || "")) refuse(400, "an invite's id is the sha256 of its secret, in hex");
+    if (typeof name !== "string" || !name.trim()) refuse(400, "give the person's name");
+    if (!USER.test(user || "")) refuse(400, "a user id is 16 hex characters");
+    if (!(Number.isSafeInteger(until) && until > Date.now() && until <= Date.now() + INVITE)) refuse(400, "an invite works for up to 30 days");
+    if (email != null && (typeof email !== "string" || !/^[^@\s]+@[^@\s]+$/.test(email))) refuse(400, `${email} isn't an email`);
+    if (this.env.SIGN_IN === "google" && !String(email || "").toLowerCase().endsWith(`@${this.env.JOIN_DOMAIN}`)) refuse(400, `People here sign in with Google: give their email at ${this.env.JOIN_DOMAIN}.`);
+    const sql = this.ctx.storage.sql;
+    if (sql.exec("select 1 from user where id = ?", user).toArray().length) refuse(409, `${name.trim()} has joined already.`);
+    sql.exec("delete from invites where until <= ? and used is null", Date.now());
+    sql.exec("insert or replace into invites (id, name, user, email, until, by, used) values (?, ?, ?, ?, ?, ?, null)", id, name.trim(), user, email ? email.toLowerCase() : null, until, signed.by);
+    return { until };
+  }
+
+  /// Whether someone signs in only with a passkey, as an admin does: `{ user, admin }`, from an admin's device, as it
+  /// writes their role. Someone with no passkey yet isn't made one, or they couldn't sign in.
+  async setAdmin(request) {
+    const signed = await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")));
+    if (!signed?.admin) refuse(403, "Only an admin's device says who's an admin.");
+    const { user, admin } = signed.fields;
+    if (!USER.test(user || "") || typeof admin !== "boolean") refuse(400, "give user, and admin as true or false");
+    const sql = this.ctx.storage.sql;
+    if (admin && this.env.SIGN_IN !== "try" && !sql.exec("select 1 from passkey where userId = ?", user).toArray().length) refuse(409, "They have no passkey yet, which an admin signs in with: they add one on their Passkeys page first.");
+    if (admin) sql.exec("insert or ignore into passkey_only (user) values (?)", user);
+    else sql.exec("delete from passkey_only where user = ?", user);
+    return {};
+  }
+
+  /// Forgets requests to join that waited too long.
+  expire() {
+    this.ctx.storage.sql.exec("delete from requests where made <= ?", Date.now() - REQUEST);
+  }
+
+  /// A device signed in asks to join: `{ key, seal, name, proof? }`, its endpoint keys (hex), its name, and for a
+  /// newcomer's first device, `keys::invite_proof` of its invite's secret and key, kept with that invite for the
+  /// inviting admin's device to check. → until when it waits.
+  async ask(request) {
+    const user = (await this.person(request)) || refuse(401, "Sign in first.");
+    const { key, seal, name, proof } = await request.json().catch(() => refuse(400, "the body isn't JSON"));
+    if (!KEY.test(key || "") || !KEY.test(seal || "")) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
+    if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the device's name, up to 64 characters");
+    if (proof != null && !KEY.test(proof)) refuse(400, "a proof is 64 hex characters");
+    this.expire();
+    const sql = this.ctx.storage.sql;
+    const [had] = sql.exec("select user from requests where key = ?", key).toArray();
+    if (had && had.user !== user) refuse(409, "Another person's device asked with that key.");
+    let invite = null;
+    if (proof != null) {
+      [invite] = sql.exec("select id from invites where user = ? and used is not null", user).toArray();
+      if (!invite) refuse(400, "Only a newcomer's first device brings an invite's proof.");
+    }
+    const made = Date.now();
+    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made) values (?, ?, ?, ?, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made);
+    return { until: made + REQUEST };
+  }
+
+  /// Requests to join, as they're shown: with the person's name.
+  shown(rows) {
+    const sql = this.ctx.storage.sql;
+    return rows.map((r) => {
+      const person = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), made: r.made, until: r.made + REQUEST };
+    });
+  }
+
+  /// Requests waiting: the signed-in person's own devices', or, for an inviting device's signed request, those its
+  /// invites' people made with their proof.
+  async requests(request) {
+    this.expire();
+    const sql = this.ctx.storage.sql;
+    const signed = await this.signed(request);
+    if (signed) return { requests: this.shown(sql.exec("select r.* from requests r join invites i on r.invite = i.id where i.by = ? order by r.made", signed.by).toArray()) };
+    const user = (await this.person(request)) || refuse(401, "Sign in first.");
+    return { requests: this.shown(sql.exec("select * from requests where user = ? order by made", user).toArray()) };
+  }
+
+  /// A request by its device's key, if the asker may see it: its person, or the device that invited them.
+  async mayTouch(request, key) {
+    this.expire();
+    const sql = this.ctx.storage.sql;
+    const [row] = sql.exec("select r.*, i.by from requests r left join invites i on r.invite = i.id where r.key = ?", key).toArray();
+    const signed = await this.signed(request);
+    const ok = row && (signed ? row.by === signed.by : row.user === ((await this.person(request)) || refuse(401, "Sign in first.")));
+    if (!ok) refuse(404, "No request waits with that key: it was approved, refused or waited too long.");
+    return row;
+  }
+
+  /// One request, for its new device to see it still waits.
+  async request(request, key) {
+    return this.shown([await this.mayTouch(request, key)])[0];
+  }
+
+  /// Forgets a request, approved or refused.
+  async unask(request, key) {
+    await this.mayTouch(request, key);
+    this.ctx.storage.sql.exec("delete from requests where key = ?", key);
+    return {};
   }
 
   /// What an MCP client asks first (RFC 9728): the address's MCP endpoint (or the address) is signed in to here.
@@ -333,25 +484,25 @@ export class Auth extends DurableObject {
 
   /// Starts signing in with Google for a client's authorization (`oauth_query`), on the sign-in page.
   async startGoogle(request, { oauth_query }) {
-    const origin = new URL(this.env.ADDRESS).origin;
-    if (request.headers.get("origin") !== origin) refuse(403, "only the sign-in page starts that");
+    this.fromOurPages(request);
     const query = new URLSearchParams(typeof oauth_query === "string" ? oauth_query : "");
     await this.client(query.get("client_id"));
-    const secret = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+    const secret = b64u.encode(crypto.getRandomValues(new Uint8Array(32)));
     const sql = this.ctx.storage.sql;
     sql.exec("delete from google_starts where made <= ?", Date.now() - STARTED);
     sql.exec("insert into google_starts (id, query, made) values (?, ?, ?)", await hash(secret), await hash(query.toString()), Date.now());
-    const secure = origin.startsWith("https:");
-    const cookie = `${secure ? "__Host-" : ""}one-google-start=${secret}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${STARTED / 1000}${secure ? "; Secure" : ""}`;
-    return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": cookie } });
+    return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": setCookie(this.env, "one-google-start", secret, STARTED / 1000) } });
+  }
+
+  /// Refuses what only this address's own pages ask.
+  fromOurPages(request) {
+    if (request.headers.get("origin") !== new URL(this.env.ADDRESS).origin) refuse(403, "only the sign-in page asks that");
   }
 
   /// The Google sign-in this browser started for the authorization `query`, if it's back from it just now: → its id.
   async started(request, session, query) {
     if (!session || !fresh(session)) return null;
-    const secure = this.env.ADDRESS.startsWith("https:");
-    const name = `${secure ? "__Host-" : ""}one-google-start=`;
-    const secret = (request.headers.get("cookie") || "").split(/;\s*/).find((c) => c.startsWith(name))?.slice(name.length);
+    const secret = cookieOf(request.headers, cookieName(this.env, "one-google-start"));
     if (!secret) return null;
     const id = await hash(secret);
     const [row] = this.ctx.storage.sql.exec("select query, made from google_starts where id = ? and made > ?", id, Date.now() - STARTED).toArray();
@@ -411,100 +562,58 @@ export class Auth extends DurableObject {
     return json(JSON.parse(row.back));
   }
 
-  /// One of the person's passkeys, by its credential id: → its row, or a refusal.
-  passkeyOf(user, credential) {
-    const [row] = this.ctx.storage.sql.exec("select id, name, credentialID from passkey where userId = ? and credentialID = ?", user, String(credential || "")).toArray();
-    return row || refuse(403, "That passkey isn't yours.");
-  }
-
   /// The invite a link's secret opens, while it works.
-  async openInvite(token) {
-    const [invite] = this.ctx.storage.sql.exec("select * from invites where id = ?", await inviteId(token)).toArray();
+  async openInvite(secret) {
+    if (!secret) refuse(403, "Joining takes an invite link: ask an admin for one.");
+    if (typeof secret !== "string" || secret.length < 32) refuse(404, "That invite link isn't whole: open the link you were sent as it is.");
+    const [invite] = this.ctx.storage.sql.exec("select * from invites where id = ?", await hash(secret)).toArray();
     if (!invite) refuse(404, "That invite link doesn't work. Ask for a new one.");
     if (invite.used) refuse(404, "That invite link has been used. Ask for a new one.");
     if (invite.until <= Date.now()) refuse(404, "That invite link has expired. Ask for a new one.");
     return invite;
   }
 
-  /// Makes the invite's person, as their first passkey is registered: the database hook lets only them in.
+  /// Makes the invite's person, as their first passkey is registered (or as a try install's link is opened), and
+  /// spends the invite: the database hook lets only them in.
   async admit(invite, user) {
     if (user.id !== invite.user) refuse(400, "That passkey was made for someone else.");
     const context = await this.auth.$context;
-    if (await context.internalAdapter.findUserById(invite.user)) return;
-    this.admitting = invite.user;
-    try {
-      await context.internalAdapter.createUser({ id: invite.user, name: invite.name, email: `${invite.user}@people.invalid`, emailVerified: false });
-    } finally {
-      this.admitting = null;
-    }
-  }
-
-  /// What an invite page shows: whose it is.
-  async inviteAbout({ token }) {
-    const invite = await this.openInvite(token);
-    return { person: invite.name, until: invite.until };
-  }
-
-  /// The invite's person's first passkey (its PRF output) gets their keys: new ones, or, for someone who lost every
-  /// passkey, those the link carries. The link is spent.
-  async inviteKeys(request, { token, prf, credential }) {
-    const { user } = await this.session(request);
-    const invite = await this.openInvite(token);
-    if (invite.user !== user.id) refuse(403, "That invite is someone else's.");
-    const passkey = this.passkeyOf(user.id, credential);
-    await this.vault("passkey", { user: user.id, secret: prf, name: passkey.name || "Passkey", client: passkey.credentialID, from: token });
-    this.ctx.storage.sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
-    return {};
-  }
-
-  /// Another passkey for someone signed in: the vault seals their keys under it too, opened with one they have.
-  async addPasskey(request, { from, from_credential, prf, credential }) {
-    const { user } = await this.session(request);
-    this.passkeyOf(user.id, from_credential);
-    const passkey = this.passkeyOf(user.id, credential);
-    await this.vault("passkey", { user: user.id, secret: prf, name: passkey.name || "Passkey", client: passkey.credentialID, from });
-    return {};
-  }
-
-  /// Signing in to a client with a passkey: the client gets a code, and a copy of the person's keys sealed under it.
-  async accept(request, { oauth_query, prf, credential }) {
-    const { user } = await this.session(request);
-    this.passkeyOf(user.id, credential);
-    return this.consent(request, user, oauth_query, async (client, code) => {
-      // A passkey that opens no keys gets the client nothing: its code, never handed over, is never used.
+    if (!(await context.internalAdapter.findUserById(invite.user))) {
+      this.admitting = invite.user;
       try {
-        await this.vault("grant", { user: user.id, from: prf, to: code, name: client.name || client.clientId, client: client.clientId });
-      } catch (err) {
-        if (err.status === 403) refuse(403, "This passkey doesn't unlock your data yet: add it on your Passkeys page with one that does.");
-        throw err;
+        await context.internalAdapter.createUser({ id: invite.user, name: invite.name, email: `${invite.user}@people.invalid`, emailVerified: false });
+      } finally {
+        this.admitting = null;
       }
-    });
+    }
+    this.ctx.storage.sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
   }
 
-  /// Signing in to a client with Google, just now, started for this authorization (a client's code is swapped for
-  /// tokens only while that sign-in lasts, so it isn't ended here; a later client asks Google again): the client gets
-  /// a code, and the vault opens the person's keys for it.
-  async acceptGoogle(request, { oauth_query }) {
+  /// What an invite page shows: whose it is, and on an install whose people sign in with Google, the email it's for.
+  async inviteAbout({ secret }) {
+    const invite = await this.openInvite(secret);
+    return { person: invite.name, until: invite.until, email: invite.email };
+  }
+
+  /// Joining with Google: the invite's secret kept in a cookie for Google's answer, whose email must be the invite's.
+  async joinWithGoogle(request, { secret }) {
+    this.fromOurPages(request);
+    await this.openInvite(secret);
+    return new Response("{}", { headers: { "content-type": "application/json", "set-cookie": setCookie(this.env, "one-invite", secret, STARTED / 1000) } });
+  }
+
+  /// Signing in to a client (`oauth_query`) as whoever just signed in here: by tapping their passkey on its page
+  /// (`passkey`), or back from the Google sign-in started for it; on a try install, whoever is signed in. → where the
+  /// client goes on to.
+  async accept(request, { oauth_query, passkey }) {
+    this.fromOurPages(request);
     const signedIn = await this.session(request);
-    const started = await this.started(request, signedIn, new URLSearchParams(typeof oauth_query === "string" ? oauth_query : ""));
-    if (!started) refuse(403, "Sign in with Google again.");
-    this.ctx.storage.sql.exec("delete from google_starts where id = ?", started);
-    const { user } = signedIn;
-    return this.consent(request, user, oauth_query, (client, code) =>
-      this.vault("own", { user: user.id, to: code, name: client.name || client.clientId, client: client.clientId }));
-  }
-
-  /// Signing in to a client on a try install: whoever is signed in here, with nothing to show, and the vault opens their keys.
-  async acceptTry(request, { oauth_query }) {
-    const { user } = await this.session(request);
-    return this.consent(request, user, oauth_query, (client, code) =>
-      this.vault("own", { user: user.id, to: code, name: client.name || client.clientId, client: client.clientId }));
-  }
-
-  /// Lets a client's authorization (`oauth_query`) through as `user`, with `keys(client, code)` giving its code a copy of
-  /// their keys before it's handed over: → where the client goes on to.
-  async consent(request, user, oauth_query, keys) {
-    const query = new URLSearchParams(oauth_query || "");
+    const query = new URLSearchParams(typeof oauth_query === "string" ? oauth_query : "");
+    if (this.env.SIGN_IN !== "try") {
+      const started = await this.started(request, signedIn, query);
+      if (started) this.ctx.storage.sql.exec("delete from google_starts where id = ?", started);
+      else if (!fresh(signedIn) || (this.env.SIGN_IN === "google" && passkey !== true)) refuse(403, "Sign in again.");
+    }
     const client = await this.client(query.get("client_id"));
     const headers = new Headers(request.headers);
     headers.set("content-type", "application/json");
@@ -512,29 +621,9 @@ export class Auth extends DurableObject {
     const resp = await this.auth.handler(new Request(new URL("/api/auth/oauth2/consent", request.url), { method: "POST", headers, body: JSON.stringify({ accept: true, oauth_query }) }));
     const out = await resp.json().catch(() => ({}));
     if (!resp.ok) throw Object.assign(new Error(out.error_description || out.message || "signing in didn't work"), { status: resp.status });
-    // Every authorization asks for the passkey (or Google), since that's what gives a client keys: none is kept for
-    // next time.
-    this.ctx.storage.sql.exec("delete from oauthConsent where clientId = ? and userId = ?", client.clientId, user.id);
-    const code = new URL(out.url).searchParams.get("code");
-    if (!code) throw Object.assign(new Error("signing in gave no code"), { status: 500 });
-    await keys(client, code);
+    // Every authorization asks for the passkey (or Google): none is kept for next time.
+    this.ctx.storage.sql.exec("delete from oauthConsent where clientId = ? and userId = ?", client.clientId, signedIn.user.id);
     return { url: out.url };
-  }
-
-  /// An invite for `name` (only a label), as `user` (their id in the install; a new one if not given): → the secret its
-  /// link carries, kept here only as a hash, and until when it works. The kernel's own tools ask, with its secret.
-  /// Signing in with Google, it's for `email` instead: who they are when they first sign in, with no link.
-  async invite(request, { name, user, email }) {
-    if (request.headers.get("x-kernel-secret") !== this.env.KERNEL_SECRET) refuse(403, "only the kernel asks that");
-    if (typeof name !== "string" || !name.trim()) refuse(400, "give the person's name");
-    if (user != null && !/^[0-9a-f]{16}$/.test(user)) refuse(400, "a user id is 16 hex characters");
-    const google = this.env.SIGN_IN === "google";
-    if (google && !String(email || "").toLowerCase().endsWith(`@${this.env.JOIN_DOMAIN}`)) refuse(400, `people here sign in with Google: give their email at ${this.env.JOIN_DOMAIN}`);
-    const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-    const until = Date.now() + INVITE;
-    this.ctx.storage.sql.exec("delete from invites where until <= ?", Date.now());
-    this.ctx.storage.sql.exec("insert into invites (id, name, user, until, email) values (?, ?, ?, ?, ?)", await inviteId(token), name.trim(), user ?? hex16(), until, google ? email.toLowerCase() : null);
-    return google ? { until } : { token, until };
   }
 }
 
@@ -563,16 +652,15 @@ function tryInstall(auth, id, name) {
         return signIn(ctx, await first(adapter));
       }),
       joinTry: createAuthEndpoint("/try/join", { method: "POST" }, async (ctx) => {
-        const invite = await auth.openInvite(ctx.body?.token);
+        const invite = await auth.openInvite(ctx.body?.secret);
         await auth.admit(invite, { id: invite.user });
-        auth.ctx.storage.sql.exec("update invites set used = ? where id = ?", Date.now(), invite.id);
         return signIn(ctx, await ctx.context.internalAdapter.findUserById(invite.user));
       }),
     },
   };
 }
 
-/// Whether a sign-in here was made just now: Google's, which a client is added with.
+/// Whether a sign-in here was made just now: one a client is added with, or a passkey.
 function fresh(session) {
   return Date.now() - new Date(session.session.createdAt).getTime() < FRESH;
 }

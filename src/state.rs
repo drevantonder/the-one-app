@@ -28,8 +28,8 @@ pub struct Here<'a> {
     pub backups: Option<Value>,
     /// Where an agent reads how to connect itself, when the install has no address.
     pub guide: Option<String>,
-    /// Whether people manage passkeys at the install's address: not where they sign in with Google, nor in a try
-    /// install, whose kernel signs its person in with none.
+    /// Whether people manage passkeys at the install's address: not in a try install, whose kernel signs its person in
+    /// with none.
     pub passkeys: bool,
     /// What it knows of each device now: `kind` (as it last said), and whatever else it says of it.
     pub device_now: &'a dyn Fn(&Machine) -> Map<String, Value>,

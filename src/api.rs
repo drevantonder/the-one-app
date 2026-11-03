@@ -423,9 +423,8 @@ impl axum::extract::FromRequestParts<Node> for Me {
 /// Sign-ins checked lately, by their token's hash, until they expire.
 static SIGNED_INS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>> = std::sync::LazyLock::new(Default::default);
 
-/// Whom a kernel access token is for: one the auth service at the install's address signed for it, whose session at
-/// the vault is open, for a person of the install. A scheduled run's token (`run.…`) is no access token: only the
-/// vault says whose it is.
+/// Whom a kernel access token is for: one the auth service at the install's address signed for it, for a person of
+/// the install.
 async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     use sha2::Digest;
     let now = crate::node::now_ms();
@@ -433,29 +432,22 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     if let Some((me, _)) = SIGNED_INS.lock().unwrap().get(&hash).filter(|(_, until)| now < *until) {
         return Ok(me.clone());
     }
-    let (address, vault) = node.kernel()?;
+    let (address, _) = node.kernel()?;
     let issuer = node.issuer()?;
     let asked = token.clone();
-    let (user, until, session, name) = tokio::task::spawn_blocking(move || {
-        let vault = crate::kernel::Vault { url: vault };
-        if asked.starts_with("run.") {
-            let session = vault.session(&asked)?;
-            anyhow::ensure!(session.client.as_deref() == Some("schedules"), "that token isn't a scheduled run's");
-            return Ok((session.user.clone(), session.until, session, String::new()));
-        }
+    let claims = tokio::task::spawn_blocking(move || {
         let claims = issuer.verify(&asked, now)?;
         // MCP clients sign in for the address's MCP endpoint, as MCP names a server.
         let address = address.trim_end_matches('/');
         anyhow::ensure!(claims.for_resource(address) || claims.for_resource(&format!("{address}/mcp")), "that sign-in isn't for {address}");
-        let session = vault.session(&asked)?;
-        anyhow::ensure!(session.user == claims.sub, "that sign-in's session is someone else's");
-        Ok((claims.sub, (claims.exp * 1000).min(session.until), session, claims.name))
+        Ok::<_, anyhow::Error>(claims)
     })
     .await??;
+    let (user, until, name) = (claims.sub.clone(), claims.exp * 1000, claims.name.clone());
     if !node.is_user(&user) {
         node.let_in(&user, &name).await?;
     }
-    let me = Me { caller: Caller { key: node.id(), user, agent: None, token: Some(token) }, sign_in: Some(session.name.clone().unwrap_or_default()) };
+    let me = Me { caller: Caller { key: node.id(), user, agent: None, token: Some(token) }, sign_in: Some(String::new()) };
     let mut kept = SIGNED_INS.lock().unwrap();
     kept.retain(|_, (_, until)| now < *until);
     kept.insert(hash, (me.clone(), until));

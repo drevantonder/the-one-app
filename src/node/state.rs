@@ -12,18 +12,16 @@ impl Node {
         })
     }
 
-    /// A link that lets someone new, called `name`, join: it works once, for a few days. Made at the install's vault as
-    /// `caller`, an admin signed in, since the kernel checks who's asking, not this device: → (the link, until when).
+    /// A link that lets someone new, called `name`, join: it works once, for a few days. Its secret is made here and
+    /// signed for with this device's key, as an admin's device's, for `caller`, an admin: → (the link, until when).
     pub async fn invite_link(&self, caller: &Caller, name: &str) -> Result<(String, u64)> {
-        ensure!(crate::config::SIGN_IN != "google", "people join by signing in with Google, so they need no invite link");
-        ensure!(!name.trim().is_empty(), "give their name");
+        ensure!(crate::config::SIGN_IN != "google", "people here sign in with Google, so their invite names their email: {} kernel invite <name> --email <email>", crate::config::CLI);
         let manages = self.with(|i| Ok(members::manages_scope(&i.r.members, &caller.user, &Scope::Global)))?;
         ensure!(manages, "only admins invite someone");
-        let token = caller.token.clone().context("sign in first: an invite link is made by someone signed in")?;
-        let (address, url) = self.kernel()?;
-        let name = name.trim().to_string();
-        let (secret, until) = tokio::task::spawn_blocking(move || crate::kernel::Vault { url }.invite(&token, &name)).await??;
-        Ok((format!("{}/invite#{secret}", address.trim_end_matches('/')), until))
+        let (address, _) = self.kernel()?;
+        let (key, name) = (ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()), name.to_string());
+        let invite = tokio::task::spawn_blocking(move || crate::kernel::invite(address.trim_end_matches('/'), &key, &name, None, None)).await??;
+        Ok((invite.link, invite.until))
     }
 
     /// Whether `user` is a person of the install.
@@ -142,7 +140,7 @@ impl Node {
             arrangements: json!(arrangements),
             backups,
             guide: crate::skills::address(),
-            passkeys: crate::config::SIGN_IN != "google" && !tried(),
+            passkeys: !tried(),
             device_now: &device_now,
             client_now: &client_now,
         };
@@ -162,10 +160,8 @@ impl Node {
     /// Signs one of `global`'s node entries with this device, for `caller`: it counts only if this device is theirs
     /// (on this machine, the CLI, MCP and the Mac app), and one that wouldn't count is refused, not written.
     pub(super) async fn member_content(&self, caller: &Caller, content: Content) -> Result<()> {
-        let before = self.with(|i| Ok(i.r.members.roles()))?;
         self.append_as(&Scope::Global, &caller.user, content).await?;
-        let after = self.with(|i| Ok(i.r.members.roles()))?;
-        self.tell_vault(caller, members::roles_changed(&before, &after)).await
+        Ok(())
     }
 
     /// Makes a group called `name`, with `caller` its first admin: → its id. Its first epoch is made by the first of
@@ -175,56 +171,6 @@ impl Node {
         let group = new_id();
         self.member_as(caller, "group", json!({ "group": group, "name": name })).await?;
         Ok(group)
-    }
-
-    /// Tells the install's vault how people's roles changed, as `caller`, who changed them, so whoever was let in opens
-    /// what's there at once, and whoever was taken out no longer does, rather than once an admin next runs `kernel
-    /// keys`; the vault decides what `caller` may say. What it couldn't be told, it says, in words for whoever made the
-    /// change: the change itself is made.
-    pub(super) async fn tell_vault(&self, caller: &Caller, changed: Vec<(String, Option<Role>, bool, Vec<Scope>)>) -> Result<()> {
-        let Ok((_, url)) = self.kernel() else { return Ok(()) };
-        let ours = format!("your {}", crate::config::NAME.trim_start_matches("The "));
-        let mut untold = Vec::new();
-        for (user, role, invited, scopes) in changed {
-            let told = match caller.token.clone() {
-                None => Err("this device isn't signed in".to_string()),
-                Some(token) => {
-                    let (vault, user, scopes) = (crate::kernel::Vault { url: url.clone() }, user.clone(), scopes.clone());
-                    match tokio::task::spawn_blocking(move || vault.role(&token, &user, role, invited, &scopes)).await {
-                        Ok(Ok(())) => Ok(()),
-                        Ok(Err(err)) => Err(format!("{err:#}").strip_prefix("the vault said: ").map(str::to_string).unwrap_or_else(|| format!("{ours}'s keys couldn't be reached"))),
-                        Err(_) => Err(format!("{ours}'s keys couldn't be reached")),
-                    }
-                }
-            };
-            let Err(why) = told else { continue };
-            tracing::warn!("the vault still has {user} as before in {scopes:?}: {why}");
-            let said = self.with(|i| {
-                let m = &i.r.members;
-                let me = user == caller.user;
-                let who = if me { "You".to_string() } else { m.users.get(&user).map(|u| u.name.clone()).unwrap_or(user.clone()) };
-                // Someone's own scope goes with the install's: it's named only alone.
-                let at: Vec<String> = scopes
-                    .iter()
-                    .filter(|s| scopes.len() == 1 || !matches!(s, Scope::User(_)))
-                    .map(|s| match s {
-                        Scope::Global => ours.clone(),
-                        Scope::User(_) => "their own".to_string(),
-                        Scope::Group(g) => m.groups.get(g).map(|g| g.name.clone()).unwrap_or_default(),
-                    })
-                    .collect();
-                let (at, cli, (are, open, they)) = (at.join(", "), crate::config::CLI, if me { ("are", "open", "you") } else { ("is", "opens", "they") });
-                Ok(match (role, invited) {
-                    (None, _) => format!("{who} {are} out of {at}, but still {open} what's in it until an admin runs {cli} kernel keys: {why}."),
-                    (Some(_), true) => format!("{who} {are} invited to {at}, but won't open what's in it on joining until an admin runs {cli} kernel keys: {why}."),
-                    (Some(Role::Admin), false) => format!("{who} {are} an admin of {at} now, but what {they} open and say there changes only when an admin runs {cli} kernel keys: {why}."),
-                    (Some(Role::Member), false) => format!("{who} {are} a member of {at} now, but what {they} open there changes only when an admin runs {cli} kernel keys: {why}."),
-                })
-            })?;
-            untold.push(said);
-        }
-        ensure!(untold.is_empty(), "{}", untold.join(" "));
-        Ok(())
     }
 
     pub async fn rename_device(&self, name: &str) -> Result<()> {

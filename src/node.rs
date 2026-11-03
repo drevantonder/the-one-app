@@ -714,7 +714,6 @@ impl Node {
         for entry in entries {
             ensure!(entry.user() == caller.user, "entry {} isn't written as you", entry.id());
             let scope = entry.scope();
-            let before = self.with(|i| Ok(i.r.members.roles()))?;
             {
                 let _write = self.0.writes.lock().await;
                 self.read_log_now(&scope).await?;
@@ -728,8 +727,6 @@ impl Node {
                 self.after(handled).await?;
             }
             self.ping(&scope, None);
-            let after = self.with(|i| Ok(i.r.members.roles()))?;
-            self.tell_vault(caller, members::roles_changed(&before, &after)).await?;
         }
         Ok(())
     }
@@ -1110,6 +1107,13 @@ fn load_pairings(dir: &Path) -> HashMap<[u8; 16], Pairing> {
     list.into_iter()
         .filter_map(|(k, v)| Some((data_encoding::HEXLOWER.decode(k.as_bytes()).ok()?.try_into().ok()?, v)))
         .collect()
+}
+
+/// The key of the device whose home is `dir`, for what this machine signs as itself without its node (`kernel invite`).
+pub fn device_key(dir: &Path) -> Result<ed25519_dalek::SigningKey> {
+    let bytes = std::fs::read(dir.join("device.json")).with_context(|| format!("{} has no device: {} serve starts one", dir.display(), crate::config::CLI))?;
+    let file: DeviceFile = serde_json::from_slice(&bytes)?;
+    Ok(ed25519_dalek::SigningKey::from_bytes(&unhex(&file.secret)?))
 }
 
 fn load_device(dir: &Path) -> Result<DeviceFile> {

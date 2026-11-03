@@ -27,19 +27,16 @@ const style = `${kit}
   [hidden] { display: none !important; }
 `;
 
-/// What a passkey without PRF is told, here and by the auth service.
-export const NO_PRF = "This passkey can't unlock your data, so it can't be used here. Passkeys saved in iCloud Keychain (iPhone, iPad, Mac) or Google Password Manager (Android, Chrome) work, as do most security keys on a current system. Choose one of those and try again.";
-
-// WebAuthn's binary fields, to and from the base64url its JSON uses; and asking for a passkey with its PRF output,
-// which opens the person's keys at the vault. A passkey without PRF opens nothing, so it's refused here and by the
-// auth service. Only whether a passkey has PRF goes to the auth service when it's made, never its output.
+// WebAuthn's binary fields, to and from the base64url its JSON uses; and asking a passkey for its PRF output, where it
+// has PRF, under the salt sha256("one/passkey-device"), from which the web client derives the passkey's device keys
+// (keys::passkey_keys). The output is kept only in this tab's sessionStorage (`one.prf`, with the passkey's credential id
+// as `one.prf.credential`), which the web client at the same address reads: it's never sent anywhere.
 const webauthn = `
   const b64u = {
     decode: (s) => Uint8Array.from(atob(s.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)),
     encode: (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, ""),
   };
-  const PRF_SALT = new TextEncoder().encode("one/passkey-prf");
-  const NO_PRF = ${JSON.stringify(NO_PRF)};
+  const PRF_SALT = crypto.subtle.digest("SHA-256", new TextEncoder().encode("one/passkey-device")).then((h) => new Uint8Array(h));
   const say = (text) => (document.querySelector(".error").textContent = text || "");
   const quietly = (err) => say(err.name === "NotAllowedError" || err.name === "AbortError" ? "" : err.message);
   async function api(path, body) {
@@ -48,39 +45,40 @@ const webauthn = `
     if (!resp.ok) throw Object.assign(new Error(out.error || out.message || "That didn't work."), { status: resp.status });
     return out;
   }
-  function credentialJSON(c, extensions = {}) {
+  function credentialJSON(c) {
     const r = c.response;
     const response = { clientDataJSON: b64u.encode(r.clientDataJSON) };
     if (r.attestationObject) Object.assign(response, { attestationObject: b64u.encode(r.attestationObject), transports: r.getTransports?.() || [] });
     if (r.authenticatorData) Object.assign(response, { authenticatorData: b64u.encode(r.authenticatorData), signature: b64u.encode(r.signature), userHandle: r.userHandle && b64u.encode(r.userHandle) });
-    return { id: c.id, rawId: b64u.encode(c.rawId), type: c.type, response, clientExtensionResults: extensions, authenticatorAttachment: c.authenticatorAttachment };
+    return { id: c.id, rawId: b64u.encode(c.rawId), type: c.type, response, clientExtensionResults: {}, authenticatorAttachment: c.authenticatorAttachment };
   }
-  const prfOf = (c) => { const first = c.getClientExtensionResults().prf?.results?.first; return first ? b64u.encode(first) : null; };
-  /// Makes a passkey, for someone signed in, or with an invite link's secret as \`context\` (which signs them in): → its
-  /// credential id, its id in the auth service, and its PRF output (asked for again if making it didn't give it).
+  /// Keeps a passkey's PRF output in this tab, if it gave one.
+  function keepPrf(c) {
+    const first = c.getClientExtensionResults().prf?.results?.first;
+    if (!first) return;
+    sessionStorage.setItem("one.prf", b64u.encode(first));
+    sessionStorage.setItem("one.prf.credential", c.id);
+  }
+  /// Makes a passkey, for someone signed in, or with an invite link's secret as \`context\` (which signs them in): →
+  /// its credential id and its id in the auth service.
   async function newPasskey(context) {
     const o = await api("/api/auth/passkey/generate-register-options" + (context ? "?context=" + encodeURIComponent(context) : ""));
     const publicKey = { ...o, challenge: b64u.decode(o.challenge), user: { ...o.user, id: b64u.decode(o.user.id) },
-      excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })), extensions: { prf: { eval: { first: PRF_SALT } } } };
+      excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })), extensions: { prf: { eval: { first: await PRF_SALT } } } };
     const c = await navigator.credentials.create({ publicKey });
-    let prf = prfOf(c);
-    if (!prf && !c.getClientExtensionResults().prf?.enabled) throw new Error(NO_PRF);
-    const made = await api("/api/auth/passkey/verify-registration", { response: credentialJSON(c, { prf: { enabled: true } }), ...(context ? { createSession: true } : {}) });
-    if (!prf) prf = (await withPasskey([c.id])).prf;
-    return { credential: c.id, id: made.id, prf };
+    const made = await api("/api/auth/passkey/verify-registration", { response: credentialJSON(c), ...(context ? { createSession: true } : {}) });
+    keepPrf(c);
+    return { credential: c.id, id: made.id };
   }
-  /// Signs in with a passkey (one of \`only\`'s credential ids, if given), refusing one without PRF: → its credential
-  /// id and PRF output.
-  async function withPasskey(only) {
+  /// Signs in with a passkey: → its credential id.
+  async function withPasskey() {
     const o = await api("/api/auth/passkey/generate-authenticate-options");
-    const allow = only ? only.map((id) => ({ type: "public-key", id })) : o.allowCredentials || [];
-    const publicKey = { ...o, challenge: b64u.decode(o.challenge), allowCredentials: allow.map((c) => ({ ...c, id: b64u.decode(c.id) })),
-      extensions: { prf: { eval: { first: PRF_SALT } } } };
+    const publicKey = { ...o, challenge: b64u.decode(o.challenge), allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })),
+      extensions: { prf: { eval: { first: await PRF_SALT } } } };
     const c = await navigator.credentials.get({ publicKey });
-    const prf = prfOf(c);
-    if (!prf) throw new Error(NO_PRF);
     await api("/api/auth/passkey/verify-authentication", { response: credentialJSON(c) });
-    return { credential: c.id, prf };
+    keepPrf(c);
+    return { credential: c.id };
   }
 `;
 
@@ -112,14 +110,14 @@ const ours = (name) => `your ${name.replace(/^The /, "")}`;
 const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system.";
 
 /// Signing in, to the install or, sent here by a client's authorization (\`oauth_query\`), to that client: the client
-/// is the person, with everything they can use, so the passkey is all it asks for. With Google (\`google\`, the
-/// install's domain), it's signing in with Google, each time.
+/// is the person, with everything they can use, so it's asked each time. With Google (\`google\`, the install's
+/// domain), it's signing in with Google, or with a passkey for an admin.
 export function signInPage(look) {
   const { name, google } = look;
   if (google) return googlePage(look);
   const body = `
     <h1 id="title">Sign in to ${escape(name)}</h1>
-    <p id="what">With your passkey: it's what unlocks your data.</p>
+    <p id="what">With your passkey.</p>
     <button class="button primary" id="passkey">Sign In with a Passkey</button>
     <p class="note">No passkey here yet? Use one from another device, or ask whoever runs ${escape(name)} for an invite link.</p>`;
   const script = `${acts}
@@ -138,8 +136,8 @@ export function signInPage(look) {
     document.getElementById("passkey").onclick = async () => {
       say();
       try {
-        const { prf, credential } = await withPasskey();
-        location.href = client_id ? (await api("/sign-in/accept", { oauth_query, prf, credential })).url : "/";
+        await withPasskey();
+        location.href = client_id ? (await api("/sign-in/accept", { oauth_query, passkey: true })).url : "/";
       } catch (err) { quietly(err); }
     };`;
   return page(look, `Sign in to ${name}`, body, script);
@@ -150,7 +148,9 @@ function googlePage(look) {
   const body = `
     <h1 id="title">Sign in to ${escape(name)}</h1>
     <p id="what">With your Google account at ${escape(google)}.</p>
-    <button class="button primary" id="google">Sign In with Google</button>`;
+    <button class="button primary" id="google">Sign In with Google</button>
+    <button class="button" id="passkey">Sign In with a Passkey</button>
+    <p class="note">Admins sign in with a passkey.</p>`;
   const script = `${acts}
     // Google's answer comes back here, with an error added to the query if it said no.
     const raw = location.search.slice(1);
@@ -179,6 +179,13 @@ function googlePage(look) {
         const out = await api("/api/auth/sign-in/social", { provider: "google", callbackURL: back, errorCallbackURL: back });
         location.href = out.url;
       } catch (err) { say(err.message); }
+    };
+    document.getElementById("passkey").onclick = async () => {
+      say();
+      try {
+        await withPasskey();
+        location.href = client_id ? (await api("/sign-in/accept", { oauth_query, passkey: true })).url : "/";
+      } catch (err) { quietly(err); }
     };`;
   return page(look, `Sign in to ${name}`, body, script);
 }
@@ -210,17 +217,21 @@ export function tryPage(look) {
   return page(look, `Sign in to ${name}`, body, script);
 }
 
-/// Joining with an invite link: making a first passkey, or on a try install (`tried`), with nothing to make.
+/// Joining with an invite link, its secret in the fragment, which goes only to auth's sign-up: making a first passkey,
+/// or signing in with Google (`google`) as the email it's for, or on a try install (`tried`), with nothing to make.
 export function invitePage(look) {
-  const { name, tried } = look;
+  const { name, tried, google } = look;
   const body = `
     <section id="join">
       <h1 id="title">Join ${escape(name)}</h1>
       ${tried
         ? `<p id="what">For testing: no passkey needed.</p>
-      <button class="button primary" id="passkey" disabled>Join</button>`
-        : `<p id="what">Make a passkey to join. It's how you sign in, and the only thing that unlocks your data.</p>
-      <button class="button primary" id="passkey" disabled>Make a Passkey</button>
+      <button class="button primary" id="go" disabled>Join</button>`
+        : google
+        ? `<p id="what">With your Google account.</p>
+      <button class="button primary" id="go" disabled>Sign In with Google</button>`
+        : `<p id="what">Make a passkey to join. It's how you sign in.</p>
+      <button class="button primary" id="go" disabled>Make a Passkey</button>
       <p class="note">${escape(WORKS)}</p>`}
     </section>
     <section id="done" hidden>
@@ -230,25 +241,31 @@ export function invitePage(look) {
       <a class="button${tried ? " primary" : ""}" href="/">Open ${escape(name)}</a>
     </section>`;
   const script = `
-    const token = location.hash.slice(1);
-    const tried = ${tried ? "true" : "false"};
+    const secret = location.hash.slice(1);
+    const tried = ${tried ? "true" : "false"}, google = ${google ? "true" : "false"};
+    // Google's answer comes back here with an error if it didn't sign them up.
+    if (/(^|&)error=/.test(location.search.slice(1))) say("That Google account isn't the one this invite is for.");
     (async () => {
       try {
-        const about = await api("/invite/about", { token });
+        const about = await api("/invite/about", { secret });
         document.getElementById("title").textContent = "Welcome, " + about.person;
-        document.getElementById("passkey").disabled = false;
+        if (google && about.email) document.getElementById("what").textContent = "With your Google account, " + about.email + ".";
+        document.getElementById("go").disabled = false;
       } catch (err) { say(err.message); }
     })();
-    document.getElementById("passkey").onclick = async () => {
+    document.getElementById("go").onclick = async () => {
       say();
       try {
-        // Whoever was signed in here before, the passkey is the invite's person's.
+        // Whoever was signed in here before, the invite is for its person.
         await api("/api/auth/sign-out", {}).catch(() => {});
-        if (tried) await api("/api/auth/try/join", { token });
-        else {
-          const { prf, credential } = await newPasskey(token);
-          await api("/invite/keys", { token, prf, credential });
+        if (google) {
+          await api("/invite/google", { secret });
+          const back = "/invite#" + secret;
+          location.href = (await api("/api/auth/sign-in/social", { provider: "google", callbackURL: "/", errorCallbackURL: back })).url;
+          return;
         }
+        if (tried) await api("/api/auth/try/join", { secret });
+        else await newPasskey(secret);
         history.replaceState(null, "", "/invite");
         document.getElementById("join").hidden = true;
         document.getElementById("done").hidden = false;
@@ -261,19 +278,19 @@ export function passkeysPage(look) {
   const { name } = look;
   const body = `
     <h1>Passkeys</h1>
-    <p id="what">Each one signs you in to ${escape(name)} and unlocks your data.</p>
+    <p id="what">Each one signs you in to ${escape(name)}.</p>
     <button class="button primary" id="signin" hidden>Sign In with a Passkey</button>
     <section id="mine" hidden>
       <div class="list" id="list"></div>
-      <p class="callout" id="suggest" hidden>Add a second passkey, on another device or a security key. If you lose every passkey, only the install's recovery key gets you back in, with the help of whoever holds it.</p>
+      <p class="callout" id="suggest" hidden>Add a second passkey, on another device or a security key, so losing one doesn't lock you out.</p>
       <button class="button primary" id="add">Add a Passkey</button>
-      <p class="note">${escape(WORKS)} Adding one asks first for a passkey you have, then makes the new one.</p>
+      <p class="note">${escape(WORKS)}</p>
     </section>`;
   const script = `
     const esc = (t) => String(t).replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
     const when = (d) => new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+    let list = [];
     async function show() {
-      let list;
       try { list = await api("/api/auth/passkey/list-user-passkeys"); }
       catch (err) {
         if (err.status !== 401) return say(err.message);
@@ -292,24 +309,18 @@ export function passkeysPage(look) {
       say();
       try { await withPasskey(); await show(); } catch (err) { quietly(err); }
     };
+    // A passkey is added just after signing in: with one they have, if they have one.
     document.getElementById("add").onclick = async () => {
       say();
-      let made;
       try {
-        const have = await withPasskey();
-        made = await newPasskey();
-        await api("/passkeys/add", { from: have.prf, from_credential: have.credential, prf: made.prf, credential: made.credential });
-        made = null;
+        if (list.length) await withPasskey();
+        await newPasskey();
         await show();
-      } catch (err) {
-        // A new passkey that doesn't open the person's keys isn't kept.
-        if (made?.id) await api("/api/auth/passkey/delete-passkey", { id: made.id }).catch(() => {});
-        quietly(err);
-      }
+      } catch (err) { quietly(err); }
     };
     document.getElementById("list").onclick = async (e) => {
       const id = e.target.dataset?.id;
-      if (!id || !confirm("Remove this passkey? It won't sign you in or unlock your data again.")) return;
+      if (!id || !confirm("Remove this passkey? It won't sign you in again.")) return;
       try { await api("/api/auth/passkey/delete-passkey", { id }); await show(); } catch (err) { say(err.message); }
     };`;
   return page(look, `Passkeys`, body, script);
@@ -327,7 +338,7 @@ export function codePage(look) {
   }
   const body = `
     <h1>Sign in with a code</h1>
-    <p>Type the code you were shown, then sign in with ${google ? "Google" : "your passkey"}. Only use a code you got yourself, on your own device.</p>
+    <p>Type the code you were shown, then sign in with ${google ? "Google or your passkey" : "your passkey"}. Only use a code you got yourself, on your own device.</p>
     <form id="form"><input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BCDF-GHJK" aria-label="Code">
     <button class="button primary">Continue</button></form>`;
   const script = `

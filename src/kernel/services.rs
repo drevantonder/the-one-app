@@ -65,17 +65,9 @@ pub struct Settings {
     /// the relay starts its list with them, as its admins', when it has none yet.
     #[serde(skip)]
     pub devices: Vec<String>,
-    /// The secret only the kernel's services share, for asking each other.
-    #[serde(default, skip_serializing)]
-    pub kernel_secret: String,
     /// Better Auth's own secret, for its cookies and the keys it keeps.
     #[serde(default, skip_serializing)]
     pub auth_secret: String,
-    /// The schedules service's own X25519 key pair.
-    #[serde(default, skip_serializing)]
-    pub schedules_key: Value,
-    /// The recovery key's X25519 twin's public half.
-    pub recovery_key: String,
     /// Nodes' own addresses MCP clients sign in for (each a resource, in OAuth's words), besides the install's.
     #[serde(default)]
     pub resources: Vec<String>,
@@ -87,10 +79,8 @@ pub struct Settings {
     /// in the app (App Links) only if the address lists the app's package and one of them.
     #[serde(default)]
     pub android: Vec<String>,
-    /// For an install whose people sign in with Google (`config::SIGN_IN`): the vault's own key, which opens their
-    /// keys, and the Google OAuth client they sign in with, `(id, secret)`.
-    #[serde(default, skip_serializing)]
-    pub vault_key: String,
+    /// For an install whose people sign in with Google (`config::SIGN_IN`): the Google OAuth client they sign in
+    /// with, `(id, secret)`.
     #[serde(default, skip_serializing)]
     pub google: Option<(String, String)>,
     /// The API token `kernel deploy` and `serverless deploy` edit the Cloudflare account's Workers with, where
@@ -104,7 +94,7 @@ pub struct Settings {
     pub try_person: Option<(String, String)>,
 }
 
-/// Whether people sign in with Google, which the vault then opens their keys for itself.
+/// Whether people sign in with Google.
 fn google() -> bool {
     crate::config::SIGN_IN == "google"
 }
@@ -116,15 +106,11 @@ const SCHEMA: &str = "\
 # @defaultSensitive=true
 # @defaultRequired=true
 # ---
-KERNEL_SECRET=
 AUTH_SECRET=
-SCHEDULES_KEY=
 # The install's bucket's credentials, which only the URL signer holds.
 # @optional
 BUCKET=
-# For an install whose people sign in with Google: the vault's own key, and their Google OAuth client.
-# @optional
-VAULT_KEY=
+# For an install whose people sign in with Google: their Google OAuth client.
 # @optional
 GOOGLE_CLIENT_ID=
 # @optional
@@ -209,12 +195,6 @@ impl Settings {
         let path = Settings::path();
         let text = std::fs::read_to_string(&path).with_context(|| format!("this machine runs no kernel yet: {} kernel serve --address <url> starts one, and its settings are on the machine that made it", crate::config::CLI))?;
         let mut settings: Settings = serde_json::from_str(&text).with_context(|| format!("{} isn't a kernel's settings", path.display()))?;
-        // Settings written before Varlock kept the secrets hold them: they move to .env.local.
-        if !settings.kernel_secret.is_empty() {
-            ensure!(!local().exists(), "{} still holds secrets, and {} is there too: keep one", path.display(), local().display());
-            settings.save()?;
-            return Ok(settings);
-        }
         let dir = path.parent().unwrap();
         std::fs::write(dir.join(".env.schema"), SCHEMA)?;
         let out = std::process::Command::new(varlock()?)
@@ -227,15 +207,10 @@ impl Settings {
         ensure!(out.status.success(), "Varlock couldn't read the kernel's secrets ({}):\n{}{}", local().display(), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         let secrets: std::collections::BTreeMap<String, String> = serde_json::from_slice(&out.stdout).context("Varlock said something other than the kernel's secrets")?;
         let get = |name: &str| secrets.get(name).filter(|v| !v.is_empty()).cloned();
-        settings.kernel_secret = get("KERNEL_SECRET").context("no KERNEL_SECRET")?;
         settings.auth_secret = get("AUTH_SECRET").context("no AUTH_SECRET")?;
-        settings.schedules_key = serde_json::from_str(&get("SCHEDULES_KEY").context("no SCHEDULES_KEY")?).context("SCHEDULES_KEY isn't JSON")?;
         settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
-        if settings.try_person.is_some() {
-            settings.vault_key = get("VAULT_KEY").context("no VAULT_KEY, which a try install's kernel needs")?;
-        } else if google() {
-            settings.vault_key = get("VAULT_KEY").context("no VAULT_KEY, which people signing in with Google need")?;
+        if settings.try_person.is_none() && google() {
             settings.google = get("GOOGLE_CLIENT_ID").zip(get("GOOGLE_CLIENT_SECRET"));
             ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client people sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
         }
@@ -248,14 +223,12 @@ impl Settings {
         none_in(Settings::path().parent().unwrap())
     }
 
-    /// New settings, with new secrets: → them, and the new recovery key's secret, to be shown once.
-    pub fn new(name: &str, address: &str) -> (Settings, String) {
+    /// New settings, with new secrets.
+    pub fn new(name: &str, address: &str) -> Settings {
         let port = crate::config::PORT;
         let ports = [port + 10, port + 11, port + 12, port + 13];
         let secret = || B64U.encode(&rand::random::<[u8; 32]>());
-        let own: [u8; 32] = rand::random();
-        let seed: [u8; 32] = rand::random();
-        let settings = Settings {
+        Settings {
             name: name.into(),
             address: address.trim_end_matches('/').into(),
             auth_url: format!("http://127.0.0.1:{}", ports[0]),
@@ -264,49 +237,31 @@ impl Settings {
             node_url: None,
             serverless: false,
             ports,
-            kernel_secret: secret(),
             auth_secret: secret(),
-            schedules_key: json!({ "secret": B64U.encode(&own), "public": B64U.encode(&public_of(&own)) }),
-            recovery_key: B64U.encode(&twin(&seed).1),
             resources: vec![],
             bucket: None,
             android: vec![],
-            vault_key: if google() { secret() } else { String::new() },
             google: None,
             cloudflare_token: None,
             devices: vec![],
             try_person: None,
-        };
-        (settings, data_encoding::HEXLOWER.encode(&seed))
+        }
     }
 
     /// A try install's kernel (`one try`): on free ports here, its address its gateway's at 127.0.0.1, which `one try`
     /// lets each device it borrows reach at the same address; its node `node`, its bucket where that node serves its
-    /// data (`bucket`), its recovery key the try install's (`recovery`, as hex), and `person` signed in with nothing
-    /// to show.
-    pub fn for_try(node: &str, bucket: &str, recovery: &str, person: (String, String)) -> Result<Settings> {
+    /// data (`bucket`), and `person` signed in with nothing to show.
+    pub fn for_try(node: &str, bucket: &str, person: (String, String)) -> Result<Settings> {
         let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
         let ports = [free()?, free()?, free()?, free()?];
-        let (mut settings, _) = Settings::new("Try", &format!("http://127.0.0.1:{}", ports[3]));
-        let seed: [u8; 32] = data_encoding::HEXLOWER.decode(recovery.trim().as_bytes()).ok().and_then(|s| s.try_into().ok()).context("that isn't a recovery key")?;
-        settings.recovery_key = B64U.encode(&twin(&seed).1);
+        let mut settings = Settings::new("Try", &format!("http://127.0.0.1:{}", ports[3]));
         (settings.auth_url, settings.vault_url, settings.schedules_url) = (format!("http://127.0.0.1:{}", ports[0]), format!("http://127.0.0.1:{}", ports[1]), format!("http://127.0.0.1:{}", ports[2]));
         settings.ports = ports;
         settings.node_url = Some(format!("http://{node}"));
-        settings.vault_key = B64U.encode(&rand::random::<[u8; 32]>());
         settings.try_person = Some(person);
         // Its node serves its data there (try_install::bucket), signatures unchecked: the URL signer holds these.
         settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try", "region": "auto", "key_id": "try", "secret": "try" }));
         Ok(settings)
-    }
-
-    /// Makes a try install's person's keys at its vault, as their first sign-in would, so the install's own keys are
-    /// given to the vault (`give_keys`) before any client signs in.
-    pub fn try_person_keys(&self) -> Result<()> {
-        let (user, _) = self.try_person.as_ref().context("not a try install's kernel")?;
-        let code = B64U.encode(&rand::random::<[u8; 32]>());
-        internal(&self.vault_url, "own", &self.kernel_secret, json!({ "user": user, "to": code, "name": "one try", "client": "one try" }))?;
-        Ok(())
     }
 
     /// Writes the settings, and, the first time, the secrets' values to `.env.local`; after that a secret changes
@@ -315,14 +270,9 @@ impl Settings {
         let path = Settings::path();
         if !local().exists() {
             let mut text = String::new();
-            for (name, value) in [("KERNEL_SECRET", self.kernel_secret.clone()), ("AUTH_SECRET", self.auth_secret.clone()), ("SCHEDULES_KEY", self.schedules_key.to_string())] {
-                text += &format!("{name}={}\n", quoted(&value));
-            }
+            text += &format!("AUTH_SECRET={}\n", quoted(&self.auth_secret));
             if let Some(bucket) = &self.bucket {
                 text += &format!("BUCKET={}\n", quoted(&bucket.to_string()));
-            }
-            if !self.vault_key.is_empty() {
-                text += &format!("VAULT_KEY={}\n", quoted(&self.vault_key));
             }
             write_private(&local(), &text)?;
         }
@@ -388,11 +338,10 @@ impl Settings {
             return out;
         }
         let issuer = format!("{}/api/auth", self.address);
-        let mut out = vec![("KERNEL_SECRET".into(), self.kernel_secret.clone(), true)];
+        let mut out = vec![];
         let mut plain = |name: &str, value: String| out.push((name.into(), value, false));
         match service {
             "auth" => {
-                plain("VAULT", "service:vault".into());
                 // Whether a request's signer is one of the install's endpoints, and an admin's.
                 plain("RELAY", "service:relay".into());
                 plain("ADDRESS", self.address.clone());
@@ -410,36 +359,17 @@ impl Settings {
                 let resources: Vec<&String> = std::iter::once(&self.address).chain(&self.resources).collect();
                 plain("RESOURCES", json!(resources).to_string());
             }
-            "vault" => {
-                plain("AUTH", "service:auth".into());
-                plain("ISSUER", issuer);
-                plain("RECOVERY_KEY", self.recovery_key.clone());
-                if self.try_person.is_some() {
-                    plain("SIGN_IN", "try".into());
-                } else if google() {
-                    plain("SIGN_IN", "google".into());
-                }
-            }
             _ => {
-                plain("VAULT", "service:vault".into());
                 plain("AUTH", "service:auth".into());
                 plain("ISSUER", issuer);
             }
         }
-        match service {
-            "auth" => {
-                out.push(("AUTH_SECRET".into(), self.auth_secret.clone(), true));
-                if let Some((id, secret)) = self.google.clone().filter(|_| google()) {
-                    out.push(("GOOGLE_CLIENT_ID".into(), id, false));
-                    out.push(("GOOGLE_CLIENT_SECRET".into(), secret, true));
-                }
+        if service == "auth" {
+            out.push(("AUTH_SECRET".into(), self.auth_secret.clone(), true));
+            if let Some((id, secret)) = self.google.clone().filter(|_| google()) {
+                out.push(("GOOGLE_CLIENT_ID".into(), id, false));
+                out.push(("GOOGLE_CLIENT_SECRET".into(), secret, true));
             }
-            "vault" => {
-                if google() || self.try_person.is_some() {
-                    out.push(("VAULT_KEY".into(), self.vault_key.clone(), true));
-                }
-            }
-            _ => out.push(("SCHEDULES_KEY".into(), self.schedules_key.to_string(), true)),
         }
         out
     }
@@ -877,73 +807,38 @@ impl Cloudflare {
     }
 }
 
-/// Asks a kernel service at `url`, as only the kernel's own tools may.
-fn internal(url: &str, path: &str, kernel_secret: &str, body: Value) -> Result<Value> {
-    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-    let mut resp = agent.post(format!("{}/internal/{path}", url.trim_end_matches('/'))).header("x-kernel-secret", kernel_secret).send_json(body)?;
-    let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-    ensure!(resp.status() == 200, "{}", out["error"].as_str().unwrap_or("the kernel failed"));
-    Ok(out)
-}
-
-/// Tells the vault each scope's key, who may open it and its admins, from the install's log (`{ scope, key, people,
-/// admins }` each, from a node that holds them): a key its nodes made before it had a kernel becomes the scope's, and
-/// only those of `people` who have keys open it there. → who opens each, or why the vault refused it.
-pub fn give_keys(settings: &Settings, keys: &[Value]) -> Vec<Result<Vec<String>>> {
-    keys.iter()
-        .map(|k| {
-            let out = internal(&settings.vault_url, "scope-key", &settings.kernel_secret, json!({ "scope": k["scope"], "key": k["key"], "people": k["people"], "admins": k["admins"] }))?;
-            Ok(out["granted"].as_array().into_iter().flatten().filter_map(|u| u.as_str().map(str::to_string)).collect())
-        })
-        .collect()
-}
-
-/// Everyone with keys in `settings`' install: `{ user, sealed }`, their key pair's secret half sealed to the recovery key.
-pub fn people(settings: &Settings) -> Result<Vec<Value>> {
-    let out = internal(&settings.vault_url, "recovery", &settings.kernel_secret, json!({}))?;
-    Ok(out["people"].as_array().cloned().unwrap_or_default())
-}
-
-/// An invite link: opening it lets its person make their first passkey and join.
+/// An invite link: opening it lets its person sign up, once, as who it says.
 pub struct Invite {
     pub link: String,
+    /// The id they'll have in the install.
+    pub user: String,
     /// Until when it works, in milliseconds since 1970.
     pub until: u64,
 }
 
-/// Invites someone to join `settings`' install, `name` only a label, as `user` (who they are in the install, so nodes
-/// know them; a new id if not given). Nobody joins uninvited, the install's first person too. Someone who has keys
-/// already lost every passkey: their link carries their keys, opened with the recovery key's secret (`recovery` gives
-/// it, asked only then), for their new passkey.
-pub fn invite(settings: &Settings, name: &str, user: Option<&str>, recovery: impl FnOnce() -> Option<String>) -> Result<Invite> {
-    ensure!(!google(), "people here sign in with Google, so they need no invite: {} kernel invite --email says who someone is in the install", crate::config::CLI);
-    let held = match user {
-        Some(user) => people(settings)?.into_iter().find(|p| p["user"] == user),
-        None => None,
-    };
-    let key = match held {
-        None => None,
-        Some(held) => {
-            let recovery = recovery().with_context(|| format!("{name} has keys already, so their link must carry them: pipe the recovery key"))?;
-            let seed: [u8; 32] = data_encoding::HEXLOWER.decode(recovery.trim().as_bytes()).ok().and_then(|s| s.try_into().ok()).context("that isn't a recovery key")?;
-            let sealed = B64U.decode(held["sealed"].as_str().unwrap_or("").as_bytes())?;
-            Some(open_sealed(&twin(&seed).0, &sealed).context("that isn't this install's recovery key")?)
-        }
-    };
-    let out = internal(&settings.auth_url, "invite", &settings.kernel_secret, json!({ "name": name, "user": user }))?;
-    let (token, until) = (out["token"].as_str().context("the auth service gave no invite")?, out["until"].as_u64().unwrap_or(0));
-    if let Some(key) = key {
-        internal(&settings.vault_url, "recover", &settings.kernel_secret, json!({ "user": user, "key": B64U.encode(&key), "secret": token, "until": until }))?;
-    }
-    Ok(Invite { link: format!("{}/invite#{token}", settings.address), until })
-}
+/// How long an invite works.
+pub const INVITE_DAYS: u64 = 3;
 
-/// On an install whose people sign in with Google, says who `email` is in the install (`user`, who `name` is) when they
-/// first sign in, for someone who was in it before it had a kernel: → until when it holds.
-pub fn known_as(settings: &Settings, name: &str, user: &str, email: &str) -> Result<u64> {
-    ensure!(google(), "people here sign in with a passkey: an invite link lets someone in");
-    let out = internal(&settings.auth_url, "invite", &settings.kernel_secret, json!({ "name": name, "user": user, "email": email }))?;
-    Ok(out["until"].as_u64().unwrap_or(0))
+/// Invites someone to join the install at `address`, `name` only a label, as `user` (who they'll be in the install; a
+/// new id if not given), and where people sign in with Google, as the Google account `email`. The link's secret is
+/// made here and never leaves but in the link: the auth service is told only its hash, in a request signed with
+/// `key`, an admin's device's.
+pub fn invite(address: &str, key: &ed25519_dalek::SigningKey, name: &str, user: Option<&str>, email: Option<&str>) -> Result<Invite> {
+    ensure!(!name.trim().is_empty(), "give their name");
+    ensure!(!google() || email.is_some(), "people here sign in with Google: --email says which account they sign up with");
+    let user = user.map(str::to_string).unwrap_or_else(crate::entry::new_id);
+    let secret = B64U.encode(&rand::random::<[u8; 32]>());
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64;
+    let until = now + INVITE_DAYS * 86_400_000;
+    let mut fields = json!({ "route": "POST /api/auth/invites", "id": data_encoding::HEXLOWER.encode(&crate::keys::sha256(secret.as_bytes())), "name": name.trim(), "user": user, "until": until });
+    if let Some(email) = email {
+        fields["email"] = json!(email);
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
+    let mut resp = agent.post(format!("{address}/api/auth/invites")).send_json(crate::keys::signed_request(key, "one/auth", fields, now))?;
+    let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
+    ensure!(resp.status() == 200, "{}", out["error"].as_str().unwrap_or("the auth service made no invite"));
+    Ok(Invite { link: format!("{address}/invite#{secret}"), user, until })
 }
 
 /// A web file's type, by its extension.

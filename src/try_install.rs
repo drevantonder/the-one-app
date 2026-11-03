@@ -125,7 +125,7 @@ fn start(dir: &Path) -> Result<String> {
     Ok(addr)
 }
 
-/// A new try install, its kernel, and its person's keys there.
+/// A new try install, and its kernel.
 fn start_new(dir: &Path) -> Result<String> {
     eprintln!("Starting a new try install for this checkout…");
     stop(dir, true)?;
@@ -146,7 +146,7 @@ fn start_new(dir: &Path) -> Result<String> {
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
     let state = crate::request(agent().get(on("/v1/state")).call())?;
     let person = (state["user"]["id"].as_str().context("the try install has no person")?.to_string(), me);
-    let settings = one::kernel::Settings::for_try(&addr, &bucket, recovery, person)?;
+    let settings = one::kernel::Settings::for_try(&addr, &bucket, person)?;
     with_home(dir, || settings.save())?;
     // Read back as the kernel reads it, with its secrets.
     let settings = load_kernel(dir)?;
@@ -162,7 +162,6 @@ fn start_new(dir: &Path) -> Result<String> {
         anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the try install's node didn't move to its bucket: node.log says why");
         std::thread::sleep(Duration::from_millis(200));
     }
-    settings.try_person_keys()?;
     Ok(addr)
 }
 
@@ -493,9 +492,10 @@ fn web(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Re
     Ok(())
 }
 
-/// `name`'s web client, signed in: the first time, the try install's first person makes them an invite link with Add
-/// Someone, on their own web client, and they open it in their own browser, join, and sign in. Pictures of making
-/// the link, the invite and joining are kept beside theirs. → its DevTools port, and the picture of their first screen.
+/// `name`'s web client, signed in: the first time, the try install's machine invites them with its own key, as
+/// `kernel invite` does on an admin's machine, and they open the link in their own browser, join, and sign in.
+/// Pictures of the invite and joining are kept beside theirs. → its DevTools port, and the picture of their first
+/// screen.
 fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u16, PathBuf)> {
     let folder = web_folder(dir, Some(name));
     let picture = folder.with_extension("png");
@@ -503,11 +503,8 @@ fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u
     let mut args = vec!["sign-in".to_string(), port.to_string(), settings.address.clone(), picture.display().to_string()];
     let marker = folder.join("joined");
     if !marker.exists() {
-        let admin = browser(dir, settings, None)?;
-        web_script(dir, &["sign-in", &admin.to_string(), &settings.address, &dir.join("web.png").display().to_string()])?;
         eprintln!("Inviting {name}…");
-        let made = picture.display().to_string().replace(".png", "-add-someone.png");
-        args.push(web_script(dir, &["invite", &admin.to_string(), &settings.address, name, &made])?);
+        args.push(one::kernel::invite(&settings.address, &one::node::device_key(dir)?, name, None, None)?.link);
     }
     web_script(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     std::fs::write(&marker, name)?;
@@ -519,7 +516,7 @@ fn web_script(dir: &Path, args: &[&str]) -> Result<String> {
     let script = dir.join("web.js");
     std::fs::write(&script, include_str!("try_install.js"))?;
     let out = std::process::Command::new(one::deploy::bun()?).arg(&script).args(args).output()?;
-    anyhow::ensure!(out.status.success(), "the web client didn't {}: {}", if args[0] == "invite" { "make an invite link" } else { "sign in" }, String::from_utf8_lossy(&out.stderr).trim());
+    anyhow::ensure!(out.status.success(), "the web client didn't sign in: {}", String::from_utf8_lossy(&out.stderr).trim());
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
