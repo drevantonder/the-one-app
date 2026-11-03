@@ -18,6 +18,20 @@ impl Node {
         .flatten()
     }
 
+    /// Refuses, before anything is written, what would make a schedule of one of `apps` run as `me` on a One App whose
+    /// schedules run from its kernel, when `me` isn't signed in: the schedules service takes a schedule only with a
+    /// sign-in's token, so it would show on and never run.
+    pub(super) async fn may_schedule(&self, me: &Caller, apps: &[&str]) -> Result<()> {
+        if self.schedules_service().is_none() || me.token.as_deref().is_some_and(|t| !t.starts_with("run.")) {
+            return Ok(());
+        }
+        let declared = self.declared().await;
+        if let Some((app, _)) = declared.iter().find(|(a, list)| apps.contains(&a.as_str()) && list.iter().any(Result::is_ok)) {
+            bail!("sign in first ({} sign-in): {app}'s schedules run only for someone signed in", crate::config::CLI);
+        }
+        Ok(())
+    }
+
     /// Brings what `me` has let run at the schedules service in line with the schedules that run as them here, in the
     /// background: after they install an app, or switch one of its schedules.
     pub(super) fn sync_schedules_later(&self, me: &Caller) {
@@ -256,11 +270,12 @@ impl Node {
     /// Switches one of an app's schedules on or off in `scope`, for `caller`; switching one on makes it run as them.
     pub async fn switch_schedule(&self, caller: &Caller, app: &str, schedule: &str, scope: &Scope, on: bool) -> Result<()> {
         let content = self.with(|i| switch_entry(i, &caller.user, scope, app, schedule, on))?;
-        let kernel = self.schedules_service().is_some();
-        ensure!(!kernel || caller.token.is_some(), "sign in first ({} sign-in): schedules here run from your One App's kernel, with what your sign-in lets them use", crate::config::CLI);
+        if on {
+            self.may_schedule(caller, &[app]).await?;
+        }
         let by = (caller.key != self.0.id).then_some(caller.key);
         self.append_as(scope, &caller.user, by, content).await?;
-        if kernel {
+        if self.schedules_service().is_some() && caller.token.is_some() {
             self.sync_schedules(caller).await.context("it's switched, but the schedules service didn't take it")?;
         }
         Ok(())

@@ -350,6 +350,13 @@ impl Node {
             }
         }
         let schedules_changed = appends.iter().any(|a| matches!(a, Append::Install { .. } | Append::Switch { .. }));
+        let scheduling: Vec<String> = appends
+            .iter()
+            .filter_map(|a| match a {
+                Append::Switch { app, on: true, .. } | Append::Install { app, installed: true, .. } => Some(app.clone()),
+                _ => None,
+            })
+            .collect();
         let (installs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
         let (execs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Exec { .. }));
         // Each scope's statements, in the order the call ran them, and the blobs they keep.
@@ -372,6 +379,7 @@ impl Node {
         for append in appends {
             writes.push(self.with(|i| check_append(i, app, append, scopes, me))?);
         }
+        self.may_schedule(me, &scheduling.iter().map(String::as_str).collect::<Vec<_>>()).await?;
         let wrote = !statements.is_empty();
         for (scope, list, kept) in statements {
             let (db, bucket) = self.call_database(me, &scope, app, DATABASE, None).await?;

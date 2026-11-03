@@ -245,7 +245,9 @@ impl Node {
     /// Installs (or uninstalls) `app` in `scope` for `caller`, and what it uses.
     pub async fn install(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool) -> Result<()> {
         let by = (caller.key != self.0.id).then_some(caller.key);
-        for (scope, content) in self.install_entries(caller, app, scope, installed).await? {
+        let entries = self.install_entries(caller, app, scope, installed).await?;
+        self.may_schedule(caller, &installing(&entries)).await?;
+        for (scope, content) in entries {
             self.append_as(&scope, &caller.user, by, content).await?;
         }
         if self.schedules_service().is_some() && caller.token.is_some() {
@@ -304,4 +306,9 @@ fn built_in_source(app: &str) -> Option<String> {
     let repo = crate::config::REPO;
     let commit = crate::config::BUILD.split(['-', '+']).next().filter(|c| !crate::config::BUILD.contains('+') && c.len() >= 7 && c.bytes().all(|b| b.is_ascii_hexdigit()));
     (!repo.is_empty()).then(|| format!("https://github.com/{repo}/tree/{}/apps/{app}", commit.unwrap_or("main")))
+}
+
+/// The apps install entries install.
+pub(super) fn installing(entries: &[(Scope, Content)]) -> Vec<&str> {
+    entries.iter().filter(|(_, c)| c.kind == "install").filter_map(|(_, c)| c.data["app"].as_str()).collect()
 }

@@ -64,6 +64,16 @@ pub fn try_install(rest: &[String]) -> Result<()> {
     // and its kernel's settings are its own kernel's.
     unsafe { std::env::set_var(addr_var(), &addr) };
     unsafe { std::env::set_var(format!("{}_HOME", CLI.to_uppercase()), &dir) };
+    if rest.first().map(String::as_str) == Some("sign-in") {
+        // As its person, with no passkey: the try install's kernel asks for none.
+        let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the try install has no address")?.to_string();
+        let started = one::sign_in::start(&address)?;
+        one::sign_in::approve_on_try(&started)?;
+        one::sign_in::finish(started)?;
+        let me = get("/v1/state")?["user"]["name"].as_str().unwrap_or("you").to_string();
+        println!("Signed in as {me}. {CLI} try and {CLI} try mcp act as them until {CLI} try sign-out.");
+        return Ok(());
+    }
     if !rest.is_empty() {
         return crate::run(rest.to_vec());
     }

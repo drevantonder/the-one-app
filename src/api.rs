@@ -555,10 +555,9 @@ async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> R
     done()
 }
 
-async fn schedule(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let me = local(&node)?;
-    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
-    node.switch_schedule(&me, text(&body, "app")?, text(&body, "schedule")?, &scope, body["on"] != false).await?;
+async fn schedule(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    let scope = node.scope_for(&me.caller, body["scope"].as_str().unwrap_or("user"))?;
+    node.switch_schedule(&me.caller, text(&body, "app")?, text(&body, "schedule")?, &scope, body["on"] != false).await?;
     done()
 }
 
