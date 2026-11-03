@@ -39,7 +39,7 @@ fn board(op: &str, input: Value) -> CallRequest {
 
 /// The texts of the posts on a device's board of `scope`.
 async fn texts(node: &Node, scope: &str) -> Vec<String> {
-    match node.call(board("news", json!({ "format": "json", "since": 0, "scope": scope }))).await {
+    match node.call(board("news", json!({ "format": "json", "since": "1970-01-01T00:00:00Z", "scope": scope }))).await {
         Ok(posts) => posts.as_array().unwrap().iter().map(|p| p["text"].as_str().unwrap().to_string()).collect(),
         Err(_) => Vec::new(),
     }
