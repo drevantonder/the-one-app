@@ -87,9 +87,15 @@ impl Node {
     /// the nearest. A sidecar about its own machine runs here first.
     pub(super) fn candidates(&self, req: &CallRequest, me: &Caller) -> Result<Vec<Key>> {
         if let Some(device) = &req.device {
-            // A sidecar's call goes to the service offering it on that device, if one does.
-            let service = req.sidecar.as_ref().and_then(|_| self.find_service(&req.app, device));
-            return Ok(vec![service.map_or_else(|| self.find_device(device), Ok)?]);
+            // A sidecar's call goes to the service offering it on that device, if one serves the caller: their own
+            // first, then the device itself, then one its person shares with everyone.
+            if req.sidecar.is_some() {
+                let found = self.find_service(&req.app, device, &me.user, true).or_else(|| self.find_device(device).ok()).or_else(|| self.find_service(&req.app, device, &me.user, false));
+                if let Some(found) = found {
+                    return Ok(vec![found]);
+                }
+            }
+            return Ok(vec![self.find_device(device)?]);
         }
         let here = self.runs_sidecar_here(&req.app);
         // A sidecar, or one of its operations, that's about its own machine (`"prefer": "here"`: Shell, models_here) runs
@@ -136,9 +142,13 @@ impl Node {
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
         // A client device's own calls are kept by its key, which proves nothing to another device, and a service runs
         // nothing as a sign-in: either is passed on with none.
-        let token = me.token.as_ref().filter(|t| !t.starts_with(sessions::CLIENT) && !self.is_service(&device));
+        // A service that serves everyone is passed a sign-in, which it checks itself; never keys.
+        let service = self.is_service(&device);
+        let shared = self.with(|i| Ok(i.r.members.service(&device).is_some_and(|s| s.shared)))?;
+        let token = me.token.as_ref().filter(|t| !t.starts_with(sessions::CLIENT) && (!service || (shared && sessions::is_sign_in(t))));
         let mut request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": token } });
         if let Some(token) = token
+            && !service
             && let Some(seal) = self.with(|i| Ok(i.r.members.seal_key(&device)))?
             && let Some(keys) = self.hand_on(token, &seal)
         {
@@ -766,19 +776,25 @@ impl Node {
     /// Runs a call one of the install's services asked for, as its person, wherever it runs: a service writes nothing
     /// itself, and asks for the calls the program it offers makes (`/v1/call` where it's hosted).
     pub(super) async fn accept_service_call(&self, remote: Key, request: &Value) -> Reply {
-        let me = match self.check_caller(remote, request) {
-            Ok(me) => me,
-            Err(err) => return Reply::Error(format!("{err:#}")),
-        };
-        let mut req: CallRequest = match serde_json::from_value(request.clone()) {
-            Ok(req) => req,
-            Err(err) => return Reply::Error(format!("{err:#}")),
-        };
-        (req.from, req.depth) = (None, 0);
-        match self.call_as(req, me).await {
-            Ok(v) => Reply::Ok(v),
+        match self.accept_service(remote, request) {
+            Ok((req, me)) => self.run(&req, &me).await,
             Err(err) => Reply::Error(format!("{err:#}")),
         }
+    }
+
+    /// What a service may have run, as `service::limited` says: only its own app, in its person's own scope, here on
+    /// a node of that person's own, whose keys it is run with until grants land, calling no other app. A hacked
+    /// service gets no more than its own app's operations for its own person.
+    fn accept_service(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
+        let me = self.check_caller(remote, request)?;
+        ensure!(request["me"]["token"].is_null(), "a service asks with no sign-in");
+        let (name, owner) = self.with(|i| Ok(i.r.members.service(&remote).map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this install")?;
+        ensure!(me.key == remote && me.user == owner && owner == self.user()?, "a service's calls run only on its own person's node");
+        let mut req: CallRequest = serde_json::from_value(crate::service::limited(&name, request)?)?;
+        let resolved = self.resolve(req.clone());
+        ensure!(resolved.app == name, "a service asks only for its own app, {name}");
+        (req.from, req.depth) = (None, MAX_DEPTH);
+        Ok((req, me))
     }
 
     async fn accept(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {

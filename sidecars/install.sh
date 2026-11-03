@@ -2,8 +2,8 @@
 # Installs a sidecar as the one-<sidecar> service on a device, here or over ssh: ./install.sh whatsapp [host]. It's a
 # service endpoint of its own (src/service.rs), which needs no node there, only this program: one with a folder here is
 # a Go program, built for the device and started by `one sidecars host`; any other is one this program hosts (`one
-# sidecars serve`). It's for the One App of the device you run this on, and shows a code that one of your devices
-# approves it with (`one devices approve <code>`), which this prints. On Linux it's a systemd service; on a Mac, a
+# sidecars serve`). It's yours, in the One App of the device you run this on, by a one-time install link made here, and
+# shows a code that this device approves it with (`one devices approve <code>`), which this prints. On Linux it's a systemd service; on a Mac, a
 # launch agent of the user's. CONFIG=path/to/config.toml installs it as <cli>-<sidecar>, for that white label: its CLI
 # and data folder (the node service's <CLI>_HOME there, if it has one).
 set -eu
@@ -21,7 +21,7 @@ if [ -n "$config" ]; then
 	env="${upper}_HOME=$home"
 	[ ! -d "$sidecar" ] || env="$env $(echo "$sidecar" | tr a-z- A-Z_)_DATA=$home/$sidecar"
 fi
-# The One App it's for: this device's.
+# The One App it's for, this device's, and whose: this device's person's, by a one-time secret made here.
 link=$($node sidecars install-link)
 set -- $(on uname -sm)
 os=$(echo "$1" | tr A-Z a-z)
@@ -45,7 +45,7 @@ fi
 code() {
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
 		c=$(on "cat $home/services/$sidecar/code 2>/dev/null" || true)
-		[ -z "$c" ] || { echo "Approve $sidecar on one of your devices: $node devices approve $c"; return; }
+		[ -z "$c" ] || { echo "Approve $sidecar here, where its link was made: $node devices approve $c"; return; }
 		sleep 1
 	done
 	echo "$sidecar is running, approved already."

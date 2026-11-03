@@ -82,6 +82,8 @@ impl Node {
                             let key = crate::keys::unhex(to)?;
                             let listed = m.machine(&key).context("that endpoint isn't one of the install's")?;
                             ensure!(m.may_use(&listed.user, scope), "that endpoint's person doesn't use {scope}");
+                            // A service holds no keys: it reads nothing, and asks its person's node to write.
+                            ensure!(m.service(&key).is_none(), "a service is sealed no keys");
                         }
                     }
                     Ok(())
@@ -122,6 +124,12 @@ pub struct DeviceRequest {
     /// `name` being its machine's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
+    /// For a service's request: whether it serves everyone, not only its person.
+    #[serde(default)]
+    pub shared: bool,
+    /// For a service's request: the hash of the enrollment secret its link carried, which names it here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrollment: Option<String>,
 }
 
 impl DeviceRequest {
@@ -141,6 +149,18 @@ pub struct Invited {
     pub role: Role,
     pub until: u64,
 }
+
+/// An enrollment secret `one sidecars install-link` minted on this device, for a service to prove its request with
+/// (`keys::service_proof`), until it runs out or a service it named is approved: kept in this device's own folder,
+/// since only this device is shown the requests it names.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct Enrollment {
+    secret: String,
+    until: u64,
+}
+
+/// How long an install link's enrollment works.
+const ENROLLMENT: u64 = 86_400_000;
 
 /// Where a person's invites are kept: a database of the node's own, in their scope.
 const INVITES: &str = "invites";
@@ -259,8 +279,12 @@ impl Node {
         for r in asked {
             let Ok(device) = r.endpoint() else { continue };
             match (&r.proof, invites.get(&r.user)) {
-                // Whoever has a service's code makes it theirs: the code is what says which it is.
-                _ if r.service.is_some() => out.push(json!({ "device": r.name, "service": r.service })),
+                // A service, only to the person whose install link it was given, as its proof says.
+                _ if r.service.is_some() => {
+                    if r.user == caller.user && self.enrolled(&r).is_ok() {
+                        out.push(json!({ "device": r.name, "service": r.service, "shared": r.shared }));
+                    }
+                }
                 (None, _) if r.user == caller.user => out.push(json!({ "device": r.name, "person": r.person, "yours": true })),
                 (Some(proof), Some(i)) if *proof == crate::keys::invite_proof(i.secret.as_bytes(), &device) => {
                     out.push(json!({ "device": r.name, "person": i.name, "code": crate::keys::join_code(&device), "role": i.role }))
@@ -349,10 +373,13 @@ impl Node {
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let r = asked.into_iter().find(|r| r.endpoint().is_ok_and(|d| crate::keys::join_code(&d) == code)).context("no device is waiting with that code: it waits 15 minutes after it asks")?;
         if let Some(service) = &r.service {
+            ensure!(r.user == caller.user, "that service is someone else's: they approve it on their own device");
+            let id = self.enrolled(&r)?;
             if !confirm {
-                return Ok(json!({ "device": r.name, "service": service }));
+                return Ok(json!({ "device": r.name, "service": service, "shared": r.shared }));
             }
             let approved = self.approve_service(caller, &r).await?;
+            self.keep_enrollment(&id, None)?;
             if let Err(err) = self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}", r.key), json!({})).await {
                 tracing::warn!("forgetting an approved request at auth: {err:#}");
             }
@@ -417,14 +444,57 @@ impl Node {
         Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not }))
     }
 
+    /// An install link for a service of `caller`'s, this device's own person (`one sidecars install-link`): the
+    /// install's address and first entry, who it's for, and a one-time secret minted here, whose hash auth is told
+    /// (signed by this device) so it keeps only a request that names it, and shows it only to this device. → the link.
+    pub async fn install_link(&self, caller: &Caller) -> Result<String> {
+        let user = self.user()?;
+        ensure!(caller.user == user, "make a service's install link on one of your own devices");
+        let root = self.with(|i| Ok(i.r.root.map(|r| r.to_hex())))?.context("this device isn't in your One App yet")?;
+        let secret: [u8; 32] = rand::random();
+        let until = now_ms() + ENROLLMENT;
+        let id = hex(&crate::keys::sha256(&secret));
+        self.ask_auth("POST", "/api/auth/services/enrollments", json!({ "id": id, "user": user, "until": until })).await?;
+        self.keep_enrollment(&id, Some(Enrollment { secret: hex(&secret), until }))?;
+        Ok(crate::service::Install { address: self.address()?, root, user, secret: hex(&secret) }.link())
+    }
+
+    /// The enrollments this device minted that still work, by their hash.
+    fn enrollments(&self) -> BTreeMap<String, Enrollment> {
+        let kept: BTreeMap<String, Enrollment> = std::fs::read(self.0.dir.join("enrollments.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        kept.into_iter().filter(|(_, e)| e.until > now_ms()).collect()
+    }
+
+    /// Keeps or forgets (`None`) an enrollment.
+    fn keep_enrollment(&self, id: &str, enrollment: Option<Enrollment>) -> Result<()> {
+        let mut kept = self.enrollments();
+        match enrollment {
+            Some(e) => kept.insert(id.to_string(), e),
+            None => kept.remove(id),
+        };
+        write_private(&self.0.dir.join("enrollments.json"), &serde_json::to_vec(&kept)?)?;
+        Ok(())
+    }
+
+    /// Whether a service's request comes with a proof from an enrollment this device minted: → its hash.
+    fn enrolled(&self, r: &DeviceRequest) -> Result<String> {
+        let id = r.enrollment.clone().context("that service came with no install link")?;
+        let e = self.enrollments().remove(&id).context("that service's install link wasn't made on this device, or ran out: make another with sidecars install-link")?;
+        let proof = crate::keys::service_proof(&crate::keys::unhex(&e.secret)?, &r.endpoint()?);
+        ensure!(r.proof.as_deref().is_some_and(|p| crate::keys::same_secret(p.as_bytes(), proof.as_bytes())), "that service's request doesn't prove it came from your install link");
+        Ok(id)
+    }
+
     /// Lets a service in as `caller`'s (`one sidecars serve` asked with its own key, and they typed the code it shows):
     /// lists it as their service endpoint offering it, and tells the relay to let it in. It holds no keys: the nodes
     /// that call it bring it the install's entries, which say who may. → what it is.
     pub async fn approve_service(&self, caller: &Caller, r: &DeviceRequest) -> Result<Value> {
         let service = r.service.as_deref().context("that request isn't a service's")?;
+        ensure!(r.user == caller.user && caller.user == self.user()?, "approve a service on the device of yours that made its install link");
+        self.enrolled(r)?;
         let endpoint = crate::keys::Endpoint { key: crate::keys::unhex(&r.key)?, seal: crate::keys::unhex(&r.seal)? };
         ensure!(self.with(|i| Ok(i.r.members.machines.get(&endpoint.key).is_none()))?, "that service is listed already");
-        self.member_content(caller, members::service(&endpoint, &caller.user, &r.name, service)).await?;
+        self.member_content(caller, members::service(&endpoint, &caller.user, &r.name, service, r.shared)).await?;
         self.tell_relay(json!({ "add": r.key, "admin": false, "role": "service" }));
         // Its first hello brings it the entries that say it's theirs: as soon as the relay lets it in.
         let (node, key) = (self.clone(), endpoint.key);

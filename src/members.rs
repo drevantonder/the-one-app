@@ -84,6 +84,9 @@ pub struct Machine {
     pub passkey: Option<String>,
     /// For a service endpoint, the service it offers (`whatsapp`): what calls naming it reach.
     pub service: Option<String>,
+    /// For a service endpoint, whether it serves everyone its person's listing lets it (a push sender, say), not only
+    /// its own person.
+    pub shared: bool,
     /// Who listed it: its person, from one of their own devices, or an admin.
     pub by: String,
     pub removed: bool,
@@ -338,6 +341,11 @@ impl Members {
         self.machine(key).filter(|m| m.is(Kind::Service) && m.service.is_some())
     }
 
+    /// Whom a service endpoint serves, as its listing says: its own person, or everyone of the install if it's shared.
+    pub fn service_serves(&self, key: &Key, user: &str) -> bool {
+        self.service(key).is_some_and(|s| s.user == user || (s.shared && self.user(user).is_some()))
+    }
+
     /// The service endpoints offering `name`.
     pub fn services<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a Machine> {
         self.machines.values().filter(move |m| m.service.as_deref() == Some(name) && self.service(&m.key).is_some())
@@ -425,6 +433,15 @@ impl Members {
         self.user(user).is_some() && self.scopes().iter().any(|s| self.may_use(user, s) && self.runs_for(endpoint, s))
     }
 
+    /// The compute endpoints a call of `user`'s that reaches `scopes` may be passed on to: each runs every one of those
+    /// scopes, all of which `user` may use, so none is handed a call, or its keys, that isn't theirs to run.
+    pub fn runners(&self, user: &str, scopes: &[Scope]) -> Vec<&Machine> {
+        if self.user(user).is_none() || !scopes.iter().all(|s| self.may_use(user, s)) {
+            return Vec::new();
+        }
+        self.computes().filter(|m| self.serves(&m.key, user) && scopes.iter().all(|s| self.runs_for(&m.key, s))).collect()
+    }
+
     /// Every scope there is: `global`, each user's (removed ones too: removing deletes nothing) and each group's.
     pub fn scopes(&self) -> Vec<Scope> {
         let mut out = vec![Scope::Global];
@@ -497,6 +514,8 @@ impl Members {
                 let user = id_of("user")?;
                 let mut machine = listed(data, &user)?;
                 machine.by = w.clone();
+                // A service answers its person's calls as them: only their own device lists one, never an admin's.
+                ensure!(!machine.is(Kind::Service) || w == user, "only a person's own device lists their services");
                 // A machine an admin listed for someone is listed again by that person's own device to be theirs: then it
                 // runs their own scope too (`runs_for`).
                 if let Some(was) = self.machines.get(&machine.key) {
@@ -726,6 +745,7 @@ fn listed(data: &Value, user: &str) -> Result<Machine> {
         name,
         roles,
         passkey: data["passkey"].as_str().map(str::to_string),
+        shared: service.is_some() && data["shared"] == true,
         service,
         by: user.to_string(),
         removed: false,
@@ -1075,9 +1095,14 @@ pub fn install(app: &str, installed: bool) -> Content {
     node(if installed { "install" } else { "uninstall" }, json!({ "app": app }))
 }
 
-/// Lists a service endpoint offering `service` as `user`'s, by one of their own devices.
-pub fn service(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str) -> Content {
-    node("device", json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service }))
+/// Lists a service endpoint offering `service` as `user`'s, by one of their own devices: `shared` if it serves everyone
+/// it may, not only them.
+pub fn service(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, shared: bool) -> Content {
+    let mut data = json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service });
+    if shared {
+        data["shared"] = json!(true);
+    }
+    node("device", data)
 }
 
 #[cfg(test)]
@@ -1364,5 +1389,23 @@ mod tests {
         entries.push(other.write("global", BOB, device(&Dev::new(10).endpoint(), BOB, "x", &[Kind::Client], None), &entries));
         assert!(members(&entries).machine(&Dev::new(10).id()).is_none());
         let _ = &mut mac;
+    }
+
+    #[test]
+    fn a_call_is_passed_on_only_to_nodes_that_run_all_its_scopes() {
+        let (mut mac, mut entries) = setup();
+        let linux = Dev::new(4);
+        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
+        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(3).endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        let m = members(&entries);
+        let keys = |user: &str, scopes: &[Scope]| m.runners(user, scopes).iter().map(|r| r.key).collect::<BTreeSet<_>>();
+        let both = BTreeSet::from([mac.id(), linux.id()]);
+        let (andre, bob) = (Scope::User(ANDRE.into()), Scope::User(BOB.into()));
+        assert_eq!(keys(ANDRE, &[andre.clone()]), both);
+        assert_eq!(keys(BOB, &[Scope::Global]), both, "global runs on the admin's nodes");
+        assert!(keys(BOB, &[bob.clone()]).is_empty(), "Andre's nodes don't run Bob's own scope");
+        assert!(keys(BOB, &[Scope::Global, bob]).is_empty(), "nor a call that reaches it");
+        assert!(keys(BOB, &[andre]).is_empty(), "nor Andre's, which Bob may not use");
+        assert!(keys("stranger", &[Scope::Global]).is_empty());
     }
 }

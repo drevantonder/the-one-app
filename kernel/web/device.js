@@ -264,7 +264,7 @@ export class Device {
     const st = this.state();
     const own = (await answer(await this.bearer("/api/auth/devices/requests"))).requests || [];
     const invited = st.install.role === "admin" ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
-    const all = [...own, ...invited].filter((r, i, a) => r.key !== this.me.key && a.findIndex((x) => x.key === r.key) === i);
+    const all = [...own, ...invited].filter((r, i, a) => !r.service && r.key !== this.me.key && a.findIndex((x) => x.key === r.key) === i);
     return Promise.all(all.map(async (r) => ({ ...r, code: await codeOf(r.key, r.seal), mine: r.user === this.user })));
   }
 

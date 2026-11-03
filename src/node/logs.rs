@@ -308,7 +308,9 @@ impl Node {
                     Ok(None) => return tracing::debug!("service {} doesn't take calls from this device yet", short(&key)),
                     Err(err) => return tracing::debug!("service {}: {err:#}", short(&key)),
                 };
-                let (mut describe, users) = offers;
+                let (mut describe, _) = offers;
+                // Whom it serves is what its listing says, never what it says of itself.
+                let users: Vec<String> = node.with(|i| { let m = &i.r.members; Ok(m.users.keys().filter(|u| m.service_serves(&key, u)).cloned().collect()) }).unwrap_or_default();
                 describe["name"] = json!(name);
                 let sidecars: Vec<Sidecar> = vec![(name.clone(), users, describe)];
                 let changed = node.with(|i| {

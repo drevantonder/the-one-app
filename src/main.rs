@@ -130,7 +130,8 @@ fn every_command() -> String {
   {CLI} sidecars host <name> <program> [--install <link>]
                                        the same for a sidecar in another language: starts the program, which registers
                                        with it as it would with a node
-  {CLI} sidecars install-link          what --install takes: your One App's address and its first entry
+  {CLI} sidecars install-link          what --install takes, for a service of yours: your One App's address and a
+                                       one-time secret, good for a day; approve the service on this device
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's operations
@@ -759,12 +760,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let program: Vec<String> = program.iter().map(|p| p.to_string()).collect();
             one::service::host(name, &program, flags.get("install").and_then(Value::as_str))?
         }
-        ["sidecars", "install-link"] => {
-            let state = get("/v1/state")?;
-            let i = &state["install"];
-            let (Some(address), Some(root)) = (i["settings"]["address"].as_str(), i["root"].as_str()) else { bail!("this device's One App has no address yet") };
-            println!("{}", one::service::Install { address: address.trim_end_matches('/').into(), root: root.into() }.link());
-        }
+        ["sidecars", "install-link"] => println!("{}", post("/v1/services/install-link", json!({}))?["link"].as_str().unwrap_or("")),
         ["sidecars", how @ ("remove" | "add"), name] => {
             let device = flags.get("device").and_then(Value::as_str);
             post("/v1/sidecar", json!({ "name": name, "device": device, "installed": *how == "add" }))?;

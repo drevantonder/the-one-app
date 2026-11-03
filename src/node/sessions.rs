@@ -14,6 +14,8 @@ use super::*;
 pub(super) struct Session {
     /// Whose it is.
     user: String,
+    /// The client device whose calls over iroh it's for, if it's one's: forgotten once that device is removed.
+    client: Option<Key>,
     /// Until when its keys may be used: when its token expires, as its handoff says.
     pub until: u64,
     /// The database keys it was handed, by (scope, app, database), each by epoch.
@@ -64,9 +66,39 @@ pub fn client_token(key: &Key) -> String {
 
 pub(super) const CLIENT: &str = "client.";
 
+/// The longest a client device's handed keys are kept here.
+const CLIENT_KEYS: u64 = 3_600_000;
+
 /// The client device a token `client_token` made is for.
 pub fn client_of(token: &str) -> Option<Key> {
     data_encoding::HEXLOWER.decode(token.strip_prefix(CLIENT)?.as_bytes()).ok()?.try_into().ok()
+}
+
+/// Whether `token` is an access token the install's sign-in service signed, which another device can check: not a
+/// client device's or a scheduled run's.
+pub(super) fn is_sign_in(token: &str) -> bool {
+    !token.starts_with(CLIENT) && !token.starts_with(SERVERLESS) && !token.starts_with("run.")
+}
+
+/// What the serverless node's calls for `user` are kept by here: its endpoint's key, proven by QUIC, and the person
+/// it says the call is for. Like a client device's, no auth service signs it, so it's never a token anyone sends, and
+/// what it was handed opens only that person's calls from it.
+pub fn serverless_token(key: &Key, user: &str) -> String {
+    format!("{SERVERLESS}{}/{user}", hex(key))
+}
+
+const SERVERLESS: &str = "serverless.";
+
+/// The `for` of a handoff with calls that bring `token`: a client device's key, the serverless node's, or the sha256
+/// of an access token.
+fn handoff_for(token: &str) -> String {
+    if let Some(key) = token.strip_prefix(CLIENT) {
+        return key.to_string();
+    }
+    if let Some((key, _)) = token.strip_prefix(SERVERLESS).and_then(|t| t.split_once('/')) {
+        return key.to_string();
+    }
+    crate::keys::token_id(token)
 }
 
 fn hash(token: &str) -> [u8; 32] {
@@ -101,16 +133,16 @@ impl Node {
     }
 
     /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for `token`'s calls, as `user`'s: only
-    /// if they were sealed to it, for that token (`for`: its sha256, or a client device's key), and not yet expired.
+    /// if they were sealed to it, for that token (`for`: its sha256, or a client device's or the serverless node's
+    /// key), and not yet expired.
     pub fn hand(&self, token: &str, user: &str, sealed: &str) -> Result<()> {
         let handoff = crate::keys::open_handoff(&self.seal_secret(), sealed)?;
-        let for_ = token.strip_prefix(CLIENT).map_or_else(|| crate::keys::token_id(token), str::to_string);
-        ensure!(handoff.for_ == for_, "the keys handed are for another sign-in");
+        ensure!(handoff.for_ == handoff_for(token), "the keys handed are for another sign-in");
         let now = now_ms();
         // Kept no longer than a sign-in's token lasts, whatever the handoff says (one that doesn't check brings no call
-        // here to use them); a client device's, as it says.
+        // here to use them); a client device's, an hour at most, as it hands them again with its calls.
         let until = match token.starts_with(CLIENT) {
-            true => handoff.until,
+            true => handoff.until.min(now + CLIENT_KEYS),
             false => handoff.until.min(self.token_expiry(token).unwrap_or(u64::MAX)),
         };
         ensure!(until > now, "the keys handed have expired");
@@ -122,6 +154,7 @@ impl Node {
         kept.retain(|_, s| s.live(now));
         let session = kept.entry(hash(token)).or_default();
         session.user = user.to_string();
+        session.client = client_of(token);
         session.until = session.until.max(until);
         for k in keys {
             session.keys.entry((k.scope, k.app, k.database)).or_default().insert(k.epoch, k.key);
@@ -129,19 +162,27 @@ impl Node {
         Ok(())
     }
 
-    /// The keys of `want`'s databases, every epoch this device has, handed to another node (sealed to `seal`) for this
-    /// device's own person's calls there with `token`, until it expires: what a 428 from that node asks for.
-    pub async fn hand_keys(&self, me: &Caller, seal: &[u8; 32], token: &str, want: &[(Scope, String, String)]) -> Result<String> {
+    /// The keys `need` names (each a database's in one epoch, as a 428 says them), handed to another node, sealed to
+    /// `seal`, for this device's own person's calls there with `token`, until it expires. `seal` must be the
+    /// serverless node's, or that of a node on a machine that runs each scope named: no one else is handed a key.
+    pub async fn hand_keys(&self, me: &Caller, seal: &[u8; 32], token: &str, need: &[Need]) -> Result<String> {
         ensure!(me.user == self.user()?, "{} hands only its own person's keys", self.device_name());
         let issuer = self.issuer()?;
         let asked = token.to_string();
         let claims = tokio::task::spawn_blocking(move || issuer.verify(&asked, now_ms())).await??;
         ensure!(claims.sub == me.user, "that sign-in is someone else's");
+        let serverless = self.with(|i| Ok(i.r.members.settings.get("serverless").cloned()))?.and_then(|k| crate::keys::unhex(&k).ok()).and_then(|k| crate::kernel::twin_public(&k).ok());
+        let to = self.with(|i| Ok(i.r.members.computes().find(|m| m.seal == *seal).map(|m| m.key)))?;
+        ensure!(serverless.as_ref() == Some(seal) || to.is_some(), "that isn't a node of your One App's to hand keys to");
         let mut keys = Vec::new();
-        for (scope, app, database) in want {
-            ensure!(self.with(|i| Ok(i.r.members.may_use(&me.user, scope)))?, "you may not use {scope}");
-            for (epoch, key) in self.database_keys(scope, app, database, false).await? {
-                keys.push(crate::keys::Handed { scope: scope.to_string(), epoch, app: app.clone(), database: database.clone(), key });
+        for n in need {
+            let scope = Scope::parse(&n.scope)?;
+            ensure!(self.with(|i| Ok(i.r.members.may_use(&me.user, &scope)))?, "you may not use {scope}");
+            if serverless.as_ref() != Some(seal) {
+                ensure!(to.is_some_and(|to| self.with(|i| Ok(i.r.members.runs_for(&to, &scope))).unwrap_or(false)), "that node doesn't run {scope}");
+            }
+            if let Some(key) = self.database_keys(&scope, &n.app, &n.database, false).await?.get(&n.epoch) {
+                keys.push(crate::keys::Handed { scope: n.scope.clone(), epoch: n.epoch, app: n.app.clone(), database: n.database.clone(), key: *key });
             }
         }
         crate::keys::seal_handoff(seal, &crate::keys::Handoff { for_: crate::keys::token_id(token), until: claims.exp * 1000, keys })
@@ -239,6 +280,15 @@ impl Node {
         kept.retain(|_, s| !users.contains(&s.user));
         if kept.len() < before {
             tracing::info!("forgot {} session(s) of {}, who may no longer use what they could", before - kept.len(), users.join(", "));
+        }
+    }
+
+    /// Forgets the keys handed by client devices the install no longer lists.
+    pub(super) fn forget_removed_clients(&self) {
+        let clients: Vec<Key> = self.0.sessions.kept.lock().unwrap().values().filter_map(|s| s.client).collect();
+        let gone: Vec<Key> = clients.into_iter().filter(|k| self.client(k).is_none()).collect();
+        if !gone.is_empty() {
+            self.0.sessions.kept.lock().unwrap().retain(|_, s| !s.client.is_some_and(|k| gone.contains(&k)));
         }
     }
 
