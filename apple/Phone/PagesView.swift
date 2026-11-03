@@ -47,7 +47,9 @@ struct PagesView: View {
                     .navigationBarTitleDisplayMode(.inline)
             }
             .overlay {
-                if store.install?.joining == true {
+                if store.state == nil, case .joining(let code) = store.phase {
+                    ApproveView(code: code) { Task { await Phone.shared.signOut() } }.background(Color(.systemBackground))
+                } else if store.install?.joining == true {
                     ProgressView("Joining…").padding(24).background(.regularMaterial, in: .rect(cornerRadius: 18))
                 } else if store.state == nil {
                     // A spinner only after a moment; can't reach only once it's been trying a while, not a first miss.

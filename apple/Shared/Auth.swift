@@ -33,7 +33,32 @@ actor Auth {
         }
     }
 
-    nonisolated static var signedIn: Bool { address != nil && Keychain.read() != nil }
+    nonisolated static var signedIn: Bool {
+        #if DEBUG
+        takeTestSignIn()
+        #endif
+        return address != nil && Keychain.read() != nil
+    }
+
+    #if DEBUG
+    /// A debug build is signed in by `SIGN_IN` (`{ address, client, refresh }`, a sign-in made elsewhere), as `one try`
+    /// tests one where no one can tap the system's sign-in sheet: in the simulator, which takes no taps from agents.
+    nonisolated private static func takeTestSignIn() {
+        guard let given = ProcessInfo.processInfo.environment["SIGN_IN"], defaults.string(forKey: "testSignIn") != given,
+              let fields = try? JSONSerialization.jsonObject(with: Data(given.utf8)) as? [String: String],
+              let at = fields["address"].flatMap(URL.init(string:)), let client = fields["client"], let refresh = fields["refresh"] else { return }
+        address = at
+        defaults.set(client, forKey: "client")
+        defaults.set(given, forKey: "testSignIn")
+        Keychain.write(refresh)
+    }
+    #endif
+
+    /// The secret of the invite link this person opened here, for their first device's request to be let in.
+    nonisolated static var invite: String? {
+        get { defaults.string(forKey: "invite") }
+        set { defaults.set(newValue, forKey: "invite") }
+    }
 
     /// Takes what the person typed: an address, or an invite link (`<address>/invite#…`). → the invite link, if it
     /// was one.
@@ -48,7 +73,9 @@ actor Auth {
         origin.host = host
         origin.port = url.port
         address = origin.url
-        return url.path() == "/invite" && !(url.fragment() ?? "").isEmpty ? url : nil
+        guard url.path() == "/invite", let secret = url.fragment(), !secret.isEmpty else { return nil }
+        invite = secret
+        return url
     }
 
     private struct Meta: Decodable {

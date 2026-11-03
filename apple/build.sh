@@ -3,6 +3,7 @@
 # also notarizes it. CONFIG=path/to/config.toml builds another white label.
 set -euo pipefail
 cd "$(dirname "$0")"
+CLIENT_TARGETS=aarch64-apple-darwin
 . ./project.sh
 BUNDLE_ID=app.$CONFIG_CLI.mac
 label=$BUNDLE_ID.node

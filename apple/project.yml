@@ -14,12 +14,19 @@ targets:
   Mac:
     type: application
     platform: macOS
-    sources: [Shared, Mac, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
+    sources: [Shared, Mac, build/Client/one_client_ffi.swift, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
+    dependencies:
+      # The client library (client/ffi), which project.sh builds.
+      - framework: build/Client/Client.xcframework
+        embed: false
+      - sdk: SystemConfiguration.framework
     settings:
       base:
         PRODUCT_NAME: ${CONFIG_NAME}
         PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.mac
         CODE_SIGNING_ALLOWED: NO
+        # Apple silicon only, as the node inside it and the client library are built.
+        ARCHS: arm64
     info:
       path: build/Info.plist
       properties:
@@ -49,9 +56,12 @@ targets:
   Phone:
     type: application
     platform: iOS
-    sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Phone.xcassets, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
+    sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Client/one_client_ffi.swift, build/Phone.xcassets, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
     dependencies:
       - target: Widgets
+      - framework: build/Client/Client.xcframework
+        embed: false
+      - sdk: SystemConfiguration.framework
     settings:
       base:
         PRODUCT_NAME: ${CONFIG_NAME}
@@ -90,7 +100,11 @@ targets:
   Screens:
     type: application
     platform: iOS
-    sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Phone.xcassets, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
+    sources: [Shared, Phone, Widget/Cache.swift, Widget/Intents.swift, build/Client/one_client_ffi.swift, build/Phone.xcassets, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
+    dependencies:
+      - framework: build/Client/Client.xcframework
+        embed: false
+      - sdk: SystemConfiguration.framework
     settings:
       base:
         PRODUCT_NAME: Screens

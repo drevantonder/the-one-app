@@ -4,6 +4,7 @@
 # builds Screens instead, beside it: the iPhone app with every client's screens as its home.
 set -euo pipefail
 cd "$(dirname "$0")"
+if [ "${1:-}" = device ]; then CLIENT_TARGETS=aarch64-apple-ios; else CLIENT_TARGETS=aarch64-apple-ios-sim; fi
 . ./project.sh
 scheme=Phone id=app.$CONFIG_CLI.phone name=$CONFIG_NAME
 if [ "${SCREENS:-}" = 1 ]; then scheme=Screens id=$id.screens name=Screens; fi

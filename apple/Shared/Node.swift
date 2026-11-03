@@ -218,6 +218,12 @@ protocol NodeTransport: Sendable {
     func events() -> AsyncThrowingStream<NodeEvent, Error>
     /// What to say when nothing answers.
     var unreachable: String { get }
+    /// Lets this app in as its person's device, if it needs to be, showing the code it's approved by meanwhile.
+    func join(showing: @MainActor @Sendable (String) -> Void) async throws
+}
+
+extension NodeTransport {
+    func join(showing: @MainActor @Sendable (String) -> Void) async throws {}
 }
 
 /// What this machine's own programs send its node to say they are: the token in the node's home, which only this

@@ -75,6 +75,22 @@ cp "${menubar%.png}@2x.png" "$assets/MenuBarIcon.imageset/mark@2x.png"
 contents '{"filename":"mark.png","idiom":"universal","scale":"1x"},{"filename":"mark@2x.png","idiom":"universal","scale":"2x"}' \
 	',"properties":{"template-rendering-intent":"template"}' > "$assets/MenuBarIcon.imageset/Contents.json"
 
+# The client library (client/ffi), for the Rust targets the build script names (CLIENT_TARGETS), as one XCFramework the
+# apps link, and its Swift, which they build with.
+client=build/Client
+"$root/client/ffi/bindings.sh" swift "$client/generated"
+mkdir -p "$client/headers"
+cp "$client/generated/one_client_ffi.swift" "$client/"
+cp "$client/generated/one_client_ffiFFI.h" "$client/headers/"
+cp "$client/generated/one_client_ffiFFI.modulemap" "$client/headers/module.modulemap"
+libraries=()
+for target in ${CLIENT_TARGETS:-aarch64-apple-darwin}; do
+	(cd "$root" && CONFIG=$config cargo build -q -p one-client-ffi --release --target "$target")
+	libraries+=(-library "$root/target/$target/release/libone_client_ffi.a" -headers "$client/headers")
+done
+rm -rf "$client/Client.xcframework"
+xcodebuild -create-xcframework "${libraries[@]}" -output "$client/Client.xcframework" >/dev/null
+
 xcodegen generate --quiet
 
 # Push needs the Push Notifications capability on the iPhone app's App ID, which only the team's account holder

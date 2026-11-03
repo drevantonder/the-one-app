@@ -113,6 +113,7 @@ final class Phone {
     func signOut() async {
         await unregisterPush()
         await Auth.shared.signOut()
+        await DeviceClient.shared.close()
         signedOut(nil)
     }
 
@@ -162,14 +163,14 @@ final class Phone {
     }
 }
 
-/// The install's address, as the person signed in: or in the simulator, NODE_URL's node as its own.
+/// The person's nodes, over iroh as this phone's own device: or in the simulator, NODE_URL's node as its own.
 struct PhoneNode: NodeTransport {
-    private var node: HTTPNode? {
+    private var node: any NodeTransport {
         if let url = Phone.nodeURL { return HTTPNode(base: url) }
-        return Auth.address.map { HTTPNode(base: $0, auth: .shared) }
+        return DeviceNode()
     }
 
-    var unreachable: String { node?.unreachable ?? String(localized: "Sign in again.") }
+    var unreachable: String { node.unreachable }
 
     private func signedOut<T>(_ work: () async throws -> T) async throws -> T {
         do {
@@ -181,22 +182,25 @@ struct PhoneNode: NodeTransport {
     }
 
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data {
-        guard let node else { throw Auth.SignedOut(message: String(localized: "Sign in again.")) }
-        return try await signedOut { try await node.send(method, path, body: body, timeout: timeout) }
+        try await signedOut { try await node.send(method, path, body: body, timeout: timeout) }
     }
 
     func page(app: String, screen: String, params: String, scope: String?) async throws -> String {
-        guard let node else { throw Auth.SignedOut(message: String(localized: "Sign in again.")) }
-        return try await signedOut { try await node.page(app: app, screen: screen, params: params, scope: scope) }
+        try await signedOut { try await node.page(app: app, screen: screen, params: params, scope: scope) }
     }
 
     func settingsPage(_ name: String, params: String) async throws -> String {
-        guard let node else { throw Auth.SignedOut(message: String(localized: "Sign in again.")) }
-        return try await signedOut { try await node.settingsPage(name, params: params) }
+        try await signedOut { try await node.settingsPage(name, params: params) }
     }
 
     func events() -> AsyncThrowingStream<NodeEvent, Error> {
-        node?.events() ?? AsyncThrowingStream { $0.finish() }
+        node.events()
+    }
+
+    func join(showing: @MainActor @Sendable (String) -> Void) async throws {
+        guard Phone.nodeURL == nil else { return }
+        let name = await UIDevice.current.name
+        try await signedOut { try await DeviceNode().join(name: name, showing: showing) }
     }
 }
 

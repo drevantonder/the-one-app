@@ -145,6 +145,7 @@ final class Mac {
     /// Signs out: the first screen again, with nothing of the person's left in the window.
     func signOut() async {
         await Auth.shared.signOut()
+        await DeviceClient.shared.close()
         signedOut(nil)
     }
 
@@ -160,27 +161,27 @@ final class Mac {
     }
 }
 
-/// This Mac's own node, asked as the person signed in. Signed out, the window asks it only what it is, and to join an
-/// install with a pairing code.
+/// Signed in, the person's nodes over iroh, as this window's own device (which this Mac's own node approves at once, if
+/// it's theirs); signed out, this Mac's own node, asked only what it is, and to join an install with a pairing code.
 struct MacNode: NodeTransport {
     private static let base = URL(string: "http://127.0.0.1:\(Bundle.main.object(forInfoDictionaryKey: "NodePort") as! String)")!
     private static let signedOut: Set = ["v1/state", "v1/join"]
 
-    var unreachable: String { HTTPNode(base: Self.base).unreachable }
+    var unreachable: String { Auth.signedIn ? DeviceNode().unreachable : HTTPNode(base: Self.base).unreachable }
 
     /// The node, as whoever's signed in: none, for what only someone signed in asks.
-    private func node(_ path: String) throws -> HTTPNode {
-        if Auth.signedIn { return HTTPNode(base: Self.base, auth: .shared) }
+    private func node(_ path: String) throws -> any NodeTransport {
+        if Auth.signedIn { return DeviceNode() }
         if Mac.asMachine || Self.signedOut.contains(path) { return HTTPNode(base: Self.base) }
         throw Auth.SignedOut(message: String(localized: "Sign in first."))
     }
 
-    private func signedIn<T>(_ path: String, _ work: (HTTPNode) async throws -> T) async throws -> T {
+    private func signedIn<T>(_ path: String, _ work: (any NodeTransport) async throws -> T) async throws -> T {
         let node = try node(path)
         do {
             return try await work(node)
         } catch let error as Auth.SignedOut {
-            if node.auth != nil { await Mac.shared.signedOut(error.message) }
+            if Auth.signedIn { await Mac.shared.signedOut(error.message) }
             throw error
         }
     }
@@ -201,6 +202,23 @@ struct MacNode: NodeTransport {
     func events() -> AsyncThrowingStream<NodeEvent, Error> {
         guard let node = try? node("") else { return AsyncThrowingStream { _ in } }
         return node.events()
+    }
+
+    func join(showing: @MainActor @Sendable (String) -> Void) async throws {
+        guard Auth.signedIn else { return }
+        let name = "\(appName) on \(Host.current().localizedName ?? "Mac")"
+        try await signedIn("") { _ in try await DeviceNode().join(name: name, showing: showing, approve: Self.approveHere) }
+    }
+
+    /// This Mac's own node approves the window by its code, as one of this Mac's own programs, if it's a device of the
+    /// same person: else the code waits for another of theirs.
+    @Sendable private static func approveHere(_ code: String) async {
+        var request = URLRequest(url: base.appending(path: "v1/devices/approve"), timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["code": code.replacingOccurrences(of: " ", with: ""), "confirm": true])
+        LocalToken.add(to: &request)
+        _ = try? await URLSession.shared.data(for: request)
     }
 }
 

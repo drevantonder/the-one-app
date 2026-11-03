@@ -95,6 +95,8 @@ extension Notification.Name {
 final class Store {
     enum Phase: Equatable {
         case connecting
+        /// Waiting to be approved by one of the person's devices, showing this code.
+        case joining(String)
         case ready
         case unreachable(String)
     }
@@ -537,6 +539,7 @@ final class Store {
     private func connect() async -> Bool {
         let failure: Error
         do {
+            try await node.transport.join { self.phase = .joining($0) }
             try await refreshState()
             return true
         } catch {
