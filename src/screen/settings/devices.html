@@ -44,21 +44,23 @@
     return "hard-drives";
   };
   const runBy = (s) => (!s.user || s.user === me() ? "" : `${userName(s.user)}’s`);
+  // A service endpoint is named for its machine; a person reads it as its service on that machine ("WhatsApp on linux").
+  const deviceName = (s) => (s.service ? `${appTitle(s.service)} on ${shown(s.name)}` : shown(s.name));
   // Online is how it should be, so it says nothing.
   const status = (on) => (on ? "" : `<span class="status">Offline</span>`);
   const subs = (...lines) => lines.filter(Boolean).map((l) => `<div class="sub">${one.esc(l)}</div>`).join("");
 
   // A row says what a device is; one that may be removed (not the device looking) has its menu, from its … or a right-click.
-  const row = ({ key, name, online, lines, trailing, removable }) =>
+  const row = ({ key, name, online, lines, trailing, removable, tile }) =>
     `<div class="row still"${removable ? ` data-device="${one.esc(key)}"` : ""}>
-      <div class="tile${online ? "" : " off"}">${one.icon(icon(name || "phone"))}</div>
+      <div class="tile${online ? "" : " off"}">${tile || one.icon(icon(name || "phone"))}</div>
       <div class="main"><div class="title"><span>${one.esc(shown(name) || "Phone")}</span></div>${subs(...lines)}</div>${trailing}` +
     (removable ? `<button class="more" data-more aria-label="More for ${one.esc(shown(name) || "Phone")}">${one.icon("dots-three-outline-fill")}</button>` : "") + "</div>";
 
   const deviceRow = (s) => {
     const online = !!s.online;
-    const trailing = status(online);
-    return row({ key: s.key, name: s.name, online, lines: [s.me ? "This device" : runBy(s)], trailing, removable: s.user === me() && !s.me });
+    const app = s.service && apps.find((a) => a.name === s.service);
+    return row({ key: s.key, name: deviceName(s), tile: app ? one.appIcon(app, 26) : one.icon(icon(s.name)), online, lines: [s.me ? "This device" : runBy(s)], trailing: status(online), removable: s.user === me() && !s.me });
   };
   // Where things run first: every device, and Cloudflare, Use First, When Needed or Last Resort, cheaper kinds first
   // within each (src/rank.rs); an admin moves one with its menu.
@@ -66,7 +68,7 @@
   const KINDS = { always_on: "Always on", laptop: "Laptop, sleeps", cloud: "Cloud server, paid by the hour", cloudflare: "Online, paid per use" };
   const COST = { laptop: 1, cloudflare: 2, cloud: 3 };
   const places = () => {
-    const all = (state.install?.devices || []).filter((s) => s.use).map((s) => ({ name: shown(s.name), key: s.key, kind: s.kind, use: s.use, online: !!s.online, here: s.me }));
+    const all = (state.install?.devices || []).filter((s) => s.use).map((s) => ({ name: deviceName(s), key: s.key, kind: s.kind, use: s.use, online: !!s.online, here: s.me }));
     if (state.install?.serverless?.use) all.push({ name: "Cloudflare", key: "cloudflare", kind: "cloudflare", use: state.install.serverless.use, online: true });
     return all;
   };
@@ -92,7 +94,7 @@
   const grantRow = (g) => {
     const on = (state.install?.devices || []).find((d) => d.key === g.endpoint);
     const until = new Date(g.until).toLocaleDateString(undefined, { day: "numeric", month: "long" });
-    return `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(shown(on?.name || "A device"))} keeps ${one.esc(appTitle(g.app))} running for ${one.esc(forWhom(g.scope))}</span></div>` +
+    return `<div class="row plain"><div class="main"><div class="title"><span>${one.esc((on && deviceName(on)) || "A device")} keeps ${one.esc(appTitle(g.app))} running for ${one.esc(forWhom(g.scope))}</span></div>` +
       `${subs(`Until ${until}, and longer as ${g.scope === `user:${me()}` ? "you use it" : "it’s used"}`)}</div>` +
       `<button class="button plain small" data-grant='${one.esc(JSON.stringify({ device: g.endpoint, app: g.app, scope: g.scope }))}'>Stop</button></div>`;
   };
@@ -107,7 +109,7 @@
     const pick = (name, data) => `<a class="row plain go" ${data}><div class="main"><div class="title"><span>${one.esc(name)}</span></div></div><span class="chev">${one.icon("caret-right")}</span></a>`;
     const devices = () => {
       const on = keepers(scope);
-      choose(on.map((d) => pick(shown(d.name), `data-keep-device="${one.esc(d.key)}"`)), `It runs on the device you choose, while that device is on.`);
+      choose(on.map((d) => pick(deviceName(d), `data-keep-device="${one.esc(d.key)}"`)), `It runs on the device you choose, while that device is on.`);
     };
     body.addEventListener("click", async (e) => {
       const t = e.target.closest("[data-keep-app], [data-keep-device]");
@@ -190,7 +192,10 @@
     [state, device] = await Promise.all([one.api("GET", "/v1/state"), one.device()]);
     if (device.keys) {
       passkey = (await one.api("GET", "/v1/devices/passkey").catch(() => ({}))).passkey === true;
-      if (!apps.length) apps = await one.api("GET", "/v1/apps").catch(() => []);
+    }
+    // App titles name the grants' rows and a service endpoint's ("WhatsApp on linux").
+    if (!apps.length && (device.keys || (state.install?.devices || []).some((s) => s.service))) {
+      apps = await one.api("GET", "/v1/apps").catch(() => []);
     }
     const html = page();
     // Not while they're naming this device or answering a question.
@@ -288,14 +293,14 @@
 
   async function menu(key, at) {
     const m = [...state.install.devices, ...state.install.clients].find((x) => x.key === key);
-    const i = await one.menu([{ title: `Remove ${shown(m.name) || "This Device"}`, icon: "minus-circle", danger: true }], at).catch(() => null);
+    const i = await one.menu([{ title: `Remove ${deviceName(m) || "This Device"}`, icon: "minus-circle", danger: true }], at).catch(() => null);
     if (i === 0) remove(key);
   }
 
   function remove(key) {
     const m = [...state.install.devices, ...state.install.clients].find((x) => x.key === key);
     one.confirm("#ask", {
-      title: `Remove ${shown(m.name) || "this device"}?`,
+      title: `Remove ${deviceName(m) || "this device"}?`,
       detail: "It loses access to your data. Approve it again to use it.",
       action: "Remove",
       danger: true,

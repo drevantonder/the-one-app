@@ -27,7 +27,7 @@ struct MenuPanel: View {
                         Circle()
                             .fill(device.isOnline ? Kit.text : Kit.faint)
                             .frame(width: 7, height: 7)
-                        Text(displayName(device.name))
+                        Text(deviceName(device))
                         Spacer()
                         if device.key == store.device?.key {
                             Text("This device").foregroundStyle(.secondary)
@@ -96,6 +96,11 @@ struct MenuPanel: View {
             .padding(.bottom, 6)
         }
         .frame(width: 340)
+    }
+
+    /// A service endpoint is named for its machine; a person reads it as its service on that machine ("WhatsApp on linux").
+    private func deviceName(_ device: Device) -> String {
+        device.service.map { "\(store.label($0)) on \(displayName(device.name))" } ?? displayName(device.name)
     }
 
     private func open() {

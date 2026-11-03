@@ -121,6 +121,8 @@ struct Device: Codable, Sendable, Equatable, Identifiable {
     var online: Bool?
     /// The scopes whose calls it runs (`user:<id>`, `group:<id>`, `global`).
     var runs_for: [String]?
+    /// For a service endpoint, the service it offers (`whatsapp`); its `name` is its machine's.
+    var service: String?
     var target: String?
 
     var id: String { key }

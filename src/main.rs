@@ -1110,7 +1110,12 @@ fn status(state: &Value) {
         let here = if s["here"] == true { " (this one)" } else { "" };
         let serves = if s["serves_me"] == true { "" } else { ", doesn't run yours" };
         let build = s["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
-        println!("  {dot} {}{here}  {}'s{serves}{build}", s["name"].as_str().unwrap_or(""), name(s["user"].as_str().unwrap_or("")));
+        // A service endpoint is named for its machine; a person reads it as its service on that machine.
+        let shown = match s["service"].as_str() {
+            Some(service) => format!("{service} on {}", s["name"].as_str().unwrap_or("")),
+            None => s["name"].as_str().unwrap_or("").to_string(),
+        };
+        println!("  {dot} {shown}{here}  {}'s{serves}{build}", name(s["user"].as_str().unwrap_or("")));
     }
     let clients = i["clients"].as_array().cloned().unwrap_or_default();
     if !clients.is_empty() {
