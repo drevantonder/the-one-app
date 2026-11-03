@@ -62,6 +62,10 @@ else
 	fi
 	install -m 755 "$bin" "$HOME/.local/bin/$cli"
 	if [ -d /run/systemd/system ]; then
+		# The node answers every client of the install, so it keeps its memory and, outside a container (where it can't
+		# be lowered), is the last thing killed when the machine runs short.
+		oom=""
+		systemd-detect-virt -cq 2>/dev/null || oom="OOMScoreAdjust=-900"
 		$sudo tee "/etc/systemd/system/$cli.service" >/dev/null <<EOF
 [Unit]
 Description=$name node
@@ -75,6 +79,8 @@ Restart=always
 RestartSec=2
 # An update's node takes over from the one before, then tells systemd it's the main process.
 NotifyAccess=all
+MemoryLow=768M
+$oom
 Environment=HOME=$HOME
 
 [Install]
