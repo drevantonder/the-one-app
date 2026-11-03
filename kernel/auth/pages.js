@@ -9,7 +9,9 @@ const escape = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)}
 // The look of the web client's welcome: the screens' design kit (src/screen/kit.css, which the kernel is built with),
 // the white label's logo, light or dark with the system. Inline, as the page's policy allows nothing else.
 const style = `${kit}
-  body { max-width: none; min-height: 100vh; padding: 40px 24px; display: grid; place-items: center; background: var(--bg); }
+  /* Near the top, not centred: text that comes in later (a client's name, a note) grows the page down, never moving
+     what's already there. */
+  body { max-width: none; min-height: 100vh; padding: max(40px, 14vh) 24px 40px; display: grid; place-items: start center; background: var(--bg); }
   main { width: min(380px, 100%); text-align: center; }
   .mark { display: block; width: 88px; height: 88px; margin: 0 auto 18px; }
   h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; text-wrap: balance; }
@@ -56,10 +58,35 @@ const webauthn = `
     return { id: c.id, rawId: b64u.encode(c.rawId), type: c.type, response, clientExtensionResults: extensions, authenticatorAttachment: c.authenticatorAttachment };
   }
   const prfOf = (c) => { const first = c.getClientExtensionResults().prf?.results?.first; return first ? b64u.encode(first) : null; };
+  /// A button busy with what its tap started: disabled at once, a spinner and \`label\` in it. → what puts it back.
+  function busy(b, label) {
+    const was = b.innerHTML;
+    b.disabled = true;
+    b.innerHTML = '<span class="spinner small" aria-hidden="true"></span>' + label;
+    const undo = () => { b.innerHTML = was; b.disabled = false; };
+    // Come back to with Back, after it went on, it's ready again.
+    addEventListener("pageshow", (e) => e.persisted && undo(), { once: true });
+    return undo;
+  }
+  /// A passkey prompt's options, asked for before the tap (\`ready\`), so the prompt comes the moment it's tapped. Each
+  /// is used once, and only while it's fresh: the auth service keeps one challenge, for five minutes.
+  const ASK = { in: "/api/auth/passkey/generate-authenticate-options", new: "/api/auth/passkey/generate-register-options" };
+  let early = null;
+  function ready(path) {
+    const asked = api(path);
+    asked.catch(() => {});
+    early = { path, at: Date.now(), asked };
+  }
+  function options(path) {
+    const e = early;
+    early = null;
+    return e && e.path === path && Date.now() - e.at < 240000 ? e.asked.catch(() => api(path)) : api(path);
+  }
+  const register = (context) => ASK.new + (context ? "?context=" + encodeURIComponent(context) : "");
   /// Makes a passkey, for someone signed in, or with an invite link's secret as \`context\` (which signs them in): → its
   /// credential id, its id in the auth service, and its PRF output (asked for again if making it didn't give it).
   async function newPasskey(context) {
-    const o = await api("/api/auth/passkey/generate-register-options" + (context ? "?context=" + encodeURIComponent(context) : ""));
+    const o = await options(register(context));
     const publicKey = { ...o, challenge: b64u.decode(o.challenge), user: { ...o.user, id: b64u.decode(o.user.id) },
       excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64u.decode(c.id) })), extensions: { prf: { eval: { first: PRF_SALT } } } };
     const c = await navigator.credentials.create({ publicKey });
@@ -72,7 +99,7 @@ const webauthn = `
   /// Signs in with a passkey (one of \`only\`'s credential ids, if given), refusing one without PRF: → its credential
   /// id and PRF output.
   async function withPasskey(only) {
-    const o = await api("/api/auth/passkey/generate-authenticate-options");
+    const o = await options(ASK.in);
     const allow = only ? only.map((id) => ({ type: "public-key", id })) : o.allowCredentials || [];
     const publicKey = { ...o, challenge: b64u.decode(o.challenge), allowCredentials: allow.map((c) => ({ ...c, id: b64u.decode(c.id) })),
       extensions: { prf: { eval: { first: PRF_SALT } } } };
@@ -130,12 +157,18 @@ export function signInPage(look) {
         if (!about.web) acts(about);
       } catch (err) { say(err.message); }
     })();
-    document.getElementById("passkey").onclick = async () => {
+    ready(ASK.in);
+    document.getElementById("passkey").onclick = async (e) => {
       say();
+      const back = busy(e.currentTarget, "Signing In…");
       try {
         const { prf, credential } = await withPasskey();
         location.href = client_id ? (await api("/sign-in/accept", { oauth_query, prf, credential })).url : "/";
-      } catch (err) { quietly(err); }
+      } catch (err) {
+        back();
+        ready(ASK.in);
+        quietly(err);
+      }
     };`;
   return page(`Sign in to ${name}`, body, script);
 }
@@ -156,6 +189,11 @@ function googlePage(look) {
     const domain = ${JSON.stringify(google).replaceAll("<", "\\u003c")};
     const back = client_id ? "/sign-in?" + oauth_query : "/";
     if (failed) say("That didn't sign you in. Use your Google account at " + domain + ".");
+    const button = document.getElementById("google");
+    // Back from Google, which this tab went to a moment ago: it says so while it goes on, not offering to start again.
+    const returning = !failed && Date.now() - Number(sessionStorage.getItem("google") || 0) < 600000;
+    sessionStorage.removeItem("google");
+    let waiting = returning ? busy(button, "Signing You In…") : null;
     if (client_id) (async () => {
       try {
         const about = await api("/sign-in/about?" + oauth_query);
@@ -164,16 +202,26 @@ function googlePage(look) {
         document.getElementById("title").textContent = title;
         if (!about.web) acts(about);
         // Back from the Google sign-in started here for this client, just now: on to it.
-        if (about.fresh && !failed) location.replace((await api("/sign-in/accept", { oauth_query })).url);
+        if (about.fresh && !failed) {
+          waiting ||= busy(button, "Signing You In…");
+          return location.replace((await api("/sign-in/accept", { oauth_query })).url);
+        }
       } catch (err) { say(err.message); }
+      waiting?.();
     })();
-    document.getElementById("google").onclick = async () => {
+    else waiting?.();
+    button.onclick = async () => {
       say();
+      const undo = busy(button, "Opening Google…");
       try {
         if (client_id) await api("/sign-in/google", { oauth_query });
         const out = await api("/api/auth/sign-in/social", { provider: "google", callbackURL: back, errorCallbackURL: back });
+        sessionStorage.setItem("google", String(Date.now()));
         location.href = out.url;
-      } catch (err) { say(err.message); }
+      } catch (err) {
+        undo();
+        say(err.message);
+      }
     };`;
   return page(`Sign in to ${name}`, body, script);
 }
@@ -191,14 +239,22 @@ export function tryPage(look) {
   const script = `
     const oauth_query = location.search.slice(1);
     const params = new URLSearchParams(oauth_query);
+    const button = document.getElementById("go");
     const go = async () => {
       say();
+      const undo = busy(button, "Signing In…");
       try {
         const { person } = await api("/api/auth/try/sign-in", params.get("as") ? { person: params.get("as") } : {});
-        document.getElementById("go").textContent = "Sign In as " + person;
-        if (params.get("as")) return void (document.getElementById("what").textContent = "This browser is signed in here as " + person + ".");
+        if (params.get("as")) {
+          undo();
+          button.textContent = "Sign In as " + person;
+          return void (document.getElementById("what").textContent = "This browser is signed in here as " + person + ".");
+        }
         location.href = params.get("client_id") ? (await api("/sign-in/accept", { oauth_query })).url : "/";
-      } catch (err) { say(err.message); }
+      } catch (err) {
+        undo();
+        say(err.message);
+      }
     };
     document.getElementById("go").onclick = go;
     go();`;
@@ -227,18 +283,23 @@ export function invitePage(look) {
   const script = `
     const token = location.hash.slice(1);
     const tried = ${tried ? "true" : "false"};
+    const button = document.getElementById("passkey");
+    // Whoever was signed in here before, the passkey is the invite's person's: signed out as the page opens, beside
+    // asking whose invite it is, and then the passkey's options, so the prompt comes the moment Make a Passkey is tapped.
+    const out = api("/api/auth/sign-out", {}).catch(() => {});
+    if (!tried) out.then(() => ready(register(token)));
     (async () => {
       try {
         const about = await api("/invite/about", { token });
         document.getElementById("title").textContent = "Welcome, " + about.person;
-        document.getElementById("passkey").disabled = false;
+        button.disabled = false;
       } catch (err) { say(err.message); }
     })();
-    document.getElementById("passkey").onclick = async () => {
+    button.onclick = async () => {
       say();
+      const undo = busy(button, tried ? "Joining…" : "Making a Passkey…");
       try {
-        // Whoever was signed in here before, the passkey is the invite's person's.
-        await api("/api/auth/sign-out", {}).catch(() => {});
+        await out;
         if (tried) await api("/api/auth/try/join", { token });
         else {
           const { prf, credential } = await newPasskey(token);
@@ -247,7 +308,11 @@ export function invitePage(look) {
         history.replaceState(null, "", "/invite");
         document.getElementById("join").hidden = true;
         document.getElementById("done").hidden = false;
-      } catch (err) { quietly(err); }
+      } catch (err) {
+        undo();
+        if (!tried) ready(register(token));
+        quietly(err);
+      }
     };`;
   return page(`Join ${name}`, body, script);
 }
@@ -257,12 +322,13 @@ export function passkeysPage(look) {
   const body = `
     <h1>Passkeys</h1>
     <p id="what">Each one signs you in to ${escape(name)} and unlocks your data.</p>
+    <div class="loading" id="wait" role="status" aria-label="Loading"><span class="spinner" aria-hidden="true"></span></div>
     <button class="button primary" id="signin" hidden>Sign In with a Passkey</button>
     <section id="mine" hidden>
       <div class="list" id="list"></div>
       <p class="callout" id="suggest" hidden>Add a second passkey on another device or a security key. Lose them all, and only whoever holds the recovery key can get you back in.</p>
       <button class="button primary" id="add">Add a Passkey</button>
-      <p class="note">${escape(WORKS)} Adding one asks first for a passkey you have, then makes the new one.</p>
+      <p class="note" id="step">${escape(WORKS)} Adding one asks first for a passkey you have, then makes the new one.</p>
     </section>`;
   const script = `
     // In the web client, beside its sidebar, whose bar already says Passkeys.
@@ -273,27 +339,38 @@ export function passkeysPage(look) {
       let list;
       try { list = await api("/api/auth/passkey/list-user-passkeys"); }
       catch (err) {
+        document.getElementById("wait").hidden = true;
         if (err.status !== 401) return say(err.message);
         document.getElementById("signin").hidden = false;
         document.getElementById("mine").hidden = true;
         return;
       }
+      document.getElementById("wait").hidden = true;
       document.getElementById("signin").hidden = true;
       document.getElementById("mine").hidden = false;
       document.getElementById("suggest").hidden = list.length > 1;
       document.getElementById("list").innerHTML = list.map((p) => '<div class="row plain"><div class="main"><div class="title"><span>' + esc(p.name || "Passkey") + '</span></div><div class="sub">Added ' + esc(when(p.createdAt)) + '</div></div>' +
         (list.length > 1 ? '<button class="button" data-id="' + esc(p.id) + '">Remove</button>' : '') + '</div>').join("");
     }
+    // Both buttons start with a passkey they have: its prompt's options are asked for now, so it comes at once.
     show();
-    document.getElementById("signin").onclick = async () => {
+    ready(ASK.in);
+    document.getElementById("signin").onclick = async (e) => {
       say();
+      const undo = busy(e.currentTarget, "Signing In…");
       try { await withPasskey(); await show(); } catch (err) { quietly(err); }
+      ready(ASK.in);
+      undo();
     };
-    document.getElementById("add").onclick = async () => {
+    const step = document.getElementById("step"), steps = step.textContent;
+    document.getElementById("add").onclick = async (e) => {
       say();
+      const b = e.currentTarget, undo = busy(b, "Signing In…");
       let made;
       try {
         const have = await withPasskey();
+        b.lastChild.textContent = "Adding…";
+        step.textContent = "Now make the new passkey.";
         made = await newPasskey();
         await api("/passkeys/add", { from: have.prf, from_credential: have.credential, prf: made.prf, credential: made.credential });
         made = null;
@@ -303,11 +380,16 @@ export function passkeysPage(look) {
         if (made?.id) await api("/api/auth/passkey/delete-passkey", { id: made.id }).catch(() => {});
         quietly(err);
       }
+      undo();
+      step.textContent = steps;
+      ready(ASK.in);
     };
     document.getElementById("list").onclick = async (e) => {
       const id = e.target.dataset?.id;
       if (!id || !confirm("Remove this passkey? It won't sign you in or unlock your data again.")) return;
-      try { await api("/api/auth/passkey/delete-passkey", { id }); await show(); } catch (err) { say(err.message); }
+      busy(e.target, "Removing…");
+      try { await api("/api/auth/passkey/delete-passkey", { id }); } catch (err) { say(err.message); }
+      await show();
     };`;
   return page(`Passkeys`, body, script);
 }
@@ -332,6 +414,7 @@ export function codePage(look) {
     document.getElementById("code").focus();
     document.getElementById("form").onsubmit = (e) => {
       e.preventDefault();
+      busy(e.target.querySelector("button"), "Continuing…");
       location.href = "/sign-in/code?c=" + encodeURIComponent(document.getElementById("code").value);
     };`;
   return page(`Sign in to ${name}`, body, script);
