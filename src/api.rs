@@ -750,7 +750,7 @@ async fn widgets(State(node): State<Node>, me: Me, Query(q): Query<WidgetsQuery>
 }
 
 async fn create(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let recovery = node.create(text(&body, "name")?, text(&body, "user_name")?).await?;
+    let recovery = node.create_with(text(&body, "name")?, text(&body, "user_name")?, body["user"].as_str(), crate::config::STARTERS).await?;
     Ok(Json(json!({ "recovery": recovery })))
 }
 

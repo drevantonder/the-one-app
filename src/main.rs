@@ -22,7 +22,9 @@ fn every_command() -> String {
   {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
                                        your devices; {CLI} and {CLI} mcp here then act as you
   {CLI} sign-out                       sign this machine out
-  {CLI} create <name> --as <your name> create an install, with you as its first admin
+  {CLI} create <name> --as <your name> [--user <id>]
+                                       create an install, with you as its first admin (--user: who you were in one
+                                       it replaces, so your sign-in is still yours)
   {CLI} pair [--user <name>]           a pairing code for another of your machines (or, for admins, someone else's)
   {CLI} join <code>                    join {YOURS} with a pairing code
   {CLI} rename <name>                  rename this device
@@ -347,7 +349,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["create", name @ ..] if !name.is_empty() => {
             let user_name = flags.get("as").and_then(Value::as_str).context("say what to call you with --as <your name>")?;
-            let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name }))?;
+            let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name, "user": flags.get("user") }))?;
             println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
         }
         ["pair"] => {

@@ -699,15 +699,17 @@ impl Node {
     /// Creates this device's install, with its local user as the first admin, and installs the config's apps in
     /// `global`. Returns the recovery key's secret, given only this once.
     pub async fn create(&self, name: &str, user_name: &str) -> Result<String> {
-        self.create_with(name, user_name, crate::config::STARTERS).await
+        self.create_with(name, user_name, None, crate::config::STARTERS).await
     }
 
     /// Creates the install, with every built-in app added (owned by admins), so anyone may add one to their own page,
-    /// and these installed in `global`.
-    pub async fn create_with(&self, name: &str, user_name: &str, apps: &[&str]) -> Result<String> {
+    /// and these installed in `global`. Its first person is `user` if given (who they were in an install this one
+    /// replaces, so their account at its kernel is still theirs), else someone new.
+    pub async fn create_with(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str]) -> Result<String> {
         self.ensure_no_install()?;
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the install a name, and yourself one");
-        let user = new_id();
+        ensure!(user.is_none_or(|u| u.len() == 16 && u.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))), "a person's id is 16 hex digits, like 976091fe8c23a057");
+        let user = user.map_or_else(new_id, str::to_string);
         let recovery = SigningKey::from_bytes(&rand::random());
         let me = crate::keys::Endpoint::of(&self.0.key);
         // `global`'s first epoch, named by the genesis before anything is sealed under it.
