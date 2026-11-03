@@ -104,9 +104,21 @@ async function where(ctx, a) {
 }
 
 async function find(ctx, name) {
-  const app = (await ctx.catalog()).find((a) => a.name === name);
-  if (!app) throw new Error(`no app named ${name}`);
-  return app;
+  const all = await ctx.catalog();
+  const app = all.find((a) => a.name === name);
+  if (app) return app;
+  const want = String(name || "").toLowerCase();
+  const like = all.filter((a) => !a.deleted && (a.name.includes(want) || want.includes(a.name) || (a.title || "").toLowerCase() === want)).map((a) => a.name);
+  throw new Error(`no app named ${name}: ${like.length ? `did you mean ${like.join(" or ")}?` : "apps_list gives their names"}`);
+}
+
+const APP = { type: "string", description: "an app's name, from apps_list, like gmail" };
+
+/// Times in what `health` gives, ms since 1970, as ISO 8601.
+function iso(v) {
+  if (Array.isArray(v)) return v.map(iso);
+  if (!v || typeof v !== "object") return v;
+  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === "number" && x > 1e12 && ["time", "first", "last", "next", "since"].includes(k) ? new Date(x).toISOString() : iso(x)]));
 }
 
 /// A folder of an app's source (src/ in its bundle) for the Code screens, folders first; at the top, the module it
@@ -179,7 +191,7 @@ export default {
   icon: "squares-four",
   color: "#007aff",
   description: "Every app you can add, and its code",
-  instructions: "The App Store lists every app in this install, where each is installed and its code. apps_add installs one for you, a group you're an admin of, or everyone (admins).",
+  instructions: "The App Store lists every app in this install, where each is installed and its code. apps_add installs one for you, a group you're an admin of, or everyone (admins); apps_code reads any app's code, to learn from or fork. Deleted apps wait in Recently Deleted: apps_list with deleted true lists them.",
 
   // The apps whose schedule, where you may switch it, failed its last run.
   async badge(ctx) {
@@ -189,13 +201,14 @@ export default {
   ops: {
     list: {
       reads: true,
-      description: "Every app, a line each: its name, where it's added (that you can see), whether it's a service (no screen of its own, like Gmail: it's in each page's Services), and what it's for; then the places you may add apps to. With service, only services.",
+      description: "Every app, a line each: its title and name (for the other apps_ tools), where it's added (that you can see), whether it's a service (no screen of its own, like Gmail: it's in each page's Services), and what it's for; then the places you may add apps to. Deleted apps are left out: deleted true lists only them.",
       // A screen asks with full for every app's details and picture, which are large.
-      input: { type: "object", properties: { service: { type: "boolean", description: "only services" } } },
-      async run(ctx, { service: only, full } = {}) {
+      input: { type: "object", properties: { service: { type: "boolean", description: "only services" }, deleted: { type: "boolean", description: "only the apps in Recently Deleted, which apps_restore brings back" } } },
+      async run(ctx, { service: only, deleted: gone, full } = {}) {
         const images = full;
         const name = namer(ctx);
-        const all = (await ctx.catalog()).filter((a) => !a.deleted || !only);
+        const every = await ctx.catalog();
+        const all = every.filter((a) => full || !!a.deleted === !!gone);
         const services = await Promise.all(all.map((a) => isService(ctx, a).catch(() => false)));
         const apps = await Promise.all(all.filter((a, i) => services[i] || !only).map(async (a) => {
           const added = a.deploys > 0;
@@ -212,14 +225,21 @@ export default {
         }));
         apps.sort((a, b) => a.title.localeCompare(b.title));
         if (full) return { apps, places: places(ctx), admin: ctx.me.role === "admin" };
-        const line = (a) => `${a.title} (${a.name}): ${a.deleted ? "deleted" : a.installed_names.length ? `added for ${a.installed_names.join(", ")}` : "not added"}`
+        const line = (a) => `${a.title} (${a.name}): ${a.deleted ? `deleted ${new Date(a.deleted.time).toISOString().slice(0, 10)}${a.mine ? "" : `, ${a.owner_name}'s`}` : a.installed_names.length ? `added for ${a.installed_names.join(", ")}` : "not added"}`
           + `${a.service ? ", a service" : ""}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.tagline || a.description || ""}`.trimEnd();
-        return [...apps.map(line), "", `You may add apps for: ${places(ctx).filter((p) => p.may).map((p) => p.scope === "user" ? "user (you)" : p.scope === "global" ? "global (everyone)" : p.name).join(", ")}.`].join("\n");
+        if (gone) return apps.length ? [...apps.map(line), "", "apps_restore brings back one you own; apps_erase deletes it for good."].join("\n") : "Nothing is in Recently Deleted.";
+        const deleted = every.filter((a) => a.deleted).length;
+        return [
+          ...apps.map(line), "",
+          `You may add apps for: ${places(ctx).filter((p) => p.may).map((p) => p.scope === "user" ? "user (you)" : p.scope === "global" ? "global (everyone)" : p.name).join(", ")}.`,
+          ...(deleted ? [`${deleted} deleted ${deleted === 1 ? "app is" : "apps are"} in Recently Deleted: apps_list with deleted true lists them.`] : []),
+        ].join("\n");
       },
     },
     add: {
-      description: "Install an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only).",
-      input: { type: "object", required: ["app", "scope"], properties: { app: { type: "string" }, scope: placeInput } },
+      reads: false,
+      description: "Install an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only). It shows on that place's page.",
+      input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
       async run(ctx, { app, scope }) {
         await find(ctx, app);
         ctx.install(app, placeOf(ctx, scope));
@@ -228,42 +248,53 @@ export default {
     },
     remove: {
       confirm: true,
-      description: "Uninstall an app from a place: user (you), a group (by its name) or global (everyone).",
-      input: { type: "object", required: ["app", "scope"], properties: { app: { type: "string" }, scope: placeInput } },
+      reads: false,
+      description: "Uninstall an app from a place: user (you), a group (by its name) or global (everyone). What it keeps there goes with it.",
+      input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
       async run(ctx, { app, scope }) {
+        await find(ctx, app);
         ctx.install(app, placeOf(ctx, scope), false);
         return `Removed ${app}.`;
       },
     },
     delete: {
       confirm: true,
-      description: "Delete an app you own: it leaves every page and stops running, and waits in Recently Deleted, where everyone sees it and its owners restore it or erase it for good.",
-      input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
+      reads: false,
+      description: "Delete an app you own: it leaves every page and stops running, and waits in Recently Deleted, where everyone sees it and its owners restore it (apps_restore) or erase it for good.",
+      input: { type: "object", required: ["app"], properties: { app: APP } },
       async run(ctx, { app }) {
+        await find(ctx, app);
         ctx.retire(app, "deleted");
         return `Deleted ${app}: it's in Recently Deleted.`;
       },
     },
     restore: {
+      reads: false,
       description: "Restore an app you own from Recently Deleted: it runs again, on the pages it was on.",
-      input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
+      input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "a deleted app's name, from apps_list with deleted true" } } },
       async run(ctx, { app }) {
+        const a = await find(ctx, app);
+        if (!a.deleted) throw new Error(`${app} isn't deleted: apps_list with deleted true lists those that are`);
         ctx.retire(app, "restored");
         return `Restored ${app}.`;
       },
     },
     erase: {
       confirm: true,
+      reads: false,
       description: "Erase a deleted app you own for good: it's gone from every list and its name can't be used again.",
-      input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
+      input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "a deleted app's name, from apps_list with deleted true" } } },
       async run(ctx, { app }) {
+        const a = await find(ctx, app);
+        if (!a.deleted) throw new Error(`delete ${app} (apps_delete) before erasing it`);
         ctx.retire(app, "erased");
         return `Erased ${app}.`;
       },
     },
     source: {
+      reads: false,
       description: "Set where an app you own keeps its code, shown on its page as Source: a web address: GitHub, any git host or page, or a repo's address in Repos (http://localhost:<port>/repos/<repo>.git). An empty link clears it. Built-in apps start with their folder in the open-source repo; forks start with none.",
-      input: { type: "object", required: ["app", "link"], properties: { app: { type: "string" }, link: { type: "string", description: "https://…, or a repo's address in Repos; empty for none" } } },
+      input: { type: "object", required: ["app", "link"], properties: { app: APP, link: { type: "string", description: "https://…, or a repo's address in Repos; empty for none" } } },
       async run(ctx, { app, link }) {
         const a = await find(ctx, app);
         if (!mine(ctx, a.owner)) throw new Error(`only ${app}'s owners set its source link`);
@@ -273,16 +304,27 @@ export default {
       },
     },
     health: {
-      description: "How an app is doing where it's installed for you: for its owners, who used it, when and from what, its errors grouped with counts, and its AI cost; its schedules (when each runs, on or off, as whom, whether a deploy changed or removed it) and their recent runs and failures.",
-      input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
+      reads: true,
+      description: "How an app is doing where it's installed for you: its schedules (when each runs, on or off, as whom) and their recent runs and failures; for its owners, who used it, when and from what, its errors grouped with counts, and its AI cost. Times are ISO 8601.",
+      input: { type: "object", required: ["app"], properties: { app: APP } },
+      async run(ctx, { app }) {
+        const a = await find(ctx, app);
+        return iso({ schedules: a.schedules || [], activity: a.activity || [], insights: a.insights || null });
+      },
+    },
+    _health: {
+      reads: true,
+      description: "For the screens: health, with times as milliseconds since 1970.",
+      input: { type: "object", required: ["app"], properties: { app: APP } },
       async run(ctx, { app }) {
         const a = await find(ctx, app);
         return { schedules: a.schedules || [], activity: a.activity || [], insights: a.insights || null };
       },
     },
     switch: {
+      reads: false,
       description: "Switch one of an app's schedules on or off in a place where it's installed (user, a group by its name, or global); switched on, it runs as you.",
-      input: { type: "object", required: ["app", "schedule", "scope", "on"], properties: { app: { type: "string" }, schedule: { type: "string" }, scope: placeInput, on: { type: "boolean" } } },
+      input: { type: "object", required: ["app", "schedule", "scope", "on"], properties: { app: APP, schedule: { type: "string", description: "the schedule's name, from apps_health's schedules" }, scope: placeInput, on: { type: "boolean", description: "true to switch it on, false off" } } },
       async run(ctx, { app, schedule, scope, on }) {
         ctx.schedule(app, schedule, placeOf(ctx, scope), on);
         return `${schedule} is ${on ? "on" : "off"}.`;
@@ -291,17 +333,20 @@ export default {
     devices: {
       reads: true,
       description: "Where a service runs (\"Runs on linux, mac\"), or what it needs when none of your devices runs it; the devices you own it may be installed on or removed from; and ask: true when you own none of those, so you ask a device's owner to install it.",
-      input: { type: "object", required: ["app"], properties: { app: { type: "string" } } },
+      input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "a service's name, from apps_list with service true" } } },
       async run(ctx, { app }) {
         const a = await find(ctx, app);
         return where(ctx, a.ops || a.uses ? a : { ...a, ...(await described(ctx, a.built_in).catch(() => ({}))) });
       },
     },
     install_on: {
-      description: "Install a service on a device you own, where an owner removed it: it runs there again.",
-      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string" }, device: { type: "string", description: "the device, by name" } } },
+      reads: false,
+      description: "Install a service on a device you own, where an owner removed it: it runs there again. apps_devices says where it may go.",
+      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string", description: "a service's name, from apps_list with service true" }, device: { type: "string", description: "a device's name, from apps_devices' install" } } },
       async run(ctx, { app, device }) {
         const a = await find(ctx, app);
+        const all = await ctx.devices();
+        if (!all.some((s) => s.name === device)) throw new Error(`no device called ${device}: your devices are ${all.map((s) => s.name).join(", ")}`);
         for (const part of a.uses?.sidecars || []) ctx.sidecar(part, device, true);
         return `${a.title || app} is installed on ${device}.`;
       },
@@ -309,18 +354,20 @@ export default {
     remove_from: {
       confirm: true,
       description: "Remove a service from a device you own: it stops running there, and goes on running on your other devices that have it. What it keeps on that device stays, and install_on puts it back.",
-      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string" }, device: { type: "string", description: "the device, by name" } } },
+      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string", description: "a service's name, from apps_list with service true" }, device: { type: "string", description: "a device's name, from apps_devices' remove" } } },
       async run(ctx, { app, device }) {
         const a = await find(ctx, app);
-        const there = (await ctx.devices()).find((s) => s.name === device);
+        const all = await ctx.devices();
+        const there = all.find((s) => s.name === device);
+        if (!there) throw new Error(`no device called ${device}: your devices are ${all.map((s) => s.name).join(", ")}`);
         for (const part of a.uses?.sidecars || []) if ((there?.sidecars || []).includes(part)) ctx.sidecar(part, device, false);
         return `${a.title || app} is removed from ${device}.`;
       },
     },
     code: {
       reads: true,
-      description: "An app's code as deployed: its files, or with path one of them. Everyone may read every app's code.",
-      input: { type: "object", required: ["app"], properties: { app: { type: "string" }, path: { type: "string" } } },
+      description: "An app's code as deployed: its files and their sizes, or with path one of them as text. Everyone may read every app's code: start a new app from one that's close.",
+      input: { type: "object", required: ["app"], properties: { app: APP, path: { type: "string", description: "a file's path, from apps_code without path, like app.js or src/app.js" } } },
       async run(ctx, { app, path }) {
         const a = await find(ctx, app);
         const bundle = a.bundle || a.built_in;
@@ -328,7 +375,7 @@ export default {
         const files = untar(await ctx.blob.get(bundle));
         if (!path) return { bundle, files: files.map((f) => ({ path: f.path, size: f.bytes.length })) };
         const file = files.find((f) => f.path === path);
-        if (!file) throw new Error(`${app} has no ${path}`);
+        if (!file) throw new Error(`${app} has no ${path}: it has ${files.map((f) => f.path).join(", ")}`);
         return { path, text: new TextDecoder().decode(file.bytes) };
       },
     },
@@ -557,7 +604,7 @@ function paint() {
   for (const b of document.querySelectorAll("[data-op]")) b.onclick = () => place(b, b.dataset.op, b.dataset.device);
 }
 async function show() {
-  const later = { code: one.call("code", { app: name }), health: one.call("health", { app: name }), where: one.call("devices", { app: name }) };
+  const later = { code: one.call("code", { app: name }), health: one.call("_health", { app: name }), where: one.call("devices", { app: name }) };
   for (const [k, p] of Object.entries(later)) p.then((v) => ((got[k] = v), paint()), () => {});
   data = got.list = await one.call("list", { full: true });
   paint();
@@ -651,7 +698,7 @@ const sections = [
 ];
 one.render("#activity", async () => {
   if (!one.params.app) return one.notFound();
-  const h = await one.call("health", { app: one.params.app });
+  const h = await one.call("_health", { app: one.params.app });
   const html = sections.map((s) => s(h)).join("");
   return html || one.empty("Nothing yet.");
 });
