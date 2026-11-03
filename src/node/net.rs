@@ -5,12 +5,14 @@
 //! back. Devices are found by the install's list of them, never n0's discovery.
 
 use iroh::endpoint::{Connection, QuicTransportConfig, presets};
-use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
+use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey};
 
 use super::*;
 
 /// How long reaching a device may take.
 const CONNECT: Duration = Duration::from_secs(10);
+/// How long a notice waits to be taken before it's sent again on a new connection.
+const NOTICE_WAIT: Duration = Duration::from_millis(500);
 /// The most an ask or its answer may carry: an email of a claim's receipts, base64, fits.
 const MESSAGE_LIMIT: usize = 64 << 20;
 /// The most a computer that isn't the install's yet may send: one ask to join.
@@ -142,6 +144,7 @@ impl Node {
         if !self.is_device(&remote) {
             return self.take_joining(conn).await;
         }
+        self.caught_up();
         // Asks go back on it too, unless one's open already.
         let slot = self.conn_slot(&remote);
         if let Ok(mut held) = slot.try_lock() {
@@ -273,8 +276,8 @@ impl Node {
         if let Some(conn) = held.as_ref().filter(|c| !fresh && c.close_reason().is_none()) {
             return Ok(conn.clone());
         }
-        // Off the relay, a device is reached only on a connection it opened.
-        if !endpoint.home_relay_status().get().iter().any(|r| r.is_connected()) {
+        // Off the relay, a device is reached only on a connection it opened: one just started waits to be on it.
+        if tokio::time::timeout(CONNECT, endpoint.online()).await.is_err() {
             bail!(NotThere("this device isn't connected to your One App's relay".into()));
         }
         let (url, _) = relay(&address, None)?;
@@ -285,7 +288,20 @@ impl Node {
             Err(_) => bail!(NotThere(format!("{} isn't connected", short(to)))),
         };
         *held = Some(conn.clone());
+        self.caught_up();
         Ok(conn)
+    }
+
+    /// Forgets the connection to `to`, so the next message opens a new one.
+    fn drop_conn(&self, to: &Key) {
+        self.0.net.conns.lock().unwrap().remove(to);
+    }
+
+    /// Fills this device's copy of each database it has open from the bucket now: a connection to another device just
+    /// opened, and what it said while there was none was lost.
+    fn caught_up(&self) {
+        let node = self.clone();
+        tokio::spawn(async move { node.fill_copies().await });
     }
 
     /// Sends `to` a message of `kind` on a stream of its own, on the connection open or, if that one's gone, a new
@@ -322,8 +338,13 @@ impl Node {
         for device in to.iter().copied() {
             let (node, body) = (self.clone(), json!({ "changed": changed }));
             tokio::spawn(async move {
-                if let Err(err) = node.send(&device, "notice", &body, false, CONNECT).await {
-                    tracing::debug!("telling {}: {err:#}", short(&device));
+                // Answered, so one lost on a connection that died unseen is sent again on a new one.
+                if let Err(err) = node.send(&device, "notice", &body, true, NOTICE_WAIT).await {
+                    node.drop_conn(&device);
+                    if let Err(err) = node.send(&device, "notice", &body, true, NOTICE_WAIT).await {
+                        tracing::debug!("telling {}: {err:#}", short(&device));
+                    }
+                    tracing::debug!("telling {}, tried again: {err:#}", short(&device));
                 }
             });
         }

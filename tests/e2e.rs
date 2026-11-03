@@ -33,6 +33,16 @@ async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
     panic!("timed out waiting for {what}");
 }
 
+/// Waits for a write to be seen on another device, which takes under a second, right after joining too: not until the
+/// next fill from the bucket.
+async fn soon(mut seen: impl AsyncFnMut() -> bool) {
+    let wrote = Instant::now();
+    while !seen().await {
+        assert!(wrote.elapsed() < Duration::from_secs(1), "a write took over a second to reach another device");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 fn board(op: &str, input: Value) -> CallRequest {
     CallRequest { app: "board".into(), op: op.into(), input, ..Default::default() }
 }
@@ -69,11 +79,17 @@ async fn devices_share_a_deployed_board() {
     assert_eq!(b.user().unwrap(), a.user().unwrap(), "a pairing code from a's user makes another of their devices");
     eventually("b to run the board and see a's post", async || sees(&b, "global", "from a").await).await;
     b.call(board("post", json!({ "text": "from b" }))).await.unwrap();
+    soon(async || sees(&a, "global", "from b").await).await;
     assert!(b.join(&a.pair().unwrap()).await.is_err(), "a device in an install joins no other");
-    eventually("a to see b's post", async || sees(&a, "global", "from b").await).await;
     let read = a.call(board("read", json!({}))).await.unwrap();
     let read = read.as_str().unwrap();
     assert!(read.lines().any(|l| l.starts_with("#1 ") && l.ends_with(": from a")) && read.lines().any(|l| l.starts_with("#2 ") && l.ends_with(": from b")), "agents read posts as numbered lines: {read}");
+
+    for i in 0..3 {
+        let text = format!("seen soon {i}");
+        b.call(board("post", json!({ "text": text }))).await.unwrap();
+        soon(async || sees(&a, "global", &text).await).await;
+    }
 
     // A new deploy runs everywhere.
     let source = include_str!("../apps/board/app.js").replace("  ops: {", "  ops: {\n    ping: { description: \"\", input: {}, run: () => \"pong\" },");
