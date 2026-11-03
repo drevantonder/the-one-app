@@ -252,7 +252,7 @@ window.__one = {};
   async function call(app, op, input = {}) {
     const out = (await api("/v1/call", { method: "POST", body: { app, op, input, client: "web" } })).ok;
     // Using an app keeps the devices keeping it running for this person doing so.
-    device?.renew(app);
+    device?.renewGrants(app);
     return out;
   }
 

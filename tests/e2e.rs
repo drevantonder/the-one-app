@@ -649,6 +649,7 @@ async fn a_grant_opens_only_its_app_in_its_scope_while_it_lasts() {
     eprintln!("GRANTS 43");
     assert!(format!("{stopped:#}").contains("doesn't keep tick running"), "{stopped:#}");
     eprintln!("GRANTS 44");
+    assert_eq!(a.state()["install"]["epochs"][mine.to_string()]["n"], 2, "stopping it gave Andre's scope new keys");
 }
 
 /// A device is approved only by its person's own device, or a newcomer's by the admin whose invite their proof was made

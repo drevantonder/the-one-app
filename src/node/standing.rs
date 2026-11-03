@@ -48,8 +48,11 @@ impl Node {
             days => now_ms() + days.min(GRANT_DAYS) * DAY,
         };
         self.grant_to(endpoint, app, scope, until).await?;
+        if until == 0 {
+            self.end_grant(me, scope).await?;
+        }
         Ok(match until {
-            0 => json!({ "said": format!("{name} no longer keeps {title} running.") }),
+            0 => json!({ "said": format!("{name} no longer keeps {title} running, and what's written from now on is under new keys it doesn't have.") }),
             until => json!({ "said": format!("{name} keeps {title} running for you, for {} days, and longer as you use it.", days.min(GRANT_DAYS)), "until": until }),
         })
     }
@@ -77,6 +80,46 @@ impl Node {
         }
         self.append(&Scope::Global, members::grant(&endpoint, scope, app, until, &hashes)).await?;
         Ok(())
+    }
+
+    /// A grant stopped or run out: a new epoch of its scope, sealed as removing a device's is, so the keys the device
+    /// held open nothing written after.
+    async fn end_grant(&self, me: &Caller, scope: &Scope) -> Result<()> {
+        self.new_epoch(me, scope).await.with_context(|| format!("starting {scope}'s new keys"))?;
+        Ok(())
+    }
+
+    /// Stops, in the background, each grant this device's person made that ran out, as Stop does: a `grant` saying so
+    /// and a new epoch of its scope. Now and then, from any of their devices with a node.
+    pub(super) fn end_expired_grants(&self) {
+        let now = now_ms();
+        let Ok(me) = self.user() else { return };
+        let ended: Vec<(Key, Scope, String)> = self
+            .with(|i| {
+                let m = &i.r.members;
+                if m.client(&self.0.id).is_none_or(|c| c.user != me) {
+                    return Ok(Vec::new());
+                }
+                Ok(m.grants.iter().filter(|((k, s, _), g)| g.by == me && g.until != 0 && g.until <= now && m.machine(k).is_some() && m.grants_in(&me, s)).map(|(id, _)| id.clone()).collect())
+            })
+            .unwrap_or_default();
+        for id in ended {
+            if !self.0.standing.renewing.lock().unwrap().insert(id.clone()) {
+                continue;
+            }
+            let (node, me) = (self.clone(), Caller { key: self.0.id, user: me.clone(), agent: None, token: None });
+            tokio::spawn(async move {
+                let (endpoint, scope, app) = id.clone();
+                let ended = async {
+                    node.grant_to(endpoint, &app, &scope, 0).await?;
+                    node.end_grant(&me, &scope).await
+                };
+                if let Err(err) = ended.await {
+                    tracing::warn!("ending {}'s grant of {app} in {scope}, which ran out: {err:#}", node.name_of(&endpoint));
+                }
+                node.0.standing.renewing.lock().unwrap().remove(&id);
+            });
+        }
     }
 
     /// Renews, in the background, each grant this device's person made of `app` that's due: as they use it, once a

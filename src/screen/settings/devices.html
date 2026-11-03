@@ -168,7 +168,8 @@
       if (passkey) html += `<div class="list passkey"><a class="row plain action-row" data-passkey>${one.icon("key")}<span>Use this passkey to get back in if you lose your devices</span></a></div>`;
       const grants = (state.install?.grants || []).filter((g) => g.until > Date.now());
       html += '<h2 class="section">Kept Running</h2><div class="list">' + grants.map(grantRow).join("") +
-        `<a class="row plain action-row" data-keep>${one.icon("arrows-clockwise")}<span>Keep an App Running…</span></a></div>`;
+        `<a class="row plain action-row" data-keep>${one.icon("arrows-clockwise")}<span>Keep an App Running…</span></a></div>` +
+        (grants.length ? '<p class="footer">Stopping one, or letting it run out, gives that app new keys the device doesn’t get.</p>' : "");
     }
     if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(deviceRow).join("") + "</div>";
     html += orderSection();

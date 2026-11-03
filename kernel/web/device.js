@@ -201,7 +201,8 @@ export class Device {
   // Standing work.
 
   /// Keeps `app` running in `scope` on one of the install's devices (`endpoint`) for `days`, 30 at most (0 stops it):
-  /// the app's key in each epoch of the scope, sealed to it first, then the `grant` naming each one's hash.
+  /// the app's key in each epoch of the scope, sealed to it first, then the `grant` naming each one's hash. Stopping
+  /// it starts a new epoch of the scope, which the device isn't sealed, so the keys it held open nothing written after.
   async grant({ endpoint, app, scope, days = GRANT_DAYS }) {
     const st = this.state();
     const e = st.install.devices.find((d) => d.key === endpoint);
@@ -218,13 +219,21 @@ export class Device {
       }
     }
     await this.write("global", members.grant({ endpoint, scope, app, until, keys }));
+    if (!until) await this.renew([scope], []);
   }
 
   /// Renews, in the background, this person's grants of `app` as they use it: once a day at most, and at once when
-  /// the scope has an epoch a grant's keys don't reach.
-  renew(app) {
+  /// the scope has an epoch a grant's keys don't reach. One of theirs that ran out is stopped, as Stop does.
+  renewGrants(app) {
     const st = this.state(), now = Date.now();
     for (const g of st.install?.grants || []) {
+      if (g.by === this.user && g.until && g.until <= now) {
+        const id = `${g.endpoint} ${g.scope} ${g.app}`;
+        if (this.renewing.has(id)) continue;
+        this.renewing.add(id);
+        this.grant({ endpoint: g.endpoint, app: g.app, scope: g.scope, days: 0 }).catch(() => {}).finally(() => this.renewing.delete(id));
+        continue;
+      }
       const newest = st.install.epochs?.[g.scope]?.n || 0;
       const reaches = Math.max(0, ...Object.keys(g.keys || {}).map(Number));
       if (g.app !== app || g.by !== this.user || g.until <= now || (g.until > now + (GRANT_DAYS - 1) * DAY && reaches >= newest)) continue;
