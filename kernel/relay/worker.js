@@ -4,17 +4,23 @@
 // (relay_protos_bg.wasm, built from protos/ by build.sh) checks each endpoint's handshake and reads and writes its
 // frames. It's blind: what endpoints send each other is QUIC, sealed end to end, so it can only drop it.
 //
-// It admits only the install's endpoints, on its one list of them: `{ by, admin }` per key, `by` the key that let it
-// in. The install's first devices, its admins', are put in when the install is made (`DEVICES`, from the kernel's
+// It admits only the install's endpoints, on its one list of them: `{ by, admin, role }` per key, `by` the key that let
+// it in, `role` what it is (`client`, `compute` or `service`). The install's first devices, its admins', are put in when the install is made (`DEVICES`, from the kernel's
 // deploy, taken only while the list is empty, which it never is again: the last admin can't be taken out); after that,
 // devices tell it, and nothing else changes it. A computer joining with a pairing code a device made gets in too, by
 // the ticket it shows as iroh's relay auth token, until the code expires, and reaches only that device until it's
-// added. The URL signer asks it, by `allowed(key)`.
+// added. A session's endpoint gets in too (a browser's: its device key can't be read out of WebCrypto, and iroh signs
+// with raw bytes), by the certificate it shows as its auth token (keys::certify), signed by a key on the list, naming
+// the key it proves, until then: it reaches every endpoint as the key that signed it would, until its certificate's
+// `until` or that key is taken out. The URL signer asks it, by `allowed(key)`.
+//
+// `POST /relay/computes` answers a key on the list (a request it signed, `one/relay`, `{ computes: true }`) or a
+// session (`{ certificate }`) with the compute endpoints' keys, in no order: a new client's first nodes to ask.
 //
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
 // shared/crypto.js, domain `one/relay`, each `(by, at)` taken once) with one of:
-// - `{ add, admin? }`: a key (hex) to let in; one already in is changed only by an admin, and an admin's added only by
-//   one.
+// - `{ add, role, admin? }`: a key (hex) to let in, and what it is; one already in is changed only by an admin, and an
+//   admin's added only by one.
 // - `{ remove }`: a key to take out, by an admin, the key that let it in, or itself, with the keys it let in that aren't
 //   admins', and theirs, and the pairing codes they made; never the last admin. A pairing code's computer is taken out
 //   the same way, by its code's maker too.
@@ -32,7 +38,7 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
-import { checkRequest, FRESH } from "../shared/crypto.js";
+import { checkCertificate, checkRequest, FRESH } from "../shared/crypto.js";
 
 initSync({ module: wasm });
 
@@ -48,6 +54,7 @@ const UNPROVEN_PER_PLACE = 8;
 const UNPROVEN = 256;
 const PAIRING_FOR = 7 * 86_400_000;
 const PAIRINGS_PER_DEVICE = 8;
+const ROLES = ["client", "compute", "service"];
 /// How often a sender is told that an endpoint it sends to isn't here, and how many such it remembers.
 const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
@@ -90,6 +97,7 @@ export default class extends WorkerEntrypoint {
       return new Response(null, { status: 204, headers });
     }
     if (url.pathname === "/relay/tell") return this.tell(request);
+    if (url.pathname === "/relay/computes") return this.computes(request);
     if (url.pathname === "/relay") return this.relay().fetch(request);
     return refuse(404, "not the relay's");
   }
@@ -104,6 +112,22 @@ export default class extends WorkerEntrypoint {
       const { fields } = await checkRequest(TELL, JSON.parse(new TextDecoder().decode(body)));
       const error = await this.relay().tell(fields);
       return error ? refuse(403, error) : new Response(null, { status: 204 });
+    } catch (e) {
+      return refuse(403, String(e.message || e));
+    }
+  }
+
+  /// The compute endpoints' keys, for a key on the list or a session's endpoint.
+  async computes(request) {
+    try {
+      if (request.method !== "POST") throw new Error("ask for the computes with a POST");
+      const body = await request.arrayBuffer();
+      if (body.byteLength > TELL_BYTES) throw new Error("that's too big");
+      const asked = JSON.parse(new TextDecoder().decode(body));
+      const by = asked?.certificate !== undefined ? (await checkCertificate(asked.certificate)).by : asked?.computes === true ? (await checkRequest(TELL, asked)).by : null;
+      if (!by) throw new Error("ask with a request your device signed, or your session's certificate");
+      const computes = await this.relay().computes(by);
+      return computes ? Response.json({ computes }) : refuse(403, "the relay takes only your One App's devices");
     } catch (e) {
       return refuse(403, String(e.message || e));
     }
@@ -130,13 +154,14 @@ export class Relay extends DurableObject {
     this.sql = ctx.storage.sql;
     // The list: each key with the key that let it in; pairing codes, with the device that made them and the computer
     // they let in, once one has; and the tells taken.
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, by TEXT NOT NULL, admin INTEGER NOT NULL);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, by TEXT NOT NULL, admin INTEGER NOT NULL, role TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pairings (hash TEXT PRIMARY KEY, until INTEGER NOT NULL, by TEXT NOT NULL, key TEXT);
       CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
       CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL);`);
     if (!this.sql.exec("SELECT 1 FROM keys LIMIT 1").toArray().length) {
       for (const key of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
-        if (isKey(key)) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'install', 1)", key);
+        // The install's first devices are machines, which run its calls.
+        if (isKey(key)) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'install', 1, 'compute')", key);
       }
     }
     /// Each proven endpoint's socket, by its key; kept in the sockets' attachments across hibernation.
@@ -153,7 +178,7 @@ export class Relay extends DurableObject {
   }
 
   key(key) {
-    return this.sql.exec("SELECT key, by, admin FROM keys WHERE key = ?", key).toArray()[0];
+    return this.sql.exec("SELECT key, by, admin, role FROM keys WHERE key = ?", key).toArray()[0];
   }
 
   pairing(hash) {
@@ -171,16 +196,31 @@ export class Relay extends DurableObject {
     return it ? { admin: it.admin === 1 } : null;
   }
 
+  /// The compute endpoints' keys, if `by` is on the list: null if it isn't.
+  computes(by) {
+    if (!this.key(by)) return null;
+    return this.sql.exec("SELECT key FROM keys WHERE role = 'compute'").toArray().map((r) => r.key);
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
     if (request.headers.get("upgrade") !== "websocket") return refuse(426, "the relay takes an endpoint's WebSocket");
     const protocols = (request.headers.get("sec-websocket-protocol") || "").split(",").map((p) => p.trim());
     if (!protocols.includes(PROTOCOL)) return refuse(400, `the relay speaks ${PROTOCOL}`);
     const now = Date.now();
-    // A pairing code's ticket, if it shows one: whether it lets this key in is decided once the key is proved.
+    // A pairing code's ticket (64 hex), or a session's certificate, if it shows one: whether it lets this key in is
+    // decided once the key is proved.
     const ticket = token(request, url);
-    const joining = ticket ? await sha256(ticket) : null;
+    const joining = isKey(ticket) ? await sha256(ticket) : null;
     if (joining && !(this.pairing(joining)?.until > now)) return refuse(403, "that pairing code has expired");
+    let session = null;
+    if (ticket && !joining) {
+      try {
+        session = await checkCertificate(ticket, now);
+      } catch (e) {
+        return refuse(403, String(e.message || e));
+      }
+    }
     // Who's let in is said only after the challenge, the same for every key that isn't, so this tells no one who's on
     // the list; sockets that haven't answered are few, from one place and in all.
     const from = place(request);
@@ -201,7 +241,7 @@ export class Relay extends DurableObject {
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
     const made = challenge();
-    server.serializeAttachment({ challenge: hex(made.slice(0, 16)), at: now, from, joining });
+    server.serializeAttachment({ challenge: hex(made.slice(0, 16)), at: now, from, joining, session });
     server.send(made.slice(16));
     return new Response(null, { status: 101, webSocket: client, headers: { "Sec-WebSocket-Protocol": PROTOCOL } });
   }
@@ -213,8 +253,10 @@ export class Relay extends DurableObject {
     if (said?.challenge) return this.prove(ws, said, bytes);
     if (!said?.id) return;
     const now = Date.now();
-    // A pairing code's computer, until it's added: only while its code works, and only to the device that made it.
+    // A pairing code's computer, until it's added: only while its code works, and only to the device that made it. A
+    // session's endpoint, only until its certificate's `until`.
     if (said.pairing && now > said.until) return this.end(said.id, "its pairing code expired");
+    if (said.by && now > said.until) return this.end(said.id, "its session ended");
     let out;
     try {
       out = from_client(unhex(said.id), bytes);
@@ -281,12 +323,6 @@ export class Relay extends DurableObject {
   /// Which of `keys` are connected here now.
   connected(keys) {
     return keys.filter((k) => this.sockets.has(k));
-  }
-
-  /// The endpoints connected here now that could be nodes: every socket that's on the list. Until the list says which
-  /// are compute, a device asking a node finds which answer as one.
-  computes() {
-    return [...this.sockets.keys()].filter((k) => this.key(k));
   }
 
   /// The MCP Worker's object a key is bound to, if it is: its name.
@@ -367,6 +403,11 @@ export class Relay extends DurableObject {
       id = null;
     }
     let attachment = id && this.key(id) ? { id } : null;
+    // A session's endpoint: the key its certificate names, signed by a key on the list.
+    if (id && !attachment && said.session?.endpoint === id && this.key(said.session.by) && said.session.until > Date.now()) {
+      attachment = { id, by: said.session.by, until: said.session.until };
+      await this.wake(said.session.until);
+    }
     if (id && !attachment && said.joining) {
       const pairing = this.pairing(said.joining);
       if (pairing && pairing.until > Date.now() && [null, id].includes(pairing.key)) {
@@ -406,7 +447,8 @@ export class Relay extends DurableObject {
     } catch {}
   }
 
-  /// An alarm at `until`, if none is sooner, to close pairing codes' computers once their codes expire.
+  /// An alarm at `until`, if none is sooner, to close pairing codes' computers once their codes expire, and sessions'
+  /// endpoints once theirs end.
   async wake(until) {
     const at = await this.ctx.storage.getAlarm();
     if (!at || at > until) await this.ctx.storage.setAlarm(until);
@@ -417,8 +459,8 @@ export class Relay extends DurableObject {
     let next = null;
     for (const ws of this.ctx.getWebSockets()) {
       const said = ws.deserializeAttachment();
-      if (!said?.pairing) continue;
-      if (said.until <= now) this.end(said.id, "its pairing code expired");
+      if (!said?.pairing && !said?.by) continue;
+      if (said.until <= now) this.end(said.id, said.pairing ? "its pairing code expired" : "its session ended");
       else next = Math.min(next ?? said.until, said.until);
     }
     this.sql.exec("DELETE FROM pairings WHERE until <= ?", now);
@@ -436,15 +478,16 @@ export class Relay extends DurableObject {
     const admin = by.admin === 1;
     if (told.add !== undefined) {
       if (!isKey(told.add)) return "add is a key, in hex";
+      if (!ROLES.includes(told.role)) return `add says its role: ${ROLES.join(", ")}`;
       const wants = told.admin === true;
       const it = this.key(told.add);
       if (wants && !admin) return "only an admin's device adds an admin's";
       if (it) {
         if (!admin) return "that key is in already: only an admin's device changes it";
         if (it.admin === 1 && !wants && this.admins() === 1) return "that's the last admin's key";
-        this.sql.exec("UPDATE keys SET admin = ? WHERE key = ?", wants ? 1 : 0, told.add);
+        this.sql.exec("UPDATE keys SET admin = ?, role = ? WHERE key = ?", wants ? 1 : 0, told.role, told.add);
       } else {
-        this.sql.exec("INSERT INTO keys VALUES (?, ?, ?)", told.add, told.by, wants ? 1 : 0);
+        this.sql.exec("INSERT INTO keys VALUES (?, ?, ?, ?)", told.add, told.by, wants ? 1 : 0, told.role);
       }
       // A pairing code's computer, added, is one of the install's: it reaches every endpoint now.
       this.sql.exec("DELETE FROM pairings WHERE key = ?", told.add);
@@ -503,6 +546,11 @@ export class Relay extends DurableObject {
       for (const { key: joined } of this.sql.exec("SELECT key FROM pairings WHERE by = ? AND key IS NOT NULL", k).toArray()) this.end(joined, "taken out");
       this.sql.exec("DELETE FROM pairings WHERE by = ?", k);
       this.end(k, "taken out");
+      // And the sessions it vouched for.
+      for (const ws of this.ctx.getWebSockets()) {
+        const said = ws.deserializeAttachment();
+        if (said?.by === k) this.end(said.id, "taken out");
+      }
     }
   }
 

@@ -222,25 +222,45 @@ impl Node {
     }
 
     /// Answers a client device's requests to the local API, as its person's (`api::FromClient`), each stream one
-    /// request and its response. Anything else that connects for it is closed at once.
+    /// request and its response. A key the install lists as a client is who its connection proves; any other only as
+    /// a session's endpoint its device vouches for, by the certificate each request carries (`x-one-endpoint`), and is
+    /// closed at the first that doesn't.
     async fn take_client(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
-        if self.client(&remote).is_none() {
-            tracing::debug!("{} isn't a client device of this install", short(&remote));
-            return conn.close(1u32.into(), b"not a device of this install");
-        }
-        let api = crate::api::router(self.clone()).layer(axum::middleware::map_request(move |mut req: axum::extract::Request| async move {
-            // Who asks is the key the connection proved, and nothing it says of itself.
-            for header in [axum::http::header::AUTHORIZATION.as_str(), crate::api::LOCAL_TOKEN_HEADER] {
-                req.headers_mut().remove(header);
+        let listed = self.client(&remote).is_some();
+        // The certificate checked last, and the session it vouched for: one check a connection, unless it's renewed.
+        let vouched: Arc<Mutex<Option<(String, crate::keys::Session)>>> = Arc::default();
+        let (node, closing) = (self.clone(), conn.clone());
+        let api = crate::api::router(self.clone()).layer(axum::middleware::from_fn(move |mut req: axum::extract::Request, next: axum::middleware::Next| {
+            let (node, closing, vouched) = (node.clone(), closing.clone(), vouched.clone());
+            async move {
+                // Who asks is the key the connection proved, or the device that vouched for it, and nothing it says of itself.
+                for header in [axum::http::header::AUTHORIZATION.as_str(), crate::api::LOCAL_TOKEN_HEADER] {
+                    req.headers_mut().remove(header);
+                }
+                let certificate = req.headers_mut().remove(crate::api::ENDPOINT_HEADER);
+                let who = if listed {
+                    Ok(remote)
+                } else {
+                    node.vouched(&remote, certificate.as_ref().and_then(|c| c.to_str().ok()), &vouched)
+                };
+                match who {
+                    Ok(key) => {
+                        req.extensions_mut().insert(crate::api::FromClient(key));
+                        next.run(req).await
+                    }
+                    Err(err) => {
+                        tracing::debug!("{}: {err:#}", short(&remote));
+                        closing.close(1u32.into(), b"not a device of this install");
+                        axum::response::IntoResponse::into_response(axum::http::StatusCode::FORBIDDEN)
+                    }
+                }
             }
-            req.extensions_mut().insert(crate::api::FromClient(remote));
-            req
         }));
         let service = hyper_util::service::TowerToHyperService::new(api);
         while let Ok((send, recv)) = conn.accept_bi().await {
-            // A device removed while connected is answered no more.
-            if self.client(&remote).is_none() {
+            // A device removed while connected is answered no more (a session's, at its next request).
+            if listed && self.client(&remote).is_none() {
                 return conn.close(1u32.into(), b"not a device of this install");
             }
             let http = hyper::server::conn::http1::Builder::new()
@@ -281,6 +301,26 @@ impl Node {
                 }
             });
         }
+    }
+
+    /// The device a session's endpoint `remote` asks as: the one its certificate names, if it's for `remote`, unexpired,
+    /// and by a client device the install still lists. `kept` is the last checked, so a connection checks one signature.
+    fn vouched(&self, remote: &Key, certificate: Option<&str>, kept: &Mutex<Option<(String, crate::keys::Session)>>) -> Result<Key> {
+        let certificate = certificate.context("that key isn't one of your One App's devices, and no device vouched for it")?;
+        let now = now_ms();
+        let mut kept = kept.lock().unwrap();
+        let session = match kept.as_ref().filter(|(c, _)| c == certificate) {
+            Some((_, session)) => *session,
+            None => {
+                let session = crate::keys::check_certificate(certificate, now)?;
+                ensure!(session.endpoint == *remote, "that certificate is for another endpoint");
+                *kept = Some((certificate.to_string(), session));
+                session
+            }
+        };
+        ensure!(session.until > now, "that session has ended");
+        ensure!(self.client(&session.by).is_some(), "the device that vouched for this endpoint isn't one of your One App's");
+        Ok(session.by)
     }
 
     /// A computer that isn't the install's: → its one ask to join answered, then the connection closed.

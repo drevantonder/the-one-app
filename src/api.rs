@@ -43,6 +43,9 @@ pub const LOCAL_TOKEN_HEADER: &str = "x-one-local-token";
 /// The keys a token caller hands this device for its calls: `keys::seal_handoff`'s.
 pub const KEYS_HEADER: &str = "x-one-keys";
 
+/// A session's endpoint's certificate (`keys::certify`), on each request it sends over iroh: who it asks as.
+pub const ENDPOINT_HEADER: &str = "x-one-endpoint";
+
 /// A request a client device sent over iroh (src/node/net.rs), with the key its connection proved it holds: only the
 /// node puts this on a request, as an extension, which nothing a client sends can set.
 #[derive(Clone, Copy)]

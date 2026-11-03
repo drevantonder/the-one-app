@@ -523,7 +523,7 @@ fn only_an_admins_device_makes_invites_or_says_who_is_an_admin() {
     let ((admin, admin_hex), (member, member_hex), (stranger, _)) = (endpoint(), endpoint(), endpoint());
     let k = Kernel::for_devices(vec![admin_hex]);
     // The admin's device lets in a member's, which isn't an admin's.
-    let tell = one::keys::signed_request(&admin, "one/relay", json!({ "add": member_hex }), now());
+    let tell = one::keys::signed_request(&admin, "one/relay", json!({ "add": member_hex, "role": "client" }), now());
     assert_eq!(post(&format!("{}/relay/tell", k.address), &[], tell).0, 204);
     for key in [&member, &stranger] {
         assert!(kernel::invite(&k.address, key, "Kim", None, None).is_err(), "a device that isn't an admin's made an invite");
@@ -1293,7 +1293,7 @@ mod relay {
 
         // Approved: Andre's device lets it in at the relay (and lists it, and seals it his scopes' keys).
         let address = k.address.replace("localhost", "127.0.0.1");
-        assert_eq!(tell(&address, &node, json!({ "add": device })), 204);
+        assert_eq!(tell(&address, &node, json!({ "add": device, "role": "client" })), 204);
         let scope = format!("user:{user}");
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
@@ -1361,25 +1361,25 @@ mod relay {
 
             // A device it adds is let in, and the two reach each other through it.
             let phone = SecretKey::generate();
-            assert_eq!(tell(&address, &first, json!({ "add": hex(&phone) })), 204);
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
             let b = online(&address, &phone, None).await.expect("a key the first device added isn't let in");
             assert!(reaches(&address, &a, &b).await, "two of the install's devices don't reach each other");
 
             // Only an admin's device adds an admin's, changes a key that's in, or takes out a key another let in; the
             // last admin stays; a device takes itself out.
-            assert_eq!(tell(&address, &phone, json!({ "add": hex(&stranger), "admin": true })), 403);
-            assert_eq!(tell(&address, &phone, json!({ "add": hex(&first) })), 403, "a device made an admin's key its own");
+            assert_eq!(tell(&address, &phone, json!({ "add": hex(&stranger), "role": "client", "admin": true })), 403);
+            assert_eq!(tell(&address, &phone, json!({ "add": hex(&first), "role": "client" })), 403, "a device made an admin's key its own");
             assert_eq!(tell(&address, &phone, json!({ "remove": hex(&first) })), 403);
             assert_eq!(tell(&address, &first, json!({ "remove": hex(&first) })), 403, "the last admin was taken out");
-            assert_eq!(tell(&address, &first, json!({ "add": hex(&first) })), 403, "the last admin was made a member");
-            assert_eq!(tell(&address, &stranger, json!({ "add": hex(&stranger) })), 403, "a stranger told the relay");
-            let request = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&stranger) }), super::now());
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&first), "role": "client" })), 403, "the last admin was made a member");
+            assert_eq!(tell(&address, &stranger, json!({ "add": hex(&stranger), "role": "client" })), 403, "a stranger told the relay");
+            let request = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&stranger), "role": "client" }), super::now());
             let mut forged = request.clone();
             forged["add"] = json!(hex(&SecretKey::generate()));
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], forged).0, 403, "a changed tell was taken");
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], request.clone()).0, 204);
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], request).0, 403, "a tell was taken twice");
-            let big = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&phone), "pad": "x".repeat(5000) }), super::now());
+            let big = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&phone), "role": "client", "pad": "x".repeat(5000) }), super::now());
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], big).0, 403, "a big tell was read");
             assert_eq!(tell(&address, &stranger, json!({ "remove": hex(&stranger) })), 204);
             assert!(online(&address, &stranger, None).await.is_none(), "a key taken out reached the relay");
@@ -1408,7 +1408,7 @@ mod relay {
 
             // Taking a device out takes out the devices it let in.
             let laptop = SecretKey::generate();
-            assert_eq!(tell(&address, &phone, json!({ "add": hex(&laptop) })), 204);
+            assert_eq!(tell(&address, &phone, json!({ "add": hex(&laptop), "role": "client" })), 204);
             assert_eq!(tell(&address, &first, json!({ "remove": hex(&phone) })), 204);
             assert!(online(&address, &laptop, None).await.is_none(), "a key a removed device let in still reached the relay");
             assert!(!reaches(&address, &b, &a).await, "a removed device's socket still reached the relay");
@@ -1422,5 +1422,56 @@ mod relay {
         assert_eq!((ping.status().as_u16(), ping.headers().get("access-control-allow-origin").map(|v| v.to_str().unwrap())), (200, Some("*")));
         let portal = agent.get(format!("{address}/generate_204")).header("x-iroh-challenge", "abc_1.2").call().unwrap();
         assert_eq!((portal.status().as_u16(), portal.headers().get("x-iroh-response").map(|v| v.to_str().unwrap())), (204, Some("response abc_1.2")));
+    }
+
+    /// A browser's endpoint is a key of its session's, which its device vouches for (keys::certify): the relay lets it
+    /// in as that device, only for the key the certificate names, until its `until`, and while the device is listed.
+    #[test]
+    fn a_session_endpoint_gets_in_only_as_its_device_vouches() {
+        let first = SecretKey::generate();
+        let k = super::Kernel::for_devices(vec![hex(&first)]);
+        let address = k.address.replace("localhost", "127.0.0.1");
+        let phone = SecretKey::generate();
+        let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
+        let certify = |by: &SecretKey, endpoint: &SecretKey, until: u64| one::keys::certify(&signer(by), endpoint.public().as_bytes(), until, super::now());
+        let computes = |body: Value| super::post(&format!("{address}/relay/computes"), &[], body);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let a = online(&address, &first, None).await.expect("the install's first device isn't let in");
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&SecretKey::generate()) })), 403, "an add that doesn't say its role");
+
+            let session = SecretKey::generate();
+            let cert = certify(&phone, &session, super::now() + 60_000);
+            let s = online(&address, &session, Some(&cert)).await.expect("a session its device vouched for isn't let in");
+            assert!(reaches(&address, &s, &a).await, "a session's endpoint doesn't reach the install's devices");
+            // Its first nodes to ask: the computes, for it or a device on the list, and no one else.
+            let asked = one::keys::signed_request(&signer(&phone), "one/relay", json!({ "computes": true }), super::now());
+            for body in [json!({ "certificate": cert }), asked] {
+                let (status, said) = computes(body);
+                assert_eq!((status, said), (200, json!({ "computes": [hex(&first)] })));
+            }
+            let stranger = SecretKey::generate();
+            assert_eq!(computes(one::keys::signed_request(&signer(&stranger), "one/relay", json!({ "computes": true }), super::now())).0, 403, "a stranger was told the computes");
+            assert_eq!(computes(json!({ "certificate": certify(&stranger, &session, super::now() + 60_000) })).0, 403);
+
+            // Nothing for another endpoint, by a key not on the list, or once it has ended.
+            assert!(online(&address, &SecretKey::generate(), Some(&cert)).await.is_none(), "a certificate let in an endpoint it doesn't name");
+            assert!(online(&address, &SecretKey::generate(), Some(&certify(&stranger, &stranger, super::now() + 60_000))).await.is_none(), "a stranger vouched for itself");
+            let short = SecretKey::generate();
+            let brief = online(&address, &short, Some(&certify(&phone, &short, super::now() + 2_000))).await.expect("a short session isn't let in");
+            tokio::time::sleep(Duration::from_millis(2_500)).await;
+            assert!(!reaches(&address, &brief, &a).await, "an ended session still reached the relay");
+            assert!(online(&address, &short, Some(&certify(&phone, &short, super::now() - 1))).await.is_none(), "an ended session was let in");
+            brief.close().await;
+
+            // Its device taken out, it's out too.
+            assert_eq!(tell(&address, &first, json!({ "remove": hex(&phone) })), 204);
+            assert!(!reaches(&address, &s, &a).await, "a removed device's session still reached the relay");
+            s.close().await;
+            assert!(online(&address, &session, Some(&cert)).await.is_none(), "a removed device's session got in again");
+            assert_eq!(computes(json!({ "certificate": cert })).0, 403, "a removed device's session was told the computes");
+            a.close().await;
+        });
     }
 }

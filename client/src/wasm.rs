@@ -1,5 +1,6 @@
 //! The client in a browser, for the web client's one SharedWorker, which every tab and screen asks through: `start`
-//! once, then `fetch` as often as at once as they like, `reconnect` on the `online` event or a long freeze, and
+//! once, as an endpoint of the session's own key its device vouches for, then `fetch` as often and as at once as they
+//! like, `certify` before the session's certificate ends, `reconnect` on the `online` event or a long freeze, and
 //! `close`. Keys are hex, headers a flat list of names and values, and a body's parts come as `chunk` is awaited.
 
 use wasm_bindgen::prelude::*;
@@ -17,15 +18,21 @@ pub struct Client(crate::Client);
 
 #[wasm_bindgen]
 impl Client {
-    /// `secret`: the 32 bytes of this browser's device key, which are kept in WebAssembly's memory while it runs.
+    /// `secret`: the 32 bytes of this session's key, kept in WebAssembly's memory while it runs (the device's own key
+    /// stays in WebCrypto). `certificate`: the device's word for it (`certify` in kernel/shared/crypto.js).
     /// `address`: the install's, where its relay is. `nodes`: the nodes to ask, hex, in the order things run on them.
-    pub async fn start(secret: Vec<u8>, address: String, nodes: Vec<String>) -> Result<Client, JsError> {
-        let secret: [u8; 32] = secret.try_into().map_err(|_| js("a device's key is 32 bytes"))?;
+    pub async fn start(secret: Vec<u8>, certificate: String, address: String, nodes: Vec<String>) -> Result<Client, JsError> {
+        let secret: [u8; 32] = secret.try_into().map_err(|_| js("a session's key is 32 bytes"))?;
         let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
-        Ok(Client(crate::Client::start(secret, &address, &nodes).await.map_err(js)?))
+        Ok(Client(crate::Client::start(secret, Some(certificate), &address, &nodes).await.map_err(js)?))
     }
 
-    /// This browser's device key, hex.
+    /// A new certificate for the session, before the last ends.
+    pub async fn certify(&self, certificate: String) {
+        self.0.certify(certificate).await
+    }
+
+    /// This session's endpoint's key, hex.
     pub fn id(&self) -> String {
         data_encoding::HEXLOWER.encode(&self.0.id())
     }

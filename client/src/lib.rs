@@ -3,6 +3,10 @@
 //! and each request HTTP/1.1 on a stream of its own, which the node answers with its local API as the device's person
 //! (src/node/net.rs). The same natively, for the CLI and the apps, and in browsers as WebAssembly (src/wasm.rs).
 //!
+//! A device whose key can't be read out (a browser's, in WebCrypto) is reached as an endpoint of a key of the session's,
+//! which the device vouches for with a certificate (`keys::certify` in the node): shown to the relay as its auth token,
+//! and sent with each request (`x-one-endpoint`), so the node takes it as the device.
+//!
 //! Every method takes `&self`, so many requests run at once on one client: on a connection, opening a stream costs no
 //! round trip, so a request takes one.
 
@@ -28,6 +32,9 @@ const CONNECT: Duration = Duration::from_secs(10);
 const HEAD_LIMIT: usize = 64 << 10;
 /// How much of a body is read at once.
 const READ: usize = 64 << 10;
+
+/// What a session's endpoint sends its certificate in.
+const ENDPOINT_HEADER: &str = "x-one-endpoint";
 
 /// What this white label's clients speak to its nodes.
 fn alpn() -> Vec<u8> {
@@ -79,6 +86,8 @@ pub struct Client(Arc<Inner>);
 struct Inner {
     secret: SecretKey,
     way: Way,
+    /// A session's endpoint's certificate, if this key is one.
+    certificate: Mutex<Option<String>>,
     /// The nodes to ask, in the order things run on them: the first that answers is asked.
     nodes: Mutex<Vec<PublicKey>>,
     /// The endpoint, made again after the network was lost.
@@ -89,13 +98,14 @@ struct Inner {
 
 impl Client {
     /// The client of the device whose key is `secret`, in the install at `address`, asking `nodes` (in the order things
-    /// run on them). It starts connecting to the first at once.
-    pub async fn start(secret: [u8; 32], address: &str, nodes: &[[u8; 32]]) -> Result<Client, Error> {
+    /// run on them); or of a session's endpoint whose key is `secret`, with its device's `certificate`. It starts
+    /// connecting to the first node at once.
+    pub async fn start(secret: [u8; 32], certificate: Option<String>, address: &str, nodes: &[[u8; 32]]) -> Result<Client, Error> {
         let url: RelayUrl = address.trim_end_matches('/').parse().map_err(|_| unsent("the install's address isn't a URL"))?;
         // A Worker has no UDP, so the relay serves no QUIC address discovery.
         let mut config = RelayConfig::from(url.clone());
         config.quic = None;
-        Client::with(secret, Way::Relay(url, config.into()), nodes).await
+        Client::with(secret, Way::Relay(url, config), certificate, nodes).await
     }
 
     /// The client of the device whose key is `secret` in a Worker, with no socket: what it sends goes to `send`, and
@@ -105,19 +115,33 @@ impl Client {
         let inbox = relayed::Inbox::default();
         let public = *SecretKey::from_bytes(&secret).public().as_bytes();
         let way = Way::Custom(Arc::new(relayed::Relayed::new(&public, inbox.clone(), send)));
-        Ok((Client::with(secret, way, nodes).await?, inbox))
+        Ok((Client::with(secret, way, None, nodes).await?, inbox))
     }
 
-    async fn with(secret: [u8; 32], way: Way, nodes: &[[u8; 32]]) -> Result<Client, Error> {
-        let client = Client(Arc::new(Inner { secret: SecretKey::from_bytes(&secret), way, nodes: Mutex::default(), endpoint: tokio::sync::Mutex::default(), conns: Mutex::default() }));
+    async fn with(secret: [u8; 32], way: Way, certificate: Option<String>, nodes: &[[u8; 32]]) -> Result<Client, Error> {
+        let client = Client(Arc::new(Inner {
+            secret: SecretKey::from_bytes(&secret),
+            way,
+            certificate: Mutex::new(certificate),
+            nodes: Mutex::default(),
+            endpoint: tokio::sync::Mutex::default(),
+            conns: Mutex::default(),
+        }));
         client.endpoint().await?;
         client.set_nodes(nodes)?;
         Ok(client)
     }
 
-    /// This device's key.
+    /// This endpoint's key: the device's, or its session's.
     pub fn id(&self) -> [u8; 32] {
         *self.0.secret.public().as_bytes()
+    }
+
+    /// A session's new certificate, before its last ends: its requests carry it at once, and it's shown to the relay
+    /// on a fresh endpoint, since the relay ends the session's socket when the last one ends.
+    pub async fn certify(&self, certificate: String) {
+        *self.0.certificate.lock().unwrap() = Some(certificate);
+        self.reconnect().await;
     }
 
     /// The nodes to ask, in the order things run on them, as the install's state says; the first is connected to now.
@@ -161,7 +185,8 @@ impl Client {
     /// was lost, again once (after a fresh endpoint, if this device lost the relay), unless it may have reached the
     /// node and isn't a GET or HEAD.
     pub async fn fetch(&self, req: Request) -> Result<Response, Error> {
-        let head = head(&req)?;
+        let certificate = self.0.certificate.lock().unwrap().clone();
+        let head = head(&req, certificate.as_deref())?;
         let again = matches!(req.method.as_str(), "GET" | "HEAD");
         let nodes = self.0.nodes.lock().unwrap().clone();
         let mut why = unsent("there's no node to ask");
@@ -201,7 +226,13 @@ impl Client {
         }
         let builder = Endpoint::builder(presets::Minimal).secret_key(self.0.secret.clone());
         let builder = match &self.0.way {
-            Way::Relay(_, map) => builder.relay_mode(RelayMode::Custom(map.clone())),
+            Way::Relay(_, config) => {
+                let mut config = config.clone();
+                if let Some(certificate) = self.0.certificate.lock().unwrap().clone() {
+                    config = config.with_auth_token(certificate);
+                }
+                builder.relay_mode(RelayMode::Custom(RelayMap::from(config)))
+            }
             #[cfg(feature = "relayed")]
             Way::Custom(transport) => builder.relay_mode(RelayMode::Disabled).add_custom_transport(transport.clone()),
         };
@@ -251,13 +282,13 @@ impl Client {
 /// How a client reaches nodes: through the relay at the install's address, or (in a Worker) a transport that passes
 /// its datagrams to that relay by RPC.
 enum Way {
-    Relay(RelayUrl, RelayMap),
+    Relay(RelayUrl, RelayConfig),
     #[cfg(feature = "relayed")]
     Custom(Arc<relayed::Relayed>),
 }
 
-/// A request's head, checked: nothing in it can start another header or request.
-fn head(req: &Request) -> Result<Vec<u8>, Error> {
+/// A request's head, checked: nothing in it can start another header or request. A session's certificate goes with it.
+fn head(req: &Request, certificate: Option<&str>) -> Result<Vec<u8>, Error> {
     let token = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
     if !token(&req.method) {
         return Err(unsent("that isn't a method"));
@@ -270,11 +301,14 @@ fn head(req: &Request) -> Result<Vec<u8>, Error> {
         if !token(name) || value.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0) {
             return Err(unsent(format!("{name} isn't a header")));
         }
-        // How the request is framed is this library's to say.
-        if ["host", "content-length", "transfer-encoding", "connection"].iter().any(|h| name.eq_ignore_ascii_case(h)) {
+        // How the request is framed, and who it's from, is this library's to say.
+        if ["host", "content-length", "transfer-encoding", "connection", ENDPOINT_HEADER].iter().any(|h| name.eq_ignore_ascii_case(h)) {
             continue;
         }
         head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    if let Some(certificate) = certificate.filter(|c| c.bytes().all(|b| b.is_ascii_graphic())) {
+        head.push_str(&format!("{ENDPOINT_HEADER}: {certificate}\r\n"));
     }
     head.push_str(&format!("content-length: {}\r\n\r\n", req.body.len()));
     Ok(head.into_bytes())

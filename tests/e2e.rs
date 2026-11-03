@@ -633,8 +633,8 @@ async fn client_devices_ask_their_node_over_iroh_as_their_person() {
     eventually("a's endpoint", async || a.endpoint_addr().is_some_and(|e| e.relay_urls().next().is_some())).await;
 
     let get = |path: &str| one_client::Request { method: "GET".into(), path: path.into(), headers: Vec::new(), body: Vec::new() };
-    let json = async |r: one_client::Response| -> (u16, Value) { (r.status, serde_json::from_slice(&r.body.bytes().await.unwrap()).unwrap()) };
-    let phone = one_client::Client::start(mine.to_bytes(), &k.address, &[a.id()]).await.unwrap();
+    let json = async |r: one_client::Response| -> (u16, Value) { let s = r.status; let b = r.body.bytes().await.unwrap(); (s, serde_json::from_slice(&b).unwrap_or_else(|_| panic!("{s}: {}", String::from_utf8_lossy(&b)))) };
+    let phone = one_client::Client::start(mine.to_bytes(), None, &k.address, &[a.id()]).await.unwrap();
     let (status, state) = json(phone.fetch(get("/v1/state")).await.unwrap()).await;
     assert_eq!((status, state["me"]["user"].as_str()), (200, a.user().ok().as_deref()), "{state}");
     let hi = |body: Value, headers: Vec<(String, String)>| one_client::Request { method: "POST".into(), path: "/v1/call".into(), headers: [vec![("content-type".into(), "application/json".into())], headers].concat(), body: body.to_string().into_bytes() };
@@ -668,7 +668,8 @@ async fn client_devices_ask_their_node_over_iroh_as_their_person() {
     assert!(many.join_all().await.iter().all(|s| *s == Some(200)));
 
     // Sam's phone shows the node's own token and a sign-in: it's still Sam's, and asks nothing only this machine may.
-    let sams = one_client::Client::start(sams.to_bytes(), &k.address, &[a.id()]).await.unwrap();
+    let sams_key = sams.clone();
+    let sams = one_client::Client::start(sams.to_bytes(), None, &k.address, &[a.id()]).await.unwrap();
     let posing = |path: &str| one_client::Request { headers: vec![(one::api::LOCAL_TOKEN_HEADER.into(), a.local_token().into()), ("authorization".into(), "Bearer x".into())], ..get(path) };
     let (status, state) = json(sams.fetch(posing("/v1/state")).await.unwrap()).await;
     assert_eq!((status, state["me"]["user"].as_str()), (200, Some(sam.as_str())), "{state}");
@@ -676,9 +677,52 @@ async fn client_devices_ask_their_node_over_iroh_as_their_person() {
     let (status, refused) = json(sams.fetch(hi(asked.clone(), vec![(one::api::KEYS_HEADER.into(), sealed)])).await.unwrap()).await;
     assert_eq!(status, 400, "the keys Andre's phone handed are for its key alone: {refused}");
 
+    // A session's endpoint (a browser's), which a listed device vouches for, asks as that device: through the relay,
+    // with the keys it handed kept for it, its certificate's own header ignored.
+    let session = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let vouch = |by: &ed25519_dalek::SigningKey, endpoint: &ed25519_dalek::SigningKey, until: u64| one::keys::certify(by, endpoint.verifying_key().as_bytes(), until, one::node::now_ms());
+    let cert = vouch(&mine, &session, one::node::now_ms() + 600_000);
+    let browser = one_client::Client::start(session.to_bytes(), Some(cert.clone()), &k.address, &[a.id()]).await.unwrap();
+    let (status, state) = json(browser.fetch(get("/v1/state")).await.unwrap()).await;
+    assert_eq!((status, state["me"]["user"].as_str()), (200, a.user().ok().as_deref()), "{state}");
+    let spoofed = |r: one_client::Request| one_client::Request { headers: [r.headers.clone(), vec![(one::api::ENDPOINT_HEADER.into(), vouch(&sams_key, &session, one::node::now_ms() + 60_000))]].concat(), ..r };
+    let (status, said) = json(browser.fetch(spoofed(hi(asked.clone(), Vec::new()))).await.unwrap()).await;
+    assert_eq!((status, &said["ok"]), (200, &json!({ "hi": "phone" })), "the phone's session uses the keys the phone handed: {said}");
+    browser.close().await;
+
+    // Reached directly, the node takes a session's endpoint only with a certificate naming it, unexpired, by a device
+    // it lists, on each request.
+    let alpn = format!("{}/http/1", one::config::CLI).into_bytes();
+    let ask_as = async |key: &ed25519_dalek::SigningKey, certificate: Option<String>| -> Option<String> {
+        let ep = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal).secret_key(iroh::SecretKey::from_bytes(&key.to_bytes())).relay_mode(iroh::RelayMode::Disabled).bind().await.ok()?;
+        let answered = async {
+            let conn = ep.connect(a.endpoint_addr().unwrap(), &alpn).await.ok()?;
+            let (mut send, mut recv) = conn.open_bi().await.ok()?;
+            let header = certificate.map(|c| format!("{}: {c}\r\n", one::api::ENDPOINT_HEADER)).unwrap_or_default();
+            send.write_all(format!("GET /v1/state HTTP/1.1\r\nhost: node\r\n{header}\r\n").as_bytes()).await.ok()?;
+            send.finish().ok()?;
+            let got = recv.read_to_end(1 << 20).await.ok()?;
+            String::from_utf8_lossy(&got).lines().next().map(str::to_string)
+        }
+        .await;
+        ep.close().await;
+        answered
+    };
+    let later = one::node::now_ms() + 600_000;
+    assert_eq!(ask_as(&session, Some(cert.clone())).await.as_deref(), Some("HTTP/1.1 200 OK"));
+    assert_eq!(ask_as(&session, None).await, None, "a session's endpoint with no certificate");
+    assert_eq!(ask_as(&ed25519_dalek::SigningKey::from_bytes(&rand::random()), Some(cert.clone())).await, None, "a certificate for another endpoint");
+    let ended = one::keys::certify(&mine, session.verifying_key().as_bytes(), one::node::now_ms() - 1, one::node::now_ms() - 1_000);
+    assert_eq!(ask_as(&session, Some(ended)).await, None, "an ended session");
+    let stranger_key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    assert_eq!(ask_as(&session, Some(vouch(&stranger_key, &session, later))).await, None, "a key the install doesn't list vouched");
+    let sams_session = vouch(&sams_key, &session, later);
+    assert_eq!(ask_as(&session, Some(sams_session.clone())).await.as_deref(), Some("HTTP/1.1 200 OK"));
+    a.remove_device(&me, &one::entry::hex(&sams_key.verifying_key().to_bytes())).await.unwrap();
+    assert_eq!(ask_as(&session, Some(sams_session)).await, None, "a removed device's session");
+
     // A key the install doesn't list, reaching the node directly as anyone on its network can.
     let stranger = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal).relay_mode(iroh::RelayMode::Disabled).bind().await.unwrap();
-    let alpn = format!("{}/http/1", one::config::CLI).into_bytes();
     let answered = async {
         let conn = stranger.connect(a.endpoint_addr().unwrap(), &alpn).await.ok()?;
         let (mut send, mut recv) = conn.open_bi().await.ok()?;

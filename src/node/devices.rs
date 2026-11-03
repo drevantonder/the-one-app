@@ -397,7 +397,7 @@ impl Node {
         };
         self.member_content(caller, listed).await?;
         let admin = self.with(|i| Ok(i.r.members.is_admin(&r.user)))?;
-        self.tell_relay(json!({ "add": r.key, "admin": admin }));
+        self.tell_relay(json!({ "add": r.key, "admin": admin, "role": "client" }));
         if invite.is_some_and(|i| i.role == Role::Admin)
             && let Err(err) = self.ask_auth("POST", "/api/auth/people/admin", json!({ "user": r.user, "admin": true })).await
         {
@@ -425,7 +425,7 @@ impl Node {
         let endpoint = crate::keys::Endpoint { key: crate::keys::unhex(&r.key)?, seal: crate::keys::unhex(&r.seal)? };
         ensure!(self.with(|i| Ok(i.r.members.machines.get(&endpoint.key).is_none()))?, "that service is listed already");
         self.member_content(caller, members::service(&endpoint, &caller.user, &r.name, service)).await?;
-        self.tell_relay(json!({ "add": r.key, "admin": false }));
+        self.tell_relay(json!({ "add": r.key, "admin": false, "role": "service" }));
         // Its first hello brings it the entries that say it's theirs: as soon as the relay lets it in.
         let (node, key) = (self.clone(), endpoint.key);
         tokio::spawn(async move {

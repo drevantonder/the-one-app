@@ -247,7 +247,7 @@ export class Client extends DurableObject {
 
   /// The nodes to ask, in Where Things Run's order as it last read it, of those on the relay now.
   async nodes(me) {
-    const online = (await this.relay().computes()).filter((k) => k !== me.key);
+    const online = (await this.relay().connected((await this.relay().computes(me.key)) || [])).filter((k) => k !== me.key);
     const kept = (await this.ctx.storage.get("order")) || [];
     this.order = [...kept.filter((k) => online.includes(k)), ...online.filter((k) => !kept.includes(k))];
     return this.order;

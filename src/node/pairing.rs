@@ -98,7 +98,7 @@ impl Node {
         let roles = if user == pairing.user { MACHINE } else { &[members::Kind::Compute][..] };
         let listed = members::device(&endpoint, &user, &request.name, roles, None);
         self.member_content(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, listed).await.context("this device can no longer admit that machine")?;
-        self.tell_relay(json!({ "add": hex(&key) }));
+        self.tell_relay(json!({ "add": hex(&key), "role": "compute" }));
         Ok(JoinReply { root, user, bucket })
     }
 }

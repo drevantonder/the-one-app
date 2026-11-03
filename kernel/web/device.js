@@ -289,7 +289,7 @@ export class Device {
     }
     await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser }), as);
     await this.sealTo(r, newUser ? ["global"] : scopesOf(st, r.user), as);
-    await this.tell({ add: r.key, ...(!newUser && st.install.role === "admin" ? { admin: true } : {}) }, as);
+    await this.tell({ add: r.key, role: "client", ...(!newUser && st.install.role === "admin" ? { admin: true } : {}) }, as);
     if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`).catch(() => {});
     else await this.bearer(`/api/auth/devices/requests/${r.key}`, { method: "DELETE" }).catch(() => {});
   }
@@ -364,7 +364,7 @@ export class Device {
     const pk = await passkeyKeysOf(prf);
     await this.write("global", members.passkey({ key: pk.key, seal: pk.seal, user: this.user, name: "Passkey", credential }));
     await this.sealTo(pk, scopesOf(this.state(), this.user));
-    await this.tell({ add: pk.key });
+    await this.tell({ add: pk.key, role: "client" });
   }
 
   /// This browser let in by a listed passkey of its person's, which signs for it and opens what's sealed to it.
