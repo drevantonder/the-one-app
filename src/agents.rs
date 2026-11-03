@@ -267,6 +267,13 @@ fn set_up(records: &[Record]) {
     let keep = |name: &str| skills.contains_key(name) || (apps.is_none() && name.starts_with(&format!("{}-", crate::skills::server_name())));
     let codex = std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
     if !text.is_empty() {
+        // Agents asked to change their instructions or add a skill otherwise edit this file, which then stays on this
+        // device and stops updating.
+        let cli = crate::config::CLI;
+        let text = format!(
+            "<!-- {} keeps this the same on every device: change it with agents_set (`{cli} agents set`), and add a skill for every agent with agents_skill_set (`{cli} agents skill_set`). Edited here, it stays on this device and stops updating. -->\n\n{text}",
+            crate::config::NAME
+        );
         for dir in [codex, home.join(".config/amp"), home.join(".config/opencode")] {
             if dir.is_dir() {
                 written.write(&dir.join("AGENTS.md"), &text);
