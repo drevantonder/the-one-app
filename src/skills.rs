@@ -7,7 +7,7 @@
 
 use serde_json::{Value, json};
 
-use crate::config::{CLI, NAME, REPO};
+use crate::config::{CLI, NAME, REPO, YOURS};
 
 /// Claude Code keeps only the first 4,096 characters (UTF-16 units) of an MCP server's instructions; stay under them.
 pub const INSTRUCTIONS_LIMIT: usize = 4000;
@@ -252,16 +252,18 @@ pub fn backups_app() -> Value {
 }
 
 /// How the groups' tool is explained, as an app's guide is.
-const GROUPS_GUIDE: &str = "Groups are the people who share a page, its apps and its data, like a family or a team. groups_list says who's in each, as what (admin or member), and who's invited but hasn't joined.";
+fn groups_guide() -> String {
+    format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the people who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined.")
+}
 
 /// The groups' tool as an app's operations.
 pub fn groups_app() -> Value {
-    node_app("groups", "Groups", "Who's in each group, as admin or member, and who's invited", GROUPS_GUIDE, groups_tools())
+    node_app("groups", "Groups", &format!("Who's in {YOURS}, and in each of its groups"), &groups_guide(), groups_tools())
 }
 
 /// The groups' MCP tools.
 pub fn groups_tools() -> Vec<Value> {
-    vec![json!({ "name": "groups_list", "description": "Every group: who's in it, as admin or member, and who's invited but hasn't joined yet.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) })]
+    vec![json!({ "name": "groups_list", "description": format!("The people in {YOURS}, you first, each as admin or member; then every group: who's in it and who's invited but hasn't joined yet."), "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) })]
 }
 
 /// An MCP tool's hints, all three always, since a client takes one left out as the worst: whether it only reads (so it
@@ -329,15 +331,16 @@ pub enum Mode {
 /// The MCP server's instructions: the rules first, then how to find things in this mode, then the guides of the apps
 /// every agent needs from the start (the config's `always_on`), then a line for each app, as many as fit under
 /// Claude Code's limit. Every other app's guide comes with search, or `<cli> <app>`.
-pub fn instructions(mode: Mode, apps: &[Value]) -> String {
+pub fn instructions(mode: Mode, apps: &[Value], person: Option<&str>) -> String {
     let finding = match mode {
         Mode::All => format!(
             "Every tool is also a command (`{CLI} <app> <op>`). `search` finds the tools for a task across every app, with each app's guide; call it before you guess, and to learn an app."
         ),
         Mode::Code => "`search` finds the operations for a task across every app, with exact call signatures and each app's guide. `execute` runs a short script with them: `const r = await tools.<app>.<op>({ ... }); return r`. Scripts call several in one go; what they return comes back to you. Guides name operations <app>_<op>: in a script, that's tools.<app>.<op>.".to_string(),
     };
+    let person = person.filter(|p| !p.trim().is_empty()).map(|p| format!("\n\nYou act for {p}: groups_list says who else is in {YOURS}.")).unwrap_or_default();
     let mut text = format!(
-        "{}\n\nRules, before anything else:\n{}\n\n{finding} Each app's guide is also a skill, `{}-<app>`, with one for the whole of {NAME}, `{}`: load them from your skills, or `{CLI} skills`.",
+        "{}{person}\n\nRules, before anything else:\n{}\n\n{finding} Each app's guide is also a skill, `{}-<app>`, with one for the whole of {NAME}, `{}`: load them from your skills, or `{CLI} skills`.",
         about(),
         rules(),
         server_name(),

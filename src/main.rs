@@ -2,7 +2,7 @@ use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use one::config::{CLI, NAME};
+use one::config::{CLI, NAME, YOURS};
 use one::skills::Mode;
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
@@ -29,7 +29,8 @@ fn every_command() -> String {
   {CLI} remove <device> | --user <user>
   {CLI} role <user> admin|member       (admins)
   {CLI} settings [<name> <value>|--default]   the install's settings (admins set them)
-  {CLI} groups                         every group: who's in it, as admin or member, and who's invited
+  {CLI} groups                         who's in {YOURS}, then every group: who's in it, as admin or member,
+                                       and who's invited
   {CLI} group create <name>            a group, with you as its admin
   {CLI} group invite <group> <user> [--admin]
   {CLI} group accept <group>
@@ -1115,30 +1116,40 @@ fn status(state: &Value) {
     }
 }
 
-/// Every group in words: its people with their roles, and who's invited.
+/// The people in the One App, you first, each with their role; then every group in words: its people with their
+/// roles, and who's invited.
 fn groups_said(state: &Value) -> String {
     let i = &state["install"];
     let names: std::collections::HashMap<&str, &str> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, u["name"].as_str()?))).collect();
+    let me = i["user"].as_str();
+    let mut users: Vec<&Value> = i["users"].as_array().into_iter().flatten().collect();
+    users.sort_by_key(|u| u["me"] != true);
+    let everyone: Vec<String> = users.iter().map(|u| {
+        let (name, role) = (u["name"].as_str().unwrap_or(""), u["role"].as_str().unwrap_or("member"));
+        if u["me"] == true { format!("{name} (you, {role})") } else { format!("{name} ({role})") }
+    }).collect();
+    let mut out = format!("People in {YOURS}: {}.\n", everyone.join(", "));
     let people = |list: &Value| -> Vec<String> {
         list.as_array().into_iter().flatten().map(|m| {
             let id = m["user"].as_str().unwrap_or("");
             let (name, role) = (names.get(id).copied().unwrap_or(id), m["role"].as_str().unwrap_or("member"));
-            match i["user"].as_str() == Some(id) {
-                true => format!("you ({name}, {role})"),
+            match me == Some(id) {
+                true => format!("{name} (you, {role})"),
                 false => format!("{name} ({role})"),
             }
         }).collect()
     };
     let groups = i["groups"].as_array().cloned().unwrap_or_default();
     if groups.is_empty() {
-        return "There are no groups yet.\n".into();
+        out.push_str("No groups yet.\n");
+        return out;
     }
-    let mut out = String::new();
+    out.push_str("Groups:\n");
     for g in &groups {
-        out.push_str(&format!("{}: {}\n", g["name"].as_str().unwrap_or(""), people(&g["members"]).join(", ")));
+        out.push_str(&format!("  {}: {}\n", g["name"].as_str().unwrap_or(""), people(&g["members"]).join(", ")));
         let invited = people(&g["invited"]);
         if !invited.is_empty() {
-            out.push_str(&format!("  invited, not joined yet: {}\n", invited.join(", ")));
+            out.push_str(&format!("    invited, not joined yet: {}\n", invited.join(", ")));
         }
     }
     out
@@ -1529,7 +1540,8 @@ fn agent_name(raw: &str) -> String {
 /// The MCP server's instructions (src/guide.rs): the rules first, short enough that every harness keeps all of them.
 fn instructions(mode: Mode) -> String {
     let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-    one::skills::instructions(mode, &apps)
+    let state = get("/v1/state").unwrap_or_default();
+    one::skills::instructions(mode, &apps, state["user"]["name"].as_str())
 }
 
 /// An item, as one line: its title, what it is, its page, its fields (secret ones never shown), where they go and
