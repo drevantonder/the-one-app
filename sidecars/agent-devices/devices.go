@@ -672,7 +672,11 @@ func (ds *devices) list(ctx context.Context, device string, name any) (any, erro
 				return t.Description + "\n\nInput: " + string(t.InputSchema), nil
 			}
 		}
-		return nil, fmt.Errorf("no tool %s", n)
+		var names []string
+		for _, t := range tools {
+			names = append(names, t.Name)
+		}
+		return nil, fmt.Errorf("no tool %s: there's %s", n, strings.Join(names, ", "))
 	}
 	var b strings.Builder
 	for _, t := range tools {
