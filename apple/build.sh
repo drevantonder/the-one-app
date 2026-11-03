@@ -59,6 +59,8 @@ if [ "${1:-}" = --release ]; then
 	fi
 fi
 
+# Installing isn't stopped part way: an update's job stops a build for a newer one, which waits for this instead.
+trap '' TERM INT
 # Only one copy may run: ask the running app to quit, wait for it, and stop it if it won't, before the new one opens.
 osascript -e "quit app id \"$BUNDLE_ID\"" 2>/dev/null || true
 for _ in $(seq 20); do pgrep -f "/Contents/MacOS/$CONFIG_NAME\$" >/dev/null || break; sleep 0.5; done

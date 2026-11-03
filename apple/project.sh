@@ -7,6 +7,8 @@ field() { sed -n "/^\[/q; s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$conf
 art() { echo "$(dirname "$config")/$(field "$1")"; }
 # The commit the shells are built from, which Settings shows at its foot.
 export BUILD_COMMIT=$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+# The build number, the commits up to it, so devicectl tells which commit an iPhone has.
+export BUILD_NUMBER=$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 1)
 export CONFIG_NAME=$(field name) CONFIG_CLI=$(field cli) CONFIG_PORT=$(field port)
 # What a person calls the install where they read: a workplace's white label, which its people join with their work
 # email (join_domain), is shared, "the PTC App"; anyone else's is "your One App".

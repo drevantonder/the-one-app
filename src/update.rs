@@ -17,8 +17,8 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
-/// it in the background, and the node by building it, which every Linux device then takes, and which deploys the kernel
-/// (and the serverless node with it) from the device with the kernel's settings. Beside it runs `after-update` in this
+/// it at once, then the iPhone app for the iPhone it reaches, and the node by building it, which every Linux device then
+/// takes, and which deploys the kernel (and the serverless node with it) from the device with the kernel's settings. Beside it runs `after-update` in this
 /// device's home, if there is one: what else is built from main here, like another white label's update.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this white label names no repo, so it has nothing to update from");
@@ -55,30 +55,8 @@ pub fn run(tag: Option<&str>) -> Result<()> {
 
     let sends = parts.node || parts.mac || !parts.apps.is_empty();
     let after = if sends && tag.is_none() { after_update()? } else { None };
-    let moved = retire_gone(&src, &parts)?;
-    if !parts.node {
-        deploy_apps(&src, &parts.apps)?;
-        add_where(&moved);
-        let missed = follow(&macs, &commit, config_commit.as_deref());
-        if !sends {
-            println!("Nothing to send out: what changed since the last update here isn't in any build.");
-        }
-        if !missed {
-            std::fs::write(&done, &this)?;
-        }
-        return finish(after);
-    }
-
-    let key = release_key()?;
-    // Its commits were tested before they were pushed.
-    println!("Building {short}");
-    let mut build = Command::new(cargo());
-    build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
-    // Every release carries the serverless node: one without it couldn't deploy the kernel.
-    build.env("SERVERLESS", serverless(&src, &config).context("couldn't build the serverless node, so nothing was sent out")?);
-    run_quiet(&mut build)?;
-
-    // An update's Macs build in the background, and a release's build it with what it publishes, which it waits for.
+    // The Macs start first, since their builds take longest: an update's in the background, and a release's with what it
+    // publishes, which it waits for.
     let mut missed = false;
     let mut started = Vec::new();
     if tag.is_some() {
@@ -97,6 +75,28 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     } else {
         missed = follow(&macs, &commit, config_commit.as_deref());
     }
+    let moved = retire_gone(&src, &parts)?;
+    if !parts.node {
+        deploy_apps(&src, &parts.apps)?;
+        add_where(&moved);
+        if !sends {
+            println!("Nothing to send out: what changed since the last update here isn't in any build.");
+        }
+        if !missed {
+            std::fs::write(&done, &this)?;
+        }
+        return finish(after);
+    }
+
+    let key = release_key()?;
+    // Its commits were tested before they were pushed.
+    println!("Building {short}");
+    let mut build = Command::new(cargo());
+    build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
+    // Every release carries the serverless node: one without it couldn't deploy the kernel.
+    build.env("SERVERLESS", serverless(&src, &config).context("couldn't build the serverless node, so nothing was sent out")?);
+    run_quiet(&mut build)?;
+
 
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     // The build devices say they run: main's commit, and a white label's config's.
@@ -316,7 +316,8 @@ fn deploy_apps(src: &Path, names: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Has each Mac build `commit`'s app in the background, after what it's building now. True if a Mac was missed.
+/// Has each Mac build `commit`'s app now, instead of anything older it's building, then the iPhone app, for the iPhone it
+/// reaches; says what its last builds did. True if a Mac was missed.
 fn follow(macs: &[Value], commit: &str, config_commit: Option<&str>) -> bool {
     let mut missed = false;
     for mac in macs {
@@ -328,12 +329,10 @@ fn follow(macs: &[Value], commit: &str, config_commit: Option<&str>) -> bool {
         }
         match shell(mac, &mac_follow(commit, config_commit), 60) {
             Ok(r) if r["exit"] == 0 => {
-                let out = r["stdout"].as_str().unwrap_or("");
-                if let Some((was, log)) = out.split_once("failed ").and_then(|(_, rest)| rest.split_once('\n')) {
-                    println!("  {name}: its last build, of {}, failed:\n{}", &was[..was.len().min(12)], log.trim_end());
+                // Its report, with logs indented under what they're of.
+                for line in r["stdout"].as_str().unwrap_or("").lines() {
+                    if line.starts_with(' ') { println!("  {line}") } else { println!("  {name}: {line}") }
                 }
-                let now = if out.contains("building") { ", after the build it's on," } else { "" };
-                println!("  {name}: builds {}{now} once ten minutes pass with no newer update, and runs it then", &commit[..12]);
             }
             Ok(r) => {
                 missed = true;
@@ -660,33 +659,89 @@ JOB
     )
 }
 
-/// Shell for a Mac: has it build `commit`'s app next, and install it, in a job in its logged-in session that keeps
-/// building what it's wanted to until it's built the last; says "building" if that job was already running, and how
-/// its last build failed if it did, once.
+/// Shell for a Mac: has it build `commit`'s app now, and install it, then the iPhone app, if what that's made of changed,
+/// for the iPhone, all in one job in its logged-in session: a newer update stops the build it's on and builds that
+/// instead. It installs the iPhone app whenever the phone is reachable, and keeps trying until it is. Says how its last
+/// builds failed, once, and what the iPhone has.
 fn mac_follow(commit: &str, config_commit: Option<&str>) -> String {
+    let short = &commit[..commit.len().min(12)];
     format!(
         r#"set -e
 c="$HOME/Library/Caches/{CLI}"; label=app.{CLI}.update
 mkdir -p "$c"; cd "$c"
 echo "{commit} {config}" > want
-if [ -f failed ]; then printf 'failed %s\n' "$(cat failed)"; tail -n 25 update.log; rm -f failed; fi
+if [ -f failed ]; then echo "its build of $(cut -c1-12 failed) failed:"; sed 's/^/    /' failed.log; rm -f failed; fi
+if [ -f phone.failed ]; then echo "its iPhone build of $(cut -c1-12 phone.failed) failed:"; sed 's/^/    /' phone.failed.log; rm -f phone.failed; fi
+if [ -s phone.built ]; then
+	b=$(cut -c1-12 phone.built)
+	if [ "$(cat phone.built)" = "$(cat phone.installed 2>/dev/null)" ]; then echo "iPhone: installed $b"; else echo "iPhone: not reachable, will install $b when it is"; fi
+fi
+echo "builds {short} now, instead of anything older, then the iPhone app if it changed"
 pid=$(launchctl list | awk -v l="$label" '$3 == l {{ print $1 }}')
-if [ -n "$pid" ] && [ "$pid" != "-" ]; then echo building; exit 0; fi
+if [ -n "$pid" ] && [ "$pid" != "-" ]; then exit 0; fi
 cat > build.sh <<'JOB'
 set -e
 c="$HOME/Library/Caches/{CLI}"
 {checkout}
 CONFIG="$config" apple/build.sh
 JOB
-cat > follow.sh <<'JOB'
+cat > phone.sh <<'JOB'
+set -e
 c="$HOME/Library/Caches/{CLI}"
-while want=$(cat "$c/want") && [ "$want" != "$(cat "$c/built" 2>/dev/null)" ]; do
-	# Pushes come in bursts: it builds the last of them, once none has come for ten minutes, at the background's priority,
-	# so the Mac stays quick to use.
-	sleep 600
-	[ "$want" = "$(cat "$c/want")" ] || continue
-	# launchd runs this in the login shell, zsh on a Mac, which doesn't split "$want" into its commit and config.
-	if taskpolicy -b /bin/sh "$c/build.sh" "${{want%% *}}" "${{want#* }}" > "$c/update.log" 2>&1; then echo "$want" > "$c/built"; else echo "$want" > "$c/failed"; exit 1; fi
+{checkout}
+# Only what the iPhone app is made of: the node isn't in it, and each install closes the app on the phone.
+last=$(cat "$c/phone.built" 2>/dev/null || true)
+if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- apple ':!apple/Mac' vendor/phosphor {CONFIG_FILE} 2>/dev/null; then exit 3; fi
+CONFIG="$config" apple/build-phone.sh device "$c/phone"
+JOB
+cat > follow.sh <<'JOB'
+# launchd runs this in the login shell, zsh on a Mac; the job control it uses is bash's.
+[ -n "$BASH_VERSION" ] || exec /bin/bash "$0" "$@"
+c="$HOME/Library/Caches/{CLI}"
+# Each build in a process group of its own, which a newer update stops (apple/build.sh's install ignores that).
+set -m
+want() {{ cat "$c/want"; }}
+# Runs a build at a lower priority, so the Mac stays quick to use, and stops it for a newer update's (sets stopped).
+run() {{
+	stopped=
+	nice -n 10 /bin/sh "$@" & pid=$!
+	while kill -0 $pid 2>/dev/null; do
+		sleep 2
+		if [ "$(want)" != "$want" ]; then stopped=1; kill -TERM -- -$pid 2>/dev/null; break; fi
+	done
+	wait $pid
+}}
+# The paired iPhone devicectl reaches, unlocked; the kept iPhone app is installed on it, not opened: if it's in use,
+# installing replaces it all the same, so it's left for the person to open.
+install() {{
+	xcrun devicectl list devices --json-output "$c/devices.json" > /dev/null 2>&1 || return 1
+	phone=$(jq -r '[.result.devices[] | select(.hardwareProperties.reality == "physical" and .hardwareProperties.deviceType == "iPhone" and .connectionProperties.pairingState == "paired")][0].identifier // empty' "$c/devices.json")
+	[ -n "$phone" ] && xcrun devicectl device install app --device "$phone" "$c"/phone/*.app
+}}
+while :; do
+	want=$(want)
+	if [ "$want" != "$(cat "$c/tried" 2>/dev/null)" ]; then
+		# zsh doesn't split "$want" into its commit and config: this is bash.
+		set -- ${{want%% *}} "${{want#* }}"
+		run "$c/build.sh" "$1" "$2" > "$c/update.log" 2>&1; status=$?
+		[ -z "$stopped" ] || continue
+		if [ $status = 0 ]; then echo "$want" > "$c/built"; else
+			tail -n 25 "$c/update.log" > "$c/failed.log"; echo "$want" | tee "$c/failed" > "$c/tried"; continue
+		fi
+		# 3: nothing the iPhone app is made of changed.
+		run "$c/phone.sh" "$1" "$2" > "$c/phone.log" 2>&1; status=$?
+		[ -z "$stopped" ] || continue
+		case $status in
+		0) echo "$want" > "$c/phone.built" ;;
+		3) ;;
+		*) tail -n 25 "$c/phone.log" > "$c/phone.failed.log"; echo "$want" > "$c/phone.failed" ;;
+		esac
+		echo "$want" > "$c/tried"
+	fi
+	[ -s "$c/phone.built" ] && [ "$(cat "$c/phone.built")" != "$(cat "$c/phone.installed" 2>/dev/null)" ] || exit 0
+	if install >> "$c/phone.log" 2>&1; then cp "$c/phone.built" "$c/phone.installed"; continue; fi
+	# Away or locked: try again in a minute, or build a newer update at once.
+	for _ in $(seq 30); do sleep 2; [ "$(want)" = "$want" ] || break; done
 done
 JOB
 {start}"#,
