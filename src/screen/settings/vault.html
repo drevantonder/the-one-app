@@ -2,7 +2,6 @@
   .head { display: flex; align-items: center; justify-content: space-between; }
   .head .button { font-size: 22px; padding: 4px 6px; }
   #search { margin-bottom: 14px; }
-  .used { display: flex; gap: 4px; flex: none; }
   .hero { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; margin: 8px 0 18px; }
   .hero .name { font-size: 22px; font-weight: 600; margin-top: 8px; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
   .hero .button { margin-top: 2px; }
@@ -102,9 +101,15 @@
     const words = [item.title, item.type, item.domain, ...item.hosts, ...item.apps.map(label), ...item.fields.filter((f) => !f.secret).map((f) => f.value)];
     return words.some((w) => String(w ?? "").toLowerCase().includes(query));
   }
+  // Its row's grey line: what it is, and the apps using it but the one that made it and those what it is names;
+  // with no type, the apps using it, else its first plain field.
+  const rowLine = (item) => {
+    const others = item.apps.filter((a) => a !== item.app && !(item.type || "").toLowerCase().includes(label(a).toLowerCase()));
+    const used = others.length ? `Used by ${names(others)}` : "";
+    return item.type ? [line(item), used].filter(Boolean).join(" · ") : used || line(item);
+  };
   const row = (item) => `<div class="row" data-item="${esc(item.id)}">${icon(item, 36)}<div class="main"><div class="title"><span>${esc(item.title)}</span></div>` +
-    (line(item) ? `<div class="sub">${esc(line(item))}</div>` : "") + `</div>` +
-    `<div class="used" aria-label="${esc(names(item.apps))}">${item.apps.slice(0, 6).map((a) => one.appIcon(app(a) || { name: a }, 20)).join("")}</div><div class="chev">›</div></div>`;
+    (rowLine(item) ? `<div class="sub">${esc(rowLine(item))}</div>` : "") + `</div><div class="chev">›</div></div>`;
   function drawList() {
     const el = document.getElementById("list");
     const found = items.filter(matches);
