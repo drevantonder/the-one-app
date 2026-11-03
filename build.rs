@@ -52,6 +52,11 @@ fn main() {
     assert!(["passkey", "google"].contains(&sign_in), "sign_in is passkey or google");
     assert!(sign_in != "google" || !optional("join_domain").is_empty(), "signing in with Google needs join_domain");
     let out = format!("{out}pub const SIGN_IN: &str = {sign_in:?};\npub const JOIN_DOMAIN: &str = {:?};\n", optional("join_domain"));
+    // What a person joins, in their words: "your One App"; a workplace's (one with a join_domain) is shared, "the PTC App".
+    // apple/project.sh, android/app/build.gradle.kts and windows/build.sh say the same.
+    let name = get("name").as_str().unwrap().to_string();
+    let yours = if optional("join_domain").is_empty() { format!("your {}", name.trim_start_matches("The ")) } else { name.replacen("The ", "the ", 1) };
+    let out = format!("{out}pub const YOURS: &str = {yours:?};\n");
     // The install settings an install has until its admins set them (`setting` entries).
     let mut settings = String::new();
     for (name, value) in config.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {

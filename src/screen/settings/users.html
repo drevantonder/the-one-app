@@ -11,8 +11,7 @@
   // someone new, with an invite link (or, where people sign in with Google, how they join). The last admin's role
   // can't change.
   let state;
-  // What a person joins, in their words: "your One App".
-  const ours = `your ${one.config.name.replace(/^The /, "")}`;
+  const yours = one.config.yours;
   // Roles changed but not yet taken in, shown at once: null for someone being removed.
   const pending = {};
   let error = "";
@@ -37,7 +36,7 @@
     if (admin && one.config.join_domain) {
       const address = state.install?.settings?.address;
       const at = address ? ` at <b>${one.esc(address.replace(/^https?:\/\//, ""))}</b>` : "";
-      html += `<h2 class="section">Add Someone</h2><p class="footer">Anyone with a Google account at ${one.esc(one.config.join_domain)} joins ${one.esc(ours)} by signing in with Google${at}.</p>`;
+      html += `<h2 class="section">Add Someone</h2><p class="footer">Anyone with a Google account at ${one.esc(one.config.join_domain)} joins ${one.esc(yours)} by signing in with Google${at}.</p>`;
     } else if (admin) {
       html += '<div class="list" style="margin-top:20px"><a class="row plain action-row" data-add>Add Someone…</a></div>';
     }
@@ -60,7 +59,7 @@
     error = "";
     const u = state.install.users.find((x) => x.id === user);
     if (role === null) {
-      const sure = await one.confirm("#confirm", { title: `Remove ${u.name} from ${ours}?`, detail: "Their devices stop reaching it.", action: "Remove", danger: true });
+      const sure = await one.confirm("#confirm", { title: `Remove ${u.name} from ${yours}?`, detail: "Their devices stop reaching it.", action: "Remove", danger: true });
       if (!sure) return void (select.value = u.role);
     }
     pending[user] = role;

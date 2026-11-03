@@ -158,7 +158,7 @@
     const show = (note = "") => {
       matches = others.filter((u) => u.name.toLowerCase().includes(query.trim().toLowerCase()));
       const rows = matches.map((u) => `<a class="row" data-user="${one.esc(u.id)}">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}</span></div>
-        ${u.role === "admin" ? `<div class="sub">Admin of your ${one.esc(one.config.name.replace(/^The /, ""))}</div>` : ""}</div>${one.icon("plus-circle-fill", "add")}</a>`);
+        ${u.role === "admin" ? `<div class="sub">Admin of ${one.esc(one.config.yours)}</div>` : ""}</div>${one.icon("plus-circle-fill", "add")}</a>`);
       people.innerHTML = (rows.length ? `<div class="list">${rows.join("")}</div>` : others.length ? `<div class="list"><div class="row plain muted">No one called “${one.esc(query.trim())}”.</div></div>` : "")
         + (note ? footer(note, true) : footer(others.length ? "They join once they accept." : "Everyone is in this group already."));
     };

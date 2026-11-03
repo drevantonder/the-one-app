@@ -180,10 +180,9 @@
     document.querySelector("#ask").scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
-  // What they signed in to, in their words: "your One App", or a workplace's, "the PTC App".
-  const ours = `${one.config.join_domain ? "the" : "your"} ${one.config.name.replace(/^The /, "")}`;
+  const yours = one.config.yours;
   async function signOut() {
-    if (await one.alert({ title: `Sign Out of ${ours} on this device?`, action: "Sign Out", danger: true })) one.signOut();
+    if (await one.alert({ title: `Sign Out of ${yours} on this device?`, action: "Sign Out", danger: true })) one.signOut();
   }
 
   function pair() {

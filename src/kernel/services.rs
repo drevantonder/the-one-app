@@ -361,6 +361,7 @@ impl Settings {
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
                 plain("ACCENT", crate::config::ACCENT.into());
+                plain("YOURS", crate::config::YOURS.into());
                 if let Some((id, name)) = &self.try_person {
                     plain("SIGN_IN", "try".into());
                     plain("TRY_USER", id.clone());

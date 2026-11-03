@@ -105,9 +105,6 @@ const page = (look, title, body, script) => {
 <body><main><img class="mark" src="/logo.png" alt="">${body}<p class="error"></p></main><script>${webauthn}${script}</script></body></html>`;
 };
 
-/// What a person joins, in their words: "your One App".
-const ours = (name) => `your ${name.replace(/^The /, "")}`;
-
 /// Which passkeys work, in plain words, for the pages that make or ask for one.
 const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system.";
 
@@ -212,7 +209,7 @@ export function tryPage(look) {
 
 /// Joining with an invite link: making a first passkey, or on a try install (`tried`), with nothing to make.
 export function invitePage(look) {
-  const { name, tried } = look;
+  const { name, yours, tried } = look;
   const body = `
     <section id="join">
       <h1 id="title">Join ${escape(name)}</h1>
@@ -224,7 +221,7 @@ export function invitePage(look) {
       <p class="note">${escape(WORKS)}</p>`}
     </section>
     <section id="done" hidden>
-      <h1>You've joined ${escape(ours(name))}</h1>
+      <h1>You've joined ${escape(yours)}</h1>
       ${tried ? "" : `<p class="callout">Add a second passkey, on another device or a security key, so losing this one doesn't lock you out.</p>
       <a class="button primary" href="/passkeys">Add Another Passkey</a>`}
       <a class="button${tried ? " primary" : ""}" href="/">Open ${escape(name)}</a>

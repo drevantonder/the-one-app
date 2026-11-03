@@ -6,6 +6,8 @@
 /// page's nonce, and its policy refuses every other, inline event handlers too.
 pub fn page(context: &serde_json::Value, body: &str, own: bool) -> String {
     let mut context = context.clone();
+    // What a person joins, in their words: "your One App", or a workplace's, "the PTC App".
+    context["config"]["yours"] = crate::config::YOURS.into();
     // The domain whose people join by signing in with Google, for Users to say so.
     if crate::config::SIGN_IN == "google" {
         context["config"]["join_domain"] = crate::config::JOIN_DOMAIN.into();

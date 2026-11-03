@@ -208,8 +208,8 @@ impl Node {
                 Ok(Err(err)) => Err(format!("{err:#}").strip_prefix("the vault said: ").map(str::to_string)),
                 Err(_) => Err(None),
             };
-            let ours = format!("your {}", crate::config::NAME.trim_start_matches("The "));
-            let key = made.map_err(|why| anyhow!("{} wasn't made: {}. Try again.", name.trim(), why.unwrap_or(format!("{ours}'s keys couldn't be reached"))))?;
+            let yours = crate::config::YOURS;
+            let key = made.map_err(|why| anyhow!("{} wasn't made: {}. Try again.", name.trim(), why.unwrap_or(format!("{yours}'s keys couldn't be reached"))))?;
             self.adopt_key(&scope, key).await?;
         }
         self.member_as(caller, "group", json!({ "group": group, "name": name })).await?;
@@ -222,7 +222,7 @@ impl Node {
     /// change: the change itself is made.
     pub(super) async fn tell_vault(&self, caller: &Caller, changed: Vec<(String, Option<Role>, bool, Vec<Scope>)>) -> Result<()> {
         let Ok((_, url)) = self.kernel() else { return Ok(()) };
-        let ours = format!("your {}", crate::config::NAME.trim_start_matches("The "));
+        let yours = crate::config::YOURS;
         let mut untold = Vec::new();
         for (user, role, invited, scopes) in changed {
             let told = match caller.token.clone() {
@@ -231,8 +231,8 @@ impl Node {
                     let (vault, user, scopes) = (crate::kernel::Vault { url: url.clone() }, user.clone(), scopes.clone());
                     match tokio::task::spawn_blocking(move || vault.role(&token, &user, role, invited, &scopes)).await {
                         Ok(Ok(())) => Ok(()),
-                        Ok(Err(err)) => Err(format!("{err:#}").strip_prefix("the vault said: ").map(str::to_string).unwrap_or_else(|| format!("{ours}'s keys couldn't be reached"))),
-                        Err(_) => Err(format!("{ours}'s keys couldn't be reached")),
+                        Ok(Err(err)) => Err(format!("{err:#}").strip_prefix("the vault said: ").map(str::to_string).unwrap_or_else(|| format!("{yours}'s keys couldn't be reached"))),
+                        Err(_) => Err(format!("{yours}'s keys couldn't be reached")),
                     }
                 }
             };
@@ -247,7 +247,7 @@ impl Node {
                     .iter()
                     .filter(|s| scopes.len() == 1 || !matches!(s, Scope::User(_)))
                     .map(|s| match s {
-                        Scope::Global => ours.clone(),
+                        Scope::Global => yours.to_string(),
                         Scope::User(_) => "their own".to_string(),
                         Scope::Group(g) => m.groups.get(g).map(|g| g.name.clone()).unwrap_or_default(),
                     })
