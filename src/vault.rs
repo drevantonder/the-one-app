@@ -276,7 +276,7 @@ fn placeholder(name: &str) -> bool {
 
 /// The Vault is the node's, not an app's: agents list its items (never a secret field's value), set and remove
 /// fields, switch apps on for items, and ask the person for one.
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 pub fn tools() -> Vec<Value> {
     use crate::skills::{confirm_input, hints};
     let scope = json!({ "type": "string", "description": "user (yours, the default), global (everyone's), or a group's name or id" });

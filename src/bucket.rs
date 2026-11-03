@@ -101,17 +101,17 @@ pub fn scope_of(folder: &str) -> String {
     folder.replacen('-', ":", 1)
 }
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 mod copied;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 mod place;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 mod signed;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 pub use copied::Copied;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 pub use signed::{Address, Signer};
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 pub use place::*;
 
 /// A bucket in memory that can lose a race on purpose.

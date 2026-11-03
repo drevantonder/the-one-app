@@ -1,0 +1,32 @@
+[package]
+name = "one-client-ffi"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+# The client (one-client) for the native apps: one definition (src/lib.rs) from which uniffi makes Swift for the Mac and
+# iPhone apps, Kotlin for Android's, and, with NordSecurity's uniffi-bindgen-cs, C# for Windows', each by its app's
+# build from the library it links, so no binding is kept to drift. uniffi, since it's the one generator that serves all
+# three from the same Rust; pinned to the version uniffi-bindgen-cs is built for (v0.11.1+v0.31.0).
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+doctest = false
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+# The generator itself, for the apps' builds: cargo run -p one-client-ffi --features bindgen --bin uniffi-bindgen.
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+one-client = { path = ".." }
+uniffi = "=0.31.0"
+# The apps call in from threads of their own and wait: each call runs on this runtime, which iroh's tasks need.
+tokio = { version = "1", features = ["rt-multi-thread"] }
+# Not used here: held at 0.2.189 because 0.2.190 made the Apple routing and IPv6 interface types iroh 1.4.1's netwatch and
+# netdev use macOS's alone, so they don't build for the iPhone with a newer one. Goes once an iroh release does.
+libc = "=0.2.189"

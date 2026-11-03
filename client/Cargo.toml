@@ -31,6 +31,18 @@ iroh-base = { version = "=1.4.1", default-features = false, features = ["key", "
 n0-watcher = { version = "1", optional = true }
 noq-udp = { version = "1.4", optional = true }
 
+# Natively, the app is a device of its person (src/device.rs): the node's own formats and rules (entries, members,
+# logs, keys) from its crate without the node itself, which it checks who's who with; ureq, which that crate's node
+# uses too, to ask auth, the relay and the URL signer at the install's address.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+one = { path = "..", default-features = false }
+anyhow = "1"
+ed25519-dalek = "3"
+rand = "0.8"
+serde_json = "1"
+ureq = { version = "3", features = ["json"] }
+tokio = { version = "1", default-features = false, features = ["sync", "rt"] }
+
 # In browsers: how the page's JavaScript calls it (src/wasm.rs).
 [target.'cfg(target_family = "wasm")'.dependencies]
 wasm-bindgen = "=0.2.130"
@@ -41,3 +53,6 @@ getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
 
 [build-dependencies]
 toml = "0.9"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

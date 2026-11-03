@@ -22,6 +22,13 @@ pub mod relayed;
 #[cfg(target_family = "wasm")]
 mod wasm;
 
+#[cfg(not(target_family = "wasm"))]
+mod bucket;
+#[cfg(not(target_family = "wasm"))]
+mod device;
+#[cfg(not(target_family = "wasm"))]
+pub use device::{Device, new_secret};
+
 mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
 }
@@ -187,12 +194,20 @@ impl Client {
     /// was lost, again once (after a fresh endpoint, if this device lost the relay), unless it may have reached the
     /// node and isn't a GET or HEAD.
     pub async fn fetch(&self, req: Request) -> Result<Response, Error> {
+        self.fetch_with(req, |_| Vec::new()).await
+    }
+
+    /// `fetch`, with headers for whichever node it's sent to (`node`, its key): what's sealed to that node.
+    pub async fn fetch_with(&self, req: Request, node: impl Fn(&[u8; 32]) -> Vec<(String, String)>) -> Result<Response, Error> {
         let certificate = self.0.certificate.lock().unwrap().clone();
-        let head = head(&req, certificate.as_deref())?;
         let again = matches!(req.method.as_str(), "GET" | "HEAD");
         let nodes = self.0.nodes.lock().unwrap().clone();
         let mut why = unsent("there's no node to ask");
-        for node in &nodes {
+        for key in &nodes {
+            let mut headers = req.headers.clone();
+            headers.extend(node(key.as_bytes()));
+            let head = head(&req.method, &req.path, &headers, req.body.len(), certificate.as_deref())?;
+            let node = key;
             for fresh in [false, true] {
                 let (err, reused) = match self.exchange(node, &head, &req, fresh).await {
                     Ok(response) => return Ok(response),
@@ -290,16 +305,16 @@ enum Way {
 }
 
 /// A request's head, checked: nothing in it can start another header or request. A session's certificate goes with it.
-fn head(req: &Request, certificate: Option<&str>) -> Result<Vec<u8>, Error> {
+fn head(method: &str, path: &str, headers: &[(String, String)], len: usize, certificate: Option<&str>) -> Result<Vec<u8>, Error> {
     let token = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
-    if !token(&req.method) {
+    if !token(method) {
         return Err(unsent("that isn't a method"));
     }
-    if !req.path.starts_with('/') || req.path.bytes().any(|b| b <= b' ' || b == 0x7f) {
+    if !path.starts_with('/') || path.bytes().any(|b| b <= b' ' || b == 0x7f) {
         return Err(unsent("a path starts with / and has no spaces"));
     }
-    let mut head = format!("{} {} HTTP/1.1\r\nhost: node\r\n", req.method, req.path);
-    for (name, value) in &req.headers {
+    let mut head = format!("{method} {path} HTTP/1.1\r\nhost: node\r\n");
+    for (name, value) in headers {
         if !token(name) || value.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0) {
             return Err(unsent(format!("{name} isn't a header")));
         }
@@ -312,7 +327,7 @@ fn head(req: &Request, certificate: Option<&str>) -> Result<Vec<u8>, Error> {
     if let Some(certificate) = certificate.filter(|c| c.bytes().all(|b| b.is_ascii_graphic())) {
         head.push_str(&format!("{ENDPOINT_HEADER}: {certificate}\r\n"));
     }
-    head.push_str(&format!("content-length: {}\r\n\r\n", req.body.len()));
+    head.push_str(&format!("content-length: {len}\r\n\r\n"));
     Ok(head.into_bytes())
 }
 
@@ -384,6 +399,11 @@ pub struct Body {
 }
 
 impl Body {
+    /// A body already read whole.
+    pub fn whole(bytes: Vec<u8>) -> Body {
+        Body { recv: None, framing: Framing::Length(bytes.len() as u64), buf: bytes }
+    }
+
     /// The next part of the body as it arrives, or none at its end.
     pub async fn chunk(&mut self) -> Result<Option<Vec<u8>>, Error> {
         loop {

@@ -2,7 +2,7 @@
 //! (`kernel/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
 //! and building and running the services in workerd.
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 use std::time::Duration;
 
 use aes_gcm::aead::Aead;
@@ -167,13 +167,13 @@ pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> 
 
 /// The auth service at an install's address, as nodes check its tokens: its keys fetched and kept five minutes, or
 /// until a token names a key that isn't among them (as `kernel/shared/token.js`'s `Issuer` does).
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 pub struct Issuer {
     pub iss: String,
     keys: std::sync::Mutex<Option<(Value, std::time::Instant)>>,
 }
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 impl Issuer {
     pub fn new(address: &str) -> Issuer {
         Issuer { iss: format!("{}/api/auth", address.trim_end_matches('/')), keys: Default::default() }
@@ -215,7 +215,7 @@ pub struct Run {
     pub scope: String,
 }
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 mod services;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "node")]
 pub use services::*;
