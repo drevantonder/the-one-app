@@ -14,7 +14,7 @@ blake3 = "1"
 data-encoding = "2"
 # Its endpoint key signs what it asks the URL signer (src/keys.rs).
 ed25519-dalek = "3"
-one = { path = "..", default-features = false }
+one = { path = "..", default-features = false, features = ["db"] }
 serde_json = "1"
 # The SQLite rusqlite builds into WebAssembly (src/db.rs on Workers) gets its clock and randomness from JavaScript.
 sqlite-wasm-rs = { version = "0.6", features = ["wasm-bindgen"] }

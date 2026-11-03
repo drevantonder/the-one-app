@@ -5,8 +5,8 @@
 //! runs.
 //!
 //! A device trusts no node for who's who or for its keys: it reads `global`'s entries from the bucket itself, through
-//! the URL signer, with the epochs sealed to it that those entries made, and replays them as nodes do
-//! (`device_view`); it opens the keys a call needs from the bucket too, each epoch checked against its entry's hash
+//! the URL signer, with the epochs sealed to it that those entries made, and replays them as every client device does
+//! (one-client's `members::Global`, the nodes' own replay) (`device_view`); it opens the keys a call needs from the bucket too, each epoch checked against its entry's hash
 //! (`device_keys`). So it asks only the compute endpoints the entries list as running its person's calls, and hands
 //! each only the keys of scopes it runs.
 
@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use js_sys::{Function, Uint8Array};
-use one::entry::{Entry, Scope, causal};
+use one::entry::Scope;
+use one_client::members::Global;
 use one::members::{self, Members};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
@@ -170,7 +171,7 @@ struct View {
     global: one::db::Keys,
     at: u64,
     floor: u32,
-    entries: Vec<Entry>,
+    entries: Global,
     members: Members,
     epochs: HashMap<Scope, one::db::Keys>,
     apps: HashMap<(Scope, String, u32), Key>,
@@ -198,8 +199,9 @@ impl View {
                 }
             }
             let read = one::log::open(bucket, &log_keys, &one::log::prefix("global"), "global").await?;
-            let entries = causal(read.entries, &HashMap::new());
-            let members = replay(&entries);
+            let mut entries = Global::new(None);
+            entries.add_entries(read.entries)?;
+            let members = entries.members()?;
             let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| members.epoch_hash(&Scope::Global, **n) != Some(one::keys::epoch_hash(k).as_str())).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
                 return Ok(View { user: user.into(), seal: *seal, global: log_keys, at: read.at, floor: read.floor, entries, members, epochs: HashMap::from([(Scope::Global, candidates)]), apps: HashMap::new() });
@@ -216,12 +218,10 @@ impl View {
         if read.ahead.is_some() {
             return Ok(false);
         }
-        let fresh: Vec<Entry> = read.entries.into_iter().filter(|e| !self.entries.iter().any(|k| k.author() == e.author() && k.seq() == e.seq())).collect();
         (self.at, self.floor) = (read.at, read.floor);
-        if !fresh.is_empty() {
-            self.entries.extend(fresh);
-            self.entries = causal(std::mem::take(&mut self.entries), &HashMap::new());
-            self.members = replay(&self.entries);
+        if !read.entries.is_empty() {
+            self.entries.add_entries(read.entries)?;
+            self.members = self.entries.members()?;
         }
         Ok(true)
     }
@@ -260,12 +260,6 @@ impl View {
             })
             .collect()
     }
-}
-
-/// `global`'s members, from its entries in replay order.
-fn replay(entries: &[Entry]) -> Members {
-    let member_entries: Vec<Entry> = entries.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
-    Members::replay(crate::root(entries), &member_entries, &Default::default())
 }
 
 /// Takes a device's view out while `f` works on it, and puts it back: a device's object asks one at a time.

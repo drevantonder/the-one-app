@@ -102,3 +102,55 @@ impl Response {
         self.body.borrow_mut().take();
     }
 }
+
+/// `global`'s entries this browser holds, checked, and the members they make (src/members.rs): from what it kept
+/// (`kept`, a pack, of the install whose genesis is `root`, hex, or none the first time) and what a node just gave
+/// (`given`, a pack). Throws if any entry doesn't check, or they're another install's.
+#[wasm_bindgen]
+pub struct Global {
+    root: String,
+    pack: Vec<u8>,
+    have: String,
+    members: String,
+}
+
+#[wasm_bindgen]
+impl Global {
+    #[wasm_bindgen(constructor)]
+    pub fn new(root: String, kept: Vec<u8>, given: Vec<u8>) -> Result<Global, JsError> {
+        let root = (!root.is_empty()).then(|| one::entry::Hash::from_hex(&root)).transpose().map_err(js)?;
+        let mut g = crate::members::Global::new(root);
+        if !kept.is_empty() {
+            g.add(&kept).map_err(js)?;
+        }
+        if !given.is_empty() {
+            g.add(&given).map_err(js)?;
+        }
+        let members = crate::members::view(&g.members().map_err(js)?).to_string();
+        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), pack: g.pack(), have: g.have(), members })
+    }
+
+    /// The install's genesis, hex: to keep, and give again.
+    #[wasm_bindgen(getter)]
+    pub fn root(&self) -> String {
+        self.root.clone()
+    }
+
+    /// Every entry held, packed: to keep.
+    #[wasm_bindgen(getter)]
+    pub fn pack(&self) -> Vec<u8> {
+        self.pack.clone()
+    }
+
+    /// What to ask a node for next: `GET /v1/entries/global?have=`.
+    #[wasm_bindgen(getter)]
+    pub fn have(&self) -> String {
+        self.have.clone()
+    }
+
+    /// The members, as JSON (`members::view`).
+    #[wasm_bindgen(getter)]
+    pub fn members(&self) -> String {
+        self.members.clone()
+    }
+}

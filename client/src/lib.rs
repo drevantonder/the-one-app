@@ -17,6 +17,7 @@ use iroh::endpoint::{Connection, RecvStream, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
 use n0_future::time::{Duration, timeout};
 
+pub mod members;
 #[cfg(feature = "relayed")]
 pub mod relayed;
 #[cfg(target_family = "wasm")]

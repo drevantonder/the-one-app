@@ -30,6 +30,7 @@ fn user_home() -> PathBuf {
 pub mod backups;
 pub mod bucket;
 pub mod call;
+#[cfg(feature = "db")]
 pub mod db;
 pub mod entry;
 #[cfg(feature = "node")]
@@ -79,9 +80,11 @@ pub mod sidecars;
 pub mod service;
 pub mod kernel;
 pub mod keys;
+#[cfg(feature = "db")]
 pub mod log;
 pub mod screen;
 pub mod state;
+#[cfg(feature = "db")]
 pub mod vault;
 #[cfg(feature = "node")]
 pub mod shell;

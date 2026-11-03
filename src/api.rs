@@ -185,6 +185,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/role", post(role))
         .route("/v1/settings", post(settings))
         .route("/v1/entries", get(heads).post(entries))
+        .route("/v1/entries/global", get(global_entries))
         .route("/v1/use", post(use_))
         .route("/v1/runs", post(runs))
         .route("/v1/group", post(group))
@@ -265,6 +266,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/role",
     "/v1/settings",
     "/v1/entries",
+    "/v1/entries/global",
     "/v1/use",
     "/v1/runs",
     "/v1/group",
@@ -777,6 +779,20 @@ async fn heads(State(node): State<Node>, me: Me, axum::extract::Query(q): axum::
         Some(s) => crate::entry::Scope::parse(s)?,
     };
     Ok(Json(node.entry_heads(&me.caller, &scope).await?))
+}
+
+/// `?have=<key>.<seq>,…`: `global`'s entries, packed (`entry::pack`), but those below each author's seq given, which
+/// the caller holds; 204 if there's nothing new.
+async fn global_entries(State(node): State<Node>, me: Me, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Result<Response, Error> {
+    let mut have = std::collections::HashMap::new();
+    for held in q.get("have").map(String::as_str).unwrap_or("").split(',').filter(|h| !h.is_empty()) {
+        let (key, seq) = held.split_once('.').ok_or_else(|| anyhow::anyhow!("have is <key>.<seq>, each"))?;
+        have.insert(crate::entry::unhex(key)?, seq.parse()?);
+    }
+    Ok(match node.global_entries(&me.caller, &have).await? {
+        Some(pack) => ([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], pack).into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    })
 }
 
 /// `[{ header, signature, body }]` (each base64url): entries the caller's own device signed, which this device checks

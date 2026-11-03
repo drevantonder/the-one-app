@@ -782,6 +782,22 @@ impl Node {
         })
     }
 
+    /// `global`'s entries and its forks' evidence, packed, but those of each author's log below the seq `have` says the
+    /// caller holds: what a client device replays itself to know who's who (one-client's `members`), never taking it
+    /// from a node. None if there's nothing new.
+    pub async fn global_entries(&self, caller: &Caller, have: &HashMap<Key, u32>) -> Result<Option<Vec<u8>>> {
+        self.read_log(&Scope::Global).await?;
+        self.with(|i| {
+            ensure!(i.r.members.may_use(&caller.user, &Scope::Global), "you aren't one of this install's people");
+            let new: Vec<Entry> = i.r.store.scope("global")?.into_iter().filter(|e| have.get(&e.author()).is_none_or(|n| e.seq() >= *n)).collect();
+            if new.is_empty() {
+                return Ok(None);
+            }
+            let forked = i.r.store.forked("global")?;
+            Ok(Some(crate::entry::pack(&new.iter().chain(&forked).collect::<Vec<_>>())))
+        })
+    }
+
     /// Writes entries `caller`'s own device signed (a browser's, say), each once it's checked: it follows what this
     /// device holds, and counts.
     pub async fn put_signed(&self, caller: &Caller, entries: Vec<Entry>) -> Result<()> {

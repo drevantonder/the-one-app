@@ -921,3 +921,57 @@ fn every_client_draws_in_the_kits_colours() {
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
+
+/// A client device (one-client: native apps, and browsers as WebAssembly) knows who's who only from the install's own
+/// signed entries, replayed as nodes replay them: a device a node lists that no entry of the person's own devices does,
+/// a seal key changed on the way, or entries of another install than the one it joined, never reach what it seals to.
+#[test]
+fn a_client_takes_whos_who_only_from_the_installs_signed_entries() {
+    use ed25519_dalek::SigningKey;
+    use one::entry::{Entry, Ext, Head, hex, pack};
+    use one::keys::Endpoint;
+    use one::members::{self, Kind};
+    use one_client::members::{Global, view};
+
+    const ANDRE: &str = "a000000000000001";
+    let (mac, phone, node) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]), SigningKey::from_bytes(&[3; 32]));
+    let write = |key: &SigningKey, prev: Option<Head>, content| Entry::create(key, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: vec![] }, prev, content);
+    let genesis = write(&mac, None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
+    let listed = write(&mac, Some(genesis.head()), members::device(&Endpoint::of(&phone), ANDRE, "phone", &[Kind::Client], None));
+    let runs = write(&mac, Some(listed.head()), members::device(&Endpoint::of(&node), ANDRE, "box", &[Kind::Compute], None));
+    let entries = [&genesis, &listed, &runs];
+
+    // The first time, the install's genesis is the one its entries start with, kept from then on.
+    let mut client = Global::new(None);
+    client.add(&pack(&entries)).unwrap();
+    assert_eq!(client.root(), Some(genesis.hash()));
+    let k = view(&client.members().unwrap());
+    let opens = |k: &serde_json::Value| k["openers"]["global"].as_array().unwrap().iter().map(|o| (o["key"].as_str().unwrap().to_string(), o["seal"].as_str().unwrap().to_string())).collect::<BTreeSet<_>>();
+    let seal = |key: &SigningKey| hex(&Endpoint::of(key).seal);
+    assert_eq!(opens(&k), BTreeSet::from([(hex(&mac.verifying_key().to_bytes()), seal(&mac)), (hex(&phone.verifying_key().to_bytes()), seal(&phone))]));
+    assert_eq!(k["runs_for"][hex(&node.verifying_key().to_bytes())], json!(["global", format!("user:{ANDRE}")]));
+
+    // A device a hacked node lists itself, signed by it rather than by one of Andre's own devices, counts for nothing.
+    let mine = SigningKey::from_bytes(&[9; 32]);
+    let forged = write(&node, None, members::device(&Endpoint::of(&mine), ANDRE, "phone 2", &[Kind::Client], None));
+    client.add(&pack(&[&forged])).unwrap();
+    assert_eq!(opens(&view(&client.members().unwrap())), opens(&k), "a device no entry of the person's lists isn't sealed to");
+
+    // A seal key changed in an entry Andre's device signed: refused, all of it.
+    let (header, signature, body) = listed.encode();
+    let body = String::from_utf8(body).unwrap().replace(&seal(&phone), &hex(&Endpoint::of(&mine).seal)).into_bytes();
+    let as_packed = |parts: [Vec<u8>; 3]| {
+        let mut out = Vec::new();
+        ciborium::into_writer(&ciborium::Value::Array(vec![ciborium::Value::Array(parts.into_iter().map(ciborium::Value::Bytes).collect())]), &mut out).unwrap();
+        out
+    };
+    assert!(Global::new(Some(genesis.hash())).add(&as_packed([header, signature, body])).is_err());
+
+    // Another install's entries: refused once one is kept, and when one's first seen beside another.
+    let other = write(&node, None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&node), "box", &[Kind::Client], &[7; 32], &"e".repeat(64)));
+    assert!(client.add(&pack(&[&other])).is_err());
+    assert!(Global::new(None).add(&pack(&[&genesis, &other])).is_err());
+    let mut kept = Global::new(Some(other.hash()));
+    assert!(kept.add(&pack(&entries)).is_err());
+    assert!(kept.members().is_err());
+}

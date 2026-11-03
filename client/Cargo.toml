@@ -26,6 +26,10 @@ n0-future = "0.3"
 httparse = "1"
 data-encoding = "2"
 tokio = { version = "1", default-features = false, features = ["sync"] }
+# A client checks the install's signed entries itself with the nodes' own Rust (src/members.rs): who's who as they say
+# it, never as a node does.
+anyhow = "1"
+serde_json = "1"
 # A transport of its own, as the serverless node's (src/relayed.rs): iroh's custom transports, at the node's iroh.
 iroh-base = { version = "=1.4.1", default-features = false, features = ["key", "relay"], optional = true }
 n0-watcher = { version = "1", optional = true }
@@ -35,16 +39,16 @@ noq-udp = { version = "1.4", optional = true }
 # logs, keys) from its crate without the node itself, which it checks who's who with; ureq, which that crate's node
 # uses too, to ask auth, the relay and the URL signer at the install's address.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-one = { path = "..", default-features = false }
-anyhow = "1"
+one = { path = "..", default-features = false, features = ["db"] }
 ed25519-dalek = "3"
 rand = "0.8"
-serde_json = "1"
 ureq = { version = "3", features = ["json"] }
 tokio = { version = "1", default-features = false, features = ["sync", "rt"] }
 
-# In browsers: how the page's JavaScript calls it (src/wasm.rs).
+# In browsers: how the page's JavaScript calls it (src/wasm.rs), and `one` without its databases (`db`), which SQLite
+# would make a megabyte bigger: a browser checks entries and replays members, and holds no database.
 [target.'cfg(target_family = "wasm")'.dependencies]
+one = { path = "..", default-features = false }
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "0.4"
 # iroh's and ring's randomness, from the browser's crypto.getRandomValues, for each version of getrandom they build.
