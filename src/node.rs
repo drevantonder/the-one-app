@@ -68,6 +68,8 @@ const STOPPED_FOR: u64 = 15 * 60_000;
 const TICK: Duration = Duration::from_secs(10);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
+/// The largest step a notice carries: a bigger one, the devices it tells read from the bucket.
+const SENT_STEP: usize = 1 << 20;
 /// How long a blob a scope forgot stays in the bucket, in case an entry another device wrote names it again.
 const FORGOTTEN_KEPT: Duration = Duration::from_secs(600);
 /// How long a call's work may carry on after it returns (`ctx.waitUntil`).
@@ -329,12 +331,15 @@ pub struct Inner {
     backup_looked: Mutex<HashMap<(String, String), u64>>,
     /// Each database of each scope, by its app and name (`board/main`), as this device last read it.
     dbs: Mutex<HashMap<(Scope, String), Arc<tokio::sync::Mutex<Db>>>>,
-    /// The databases another device said it wrote without sending the step, which a read catches up from the bucket.
+    /// The databases another device said it wrote whose step isn't in this device's copy yet, which a read catches up
+    /// from the bucket.
     behind: Mutex<std::collections::HashSet<(Scope, String)>>,
     /// Each scope's epochs this device opens, by number, once it has looked.
     epochs: Mutex<HashMap<Scope, crate::db::Keys>>,
     /// Each database's keys by epoch as this device opens them (`database_keys`), with the newest epoch they're as of.
     database_keys: Mutex<HashMap<(Scope, String), (u32, crate::db::Keys)>>,
+    /// Steps other devices sent, waiting for the bucket to confirm them, while one ask of it is under way: none then.
+    sent: Mutex<Option<Vec<logs::Sent>>>,
     /// Whether this device is moving to the install's new storage now.
     moving: Mutex<bool>,
     /// Where the install's data went: every bucket this device has used writes there, after a move (`Copied`).
@@ -458,6 +463,7 @@ impl Node {
             behind: Mutex::new(Default::default()),
             epochs: Mutex::new(HashMap::new()),
             database_keys: Mutex::new(HashMap::new()),
+            sent: Mutex::new(None),
             moving: Mutex::new(false),
             moved: Arc::default(),
             tunnel: Mutex::new(None),

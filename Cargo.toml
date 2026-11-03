@@ -55,6 +55,9 @@ axum = "0.8"
 iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "portmapper"] }
 # Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
 jiff = "0.2"
+# A device applies a database step another device sent only once the bucket confirms it holds those bytes, by their
+# ETag, which for R2's single PUT is their MD5 (src/bucket/place.rs); nothing already built gives MD5.
+md-5 = "0.11"
 # So workerd dies with its node on Linux (prctl PR_SET_PDEATHSIG).
 libc = "0.2"
 # Release signatures are OpenSSH signatures (sshsig), which install.sh checks with ssh-keygen; this reads the keys and

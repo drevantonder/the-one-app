@@ -61,6 +61,26 @@ impl<B: Bucket + Clone> Copied<B> {
         self.here.get(name)
     }
 
+    /// Keeps the steps other devices sent, each a name and its bytes, that the bucket confirms it holds as sent, asking
+    /// it about all of them at once: → which are kept. One it doesn't confirm is never kept, so no device can show
+    /// another anything but the bucket's: it's read from the bucket when it's next needed.
+    pub async fn take_sent(&self, sent: &[(String, Vec<u8>)]) -> Result<Vec<bool>> {
+        let mut out: Vec<bool> = sent.iter().map(|(name, _)| self.kept(name).is_ok_and(|k| k.is_some())).collect();
+        let ask: Vec<(String, Vec<u8>)> = sent.iter().zip(&out).filter(|((name, _), here)| !**here && kept(name)).map(|(s, _)| s.clone()).collect();
+        if ask.is_empty() {
+            return Ok(out);
+        }
+        let mut confirmed = Bucket::confirm(self, &ask).await?.into_iter();
+        for ((name, bytes), took) in sent.iter().zip(out.iter_mut()) {
+            if !*took && kept(name) && confirmed.next() == Some(true) {
+                // Kept already if not created: from the bucket too.
+                self.here.create(name, bytes)?;
+                *took = true;
+            }
+        }
+        Ok(out)
+    }
+
     /// Forgets what's kept of a folder: a scope this device no longer holds, or an app erased.
     pub fn forget(&self, folder: &str) -> Result<()> {
         ensure!(!folder.is_empty() && folder.split('/').all(segment), "{folder} isn't a folder of the bucket");
@@ -145,6 +165,12 @@ impl<B: Bucket> Bucket for Copied<B> {
 
     async fn wait(&self, ms: u64) {
         self.place.wait(ms).await
+    }
+
+    /// Asks the bucket, never this copy.
+    async fn confirm(&self, objects: &[(String, Vec<u8>)]) -> Result<Vec<bool>> {
+        let moved = self.moved.try_read().ok();
+        Bucket::confirm(moved.as_deref().and_then(Option::as_ref).unwrap_or(&self.place), objects).await
     }
 }
 

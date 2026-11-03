@@ -6,9 +6,11 @@
 //! it was told failed, and nothing one attempt wrote twice; and a write says it may have been made only when the bucket
 //! left one of its requests unanswered. A failing seed is a bug. `ONE_SIM_SEEDS=<from>..<to>` sweeps more.
 //!
-//! Then the same with each device keeping a copy on its disk, told of some of the others' writes as they're made, and
-//! fetching what it's told of from the bucket into its copy, and reading from its copy alone in between: what it reads
-//! may be behind, but never anything no device read at the same step, and the copy opens nothing without the key.
+//! Then the same with each device keeping a copy on its disk, sent some of the others' steps as they're written (some
+//! of them forged: other bytes at that step, or at the next), keeping each only once the bucket confirms it and
+//! otherwise fetching from the bucket into its copy, and reading from its copy alone in between: what it reads may be
+//! behind, but never anything no device read at the same step, nothing the bucket doesn't hold is kept, and the copy
+//! opens nothing without the key.
 //!
 //! In odd seeds the scope's epoch changes midway: each device is handed epoch 2 when it first meets a step under it,
 //! and one device never is, writing under epoch 1 after it all the same: what it writes after is passed over, and
@@ -401,10 +403,26 @@ async fn run_copied(seed: u64) {
                 let id = (device * WRITES + i) as u64;
                 let at = db.at();
                 link.write(&mut db, here, id, device).await.expect("one epoch");
-                // Its notice reaches some of the others, which fetch what's new into their copies, if the link lets them.
+                // Its step reaches some of the others, some of them forged on the way, and each keeps what the bucket
+                // confirms, fetching the rest from the bucket, if the link lets it.
                 if db.at() > at {
+                    let (name, next) = (one::db::step_name("global/sim/main", db.at()), one::db::step_name("global/sim/main", db.at() + 1));
+                    let step = here.kept(&name).unwrap().expect("a step written is kept");
+                    let first = &key[&1];
+                    let plain = one::keys::open(first, &name, &step).unwrap();
                     for (_, copy) in copies.iter().enumerate().filter(|(o, _)| *o != device) {
-                        if link.rng.lock().unwrap().gen_bool(0.6) {
+                        let (sent, forged, ahead) = {
+                            let mut rng = link.rng.lock().unwrap();
+                            (rng.gen_bool(0.6), rng.gen_bool(0.2), rng.gen_bool(0.2))
+                        };
+                        if !sent {
+                            continue;
+                        }
+                        let mut steps = vec![(name.clone(), if forged { one::keys::seal(1, first, &name, &plain) } else { step.clone() })];
+                        if ahead {
+                            steps.push((next.clone(), one::keys::seal(1, first, &next, &plain)));
+                        }
+                        if !copy.take_sent(&steps).await.is_ok_and(|took| took[0]) {
                             let _ = copy.fill("global/sim/main", 0).await;
                         }
                     }

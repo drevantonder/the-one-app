@@ -22,6 +22,17 @@ pub trait Bucket {
     fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> impl Future<Output = Result<bool>>;
     /// Waits before asking again, on the clock of the runtime it's reached from.
     fn wait(&self, ms: u64) -> impl Future<Output = ()>;
+    /// Which of `objects` the bucket holds exactly as given, each a name and its bytes: read and compared, unless the
+    /// place can tell in one trip.
+    fn confirm(&self, objects: &[(String, Vec<u8>)]) -> impl Future<Output = Result<Vec<bool>>> {
+        async move {
+            let mut out = Vec::new();
+            for (name, bytes) in objects {
+                out.push(self.get(name).await?.is_some_and(|o| o.bytes == *bytes));
+            }
+            Ok(out)
+        }
+    }
 }
 
 /// What went wrong at a place, so a person can be told how to fix it.

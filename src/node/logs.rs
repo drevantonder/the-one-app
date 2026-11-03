@@ -102,8 +102,9 @@ impl Node {
     }
 
     /// Tells the devices that hold `scope` it changed, so they read it now rather than at their next look: its entries,
-    /// or with `wrote`, step `at` of an app's database, through the relay. Only a hint: each reads what changed from the
-    /// bucket.
+    /// or with `wrote`, step `at` of an app's database, which it sends them unless it's big. Each applies a step only
+    /// once the bucket confirms it holds those bytes, so nothing a device sends can be anything but the bucket's, and
+    /// QUIC proves who sent it: it needs no signature.
     pub(super) fn ping(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
         let Ok(devices) = self.with(|i| {
             let m = &i.r.members;
@@ -114,14 +115,18 @@ impl Node {
         let mut input = json!({ "scope": scope.to_string() });
         if let Some((app, database, at)) = wrote {
             input = json!({ "scope": scope.to_string(), "app": app, "database": database, "at": at });
+            let name = crate::db::step_name(&database_prefix(scope, app, database), at);
+            if let Some(step) = self.bucket().ok().and_then(|b| b.kept(&name).ok().flatten()).filter(|s| s.len() <= SENT_STEP) {
+                input["step"] = json!(data_encoding::BASE64.encode(&step));
+            }
         }
         self.notify(&devices, &input);
     }
 
     /// What another device said changed in `scope`, which this device holds: its entries, which it reads now, or with
-    /// `wrote`, step `at` of a database, which it fetches into its copy now if it has the database open, and until then
-    /// reads from the bucket first.
-    pub(super) fn changed_there(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
+    /// `wrote`, step `at` of a database. If it has the database open, it fetches that step into its copy now: the one
+    /// sent, once the bucket confirms it, else the bucket's. Until then a read asks the bucket first.
+    pub(super) fn changed_there(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>, step: Option<Vec<u8>>) {
         if !self.with(|i| Ok(i.r.holds(scope))).unwrap_or(false) {
             return;
         }
@@ -134,22 +139,81 @@ impl Node {
         };
         let id = (scope, format!("{app}/{database}"));
         self.0.behind.lock().unwrap().insert(id.clone());
+        let open = self.0.dbs.lock().unwrap().contains_key(&id);
+        match step.filter(|_| open) {
+            Some(step) => self.confirm_sent(Sent { name: crate::db::step_name(&database_prefix(&id.0, &app, &database), at), step, id, at }),
+            None => drop(tokio::spawn(async move { node.fill_to(&[(id, at)]).await })),
+        }
+    }
+
+    /// Asks the bucket to confirm a step another device sent, with every other sent while it's asked about the last
+    /// lot: a burst of steps is one ask.
+    fn confirm_sent(&self, sent: Sent) {
+        let first = {
+            let mut waiting = self.0.sent.lock().unwrap();
+            let first = waiting.is_none();
+            waiting.get_or_insert_default().push(sent);
+            first
+        };
+        if !first {
+            return;
+        }
+        let node = self.clone();
         tokio::spawn(async move {
-            let open = node.0.dbs.lock().unwrap().get(&id).cloned();
-            let filled = match (open, node.bucket()) {
-                (Some(db), Ok(bucket)) => match db.try_lock().map(|db| (db.prefix().to_string(), db.at())) {
-                    Ok((prefix, from)) => bucket.fill(&prefix, from).await.is_ok_and(|n| from + n >= at),
-                    Err(_) => false,
-                },
+            loop {
+                let lot = {
+                    let mut waiting = node.0.sent.lock().unwrap();
+                    let lot = std::mem::take(waiting.as_mut().expect("asking"));
+                    if lot.is_empty() {
+                        *waiting = None;
+                        break;
+                    }
+                    lot
+                };
+                let steps: Vec<(String, Vec<u8>)> = lot.iter().map(|s| (s.name.clone(), s.step.clone())).collect();
+                // A bucket slow to answer holds up no other: what it doesn't confirm in time is read from it.
+                let took = match node.bucket() {
+                    Ok(bucket) => tokio::time::timeout(BUCKET_WAIT, bucket.take_sent(&steps)).await.unwrap_or_else(|_| Err(anyhow!("the bucket didn't answer"))),
+                    Err(err) => Err(err),
+                };
+                match took {
+                    Ok(took) => {
+                        for (sent, _) in lot.iter().zip(took).filter(|(_, took)| !took) {
+                            tracing::debug!("{}: the bucket didn't confirm the step sent, so it's read from the bucket", sent.name);
+                        }
+                    }
+                    Err(err) => tracing::debug!("confirming steps other devices sent: {err:#}"),
+                }
+                node.fill_to(&lot.into_iter().map(|s| (s.id, s.at)).collect::<Vec<_>>()).await;
+            }
+        });
+    }
+
+    /// Brings this device's copy of each open database up to step `at`: from what it has, then from the bucket for what
+    /// it lacks. One that's there no longer needs a read to ask the bucket first.
+    async fn fill_to(&self, wrote: &[((Scope, String), u64)]) {
+        let Ok(bucket) = self.bucket() else { return };
+        let mut apps = Vec::new();
+        for (id, at) in wrote {
+            if wrote.iter().any(|(other, later)| other == id && later > at) {
+                continue;
+            }
+            let open = self.0.dbs.lock().unwrap().get(id).cloned();
+            let filled = match open.as_ref().map(|db| db.try_lock().map(|db| (db.prefix().to_string(), db.at()))) {
+                Some(Ok((prefix, from))) => {
+                    let here = from + bucket.here_only().fill(&prefix, from).await.unwrap_or(0);
+                    here >= *at || bucket.fill(&prefix, here).await.is_ok_and(|n| here + n >= *at)
+                }
                 _ => false,
             };
             if filled {
-                node.0.behind.lock().unwrap().remove(&id);
+                self.0.behind.lock().unwrap().remove(id);
             }
-            if app != members::APP {
-                node.emit(Event::Changed { apps: vec![app] });
-            }
-        });
+            apps.extend(id.1.split('/').next().filter(|app| *app != members::APP && !apps.iter().any(|a: &String| a == app)).map(str::to_string));
+        }
+        if !apps.is_empty() {
+            self.emit(Event::Changed { apps });
+        }
     }
 
     /// Tells every other device which sidecars serve its local user here and how loaded it is, now and then.
@@ -182,4 +246,17 @@ impl Node {
             });
         }
     }
+}
+
+/// A step another device sent, waiting for the bucket to confirm it: its name, its bytes, its database and position.
+pub(super) struct Sent {
+    name: String,
+    step: Vec<u8>,
+    id: (Scope, String),
+    at: u64,
+}
+
+/// Where a database's steps are in the bucket.
+fn database_prefix(scope: &Scope, app: &str, database: &str) -> String {
+    format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()))
 }

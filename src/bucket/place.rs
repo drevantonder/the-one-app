@@ -109,6 +109,9 @@ impl Place {
         if let Place::S3(S3 { auth: Auth::Signed(signer), .. }) = self {
             return signer.confirm(objects);
         }
+        if let Place::S3(s3) = self {
+            return Ok(objects.iter().map(|(name, _)| name.to_string()).zip(s3.confirm(objects)?).collect());
+        }
         let bare = |t: &str| t.trim_matches('"').to_string();
         objects.iter().map(|(name, tag)| Ok((name.to_string(), self.get_object(name)?.is_some_and(|o| bare(&o.tag) == bare(tag))))).collect()
     }
@@ -156,6 +159,16 @@ impl Place {
                 (status, _, body) => Err(s3.failed(status, &body)),
             },
         }
+    }
+
+    /// Which of `objects` (names and bytes) the place holds exactly as given: a folder's are compared, S3's by ETag.
+    pub fn holds(&self, objects: &[(String, Vec<u8>)]) -> Result<Vec<bool>> {
+        if let Place::Folder(_) = self {
+            return objects.iter().map(|(name, bytes)| Ok(self.get(name)?.is_some_and(|b| b == *bytes))).collect();
+        }
+        let tags: Vec<(String, String)> = objects.iter().map(|(name, bytes)| (name.clone(), etag(bytes))).collect();
+        let asked = self.confirm(&tags.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect::<Vec<_>>())?;
+        Ok(objects.iter().map(|(name, _)| asked.get(name).copied().unwrap_or(false)).collect())
     }
 
     /// Writes an object only if none has its name: false if one does.
@@ -329,6 +342,17 @@ impl Bucket for Place {
     async fn wait(&self, ms: u64) {
         tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
     }
+
+    async fn confirm(&self, objects: &[(String, Vec<u8>)]) -> Result<Vec<bool>> {
+        let (place, objects) = (self.clone(), objects.to_vec());
+        tokio::task::spawn_blocking(move || Place::holds(&place, &objects)).await?
+    }
+}
+
+/// The ETag S3 gives an object written by one PUT, as R2 does: its bytes' MD5, quoted.
+fn etag(bytes: &[u8]) -> String {
+    use md5::Digest as _;
+    format!("\"{}\"", data_encoding::HEXLOWER.encode(&md5::Md5::digest(bytes)))
 }
 
 /// What names in a folder start with: nothing for the top.
@@ -357,6 +381,19 @@ fn partial(dir: &std::path::Path, name: &str, bytes: &[u8]) -> Result<PathBuf> {
 impl S3 {
     fn host(&self) -> &str {
         self.endpoint.split("://").nth(1).unwrap_or(&self.endpoint)
+    }
+
+    /// Which objects have the ETag given for each, one HEAD each, where this device signs its own requests: one with the
+    /// URL signer asks it for all of them in one trip.
+    fn confirm(&self, tags: &[(&str, &str)]) -> Result<Vec<bool>> {
+        let bare = |t: &str| t.trim_matches('"').to_string();
+        tags.iter()
+            .map(|(name, tag)| match self.request("HEAD", name, &[], &[], &[])? {
+                (200, got, _) => Ok(got.is_some_and(|g| bare(&g) == bare(tag))),
+                (404, _, _) => Ok(false),
+                (status, _, body) => Err(self.failed(status, &body)),
+            })
+            .collect()
     }
 
     /// A PUT that only happens if `header` holds: false if it didn't.
