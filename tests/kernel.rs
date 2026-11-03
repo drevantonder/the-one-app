@@ -1219,7 +1219,7 @@ mod relay {
     /// Whether the relay let `key` in, as iroh sees it.
     async fn online(address: &str, key: &SecretKey, ticket: Option<&str>) -> Option<Endpoint> {
         let ep = endpoint(address, key, ticket).await;
-        match tokio::time::timeout(Duration::from_secs(3), ep.online()).await {
+        match tokio::time::timeout(Duration::from_secs(2), ep.online()).await {
             Ok(()) => Some(ep),
             Err(_) => {
                 ep.close().await;
@@ -1228,26 +1228,38 @@ mod relay {
         }
     }
 
-    /// `from` opens a stream to `to` through the relay, and `to` echoes it back.
-    async fn echo(address: &str, from: &Endpoint, to: &Endpoint) {
+    /// Whether `from` reaches `to` through the relay: a stream that `to` echoes back, whole.
+    async fn reaches(address: &str, from: &Endpoint, to: &Endpoint) -> bool {
         let serving = to.clone();
         let server = tokio::spawn(async move {
-            let conn = serving.accept().await.unwrap().await.unwrap();
-            let (mut send, mut recv) = conn.accept_bi().await.unwrap();
-            let got = recv.read_to_end(1 << 20).await.unwrap();
-            send.write_all(&got).await.unwrap();
-            send.finish().unwrap();
+            let conn = serving.accept().await?.await.ok()?;
+            let (mut send, mut recv) = conn.accept_bi().await.ok()?;
+            let got = recv.read_to_end(1 << 20).await.ok()?;
+            send.write_all(&got).await.ok()?;
+            send.finish().ok()?;
             conn.closed().await;
+            Some(())
         });
-        let at = EndpointAddr::new(to.id()).with_relay_url(address.parse().unwrap());
-        let conn = from.connect(at, ALPN).await.unwrap();
-        let (mut send, mut recv) = conn.open_bi().await.unwrap();
         let said = vec![7u8; 100_000];
-        send.write_all(&said).await.unwrap();
-        send.finish().unwrap();
-        assert_eq!(recv.read_to_end(1 << 20).await.unwrap(), said, "the relay changed what it carried");
-        conn.close(0u32.into(), b"done");
-        let _ = tokio::time::timeout(Duration::from_secs(2), server).await;
+        let at = EndpointAddr::new(to.id()).with_relay_url(address.parse().unwrap());
+        let echoed = tokio::time::timeout(Duration::from_secs(2), async {
+            let conn = from.connect(at, ALPN).await.ok()?;
+            let (mut send, mut recv) = conn.open_bi().await.ok()?;
+            send.write_all(&said).await.ok()?;
+            send.finish().ok()?;
+            let got = recv.read_to_end(1 << 20).await.ok()?;
+            conn.close(0u32.into(), b"done");
+            Some(got)
+        })
+        .await;
+        server.abort();
+        match echoed {
+            Ok(Some(got)) => {
+                assert_eq!(got, said, "the relay changed what it carried");
+                true
+            }
+            _ => false,
+        }
     }
 
     /// What `key` tells the relay: `fields`, signed as devices sign requests.
@@ -1260,6 +1272,10 @@ mod relay {
     fn sha256(text: &str) -> String {
         use sha2::Digest;
         data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()))
+    }
+
+    fn ticket() -> String {
+        data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>())
     }
 
     #[test]
@@ -1278,11 +1294,15 @@ mod relay {
             let phone = SecretKey::generate();
             assert_eq!(tell(&address, &first, json!({ "add": hex(&phone) })), 204);
             let b = online(&address, &phone, None).await.expect("a key the first device added isn't let in");
-            echo(&address, &a, &b).await;
+            assert!(reaches(&address, &a, &b).await, "two of the install's devices don't reach each other");
 
-            // Only an admin's device adds an admin's, or takes out a key another let in; a device takes itself out.
+            // Only an admin's device adds an admin's, changes a key that's in, or takes out a key another let in; the
+            // last admin stays; a device takes itself out.
             assert_eq!(tell(&address, &phone, json!({ "add": hex(&stranger), "admin": true })), 403);
+            assert_eq!(tell(&address, &phone, json!({ "add": hex(&first) })), 403, "a device made an admin's key its own");
             assert_eq!(tell(&address, &phone, json!({ "remove": hex(&first) })), 403);
+            assert_eq!(tell(&address, &first, json!({ "remove": hex(&first) })), 403, "the last admin was taken out");
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&first) })), 403, "the last admin was made a member");
             assert_eq!(tell(&address, &stranger, json!({ "add": hex(&stranger) })), 403, "a stranger told the relay");
             let request = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&stranger) }), super::now());
             let mut forged = request.clone();
@@ -1290,17 +1310,40 @@ mod relay {
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], forged).0, 403, "a changed tell was taken");
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], request.clone()).0, 204);
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], request).0, 403, "a tell was taken twice");
+            let big = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&phone), "pad": "x".repeat(5000) }), super::now());
+            assert_eq!(super::post(&format!("{address}/relay/tell"), &[], big).0, 403, "a big tell was read");
             assert_eq!(tell(&address, &stranger, json!({ "remove": hex(&stranger) })), 204);
             assert!(online(&address, &stranger, None).await.is_none(), "a key taken out reached the relay");
 
-            // A pairing code lets in one computer, with its ticket.
-            let ticket = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
-            assert_eq!(tell(&address, &first, json!({ "pairing": { "hash": sha256(&ticket), "until": super::now() + 600_000 } })), 204);
+            // A pairing code lets in one computer, which reaches only the device that made it until it's added.
+            let code = ticket();
+            assert_eq!(tell(&address, &first, json!({ "pairing": { "hash": sha256(&code), "until": super::now() + 600_000 } })), 204);
             let joining = SecretKey::generate();
-            let c = online(&address, &joining, Some(&ticket)).await.expect("a pairing code's computer isn't let in");
-            assert!(online(&address, &SecretKey::generate(), Some(&ticket)).await.is_none(), "a pairing code let in a second computer");
-            echo(&address, &c, &a).await;
-            for ep in [a, b, c] {
+            let c = online(&address, &joining, Some(&code)).await.expect("a pairing code's computer isn't let in");
+            assert!(online(&address, &SecretKey::generate(), Some(&code)).await.is_none(), "a pairing code let in a second computer");
+            assert!(reaches(&address, &c, &a).await, "a pairing code's computer doesn't reach the device that made it");
+            assert!(!reaches(&address, &c, &b).await, "a pairing code's computer reached another device");
+            // Ended, its computer is out.
+            assert_eq!(tell(&address, &phone, json!({ "unpair": sha256(&code) })), 403, "a device ended another's pairing code");
+            assert_eq!(tell(&address, &first, json!({ "unpair": sha256(&code) })), 204);
+            assert!(!reaches(&address, &c, &a).await, "an ended pairing code's computer still reached the relay");
+            c.close().await;
+            assert!(online(&address, &joining, Some(&code)).await.is_none(), "an ended pairing code let its computer in again");
+            // Expired, too, while it's connected.
+            let code = ticket();
+            assert_eq!(tell(&address, &first, json!({ "pairing": { "hash": sha256(&code), "until": super::now() + 2_000 } })), 204);
+            let d = online(&address, &SecretKey::generate(), Some(&code)).await.expect("a pairing code's computer isn't let in");
+            tokio::time::sleep(Duration::from_millis(2_500)).await;
+            assert!(!reaches(&address, &d, &a).await, "an expired pairing code's computer still reached the relay");
+            d.close().await;
+
+            // Taking a device out takes out the devices it let in.
+            let laptop = SecretKey::generate();
+            assert_eq!(tell(&address, &phone, json!({ "add": hex(&laptop) })), 204);
+            assert_eq!(tell(&address, &first, json!({ "remove": hex(&phone) })), 204);
+            assert!(online(&address, &laptop, None).await.is_none(), "a key a removed device let in still reached the relay");
+            assert!(!reaches(&address, &b, &a).await, "a removed device's socket still reached the relay");
+            for ep in [a, b] {
                 ep.close().await;
             }
         });
