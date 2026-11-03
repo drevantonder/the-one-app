@@ -666,8 +666,7 @@ pub fn help(app: &Value, op: &Value) -> String {
         rows.push((flag, about.join("; ")));
     }
     if !own_device(op) && !node_app(app["name"].as_str().unwrap_or("")) {
-        let about = if app["runs"] == "here" { "which of your devices runs it, by name; all for every one; default is this one" } else { "run it on that device (by name)" };
-        rows.push(("--device <name>".into(), about.into()));
+        rows.push(("--device <name>".into(), device_about(app).into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
     rows.push(("--json".into(), "print what it gives back as JSON".into()));
@@ -730,6 +729,21 @@ fn takes_file(prop: &Value) -> Option<bool> {
 /// How MCP describes a file input to agents.
 pub const MCP_FILE: &str = "a file: { base64, name, type } (up to 1 MiB), { file } (a file id another tool gave back) or { url } (public)";
 
+/// Whether an app's calls run on a device of the person's choosing: it runs on every device, or uses a sidecar (Shell
+/// on a named device, iMessage on the Mac), so MCP and search offer `device` as the CLI's `--device` does.
+fn runs_on_devices(app: &Value) -> bool {
+    app["runs"] == "here" || app["uses"]["sidecars"].as_array().is_some_and(|s| !s.is_empty())
+}
+
+/// What `device` says it does: which device runs the call, and which when none is given.
+fn device_about(app: &Value) -> &'static str {
+    match (app["runs"] == "here", runs_on_devices(app)) {
+        (true, _) => "which of your devices runs it, by name; all for every one; default is this one",
+        (_, true) => "which of your devices runs it, by name; default is the first online one that can, in Device Activity's order",
+        _ => "run it on that device (by name)",
+    }
+}
+
 /// An operation's input schema as an MCP tool's: files explained, and `confirm` on what can't be undone.
 pub fn mcp_schema(app: &Value, op: &Value) -> Value {
     let mut schema = op["input"].clone();
@@ -747,8 +761,8 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
             prop["description"] = json!(format!("{about}{MCP_FILE}"));
         }
     }
-    if app["runs"] == "here" && !own_device(op) {
-        schema["properties"]["device"] = json!({ "type": "string", "description": "which of your devices, by name, or all for every one; default is this one" });
+    if runs_on_devices(app) && !own_device(op) {
+        schema["properties"]["device"] = json!({ "type": "string", "description": device_about(app) });
     }
     if op["confirm"] == true {
         schema["properties"]["confirm"] = one::skills::confirm_input();

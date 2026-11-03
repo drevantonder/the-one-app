@@ -140,6 +140,27 @@ fn call(app: &Value, op: &Value, how: For) -> String {
     }
 }
 
+/// About how much of a search's answer the matches may take, in characters, before their descriptions are cut short.
+const MATCHES: usize = 6_000;
+
+/// Descriptions that fit in `room` characters between them: as written when they do, else each cut to its first
+/// sentence, else to an equal share of the room.
+fn fit(described: &[&str], room: usize) -> Vec<String> {
+    let total = |d: &[String]| d.iter().map(|s| s.chars().count()).sum::<usize>();
+    let whole: Vec<String> = described.iter().map(|d| d.to_string()).collect();
+    if total(&whole) <= room {
+        return whole;
+    }
+    let mut first: Vec<String> = described.iter().map(|d| format!("{}.", d.split_once(". ").map_or(*d, |(first, _)| first).trim_end_matches('.'))).collect();
+    let share = room / first.len().max(1);
+    if total(&first) > room {
+        for d in first.iter_mut().filter(|d| d.chars().count() > share) {
+            *d = format!("{}...", d.chars().take(share.saturating_sub(3)).collect::<String>().trim_end());
+        }
+    }
+    first
+}
+
 /// The operations that best match `query`, best first, each with how to call it and what it does, then the guide of
 /// each app they're in; and the apps the person could add (`addable`) that match as well. A match is one whose name,
 /// app or description has most of the query's words, and as many as the best: fewer is a guess, not an answer.
@@ -202,7 +223,12 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
     }
     let mut text = String::new();
     let mut shown: Vec<&Value> = Vec::new();
-    for (_, _, _, app, op) in &found {
+    let calls: Vec<String> = found.iter().map(|f| call(f.3, f.4, how)).collect();
+    // What the descriptions may take of the matches' budget: each call whole, since an agent can't guess its inputs,
+    // and the descriptions cut (to their first sentence, then shorter) when they don't fit.
+    let room = MATCHES.saturating_sub(calls.iter().map(|c| c.chars().count() + 4).sum::<usize>());
+    let about = fit(&found.iter().map(|f| f.4["description"].as_str().unwrap_or("").trim()).collect::<Vec<_>>(), room);
+    for (i, (_, _, _, app, op)) in found.iter().enumerate() {
         let mark = match (op["reads"] == true, op["confirm"] == true) {
             (true, _) => " It only reads.",
             (_, true) => match how {
@@ -211,7 +237,7 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
             },
             _ => "",
         };
-        text.push_str(&format!("{}\n  {}{mark}\n\n", call(app, op, how), op["description"].as_str().unwrap_or("").trim()));
+        text.push_str(&format!("{}\n  {}{mark}\n\n", calls[i], about[i]));
         if !shown.iter().any(|a| a["name"] == app["name"]) {
             shown.push(app);
         }

@@ -22,7 +22,7 @@ export default {
   description: "Run commands on your own devices",
   connector: true,
   needs: "Needs one of your devices",
-  instructions: "Run a shell command on one of your own devices with shell_run; give device (a device's name) to choose which. Every command is logged where only you can read it.",
+  instructions: "Run a shell command on one of your own devices with shell_run; give device (a name from shell_accounts) to choose which, or it runs on the first online one in Device Activity's order. Every command is logged where only you can read it.",
   uses: { sidecars: ["shell"] },
 
   ops: {
@@ -44,7 +44,7 @@ export default {
     },
     run: {
       reads: false,
-      description: "Run a shell command on this device, or the device given, as its owner, and wait for it to finish. Gives { exit, stdout, stderr }: exit 0 when it worked, and what it printed, the last 64 KB of each when longer. Every command is logged where only you can read it.",
+      description: "Run a shell command on one of your devices, as its owner, and wait for it to finish. Gives { exit, stdout, stderr }: exit 0 when it worked, and what it printed, the last 64 KB of each when longer. Every command is logged where only you can read it.",
       input: {
         type: "object",
         required: ["command"],
