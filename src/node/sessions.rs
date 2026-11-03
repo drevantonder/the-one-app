@@ -155,7 +155,12 @@ impl Node {
             false => handoff.until.min(self.token_expiry(token).unwrap_or(u64::MAX)),
         }
         .min(most);
-        ensure!(until > now, "the keys handed have expired");
+        // Keys that have run out are left, not refused: the call goes on and asks for what it needs (428), and its
+        // caller hands them again.
+        if until <= now {
+            tracing::debug!("keys handed for {user} had run out: left");
+            return Ok(());
+        }
         // Only epochs an entry made are kept: a key for one beyond is junk, or for one this device hasn't read yet,
         // which a call that needs it asks for again.
         let newest: HashMap<String, u32> = self.with(|i| Ok(handoff.keys.iter().filter_map(|k| Some((k.scope.clone(), i.r.members.epoch(&Scope::parse(&k.scope).ok()?)))).collect()))?;

@@ -553,7 +553,10 @@ class Person {
     const order = new Map(view.state.install.devices.map((d) => [d.key, d.order]));
     const runs = JSON.parse(runners(this.owner, who.user, JSON.stringify(scopes))).sort((a, b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity));
     if (!runs.length) return null;
-    const until = Math.min(this.handed.get(who.hash)?.until ?? who.until, who.until);
+    // The keys it was handed earlier count only while they last: once they've run out, a call passed on says no more
+    // than this request's own word, and the machine asks for what it needs (428), never refusing it as expired.
+    const kept = this.handed.get(who.hash);
+    const until = kept && kept.until > Date.now() ? Math.min(kept.until, who.until) : who.until;
     let more = [];
     for (;;) {
       const keys = JSON.stringify(this.handedFor(who, scopes, req.app, more));
