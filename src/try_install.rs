@@ -381,10 +381,29 @@ fn devices(dir: &Path) -> serde_json::Map<String, Value> {
     std::fs::read(dir.join("devices.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// One of this machine's install's Agent Devices' operations (not the try install's, which has none).
+/// One of this machine's install's Agent Devices' operations (not the try install's, which has none). When the node
+/// restarts during it (an update), or its sidecar is still coming back, it's asked again once they answer.
 fn agent_devices(op: &str, input: Value) -> Result<Value> {
-    let out = post("/v1/call", json!({ "app": "agent-devices", "op": op, "input": input, "client": "one try" }))?;
-    Ok(out["ok"].clone())
+    Ok(again(|| post("/v1/call", json!({ "app": "agent-devices", "op": op, "input": input, "client": "one try" })))?["ok"].clone())
+}
+
+/// What `ask` gives, asking again for up to 3 minutes while this machine's node or a sidecar of its restarts.
+fn again(ask: impl Fn() -> Result<Value>) -> Result<Value> {
+    let start = Instant::now();
+    loop {
+        match ask() {
+            Err(err) if start.elapsed() < Duration::from_secs(180) && restarting(&format!("{err:#}")) => {
+                eprintln!("{NAME} is restarting here; asking again once it's back…");
+                std::thread::sleep(Duration::from_secs(5));
+            }
+            out => return out,
+        }
+    }
+}
+
+/// Whether an error is the node or a sidecar of it restarting, not the call failing.
+fn restarting(err: &str) -> bool {
+    ["isn't running here", "isn't running on this device", "no device runs agent-devices", "none of yours runs it"].iter().any(|s| err.contains(s))
 }
 
 /// A command run on a device, and what it said.
@@ -551,14 +570,24 @@ fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -
 /// which reaches the try install's address at the same address; this checkout's build installed there, and signed in.
 fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, kind: &str, person: Option<&str>) -> Result<()> {
     let mut borrowed = devices(dir);
-    let listed = post("/v1/call", json!({ "app": "computer", "op": "list", "input": {}, "client": "one try" })).map(|l| l["ok"].clone()).unwrap_or_default();
-    let still = |name: &str| listed["devices"].as_array().into_iter().flatten().any(|d| d["name"] == name);
-    let device = match borrowed.get(kind).and_then(Value::as_str).filter(|d| still(d)) {
-        Some(device) => device.to_string(),
+    let what = format!("one try client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    let listed = || again(|| post("/v1/call", json!({ "app": "computer", "op": "list", "input": {}, "client": "one try" }))).map(|l| l["ok"]["devices"].clone()).unwrap_or_default();
+    // A copy borrowed for this checkout's try install that it lost track of (the node restarted as it was lent) is
+    // taken, not left beside a second one.
+    let ours = |listed: &Value| listed.as_array().into_iter().flatten().find(|d| d["borrowed"]["for"] == what.as_str()).and_then(|d| d["name"].as_str()).map(String::from);
+    let now = listed();
+    let still = |name: &str| now.as_array().into_iter().flatten().any(|d| d["name"] == name);
+    let device = match borrowed.get(kind).and_then(Value::as_str).filter(|d| still(d)).map(String::from).or_else(|| ours(&now)) {
+        Some(device) => device,
         None => {
             eprintln!("Borrowing a copy of your {kind} device…");
-            let what = format!("one try client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
-            let got = agent_devices("borrow", json!({ "kind": kind, "copy": true, "for": what }))?;
+            let got = match agent_devices("borrow", json!({ "kind": kind, "copy": true, "for": what })) {
+                Ok(got) => got,
+                Err(err) => match ours(&listed()) {
+                    Some(device) => json!({ "device": device }),
+                    None => return Err(err),
+                },
+            };
             let device = got["device"].as_str().context("Agent Devices lent no device")?.to_string();
             borrowed.insert(kind.into(), json!(device));
             std::fs::write(dir.join("devices.json"), serde_json::to_vec(&borrowed)?)?;
