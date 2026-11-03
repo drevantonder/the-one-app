@@ -1,0 +1,48 @@
+# iroh's relay protocol, as the relay Worker (kernel/relay/worker.js) runs it: iroh-relay's own files, built to
+# WebAssembly by ../build.sh. Its own workspace, so the node's builds and tests never build it.
+[package]
+name = "relay-protos"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["server"]
+# iroh-relay's files gate their server half on this feature name.
+server = []
+
+# What iroh-relay 1.4.1's files import, at its versions; getrandom's wasm_js and js features take randomness from the
+# Worker's crypto.getRandomValues.
+[dependencies]
+blake3 = "1.8.2"
+bytes = "1.11"
+data-encoding = "2.6.0"
+derive_more = { version = "2.0.1", features = ["debug", "display", "from", "try_into", "deref"] }
+http = "1"
+iroh-base = { version = "=1.4.1", default-features = false, features = ["key", "relay"] }
+lru = "0.18.3"
+n0-error = "1.0.0"
+n0-future = "0.3"
+num_enum = "0.7"
+postcard = { version = "1", default-features = false, features = ["alloc", "use-std", "experimental-derive"] }
+noq-proto = { version = "1.4.0", default-features = false }
+rand = "0.10"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_bytes = "0.11.17"
+strum = { version = "0.28", features = ["derive"] }
+tracing = "0.1"
+wasm-bindgen = "=0.2.130"
+getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"

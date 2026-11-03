@@ -1,6 +1,7 @@
 // The gateway: the install's address, the one people use. It holds no keys and runs no app code; it only sends each
 // request where its path says: sign-in to the auth service (with the gateway's host kept, since passkeys belong to
-// it), `/v1/` and `/mcp` to a node, `/relay` to the relay, and everything else to the web client's files.
+// it), `/v1/` and `/mcp` to a node, `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything
+// else to the web client's files.
 //
 // What a node answers is stamped so it can't run as script at this origin, which holds browsers' tokens: it's
 // sandboxed into an opaque origin, can't be sniffed into another type, and sets no cookies here.
@@ -75,7 +76,10 @@ async function toWeb(request, env, url) {
   return new Response(resp.body, { status: resp.status, headers });
 }
 
-// The relay: how nodes reach each other, with no address of their own. Each node keeps one WebSocket here, as the key
+// The old relay, for nodes from before iroh (the relay is kernel/relay/'s), until they speak only iroh and step 6 of
+// ARCHITECTURE.md's "Being built" deletes it with its Durable Object.
+//
+// How nodes reached each other, with no address of their own. Each node keeps one WebSocket here, as the key
 // it proves it holds; what one sends `to` another key is passed to that node's socket, with `from` saying who sent it.
 // It's blind: what nodes send each other is sealed to the receiver's key and signed by the sender (src/node/relay.rs),
 // so it reads, changes and passes off nothing; it can only drop it. It takes only the install's devices: those the
@@ -227,11 +231,13 @@ async function proves(key, challenge, signature) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // One relay for the install: only nodes' WebSockets reach it here.
-    if (url.pathname === "/relay") {
+    // The relay, iroh's: its WebSockets, its probes, and what devices tell it go to its own Worker (kernel/relay/).
+    // A WebSocket not speaking its protocol is a node's from before iroh, for the old relay, until nodes speak only iroh.
+    if (url.pathname === "/relay" && !/\biroh-relay-v2\b/.test(request.headers.get("sec-websocket-protocol") || "")) {
       if (request.headers.get("upgrade") !== "websocket") return refuse(426, "the relay takes a node's WebSocket");
       return env.RELAY.get(env.RELAY.idFromName("relay")).fetch(request);
     }
+    if (["/relay", "/relay/tell", "/ping", "/generate_204"].includes(url.pathname)) return env.IROH.fetch(request);
     switch (where(url.pathname)) {
       case "auth": return env.AUTH.fetch(request);
       case "node": return toNode(request, env, url);

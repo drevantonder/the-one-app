@@ -12,13 +12,27 @@ use super::*;
 
 // Building and running.
 
-/// The kernel's services: each one's name, its module, and its Durable Object's class, if it keeps anything.
+/// The kernel's services: each one's name, its module, and its Durable Object's class, if it keeps anything. Each
+/// one's WebAssembly is the `.wasm` files in its module's folder, modules of its own (Workers can't compile it).
 pub const SERVICES: &[(&str, &str, Option<&str>)] = &[
     ("auth", "auth/worker.js", Some("Auth")),
     ("vault", "vault/worker.js", Some("Vault")),
     ("schedules", "schedules/worker.js", Some("Schedules")),
+    ("relay", "relay/worker.js", Some("Relay")),
     ("gateway", "gateway/worker.js", Some("Relay")),
 ];
+
+/// A service's WebAssembly modules, (name, bytes): the `.wasm` files in its module's folder, as this release has them.
+pub fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
+    let dir = entry.rsplit_once('/').map_or("", |(dir, _)| dir);
+    crate::config::KERNEL
+        .iter()
+        .filter_map(|(path, bytes)| {
+            let name = path.strip_prefix(dir)?.strip_prefix('/')?;
+            (name.ends_with(".wasm") && !name.contains('/')).then(|| (name.to_string(), bytes.to_vec()))
+        })
+        .collect()
+}
 
 /// How an install's kernel is set up, wherever it runs: kept in `<home>/kernel/settings.json`, with its secrets in
 /// `.env.local` beside it, which Varlock reads (see `SCHEMA`): their values, for a kernel tried here, or
@@ -43,13 +57,14 @@ pub struct Settings {
     /// which sends on to `node_url` what needs a machine.
     #[serde(default)]
     pub serverless: bool,
-    /// The local ports each service listens on, in `SERVICES`' order, when this machine runs them.
+    /// The local ports the auth service, the vault, the schedules service and the gateway listen on, when this machine
+    /// runs them. The relay has none: the gateway reaches it by binding.
     pub ports: [u16; 4],
     /// The install's devices' public keys (hex), from the node on this machine when the kernel is deployed or served:
-    /// the relay takes only them, those they admit since, and a computer joining with a pairing code one made.
+    /// the relay starts its list with them, as its admins', when it has none yet.
     #[serde(skip)]
     pub devices: Vec<String>,
-    /// When the install's log last changed its devices (ms), so the same devices give the gateway the same binding.
+    /// When the install's log last changed its devices (ms), for the old relay, until nodes speak only iroh.
     #[serde(skip)]
     pub devices_at: u64,
     /// The secret only the kernel's services share, for asking each other.
@@ -337,6 +352,13 @@ impl Settings {
         }
     }
 
+    /// Where a service is reached, and the local port it listens on: none for the relay, which only the gateway's
+    /// binding reaches.
+    pub fn place(&self, service: &str) -> Option<(&str, u16)> {
+        let i = ["auth", "vault", "schedules", "gateway"].iter().position(|s| *s == service)?;
+        Some(([&self.auth_url, &self.vault_url, &self.schedules_url, &self.address][i].as_str(), self.ports[i]))
+    }
+
     /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service, and
     /// `vpc:<id>` a Cloudflare Workers VPC service.
     pub fn bindings(&self, service: &str) -> Vec<(String, String, bool)> {
@@ -346,11 +368,18 @@ impl Settings {
                 true => ("NODE".into(), format!("service:{}", crate::serverless::SERVICE), false),
                 false => self.machine("NODE"),
             };
-            let mut out = vec![("AUTH".into(), "service:auth".into(), false), node];
+            let mut out = vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), node];
+            // For the old relay, until nodes speak only iroh.
             if !self.devices.is_empty() {
                 out.push(("DEVICES".into(), json!({ "keys": self.devices, "at": self.devices_at }).to_string(), false));
             }
             return out;
+        }
+        // Nor does the relay: only the keys of the install's first devices, which it starts its list with.
+        if service == "relay" {
+            let devices = (!self.devices.is_empty()).then(|| ("DEVICES".into(), json!(self.devices).to_string(), false));
+            let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
+            return devices.into_iter().chain(location).collect();
         }
         let issuer = format!("{}/api/auth", self.address);
         let mut out = vec![("KERNEL_SECRET".into(), self.kernel_secret.clone(), true)];
@@ -358,6 +387,8 @@ impl Settings {
         match service {
             "auth" => {
                 plain("VAULT", "service:vault".into());
+                // Whether a request's signer is one of the install's endpoints, and an admin's.
+                plain("RELAY", "service:relay".into());
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
                 plain("ACCENT", crate::config::ACCENT.into());
@@ -417,12 +448,12 @@ pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Ser
     SERVICES
         .iter()
         .zip(modules)
-        .enumerate()
-        .map(|(i, ((name, _, class), module))| Served {
+        .map(|((name, entry, class), module)| Served {
             name: name.to_string(),
             module,
+            wasm: wasm(entry),
             class: class.map(str::to_string),
-            listen: format!("127.0.0.1:{}", settings.ports[i]),
+            listen: settings.place(name).map(|(_, port)| format!("127.0.0.1:{port}")),
             bindings: settings.bindings(name).into_iter().map(|(n, v, _)| (n, v)).collect(),
             assets: (*name == "gateway").then(|| web.to_path_buf()),
             // The gateway's node may be on this machine or its private network, as a node behind a tunnel is; a try
@@ -491,7 +522,7 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let web = dir.join("web");
     let served = served(settings, modules, &web);
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
-    ensure!(settings.try_person.is_none() || here(&settings.address) && served.iter().all(|s| here(&s.listen)), "a try install's kernel signs in anyone who reaches it, so it runs only beside its try install, at 127.0.0.1");
+    ensure!(settings.try_person.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a try install's kernel signs in anyone who reaches it, so it runs only beside its try install, at 127.0.0.1");
     let _ = std::fs::remove_dir_all(&web);
     let files = settings.web();
     parses(&files)?;
@@ -600,7 +631,7 @@ pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
         run(&["install", "--frozen-lockfile"])?;
     }
     let out = dir.join("out.js");
-    run(&["build", entry, "--target=browser", "--format=esm", "--external=cloudflare:*", "--external=node:*", &format!("--outfile={}", out.display())])?;
+    run(&["build", entry, "--target=browser", "--format=esm", "--external=cloudflare:*", "--external=node:*", "--external=*.wasm", &format!("--outfile={}", out.display())])?;
     Ok(std::fs::read(out)?)
 }
 
@@ -609,8 +640,11 @@ pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
 pub struct Served {
     pub name: String,
     pub module: Vec<u8>,
+    /// Its WebAssembly modules, (name, bytes).
+    pub wasm: Vec<(String, Vec<u8>)>,
     pub class: Option<String>,
-    pub listen: String,
+    /// Where it listens, if anywhere but its binding.
+    pub listen: Option<String>,
     pub bindings: Vec<(String, String)>,
     /// A folder it reads as `ASSETS`, as a Worker reads its static assets on Cloudflare.
     pub assets: Option<PathBuf>,
@@ -634,11 +668,19 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
     for (i, s) in served.iter().enumerate() {
         ensure!(s.name.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "a kernel service's name is lowercase");
         std::fs::write(dir.join(format!("{}.js", s.name)), &s.module)?;
+        let mut modules = vec![format!("(name = \"worker.js\", esModule = embed {})", quote(&format!("{}.js", s.name)))];
+        for (name, bytes) in &s.wasm {
+            let file = format!("{}-{name}", s.name);
+            std::fs::write(dir.join(&file), bytes)?;
+            modules.push(format!("(name = {}, wasm = embed {})", quote(name), quote(&file)));
+        }
         let data = dir.join("data").join(&s.name);
         std::fs::create_dir_all(&data)?;
         services.push(format!("(name = {}, worker = .w{i})", quote(&s.name)));
         services.push(format!("(name = {}, disk = (path = {}, writable = true))", quote(&format!("{}-data", s.name)), quote(&data.to_string_lossy())));
-        sockets.push(format!("(name = {}, address = {}, http = (), service = {})", quote(&s.name), quote(&s.listen), quote(&s.name)));
+        if let Some(listen) = &s.listen {
+            sockets.push(format!("(name = {}, address = {}, http = (), service = {})", quote(&s.name), quote(listen), quote(&s.name)));
+        }
         let mut bindings: Vec<String> = s.class.iter().map(|c| format!("(name = {}, durableObjectNamespace = {})", quote(&c.to_uppercase()), quote(c))).collect();
         if let Some(assets) = &s.assets {
             // With `.well-known/`, which Windows and Android ask the address for.
@@ -662,8 +704,8 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
             None => String::new(),
         };
         workers.push(format!(
-            "const w{i} :Workerd.Worker = (\n  modules = [(name = \"worker.js\", esModule = embed {})],\n  compatibilityDate = \"{}\",\n  bindings = [{}],\n{objects}{});",
-            quote(&format!("{}.js", s.name)),
+            "const w{i} :Workerd.Worker = (\n  modules = [{}],\n  compatibilityDate = \"{}\",\n  bindings = [{}],\n{objects}{});",
+            modules.join(", "),
             crate::apps::COMPATIBILITY_DATE,
             bindings.join(", "),
             s.outbound.as_ref().map(|o| format!("  globalOutbound = {},\n", quote(o))).unwrap_or_default(),
@@ -962,15 +1004,21 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
             let name = worker_name(service);
             let migrated = scripts.get(&name).is_some_and(|s| s.migration.as_deref() == Some("v1"));
             let (mut meta, complete) = metadata(settings, service, class, migrated, |other| scripts.contains_key(other) || other == name);
-            let url = [&settings.auth_url, &settings.vault_url, &settings.schedules_url, &settings.address][i];
-            let mut what = vec![meta.to_string().into_bytes(), modules[i].clone(), url.as_bytes().to_vec()];
+            let url = settings.place(service).map(|(url, _)| url);
+            let wasm = wasm(SERVICES[i].1);
+            let mut what = vec![meta.to_string().into_bytes(), modules[i].clone(), url.unwrap_or("").as_bytes().to_vec()];
+            what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));
             if service == "gateway" {
                 what.extend(web.iter().flat_map(|(path, bytes)| [path.as_bytes().to_vec(), bytes.clone()]));
             }
             let what = Uploaded::hash(&what);
+            // Its address may have been changed by hand.
+            let reach = || match url {
+                Some(url) => cf.reach(&name, url),
+                None => cf.hide(&name),
+            };
             if complete && uploaded.same(cf, &name, &what) {
-                // Its address may have been changed by hand.
-                cf.reach(&name, url)?;
+                reach()?;
                 continue;
             }
             if service == "gateway" {
@@ -978,8 +1026,10 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
                 meta["assets"] = json!({ "jwt": jwt, "config": { "html_handling": "none", "not_found_handling": "none", "run_worker_first": true } });
                 meta["bindings"].as_array_mut().unwrap().push(json!({ "type": "assets", "name": "ASSETS" }));
             }
-            let version = cf.upload(&name, &[("worker.js", "application/javascript+module", &modules[i])], &meta)?;
-            cf.reach(&name, url)?;
+            let mut parts: Vec<(&str, &str, &[u8])> = vec![("worker.js", "application/javascript+module", &modules[i])];
+            parts.extend(wasm.iter().map(|(name, bytes)| (name.as_str(), "application/wasm", bytes.as_slice())));
+            let version = cf.upload(&name, &parts, &meta)?;
+            reach()?;
             // Later services' bindings to it resolve in this pass, and its class has had its migration.
             scripts.insert(name.clone(), Script { migration: class.map(|_| "v1".to_string()) });
             if complete {

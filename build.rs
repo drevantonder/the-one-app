@@ -51,6 +51,9 @@ fn main() {
     assert!(["passkey", "google"].contains(&sign_in), "sign_in is passkey or google");
     assert!(sign_in != "google" || !optional("join_domain").is_empty(), "signing in with Google needs join_domain");
     let out = format!("{out}pub const SIGN_IN: &str = {sign_in:?};\npub const JOIN_DOMAIN: &str = {:?};\n", optional("join_domain"));
+    let relay_location = optional("relay_location");
+    assert!(["", "wnam", "enam", "sam", "weur", "eeur", "apac", "oc", "afr", "me"].contains(&relay_location.as_str()), "relay_location is one of Cloudflare's location hints");
+    let out = format!("{out}pub const RELAY_LOCATION: &str = {relay_location:?};\n");
     // The install settings an install has until its admins set them (`setting` entries).
     let mut settings = String::new();
     for (name, value) in config.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {
@@ -85,7 +88,8 @@ fn main() {
     println!("cargo:rerun-if-changed={}", kernel.display());
     let mut files = Vec::new();
     collect(&kernel, &kernel, &mut files);
-    files.retain(|(rel, _)| !rel.starts_with("test/"));
+    // The relay's WebAssembly is built from relay/protos/ by hand (relay/build.sh), so only what it built ships.
+    files.retain(|(rel, _)| !rel.starts_with("test/") && !rel.starts_with("relay/protos/") && rel != "relay/build.sh");
     // The gateway serves the screens' design kit beside the web client, the same files nodes put in screens.
     let screen = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("src/screen");
     println!("cargo:rerun-if-changed={}", screen.display());

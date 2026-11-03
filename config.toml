@@ -21,6 +21,10 @@ always_on = ["board"]
 # doing so: the vault then opens their keys itself, so whoever controls the kernel can read the install's data.
 sign_in = "passkey"
 join_domain = ""
+# Where the install's relay is made (a Cloudflare location hint: wnam, enam, sam, weur, eeur, apac, oc, afr or me), near
+# its people, since every packet between devices that can't reach each other directly goes through it; empty for
+# wherever its first request came from.
+relay_location = "oc"
 # Artwork, relative to this file: the app icon (1024px), the menu bar template (18pt, with an @2x),
 # and the logo the apps show inside themselves.
 icon = "icons/AppIcon.png"
