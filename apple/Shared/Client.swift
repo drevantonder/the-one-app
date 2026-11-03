@@ -190,11 +190,6 @@ struct DeviceNode: NodeTransport {
         return String(decoding: html, as: UTF8.self)
     }
 
-    func settingsPage(_ name: String, params: String) async throws -> String {
-        let html = try await send("GET", "v1/client-screens/\(name)", body: try JSONEncoder().encode(["params": params]), timeout: 10)
-        return String(decoding: html, as: UTF8.self)
-    }
-
     func events() -> AsyncThrowingStream<NodeEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {

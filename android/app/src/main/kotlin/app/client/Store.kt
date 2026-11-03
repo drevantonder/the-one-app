@@ -27,8 +27,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.net.URLEncoder
 
-/** A screen the app shows: one of the client's own, by name (`/v1/client-screens/<name>`: the pages, Services, a Vault
- *  request, Settings'), or an app's. Only this app makes an `Own` route, never a page, so only a screen it chose acts as
+/** A screen the app shows: one of the client's own, by name (built into the app: the pages, Services, a Vault request,
+ *  Settings'), or an app's. Only this app makes an `Own` route, never a page, so only a screen it chose acts as
  *  the person. */
 sealed interface Route {
     data class Own(val name: String, val params: String = "{}") : Route
@@ -183,9 +183,10 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     suspend fun call(app: String, op: String, input: JsonElement = JsonObject(emptyMap())): JsonElement? =
         (post("/v1/call", obj("app" to app, "op" to op, "input" to input, "client" to "android")) as? JsonObject)?.get("ok")
 
-    /** A screen's page, as the node makes it. */
+    /** A screen's page: an app's as the node makes it; the client's own from those built into this app (client/ffi),
+     *  never a node's, since they act as the person. */
     suspend fun screen(r: Route): String = when (r) {
-        is Route.Own -> String(api("/v1/client-screens/${enc(r.name)}", query = mapOf("params" to r.params)))
+        is Route.Own -> uniffi.one_client_ffi.clientScreen(r.name, r.params)
         is Route.App -> String(api("/v1/screens/${enc(r.app)}/${enc(r.screen)}", query = mapOf("params" to r.params, "scope" to r.scope)))
     }
 

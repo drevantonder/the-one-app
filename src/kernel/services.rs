@@ -557,6 +557,8 @@ impl Settings {
         // The page says whose it is before anyone signs in: the white label's name.
         let attr = |v: &str| v.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
         files.push(("icons.json".into(), crate::screen::ICONS.to_vec()));
+        // The client's own screens, which it shows from here and never from a node (`screen::client_template`).
+        files.extend(crate::screen::client_screens().map(|name| (format!("screens/{name}.html"), crate::screen::client_template(name).into_bytes())));
         // Each file the page loads is named by its content (`?v=`, which the gateway checks), so a browser keeps it for
         // good and asks again only once it changes: those it names itself, and those web.js asks for (`one-files`).
         let named = |path: &str, bytes: &[u8]| {
@@ -592,7 +594,7 @@ impl Settings {
             // The scripts web.js imports are asked for beside it, not a round trip after each, on a first visit.
             let preload: String = names.iter().filter(|(path, _)| scripts.contains(path) && !["web.js", "net-worker.js"].contains(&path.as_str())).map(|(_, name)| format!("<link rel=\"modulepreload\" href=\"{name}\">\n")).collect();
             text = text.replacen("<script type=\"module\"", &format!("{preload}<script type=\"module\""), 1);
-            let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json", "net-worker.js"].contains(&path.as_str())).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
+            let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json", "net-worker.js"].contains(&path.as_str()) || path.starts_with("screens/")).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
             let label = format!(
                 "<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"one-files\" content=\"{asked}\">",
                 attr(crate::config::NAME),

@@ -1096,7 +1096,8 @@ fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl IntoRespons
     ([(axum::http::header::ETAG, tag)], answer).into_response()
 }
 
-/// A client's own screen as a page (see `Node::client_screen`).
+/// A client's own screen as a page (see `Node::client_screen`), for clients built before they made them themselves
+/// (`screen::client_page`); none since asks.
 async fn client_screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
     Ok(page(&headers, node.client_screen(me.caller, &name, params, q.linked == Some(true))?))

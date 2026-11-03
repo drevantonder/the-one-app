@@ -189,10 +189,6 @@ struct PhoneNode: NodeTransport {
         try await signedOut { try await node.page(app: app, screen: screen, params: params, scope: scope) }
     }
 
-    func settingsPage(_ name: String, params: String) async throws -> String {
-        try await signedOut { try await node.settingsPage(name, params: params) }
-    }
-
     func events() -> AsyncThrowingStream<NodeEvent, Error> {
         node.events()
     }

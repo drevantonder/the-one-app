@@ -1,4 +1,4 @@
-//! A screen's page, as every node serves it, an app's or a client's own: the design kit and the bridge (`src/screen/`), what the
+//! A screen's page, an app's as every node serves it, or a client's own as every client makes it: the design kit and the bridge (`src/screen/`), what the
 //! screen is told (`window.__one`), and the screen's own HTML.
 
 /// Phosphor's icons, each name's path on a 256-point grid (vendor/phosphor), for the web pages that draw screens: the
@@ -20,6 +20,11 @@ const KIT: &[(&str, &str)] = &[
 /// to the address's files (`/screen/<path>?v=`, named by content as the gateway names them), which the web client
 /// already has, rather than in the page.
 pub fn page(context: &serde_json::Value, body: &str, own: bool, linked: bool) -> String {
+    page_with(context, body, own.then(|| data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>())), linked)
+}
+
+/// `page`, with a client's own screen's `nonce`, or none for an app's.
+fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, linked: bool) -> String {
     let mut context = context.clone();
     // What a person joins, in their words: "your One App", or a workplace's, "the PTC App".
     context["config"]["yours"] = crate::config::YOURS.into();
@@ -29,8 +34,7 @@ pub fn page(context: &serde_json::Value, body: &str, own: bool, linked: bool) ->
     }
     // `</` can't appear inside the inline script, so it can't end it early.
     let context = context.to_string().replace("</", "<\\/");
-    let (policy, script, body) = if own {
-        let nonce = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>());
+    let (policy, script, body) = if let Some(nonce) = nonce {
         let policy = format!(
             "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'nonce-{nonce}'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'\">"
         );
@@ -88,4 +92,33 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
 /// A client's own screen's HTML, or a note that it isn't there.
 pub fn client_screen(name: &str) -> &'static str {
     CLIENT_SCREENS.iter().find(|(n, _)| *n == name).map_or("<div id=\"missing\"></div><script>missing.innerHTML = one.notFound()</script>", |(_, html)| html)
+}
+
+/// A client's own screen as its page, as each client makes it from the screens built into it, never a node's: one a
+/// node served could act as the person. Native apps make it with this (client/ffi); the web client fills in its
+/// address's `screens/<name>.html` (`client_template`).
+pub fn client_page(name: &str, params: &serde_json::Value) -> String {
+    let nonce = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>());
+    page_with(&client_context(name, params), client_screen(name), Some(nonce), false)
+}
+
+/// What a client's own screen is told: its name, its params, and the product's.
+fn client_context(name: &str, params: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "screen": name, "params": params, "config": { "name": crate::config::NAME, "cli": crate::config::CLI, "made_here": crate::config::MADE_HERE } })
+}
+
+/// Each client's own screen's name, and `missing`, what a name that's none of them shows.
+pub fn client_screens() -> impl Iterator<Item = &'static str> {
+    CLIENT_SCREENS.iter().map(|(name, _)| *name).chain(["missing"])
+}
+
+/// What the web client fills in a template: its page's own nonce, and its params' JSON.
+pub const TEMPLATE_NONCE: &str = "__nonce__";
+pub const TEMPLATE_PARAMS: &str = "\"__params__\"";
+
+/// A client's own screen's page for the web client, which its address serves as `screens/<name>.html` (src/kernel/
+/// services.rs): `client_page`, but for `TEMPLATE_NONCE` and `TEMPLATE_PARAMS`, which the web client fills in
+/// (kernel/web/web.js).
+pub fn client_template(name: &str) -> String {
+    page_with(&client_context(name, &TEMPLATE_PARAMS.trim_matches('"').into()), client_screen(name), Some(TEMPLATE_NONCE.into()), false)
 }

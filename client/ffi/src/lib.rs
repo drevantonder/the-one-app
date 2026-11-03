@@ -52,6 +52,13 @@ pub fn new_device_secret() -> Vec<u8> {
     one_client::new_secret().to_vec()
 }
 
+/// One of the app's own screens (its pages, Services, a Vault request, Settings') as its page, from the screens built
+/// into it: never a node's, since they act as its person. `params` is JSON.
+#[uniffi::export]
+pub fn client_screen(name: String, params: String) -> String {
+    one_client::client_screen(&name, &params)
+}
+
 #[derive(Clone, uniffi::Record)]
 pub struct Header {
     pub name: String,

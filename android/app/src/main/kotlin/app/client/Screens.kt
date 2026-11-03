@@ -118,8 +118,8 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlin.coroutines.resume
 
-// Every screen the app shows is a page the node serves (src/screen/), the same on every client: the pages, Services, a
-// Vault request and Settings' (the client's own), and apps'. Each is in a web view of its own, and this is the shell
+// Every screen the app shows is a page (src/screen/), the same on every client: the pages, Services, a Vault request
+// and Settings' (the client's own, built into the app), and apps' (the node's). Each is in a web view of its own, and this is the shell
 // around them: the pages as the home, what they open pushed over them with Back or in a sheet, and the bridge each
 // page talks through (src/screen/bridge.js), answered natively wherever a person touches: menus, alerts, sheets, files,
 // scanning, links. Screens are untrusted: a page gets an origin of its own that's nowhere (ORIGIN), never this app's or

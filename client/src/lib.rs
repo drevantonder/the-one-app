@@ -30,6 +30,13 @@ mod device;
 #[cfg(not(target_family = "wasm"))]
 pub use device::{Device, new_secret};
 
+/// One of the client's own screens (its pages, Services, a Vault request, Settings') as its page, made from the screens
+/// built into this client, never asked of a node: they act as its person (`one::screen::client_page`). `params` is JSON.
+#[cfg(not(target_family = "wasm"))]
+pub fn client_screen(name: &str, params: &str) -> String {
+    one::screen::client_page(name, &serde_json::from_str(params).unwrap_or_else(|_| serde_json::json!({})))
+}
+
 mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
 }

@@ -655,6 +655,88 @@ fn every_host_answers_each_message_of_the_bridge() {
     }
 }
 
+/// The clients' own screens (pages, Services, a Vault request, Settings') act as their person, so a node serving one
+/// could act as them: every client makes them from what it ships, never asks a node. The native apps make each page
+/// with client/ffi's `client_screen` (`one::screen::client_page`); the web client fills in its address's
+/// `screens/<name>.html` (`client_template`) as web.js does, which comes to the same page.
+#[test]
+fn every_client_makes_its_own_screens_from_what_it_ships() {
+    use one::screen::{TEMPLATE_NONCE, TEMPLATE_PARAMS, client_page, client_screens, client_template, tag};
+    let web = read("kernel/web/web.js");
+    assert!(
+        web.contains(&format!(".replaceAll({TEMPLATE_NONCE:?}, nonce)")) && web.contains(&format!(".replace('{TEMPLATE_PARAMS}', () => params)")) && web.contains(r#".replaceAll("</", "<\\/")"#),
+        "web.js fills in a template otherwise than src/screen.rs makes it"
+    );
+    let params = json!({ "scope": "user", "id": "</script><script>alert(1)</script>" });
+    let filled = params.to_string().replace("</", "<\\/");
+    for name in client_screens().chain(["no-such-screen"]) {
+        // A name that's none of them is web.js's `missing`.
+        let known = client_screens().any(|n| n == name);
+        let template = client_template(if known { name } else { "missing" });
+        let page = template.replace(TEMPLATE_NONCE, "0123456789abcdef0123456789abcdef").replacen(TEMPLATE_PARAMS, &filled, 1);
+        let mut made = client_page(name, &params);
+        if !known {
+            made = made.replace(&format!("\"screen\":\"{name}\""), "\"screen\":\"missing\"");
+        }
+        assert_eq!(tag(&page), tag(&made), "the web client's {name} isn't the page the native apps make");
+    }
+    for (path, makes) in [
+        ("kernel/web/web.js", "if (r.kind === \"own\") return ownPage(r);"),
+        ("android/app/src/main/kotlin/app/client/Store.kt", "is Route.Own -> uniffi.one_client_ffi.clientScreen(r.name, r.params)"),
+        ("apple/Shared/Views/AppScreen.swift", "clientScreen(name: route.screen, params: route.params)"),
+        ("windows/Node.cs", "OneClientFfiMethods.ClientScreen(name, parameters)"),
+    ] {
+        assert!(read(path).contains(makes), "{path} doesn't make the client's own screens itself");
+    }
+    // And none asks a node for one, which nodes answer only for clients built before this.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut sources = vec![];
+    let mut dirs = vec![root.join("kernel/web"), root.join("android/app/src"), root.join("apple"), root.join("windows")];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|e| ["js", "html", "kt", "swift", "cs"].contains(&e.to_str().unwrap())) {
+                sources.push(path);
+            }
+        }
+    }
+    assert!(sources.len() > 20, "{sources:?}");
+    for path in sources {
+        assert!(!std::fs::read_to_string(&path).unwrap_or_default().contains("client-screens"), "{} asks a node for a client's own screen", path.display());
+    }
+}
+
+/// What only the client's own screens may ask, as their person: an app's screen, whose page a node serves, is refused
+/// each by every host (the web pages that frame screens, through src/screen/host.js, and the shells' web views), by
+/// whether it's a screen the client chose to show as its own (`mine`, `own`, `view.settings`, `Own`), never by its page.
+#[test]
+fn an_apps_screen_cant_ask_what_only_the_clients_own_may() {
+    let only_own: BTreeSet<&str> = ["api", "signOut", "appearance", "device", "request", "cache"].into();
+    for (path, unless) in [
+        ("src/screen/host.js", "!h.own"),
+        ("android/app/src/main/kotlin/app/client/Screens.kt", "!own"),
+        ("apple/Shared/Views/AppScreen.swift", "!view.settings"),
+        ("windows/AppScreen.cs", "!Own"),
+    ] {
+        let src = read(path);
+        let lines: Vec<&str> = src.lines().collect();
+        let at = lines.iter().position(|l| l.contains("\"Only Settings can do that.\"")).unwrap_or_else(|| panic!("{path} refuses nothing"));
+        let guard = lines[at.saturating_sub(2)..=at].join("\n");
+        let refused: BTreeSet<&str> = guard.split('"').skip(1).step_by(2).filter(|w| only_own.contains(w)).collect();
+        assert_eq!(refused, only_own, "{path} lets an app's screen ask {:?}", only_own.difference(&refused).collect::<Vec<_>>());
+        assert!(guard.contains(unless), "{path} refuses them otherwise than by whether the screen is the client's own");
+    }
+    // The web client gives host.js what only its own may do just for a screen it chose to show as its own; a chat's
+    // view, which shows only apps' screens, gives none.
+    let web = read("kernel/web/web.js");
+    assert!(web.contains("const r = f.route, mine = r.kind === \"own\";") && web.contains("own: mine && {"), "web.js gives an app's screen what only its own may do");
+    assert!(!read("src/mcp_view.html").lines().any(|l| l.trim_start().starts_with("own:")), "a chat's view gives an app's screen what only the client's own may do");
+    // And an app's screen sends its person to Settings › Devices only to keep its app running there: no code to approve.
+    assert!(web.contains(r#"params: mine ? params : JSON.stringify({ keep: m.params?.keep, scope: m.params?.scope })"#));
+}
+
 /// Windows opens links to the address in the app only if the address's `windows-app-web-link` names its package as
 /// Windows does: from the name and publisher windows/build.sh gives it, as the hash Windows made in a VM says.
 #[test]

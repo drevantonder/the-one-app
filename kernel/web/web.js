@@ -627,8 +627,8 @@ window.__one = {};
   /// Two pages the same but for their nonce.
   const same = (a, b) => a?.replace(/nonce(-|=")[0-9a-f]{32}/g, "") === b?.replace(/nonce(-|=")[0-9a-f]{32}/g, "");
 
-  /// A route's page from the node, asked for once (the one the window opens on as it starts, beside the sidebar's),
-  /// and kept.
+  /// A route's page, asked for once (the one the window opens on as it starts, beside the sidebar's): an app's from
+  /// the node, and kept; the client's own from this client's files (`ownPage`).
   let asked = null;
   function screenPage(r) {
     const key = JSON.stringify(r);
@@ -637,8 +637,19 @@ window.__one = {};
       asked = null;
       return page;
     }
-    const path = r.kind === "own" ? `/v1/client-screens/${encodeURIComponent(r.name)}` : `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
+    if (r.kind === "own") return ownPage(r);
+    const path = `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
     return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
+  }
+
+  /// One of the client's own screens' pages, which act as the person, so never a node's: the address's
+  /// `screens/<name>.html` (src/screen.rs's `client_template`), with a nonce of its own and its params filled in.
+  async function ownPage(r) {
+    const resp = await fetch(asset(`screens/${files[`screens/${r.name}.html`] ? r.name : "missing"}.html`));
+    if (!resp.ok) throw new Error("This didn’t load. Try again.");
+    const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, "0")).join("");
+    const params = JSON.stringify(JSON.parse(r.params || "{}")).replaceAll("</", "<\\/");
+    return (await resp.text()).replaceAll("__nonce__", nonce).replace('"__params__"', () => params);
   }
   const ask = (r) => (asked = { key: JSON.stringify(r), page: screenPage(r) }).page.catch(() => {});
 
@@ -677,7 +688,8 @@ window.__one = {};
       }, { once: true });
     };
     const fresh = screenPage(r);
-    Promise.all([kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
+    // The client's own aren't kept: one kept before they came from its files came from a node.
+    Promise.all([r.kind === "own" ? null : kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
       if (f.html) return;
       if (still) showStill(f, still);
       if (page) draw(page);
@@ -815,7 +827,8 @@ window.__one = {};
         open: (m) => {
           const params = JSON.stringify(m.params || {});
           // Any screen may send its person to choose the device that keeps its app running, in Settings › Devices.
-          const to = m.app === "settings" && m.screen === "devices" ? { kind: "own", name: "devices", params }
+          // An app's says only which app to keep running, and where: no code to approve.
+          const to = m.app === "settings" && m.screen === "devices" ? { kind: "own", name: "devices", params: mine ? params : JSON.stringify({ keep: m.params?.keep, scope: m.params?.scope }) }
             : typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope }
             : mine ? { kind: "own", name: String(m.screen || ""), params }
             : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope };

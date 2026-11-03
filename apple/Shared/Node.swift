@@ -214,8 +214,6 @@ protocol NodeTransport: Sendable {
     func send(_ method: String, _ path: String, body: Data?, timeout: TimeInterval) async throws -> Data
     /// An app screen's page.
     func page(app: String, screen: String, params: String, scope: String?) async throws -> String
-    /// A Settings screen's page.
-    func settingsPage(_ name: String, params: String) async throws -> String
     /// The node's events, until the connection drops.
     func events() -> AsyncThrowingStream<NodeEvent, Error>
     /// What to say when nothing answers.
@@ -328,11 +326,6 @@ struct HTTPNode: NodeTransport {
         var query = ["params": params]
         query["scope"] = scope
         let html = try await send("GET", "v1/screens/\(app)/\(screen)", body: try JSONEncoder().encode(query), timeout: 10)
-        return String(decoding: html, as: UTF8.self)
-    }
-
-    func settingsPage(_ name: String, params: String) async throws -> String {
-        let html = try await send("GET", "v1/client-screens/\(name)", body: try JSONEncoder().encode(["params": params]), timeout: 10)
         return String(decoding: html, as: UTF8.self)
     }
 
@@ -533,10 +526,6 @@ struct NodeClient: Sendable {
 
     func page(app: String, screen: String, params: String, scope: String?) async throws -> String {
         try await transport.page(app: app, screen: screen, params: params, scope: scope)
-    }
-
-    func settingsPage(_ name: String, params: String) async throws -> String {
-        try await transport.settingsPage(name, params: params)
     }
 
     /// A Settings screen's `one.api`: `path` is the node's /v1 API's, its query's fields going in the body as every

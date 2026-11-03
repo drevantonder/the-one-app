@@ -251,13 +251,19 @@ private struct ScreenWebView: Representable {
             self.web = web
             let route = view.route, settings = view.settings, node = view.store.node
             loading?.cancel()
+            // The client's own screens are made here, from those built into the app (client/ffi), never a node's, since
+            // they act as the person; and never kept, since one kept before was a node's.
+            if settings {
+                web.loadHTMLString(clientScreen(name: route.screen, params: route.params), baseURL: nil)
+                return
+            }
             // The page as the node last gave it shows at once while the node is asked, which replaces it only if it's
             // changed since (its app deployed).
             let copy = view.offline == nil ? ScreenCache.last(for: route)?.html : nil
             if let copy { web.loadHTMLString(copy, baseURL: nil) }
             loading = Task { [weak self] in
                 do {
-                    let page = try await settings ? node.settingsPage(route.screen, params: route.params) : node.page(app: route.app, screen: route.screen, params: route.params, scope: route.scope)
+                    let page = try await node.page(app: route.app, screen: route.screen, params: route.params, scope: route.scope)
                     guard let self, !Task.isCancelled else { return }
                     // No base: a screen is an app's code, never at the node's address, where it would ask as this
                     // machine's own programs.
