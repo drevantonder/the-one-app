@@ -47,6 +47,8 @@ pub mod agents;
 pub mod api;
 #[cfg(not(target_family = "wasm"))]
 pub mod apps;
+#[cfg(not(target_family = "wasm"))]
+pub mod handoff;
 pub mod bundle;
 #[cfg(not(target_family = "wasm"))]
 pub mod deploy;

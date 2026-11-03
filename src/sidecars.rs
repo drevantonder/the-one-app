@@ -147,7 +147,14 @@ impl Sidecars {
     /// Hands a call to the sidecar and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
     /// caller's scope keeps, so the devices that hold the scope can fetch it.
     pub async fn call(&self, app: &str, op: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
-        let p = self.get(app).ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
+        // A node that just started, an update's, waits a moment for its sidecars to register again with it.
+        let mut p = self.get(app);
+        let until = Instant::now() + Duration::from_secs(5);
+        while p.is_none() && crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(15)) && Instant::now() < until {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            p = self.get(app);
+        }
+        let p = p.ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         p.replies.lock().unwrap().insert(id, (tx, caller.clone()));
@@ -168,7 +175,11 @@ impl Sidecars {
         let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("register {app} first"))?;
         *p.seen.lock().unwrap() = Instant::now();
         let mut rx = p.waiting.lock().await;
-        let call = tokio::time::timeout(Duration::from_secs(25), rx.recv()).await.ok().flatten();
+        // Ended as the node hands over, so the sidecar asks the new one.
+        let call = tokio::select! {
+            call = tokio::time::timeout(Duration::from_secs(25), rx.recv()) => call.ok().flatten(),
+            _ = crate::handoff::stopping() => None,
+        };
         *p.seen.lock().unwrap() = Instant::now();
         Ok(call)
     }

@@ -296,7 +296,15 @@ pub fn stop_others(home: &Path) {
 pub async fn bucket(home: PathBuf) -> Result<()> {
     use axum::http::{HeaderMap, Method, StatusCode, Uri};
     let Ok(at) = std::fs::read_to_string(home.join("bucket-addr")) else { return Ok(()) };
-    let listener = tokio::net::TcpListener::bind(at.trim()).await?;
+    // A node taking over from another waits for the one before to let the port go.
+    let mut tries = 0;
+    let listener = loop {
+        match tokio::net::TcpListener::bind(at.trim()).await {
+            Err(err) if err.kind() == std::io::ErrorKind::AddrInUse && tries < 600 => tries += 1,
+            bound => break bound?,
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
     let place = one::bucket::Place::Folder(home.join("install").join("bucket"));
     let answer = move |method: Method, uri: Uri, headers: HeaderMap, body: axum::body::Bytes| {
         let place = place.clone();

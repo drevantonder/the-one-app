@@ -212,7 +212,7 @@ fn run(args: Vec<String>) -> Result<()> {
         ["serve"] => {
             usual_path();
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
-            serve(flags.contains_key("try"))?
+            serve(flags.contains_key("try"), &args)?
         }
         ["sign-in"] => sign_in(&flags)?,
         ["sign-out"] => match one::sign_in::sign_out()? {
@@ -1137,7 +1137,7 @@ const TRY_IDLE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[tokio::main]
-async fn serve(is_try: bool) -> Result<()> {
+async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
@@ -1152,13 +1152,21 @@ async fn serve(is_try: bool) -> Result<()> {
     let dir = one::home();
     // A new install's first start makes its home.
     std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
-    let listener = listen(&dir).await?;
-    std::fs::write(dir.join("pid"), std::process::id().to_string())?;
+    // Taking over from the node before, an update's, with its socket: it answers until this one is warm.
+    let handed = one::handoff::handed(args)?;
+    let listener = match &handed {
+        Some(h) => tokio::net::TcpListener::from_std(h.listener.try_clone()?)?,
+        None => listen(&dir).await?,
+    };
     let node = Node::start(&dir, one::sidecars::built_in()).await?;
+    if handed.is_some() {
+        node.warm().await;
+    }
+    std::fs::write(dir.join("pid"), std::process::id().to_string())?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
     let routes = api::routes().route("/mcp", axum::routing::post(mcp_http));
-    let mut routes = api::guarded(routes, node);
+    let mut routes = api::guarded(routes, node.clone());
     if is_try {
         let home = dir.clone();
         tokio::spawn(async move {
@@ -1184,10 +1192,65 @@ async fn serve(is_try: bool) -> Result<()> {
             unsafe { libc::kill(0, libc::SIGTERM) };
         });
     }
-    let http = api::serve(listener, routes);
+    // Asked to restart (an update, or SIGHUP): the program now at this one's path takes over, and this one stops
+    // taking connections, finishes what it's answering, and exits.
+    let fd = raw_fd(&listener);
+    let (drained, drain) = tokio::sync::oneshot::channel::<()>();
+    let restarting = {
+        let (node, args) = (node.clone(), args.to_vec());
+        async move {
+            loop {
+                one::handoff::wanted().await;
+                tracing::info!("handing over to {}", std::env::current_exe().map(|e| e.display().to_string()).unwrap_or_default());
+                node.hand_over();
+                match one::handoff::hand_over(fd, &args).await {
+                    Ok(()) => return,
+                    Err(err) if one::handoff::supervised() => {
+                        // Its supervisor starts the new build, as before nodes handed over.
+                        tracing::warn!("couldn't hand over ({err:#}): exiting, to be started again");
+                        std::process::exit(0);
+                    }
+                    Err(err) => tracing::warn!("couldn't hand over, so this build keeps running: {err:#}"),
+                }
+            }
+        }
+    };
+    #[cfg(unix)]
+    tokio::spawn(async {
+        let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else { return };
+        while hup.recv().await.is_some() {
+            one::handoff::restart();
+        }
+    });
+    tokio::spawn(async move {
+        restarting.await;
+        let _ = drained.send(());
+    });
+    let http = api::serve_until(listener, routes, async {
+        let _ = drain.await;
+    });
+    one::handoff::able();
+    match handed {
+        Some(h) => h.ready(),
+        None => one::handoff::notify("READY=1"),
+    }
+    tracing::info!("{NAME} node {} answering", &one::entry::hex(&node.id())[..8]);
     let served = http.await;
     one::apps::stop_all();
+    if one::handoff::stopped() {
+        std::process::exit(0);
+    }
     Ok(served?)
+}
+
+#[cfg(unix)]
+fn raw_fd(listener: &tokio::net::TcpListener) -> i32 {
+    std::os::fd::AsRawFd::as_raw_fd(listener)
+}
+
+#[cfg(not(unix))]
+fn raw_fd(_listener: &tokio::net::TcpListener) -> i32 {
+    -1
 }
 
 /// When the node is asked to stop: Ctrl-C, or SIGTERM from its supervisor, an update or a node replacing it, each

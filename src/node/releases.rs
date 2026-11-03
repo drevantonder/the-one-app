@@ -28,7 +28,8 @@ impl Node {
                 Ok(exe) => {
                     let _ = std::fs::write(self.0.dir.join("release"), &r.blob);
                     tracing::info!("updated {} to {}; restarting", exe.display(), r.commit);
-                    std::process::exit(0);
+                    crate::handoff::restart();
+                    return;
                 }
                 Err(err) => tracing::warn!("couldn't take the release of {}, trying again in {}s: {err:#}", r.commit, wait.as_secs()),
             }

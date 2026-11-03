@@ -351,7 +351,12 @@ pub struct Inner {
     sessions: sessions::Sessions,
     /// This device's socket to the relay.
     relay: relay::Relay,
+    /// How many times its deploys were settled (`settle`), the first once its apps are loaded.
+    settled: tokio::sync::watch::Sender<u64>,
 }
+
+/// Set once this process's node is handing over to the next: it opens nothing only one of them may hold.
+static HANDING_OVER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
 /// device is stopped here for `STOPPED_FOR`, or until it's deployed again.
@@ -408,7 +413,7 @@ impl Node {
         let key = SigningKey::from(secret);
         let id = *key.verifying_key().as_bytes();
         let outbound = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let apps = Apps::start(dir.join("runtime"), outbound.local_addr()?.port()).await?;
+        let apps = Apps::start(dir.join(crate::handoff::runtime()), outbound.local_addr()?.port()).await?;
         let (events, _) = broadcast::channel(256);
         let mut built_in = BTreeMap::new();
         for (app, files) in crate::config::BUILT_IN {
@@ -460,6 +465,7 @@ impl Node {
             forgotten: Mutex::new(()),
             sessions: Default::default(),
             relay: relay::Relay::new(),
+            settled: tokio::sync::watch::channel(0).0,
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -496,6 +502,7 @@ impl Node {
                 if let Err(err) = worker.settle().await {
                     tracing::warn!("{err:#}");
                 }
+                worker.0.settled.send_modify(|n| *n += 1);
                 worker.0.changed.notified().await;
             }
         });
@@ -509,6 +516,27 @@ impl Node {
 
     pub fn id(&self) -> Key {
         self.0.id
+    }
+
+    /// Waits until its apps are loaded and each has answered once, so a node taking over answers its first calls warm.
+    pub async fn warm(&self) {
+        let mut settled = self.0.settled.subscribe();
+        let _ = tokio::time::timeout(Duration::from_secs(60), settled.wait_for(|n| *n > 0)).await;
+        let mut asked = tokio::task::JoinSet::new();
+        for app in self.0.apps.names() {
+            let apps = self.0.apps.clone();
+            asked.spawn(async move { apps.describe(&app).await });
+        }
+        let _ = tokio::time::timeout(Duration::from_secs(30), asked.join_all()).await;
+    }
+
+    /// Lets go of what only one of a device's nodes may hold, as this one hands over to the next: its socket to the
+    /// relay, which the next one opens.
+    pub fn hand_over(&self) {
+        HANDING_OVER.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some((_, task)) = self.0.relay.task.lock().unwrap().take() {
+            task.abort();
+        }
     }
 
     /// What this machine's own programs send to say they are (`api::LOCAL_TOKEN`).

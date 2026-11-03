@@ -73,6 +73,8 @@ User=$(id -un)
 ExecStart=$HOME/.local/bin/$cli serve
 Restart=always
 RestartSec=2
+# An update's node takes over from the one before, then tells systemd it's the main process.
+NotifyAccess=all
 Environment=HOME=$HOME
 
 [Install]

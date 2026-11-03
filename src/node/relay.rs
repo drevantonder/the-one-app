@@ -28,7 +28,7 @@ pub(super) struct Relay {
     /// When this device started: a message sent before then may have been taken already, so it isn't.
     started: u64,
     /// The task keeping the socket, with the address it's to.
-    task: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
+    pub(super) task: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
     /// What's sent on the socket open now.
     out: Mutex<Option<mpsc::UnboundedSender<String>>>,
     /// Each ask waiting on its answer: the device asked, and where its answer goes.
@@ -63,6 +63,9 @@ impl Node {
     /// Keeps this device's socket to the relay at the install's address, once it has one and is a device of it.
     pub(super) fn follow_relay(&self) {
         let wanted = self.with(|i| Ok(i.r.members.device(&self.0.id).and(i.r.members.settings.get("address").cloned()))).ok().flatten();
+        if HANDING_OVER.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         let mut task = self.0.relay.task.lock().unwrap();
         if task.as_ref().map(|(a, _)| a) == wanted.as_ref() {
             return;
