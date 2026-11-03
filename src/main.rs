@@ -1391,8 +1391,11 @@ fn mcp(mode: Mode) -> Result<()> {
     let mut agent = agent_from_env();
     for line in stdin.lock().lines() {
         let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
-        if let Some(reply) = mcp_answer(&msg, &mut agent, mode) {
+        if let Some(reply) = mcp_answer(&msg, &mut agent, mode, true) {
             writeln!(out, "{reply}")?;
+            if TOOLS_CHANGED.take() {
+                writeln!(out, "{}", json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }))?;
+            }
             out.flush()?;
         }
     }
@@ -1416,8 +1419,8 @@ async fn mcp_http(headers: axum::http::HeaderMap, body: String) -> axum::respons
     let answered = tokio::task::spawn_blocking(move || {
         SIGNED_IN.with(|t| *t.borrow_mut() = token);
         let reply = match &msg {
-            Value::Array(batch) => Some(json!(batch.iter().filter_map(|m| mcp_answer(m, &mut agent, Mode::All)).collect::<Vec<_>>())).filter(|r| r.as_array().is_some_and(|r| !r.is_empty())),
-            msg => mcp_answer(msg, &mut agent, Mode::All),
+            Value::Array(batch) => Some(json!(batch.iter().filter_map(|m| mcp_answer(m, &mut agent, Mode::All, false)).collect::<Vec<_>>())).filter(|r| r.as_array().is_some_and(|r| !r.is_empty())),
+            msg => mcp_answer(msg, &mut agent, Mode::All, false),
         };
         SIGNED_IN.with(|t| *t.borrow_mut() = None);
         (reply, agent)
@@ -1437,9 +1440,49 @@ async fn mcp_http(headers: axum::http::HeaderMap, body: String) -> axum::respons
     }
 }
 
-/// The answer to one MCP message, over stdio or HTTP: None for a notification. `agent` is the client's name, which
-/// `initialize` says.
-fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode) -> Option<Value> {
+thread_local! {
+    /// Whether the call just answered changed the tools a session lists, so stdio tells the client after its answer.
+    static TOOLS_CHANGED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Every app's tools by name, as `GET /v1/apps` gives them: what a session's list of tools is made of.
+fn tool_names(apps: &Value) -> Vec<String> {
+    let mut names: Vec<String> = apps.as_array().into_iter().flatten().flat_map(|a| a["ops"].as_array().into_iter().flatten().map(move |o| format!("{}_{}", a["name"].as_str().unwrap_or(""), o["name"].as_str().unwrap_or("")))).collect();
+    names.sort();
+    names
+}
+
+/// A tool call, and what it changed of the tools a session lists (adding an app, say): over stdio, `stdio` sends MCP's
+/// notification after the answer; over HTTP, which sends nothing unasked, the answer says which tools are new.
+fn call_and_tell(params: &Value, agent: Option<&str>, mode: Mode, stdio: bool) -> Value {
+    let name = params["name"].as_str().unwrap_or("");
+    let apps = (mode == Mode::All && name != "search").then(|| get("/v1/apps").ok()).flatten();
+    let reads = |apps: &Value| match name.split_once('_') {
+        Some((a, o)) => ops::node_app(a) || apps.as_array().into_iter().flatten().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
+        None => true,
+    };
+    let before = apps.filter(|a| !reads(a)).map(|a| tool_names(&a));
+    let mut out = call_tool(params, agent, mode);
+    let Some(before) = before else { return out };
+    let Ok(after) = get("/v1/apps").map(|a| tool_names(&a)) else { return out };
+    if after == before {
+        return out;
+    }
+    if stdio {
+        TOOLS_CHANGED.set(true);
+        return out;
+    }
+    let mut new: Vec<&str> = after.iter().filter(|t| !before.contains(t)).filter_map(|t| t.split_once('_').map(|(a, _)| a)).collect();
+    new.dedup();
+    if let (Some(first), Some(content)) = (new.first(), out["content"].as_array_mut()) {
+        content.push(json!({ "type": "text", "text": format!("New tools for {}: they come with your next session. Until then, `{CLI} {first} <op>` runs them where `{CLI}` runs.", new.join(", ")) }));
+    }
+    out
+}
+
+/// The answer to one MCP message, over stdio or HTTP (`stdio` false): None for a notification. `agent` is the
+/// client's name, which `initialize` says.
+fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode, stdio: bool) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let result = match msg["method"].as_str().unwrap_or("") {
         "initialize" => Ok({
@@ -1448,7 +1491,7 @@ fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode) -> Option<Val
             }
             json!({
             "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
-            "capabilities": { "tools": {}, "resources": {}, "extensions": { "io.modelcontextprotocol/skills": {} } },
+            "capabilities": { "tools": { "listChanged": stdio }, "resources": {}, "extensions": { "io.modelcontextprotocol/skills": {} } },
             "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
             "instructions": instructions(mode),
             })
@@ -1462,7 +1505,7 @@ fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode) -> Option<Val
             t.extend(mcp_apps::tools());
             json!({ "tools": t })
         }),
-        "tools/call" => Ok(call_tool(&msg["params"], agent.as_deref(), mode)),
+        "tools/call" => Ok(call_and_tell(&msg["params"], agent.as_deref(), mode, stdio)),
         // Apps' widgets and screens, as MCP Apps (src/mcp_apps.rs).
         "resources/list" => Ok(json!({ "resources": mcp_apps::resources() })),
         "resources/read" => match msg["params"]["uri"].as_str().unwrap_or("") {
