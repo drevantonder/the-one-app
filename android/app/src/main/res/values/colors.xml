@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The page's background (Kit.bg in Style.kt), for the window before the app draws: light here, dark in values-night. -->
+    <color name="page">#FFFFFF</color>
+</resources>

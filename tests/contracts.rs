@@ -755,6 +755,13 @@ fn every_client_draws_in_the_kits_colours() {
             }
         }
     }
+    // Android's window as it opens, before the app draws, is the page's colour too.
+    for (path, want) in [("android/app/src/main/res/values/colors.xml", &tokens["bg"].0), ("android/app/src/main/res/values-night/colors.xml", &tokens["bg"].1)] {
+        let got = read(path).lines().find(|l| l.contains(r#"name="page""#)).map(hexes);
+        if got.as_deref() != Some(&[want.clone()][..]) {
+            problems.push(format!("{path}: its page is {got:?}, kit.css's is {want}"));
+        }
+    }
     // The web client's window draws in the kit's own variables, so it has no colours of its own to drift.
     if let Some(hex) = hexes(&read("kernel/web/web.css")).first() {
         problems.push(format!("kernel/web/web.css: #{hex} is its own colour; use the kit's variables"));
