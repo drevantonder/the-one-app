@@ -355,6 +355,9 @@ func (ds *devices) giveBackVM(ctx context.Context, v *vm, why string) error {
 // idleBorrowed, as a Linux device's.
 const idleLasting = time.Hour
 
+// A borrowed copy left stopped this long without a call is given back: a call starts it again before then.
+const idleStoppedCopy = 2 * time.Minute
+
 // A device nobody has borrowed, called or watched for idlePause is paused, and after idleStop shut down: each holds
 // cores and gigabytes while it runs.
 const (
@@ -374,6 +377,10 @@ func (ds *devices) tendVMs(ctx context.Context) {
 		limit := idleBorrowed
 		if v.Of == "" && !strings.HasPrefix(v.Name, poolPrefix) {
 			limit = idleLasting
+		} else if v.state(ctx) == "stopped" {
+			// A throwaway copy that stopped (its emulator killed for memory, or a reinstall mid-boot) holds its disk
+			// and its loan for nothing: its borrower borrows another.
+			limit = idleStoppedCopy
 		}
 		if ds.idle(name) < limit {
 			continue
