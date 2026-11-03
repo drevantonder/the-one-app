@@ -86,6 +86,7 @@ class HomeWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         HomeWidgets.start(context)
         withContext(Dispatchers.IO) { Glyphs.load(context) }
+        HomeWidgets.read.await()
         val widgetId = GlanceAppWidgetManager(context).getAppWidgetId(id)
         provideContent {
             val shown by HomeWidgets.shown.collectAsState()

@@ -28,7 +28,9 @@ import app.client.json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -83,9 +85,17 @@ object HomeWidgets {
     fun start(context: Application) {
         if (::app.isInitialized) return
         app = context
-        val kept = runCatching { json.decodeFromString(Kept.serializer(), file.readText()) }.getOrNull()
-        shown.value = Shown(kept, choices(), store.signIn.signedIn)
+        shown.value = Shown(null, choices(), store.signIn.signedIn)
+        // Read in the background, not as the app opens; unless something newer came first, or it signed out.
+        scope.launch {
+            val kept = runCatching { json.decodeFromString(Kept.serializer(), file.readText()) }.getOrNull()
+            if (kept != null) shown.update { if (it.kept == null && it.signedIn) it.copy(kept = kept) else it }
+            read.complete(Unit)
+        }
     }
+
+    /** Done once what was kept is read, for the home screen, which draws once. */
+    val read = CompletableDeferred<Unit>()
 
     fun start(context: Context) = start(context.applicationContext as Application)
 
