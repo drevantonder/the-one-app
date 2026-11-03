@@ -116,7 +116,16 @@ public static class Client
         return removed;
     }
 
-    /// Signed out: its connections close. Its key stays, so signing in again as the same person needs no approval.
+    /// Signs out: this computer takes itself out of its person's devices (it asks their node to), then its key goes, so
+    /// signing in again makes a new device that replaces it, never a second. Asked before the sign-in is revoked.
+    public static async Task SignOut()
+    {
+        var d = device;
+        if (d != null) await Off(() => { d.SignOut(); return 0; });
+        await TakenOut();
+    }
+
+    /// Its connections close. Its key stays.
     public static async Task Close()
     {
         var d = device;

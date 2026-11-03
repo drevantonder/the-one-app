@@ -623,7 +623,8 @@ impl Node {
     /// reaches the bucket no more, then its `remove` entry, and a new epoch of each scope it could open (as a client:
     /// compute holds no epochs) that `caller` starts epochs of, sealed to every client left that opens it and the
     /// recovery key; databases move to it at their next routine copy. A scope `caller` can't start a new epoch of is
-    /// said: one of its own admins' devices does. → what was done.
+    /// said: one of its own admins' devices does. A device removing itself (as it signs out) is told off the relay last,
+    /// since it hears no answer after. → what was done.
     pub async fn remove_device(&self, caller: &Caller, device: &str) -> Result<Value> {
         let key = self.find_machine(device)?;
         let (gone, scopes) = self.with(|i| {
@@ -634,11 +635,17 @@ impl Node {
             Ok((d.name.clone(), m.scopes().into_iter().filter(opens).collect::<Vec<_>>()))
         })?;
         ensure!(key != self.0.id, "{gone} is this device: remove it from another of your devices");
-        let relay = self.tell_relay_now(json!({ "remove": hex(&key) })).await.err().map(|err| format!("{err:#}"));
+        // A device taking itself out (signing out) is told last: off the relay, it hears no answer, so everything else is done.
+        let itself = key == caller.key;
+        let off_relay = || async { self.tell_relay_now(json!({ "remove": hex(&key) })).await.err().map(|err| format!("{err:#}")) };
+        let mut relay = if itself { None } else { off_relay().await };
         // The last of its entries in `global` this device had seen: those after never count, wherever they sort.
         let seq = self.with(|i| Ok(i.r.store.last(&key, "global")?.map(|e| e.seq())))?;
         self.member_as(caller, "remove", json!({ "key": hex(&key), "seq": seq })).await?;
         let (renewed, left) = self.renew(caller, scopes).await;
+        if itself {
+            relay = off_relay().await;
+        }
         Ok(json!({ "removed": gone, "new_epochs": renewed, "not_renewed": left, "relay": relay }))
     }
 

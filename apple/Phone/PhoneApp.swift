@@ -112,8 +112,8 @@ final class Phone {
     /// Signs out: back to the first screen, with nothing of the person's left on the phone, and no more of their pushes.
     func signOut() async {
         await unregisterPush()
+        await DeviceClient.shared.signOut()
         await Auth.shared.signOut()
-        await DeviceClient.shared.close()
         signedOut(nil)
     }
 

@@ -81,7 +81,15 @@ class Client(private val context: Context, private val signIn: SignIn) {
         device?.let { d -> io { d.reconnect() } }
     }
 
-    /** Signed out: its connections close. Its key stays, so signing in again as the same person needs no approval. */
+    /** Signs out: this phone takes itself out of its person's devices (it asks their node to), then its key goes, so signing
+     *  in again makes a new device that replaces it, never a second. Asked before the sign-in is revoked. */
+    suspend fun signOut() {
+        device?.let { d -> io { d.signOut() } }
+        deviceFor?.let { signIn.forgetDeviceSecret(it) }
+        close()
+    }
+
+    /** Its connections close. Its key stays. */
     suspend fun close() {
         device?.let { d -> io { d.disconnect() } }
         device = null

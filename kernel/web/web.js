@@ -216,12 +216,24 @@ window.__one = {};
     if (removed) return true;
     if (await net.still().catch(() => true)) return false;
     removed = true;
-    events?.abort();
-    // Its key goes with it: a removed key can't be let in again, so signing in makes a new one.
-    const user = auth.user();
-    if (user) await Promise.all([del(`device:${user}`), del(`nodes:${user}`)]).catch(() => {});
+    await forgetDevice();
     await auth.signOut(REMOVED);
     return true;
+  }
+
+  /// This browser's key goes: a removed key can't be let in again, so signing in makes a new one.
+  async function forgetDevice() {
+    events?.abort();
+    const user = auth.user();
+    if (user) await Promise.all([del(`device:${user}`), del(`nodes:${user}`)]).catch(() => {});
+  }
+
+  /// Signs out as a device: out of its person's devices first (`Device.leave`), so signing in again replaces it, then its
+  /// key goes. One that can't get out in a few seconds (no node answering) goes anyway: approving the new one replaces it.
+  async function signOut() {
+    if (device) await Promise.race([device.leave(), sleep(20_000)]).catch((err) => console.warn("leaving your devices:", err));
+    await forgetDevice();
+    return auth.signOut();
   }
 
   const gone = () => Object.assign(new NodeError(REMOVED), { signedOut: true, removed: true });
@@ -822,7 +834,7 @@ window.__one = {};
           return reply(await clientApi(m));
         case "signOut":
           reply(null);
-          return auth.signOut();
+          return signOut();
         case "appearance":
           if (m.value != null) setAppearance(String(m.value));
           return reply(appearance());

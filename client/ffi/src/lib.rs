@@ -115,6 +115,12 @@ impl ThisDevice {
         run(self.0.reconnect())
     }
 
+    /// Signs out: takes itself out of its person's devices first, then closes its connections. The app forgets this
+    /// device's key after, and asks this before it revokes the sign-in.
+    pub fn sign_out(&self) {
+        run(self.0.sign_out())
+    }
+
     /// Closes its connections, until it's asked again: when its person signs out. (`close` is each binding's own.)
     pub fn disconnect(&self) {
         run(self.0.close())

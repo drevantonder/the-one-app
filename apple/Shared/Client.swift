@@ -68,7 +68,15 @@ actor DeviceClient {
         return Auth.SignedOut(message: String(localized: "This device was taken out. Sign in again."))
     }
 
-    /// Signed out: its connections close. Its key stays, so signing in again as the same person needs no approval.
+    /// Signs out: this device takes itself out of its person's devices (it asks their node to), then its key goes, so
+    /// signing in again makes a new device that replaces it, never a second. Asked before the sign-in is revoked.
+    func signOut() async {
+        if let device { await off { device.signOut() } }
+        if let deviceFor { Keychain.forget(deviceFor) }
+        await close()
+    }
+
+    /// Its connections close. Its key stays.
     func close() async {
         if let device { await off { device.disconnect() } }
         device = nil

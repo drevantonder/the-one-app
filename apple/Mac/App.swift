@@ -147,8 +147,8 @@ final class Mac {
 
     /// Signs out: the first screen again, with nothing of the person's left in the window.
     func signOut() async {
+        await DeviceClient.shared.signOut()
         await Auth.shared.signOut()
-        await DeviceClient.shared.close()
         signedOut(nil)
     }
 

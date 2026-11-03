@@ -518,8 +518,8 @@ public sealed class MainWindow : Window
     public async Task SignOut()
     {
         listening?.Cancel();
+        await Client.SignOut();
         await Auth.Shared.SignOut();
-        await Client.Close();
         pushed.Clear();
         selection = Route.PageOf("user");
         Welcome(null);

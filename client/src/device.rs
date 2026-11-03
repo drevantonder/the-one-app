@@ -327,6 +327,17 @@ impl Device {
         }
     }
 
+    /// Signs out: this device takes itself out of its person's devices first, by asking their node to (as Settings ›
+    /// Devices does for another), so signing in again makes a new one that replaces it, never a second; then it closes.
+    /// A node that doesn't answer in a few seconds is left: approving the new device replaces it. The app forgets this
+    /// device's key either way, as a removed key can't be let in again.
+    pub async fn sign_out(&self) {
+        if self.dir.join("joined").exists() {
+            let _ = n0_future::time::timeout(Duration::from_secs(15), self.json("POST", "/v1/remove", Some(json!({ "key": self.key() })))).await;
+        }
+        self.close().await;
+    }
+
     /// Whether the install took this device out: it was in, and isn't listed now.
     pub fn removed(&self) -> bool {
         self.dir.join("joined").exists()

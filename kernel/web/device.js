@@ -151,7 +151,7 @@ export class Device {
     const key = random(32);
     const hash = await epochHash(key);
     const to = openers(k, scope).filter((e) => !except.includes(e.key));
-    if (!to.some((e) => e.key === this.me.key)) to.push({ key: this.me.key, seal: this.me.seal });
+    if (!to.some((e) => e.key === this.me.key) && !except.includes(this.me.key)) to.push({ key: this.me.key, seal: this.me.seal });
     await this.write("global", members.epoch({ scope, n, to: to.map((e) => e.key), hash }));
     if ((await this.checked(true)).epochs[scope]?.hashes?.[n] !== hash) throw new Error("Another device made new keys for this just now. Try again.");
     await this.api("/v1/keys", { method: "POST", body: { scope, n, to: "recovery", sealed: b64u.encode(await sealTo(twinPublic(hex.decode(k.recovery)), key)) } });
@@ -307,12 +307,13 @@ export class Device {
   // Signing.
 
   /// Signs an entry of `content` in `log` as `as` (this browser, or a passkey), after what the node has, and writes it.
+  /// `content` may be a function of the entry's seq, for one that says which entry it is.
   async write(log, content, as = this.me) {
     for (let tries = 0; ; tries++) {
       const heads = await this.api(`/v1/entries?scope=${encodeURIComponent(log)}`);
       const last = heads.logs?.[as.key];
       const fields = { log, seq: last ? last.seq + 1 : 0, backlink: last?.hash ?? null, previous: (heads.previous || []).filter((h) => h !== last?.hash), time: Date.now(), user: this.user, epoch: heads.epoch };
-      const e = await signEntry(as.sign, hex.decode(as.key), fields, JSON.stringify(content));
+      const e = await signEntry(as.sign, hex.decode(as.key), fields, JSON.stringify(typeof content === "function" ? content(fields.seq) : content));
       try {
         return await this.api("/v1/entries", { method: "POST", body: [{ header: b64u.encode(e.header), signature: b64u.encode(e.signature), body: b64u.encode(e.body) }] });
       } catch (err) {
@@ -371,6 +372,10 @@ export class Device {
     const approved = `?approved&genesis=${(await get(`global:${this.user}`))?.root || ""}`;
     if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`, {}, approved).catch(() => {});
     else await this.bearer(`/api/auth/devices/requests/${r.key}${approved}`, { method: "DELETE" }).catch(() => {});
+    // Re-adding a device replaces the one it was (signed out, or set up again), never a second of the same name.
+    for (const old of k.devices.filter((d) => d.user === r.user && d.name === r.name && d.key !== r.key && d.roles?.includes("client") && !d.passkey)) {
+      await this.remove(old.key, as).catch((err) => console.warn(`replacing ${r.name}'s earlier device:`, err));
+    }
   }
 
   /// Seals each epoch of `scopes` that `as` opens to a device (`{ key, seal }`), but those it has.
@@ -388,17 +393,33 @@ export class Device {
 
   /// Takes one of this person's devices out (or, for an admin, anyone's): off the network first, then unlisted, then
   /// each scope it opened that this person may move on gets a new epoch it doesn't have.
-  async remove(key) {
+  async remove(key, as = this.me) {
+    // Itself, it goes in the order `leave` says: its removal counts only if it's the last entry of its own that does.
+    if (key === this.me.key) return this.leave();
     const k = await this.checked(true);
     const it = k.devices.find((e) => e.key === key);
     if (!it) throw new Error("That device isn’t listed.");
-    await this.tell({ remove: key }).catch((err) => {
+    await this.tell({ remove: key }, as).catch((err) => {
       if (!/isn.t|not/.test(err.message)) throw err;
     });
     // The last of its entries this browser checked, from which on none counts.
     const next = (await get(`global:${this.user}`))?.have.split(",").find((h) => h.startsWith(`${key}.`))?.split(".")[1];
-    await this.write("global", members.removeDevice({ key, seq: next ? Number(next) - 1 : null }));
+    await this.write("global", members.removeDevice({ key, seq: next ? Number(next) - 1 : null }), as);
     await this.renew(scopesOf(k, it.user), [key]);
+  }
+
+  /// Takes this browser out of its person's devices, as it signs out, so signing in again makes a new one that
+  /// replaces it, never a second. Itself it may (the install lets a device take out its person's, itself among them),
+  /// but nothing it writes after counts, so it goes in this order: a new epoch of each scope it opened that this person
+  /// may move on and another device of theirs still opens (one only the recovery key could open would lock them out),
+  /// sealed to none of it; its `remove` entry, whose seq is its own, so that one counts and none after; then off the
+  /// network, which ends its connection, so nothing is asked after.
+  async leave() {
+    const k = await this.checked(true);
+    if (!k.devices.some((d) => d.key === this.me.key)) return;
+    await this.renew(scopesOf(k, this.user).filter((s) => openers(k, s).some((e) => e.key !== this.me.key)), [this.me.key]);
+    await this.write("global", (seq) => members.removeDevice({ key: this.me.key, seq }));
+    await this.tell({ remove: this.me.key });
   }
 
   /// Takes a person out, for an admin: each of their devices off the network first, then them (with the last of each of

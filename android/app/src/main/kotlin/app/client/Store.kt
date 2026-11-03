@@ -390,6 +390,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
 
     fun signOut() {
         scope.launch {
+            client.signOut()
             signIn.signOut()
             signedOut()
         }
