@@ -189,8 +189,7 @@ window.home = (() => {
 
   /// Loads what the screens show: the node's state, its apps, and each page's widgets and badges.
   async function load() {
-    h.state = await one.api("GET", "/v1/state");
-    h.apps = await one.api("GET", "/v1/apps");
+    [h.state, h.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]);
     await loadWidgets();
   }
 

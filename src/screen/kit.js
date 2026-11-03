@@ -3,9 +3,23 @@
 (() => {
   const esc = one.esc;
 
-  // A spinner that says what it waits for, to people and to screen readers.
+  // A spinner that says what it waits for, to people and to screen readers: for an action, not a screen's first draw.
   one.loading = (label = "Loading") =>
     `<div class="loading" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span>${esc(label)}</span></div>`;
+
+  // Grey shapes where what's loading will be, so the screen looks ready and doesn't jump when it comes: `rows` rows
+  // of a list (the kit's .list), "text" for lines of text, or "cards" for tiles. Screen readers hear `label`.
+  one.skeleton = (shape = 4, label = "Loading") => {
+    const line = (w, cls = "") => `<span class="sk-line${cls}" style="width:${w}%"></span>`;
+    const widths = [62, 48, 70, 55, 40, 66, 52, 58];
+    const inner = shape === "text"
+      ? `<div class="sk-text">${[92, 100, 84, 96, 60].map((w) => line(w)).join("")}</div>`
+      : shape === "cards"
+      ? `<div class="sk-cards">${'<span class="sk-card"></span>'.repeat(4)}</div>`
+      : `<div class="list">${widths.slice(0, Math.max(1, Math.min(+shape || 4, 8))).map((w) =>
+          `<div class="row"><span class="sk-dot"></span><div class="main">${line(w)}${line(w - 18, " sub")}</div></div>`).join("")}</div>`;
+    return `<div class="skeleton" role="status" aria-live="polite" aria-label="${esc(label)}">${inner}</div>`;
+  };
 
   // A button for what the kit draws, `action` `{ label, run }`: run when it's tapped.
   const runs = [];
@@ -52,27 +66,37 @@
     return { title: said, safe: "Nothing was lost.", next: "", missing };
   };
 
-  // Draws `fn()`'s HTML into `el`: with a labelled spinner the first time, if it's slow (`wait` ms), and the problem,
-  // with Try Again, if it fails. Later draws (on "changed") replace what's there only once they're ready.
-  one.render = async (el, fn, { loading = "Loading", wait = 120 } = {}) => {
+  // Draws `fn()`'s HTML into `el`. The first time, if it takes longer than `wait` ms, grey shapes stand where it will
+  // be (`skeleton`: rows of a list, "text" or "cards", or false for a spinner saying `loading`); a fast load shows
+  // nothing in between, so nothing flashes. If it fails, the problem, with Try Again. Later draws (on "changed") replace
+  // what's there only once they're ready, and keep the scroll where it was.
+  one.render = async (el, fn, { loading = "Loading", wait = 100, skeleton = 4 } = {}) => {
     if (typeof el === "string") el = document.querySelector(el);
     const turn = (el.__turn = (el.__turn || 0) + 1);
-    const slow = el.__drawn ? null : setTimeout(() => turn === el.__turn && (el.innerHTML = one.loading(loading)), wait);
+    const waiting = () => (skeleton === false ? one.loading(loading) : one.skeleton(skeleton, loading));
+    const slow = el.__drawn ? null : setTimeout(() => turn === el.__turn && (el.innerHTML = waiting()), wait);
     try {
       const html = await fn();
       if (turn !== el.__turn) return;
-      if (html !== undefined) el.innerHTML = html;
+      if (html !== undefined && html !== el.__html) {
+        const y = scrollY;
+        el.innerHTML = el.__html = html;
+        if (el.__drawn && scrollY !== y) scrollTo(scrollX, y);
+      }
       el.__drawn = true;
     } catch (err) {
       if (turn !== el.__turn) return;
       const p = one.plain(err);
+      // A redraw that fails leaves what's there, which was right a moment ago; the next change tries again.
+      if (el.__drawn && !p.missing) return;
+      el.__html = null;
+      el.__drawn = false;
       if (p.missing) return void (el.innerHTML = one.notFound({ title: p.title }));
       el.innerHTML = one.problem({ title: p.title, text: p.next, action: { label: "Try Again", run: () => {
         one.tap();
-        el.innerHTML = one.loading(loading);
-        one.render(el, fn, { loading });
+        el.innerHTML = waiting();
+        one.render(el, fn, { loading, wait, skeleton });
       } } });
-      el.__drawn = false;
     } finally {
       clearTimeout(slow);
     }

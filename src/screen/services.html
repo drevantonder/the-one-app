@@ -26,7 +26,7 @@
     const all = home.servicesOn(p), withAccounts = all.filter((a) => (a.ops || []).some((o) => o.name === "accounts")), others = all.filter((a) => !withAccounts.includes(a));
     const sections = withAccounts.map((a) => {
       const list = accounts[a.name], signIn = home.settings(a, p, true);
-      const rows = list === undefined ? `<div class="row plain muted"><span class="spinner small"></span>Loading…</div>`
+      const rows = list === undefined ? `<div class="row plain skeleton" role="status" aria-label="Loading"><div class="main"><span class="sk-line" style="width:45%"></span></div></div>`
         : list instanceof Error ? `<div class="row plain warn">${esc(one.plain(list).title)}</div>`
         : !list.length ? `<div class="row plain muted">No accounts yet</div>`
         : list.map((x) => `<div class="row plain"><div class="main"><div class="title"><span>${esc(x.account)}</span></div>` +

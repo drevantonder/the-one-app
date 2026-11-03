@@ -891,8 +891,8 @@
   }
   (async () => {
     const kept = await one.cache("pages").catch(() => null);
-    // Nothing kept (the first time on this device): a spinner only if reading takes a while.
-    if (!kept?.state) return one.render(root, async () => void (await refresh()), { wait: 800 });
+    // Nothing kept (the first time on this device): grey tiles only if reading takes a while.
+    if (!kept?.state) return one.render(root, async () => void (await refresh()), { skeleton: "cards", wait: 300 });
     // Drawn from what was kept, at once, then from what's read: offline, it stays as it was, trying again.
     Object.assign(home.data, kept);
     root.__drawn = true;

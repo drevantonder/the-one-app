@@ -13,5 +13,5 @@
     // What to paste into an agent so it connects itself, as the node says.
     const text = (await one.api("GET", "/v1/state")).agent_prompt;
     return `<h2 class="section">Ask Your Agent</h2><div class="list"><div class="row prompt"><p>${one.esc(text)}</p>${one.copyButton(text)}</div></div>`;
-  });
+  }, { skeleton: "text" });
 </script>

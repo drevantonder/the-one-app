@@ -18,10 +18,10 @@
   const push = () => settings.push || "";
 
   const draw = () => one.render("#settings", async () => {
-    const state = await one.api("GET", "/v1/state");
+    const [state, items] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/vault?scope=global").catch(() => [])]);
     settings = state.install?.settings || {};
     const admin = state.user?.role === "admin";
-    pushKey = push() && admin ? (await one.api("GET", "/v1/vault?scope=global")).find((it) => (it.apps || []).includes(push()))?.title || "" : "";
+    pushKey = push() && admin ? items.find((it) => (it.apps || []).includes(push()))?.title || "" : "";
     const shown = (title, value) => `<div class="row plain"><div class="main"><div class="title"><span>${title}</span><span class="value">${one.esc(value)}</span></div></div></div>`;
     return `<div class="list">
         ${admin ? `<label class="row plain"><div class="main"><div class="title"><span>Push Notifications</span></div></div><input type="checkbox" class="switch" id="push"${push() ? " checked" : ""}></label>` : shown("Push Notifications", push() ? "On" : "Off")}
