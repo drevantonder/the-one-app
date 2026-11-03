@@ -2010,6 +2010,10 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
         return backups_tool(op, &input, agent);
     }
     if app == "devices" {
+        // Its approve and remove read the person's yes themselves.
+        if confirmed {
+            input.insert("confirm".into(), json!(true));
+        }
         return devices_tool(op, &input, client);
     }
     if name == "groups_list" {
