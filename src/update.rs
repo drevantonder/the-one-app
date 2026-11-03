@@ -55,9 +55,10 @@ pub fn run(tag: Option<&str>) -> Result<()> {
 
     let sends = parts.node || parts.mac || !parts.apps.is_empty();
     let after = if sends && tag.is_none() { after_update()? } else { None };
-    retire_gone(&src, &parts.apps)?;
+    let moved = retire_gone(&src, &parts)?;
     if !parts.node {
         deploy_apps(&src, &parts.apps)?;
+        add_where(&moved);
         let missed = follow(&macs, &commit, config_commit.as_deref());
         if !sends {
             println!("Nothing to send out: what changed since the last update here isn't in any build.");
@@ -115,6 +116,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
     }
+    add_where(&moved);
     let kernel_failed = deploy_kernel(&linux, short);
 
     let Some(tag) = tag else {
@@ -181,11 +183,13 @@ struct Parts {
     mac: bool,
     /// Built-in apps, by name, each deployed on its own.
     apps: Vec<String>,
+    /// Built-in apps renamed: (old name, new name).
+    renamed: Vec<(String, String)>,
 }
 
 impl Parts {
     fn everything() -> Parts {
-        Parts { node: true, mac: true, apps: Vec::new() }
+        Parts { node: true, mac: true, ..Default::default() }
     }
 
     /// What changed from the commit `last` says (and its config's) to `this`'s.
@@ -194,10 +198,24 @@ impl Parts {
         if was_config != now_config {
             return Parts::everything();
         }
-        match git(src, &["diff", "--name-only", was, now]) {
-            Ok(files) => Parts::of(files.lines()),
-            Err(_) => Parts::everything(),
+        // Without renames, so a renamed app's old folder is in it too.
+        let (Ok(files), Ok(renames)) = (git(src, &["diff", "--name-status", "--no-renames", was, now]), git(src, &["diff", "--name-status", "-M", "--diff-filter=R", was, now, "--", "apps/*/app.js"])) else {
+            return Parts::everything();
+        };
+        let mut parts = Parts::of(files.lines().filter_map(|l| l.split_once('\t')).map(|(_, f)| f));
+        // A new built-in app is in the node's next build, which adds it.
+        if files.lines().any(|l| l.strip_prefix("A\tapps/").is_some_and(|f| f.ends_with("/app.js") && f.matches('/').count() == 1)) {
+            (parts.node, parts.mac) = (true, true);
         }
+        let app = |f: &str| f.split('/').nth(1).unwrap_or("").to_string();
+        parts.renamed = renames
+            .lines()
+            .filter_map(|l| {
+                let mut f = l.split('\t').skip(1);
+                Some((app(f.next()?), app(f.next()?)))
+            })
+            .collect();
+        parts
     }
 
     /// What changing `files` (paths in the repo) has to send out. Anything not known to be outside the node is in it.
@@ -240,18 +258,39 @@ fn run_quiet(cmd: &mut Command) -> Result<()> {
     Ok(())
 }
 
-/// Deletes the built-in apps named whose folder is gone from `src`, renamed or removed, where the install still has
+/// Deletes the built-in apps changed whose folder is gone from `src`, renamed or removed, where the install still has
 /// them: they'd stay as apps no release ships. They wait in Recently Deleted, where an admin could restore one.
-fn retire_gone(src: &Path, names: &[String]) -> Result<()> {
+/// Gives each renamed one's new name, with where the old one was installed.
+fn retire_gone(src: &Path, parts: &Parts) -> Result<Vec<(String, Vec<String>)>> {
+    let mut moved = Vec::new();
     for app in get("/v1/apps")?.as_array().into_iter().flatten() {
-        let Some(name) = app["name"].as_str().filter(|n| names.iter().any(|m| m == n)) else { continue };
+        let Some(name) = app["name"].as_str().filter(|n| parts.apps.iter().any(|m| m == n)) else { continue };
         let built_in = app["owner"] == "admins" && app["from"].is_null();
         if built_in && app["deleted"].is_null() && !src.join("apps").join(name).join("app.js").is_file() {
             post("/v1/retire", json!({ "app": name, "how": "deleted" }))?;
-            println!("Deleted {name}: its folder is gone from apps/, so no release ships it");
+            match parts.renamed.iter().find(|(old, _)| old == name) {
+                Some((_, new)) => {
+                    println!("Deleted {name}: it's {new} now");
+                    let scopes = app["installed"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect();
+                    moved.push((new.clone(), scopes));
+                }
+                None => println!("Deleted {name}: its folder is gone from apps/, so no release ships it"),
+            }
         }
     }
-    Ok(())
+    Ok(moved)
+}
+
+/// Adds each renamed built-in app where its old name was installed.
+fn add_where(moved: &[(String, Vec<String>)]) {
+    for (app, scopes) in moved {
+        for scope in scopes {
+            match post("/v1/install", json!({ "app": app, "scope": scope, "installed": true })) {
+                Ok(_) => println!("Added {app} to {scope}, where its old name was"),
+                Err(err) => println!("  couldn't add {app} to {scope}: {err:#}"),
+            }
+        }
+    }
 }
 
 /// Deploys the built-in apps named, as they are in `src`, where the install has them.
@@ -730,7 +769,7 @@ fn a_change_sends_out_only_what_it_touched() {
     assert_eq!(Parts::of(["README.md", "docs/a.md", "tests/e2e.rs", "android/x", "windows/App.cs", "kernel/test/vault.test.js"]), Parts::default());
     assert_eq!(Parts::of(["apps/board/app.js", "apps/board/screen.html", "apps/vault/app.js"]), Parts { apps: vec!["board".into(), "vault".into()], ..Default::default() });
     assert_eq!(Parts::of(["apple/Mac/App.swift"]), Parts { mac: true, ..Default::default() });
-    assert_eq!(Parts::of(["src/node.rs", "apps/board/app.js"]), Parts { node: true, mac: true, apps: vec!["board".into()] });
+    assert_eq!(Parts::of(["src/node.rs", "apps/board/app.js"]), Parts { node: true, mac: true, apps: vec!["board".into()], ..Default::default() });
     assert_eq!(Parts::of(["kernel/vault/vault.js", "serverless/worker.js"]), Parts { node: true, ..Default::default() });
     assert_eq!(Parts::of(["Cargo.lock"]), Parts::everything());
 }
