@@ -8,7 +8,7 @@ function row(d, c) {
   return `<a class="row plain commit-row" onclick="${go("commit", { repo: d.repo, sha: c.sha })}">
     <div class="main">
       <div class="commit-subject">${esc(c.subject)}</div>
-      <div class="commit-by">${avatar(c, "tiny")}<strong>${esc(c.author)}</strong> committed ${one.ago(c.time, { long: true })}</div>
+      <div class="commit-by">${avatar(c, "tiny")}<strong>${esc(c.author)}</strong> committed ${ago(c.time, { long: true })}</div>
     </div>
     <span class="commit-sha"><code>${short(c.sha)}</code>${one.copyButton(c.sha, { label: "" })}</span>
   </a>`;

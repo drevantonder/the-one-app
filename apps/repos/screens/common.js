@@ -1,6 +1,8 @@
 // What every repo page shares: links, the path bar and the latest-commit card.
 const P = one.params;
 const esc = one.esc;
+// How long ago an ISO 8601 time from an operation was.
+const ago = (iso, opts) => one.ago(Date.parse(iso), opts);
 const short = (sha) => String(sha || "").slice(0, 7);
 const wide = () => matchMedia("(min-width: 700px)").matches;
 // A script that opens a screen, for an onclick="…".
@@ -39,7 +41,7 @@ function commitCard(c, d) {
     <a class="latest-main" onclick="${go("commit", { repo: d.repo, sha: c.sha })}">
       ${avatar(c, "small")}<span class="latest-author">${esc(c.author)}</span>
       <span class="latest-subject">${esc(c.subject)}</span>
-      <span class="latest-meta"><code>${short(c.sha)}</code> · ${one.ago(c.time, { long: true })}</span>
+      <span class="latest-meta"><code>${short(c.sha)}</code> · ${ago(c.time, { long: true })}</span>
     </a>
     <a class="latest-history" onclick="${history}">${one.icon("clock-counter-clockwise")}<span>History</span><span class="chev-row">${one.icon("caret-right")}</span></a>
   </div>`;

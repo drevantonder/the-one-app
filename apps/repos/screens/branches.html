@@ -6,7 +6,7 @@ function row(b) {
   return `<a class="row plain branch-row" onclick="${go("repo", { repo: P.repo, ref: b.branch, path: P.path || "" })}">
     ${one.icon("git-branch", "row-icon")}
     <div class="main">
-      <div class="title"><span class="branch-name">${esc(b.branch)}${b.branch === "main" ? ' <span class="badge">Default</span>' : ""}</span><span class="when">${one.ago(b.time)}</span></div>
+      <div class="title"><span class="branch-name">${esc(b.branch)}${b.branch === "main" ? ' <span class="badge">Default</span>' : ""}</span><span class="when">${ago(b.time)}</span></div>
       <div class="sub">${b.subject ? `${esc(b.subject)} · ${esc(b.author)}` : `<code>${short(b.head)}</code> · ${esc(b.pushed_by)}`}</div>
     </div>
     <div class="chev">›</div>
@@ -16,7 +16,7 @@ function row(b) {
 async function show() {
   const all = await one.call("branches", { repo: P.repo });
   if (!all.length) return one.empty(`No branches yet. ${where}, push one:<br><code>git push ${esc(address(P.repo))} main</code>`);
-  const sorted = all.sort((a, b) => (b.branch === "main") - (a.branch === "main") || b.time - a.time);
+  const sorted = all.sort((a, b) => (b.branch === "main") - (a.branch === "main") || Date.parse(b.time) - Date.parse(a.time));
   return `<h2 class="section">Branches</h2><div class="list">${sorted.map(row).join("")}</div>`;
 }
 

@@ -14,7 +14,7 @@ function entry(d, e) {
   return `<a class="row plain entry ${e.type}" data-name="${esc(e.name)}" onclick="${open}">
     ${one.icon(icons[e.type], "entry-icon")}
     <span class="entry-name">${esc(e.name)}${e.type === "commit" ? ` <span class="muted">@ ${short(e.sha)}</span>` : ""}</span>
-    <span class="entry-commit">${lastCommit(d, latest[e.name])}</span><span class="entry-when">${latest[e.name] ? esc(one.ago(latest[e.name].time, { long: true })) : ""}</span>
+    <span class="entry-commit">${lastCommit(d, latest[e.name])}</span><span class="entry-when">${latest[e.name] ? esc(ago(latest[e.name].time, { long: true })) : ""}</span>
   </a>`;
 }
 
@@ -89,7 +89,7 @@ async function restore(button) {
 async function show() {
   const d = await one.call("tree", { repo: P.repo, ref: P.ref, path: at });
   if (d.deleted)
-    return head(d) + `<div class="deleted-note muted">Deleted ${esc(one.ago(d.deleted.time, { long: true }))}</div>`
+    return head(d) + `<div class="deleted-note muted">Deleted ${esc(ago(d.deleted.time, { long: true }))}</div>`
       + (d.yours ? '<button class="button capsule" onclick="restore(this)">Restore</button>' : "") + danger(d);
   if (d.file) return one.open("file", { repo: d.repo, ref: refOf(d), path: at });
   if (d.empty)
@@ -111,7 +111,7 @@ async function fill(d) {
   for (const row of document.querySelectorAll(".entry[data-name]")) {
     const c = latest[row.dataset.name];
     row.querySelector(".entry-commit").innerHTML = lastCommit(d, c);
-    row.querySelector(".entry-when").textContent = c ? one.ago(c.time, { long: true }) : "";
+    row.querySelector(".entry-when").textContent = c ? ago(c.time, { long: true }) : "";
   }
 }
 

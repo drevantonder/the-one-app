@@ -116,7 +116,7 @@ async function show() {
   return `<div class="commit-head">
       <h1>${esc(d.subject)}</h1>
       ${d.body ? `<pre class="commit-body">${esc(d.body)}</pre>` : ""}
-      <div class="commit-by">${avatar(d, "small")}<strong>${esc(d.author)}</strong> committed ${one.ago(d.time, { long: true })}</div>
+      <div class="commit-by">${avatar(d, "small")}<strong>${esc(d.author)}</strong> committed ${ago(d.time, { long: true })}</div>
       <div class="commit-meta">
         <span>commit <code>${short(d.sha)}</code>${one.copyButton(d.sha, { label: "" })}</span>
         <span>${parents}</span>
