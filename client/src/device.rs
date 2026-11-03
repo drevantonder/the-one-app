@@ -137,12 +137,30 @@ impl Device {
     }
 
     /// Whether it's been let in: it reaches a node as itself. While it waits, a request that waited too long or was
-    /// turned down is asked again.
+    /// turned down is asked again. Once approved, the install the device that approved it said it's in (its genesis) is
+    /// the only one it takes, kept before it reads any: none it's shown first can be another.
     pub async fn wait(&self, token: &str) -> Result<bool, Error> {
+        let pinned = self.dir.join("genesis");
+        let asked_at = format!("{}/api/auth/devices/requests/{}", self.address, self.key());
+        let mut said = None;
+        if !pinned.exists() {
+            let (status, out) = http("GET", &asked_at, Some(token), None).await?;
+            if status == 200 && out["approved"] != true {
+                return Ok(false);
+            }
+            if let Some(genesis) = out["genesis"].as_str().and_then(|g| Hash::from_hex(g).ok()) {
+                let _ = std::fs::create_dir_all(&self.dir);
+                std::fs::write(&pinned, genesis.to_hex()).map_err(failed)?;
+            }
+            said = Some(status);
+        }
         if self.connect().await? {
             return Ok(true);
         }
-        let (status, _) = http("GET", &format!("{}/api/auth/devices/requests/{}", self.address, self.key()), Some(token), None).await?;
+        let status = match said {
+            Some(status) => status,
+            None => http("GET", &asked_at, Some(token), None).await?.0,
+        };
         let asked = self.asked.lock().unwrap().clone();
         if status == 404
             && let Some(asked) = asked

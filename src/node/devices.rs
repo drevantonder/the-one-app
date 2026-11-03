@@ -182,6 +182,33 @@ const ENROLLMENT: u64 = 86_400_000;
 const INVITES: &str = "invites";
 const INVITES_SCHEMA: &str = "create table invites (user text primary key, secret text not null, name text not null, role text not null, until integer not null)";
 
+#[cfg(test)]
+mod waiting_tests {
+    use super::*;
+
+    /// A code two waiting devices show lets neither in: one may have been made to show the other's.
+    #[test]
+    fn a_code_two_devices_show_lets_neither_in() {
+        let asking = |secret: [u8; 32], name: &str| {
+            let e = crate::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&secret));
+            DeviceRequest { key: hex(&e.key), seal: hex(&e.seal), name: name.into(), user: "u".into(), person: String::new(), proof: None, service: None, shared: false, enrollment: None }
+        };
+        let (mine, other) = (asking([1; 32], "Mine"), asking([2; 32], "Other"));
+        let code = crate::keys::join_code(&mine.endpoint().unwrap());
+        assert_eq!(waiting(vec![mine.clone(), other.clone()], &code).unwrap().name, "Mine");
+        let twin = DeviceRequest { name: "Made to match".into(), ..mine.clone() };
+        assert!(waiting(vec![mine, twin, other], &code).unwrap_err().to_string().contains("two devices"));
+    }
+}
+
+/// The one device waiting with join `code`: none if two are, as a device made to show another's code would be.
+fn waiting(asked: Vec<DeviceRequest>, code: &str) -> Result<DeviceRequest> {
+    let mut found = asked.into_iter().filter(|r| r.endpoint().is_ok_and(|d| crate::keys::join_code(&d) == code));
+    let r = found.next().context("no device is waiting with that code: it waits 15 minutes after it asks")?;
+    ensure!(found.next().is_none(), "two devices are waiting with that code, so neither was let in: start again on yours, for a new code");
+    Ok(r)
+}
+
 /// A join code as someone types it: its letters, upper case, without spaces or dashes.
 fn code_of(typed: &str) -> String {
     typed.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_ascii_uppercase()
@@ -343,7 +370,7 @@ impl Node {
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
-        let r = asked.into_iter().find(|r| r.endpoint().is_ok_and(|d| crate::keys::join_code(&d) == code)).context("no device is waiting with that code: it waits 15 minutes after it asks")?;
+        let r = waiting(asked, &code)?;
         ensure!(r.service.is_none() && r.proof.is_none(), "the recovery key lets in a device of someone already in your One App");
         let person = self.with(|i| Ok(i.r.members.user(&r.user).map(|u| u.name.clone())))?.context("the recovery key lets in a device of someone already in your One App")?;
         if !confirm {
@@ -367,11 +394,18 @@ impl Node {
                 Err(err) => not.push(json!({ "scope": scope.to_string(), "why": format!("{err:#}") })),
             }
         }
-        // Marked approved, for the device waiting on it to see.
-        if let Err(err) = self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}?approved", r.key), json!({})).await {
+        // Marked approved, for the device waiting on it to see, with the install it's in.
+        if let Err(err) = self.ask_auth("DELETE", &self.approved_path(&r.key)?, json!({})).await {
             tracing::warn!("marking a request approved at auth: {err:#}");
         }
         Ok(json!({ "device": r.name, "person": person, "recovery": true, "sealed": sealed, "not_sealed": not, "relay": relay }))
+    }
+
+    /// Where a device's request is marked approved at auth, saying the install it was let into (its first entry's hash),
+    /// the only one that device then takes.
+    fn approved_path(&self, key: &str) -> Result<String> {
+        let root = self.with(|i| Ok(i.r.root.map(|r| r.to_hex())))?.context("this device isn't in your One App yet")?;
+        Ok(format!("/api/auth/devices/requests/{key}?approved&genesis={root}"))
     }
 
     /// Seals each epoch of `scope` its entries made, opened through the recovery key's copy, to `to` where it isn't yet.
@@ -407,7 +441,7 @@ impl Node {
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
-        let r = asked.into_iter().find(|r| r.endpoint().is_ok_and(|d| crate::keys::join_code(&d) == code)).context("no device is waiting with that code: it waits 15 minutes after it asks")?;
+        let r = waiting(asked, &code)?;
         if let Some(service) = &r.service {
             ensure!(r.user == caller.user, "that service is someone else's: they approve it on their own device");
             let id = self.enrolled(&r)?;
@@ -431,8 +465,8 @@ impl Node {
             return Ok(json!({ "device": r.name, "person": who, "new": invite.is_some() }));
         }
         let approved = self.approve_request(caller, &r, invite.as_ref()).await?;
-        // Marked approved, for the device waiting on it to see.
-        if let Err(err) = self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}?approved", r.key), json!({})).await {
+        // Marked approved, for the device waiting on it to see, with the install it's in.
+        if let Err(err) = self.ask_auth("DELETE", &self.approved_path(&r.key)?, json!({})).await {
             tracing::warn!("marking a request approved at auth: {err:#}");
         }
         if invite.is_some() {

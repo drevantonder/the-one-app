@@ -659,6 +659,15 @@ fn a_person_sees_only_their_own_join_requests_and_the_installs_devices_see_them_
     assert_eq!(by(&a, "DELETE", &format!("/{kim_device}")).0, 200);
     assert_eq!(kims.get(&format!("/api/auth/devices/requests/{kim_device}")).0, 404);
 
+    // Lee's, approved saying the install it's in: her new device sees which, and takes no other.
+    let genesis = "ab".repeat(32);
+    let request = signed(&b, &format!("DELETE /api/auth/devices/requests/{lee_device}"), json!({}));
+    let (status, _, _) = ask("DELETE", &format!("{requests}/{lee_device}?approved&genesis={genesis}"), &[("x-one-request", &header(&request))], None);
+    assert_eq!(status, 200);
+    let (status, out, _) = lees.get(&format!("/api/auth/devices/requests/{lee_device}"));
+    assert_eq!((status, &out["approved"], out["genesis"].as_str()), (200, &json!(true), Some(genesis.as_str())), "{out}");
+    assert_eq!(kims.get(&format!("/api/auth/devices/requests/{lee_device}")).0, 404, "nobody else sees it");
+
     // What took or gave keys is gone.
     for path in ["/invite/keys", "/passkeys/add", "/internal/invite"] {
         let (status, _) = k.browser().post(path, json!({}));

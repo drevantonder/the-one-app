@@ -367,9 +367,10 @@ export class Device {
     await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser }), as);
     await this.sealTo(r, newUser ? ["global"] : scopesOf(k, r.user), as);
     await this.tell({ add: r.key, role: "client", ...(!newUser && k.roles.global?.[this.user] === "admin" ? { admin: true } : {}) }, as);
-    // Marked approved, for the device waiting on it to see.
-    if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`, {}, "?approved").catch(() => {});
-    else await this.bearer(`/api/auth/devices/requests/${r.key}?approved`, { method: "DELETE" }).catch(() => {});
+    // Marked approved, for the device waiting on it to see, with the install it's in: the only one it then takes.
+    const approved = `?approved&genesis=${(await get(`global:${this.user}`))?.root || ""}`;
+    if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`, {}, approved).catch(() => {});
+    else await this.bearer(`/api/auth/devices/requests/${r.key}${approved}`, { method: "DELETE" }).catch(() => {});
   }
 
   /// Seals each epoch of `scopes` that `as` opens to a device (`{ key, seal }`), but those it has.

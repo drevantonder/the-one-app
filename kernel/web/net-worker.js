@@ -73,13 +73,15 @@ export function server(version) {
   }
 
   /// `user`'s members from `global`'s entries kept and those `given` (a pack), checked and replayed by the client
-  /// (src/members.rs), then kept: the entries, the install's first, what to ask for next, and the members.
+  /// (src/members.rs), then kept: the entries, the install's first, what to ask for next, and the members. The first
+  /// time, of the install its approval named (`genesis:<user>`), if it named one.
   async function global(user, given) {
     const [, { get, put }] = await code;
     const kept = await get(`global:${user}`);
     if (!given && kept) return kept.members;
     const { Global } = await glue;
-    const g = new Global(kept?.root || "", kept?.pack || new Uint8Array(), given || new Uint8Array());
+    const root = kept?.root || (await get(`genesis:${user}`)) || "";
+    const g = new Global(root, kept?.pack || new Uint8Array(), given || new Uint8Array());
     const members = JSON.parse(g.members);
     await put(`global:${user}`, { root: g.root, pack: g.pack, have: g.have, members });
     g.free();

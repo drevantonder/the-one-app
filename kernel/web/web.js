@@ -6,7 +6,7 @@
 // The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use (`__one.host`).
 // This browser is a device of its person (device.js): it signs what changes who can do what, and hands each call the
 // keys it needs.
-import { del } from "./kept.js";
+import { del, put } from "./kept.js";
 import { answer, browserKeys, browserName, codeOf, Device, joinAsk, passkeyKeysOf } from "./device.js";
 import { members } from "./members.js";
 import { net } from "./net.js";
@@ -954,8 +954,10 @@ window.__one = {};
     // As a machine's node answers it: without `confirm`, which device it is; with, it's let in.
     "POST /v1/devices/approve": async (b) => {
       const code = String(b.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
-      const r = (await device.requests()).find((x) => x.code.replace(" ", "") === code);
-      if (!r) throw new Error("No device is waiting with that code. Check it, or start again on that device.");
+      const found = (await device.requests()).filter((x) => x.code.replace(" ", "") === code);
+      if (!found.length) throw new Error("No device is waiting with that code. Check it, or start again on that device.");
+      if (found.length > 1) throw new Error("Two devices are waiting with that code, so neither was let in. Start again on yours, for a new code.");
+      const [r] = found;
       if (b.confirm !== true) return { device: r.name, person: r.person, new: !r.mine };
       await device.approve(r);
     },
@@ -1027,7 +1029,10 @@ window.__one = {};
       const r = await bearer(`/api/auth/devices/requests/${keys.key}`).catch(() => null);
       if (r?.status === 401) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
       const gone = r?.status === 404;
-      const approved = gone || (r?.ok && (await r.json().catch(() => ({}))).approved);
+      const said = r?.ok ? await r.json().catch(() => ({})) : {};
+      // The install it was let into, as the device that approved it said: the only one it then takes.
+      if (said.approved && /^[0-9a-f]{64}$/.test(said.genesis || "")) await put(`genesis:${user}`, said.genesis);
+      const approved = gone || said.approved;
       if (approved && (await net.start(user, true).catch(() => false))) break;
       if (gone) await ask().catch(() => {});
     }
