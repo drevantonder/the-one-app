@@ -15,13 +15,15 @@ use serde_json::{Value, json};
 
 use crate::{agent, get, post};
 
-/// The try install for the checkout (or folder) this is run in, beside the downloads every try install shares: → its
-/// folder, and the checkout.
+/// The try install for the checkout this build is from (`<checkout>/target/<profile>/`), else for the checkout (or
+/// folder) it's run in, beside the downloads every try install shares: → its folder, and the checkout. So a checkout's
+/// own build finds its try install from any folder, as an MCP client starts it.
 fn folder() -> (PathBuf, PathBuf) {
     let base = PathBuf::from(format!("{}-try", one::home().display()));
+    let built = std::env::current_exe().ok().and_then(|exe| exe.canonicalize().ok()).and_then(|exe| Some(exe.parent()?.parent()?.parent()?.to_path_buf())).filter(|top| top.join(".git").exists() && top.join("Cargo.toml").exists());
     let here = std::env::current_dir().unwrap_or_else(|_| ".".into());
-    let top = std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output().ok().filter(|o| o.status.success());
-    let checkout = top.map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim())).unwrap_or(here);
+    let top = || std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output().ok().filter(|o| o.status.success());
+    let checkout = built.or_else(|| top().map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))).unwrap_or(here);
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(checkout.to_string_lossy().as_bytes()).into();
     let hash = one::entry::hex(&hash);
     let name = checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -126,11 +128,18 @@ fn serverless(dir: &Path) -> Result<()> {
 
 /// What `try` takes.
 fn usage() -> String {
+    // The MCP command as one that finds this try install from any folder: this build, if it's a checkout's own.
+    let (_, checkout) = folder();
+    let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).filter(|e| e.starts_with(&checkout));
+    let mcp = match exe {
+        Some(exe) => format!("{} try mcp", exe.display()),
+        None => format!("sh -c 'cd {} && exec {CLI} try mcp'", checkout.display()),
+    };
     format!(
         "Usage:
   {CLI} try                  start this checkout's try install, if it isn't running, and say where it is
   {CLI} try <command>        any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
-  {CLI} try mcp              its MCP server, for an agent: claude mcp add {CLI}-try -- {CLI} try mcp
+  {CLI} try mcp              its MCP server, for an agent: claude mcp add {CLI}-try -- {mcp}
   {CLI} try sign-in          sign its CLI in as its person, with no browser
   {CLI} try serverless deploy    run its serverless node beside its kernel, as Cloudflare would
   {CLI} try client <kind>    a signed-in client of this checkout's build: web, android or windows

@@ -468,10 +468,9 @@ window.__one = {};
     return `<div class="unavailable"><div class="unavailable-title">${esc(title)}</div><div class="unavailable-text">${text}</div>${extra}</div>`;
   }
 
-  /// A page's Services folder: its services' icons, nine at most, small, on frosted glass; with none, nine faint
-  /// empty places.
+  /// A page's Services folder: its services' icons, four at most, on frosted glass; with none, four faint empty places.
   function folder(apps, size) {
-    const cells = apps.length ? apps.slice(0, 9).map((a) => one.appIcon(a, size / 4)).join("") : `<i></i>`.repeat(9);
+    const cells = apps.length ? apps.slice(0, 4).map((a) => one.appIcon(a, size * 0.36)).join("") : `<i></i>`.repeat(4);
     return `<span class="folder" style="--size:${size}px">${cells}</span>`;
   }
 
@@ -810,14 +809,15 @@ window.__one = {};
           return reply((await openSheet(own("request", { scope: out.scope, id: out.id }))) === true);
         }
         case "title": {
-          // Empty while the screen shows its own large title, as the Mac app's bar is.
+          // Empty while the screen shows its own large title, as the Mac app's bar is; the tab is named by what the
+          // screen says it's called.
           const title = String(m.text ?? "");
           if (f.sheet) f.sheet.title.textContent = title || titleOf(r);
           // A phone's pages have no bar: what's pushed over them has its own.
           else if (!f.home) {
             const el = $(".detail .bar-title", root);
             if (el) el.textContent = title;
-            document.title = title || titleOf(r);
+            document.title = title || String(m.name || "") || titleOf(r);
           }
           return reply(null);
         }

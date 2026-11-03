@@ -23,6 +23,10 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this white label names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
+    // It runs from its own cache, not the folder it was started in, which (an agent's worktree) may be gone before it ends.
+    ensure!(cache().is_absolute(), "give {}_HOME as a full path", CLI.to_uppercase());
+    std::fs::create_dir_all(cache())?;
+    std::env::set_current_dir(cache())?;
     if let Some(tag) = tag {
         ensure!(version_tag(tag), "a release is named like v1.2.3");
         ensure!(installer_is_ours(), "install.sh installs another white label, so {NAME} isn't released on GitHub; {CLI} update runs main on its devices");

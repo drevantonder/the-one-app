@@ -32,13 +32,13 @@ pub fn describe() -> Value {
         "instructions": "agents_get and agents_set read and replace the AGENTS.md every agent harness on every device gets (Codex, Amp, OpenCode). Skills live in every harness's skills folder: agents_skills lists them, agents_skill reads one, agents_skill_set adds or replaces one (all its files), agents_skill_remove removes one. agents_history lists AGENTS.md's revisions (or a skill's), and agents_restore brings an old one back. Every device's harnesses also get the board's prompt hook and this install's MCP server.",
         "ops": [
             { "name": "get", "reads": true, "description": "The AGENTS.md every harness on every device gets.", "input": { "type": "object", "properties": {} } },
-            { "name": "set", "confirm": true, "description": "Replace the AGENTS.md every harness on every device gets (all of it; history keeps the old one).", "input": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } } },
+            { "name": "set", "reads": false, "confirm": true, "description": "Replace the AGENTS.md every harness on every device gets (all of it; history keeps the old one).", "input": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } } },
             { "name": "skills", "reads": true, "description": "Every skill: its name and description.", "input": { "type": "object", "properties": {} } },
             { "name": "skill", "reads": true, "description": "One skill's files.", "input": { "type": "object", "required": ["name"], "properties": { "name": name } } },
-            { "name": "skill_set", "description": "Add or replace a skill on every device: all of its files, SKILL.md first among them, which starts with frontmatter giving its name and description (what it's for, and when to use it).", "input": { "type": "object", "required": ["name", "files"], "properties": { "name": name, "files": { "type": "object", "description": "file path within the skill → its text" } } } },
-            { "name": "skill_remove", "confirm": true, "description": "Remove a skill from every device.", "input": { "type": "object", "required": ["name"], "properties": { "name": name } } },
+            { "name": "skill_set", "reads": false, "description": "Add or replace a skill on every device: all of its files, SKILL.md first among them, which starts with frontmatter giving its name and description (what it's for, and when to use it).", "input": { "type": "object", "required": ["name", "files"], "properties": { "name": name, "files": { "type": "object", "description": "file path within the skill → its text" } } } },
+            { "name": "skill_remove", "reads": false, "confirm": true, "description": "Remove a skill from every device.", "input": { "type": "object", "required": ["name"], "properties": { "name": name } } },
             { "name": "history", "reads": true, "description": "Every revision of AGENTS.md, or of a skill if given its name, newest first: its id, when, who from which device, its size and what changed.", "input": { "type": "object", "properties": { "name": name } } },
-            { "name": "restore", "confirm": true, "description": "Make an older revision (an id from history) the current one again, on every device.", "input": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "description": "the revision's id, from history" } } } },
+            { "name": "restore", "reads": false, "confirm": true, "description": "Make an older revision (an id from history) the current one again, on every device.", "input": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "description": "the revision's id, from history" } } } },
         ],
         "widgets": [],
     })
@@ -267,6 +267,13 @@ fn set_up(records: &[Record]) {
     let keep = |name: &str| skills.contains_key(name) || (apps.is_none() && name.starts_with(&format!("{}-", crate::skills::server_name())));
     let codex = std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
     if !text.is_empty() {
+        // Agents asked to change their instructions or add a skill otherwise edit this file, which then stays on this
+        // device and stops updating.
+        let cli = crate::config::CLI;
+        let text = format!(
+            "<!-- {} keeps this the same on every device: change it with agents_set (`{cli} agents set`), and add a skill for every agent with agents_skill_set (`{cli} agents skill_set`). Edited here, it stays on this device and stops updating. -->\n\n{text}",
+            crate::config::NAME
+        );
         for dir in [codex, home.join(".config/amp"), home.join(".config/opencode")] {
             if dir.is_dir() {
                 written.write(&dir.join("AGENTS.md"), &text);
@@ -298,8 +305,8 @@ fn set_up(records: &[Record]) {
 const HOOK_PATH: &str = "/hooks/board/news";
 
 /// Harnesses without settings hooks but with a way to add a message of their own get an extension that does what the
-/// hook does. OpenCode gets none: it could only add to the person's own message, where they see it; the board's
-/// instructions reach it in AGENTS.md and the MCP server's.
+/// hook does. OpenCode gets a plugin that puts usage in its instructions; Pi an extension that says it with each
+/// prompt, in full the first time a session speaks. Both run the install's CLI, as the person, where they run.
 const PI_EXTENSION: &str = r#"// Installed by {{name}}'s Board: adds to each prompt what other
 // agents have posted since this session last looked.
 import { readFileSync } from "node:fs"
@@ -318,6 +325,78 @@ export default function (pi: any) {
     } catch {}
   })
 }
+"#;
+
+/// Agent Hooks for Pi: usage and pace, in full the first time a session speaks, warnings after.
+/// Runs the install's CLI where Pi runs, so it reads that device.
+const HOOKS_EXTENSION: &str = r#"// Installed by {{name}}'s Agent Hooks: usage and pace for the models, in full the
+// first time a session speaks, warnings after.
+import { execFileSync } from "node:child_process"
+
+const clis = ["{{cli}}", `${process.env.HOME}/.local/bin/{{cli}}`, "/opt/homebrew/bin/{{cli}}"]
+function run(args: string[]): string {
+  for (const c of clis) {
+    try {
+      return execFileSync(c, args, { timeout: 15000, stdio: ["ignore", "pipe", "ignore"] }).toString().trim()
+    } catch {}
+  }
+  return ""
+}
+const seen = new Set<string>()
+export default function (pi: any) {
+  pi.on("before_agent_start", async (event: any, ctx: any) => {
+    if (event.messageType !== "user") return
+    try {
+      const id = ctx.sessionManager.getSessionId()
+      const first = !seen.has(id)
+      seen.add(id)
+      const text = run(["agent-hooks", "context", "--format", "text", "--hook_event_name", first ? "SessionStart" : "UserPromptSubmit"])
+      if (text) return { message: { customType: "{{cli}}-usage", content: text, display: !first } }
+    } catch {}
+  })
+}
+"#;
+
+/// Agent Hooks for OpenCode: usage and pace in its instructions, in full once per session, warnings after.
+const OPENCODE_HOOKS: &str = r#"// Installed by {{name}}'s Agent Hooks: usage and pace for the models, in full once
+// per session, warnings after.
+import { Plugin } from "@opencode/plugin"
+import { execFileSync } from "node:child_process"
+
+const clis = ["{{cli}}", `${process.env.HOME}/.local/bin/{{cli}}`, "/opt/homebrew/bin/{{cli}}"]
+function run(args: string[]): string {
+  for (const c of clis) {
+    try {
+      return execFileSync(c, args, { timeout: 15000, stdio: ["ignore", "pipe", "ignore"] }).toString().trim()
+    } catch {}
+  }
+  return ""
+}
+
+export default Plugin.define({
+  id: "{{cli}}-hooks",
+  async setup(ctx) {
+    await ctx.session.hook("prompt", async (event: any) => {
+      try {
+        const sid = event.sessionID ?? event.sessionId
+        const seen = ((await ctx.storage.get("sessions")) ?? []) as string[]
+        const first = !sid || !seen.includes(sid)
+        const text = run(["agent-hooks", "context", "--format", "text", "--hook_event_name", first ? "SessionStart" : "UserPromptSubmit"])
+        if (!text) {
+          if (sid && !first) await ctx.session.instructions.entry.remove({ sessionID: sid, key: "ai-usage" }).catch(() => {})
+          return
+        }
+        if (sid) {
+          await ctx.session.instructions.entry.put({ sessionID: sid, key: "ai-usage", value: text })
+          if (first) await ctx.storage.set("sessions", [...seen.filter((s) => s !== sid), sid].slice(-100))
+        } else if (event.prompt && typeof event.prompt.text === "string") {
+          console.warn("one-hooks: no session id on prompt hook; appending usage to the prompt")
+          event.prompt.text += "\n\n" + text
+        }
+      } catch {}
+    })
+  },
+})
 "#;
 
 /// The MCP entry each harness gets when it has none: `<cli> mcp`, every tool, for those that find tools themselves or
@@ -361,19 +440,26 @@ fn harnesses(home: &Path, written: &mut Written) {
     let s = |v: &str| CstInputValue::String(v.to_string());
     let args = |harness: &str| mcp_args(harness).iter().map(|a| s(a)).collect::<Vec<_>>();
     if claude.is_dir() {
-        edit(&claude.join("settings.json"), true, |t| with_hook(t, &hook, &port));
+        edit(&claude.join("settings.json"), true, |t| with_hook(t, "UserPromptSubmit", &hook, &port));
+        let usage = format!("{cli} agent-hooks context --format claude -");
+        edit(&claude.join("settings.json"), true, |t| with_hook(t, "SessionStart", &usage, "agent-hooks context"));
+        edit(&claude.join("settings.json"), true, |t| with_hook(t, "UserPromptSubmit", &usage, "agent-hooks context"));
         // Claude Code keeps user-scoped MCP servers beside its config folder, or in it if that's moved.
         let file = if std::env::var_os("CLAUDE_CONFIG_DIR").is_some() { claude.join(".claude.json") } else { home.join(".claude.json") };
         let entry = CstInputValue::Object(vec![("type".into(), s("stdio")), ("command".into(), s(&cli)), ("args".into(), CstInputValue::Array(args("claude"))), ("env".into(), CstInputValue::Object(vec![]))]);
         edit(&file, false, |t| with_mcp(t, "mcpServers", &server, entry));
     }
     if codex.is_dir() {
-        edit(&codex.join("hooks.json"), true, |t| with_hook(t, &hook, &port));
+        edit(&codex.join("hooks.json"), true, |t| with_hook(t, "UserPromptSubmit", &hook, &port));
+        let usage = format!("{cli} agent-hooks context --format codex -");
+        edit(&codex.join("hooks.json"), true, |t| with_hook(t, "SessionStart", &usage, "agent-hooks context"));
+        edit(&codex.join("hooks.json"), true, |t| with_hook(t, "UserPromptSubmit", &usage, "agent-hooks context"));
         edit(&codex.join("config.toml"), true, |t| with_codex_mcp(t, &server, &cli, mcp_args("codex")));
     }
     let opencode = config.join("opencode");
     if opencode.is_dir() {
         written.remove(&opencode.join("plugins").join(format!("{}-board.js", crate::config::CLI)));
+        written.write(&opencode.join("plugins").join(format!("{}-hooks", crate::config::CLI)).join("index.ts"), &plugin(OPENCODE_HOOKS));
         let entry = CstInputValue::Object(vec![("type".into(), s("local")), ("command".into(), CstInputValue::Array([vec![s(&cli)], args("opencode")].concat())), ("enabled".into(), true.into())]);
         edit(&json_or_jsonc(&opencode, "opencode"), true, |t| with_mcp(t, "mcp", &server, entry));
     }
@@ -384,6 +470,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     }
     if pi.is_dir() {
         written.write(&pi.join("extensions").join(format!("{}-board.ts", crate::config::CLI)), &plugin(PI_EXTENSION));
+        written.write(&pi.join("extensions").join(format!("{}-hooks.ts", crate::config::CLI)), &plugin(HOOKS_EXTENSION));
     }
     git(&addr);
 }
@@ -469,11 +556,11 @@ fn parse_json(text: &str) -> Result<CstRootNode> {
 
 /// Puts `command` among the settings' UserPromptSubmit hooks (Claude Code's and Codex's format), in place of a board
 /// hook already there (one whose command has `ours` in it), and says what the text becomes if that changes it.
-fn with_hook(text: &str, command: &str, ours: &str) -> Result<Option<String>> {
+fn with_hook(text: &str, event: &str, command: &str, ours: &str) -> Result<Option<String>> {
     let root = parse_json(text)?;
     let settings = root.object_value().unwrap();
     let hooks = settings.object_value_or_create("hooks").context("its hooks aren't an object")?;
-    let groups = hooks.array_value_or_create("UserPromptSubmit").context("its UserPromptSubmit hooks aren't a list")?;
+    let groups = hooks.array_value_or_create(event).with_context(|| format!("its {event} hooks aren't a list"))?;
     let (mut found, mut changed) = (false, false);
     for group in groups.elements() {
         let Some(list) = group.as_object().and_then(|g| g.array_value("hooks")) else { continue };
@@ -626,7 +713,7 @@ mod tests {
     #[test]
     fn settings_it_cant_read_are_never_rewritten() {
         for text in ["{ \"model\": ", "[1, 2]", "{\"hooks\": []}", "{\"hooks\": {\"UserPromptSubmit\": {}}}"] {
-            assert!(with_hook(text, HOOK, OURS).is_err(), "{text}");
+            assert!(with_hook(text, "UserPromptSubmit", HOOK, OURS).is_err(), "{text}");
         }
         assert!(with_mcp("{\"mcp\": 3}", "mcp", "the-one-app", "x".into()).is_err());
         assert!(with_codex_mcp("model = ", "the-one-app", "one", &["mcp"]).is_err());

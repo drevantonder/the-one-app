@@ -27,8 +27,9 @@ a { color: inherit; }
 .nav-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nav-count { flex: none; min-width: 18px; padding: 0 6px; border-radius: 9px; background: var(--badge); color: white; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
 
-/* A page's Services folder: its services' icons, small, nine to a folder, on frosted glass. */
-.folder { --size: 20px; --mini: calc(var(--size) * 0.62 / 3); width: var(--size); height: var(--size); flex: none; display: grid; grid-template-columns: repeat(3, var(--mini)); grid-auto-rows: var(--mini); gap: calc(var(--size) * 0.06); padding: calc(var(--size) * 0.13); border-radius: calc(var(--size) * 0.225); background: rgba(128, 128, 128, 0.22); box-shadow: inset 0 0 0 0.5px rgba(128, 128, 128, 0.3); align-content: start; }
+/* A page's Services folder: its services' icons on frosted glass, four to a folder at a sidebar row's size, where
+   nine would be dots. */
+.folder { --size: 20px; --mini: calc(var(--size) * 0.36); width: var(--size); height: var(--size); flex: none; display: grid; grid-template-columns: repeat(2, var(--mini)); grid-auto-rows: var(--mini); gap: calc(var(--size) * 0.08); padding: calc(var(--size) * 0.1); border-radius: calc(var(--size) * 0.225); background: rgba(128, 128, 128, 0.22); box-shadow: inset 0 0 0 0.5px rgba(128, 128, 128, 0.3); align-content: start; }
 .folder > i { border-radius: calc(var(--mini) * 0.25); background: rgba(128, 128, 128, 0.18); }
 .folder .app-icon { --size: var(--mini) !important; font-size: 0; }
 /* Your own icon in Settings: your avatar, round. */

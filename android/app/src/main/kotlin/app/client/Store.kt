@@ -174,6 +174,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     /** Loads who this is and the apps, and keeps up with the node's events, until signed out. */
     fun run() {
         if (running?.isActive == true) return
+        drawKept()
         running = scope.launch {
             var misses = 1
             val started = System.currentTimeMillis()
@@ -213,6 +214,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         apps = emptyList()
         code = null
         scope.launch { client.close() }
+        answered = false
         forget()
     }
 
@@ -231,12 +233,38 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         app.client.widget.HomeWidgets.signedOut()
     }
 
+    // MARK: The window as it was last
+
+    /** The node's state and apps as it last gave them, kept in the app's cache (which signing out clears), and drawn
+     *  as the app opens, while it asks the node again. */
+    private fun keptFile(name: String) = java.io.File(application.cacheDir, "window").apply { mkdirs() }.resolve(name)
+
+    private suspend inline fun <reified T> kept(name: String, path: String): T {
+        val text = String(api(path))
+        val value: T = json.decodeFromString(text)
+        withContext(Dispatchers.IO) { runCatching { keptFile(name).writeText(text) } }
+        return value
+    }
+
+    private fun drawKept() {
+        if (state != null || !signIn.signedIn) return
+        val kept = runCatching { json.decodeFromString<NodeState>(keptFile("state").readText()) }.getOrNull()
+        if (kept?.install == null) return
+        state = kept
+        apps = runCatching { json.decodeFromString<List<AppInfo>>(keptFile("apps").readText()) }.getOrDefault(emptyList())
+        phase = Phase.Ready
+    }
+
+    /** Whether the node has answered since the app opened. */
+    private var answered = false
+
     suspend fun refreshState(): Unit = coroutineScope {
         // The first time, the apps are asked for beside the state, not after it.
-        val early = if (state == null) async { runCatching { get<List<AppInfo>>("/v1/apps") }.getOrNull() } else null
-        val next: NodeState = get("/v1/state")
+        val early = if (!answered) async { runCatching { kept<List<AppInfo>>("apps", "/v1/apps") }.getOrNull() } else null
+        val next: NodeState = kept("state", "/v1/state")
         val regrouped = (next.user to next.install?.groups) != (state?.user to state?.install?.groups)
-        val first = state == null
+        val first = !answered
+        answered = true
         state = next
         failure = null
         if (first || regrouped || apps.isEmpty()) refreshApps(early?.await())
@@ -244,7 +272,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
 
     suspend fun refreshApps(early: List<AppInfo>? = null) {
         if (state?.install == null) return
-        apps = early ?: get("/v1/apps")
+        apps = early ?: kept("apps", "/v1/apps")
     }
 
     /** Every page's widgets, for the home screen's, while any is there (or `always`, as one is chosen). */

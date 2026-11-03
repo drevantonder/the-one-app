@@ -533,30 +533,29 @@ struct IconButton<Icon: View>: View {
     }
 }
 
+/// A page with nothing on it, as every screen's empty state (`one.empty`): one grey line, and the App Store's button
+/// for whoever can add apps here.
 private struct EmptyPage: View {
     @Environment(Store.self) private var store
     var page: Page
     var open: (Route) -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
-            Text("Nothing here yet")
-                .font(.headline)
+        VStack(spacing: 14) {
             Text(store.canArrange(page.scope)
                  ? page.scope == "user" ? "Apps you add for yourself show up here." : "Apps you add to \(page.title) show up here."
                  : "When its admins add apps to \(page.title), they show up here.")
-                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             if store.canArrange(page.scope) {
                 Button("Open the App Store") { open(.setting("store")) }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top, 4)
+                    .buttonStyle(.bordered)
+                    .fontWeight(.semibold)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(28)
-        .groupedContainer()
+        .padding(.horizontal, 24)
+        .padding(.vertical, 48)
     }
 }
 

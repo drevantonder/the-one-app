@@ -47,7 +47,7 @@ public sealed class Sheet
         button.Click += (_, _) => Close(null);
         bar.Children.Add(button);
         card.Children.Add(bar);
-        var screen = new AppScreen(route, Retitle, this);
+        var screen = new AppScreen(route, (text, _) => Retitle(text), this);
         Grid.SetRow(screen, 1);
         card.Children.Add(screen);
         layer.Children.Add(card);

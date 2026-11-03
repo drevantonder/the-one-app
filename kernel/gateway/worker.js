@@ -16,8 +16,9 @@ const MCP = ["/mcp", "/.well-known/oauth-protected-resource", "/.well-known/oaut
 /// What a node's answer is stamped with.
 const SANDBOX = "sandbox allow-scripts allow-forms allow-popups allow-downloads";
 
-/// The request headers a node gets: never the browser's cookies, which are the auth service's.
-const TO_NODE = ["authorization", "content-type", "accept", "accept-language", "last-event-id", "x-one-keys"];
+/// The request headers a node gets: never the browser's cookies, which are the auth service's. `if-none-match` asks
+/// for a screen's page only if it's changed.
+const TO_NODE = ["authorization", "content-type", "accept", "accept-language", "if-none-match", "last-event-id", "x-one-keys"];
 /// The answer headers a node may give.
 const FROM_NODE = ["content-type", "cache-control", "etag", "last-modified", "content-disposition", "retry-after"];
 
@@ -64,9 +65,28 @@ async function toNode(request, env, url) {
   return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: out });
 }
 
+/// Phosphor's icons (`icons.json`), read once per isolate, with the start of its SHA-256 that names it.
+let icons = null;
+
+/// `/icons?names=a,b&v=…`: only the icons named, of the set `v` names, so a screen's few don't cost the whole set.
+async function someIcons(env, url) {
+  icons ||= env.ASSETS.fetch(new Request(new URL("/icons.json", url.origin))).then(async (r) => {
+    const body = await r.arrayBuffer();
+    return { all: JSON.parse(new TextDecoder().decode(body)), v: await sha256(body) };
+  }).catch((err) => ((icons = null), Promise.reject(err)));
+  const { all, v } = await icons;
+  const names = (url.searchParams.get("names") || "").split(",").slice(0, 1000);
+  const asked = url.searchParams.get("v") || "";
+  const named = asked.length >= 12 && v.startsWith(asked);
+  return Response.json(Object.fromEntries(names.filter((n) => Object.hasOwn(all, n)).map((n) => [n, all[n]])), {
+    headers: { "cache-control": named ? "public, max-age=31536000, immutable" : "no-cache", "x-content-type-options": "nosniff" },
+  });
+}
+
 /// The web client's files: `/` and any path that isn't a file are its page, which routes itself.
 async function toWeb(request, env, url) {
   if (!["GET", "HEAD"].includes(request.method)) return refuse(405, "only GET and HEAD here");
+  if (url.pathname === "/icons") return someIcons(env, url);
   const ask = (path) => env.ASSETS.fetch(new Request(new URL(path, url.origin), { method: request.method }));
   let path = url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname;
   let resp = await ask(path);

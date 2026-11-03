@@ -1,9 +1,9 @@
-//! `one deploy <dir>`: builds an app with a pinned Bun, npm packages and all, into a bundle that holds the built module
-//! and the files it was built from, as written.
+//! `one deploy <dir>` and the deploy tool: build an app with a pinned Bun, npm packages and all, into a bundle that
+//! holds the built module and the files it was built from, as written.
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 
 /// The Bun every deploy builds with, and each platform's npm package of it with its sha512.
 const BUN: &str = "1.4.4";
@@ -77,24 +77,45 @@ pub fn build(dir: &Path) -> Result<Vec<u8>> {
         }
         Ok(())
     };
+    // Nothing in the folder runs while it builds: no packages' scripts, no macros. What the deploy tool builds is
+    // someone else's, maybe from elsewhere, on this machine.
     if dir.join("package.json").is_file() {
-        run(&["install"], "bun install")?;
+        run(&["install", "--ignore-scripts"], "bun install")?;
     }
     let out = tempdir()?;
     let outfile = out.join("app.js");
+    let meta = out.join("meta.json");
     let built = run(
-        &["build", &format!("./{entry}"), "--target=browser", "--format=esm", "--external=cloudflare:*", "--external=node:*", &format!("--outfile={}", outfile.display())],
+        &[
+            "build",
+            &format!("./{entry}"),
+            "--target=browser",
+            "--format=esm",
+            "--no-macros",
+            "--external=cloudflare:*",
+            "--external=node:*",
+            &format!("--outfile={}", outfile.display()),
+            &format!("--metafile={}", meta.display()),
+        ],
         "bun build",
     );
-    let module = built.and_then(|_| Ok(std::fs::read(&outfile)?));
+    let module = built.and_then(|_| {
+        // Every file it read is the folder's (Bun names them from it, links followed): never /etc/… or ../….
+        let meta: serde_json::Value = serde_json::from_slice(&std::fs::read(&meta)?)?;
+        for input in meta["inputs"].as_object().into_iter().flatten().map(|(path, _)| path) {
+            let path = Path::new(input);
+            ensure!(path.is_relative() && path.components().all(|c| matches!(c, std::path::Component::Normal(_))), "the app imports {input}, outside its folder: an app is built only from its own files and npm packages");
+        }
+        Ok(std::fs::read(&outfile)?)
+    });
     let _ = std::fs::remove_dir_all(&out);
     let mut files = vec![("app.js".to_string(), module?)];
     files.extend(crate::bundle::sources(dir)?.into_iter().map(|(path, bytes)| (format!("src/{path}"), bytes)));
     crate::bundle::pack(&files)
 }
 
-/// A built-in app's bundle, built from its files as `build` builds a folder, once per version of them: the build is
-/// kept in the cache, by the files' hash.
+/// An app's bundle, built from its files as `build` builds a folder, once per version of them: the build is kept in
+/// the cache, by the files' hash.
 pub fn build_files(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
     use sha2::Digest;
     let mut hash = sha2::Sha256::new();
@@ -124,6 +145,37 @@ pub fn build_files(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
     Ok(bundle)
 }
 
+/// An app's files as the deploy tool is given them, checked before they're built on this machine: paths inside the
+/// folder, no dot files, lockfiles or Bun's settings, and npm packages only from npm.
+pub fn given(files: &serde_json::Map<String, serde_json::Value>) -> Result<Vec<(String, Vec<u8>)>> {
+    ensure!(!files.is_empty(), "give the app's files: {{ \"app.js\": \"…\" }}");
+    let mut out = Vec::new();
+    for (path, text) in files {
+        let text = text.as_str().with_context(|| format!("{path}: give each file's text"))?;
+        let p = Path::new(path);
+        ensure!(
+            p.is_relative() && p.components().all(|c| matches!(c, std::path::Component::Normal(n) if !n.to_string_lossy().starts_with('.') && n != "node_modules")),
+            "{path}: a file's path is inside the app's folder, like app.js or screens/main.html, with no dot files or node_modules"
+        );
+        ensure!(!["bunfig.toml", "bun.lock", "bun.lockb", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"].contains(&path.as_str()), "{path}: leave it out; packages come from package.json");
+        if path == "package.json" {
+            let package: serde_json::Value = serde_json::from_str(text).context("package.json isn't JSON")?;
+            for key in ["overrides", "resolutions", "workspaces", "patchedDependencies", "catalog", "catalogs"] {
+                ensure!(package.get(key).is_none(), "package.json: leave out {key}; give dependencies with versions from npm");
+            }
+            for key in ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"] {
+                for (name, version) in package[key].as_object().into_iter().flatten() {
+                    let version = version.as_str().unwrap_or("/");
+                    ensure!(!version.contains([':', '/', '\\']), "package.json: {name} is {version}: packages come from npm, by version, like \"^2.1.0\"");
+                }
+            }
+        }
+        out.push((path.clone(), text.as_bytes().to_vec()));
+    }
+    ensure!(out.iter().any(|(p, _)| ENTRIES.contains(&p.as_str())), "give the app's module, one of {}", ENTRIES.join(", "));
+    Ok(out)
+}
+
 fn tempdir() -> Result<PathBuf> {
     let dir = std::env::temp_dir().join(format!("{}-build-{}", crate::config::CLI, rand::random::<u64>()));
     std::fs::create_dir_all(&dir)?;
@@ -144,4 +196,29 @@ pub fn show(bundle: &[u8], path: Option<&str>) -> Result<serde_json::Value> {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    /// What someone deploys from elsewhere is built on this machine: it reads nothing of it but the files given.
+    #[test]
+    fn a_build_reads_only_the_apps_own_files() {
+        let files = |app_js: &str| super::given(json!({ "app.js": app_js }).as_object().unwrap()).unwrap();
+        let build = |app_js: &str| super::build_files(&files(app_js).iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>());
+        for import in ["/etc/hostname", "../../../../../../etc/hostname"] {
+            let err = build(&format!("import t from {import:?} with {{ type: \"text\" }};\nexport default {{ t }};")).unwrap_err();
+            assert!(format!("{err:#}").contains("outside its folder"), "{err:#}");
+        }
+        let err = build("import { f } from \"./app.js\" with { type: \"macro\" };\nexport function g() { return 1; }\nexport default { a: f() };").unwrap_err();
+        assert!(format!("{err:#}").contains("Macros are disabled"), "{err:#}");
+        for (path, why) in [("../x.js", "inside the app's folder"), ("/tmp/x.js", "inside the app's folder"), (".npmrc", "no dot files"), ("bunfig.toml", "leave it out")] {
+            let err = super::given(json!({ "app.js": "export default {}", path: "" }).as_object().unwrap()).unwrap_err();
+            assert!(format!("{err:#}").contains(why), "{path}: {err:#}");
+        }
+        let package = json!({ "dependencies": { "secret": "file:/home" } }).to_string();
+        assert!(super::given(json!({ "app.js": "export default {}", "package.json": package }).as_object().unwrap()).is_err());
+        assert!(build("export default { ok: true };").is_ok());
+    }
 }

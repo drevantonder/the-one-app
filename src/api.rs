@@ -173,6 +173,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/endpoint", get(endpoint))
         .route("/v1/keys", get(keys_get).post(keys_post))
         .route("/v1/apps", get(apps))
+        .route("/v1/images/{name}", get(image))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .route("/v1/widgets", get(widgets))
         .route("/v1/badges", get(badges))
@@ -254,6 +255,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/events",
     "/v1/arrange",
     "/v1/install",
+    "/v1/deploy",
     "/v1/retire",
     "/v1/vault",
     "/v1/vault/requests",
@@ -369,6 +371,10 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
 /// instead, for what `SIGNED_IN` lists.
 async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
+    // A picture named by its content is anyone's who has its name.
+    if path == "/v1/images/{name}" {
+        return next.run(req).await;
+    }
     if let Some(FromClient(key, until)) = req.extensions().get::<FromClient>().copied() {
         return from_client(&node, key, until, &path, req, next).await;
     }
@@ -633,8 +639,27 @@ async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>)
     })
 }
 
-async fn apps(State(node): State<Node>, me: Me) -> Reply {
-    Ok(Json(json!(node.apps(&me.caller).await?)))
+#[derive(Deserialize)]
+struct AppsQuery {
+    /// As a window draws them (`Node::apps_drawn`).
+    light: Option<bool>,
+}
+
+async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Query(q): Query<AppsQuery>) -> Result<Response, Error> {
+    let apps = if q.light == Some(true) { node.apps_drawn(&me.caller).await? } else { node.apps(&me.caller).await? };
+    let body = serde_json::to_string(&apps)?;
+    let tag = crate::screen::tag(&body);
+    Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))
+}
+
+/// A picture a window's app list names (`Node::apps_drawn`), for anyone who has its name, which is its content's:
+/// kept for good, since it can't change.
+async fn image(State(node): State<Node>, Path(name): Path<String>) -> Response {
+    let found = if name.len() == 32 && name.bytes().all(|b| b.is_ascii_hexdigit()) { node.named_image(&name).await } else { None };
+    match found {
+        Some((kind, bytes)) => ([(axum::http::header::CONTENT_TYPE, kind), (axum::http::header::CACHE_CONTROL, "public, max-age=31536000, immutable".into())], bytes).into_response(),
+        None => (StatusCode::NOT_FOUND, [(axum::http::header::CACHE_CONTROL, "no-store")]).into_response(),
+    }
 }
 
 /// `{ name, device?, installed? }`: removes a sidecar from a device (this one by default), or with `installed` lets it
@@ -884,9 +909,23 @@ async fn app(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-async fn deploy(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.deploy(&local(&node)?, text(&body, "app")?, text(&body, "bundle")?).await?;
-    done()
+/// `{ app, bundle, owner?, wait? }`, or `{ app, files, … }` (each file's path → its text, built here as `one deploy`
+/// builds a folder): deploys it, making the app first if there's none by that name, owned by `owner` (as for
+/// `/v1/app`) or the caller. → what `Node::deploy_making` says.
+async fn deploy(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    let bundle = match body["files"].as_object() {
+        Some(files) => {
+            let files = crate::deploy::given(files)?;
+            let built = tokio::task::spawn_blocking(move || crate::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>()));
+            node.put_blob_for(&me.caller, &built.await.map_err(anyhow::Error::from)??)?
+        }
+        None => text(&body, "bundle")?.to_string(),
+    };
+    let owner = match body["owner"].as_str() {
+        Some(o) => Some(crate::members::Principal::parse(o).map(|p| p.to_string()).or_else(|_| node.find_group(o).map(|g| format!("group:{g}")))?),
+        None => None,
+    };
+    Ok(Json(node.deploy_making(&me.caller, text(&body, "app")?, &bundle, owner.as_deref(), body["wait"] == true).await?))
 }
 
 #[derive(Deserialize)]
@@ -1043,19 +1082,35 @@ async fn fill(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Js
 struct ScreenQuery {
     params: Option<String>,
     scope: Option<String>,
+    /// The kit and bridge as the address's files (`crate::screen::page`), for the web client, which has them.
+    linked: Option<bool>,
 }
 
 /// An app screen as a page, for shells' web views and the web client's frames.
-async fn screen(State(node): State<Node>, me: Me, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
+async fn screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref()).await?;
-    Ok(axum::response::Html(html).into_response())
+    let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref(), q.linked == Some(true)).await?;
+    Ok(page(&headers, html))
+}
+
+/// A screen's page, named by its content but for its nonce (its ETag).
+fn page(headers: &axum::http::HeaderMap, html: String) -> Response {
+    let tag = crate::screen::tag(&html);
+    tagged(headers, tag, axum::response::Html(html))
+}
+
+/// An answer named by its content (`tag`, its ETag): to a client that has it already, only that.
+fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl IntoResponse) -> Response {
+    if headers.get(axum::http::header::IF_NONE_MATCH).is_some_and(|had| had.as_bytes() == tag.as_bytes()) {
+        return (StatusCode::NOT_MODIFIED, [(axum::http::header::ETAG, tag)]).into_response();
+    }
+    ([(axum::http::header::ETAG, tag)], answer).into_response()
 }
 
 /// A client's own screen as a page (see `Node::client_screen`).
-async fn client_screen(State(node): State<Node>, me: Me, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
+async fn client_screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    Ok(axum::response::Html(node.client_screen(me.caller, &name, params)?).into_response())
+    Ok(page(&headers, node.client_screen(me.caller, &name, params, q.linked == Some(true))?))
 }
 
 async fn events(State(node): State<Node>, me: Me) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {

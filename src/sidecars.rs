@@ -334,3 +334,15 @@ pub fn answer_hosted(name: &str, dir: std::path::PathBuf, at: String, token: Str
     }
     Ok(())
 }
+
+/// Every operation declared here says whether it only reads, since an agent's client runs reads side by side and asks
+/// them again, and what can't be undone says it needs the person's agreement.
+#[test]
+fn every_operation_says_whether_it_only_reads() {
+    let all = built_in().iter().map(|b| (b.describe)()).chain([crate::messenger::describe(), crate::push::describe()]).collect::<Vec<_>>();
+    for d in &all {
+        for op in d["ops"].as_array().into_iter().flatten() {
+            assert!(op["reads"].is_boolean(), "{}_{} says neither reads: true nor reads: false", d["name"], op["name"]);
+        }
+    }
+}

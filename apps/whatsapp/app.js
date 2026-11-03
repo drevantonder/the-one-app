@@ -16,7 +16,7 @@ async function sidecar(ctx, op, input) {
   }
 }
 
-const NEEDS = "WhatsApp isn't on any of your devices yet. Add it in the App Store: whoever owns a device installs it there, and the App Store's WhatsApp page shows where. Then whatsapp_sign_in links your phone.";
+const NEEDS = "WhatsApp isn't on any of your devices yet. It runs on one that stays on, which your phone links to: that device's owner installs it there, and apps_devices whatsapp says where it runs. Then whatsapp_sign_in links your phone.";
 
 const ACCOUNT = { type: "string", description: "which WhatsApp account: its number, as whatsapp_accounts lists them; default the first linked here" };
 const CHAT = "the chat: its name as whatsapp_chats gives it, or a part of it only one chat has; or a phone number with its country code (+61 400 000 000), or a JID (61400000000@s.whatsapp.net)";

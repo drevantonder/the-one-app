@@ -493,8 +493,16 @@ struct NodeClient: Sendable {
         return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
     }
 
-    func state() async throws -> NodeState { try await get("v1/state", timeout: 2) }
-    func apps() async throws -> [AppInfo] { try await get("v1/apps") }
+    func state() async throws -> NodeState { try await kept("state", "v1/state", timeout: 2) }
+    func apps() async throws -> [AppInfo] { try await kept("apps", "v1/apps") }
+
+    /// A `GET` whose answer is also kept as the window's (`KeptWindow`), to draw the next time the app opens.
+    private func kept<T: Decodable>(_ name: String, _ path: String, timeout: TimeInterval = 10) async throws -> T {
+        let data = try await transport.send("GET", path, body: nil, timeout: timeout)
+        let value = try JSONDecoder().decode(T.self, from: data)
+        KeptWindow.keep(name, data)
+        return value
+    }
 
     /// The widgets, rendered for a page's scope.
     func widgets(scope: String?) async throws -> [WidgetInfo] {
@@ -631,4 +639,21 @@ func joinFailure(_ error: Error) -> String {
     } else {
         return String(localized: "Couldn’t join. Make a new pairing code on your other device and try again.")
     }
+}
+
+/// The window as it was last, kept on this device until its person signs out: the node's state and apps as it last
+/// gave them, and each page's widgets. The app draws it as it opens, while it asks the node again.
+enum KeptWindow {
+    private static var dir: URL { FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "window") }
+
+    static func keep(_ name: String, _ data: Data) {
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: dir.appending(path: name), options: .atomic)
+    }
+
+    static func read<T: Decodable>(_ name: String, as: T.Type) -> T? {
+        (try? Data(contentsOf: dir.appending(path: name))).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+    }
+
+    static func forget() { try? FileManager.default.removeItem(at: dir) }
 }

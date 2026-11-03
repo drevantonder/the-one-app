@@ -7,7 +7,7 @@
 
 use serde_json::{Value, json};
 
-use crate::config::{CLI, NAME, REPO};
+use crate::config::{CLI, NAME, REPO, YOURS};
 
 /// Claude Code keeps only the first 4,096 characters (UTF-16 units) of an MCP server's instructions; stay under them.
 pub const INSTRUCTIONS_LIMIT: usize = 4000;
@@ -15,7 +15,7 @@ pub const INSTRUCTIONS_LIMIT: usize = 4000;
 /// What it is, in two plain lines.
 pub fn about() -> String {
     format!(
-        "{NAME} is a person's devices, and their team's, as one place for apps and agents: their email, messages, calendar, files, notes and more, each an app.\nAgents use those apps as that person, through MCP or the `{CLI}` command, on devices that are part of their install."
+        "{NAME} is a person's devices, and their team's, as one place for apps and agents: their email, messages, calendar, files, notes and more, each an app.\nAgents use those apps as that person, through MCP or the `{CLI}` command, on any device in {YOURS}."
     )
 }
 
@@ -37,7 +37,8 @@ pub fn rules() -> String {
 /// How to find what's possible, from the command line.
 pub fn finding() -> String {
     format!(
-        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and which devices are in the install."
+        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}.\n- When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
+        server_name()
     )
 }
 
@@ -60,7 +61,7 @@ pub fn mcp_entries() -> String {
 fn install() -> String {
     match REPO.is_empty() {
         false => format!("install it with `curl -fsSL https://github.com/{REPO}/releases/latest/download/install.sh | sh`"),
-        true => format!("ask whoever runs their install to set {NAME} up on it"),
+        true => format!("ask an admin of {YOURS} to set it up there"),
     }
 }
 
@@ -69,7 +70,7 @@ fn install() -> String {
 pub fn connecting(address: Option<&str>) -> String {
     let mcp = match address {
         Some(a) => format!("`{}/mcp`", web(a)),
-        None => format!("their {NAME}'s web address followed by `/mcp`, like `https://{CLI}.example.com/mcp`"),
+        None => format!("the web address of {YOURS} followed by `/mcp`, like `https://{CLI}.example.com/mcp`"),
     };
     format!(
         "When someone asks you to connect to {NAME}, do it yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- If you can run commands (Claude Code, Codex, OpenCode, Cursor): run `{CLI} status`. If it answers, you're on one of their devices already: use the command line, and add MCP as below. If there's no `{CLI}`, {}, then ask them for a pairing code (Settings, then Devices) and run `{CLI} join <code>`.\n- If you can't (ChatGPT, Claude and other chat apps): add {mcp} as a connector, a custom MCP server. They sign in when it asks, and you act as them.",
@@ -125,7 +126,7 @@ impl Skill {
 /// The root skill's description: short, so a harness can keep it loaded.
 fn root_description() -> String {
     format!(
-        "{NAME}: the person's email, messages, calendar, files, board and more, as apps their agents use. Use whenever they mention {NAME} or its apps, ask you to connect to it, or want a message sent or a key or password used; read it before any of its tools."
+        "Use whenever the person pastes or mentions a key, token or password (keep it in the Vault, never use it raw), wants a message sent, mentions {NAME} or its apps, or asks you to connect to it; read it before any of its tools. {NAME} is their email, messages, calendar, files, board and more, as apps their agents use."
     )
 }
 
@@ -141,9 +142,9 @@ pub fn root(others: &[Skill], link: impl Fn(&Skill) -> String) -> Skill {
 pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     let code = match REPO.is_empty() {
         false => format!("https://github.com/{REPO}"),
-        true => "ask whoever runs the install where it is".to_string(),
+        true => format!("ask an admin of {YOURS} where it is"),
     };
-    let fill = |t: &str| t.replace("{{name}}", NAME).replace("{{cli}}", CLI).replace("{{server}}", &server_name()).replace("{{code}}", &code);
+    let fill = |t: &str| t.replace("{{name}}", NAME).replace("{{cli}}", CLI).replace("{{server}}", &server_name()).replace("{{code}}", &code).replace("{{yours}}", YOURS);
     let written = [include_str!("../skills/accounts/SKILL.md"), include_str!("../skills/build/SKILL.md")];
     let mut skills: Vec<Skill> = written
         .into_iter()
@@ -245,7 +246,7 @@ pub fn vault_app() -> Value {
 }
 
 /// How backups' tools are explained, as an app's guide is.
-const BACKUPS_GUIDE: &str = "Each device backs up the install's data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; backups_check restores the newest backup into a throwaway copy and says what came back.";
+const BACKUPS_GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; backups_check restores the newest backup into a throwaway copy and says what came back.";
 
 /// Backups' tools as an app's operations.
 pub fn backups_app() -> Value {
@@ -253,16 +254,18 @@ pub fn backups_app() -> Value {
 }
 
 /// How the groups' tool is explained, as an app's guide is.
-const GROUPS_GUIDE: &str = "Groups are the people who share a page, its apps and its data, like a family or a team. groups_list says who's in each, as what (admin or member), and who's invited but hasn't joined.";
+fn groups_guide() -> String {
+    format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the people who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined.")
+}
 
 /// The groups' tool as an app's operations.
 pub fn groups_app() -> Value {
-    node_app("groups", "Groups", "Who's in each group, as admin or member, and who's invited", GROUPS_GUIDE, groups_tools())
+    node_app("groups", "Groups", &format!("Who's in {YOURS}, and in each of its groups"), &groups_guide(), groups_tools())
 }
 
 /// The groups' MCP tools.
 pub fn groups_tools() -> Vec<Value> {
-    vec![json!({ "name": "groups_list", "description": "Every group: who's in it, as admin or member, and who's invited but hasn't joined yet.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) })]
+    vec![json!({ "name": "groups_list", "description": format!("The people in {YOURS}, you first, each as admin or member; then every group: who's in it and who's invited but hasn't joined yet."), "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) })]
 }
 
 /// An MCP tool's hints, all three always, since a client takes one left out as the worst: whether it only reads (so it
@@ -350,17 +353,19 @@ pub enum Mode {
 /// The MCP server's instructions: the rules first, then how to find things in this mode, then the guides of the apps
 /// every agent needs from the start (the config's `always_on`), then a line for each app, as many as fit under
 /// Claude Code's limit. Every other app's guide comes with search, or `<cli> <app>`.
-pub fn instructions(mode: Mode, apps: &[Value]) -> String {
+pub fn instructions(mode: Mode, apps: &[Value], person: Option<&str>) -> String {
     let finding = match mode {
         Mode::All => format!(
             "Every tool is also a command (`{CLI} <app> <op>`). `search` finds the tools for a task across every app, with each app's guide; call it before you guess, and to learn an app."
         ),
         Mode::Code => "`search` finds the operations for a task across every app, with exact call signatures and each app's guide. `execute` runs a short script with them: `const r = await tools.<app>.<op>({ ... }); return r`. Scripts call several in one go; what they return comes back to you. Guides name operations <app>_<op>: in a script, that's tools.<app>.<op>.".to_string(),
     };
+    let person = person.filter(|p| !p.trim().is_empty()).map(|p| format!("\n\nYou act for {p}: groups_list says who else is in {YOURS}.")).unwrap_or_default();
     let mut text = format!(
-        "{}\n\nRules, before anything else:\n{}\n\n{finding} Each app's guide is also a skill, `{}-<app>`, with one for the whole of {NAME}, `{}`: load them from your skills, or `{CLI} skills`.",
+        "{}{person}\n\nRules, before anything else:\n{}\n\n{finding} Each app's guide is also a skill, `{}-<app>`, with one for the whole of {NAME}, `{}`: load them from your skills, or `{CLI} skills`. When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
         about(),
         rules(),
+        server_name(),
         server_name(),
         server_name()
     );

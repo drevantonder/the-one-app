@@ -161,6 +161,8 @@ final class Store {
 
     /// Forgets everything it showed, and what it kept of the person's on this device: they signed out.
     func forget() {
+        KeptWindow.forget()
+        answered = false
         ScreenCache.forget()
         forgetKeptScreens()
         ScreenFile.forget()
@@ -519,6 +521,7 @@ final class Store {
     // MARK: Connection
 
     func run() async {
+        drawKept()
         var misses = 0
         while !Task.isCancelled {
             let started = Date.now
@@ -564,12 +567,37 @@ final class Store {
         return false
     }
 
+    /// The window as it was last (`KeptWindow`), drawn before the node first answers.
+    private func drawKept() {
+        guard state == nil, signedIn, let state = KeptWindow.read("state", as: NodeState.self), state.install != nil else { return }
+        self.state = state
+        apps = KeptWindow.read("apps", as: [AppInfo].self) ?? []
+        widgets = KeptWindow.read("widgets", as: [String: [WidgetInfo]].self) ?? [:]
+        arrangements = (state.arrangements ?? [:]).merging(unsaved) { $1 }
+        phase = .ready
+        if !apps.isEmpty { openWhereItWas() }
+    }
+
+    /// The Mac's window opens where it was, unless a link already chose where.
+    private func openWhereItWas() {
+        #if os(macOS)
+        if selection == nil {
+            let kept = UserDefaults.standard.data(forKey: "selection").flatMap { try? JSONDecoder().decode(Route.self, from: $0) }
+            selection = kept.flatMap(stillThere) ?? .page("user")
+        }
+        #endif
+    }
+
+    /// Whether the node has answered since the app opened (or its person signed in).
+    private var answered = false
+
     func refreshState() async throws {
         // The first time, the apps are asked for beside the state, not after it.
         let node = node
-        let early: Task<[AppInfo]?, Never>? = self.state == nil && signedIn ? Task { try? await node.apps() } : nil
+        let early: Task<[AppInfo]?, Never>? = !answered && signedIn ? Task { try? await node.apps() } : nil
         let state = try await node.state()
-        let first = self.state == nil
+        let first = !answered
+        answered = true
         let arrived = self.state?.install?.joining != false && state.install?.joining == false
         let regrouped = state.user != self.state?.user || state.install?.groups != self.state?.install?.groups
         self.state = state
@@ -637,13 +665,7 @@ final class Store {
                 await refreshApps()
             }
         }
-        #if os(macOS)
-        // Unless a link already chose where the window opens.
-        if selection == nil {
-            let kept = UserDefaults.standard.data(forKey: "selection").flatMap { try? JSONDecoder().decode(Route.self, from: $0) }
-            selection = kept.flatMap(stillThere) ?? .page("user")
-        }
-        #endif
+        openWhereItWas()
         await refreshWidgets()
     }
 
@@ -659,7 +681,10 @@ final class Store {
                 if widgets != nil { loadedWidgets.insert(scope) } else { answered = false }
             }
         }
-        if fresh != widgets { widgets = fresh }
+        if fresh != widgets {
+            widgets = fresh
+            if let data = try? JSONEncoder().encode(fresh) { KeptWindow.keep("widgets", data) }
+        }
         if answered { widgetsFetched = .now }
         keepWidgetsShownBefore()
         scheduleRedraw()

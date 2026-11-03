@@ -350,7 +350,7 @@ async fn the_apps_decode_what_the_node_sends() {
     let blob = node.put_blob(&bundle).unwrap();
     let me = one::node::Caller { key: node.id(), user: node.user().unwrap(), agent: None, token: None };
     node.member("app", json!({ "name": "lamps", "owner": format!("user:{}", me.user) })).await.unwrap();
-    node.deploy(&me, "lamps", &blob).await.unwrap();
+    node.deploy(&me, "lamps", &blob, false).await.unwrap();
     node.member("app", json!({ "name": "lamps", "owner": format!("user:{}", me.user), "source": "https://example.com/lamps" })).await.unwrap();
     api(&addr, &token, "POST", "/v1/install", json!({ "app": "lamps", "scope": "user", "installed": true })).await;
     api(&addr, &token, "POST", "/v1/arrange", json!({ "page": "user", "items": [{ "app": "lamps", "widget": "glance", "id": "w1", "size": "small", "options": { "room": "kitchen" } }, { "app": "lamps" }], "hidden": [] })).await;
@@ -728,7 +728,7 @@ fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
     let dir = crate::temp("screens");
     // What each page says once it's drawn, as its title.
     let title = |name: &str, body: &str, own: bool| -> String {
-        let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body, own);
+        let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body, own, false);
         let path = dir.join(format!("{name}.html"));
         std::fs::write(&path, page).unwrap();
         let out = one::deploy::chrome()
@@ -958,4 +958,23 @@ fn a_client_takes_whos_who_only_from_the_installs_signed_entries() {
     let mut kept = Global::new(Some(other.hash()));
     assert!(kept.add(&pack(&entries)).is_err());
     assert!(kept.members().is_err());
+}
+
+/// Every built-in app's operation says whether it only reads (`reads: true` or `reads: false`), as the core's do
+/// (src/sidecars.rs): MCP clients run read-only tools side by side and ask before the rest, and code mode refuses
+/// what can't be undone, so a missing one is a write passed off as nothing, or a read treated as one.
+#[test]
+fn every_built_in_apps_operation_says_whether_it_only_reads() {
+    let apps: Vec<String> = std::fs::read_dir("apps").unwrap().filter_map(|e| Some(e.ok()?.path().join("app.js"))).filter(|p| p.is_file()).map(|p| std::fs::canonicalize(p).unwrap().display().to_string()).collect();
+    assert!(apps.len() > 10, "the test reads apps/*/app.js: {apps:?}");
+    let script = r#"const bad = [];
+        for (const p of process.argv.slice(1)) {
+          const app = (await import(p)).default;
+          for (const [name, op] of Object.entries(app.ops || {})) if (!name.startsWith("_") && typeof op.reads !== "boolean") bad.push(`${app.name}_${name}`);
+        }
+        console.log(JSON.stringify(bad));"#;
+    let out = std::process::Command::new(one::deploy::bun().unwrap()).arg("-e").arg(script).args(&apps).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let bad: Vec<String> = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(bad.is_empty(), "these say neither reads: true nor reads: false: {bad:?}");
 }

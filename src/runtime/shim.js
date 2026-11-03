@@ -2,9 +2,17 @@
 // into a Worker that answers the node: operations, widgets, hooks and screens. Its databases, one per scope, are the
 // node's: a query asks the node, and a call's writes are handed to it when the call returns, as one write. A node on a
 // machine asks it over HTTP (`fetch`); the serverless node by RPC (`Call`), handing it what answers for the node.
-import app from "./app.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { WorkerEntrypoint } from "cloudflare:workers";
+
+// An app that throws as it starts answers every request with why, and every other app runs on.
+let app = {};
+let broken;
+try {
+  app = (await import("./app.js")).default ?? {};
+} catch (err) {
+  broken = `app.js doesn't start: ${String(err?.stack ?? err).split("\n").slice(0, 2).map((l) => l.trim()).join(" ")}`;
+}
 
 // Every request goes out through the node (the Worker's global outbound), carrying the token of the call it's made
 // in, so the node knows whose it is: it fills in that call's secrets, and refuses them to other hosts. On the
@@ -250,6 +258,7 @@ function context(ask, body, appends, later) {
 /// a hook, for `body`; `ask` is how it asks the node, `waitUntil` how work outlives the reply, and `out`, if given,
 /// sends the app's requests out. → what the reply says.
 async function handle(what, name, body, ask, waitUntil, out) {
+  if (broken) return { error: broken };
   if (what === "describe") return { ok: describe() };
   if (what === "screen") return { ok: app.screens?.[name]?.html ?? null };
   try {

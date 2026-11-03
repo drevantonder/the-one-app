@@ -49,6 +49,18 @@ const refuse = (status, message) => {
 
 const json = (v, status = 200) => Response.json(v, { status });
 
+/// An answer named by its content, but for a page's nonce, as a node on a machine names it (src/screen.rs's `tag`): to
+/// a client that has it already, only that.
+async function tagged(request, body, type) {
+  const nonce = body.split("'nonce-")[1]?.slice(0, 32);
+  const content = nonce ? body.replaceAll(nonce, "") : body;
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content)));
+  const tag = `"${[...digest.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("")}"`;
+  if (request.headers.get("if-none-match") === tag) return new Response(null, { status: 304, headers: { etag: tag } });
+  return new Response(body, { headers: { "content-type": type, etag: tag } });
+}
+const screenPage = (request, html) => tagged(request, html, "text/html; charset=utf-8");
+
 const kindOf = (scope) => (scope === "global" ? "global" : scope.startsWith("group:") ? "group" : "user");
 
 /// What a person reads when something needs a device and none is on.
@@ -749,14 +761,16 @@ class Run {
 
   /// Every app in the install, with what each does for this person where it's installed for them (src/node.rs:
   /// `catalog`). What it says of itself comes from its latest deploy.
-  async apps() {
+  /// `light`, as a window draws them (src/node/apps.rs: `apps_drawn`): what shows each one and where.
+  async apps({ light = false } = {}) {
+    const drawn = ["name", "title", "icon", "color", "domain", "image", "image_kind", "installed", "deleted", "screens", "widgets", "owner"];
     return Promise.all(this.view.apps.map(async ({ reach, ...info }) => {
       const app = deployed(this.view, info.name);
       const d = app && (await this.person.describe(this.who, app).catch(() => null));
       const mine = reach.length > 0;
       const shown = ["title", "icon", "color", "domain", "tagline", "description", "uses", "connector", "needs"];
       for (const [k, v] of Object.entries(d || {})) if (k !== "name" && k !== "schedules" && (mine || shown.includes(k))) info[k] = v;
-      return info;
+      return light ? Object.fromEntries(Object.entries(info).filter(([k]) => drawn.includes(k))) : info;
     }));
   }
 }
@@ -849,11 +863,11 @@ function answered(out, app) {
 }
 
 /// An app's screen, as its page (src/screen.rs).
-async function screenOf(person, who, view, app, name, params, scope) {
+async function screenOf(request, person, who, view, app, name, params, scope) {
   const reply = await person.appWorker(who, app).getEntrypoint("Call").run("screen", name, {}, null);
   const body = reply.ok ?? '<div id="missing"></div><script>missing.innerHTML = one.notFound()</script>';
   const context = { app: app.name, screen: name, params, me: view.me, scope, config: { name: CONFIG.name, cli: CONFIG.cli, api: `http://localhost:${CONFIG.port}`, made_here: CONFIG.made_here } };
-  return new Response(screen(JSON.stringify(context), body), { headers: { "content-type": "text/html; charset=utf-8" } });
+  return screenPage(request, screen(JSON.stringify(context), body, new URL(request.url).searchParams.get("linked") === "true"));
 }
 
 // Its endpoint, which reaches devices over iroh.
@@ -893,7 +907,7 @@ async function route(p, request) {
     const app = deployed(view, screenAt[1]);
     const d = app && (await p.describe(who, app));
     if (!d || d.uses?.sidecars?.length) refuse(503, needsDevice(d, screenAt[1]));
-    return screenOf(p, who, view, app, screenAt[2], JSON.parse(url.searchParams.get("params") || "{}"), url.searchParams.get("scope"));
+    return screenOf(request, p, who, view, app, screenAt[2], JSON.parse(url.searchParams.get("params") || "{}"), url.searchParams.get("scope"));
   }
   // A scope's keys, as sealed in the bucket, where every endpoint the relay lets in may read them anyway.
   if (request.method === "GET" && path === "/v1/keys") {
@@ -911,13 +925,13 @@ async function route(p, request) {
       const name = decodeURIComponent(path.slice("/v1/client-screens/".length));
       const params = JSON.parse(url.searchParams.get("params") || "{}");
       const context = { screen: name, params, me: run.view.me, config: { name: CONFIG.name, cli: CONFIG.cli, api: `http://localhost:${CONFIG.port}`, made_here: CONFIG.made_here } };
-      return new Response(client_screen(JSON.stringify(context), name), { headers: { "content-type": "text/html; charset=utf-8" } });
+      return screenPage(request, client_screen(JSON.stringify(context), name, url.searchParams.get("linked") === "true"));
     }
-    const page = url.searchParams.get("scope");
+    const scope = url.searchParams.get("scope");
     if (path === "/v1/state") return json(run.view.state);
-    if (path === "/v1/apps") return json(await run.apps());
-    if (path === "/v1/widgets") return json(await run.widgets(page));
-    return json(await run.badges(page));
+    if (path === "/v1/apps") return tagged(request, JSON.stringify(await run.apps({ light: url.searchParams.get("light") === "true" })), "application/json");
+    if (path === "/v1/widgets") return json(await run.widgets(scope));
+    return json(await run.badges(scope));
   }
   refuse(503, `That needs one of your devices, and ${OFF}.`);
 }

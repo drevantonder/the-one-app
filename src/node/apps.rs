@@ -69,6 +69,58 @@ impl Node {
         Ok(out)
     }
 
+    /// `apps`, as a window draws them: what shows each one and where (no operations, schemas or instructions, which
+    /// whoever needs them asks the whole list for), its picture named (`/v1/images/<name>`) rather than in it, so the
+    /// list is small and each picture is kept for good where it's shown.
+    pub async fn apps_drawn(&self, viewer: &Caller) -> Result<Vec<Value>> {
+        const DRAWN: &[&str] = &["name", "title", "icon", "color", "domain", "image", "image_kind", "installed", "deleted", "screens", "widgets", "owner"];
+        let mut out = Vec::new();
+        for app in self.apps(viewer).await? {
+            let Value::Object(mut app) = app else { continue };
+            app.retain(|k, _| DRAWN.contains(&k.as_str()));
+            if let Some(Value::String(image)) = app.get_mut("image")
+                && image.starts_with("data:")
+            {
+                *image = self.name_image(std::mem::take(image));
+            }
+            out.push(Value::Object(app));
+        }
+        Ok(out)
+    }
+
+    /// A picture's address by its content: `/v1/images/<name>`, which `named_image` gives back.
+    fn name_image(&self, data_url: String) -> String {
+        use sha2::Digest;
+        let name = data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(data_url.as_bytes())[..16]);
+        let url = format!("/v1/images/{name}");
+        self.0.named_images.lock().unwrap().insert(name, data_url);
+        url
+    }
+
+    /// The picture `apps_drawn` named `name`, as its type and bytes: looked for again in this machine's person's apps
+    /// if this node didn't name it (it's newer than the list that did, or another node made that list).
+    pub async fn named_image(&self, name: &str) -> Option<(String, Vec<u8>)> {
+        let found = || self.0.named_images.lock().unwrap().get(name).cloned();
+        let url = match found() {
+            Some(url) => url,
+            None => {
+                // Anyone can ask for a name, so the list is made again for one at most every ten seconds.
+                static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let now = now_ms();
+                if now.saturating_sub(LAST.load(std::sync::atomic::Ordering::Relaxed)) < 10_000 {
+                    return None;
+                }
+                LAST.store(now, std::sync::atomic::Ordering::Relaxed);
+                let me = Caller { key: self.id(), user: self.user().ok()?, agent: None, token: None };
+                self.apps_drawn(&me).await.ok()?;
+                found()?
+            }
+        };
+        let (head, data) = url.strip_prefix("data:")?.split_once(',')?;
+        let kind = head.strip_suffix(";base64")?;
+        Some((kind.to_string(), data_encoding::BASE64.decode(data.as_bytes()).ok()?))
+    }
+
     /// Every app in the install: owner, `from`, forks, deploys, the scopes `viewer` may use it's installed in, its
     /// title and icon, and for one built in, the bundle this release has of it; for those installed for them, what it
     /// does (operations, widgets, screens, instructions). With `not_added`, also the built-in apps the install hasn't
@@ -199,22 +251,30 @@ impl Node {
         if present {
             return Ok(());
         }
-        ensure!(admin, "{app} is built in, but this install doesn't have it yet: an admin adds it first");
+        ensure!(admin, "{app} is built in, but {} doesn't have it yet: an admin adds it first", crate::config::YOURS);
         self.member_as(caller, "app", json!({ "name": app, "owner": "admins" })).await?;
         self.member_content(caller, deploy(app, bundle)).await
     }
 
     /// What an app's latest deploy says it uses: (apps, sidecars). Waits a while for this device to run that deploy.
     pub(super) async fn uses(&self, app: &str) -> (Vec<String>, Vec<String>) {
+        self.runs_latest(app, CALL_LIMIT).await;
+        self.uses_here(app).await
+    }
+
+    /// Whether this device runs `app`'s latest deploy (or it has none), waiting up to `within` for it to.
+    async fn runs_latest(&self, app: &str, within: Duration) -> bool {
         let started = Instant::now();
-        while started.elapsed() < CALL_LIMIT {
+        loop {
             let latest = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone()))).ok().flatten();
             if latest.is_none() || self.0.bundles.lock().unwrap().get(app) == latest.as_ref() {
-                break;
+                return true;
+            }
+            if started.elapsed() >= within {
+                return false;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        self.uses_here(app).await
     }
 
     /// What the deploy of `app` this device runs says it uses: (apps, sidecars).
@@ -279,8 +339,9 @@ impl Node {
     }
 
     /// Deploys `bundle` as `app`'s code, for someone acting for its owner. Deploying an older bundle again rolls back.
-    /// `bundle` may be the start of an earlier deploy's.
-    pub async fn deploy(&self, caller: &Caller, app: &str, bundle: &str) -> Result<()> {
+    /// `bundle` may be the start of an earlier deploy's. With `wait`, → whether this device runs it within a few
+    /// seconds, as its next call here would.
+    pub async fn deploy(&self, caller: &Caller, app: &str, bundle: &str, wait: bool) -> Result<bool> {
         let bundle = self.with(|i| {
             let m = &i.r.members;
             let a = m.apps.get(app).with_context(|| format!("no app named {app}"))?;
@@ -290,8 +351,42 @@ impl Node {
                 None => bundle.to_string(),
             })
         })?;
+        // From elsewhere, only a bundle they may read: their own, or one an entry names for them.
+        ensure!(caller.key == self.0.id || self.may_read_blob(&caller.user, &bundle)?, "{app} has no deploy {bundle}: its versions are in apps_list's history");
         crate::bundle::module(&self.blob(&bundle).await?)?;
-        self.member_content(caller, deploy(app, &bundle)).await
+        self.member_content(caller, deploy(app, &bundle)).await?;
+        Ok(wait && self.runs_latest(app, Duration::from_secs(10)).await)
+    }
+
+    /// Deploys `bundle` as `app`, as `deploy` does, making the app first if there's none by that name, owned by
+    /// `owner` (by default the caller). → `{ bundle, made, before, here, ops }`: whether it was made, the deploy it ran
+    /// before, and with `wait`, whether this device runs it now and then its operations (or why it doesn't start).
+    pub async fn deploy_making(&self, caller: &Caller, app: &str, bundle: &str, owner: Option<&str>, wait: bool) -> Result<Value> {
+        let before = self.with(|i| {
+            let m = &i.r.members;
+            Ok(match m.apps.get(app) {
+                Some(a) => {
+                    ensure!(m.acts_for(&caller.user, &a.owner), "there's already an app called {app}, and it isn't yours: give yours another name, or fork it");
+                    Some(a.bundle.clone())
+                }
+                None => None,
+            })
+        })?;
+        if before.is_none() {
+            ensure!(members::valid_app_name(app), "{app}: an app's name is lowercase words joined by -, like water-log");
+            let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
+            self.member_as(caller, "app", json!({ "name": app, "owner": owner })).await?;
+        }
+        let here = self.deploy(caller, app, bundle, wait).await?;
+        let bundle = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone())))?;
+        let mut out = json!({ "bundle": bundle, "made": before.is_none(), "before": before.flatten(), "here": here });
+        if here {
+            match self.0.apps.describe(app).await {
+                Ok(d) => out["ops"] = json!(d["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).collect::<Vec<_>>()),
+                Err(e) => out["failed"] = json!(format!("{e:#}")),
+            }
+        }
+        Ok(out)
     }
 
     /// An app's code as deployed, its latest or an earlier deploy's: its files, or one of them. Everyone may read

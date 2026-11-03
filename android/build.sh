@@ -22,8 +22,9 @@ for abi in ${ABIS:-arm64-v8a x86_64}; do
 	cp "../target/$target/release/libone_client_ffi.so" "$generated/jniLibs/$abi/"
 done
 ../client/ffi/bindings.sh kotlin "$generated/kotlin"
-# No daemon: one left idle holds GBs on machines many agents share, and a warm one built no faster there.
-./gradlew --quiet --no-daemon assembleRelease
+# No daemon: one left idle holds GBs on machines many agents share, and a warm one built no faster there. Its
+# single-use one is listed in this checkout only, so another's `gradlew --stop` can't stop this build.
+./gradlew --quiet --no-daemon -Dorg.gradle.daemon.registry.base="$PWD/.gradle/daemon" assembleRelease
 config="${CONFIG:-../config.toml}"
 cli=$(sed -n '/^\[/q; s/^cli *= *"\([^"]*\)".*/\1/p' "$config")
 mkdir -p build

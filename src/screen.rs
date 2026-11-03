@@ -1,10 +1,21 @@
 //! A screen's page, as every node serves it, an app's or a client's own: the design kit and the bridge (`src/screen/`), what the
 //! screen is told (`window.__one`), and the screen's own HTML.
 
+/// The kit and the bridge, in the order a page has them: each path under `src/screen/` and its text.
+const KIT: &[(&str, &str)] = &[
+    ("kit.css", include_str!("screen/kit.css")),
+    ("bridge.js", include_str!("screen/bridge.js")),
+    ("kit.js", include_str!("screen/kit.js")),
+    ("code.js", include_str!("screen/code.js")),
+    ("markdown.js", include_str!("screen/markdown.js")),
+];
+
 /// A screen's page: `context` is `{ app, screen, params, me, scope, config }` (a Settings screen has no app or scope), `body` its HTML.
 /// A client's own (`own`) acts as the person, and draws what apps say, so it runs only its own scripts: they carry this
-/// page's nonce, and its policy refuses every other, inline event handlers too.
-pub fn page(context: &serde_json::Value, body: &str, own: bool) -> String {
+/// page's nonce, and its policy refuses every other, inline event handlers too. `linked`, the kit and bridge are links
+/// to the address's files (`/screen/<path>?v=`, named by content as the gateway names them), which the web client
+/// already has, rather than in the page.
+pub fn page(context: &serde_json::Value, body: &str, own: bool, linked: bool) -> String {
     let mut context = context.clone();
     // What a person joins, in their words: "your One App", or a workplace's, "the PTC App".
     context["config"]["yours"] = crate::config::YOURS.into();
@@ -23,12 +34,33 @@ pub fn page(context: &serde_json::Value, body: &str, own: bool) -> String {
     } else {
         (String::new(), "<script>".into(), body.to_string())
     };
+    let head = if linked {
+        let tag = &script[..script.len() - 1];
+        let (kit, scripts) = KIT.split_first().unwrap();
+        let scripts: String = scripts.iter().map(|(path, text)| format!("{tag} src=\"{}\"></script>", named(path, text))).collect();
+        format!("<link rel=\"stylesheet\" href=\"{}\">{script}window.__one={context};</script>{scripts}", named(kit.0, kit.1))
+    } else {
+        let bridge: String = KIT[1..].iter().map(|(_, text)| *text).collect();
+        format!("<style>{}</style>{script}window.__one={context};{bridge}</script>", KIT[0].1)
+    };
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">{policy}<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\
-         <style>{kit}</style>{script}window.__one={context};{bridge}</script></head><body>{body}</body></html>",
-        kit = include_str!("screen/kit.css"),
-        bridge = concat!(include_str!("screen/bridge.js"), include_str!("screen/kit.js"), include_str!("screen/code.js"), include_str!("screen/markdown.js")),
+         {head}</head><body>{body}</body></html>"
     )
+}
+
+/// A kit file's address, named by its content as the gateway names the files it serves (src/kernel/services.rs).
+fn named(path: &str, text: &str) -> String {
+    use sha2::Digest;
+    format!("/screen/{path}?v={}", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()))[..16])
+}
+
+/// What names a page's content, or any answer's (its ETag): the same for two pages that differ only in their nonce.
+pub fn tag(page: &str) -> String {
+    use sha2::Digest;
+    let nonce = page.split("'nonce-").nth(1).and_then(|rest| rest.get(..32));
+    let content = nonce.map_or_else(|| page.to_string(), |nonce| page.replace(nonce, ""));
+    format!("\"{}\"", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(content.as_bytes()))[..32])
 }
 
 /// The clients' own screens, by name, the same on every client: the person's pages, a page's Services, a request for a

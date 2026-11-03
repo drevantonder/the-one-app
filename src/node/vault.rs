@@ -223,13 +223,14 @@ impl Node {
         ensure!(!self.names_app(&host), "{host} is an app's name, not a site's");
         let lookup = self.lookup(caller, crate::agents::NAME, &self.usable_scopes(&caller.user)?).await?;
         let used = std::sync::Mutex::new(Vec::<String>::new());
+        let missing = std::sync::Mutex::new(Vec::<String>::new());
         let fill = |text: &str| {
             crate::vault::fill(text, &host, |name| {
                 let found = lookup.get(name);
-                if let Some((hosts, value)) = &found {
-                    if !hosts.is_empty() {
-                        used.lock().unwrap().push(value.clone());
-                    }
+                match &found {
+                    Some((hosts, value)) if !hosts.is_empty() => used.lock().unwrap().push(value.clone()),
+                    Some(_) => {}
+                    None => missing.lock().unwrap().push(name.to_string()),
                 }
                 found
             })
@@ -245,6 +246,10 @@ impl Node {
             Value::String(text) => fill(text)?.into_bytes(),
             other => fill(&other.to_string())?.into_bytes(),
         };
+        // A placeholder left as it is would go to the site as it is: say why it wasn't filled instead, sending nothing.
+        if let Some(name) = missing.into_inner().unwrap().first() {
+            bail!("Not sent: {}", Self::why_unfilled(&lookup, name));
+        }
         let method = req["method"].as_str().unwrap_or(if body.is_empty() { "GET" } else { "POST" }).to_uppercase();
         let (status, headers, bytes) = tokio::task::spawn_blocking(move || crate::outbound::send(&method, &filled, headers, body)).await??;
         let secrets = used.into_inner().unwrap();
@@ -264,6 +269,24 @@ impl Node {
         Ok(out)
     }
 
+    /// Why an agent's placeholder `name` found nothing in the items it was filled from (`lookup`), and what to do, in
+    /// a sentence.
+    fn why_unfilled(lookup: &crate::vault::Lookup, name: &str) -> String {
+        let ask = "vault_request, leaving out app, asks the person to let you";
+        let found = name.split_once(':').map(|(id, field)| (id, field, lookup.scopes.iter().find_map(|(_, items)| items.get(id).cloned())));
+        match found {
+            Some((id, _, None)) => format!("no item {id} is in a Vault you may use: vault_list shows them, and {ask} use one"),
+            Some((_, _, Some(it))) if !it.apps.contains(crate::agents::NAME) => format!("agents may not use {} yet: {ask}", it.title),
+            Some((_, field, Some(it))) => {
+                let fields: Vec<&str> = it.fields.keys().map(String::as_str).collect();
+                format!("{} has no field {field}; it has {}", it.title, fields.join(", "))
+            }
+            None => {
+                let field = name.rsplit('/').next().unwrap_or(name);
+                format!("no item agents may use has a field {field}: vault_request, leaving out app, asks the person for one")
+            }
+        }
+    }
     /// The items in the scopes `viewer` manages (or `scope`), as a person sees them: never a secret field's value.
     /// `wanted_by` is the apps installed for them that ask the Vault for fields it has.
     pub async fn vault(&self, viewer: &Caller, scope: Option<&Scope>) -> Result<Vec<Value>> {
@@ -445,10 +468,21 @@ impl Node {
     /// Asks a person for an item `app` may use, in `scope`, for `caller` (an agent, or an app's page), who never sees
     /// its secret fields: what `app` declares as `need`, or `ask`'s `{ title, fields, hosts }`. → `{ id, link, scope }`.
     /// From a page whose Vault they can't change (a member on Everyone's), it's asked in their own, which the app's calls
-    /// for them read first.
+    /// for them read first. A `shared` need is set once, by an admin in Everyone's Vault, for everyone: anyone else is
+    /// told which admin to ask.
     pub async fn request_item(&self, caller: &Caller, scope: &Scope, app: &str, need: Option<&str>, ask: &Value, why: &str) -> Result<Value> {
         let own = Scope::User(caller.user.clone());
-        let scope = if self.with(|i| Ok(members::manages_scope(&i.r.members, &caller.user, scope)))? { scope } else { &own };
+        let shared = match need {
+            Some(need) if app != crate::agents::NAME && app != members::APP => self.0.apps.describe(app).await.ok().map(|d| d["vault"][need].clone()).filter(|d| d["shared"] == true),
+            _ => None,
+        };
+        let manages = |scope: &Scope| self.with(|i| Ok(members::manages_scope(&i.r.members, &caller.user, scope)));
+        let scope = match &shared {
+            Some(d) if !manages(&Scope::Global)? => bail!("Ask {} to set up {}: only an admin can, once for everyone", self.admin_names()?, d["title"].as_str().unwrap_or("this")),
+            Some(_) => &Scope::Global,
+            None if manages(scope)? => scope,
+            None => &own,
+        };
         let mut data = match need {
             Some(_) if app == crate::agents::NAME => bail!(
                 "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the person"
@@ -496,9 +530,52 @@ impl Node {
         Ok(json!({ "id": id, "scope": scope.to_string(), "link": link }))
     }
 
-    /// Answers a request in `scope`: switches its app on for `item`, or makes an item with `fields` (name → value)
-    /// and `title`; with `declined`, declines it.
+    /// The install's admins' names, as someone asks them: "Andre", "Andre or Sam", "Andre, Sam or Kim".
+    fn admin_names(&self) -> Result<String> {
+        let mut names = self.with(|i| Ok(i.r.members.users.iter().filter(|(id, _)| i.r.members.is_admin(id)).map(|(_, u)| u.name.clone()).collect::<Vec<_>>()))?;
+        names.sort();
+        Ok(match names.split_last() {
+            None => "an admin".to_string(),
+            Some((last, [])) => last.clone(),
+            Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        })
+    }
+
+    /// The apps that use what a request of `app`'s for `need` gets: `app`, and when the need is `shared`, every added
+    /// app that declares a shared need of the same type, so one item an admin sets counts for them all.
+    async fn sharing(&self, app: &str, need: Option<&str>) -> Vec<String> {
+        let mut out = vec![app.to_string()];
+        let Some(need) = need.filter(|_| app != crate::agents::NAME && app != members::APP) else { return out };
+        let Ok(d) = self.0.apps.describe(app).await else { return out };
+        let d = &d["vault"][need];
+        if d["shared"] != true || d["type"].as_str().is_none_or(str::is_empty) {
+            return out;
+        }
+        let added: Vec<String> = self.with(|i| Ok(i.r.members.apps.iter().filter(|(n, a)| !a.erased && n.as_str() != app).map(|(n, _)| n.clone()).collect())).unwrap_or_default();
+        for other in added {
+            if let Ok(o) = self.0.apps.describe(&other).await {
+                if o["vault"].as_object().is_some_and(|v| v.values().any(|n| n["shared"] == true && n["type"] == d["type"])) {
+                    out.push(other);
+                }
+            }
+        }
+        out
+    }
+
+    /// Answers a request in `scope`: switches its app on for `item` (with every app that shares its need), or makes an
+    /// item with `fields` (name → value) and `title`; with `declined`, declines it.
     pub async fn answer_request(&self, caller: &Caller, scope: &Scope, id: &str, answer: &Value) -> Result<()> {
+        let asked = self.with(|i| Ok(i.views.get(&scope.to_string()).and_then(|(_, s)| s.requests.get(id)).map(|r| (r.app.clone(), r.need.clone()))))?;
+        let (sharing, kind) = match &asked {
+            Some((app, need)) => {
+                let kind = match need.as_deref().filter(|_| app != crate::agents::NAME && app != members::APP) {
+                    Some(need) => self.0.apps.describe(app).await.ok().and_then(|d| d["vault"][need]["type"].as_str().map(str::to_string)),
+                    None => None,
+                };
+                (self.sharing(app, need.as_deref()).await, kind)
+            }
+            None => (Vec::new(), None),
+        };
         let r = self.with(|i| {
             let state = &i.views.get(&scope.to_string()).with_context(|| format!("no request {id} in {scope}"))?.1;
             let r = state.requests.get(id).with_context(|| format!("no request {id} in {scope}"))?;
@@ -516,6 +593,7 @@ impl Node {
                     let it = items.get(item).context("no such item there")?;
                     let mut apps = it.apps.clone();
                     apps.insert(r.app.clone());
+                    apps.extend(sharing.iter().cloned());
                     json!({ "id": item, "apps": apps })
                 }
                 None => {
@@ -526,10 +604,13 @@ impl Node {
                         fields.insert(name.clone(), json!({ "value": value, "secret": secret }));
                     }
                     let title = answer["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or(&r.title);
-                    let mut data = json!({ "id": made, "title": title, "fields": fields, "hosts": r.hosts, "apps": [r.app] });
-                    // What the node asked for itself (the install's storage) is an item of that type.
+                    let mut data = json!({ "id": made, "title": title, "fields": fields, "hosts": r.hosts, "apps": sharing });
+                    // What the node asked for itself (the install's storage) is an item of that type; what an app
+                    // declared, of the type it declared.
                     if let Some(need) = r.need.as_ref().filter(|_| r.app == members::APP) {
                         data["type"] = json!(need);
+                    } else if let Some(kind) = &kind {
+                        data["type"] = json!(kind);
                     }
                     data
                 }

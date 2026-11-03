@@ -112,7 +112,7 @@ async fn deploy_module(node: &Node, app: &str, source: &str) {
     if node.source(app, None, None).await.is_err() {
         node.member("app", json!({ "name": app, "owner": format!("user:{}", me.user) })).await.unwrap();
     }
-    node.deploy(&me, app, &blob).await.unwrap();
+    node.deploy(&me, app, &blob, false).await.unwrap();
 }
 
 /// A device that answers every request with what it got: `{ host, authorization, body }`.
@@ -225,6 +225,12 @@ async fn agents_ask_for_items_and_never_see_them() {
     a.answer_request(&me, &mine, again, &json!({ "item": item })).await.unwrap();
     assert_eq!(a.vault(&me, Some(&mine)).await.unwrap()[0]["apps"], json!(["board", "other"]));
 
+    // An agent's request with a placeholder it may not fill is never sent, rather than sent as it is.
+    let site = format!("http://127.0.0.1:{}/", echo().await);
+    for (placeholder, why) in [(format!("{{{{{item}:key}}}}"), "agents may not use Example key yet"), ("{{key}}".to_string(), "no item agents may use has a field key"), ("{{0123456789abcdef:key}}".to_string(), "no item 0123456789abcdef")] {
+        let err = a.vault_fetch(&me, &json!({ "url": site, "headers": { "authorization": placeholder } })).await.unwrap_err().to_string();
+        assert!(err.starts_with("Not sent: ") && err.contains(why), "{err}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -237,7 +243,10 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     let port = echo().await;
     let module = |name: &str| format!(r#"export default {{
   name: "{name}",
-  vault: {{ account: {{ title: "Example account", type: "Example account", accounts: true, hosts: ["127.0.0.1"], fields: {{ email: {{}}, token: {{ secret: true }} }} }} }},
+  vault: {{
+    account: {{ title: "Example account", type: "Example account", accounts: true, hosts: ["127.0.0.1"], fields: {{ email: {{}}, token: {{ secret: true }} }} }},
+    client: {{ title: "Example sign-in", type: "Example sign-in", shared: true, hosts: ["127.0.0.1"], fields: {{ client_id: {{}} }} }},
+  }},
   ops: {{
     send: {{ run: async (ctx, {{ url, auth }}) => {{
       const r = await fetch(url, {{ method: "POST", headers: {{ authorization: auth }}, body: "" }});
@@ -362,6 +371,14 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     a.vault_grant(&me, &mine, "vault", true).await.unwrap();
     assert_eq!(a.call(send("two", "{{token}}")).await.unwrap()["authorization"], "s3cret-in-the-vault", "granted again, it opens what it opened before");
     assert_eq!(a.call(send("one", "{{token}}")).await.unwrap()["authorization"], "{{token}}", "still only for the app switched on");
+
+    // A shared need is asked in Everyone's Vault, from any page, and the item an admin sets counts for every app that
+    // shares it.
+    let asked = a.request_item(&me, &mine, "one", Some("client"), &json!({}), "").await.unwrap();
+    assert_eq!(asked["scope"], "global");
+    a.answer_request(&me, &one::entry::Scope::Global, asked["id"].as_str().unwrap(), &json!({ "fields": { "client_id": "c" } })).await.unwrap();
+    let shared = a.vault(&me, Some(&one::entry::Scope::Global)).await.unwrap();
+    assert_eq!((shared[0]["type"].as_str(), &shared[0]["apps"]), (Some("Example sign-in"), &json!(["one", "two"])));
 }
 
 /// A device whose key is still in server.json, from before devices were called devices, never quietly becomes a new one.

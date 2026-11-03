@@ -2,7 +2,7 @@ use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use one::config::{CLI, NAME};
+use one::config::{CLI, NAME, YOURS};
 use one::skills::Mode;
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
@@ -18,17 +18,18 @@ fn every_command() -> String {
     format!(
         "Usage:
   {CLI} serve                          run this machine as one of your devices
-  {CLI} status                         this device, its install, its users, groups and devices
+  {CLI} status                         this device, and the people, groups and devices in {YOURS}
   {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
                                        your devices; {CLI} and {CLI} mcp here then act as you
   {CLI} sign-out                       sign this machine out
   {CLI} create <name> --as <your name> create an install, with you as its first admin
   {CLI} pair [--user <name>]           a pairing code for another of your machines (or, for admins, someone else's)
-  {CLI} join <code>                    join an install with a pairing code
+  {CLI} join <code>                    join {YOURS} with a pairing code
   {CLI} rename <name>                  rename this device
   {CLI} role <user> admin|member       (admins)
   {CLI} settings [<name> <value>|--default]   the install's settings (admins set them)
-  {CLI} groups                         every group: who's in it, as admin or member, and who's invited
+  {CLI} groups                         who's in {YOURS}, then every group: who's in it, as admin or member,
+                                       and who's invited
   {CLI} group create <name>            a group, with you as its admin
   {CLI} group invite <group> <user> [--admin]
   {CLI} group accept <group>
@@ -324,21 +325,29 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["search", words @ ..] if !words.is_empty() => {
             let limit = flags.get("limit").and_then(|l| l.as_str().and_then(|l| l.parse().ok()).or(l.as_u64().map(|l| l as usize))).unwrap_or(8);
-            println!("{}", code::search(&code::catalog()?, &words.join(" "), limit, code::For::Cli));
+            let (apps, addable) = code::catalogs()?;
+            println!("{}", code::search(&apps, &addable, &words.join(" "), limit, code::For::Cli));
         }
         ["status"] => status(&get("/v1/state")?),
         ["apps"] => {
+            let groups = get("/v1/state")?["install"]["groups"].clone();
+            // Where it's added, as the App Store says it: you, a group by its name, everyone.
+            let place = |scope: &str| match scope.split_once(':') {
+                Some(("group", id)) => groups.as_array().into_iter().flatten().find(|g| g["id"] == id).and_then(|g| g["name"].as_str()).unwrap_or(id).to_string(),
+                Some(("user", _)) => "you".to_string(),
+                _ => "everyone".to_string(),
+            };
             for app in get("/v1/apps")?.as_array().into_iter().flatten() {
                 let from = app["from"].as_str().map(|f| format!(", a fork of {f}")).unwrap_or_default();
-                let installed: Vec<&str> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-                let installed = if installed.is_empty() { String::new() } else { format!(", installed in {}", installed.join(", ")) };
+                let installed: Vec<String> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).map(place).collect();
+                let installed = if installed.is_empty() { String::new() } else { format!(", added for {}", installed.join(", ")) };
                 println!("{} ({}{from}{installed})", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
                 ops::list(std::slice::from_ref(app)).iter().for_each(|l| println!("{l}"));
             }
         }
         ["create", name @ ..] if !name.is_empty() => {
             let user_name = flags.get("as").and_then(Value::as_str).context("say what to call you with --as <your name>")?;
-            let r = post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name }))?;
+            let r = unsigned_post("/v1/create", json!({ "name": name.join(" "), "user_name": user_name }))?;
             println!("Created {}.\n\nIts recovery key, shown only this once; keep it in your admins' password manager:\n\n  {}\n\nAdd your other machines with: {CLI} pair", name.join(" "), r["recovery"].as_str().unwrap_or(""));
         }
         ["pair"] => {
@@ -346,7 +355,7 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for seven days.", r["code"].as_str().unwrap_or(""));
         }
         ["join", code] => {
-            post("/v1/join", json!({ "code": code }))?;
+            unsigned_post("/v1/join", json!({ "code": code }))?;
             println!("Joined. Syncing now; {CLI} status shows progress.");
         }
         ["settings"] => {
@@ -387,8 +396,8 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["deploy", app] if flags.contains_key("version") => {
             let version = flags["version"].as_str().context("give --version <hash>")?;
-            post("/v1/deploy", json!({ "app": app, "bundle": version }))?;
-            println!("Deployed {app} ({version}) again. Every device runs it now.");
+            let here = post("/v1/deploy", json!({ "app": app, "bundle": version, "wait": true }))?["here"] == true;
+            println!("{}", deployed_said(&format!("Deployed {app} ({version}) again."), here));
         }
         ["deploy", dir] => deploy(std::path::Path::new(dir), &flags)?,
         ["deploys", app] => {
@@ -783,9 +792,17 @@ fn run(args: Vec<String>) -> Result<()> {
             let device = flags.get("device").and_then(Value::as_str);
             post("/v1/sidecar", json!({ "name": name, "device": device, "installed": *how == "add" }))?;
             let on = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
-            match *how {
-                "remove" => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} sidecars add {name})."),
-                _ => println!("{name} is installed {on}: it serves there while it runs."),
+            // Allowing it runs nothing: it serves only where it's installed and running.
+            let state = get("/v1/state")?;
+            let there = state["install"]["devices"].as_array().into_iter().flatten().find(|s| match device {
+                Some(d) => s["name"] == d,
+                None => s["here"] == true,
+            });
+            let runs = there.is_some_and(|s| s["sidecars"].as_array().into_iter().flatten().any(|n| n == *name));
+            match (*how, runs) {
+                ("remove", _) => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} sidecars add {name})."),
+                (_, true) => println!("{name} runs {on}."),
+                (_, false) => println!("{name} may run {on}, but it isn't installed there: sidecars/install.sh {name} in {NAME}'s code installs it, as the device's owner."),
             }
         }
         ["schedules"] => {
@@ -889,26 +906,27 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
 }
 
 /// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the install hasn't one by that
-/// name, and deploys it. Every device runs it now.
+/// name, and deploys it, saying whether this device runs it yet.
 fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
+    anyhow::ensure!(dir.is_dir(), "no folder {} in {}: give the app's folder", dir.display(), std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default());
     let name = match flags.get("name").and_then(Value::as_str) {
         Some(name) => name.to_string(),
         None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
     };
     let bundle = one::deploy::build(dir)?;
     let blob = request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
-    let apps = get("/v1/apps")?;
-    // A sidecar of the same name is listed too, without an owner: the app is still to be made.
-    if !apps.as_array().into_iter().flatten().any(|a| a["name"] == name.as_str() && !a["owner"].is_null()) {
-        let owner = match flags.get("owner").and_then(Value::as_str) {
-            Some(owner) => owner.to_string(),
-            None => format!("user:{}", get("/v1/state")?["install"]["user"].as_str().unwrap_or("")),
-        };
-        post("/v1/app", json!({ "name": name, "owner": owner }))?;
-    }
-    post("/v1/deploy", json!({ "app": name, "bundle": blob }))?;
-    println!("Deployed {name} ({}). Every device runs it now.", &blob[..12]);
+    let here = post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": flags.get("owner"), "wait": true }))?["here"] == true;
+    println!("{}", deployed_said(&format!("Deployed {name} ({}).", &blob[..12]), here));
     Ok(())
+}
+
+/// What a deploy did, after `done`: which devices run it yet, as far as this one knows (`here`, whether it does).
+fn deployed_said(done: &str, here: bool) -> String {
+    let device = get("/v1/state").ok().and_then(|s| s["device"]["name"].as_str().map(str::to_string)).unwrap_or_else(|| "This device".into());
+    match here {
+        true => format!("{done} {device} runs it now; your other devices take it within a few seconds."),
+        false => format!("{done} Your devices take it within a few seconds: until then, its calls say they don't have its latest version yet."),
+    }
 }
 
 /// A built-in command's help, for --help after it: every_command()'s lines for it, or help() when none are. None for
@@ -916,19 +934,25 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
 fn command_help(words: &[String]) -> Option<String> {
     let first = words.first().filter(|w| *w != "-h")?;
     let text = every_command();
-    let mut out = String::new();
-    let mut taking = false;
-    for line in text.lines() {
-        if line.starts_with(&format!("  {CLI} {first}")) {
-            taking = true;
-        } else if !line.starts_with("        ") {
-            taking = false;
+    // The lines for the most words given that have any: vault set's, else every vault line.
+    let lines = |prefix: &str| {
+        let mut out = String::new();
+        let mut taking = false;
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix(&format!("  {CLI} {prefix}")) {
+                taking = rest.is_empty() || rest.starts_with(' ');
+            } else if !line.starts_with("        ") {
+                taking = false;
+            }
+            if taking {
+                out.push_str(line);
+                out.push('\n');
+            }
         }
-        if taking {
-            out.push_str(line);
-            out.push('\n');
-        }
-    }
+        out
+    };
+    let commands: Vec<&String> = words.iter().take_while(|w| !w.starts_with('-')).collect();
+    let out = (1..=commands.len()).rev().map(|n| lines(&commands[..n].iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" "))).find(|o| !o.is_empty()).unwrap_or_default();
     let app = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default().iter().any(|a| a["name"] == first.as_str());
     match (app, out.is_empty()) {
         (true, _) if words.len() > 1 => None,
@@ -978,9 +1002,9 @@ fn connection() -> String {
     let device = state["device"]["name"].as_str().unwrap_or("this device");
     let i = &state["install"];
     if i.is_null() {
-        return format!("{device} is in no install yet: {CLI} create <name> --as <your name>, or {CLI} join <code>.");
+        return format!("{device} isn't in {YOURS} yet: {CLI} join <code> joins it, or {CLI} create <name> --as <your name> starts a new one.");
     }
-    let install = i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("an install (still joining)");
+    let install = i["name"].as_str().filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| format!("{YOURS} (still joining)"));
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("");
     let ready = if state["device"]["ready"] == true { "" } else { ", catching up" };
     format!("Connected to {install} as {me}, on {device}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.")
@@ -1074,12 +1098,20 @@ fn post(path: &str, body: Value) -> Result<Value> {
     request(to_node(agent().post(format!("http://{}{path}", addr()))).send_json(&body))
 }
 
+/// For a node in no install yet, which no one is signed in to: a sign-in this CLI kept for its address was another
+/// node's there before, so it isn't sent, and once the node is in an install it's let go.
+fn unsigned_post(path: &str, body: Value) -> Result<Value> {
+    let r = request(agent().post(format!("http://{}{path}", addr())).send_json(&body))?;
+    let _ = one::sign_in::sign_out();
+    Ok(r)
+}
+
 fn status(state: &Value) {
     let device = &state["device"];
     println!("{} ({}){}", device["name"].as_str().unwrap_or(""), &device["key"].as_str().unwrap_or("")[..8], if device["ready"] == true { "" } else { ", not ready yet" });
     let i = &state["install"];
     if i.is_null() {
-        println!("\nIn no install yet. Create one with {CLI} create <name> --as <your name>, or join with a pairing code.");
+        println!("\nNot in {YOURS} yet: {CLI} join <code> joins it with a pairing code, or {CLI} create <name> --as <your name> starts a new one.");
         return;
     }
     let users: std::collections::HashMap<&str, &str> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, u["name"].as_str()?))).collect();
@@ -1117,30 +1149,40 @@ fn status(state: &Value) {
     }
 }
 
-/// Every group in words: its people with their roles, and who's invited.
+/// The people in the One App, you first, each with their role; then every group in words: its people with their
+/// roles, and who's invited.
 fn groups_said(state: &Value) -> String {
     let i = &state["install"];
     let names: std::collections::HashMap<&str, &str> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, u["name"].as_str()?))).collect();
+    let me = i["user"].as_str();
+    let mut users: Vec<&Value> = i["users"].as_array().into_iter().flatten().collect();
+    users.sort_by_key(|u| u["me"] != true);
+    let everyone: Vec<String> = users.iter().map(|u| {
+        let (name, role) = (u["name"].as_str().unwrap_or(""), u["role"].as_str().unwrap_or("member"));
+        if u["me"] == true { format!("{name} (you, {role})") } else { format!("{name} ({role})") }
+    }).collect();
+    let mut out = format!("People in {YOURS}: {}.\n", everyone.join(", "));
     let people = |list: &Value| -> Vec<String> {
         list.as_array().into_iter().flatten().map(|m| {
             let id = m["user"].as_str().unwrap_or("");
             let (name, role) = (names.get(id).copied().unwrap_or(id), m["role"].as_str().unwrap_or("member"));
-            match i["user"].as_str() == Some(id) {
-                true => format!("you ({name}, {role})"),
+            match me == Some(id) {
+                true => format!("{name} (you, {role})"),
                 false => format!("{name} ({role})"),
             }
         }).collect()
     };
     let groups = i["groups"].as_array().cloned().unwrap_or_default();
     if groups.is_empty() {
-        return "There are no groups yet.\n".into();
+        out.push_str("No groups yet.\n");
+        return out;
     }
-    let mut out = String::new();
+    out.push_str("Groups:\n");
     for g in &groups {
-        out.push_str(&format!("{}: {}\n", g["name"].as_str().unwrap_or(""), people(&g["members"]).join(", ")));
+        out.push_str(&format!("  {}: {}\n", g["name"].as_str().unwrap_or(""), people(&g["members"]).join(", ")));
         let invited = people(&g["invited"]);
         if !invited.is_empty() {
-            out.push_str(&format!("  invited, not joined yet: {}\n", invited.join(", ")));
+            out.push_str(&format!("    invited, not joined yet: {}\n", invited.join(", ")));
         }
     }
     out
@@ -1382,8 +1424,11 @@ fn mcp(mode: Mode) -> Result<()> {
     let mut agent = agent_from_env();
     for line in stdin.lock().lines() {
         let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
-        if let Some(reply) = mcp_answer(&msg, &mut agent, mode) {
+        if let Some(reply) = mcp_answer(&msg, &mut agent, mode, true) {
             writeln!(out, "{reply}")?;
+            if TOOLS_CHANGED.take() {
+                writeln!(out, "{}", json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }))?;
+            }
             out.flush()?;
         }
     }
@@ -1414,8 +1459,8 @@ async fn mcp_http(client: Option<axum::Extension<api::FromClient>>, headers: axu
         SIGNED_IN.with(|t| *t.borrow_mut() = token);
         NEEDED.with(|n| *n.borrow_mut() = None);
         let reply = match &msg {
-            Value::Array(batch) => Some(json!(batch.iter().filter_map(|m| mcp_answer(m, &mut agent, Mode::All)).collect::<Vec<_>>())).filter(|r| r.as_array().is_some_and(|r| !r.is_empty())),
-            msg => mcp_answer(msg, &mut agent, Mode::All),
+            Value::Array(batch) => Some(json!(batch.iter().filter_map(|m| mcp_answer(m, &mut agent, Mode::All, false)).collect::<Vec<_>>())).filter(|r| r.as_array().is_some_and(|r| !r.is_empty())),
+            msg => mcp_answer(msg, &mut agent, Mode::All, false),
         };
         SIGNED_IN.with(|t| *t.borrow_mut() = None);
         (reply, agent, NEEDED.with(|n| n.borrow_mut().take()))
@@ -1440,9 +1485,49 @@ async fn mcp_http(client: Option<axum::Extension<api::FromClient>>, headers: axu
     }
 }
 
-/// The answer to one MCP message, over stdio or HTTP: None for a notification. `agent` is the client's name, which
-/// `initialize` says.
-fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode) -> Option<Value> {
+thread_local! {
+    /// Whether the call just answered changed the tools a session lists, so stdio tells the client after its answer.
+    static TOOLS_CHANGED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Every app's tools by name, as `GET /v1/apps` gives them: what a session's list of tools is made of.
+fn tool_names(apps: &Value) -> Vec<String> {
+    let mut names: Vec<String> = apps.as_array().into_iter().flatten().flat_map(|a| a["ops"].as_array().into_iter().flatten().map(move |o| format!("{}_{}", a["name"].as_str().unwrap_or(""), o["name"].as_str().unwrap_or("")))).collect();
+    names.sort();
+    names
+}
+
+/// A tool call, and what it changed of the tools a session lists (adding an app, say): over stdio, `stdio` sends MCP's
+/// notification after the answer; over HTTP, which sends nothing unasked, the answer says which tools are new.
+fn call_and_tell(params: &Value, agent: Option<&str>, mode: Mode, stdio: bool) -> Value {
+    let name = params["name"].as_str().unwrap_or("");
+    let apps = (mode == Mode::All && name != "search").then(|| get("/v1/apps").ok()).flatten();
+    let reads = |apps: &Value| match name.split_once('_') {
+        Some((a, o)) => ops::node_app(a) || apps.as_array().into_iter().flatten().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
+        None => name == "search",
+    };
+    let before = apps.filter(|a| !reads(a)).map(|a| tool_names(&a));
+    let mut out = call_tool(params, agent, mode);
+    let Some(before) = before else { return out };
+    let Ok(after) = get("/v1/apps").map(|a| tool_names(&a)) else { return out };
+    if after == before {
+        return out;
+    }
+    if stdio {
+        TOOLS_CHANGED.set(true);
+        return out;
+    }
+    let mut new: Vec<&str> = after.iter().filter(|t| !before.contains(t)).filter_map(|t| t.split_once('_').map(|(a, _)| a)).collect();
+    new.dedup();
+    if let (Some(first), Some(content)) = (new.first(), out["content"].as_array_mut()) {
+        content.push(json!({ "type": "text", "text": format!("New tools for {}: they come with your next session. Until then, `{CLI} {first} <op>` runs them where `{CLI}` runs.", new.join(", ")) }));
+    }
+    out
+}
+
+/// The answer to one MCP message, over stdio or HTTP (`stdio` false): None for a notification. `agent` is the
+/// client's name, which `initialize` says.
+fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode, stdio: bool) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let result = match msg["method"].as_str().unwrap_or("") {
         "initialize" => Ok({
@@ -1451,7 +1536,7 @@ fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode) -> Option<Val
             }
             json!({
             "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
-            "capabilities": { "tools": {}, "resources": {}, "extensions": { "io.modelcontextprotocol/skills": {} } },
+            "capabilities": { "tools": { "listChanged": stdio }, "resources": {}, "extensions": { "io.modelcontextprotocol/skills": {} } },
             "serverInfo": { "name": CLI, "title": NAME, "version": env!("CARGO_PKG_VERSION") },
             "instructions": instructions(mode),
             })
@@ -1465,7 +1550,7 @@ fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode) -> Option<Val
             t.extend(mcp_apps::tools());
             json!({ "tools": t })
         }),
-        "tools/call" => Ok(call_tool(&msg["params"], agent.as_deref(), mode)),
+        "tools/call" => Ok(call_and_tell(&msg["params"], agent.as_deref(), mode, stdio)),
         // Apps' widgets and screens, as MCP Apps (src/mcp_apps.rs).
         "resources/list" => Ok(json!({ "resources": mcp_apps::resources() })),
         "resources/read" => match msg["params"]["uri"].as_str().unwrap_or("") {
@@ -1543,7 +1628,8 @@ fn agent_name(raw: &str) -> String {
 /// The MCP server's instructions (src/guide.rs): the rules first, short enough that every harness keeps all of them.
 fn instructions(mode: Mode) -> String {
     let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-    one::skills::instructions(mode, &apps)
+    let state = get("/v1/state").unwrap_or_default();
+    one::skills::instructions(mode, &apps, state["user"]["name"].as_str())
 }
 
 /// An item, as one line: its title, what it is, its page, its fields (secret ones never shown), where they go and
@@ -1555,14 +1641,14 @@ fn item_line(it: &Value) -> String {
     }).collect();
     let list = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
     format!(
-        "{}  {}{}  [{}]  {}{}  used by: {}",
+        "{}  {}{}  [{}]  {}{}{}",
         it["id"].as_str().unwrap_or(""),
         it["title"].as_str().unwrap_or(""),
         it["type"].as_str().filter(|t| !t.is_empty()).map(|t| format!(" ({t})")).unwrap_or_default(),
         it["scope_name"].as_str().unwrap_or(""),
         fields.join(", "),
         Some(list(&it["hosts"])).filter(|h| !h.is_empty()).map(|h| format!("  → {h}")).unwrap_or_default(),
-        list(&it["apps"]),
+        Some(list(&it["apps"])).filter(|a| !a.is_empty()).map(|a| format!("  used by: {a}")).unwrap_or_default(),
     )
 }
 
@@ -1618,9 +1704,21 @@ fn vault_set(scope: &str, item: &str, field: &str, value: &str, secret: Option<b
         }
     };
     let id = post("/v1/vault", data)?["id"].as_str().unwrap_or("").to_string();
-    Ok(match made {
-        true => format!("Made {item} ({id}) in {scope}, with {field}."),
+    let vault = match scope {
+        "user" => "your Vault".to_string(),
+        "global" => "Everyone's Vault".to_string(),
+        group => format!("{group}'s Vault"),
+    };
+    let done = match made {
+        true => format!("Made {item} ({id}) in {vault}, with {field}."),
         false => format!("Set {item}'s {field}."),
+    };
+    // Whether an agent may use it now, since only the person lets agents use an item.
+    let agents = found.as_ref().is_some_and(|it| it["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == one::agents::NAME))) || app == Some(one::agents::NAME);
+    Ok(match (agents, app) {
+        (true, _) => format!("{done} Agents use it with vault_fetch, as {{{{{id}:{field}}}}}."),
+        (false, None) => format!("{done} Agents may not use it yet: vault_request, leaving out app, asks the person to let you, and they pick it."),
+        (false, Some(_)) => done,
     })
 }
 
@@ -1903,9 +2001,47 @@ fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Resu
     }
 }
 
+/// MCP's `deploy`, `{CLI} deploy` for an agent with no shell: the app's files as text, built where it's asked.
+fn deploy_tool() -> Value {
+    json!({
+        "name": "deploy",
+        "description": format!("Deploy an app from its files: builds it as {CLI} deploy builds a folder, npm packages and all, and makes the app if the name is new, owned by you. Or put back an earlier version. Answers with its tools and how to put it on your page."),
+        "inputSchema": { "type": "object", "required": ["app"], "properties": {
+            "app": { "type": "string", "description": "the app's name, lowercase words joined by -, like water-log; a new name makes a new app" },
+            "files": { "type": "object", "additionalProperties": { "type": "string" }, "description": "every file of the app, each path → its text: { \"app.js\": \"export default { … }\" }, and package.json for npm packages" },
+            "version": { "type": "string", "description": "instead of files: an earlier version to put back, from this tool's answer or apps_list" },
+        } },
+        "annotations": one::skills::hints(false, false),
+    })
+}
+
+/// What `deploy` did, and what's next: its tools, putting it on a page, and undoing it.
+fn deploy_said(app: &str, r: &Value, installed: bool) -> String {
+    let short = |b: &Value| b.as_str().unwrap_or("").chars().take(12).collect::<String>();
+    let mut out = vec![format!("Deployed {app} ({}){}.", short(&r["bundle"]), if r["made"] == true { ", a new app of yours" } else { "" })];
+    let tools: Vec<String> = r["ops"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|o| format!("{app}_{o}")).collect();
+    match (&r["failed"], r["here"] == true) {
+        (Value::String(why), _) => out.push(format!("{why}. Fix it and deploy again.")),
+        (_, false) => out.push("Your devices take it within a few seconds.".into()),
+        _ if installed && tools.is_empty() => out.push("It has no tools.".into()),
+        _ if installed => out.push(format!("Its tools: {}.", tools.join(", "))),
+        _ => out.push(format!(
+            "Put it on your page with apps_add {{ app: \"{app}\", scope: \"user\" }}; its tools come then{}, at once where your client takes list_changed, else in your next session.",
+            if tools.is_empty() { String::new() } else { format!(" ({})", tools.join(", ")) }
+        )),
+    }
+    out.push(match &r["before"] {
+        b if *b == r["bundle"] => "It ran this version already.".into(),
+        Value::String(_) => format!("To undo, deploy {{ app: \"{app}\", version: \"{}\" }}.", short(&r["before"])),
+        _ => "To undo, apps_delete removes it.".into(),
+    });
+    out.join("\n")
+}
+
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
-    let mut tools = one::vault::tools();
+    let mut tools = vec![deploy_tool()];
+    tools.extend(one::vault::tools());
     tools.extend(one::skills::groups_tools());
     // Backups are this machine's to run: a sign-in from elsewhere can't.
     if !signed_in() {
@@ -1942,7 +2078,7 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     let input = params["arguments"].as_object().cloned().unwrap_or_default();
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
     // This server's own tools, checked as apps' are, in dispatch.
-    let own = [code::search_tool(mode), code::execute_tool()].into_iter().chain(mcp_apps::tools()).find(|t| t["name"] == name);
+    let own = [code::search_tool(mode), code::execute_tool(), deploy_tool()].into_iter().chain(mcp_apps::tools()).find(|t| t["name"] == name);
     if let Some(Err(e)) = own.map(|t| ops::check(&t["inputSchema"], &Value::Object(input.clone()))) {
         return failed(format!("{e:#}"));
     }
@@ -1952,8 +2088,23 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     match name {
         "search" => {
             let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
-            match code::catalog() {
-                Ok(apps) => json!({ "content": [{ "type": "text", "text": code::search(&apps, input.get("query").and_then(Value::as_str).unwrap_or(""), limit, code::For::Mcp(mode)) }] }),
+            match code::catalogs() {
+                Ok((apps, addable)) => json!({ "content": [{ "type": "text", "text": code::search(&apps, &addable, input.get("query").and_then(Value::as_str).unwrap_or(""), limit, code::For::Mcp(mode)) }] }),
+                Err(e) => failed(format!("{e:#}")),
+            }
+        }
+        "deploy" => {
+            let app = input.get("app").and_then(Value::as_str).unwrap_or("");
+            let body = match (input.get("files"), input.get("version")) {
+                (Some(files), None) => json!({ "app": app, "files": files, "wait": true }),
+                (None, Some(version)) => json!({ "app": app, "bundle": version, "wait": true }),
+                _ => return failed("give files, the app's files, or version, an earlier one to put back".into()),
+            };
+            match post("/v1/deploy", body) {
+                Ok(r) => {
+                    let installed = get("/v1/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["installed"].as_array().is_some_and(|i| !i.is_empty())));
+                    json!({ "content": [{ "type": "text", "text": deploy_said(app, &r, installed == Some(true)) }] })
+                }
                 Err(e) => failed(format!("{e:#}")),
             }
         }
