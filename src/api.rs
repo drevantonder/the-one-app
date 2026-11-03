@@ -192,6 +192,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/events",
     "/v1/arrange",
     "/v1/install",
+    "/v1/deploy",
     "/v1/retire",
     "/v1/vault",
     "/v1/vault/requests",
@@ -723,9 +724,23 @@ async fn app(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-async fn deploy(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let here = node.deploy(&local(&node)?, text(&body, "app")?, text(&body, "bundle")?, body["wait"] == true).await?;
-    Ok(Json(json!({ "here": here })))
+/// `{ app, bundle, owner?, wait? }`, or `{ app, files, … }` (each file's path → its text, built here as `one deploy`
+/// builds a folder): deploys it, making the app first if there's none by that name, owned by `owner` (as for
+/// `/v1/app`) or the caller. → what `Node::deploy_making` says.
+async fn deploy(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    let bundle = match body["files"].as_object() {
+        Some(files) => {
+            let files = crate::deploy::given(files)?;
+            let built = tokio::task::spawn_blocking(move || crate::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>()));
+            node.put_blob_for(&me.caller, &built.await.map_err(anyhow::Error::from)??)?
+        }
+        None => text(&body, "bundle")?.to_string(),
+    };
+    let owner = match body["owner"].as_str() {
+        Some(o) => Some(crate::members::Principal::parse(o).map(|p| p.to_string()).or_else(|_| node.find_group(o).map(|g| format!("group:{g}")))?),
+        None => None,
+    };
+    Ok(Json(node.deploy_making(&me.caller, text(&body, "app")?, &bundle, owner.as_deref(), body["wait"] == true).await?))
 }
 
 #[derive(Deserialize)]

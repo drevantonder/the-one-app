@@ -240,7 +240,7 @@ pub fn search_tool(mode: Mode) -> Value {
 pub fn code_tools(all: Vec<Value>) -> Vec<Value> {
     let direct = |t: &Value| {
         let name = t["name"].as_str().unwrap_or("");
-        matches!(name, "vault_request" | "vault_status") || one::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|op| op.starts_with('_')))
+        matches!(name, "deploy" | "vault_request" | "vault_status") || one::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|op| op.starts_with('_')))
     };
     [vec![search_tool(Mode::Code), execute_tool()], all.into_iter().filter(direct).collect()].concat()
 }

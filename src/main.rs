@@ -920,16 +920,7 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     };
     let bundle = one::deploy::build(dir)?;
     let blob = request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
-    let apps = get("/v1/apps")?;
-    // A sidecar of the same name is listed too, without an owner: the app is still to be made.
-    if !apps.as_array().into_iter().flatten().any(|a| a["name"] == name.as_str() && !a["owner"].is_null()) {
-        let owner = match flags.get("owner").and_then(Value::as_str) {
-            Some(owner) => owner.to_string(),
-            None => format!("user:{}", get("/v1/state")?["install"]["user"].as_str().unwrap_or("")),
-        };
-        post("/v1/app", json!({ "name": name, "owner": owner }))?;
-    }
-    let here = post("/v1/deploy", json!({ "app": name, "bundle": blob, "wait": true }))?["here"] == true;
+    let here = post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": flags.get("owner"), "wait": true }))?["here"] == true;
     println!("{}", deployed_said(&format!("Deployed {name} ({}).", &blob[..12]), here));
     Ok(())
 }
@@ -1499,7 +1490,7 @@ fn call_and_tell(params: &Value, agent: Option<&str>, mode: Mode, stdio: bool) -
     let apps = (mode == Mode::All && name != "search").then(|| get("/v1/apps").ok()).flatten();
     let reads = |apps: &Value| match name.split_once('_') {
         Some((a, o)) => ops::node_app(a) || apps.as_array().into_iter().flatten().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
-        None => true,
+        None => name == "search",
     };
     let before = apps.filter(|a| !reads(a)).map(|a| tool_names(&a));
     let mut out = call_tool(params, agent, mode);
@@ -1906,9 +1897,47 @@ fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Resu
     }
 }
 
+/// MCP's `deploy`, `{CLI} deploy` for an agent with no shell: the app's files as text, built where it's asked.
+fn deploy_tool() -> Value {
+    json!({
+        "name": "deploy",
+        "description": format!("Deploy an app from its files: builds it as {CLI} deploy builds a folder, npm packages and all, and makes the app if the name is new, owned by you. Or put back an earlier version. Answers with its tools and how to put it on your page."),
+        "inputSchema": { "type": "object", "required": ["app"], "properties": {
+            "app": { "type": "string", "description": "the app's name, lowercase words joined by -, like water-log; a new name makes a new app" },
+            "files": { "type": "object", "additionalProperties": { "type": "string" }, "description": "every file of the app, each path → its text: { \"app.js\": \"export default { … }\" }, and package.json for npm packages" },
+            "version": { "type": "string", "description": "instead of files: an earlier version to put back, from this tool's answer or apps_list" },
+        } },
+        "annotations": one::skills::hints(false, false),
+    })
+}
+
+/// What `deploy` did, and what's next: its tools, putting it on a page, and undoing it.
+fn deploy_said(app: &str, r: &Value, installed: bool) -> String {
+    let short = |b: &Value| b.as_str().unwrap_or("").chars().take(12).collect::<String>();
+    let mut out = vec![format!("Deployed {app} ({}){}.", short(&r["bundle"]), if r["made"] == true { ", a new app of yours" } else { "" })];
+    let tools: Vec<String> = r["ops"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|o| format!("{app}_{o}")).collect();
+    match (&r["failed"], r["here"] == true) {
+        (Value::String(why), _) => out.push(format!("{why}. Fix it and deploy again.")),
+        (_, false) => out.push("Your devices take it within a few seconds.".into()),
+        _ if installed && tools.is_empty() => out.push("It has no tools.".into()),
+        _ if installed => out.push(format!("Its tools: {}.", tools.join(", "))),
+        _ => out.push(format!(
+            "Put it on your page with apps_add {{ app: \"{app}\", scope: \"user\" }}; its tools come then{}, at once where your client takes list_changed, else in your next session.",
+            if tools.is_empty() { String::new() } else { format!(" ({})", tools.join(", ")) }
+        )),
+    }
+    out.push(match &r["before"] {
+        b if *b == r["bundle"] => "It ran this version already.".into(),
+        Value::String(_) => format!("To undo, deploy {{ app: \"{app}\", version: \"{}\" }}.", short(&r["before"])),
+        _ => "To undo, apps_delete removes it.".into(),
+    });
+    out.join("\n")
+}
+
 fn tools() -> Result<Vec<Value>, Value> {
     let apps = get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
-    let mut tools = one::vault::tools();
+    let mut tools = vec![deploy_tool()];
+    tools.extend(one::vault::tools());
     tools.extend(one::skills::groups_tools());
     // Backups are this machine's to run: a sign-in from elsewhere can't.
     if !signed_in() {
@@ -1944,7 +1973,7 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     let input = params["arguments"].as_object().cloned().unwrap_or_default();
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
     // This server's own tools, checked as apps' are, in dispatch.
-    let own = [code::search_tool(mode), code::execute_tool()].into_iter().chain(mcp_apps::tools()).find(|t| t["name"] == name);
+    let own = [code::search_tool(mode), code::execute_tool(), deploy_tool()].into_iter().chain(mcp_apps::tools()).find(|t| t["name"] == name);
     if let Some(Err(e)) = own.map(|t| ops::check(&t["inputSchema"], &Value::Object(input.clone()))) {
         return failed(format!("{e:#}"));
     }
@@ -1956,6 +1985,21 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
             let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
             match code::catalogs() {
                 Ok((apps, addable)) => json!({ "content": [{ "type": "text", "text": code::search(&apps, &addable, input.get("query").and_then(Value::as_str).unwrap_or(""), limit, code::For::Mcp(mode)) }] }),
+                Err(e) => failed(format!("{e:#}")),
+            }
+        }
+        "deploy" => {
+            let app = input.get("app").and_then(Value::as_str).unwrap_or("");
+            let body = match (input.get("files"), input.get("version")) {
+                (Some(files), None) => json!({ "app": app, "files": files, "wait": true }),
+                (None, Some(version)) => json!({ "app": app, "bundle": version, "wait": true }),
+                _ => return failed("give files, the app's files, or version, an earlier one to put back".into()),
+            };
+            match post("/v1/deploy", body) {
+                Ok(r) => {
+                    let installed = get("/v1/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["installed"].as_array().is_some_and(|i| !i.is_empty())));
+                    json!({ "content": [{ "type": "text", "text": deploy_said(app, &r, installed == Some(true)) }] })
+                }
                 Err(e) => failed(format!("{e:#}")),
             }
         }

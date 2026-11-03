@@ -376,9 +376,42 @@ impl Node {
                 None => bundle.to_string(),
             })
         })?;
+        // From elsewhere, only a bundle they may read: their own, or one an entry names for them.
+        ensure!(caller.key == self.0.id || self.may_read_blob(&caller.user, &bundle)?, "{app} has no deploy {bundle}: its versions are in apps_list's history");
         crate::bundle::module(&self.blob(&bundle).await?)?;
         self.member_content(caller, deploy(app, &bundle)).await?;
         Ok(wait && self.runs_latest(app, Duration::from_secs(10)).await)
+    }
+
+    /// Deploys `bundle` as `app`, as `deploy` does, making the app first if there's none by that name, owned by
+    /// `owner` (by default the caller). → `{ bundle, made, before, here, ops }`: whether it was made, the deploy it ran
+    /// before, and with `wait`, whether this device runs it now and then its operations (or why it doesn't start).
+    pub async fn deploy_making(&self, caller: &Caller, app: &str, bundle: &str, owner: Option<&str>, wait: bool) -> Result<Value> {
+        let before = self.with(|i| {
+            let m = &i.r.members;
+            Ok(match m.apps.get(app) {
+                Some(a) => {
+                    ensure!(m.acts_for(&caller.user, &a.owner), "there's already an app called {app}, and it isn't yours: give yours another name, or fork it");
+                    Some(a.bundle.clone())
+                }
+                None => None,
+            })
+        })?;
+        if before.is_none() {
+            ensure!(members::valid_app_name(app), "{app}: an app's name is lowercase words joined by -, like water-log");
+            let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
+            self.member_as(caller, "app", json!({ "name": app, "owner": owner })).await?;
+        }
+        let here = self.deploy(caller, app, bundle, wait).await?;
+        let bundle = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone())))?;
+        let mut out = json!({ "bundle": bundle, "made": before.is_none(), "before": before.flatten(), "here": here });
+        if here {
+            match self.0.apps.describe(app).await {
+                Ok(d) => out["ops"] = json!(d["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).collect::<Vec<_>>()),
+                Err(e) => out["failed"] = json!(format!("{e:#}")),
+            }
+        }
+        Ok(out)
     }
 
     /// An app's code as deployed, its latest or an earlier deploy's: its files, or one of them. Everyone may read
