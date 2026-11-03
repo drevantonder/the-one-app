@@ -15,7 +15,7 @@ pub const INSTRUCTIONS_LIMIT: usize = 4000;
 /// What it is, in two plain lines.
 pub fn about() -> String {
     format!(
-        "{NAME} is a person's devices, and their team's, as one place for apps and agents: their email, messages, calendar, files, notes and more, each an app.\nAgents use those apps as that person, through MCP or the `{CLI}` command, on devices that are part of their install."
+        "{NAME} is a person's devices, and their team's, as one place for apps and agents: their email, messages, calendar, files, notes and more, each an app.\nAgents use those apps as that person, through MCP or the `{CLI}` command, on any device in {YOURS}."
     )
 }
 
@@ -37,7 +37,7 @@ pub fn rules() -> String {
 /// How to find what's possible, from the command line.
 pub fn finding() -> String {
     format!(
-        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and which devices are in the install."
+        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}."
     )
 }
 
@@ -60,7 +60,7 @@ pub fn mcp_entries() -> String {
 fn install() -> String {
     match REPO.is_empty() {
         false => format!("install it with `curl -fsSL https://github.com/{REPO}/releases/latest/download/install.sh | sh`"),
-        true => format!("ask whoever runs their install to set {NAME} up on it"),
+        true => format!("ask an admin of {YOURS} to set it up there"),
     }
 }
 
@@ -69,7 +69,7 @@ fn install() -> String {
 pub fn connecting(address: Option<&str>) -> String {
     let mcp = match address {
         Some(a) => format!("`{}/mcp`", web(a)),
-        None => format!("their {NAME}'s web address followed by `/mcp`, like `https://{CLI}.example.com/mcp`"),
+        None => format!("the web address of {YOURS} followed by `/mcp`, like `https://{CLI}.example.com/mcp`"),
     };
     format!(
         "When someone asks you to connect to {NAME}, do it yourself, and tell them only what they need to do, one step at a time, in everyday words.\n\n- If you can run commands (Claude Code, Codex, OpenCode, Cursor): run `{CLI} status`. If it answers, you're on one of their devices already: use the command line, and add MCP as below. If there's no `{CLI}`, {}, then ask them for a pairing code (Settings, then Devices) and run `{CLI} join <code>`.\n- If you can't (ChatGPT, Claude and other chat apps): add {mcp} as a connector, a custom MCP server. They sign in when it asks, and you act as them.",
@@ -141,9 +141,9 @@ pub fn root(others: &[Skill], link: impl Fn(&Skill) -> String) -> Skill {
 pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     let code = match REPO.is_empty() {
         false => format!("https://github.com/{REPO}"),
-        true => "ask whoever runs the install where it is".to_string(),
+        true => format!("ask an admin of {YOURS} where it is"),
     };
-    let fill = |t: &str| t.replace("{{name}}", NAME).replace("{{cli}}", CLI).replace("{{server}}", &server_name()).replace("{{code}}", &code);
+    let fill = |t: &str| t.replace("{{name}}", NAME).replace("{{cli}}", CLI).replace("{{server}}", &server_name()).replace("{{code}}", &code).replace("{{yours}}", YOURS);
     let written = [include_str!("../skills/accounts/SKILL.md"), include_str!("../skills/build/SKILL.md")];
     let mut skills: Vec<Skill> = written
         .into_iter()
@@ -244,7 +244,7 @@ pub fn vault_app() -> Value {
 }
 
 /// How backups' tools are explained, as an app's guide is.
-const BACKUPS_GUIDE: &str = "Each device backs up the install's data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; backups_check restores the newest backup into a throwaway copy and says what came back.";
+const BACKUPS_GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; backups_check restores the newest backup into a throwaway copy and says what came back.";
 
 /// Backups' tools as an app's operations.
 pub fn backups_app() -> Value {

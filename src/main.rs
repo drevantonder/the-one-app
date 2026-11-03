@@ -18,13 +18,13 @@ fn every_command() -> String {
     format!(
         "Usage:
   {CLI} serve                          run this machine as one of your devices
-  {CLI} status                         this device, its install, its users, groups and devices
+  {CLI} status                         this device, and the people, groups and devices in {YOURS}
   {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
                                        your devices; {CLI} and {CLI} mcp here then act as you
   {CLI} sign-out                       sign this machine out
   {CLI} create <name> --as <your name> create an install, with you as its first admin
   {CLI} pair [--user <name>]           a pairing code for another of your machines (or, for admins, someone else's)
-  {CLI} join <code>                    join an install with a pairing code
+  {CLI} join <code>                    join {YOURS} with a pairing code
   {CLI} rename <name>                  rename this device
   {CLI} remove <device> | --user <user>
   {CLI} role <user> admin|member       (admins)
@@ -314,10 +314,17 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["status"] => status(&get("/v1/state")?),
         ["apps"] => {
+            let groups = get("/v1/state")?["install"]["groups"].clone();
+            // Where it's added, as the App Store says it: you, a group by its name, everyone.
+            let place = |scope: &str| match scope.split_once(':') {
+                Some(("group", id)) => groups.as_array().into_iter().flatten().find(|g| g["id"] == id).and_then(|g| g["name"].as_str()).unwrap_or(id).to_string(),
+                Some(("user", _)) => "you".to_string(),
+                _ => "everyone".to_string(),
+            };
             for app in get("/v1/apps")?.as_array().into_iter().flatten() {
                 let from = app["from"].as_str().map(|f| format!(", a fork of {f}")).unwrap_or_default();
-                let installed: Vec<&str> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-                let installed = if installed.is_empty() { String::new() } else { format!(", installed in {}", installed.join(", ")) };
+                let installed: Vec<String> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).map(place).collect();
+                let installed = if installed.is_empty() { String::new() } else { format!(", added for {}", installed.join(", ")) };
                 println!("{} ({}{from}{installed})", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
                 ops::list(std::slice::from_ref(app)).iter().for_each(|l| println!("{l}"));
             }
@@ -994,9 +1001,9 @@ fn connection() -> String {
     let device = state["device"]["name"].as_str().unwrap_or("this device");
     let i = &state["install"];
     if i.is_null() {
-        return format!("{device} is in no install yet: {CLI} create <name> --as <your name>, or {CLI} join <code>.");
+        return format!("{device} isn't in {YOURS} yet: {CLI} join <code> joins it, or {CLI} create <name> --as <your name> starts a new one.");
     }
-    let install = i["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("an install (still joining)");
+    let install = i["name"].as_str().filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| format!("{YOURS} (still joining)"));
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("");
     let ready = if state["device"]["ready"] == true { "" } else { ", catching up" };
     format!("Connected to {install} as {me}, on {device}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.")
@@ -1086,7 +1093,7 @@ fn status(state: &Value) {
     println!("{} ({}){}", device["name"].as_str().unwrap_or(""), &device["key"].as_str().unwrap_or("")[..8], if device["ready"] == true { "" } else { ", not ready yet" });
     let i = &state["install"];
     if i.is_null() {
-        println!("\nIn no install yet. Create one with {CLI} create <name> --as <your name>, or join with a pairing code.");
+        println!("\nNot in {YOURS} yet: {CLI} join <code> joins it with a pairing code, or {CLI} create <name> --as <your name> starts a new one.");
         return;
     }
     let users: std::collections::HashMap<&str, &str> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, u["name"].as_str()?))).collect();

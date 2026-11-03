@@ -199,7 +199,7 @@ impl Node {
         if present {
             return Ok(());
         }
-        ensure!(admin, "{app} is built in, but this install doesn't have it yet: an admin adds it first");
+        ensure!(admin, "{app} is built in, but {} doesn't have it yet: an admin adds it first", crate::config::YOURS);
         self.member_as(caller, "app", json!({ "name": app, "owner": "admins" })).await?;
         self.member_content(caller, deploy(app, bundle)).await
     }

@@ -14,7 +14,7 @@ impl Node {
         let user = user.map(|u| self.find_user(u)).transpose()?;
         self.with(|i| {
             let m = &i.r.members;
-            ensure!(m.device(&self.0.id).is_some(), "this device isn't in the install yet");
+            ensure!(m.device(&self.0.id).is_some(), "this device isn't in {} yet", crate::config::YOURS);
             ensure!(user.as_ref().is_none_or(|u| *u == asker.user) || m.is_admin(&asker.user), "only admins pair other people's machines");
             ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.device_name());
             Ok(())

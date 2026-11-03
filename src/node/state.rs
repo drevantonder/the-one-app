@@ -61,8 +61,8 @@ impl Node {
     pub async fn let_in(&self, user: &str, name: &str) -> Result<()> {
         let me = self.user()?;
         let (admin, removed) = self.with(|i| Ok((i.r.members.is_admin(&me), i.r.members.removed_user(user))))?;
-        ensure!(!removed, "you were removed from this install: an admin adds you back");
-        ensure!(admin, "you aren't a person of this install yet, and {} can't let you in: its person isn't an admin", self.device_name());
+        ensure!(!removed, "you were removed from {}: an admin adds you back", crate::config::YOURS);
+        ensure!(admin, "you aren't in {} yet, and {} can't let you in: its person isn't an admin", crate::config::YOURS, self.device_name());
         ensure!(!name.trim().is_empty(), "your sign-in doesn't say your name: sign in again");
         // A key no machine holds, the same on every device, so two letting the same person in at once add them once.
         let key: Key = <sha2::Sha256 as sha2::Digest>::digest(format!("{}/sign-in\0{user}", crate::config::CLI)).into();
