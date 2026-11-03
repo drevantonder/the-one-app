@@ -37,7 +37,8 @@ pub fn rules() -> String {
 /// How to find what's possible, from the command line.
 pub fn finding() -> String {
     format!(
-        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}."
+        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}.\n- When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
+        server_name()
     )
 }
 
@@ -125,7 +126,7 @@ impl Skill {
 /// The root skill's description: short, so a harness can keep it loaded.
 fn root_description() -> String {
     format!(
-        "{NAME}: the person's email, messages, calendar, files, board and more, as apps their agents use. Use whenever they mention {NAME} or its apps, ask you to connect to it, or want a message sent or a key or password used; read it before any of its tools."
+        "Use whenever the person pastes or mentions a key, token or password (keep it in the Vault, never use it raw), wants a message sent, mentions {NAME} or its apps, or asks you to connect to it; read it before any of its tools. {NAME} is their email, messages, calendar, files, board and more, as apps their agents use."
     )
 }
 
@@ -340,9 +341,10 @@ pub fn instructions(mode: Mode, apps: &[Value], person: Option<&str>) -> String 
     };
     let person = person.filter(|p| !p.trim().is_empty()).map(|p| format!("\n\nYou act for {p}: groups_list says who else is in {YOURS}.")).unwrap_or_default();
     let mut text = format!(
-        "{}{person}\n\nRules, before anything else:\n{}\n\n{finding} Each app's guide is also a skill, `{}-<app>`, with one for the whole of {NAME}, `{}`: load them from your skills, or `{CLI} skills`.",
+        "{}{person}\n\nRules, before anything else:\n{}\n\n{finding} Each app's guide is also a skill, `{}-<app>`, with one for the whole of {NAME}, `{}`: load them from your skills, or `{CLI} skills`. When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
         about(),
         rules(),
+        server_name(),
         server_name(),
         server_name()
     );
