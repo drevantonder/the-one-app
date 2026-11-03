@@ -34,7 +34,8 @@ impl Node {
         for device in self.candidates(&req, &me)? {
             let started = Instant::now();
             let reply = match device == self.0.id {
-                true => Ok(self.run(&req, &me).await),
+                // Keys it lacks are its caller's to hand this device, which they were sealed to: no other runs it.
+                true => Ok(self.run_or_need(&req, &me).await?),
                 false => self.ask_device(device, &req, &me).await,
             };
             let name = self.name_of(&device);
@@ -136,14 +137,22 @@ impl Node {
 
     /// Runs a call here, for `me`, or says why it can't.
     pub(super) async fn run(&self, req: &CallRequest, me: &Caller) -> Reply {
+        self.run_or_need(req, me).await.unwrap_or_else(|need| Reply::Error(need.to_string()))
+    }
+
+    /// `run`, but a call that lacks keys its caller can hand fails with what it needs.
+    pub(super) async fn run_or_need(&self, req: &CallRequest, me: &Caller) -> Result<Reply, sessions::Needs> {
         let req = &self.resolve(req.clone());
         let limit = self.limit(req).await;
         let result = tokio::time::timeout(limit, self.run_here(req, me, limit)).await;
-        match result {
+        Ok(match result {
             Ok(Ok(reply)) => reply,
-            Ok(Err(err)) => Reply::Error(format!("{err:#}")),
+            Ok(Err(err)) => match err.downcast::<sessions::Needs>() {
+                Ok(need) => return Err(need),
+                Err(err) => Reply::Error(format!("{err:#}")),
+            },
             Err(_) => Reply::Error(format!("it took longer than {}s and was stopped", limit.as_secs())),
-        }
+        })
     }
 
     /// How long a call may run: an app's, CALL_LIMIT; a sidecar's, and that of an app that uses sidecars (which waits
@@ -189,11 +198,9 @@ impl Node {
             self.record(&req.app, req, me, Some(&why));
             return Ok(Reply::Error(why));
         }
-        // The vault is asked once for the keys of every scope a sign-in's call names, which its session keeps here.
+        // A sign-in's call that lacks a key of a scope it names fails here, before it runs or writes anything.
         let want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), DATABASE)).collect();
-        if let Err(err) = self.session_keys(me, &want).await {
-            tracing::debug!("{}'s keys for {}: {err:#}", me.user, req.app);
-        }
+        self.needs(me, &want).await?;
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
         if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);

@@ -9,6 +9,10 @@
 //! Then the same with each device keeping a copy on its disk, told of some of the others' writes as they're made, and
 //! fetching what it's told of from the bucket into its copy, and reading from its copy alone in between: what it reads
 //! may be behind, but never anything no device read at the same step, and the copy opens nothing without the key.
+//!
+//! In odd seeds the scope's epoch changes midway: each device is handed epoch 2 when it first meets a step under it,
+//! and one device never is, writing under epoch 1 after it all the same: what it writes after is passed over, and
+//! nothing the others wrote is lost.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -16,7 +20,7 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use one::bucket::{Bucket, Copied, Failed, Object, Trouble};
-use one::db::{Db, execute};
+use one::db::{Db, Keys, Missing, execute};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::json;
@@ -120,8 +124,8 @@ impl Link {
     }
 
     /// Writes, retried as `retry` does, each try a new attempt, given up on when the link's patience runs out: what it
-    /// wrote may still land.
-    async fn write<B: Bucket>(&self, db: &mut Db, bucket: &B, id: u64, device: usize) {
+    /// wrote may still land. Fails only with an epoch it wasn't given.
+    async fn write<B: Bucket>(&self, db: &mut Db, bucket: &B, id: u64, device: usize) -> Result<(), Missing> {
         retry(async || {
             let attempt = self.rng.lock().unwrap().r#gen::<i64>();
             let (wrote, unanswered) = UNANSWERED
@@ -136,7 +140,10 @@ impl Link {
             if wrote.as_ref().is_err_and(|e| !format!("{e:#}").contains("given up on") && !format!("{e:#}").contains("may have been")) {
                 self.failed.lock().unwrap().push(attempt);
             }
-            wrote
+            match wrote {
+                Err(e) if e.is::<Missing>() => Ok(Err(*e.downcast_ref::<Missing>().unwrap())),
+                other => other.map(Ok),
+            }
         })
         .await
     }
@@ -233,36 +240,94 @@ fn state(db: &Db) -> (Vec<(u64, u64)>, u64) {
     (rows, n)
 }
 
+/// A database's keys in epoch 1, and in epochs 1 and 2.
+fn keys(seed: u64) -> (Keys, Keys) {
+    let (one, two) = (one::kernel::database_key(&[seed as u8; 32], "main"), one::kernel::database_key(&[!(seed as u8); 32], "main"));
+    (Keys::from([(1, one)]), Keys::from([(1, one), (2, two)]))
+}
+
+/// Writes `id` as `device`, from epoch 2 on once it's past `from` or meets a step under it, as a device is handed a
+/// scope's new epoch.
+async fn write_handed(link: &Link, db: &mut Db, id: u64, device: usize, from: bool, newer: &Keys) {
+    if from {
+        db.add_keys(newer);
+    }
+    if link.write(db, link, id, device).await.is_err() {
+        db.add_keys(newer);
+        link.write(db, link, id, device).await.expect("given every epoch");
+    }
+}
+
+/// A step under epoch 1, written by a device that wasn't handed epoch 2, at the first free position: its own step at
+/// `at` again, so applied twice it would move the count twice.
+async fn stale_step(link: &Link, key: &[u8; 32], at: u64) {
+    let name = one::db::step_name("global/sim/main", at);
+    let step = one::keys::open(key, &name, &link.objects.lock().unwrap()[&name]).unwrap();
+    let mut objects = link.objects.lock().unwrap();
+    let free = (at + 1..).find(|n| !objects.contains_key(&one::db::step_name("global/sim/main", *n))).unwrap();
+    let name = one::db::step_name("global/sim/main", free);
+    objects.insert(name.clone(), one::keys::seal(1, key, &name, &step));
+}
+
 async fn run(seed: u64) {
     let link = Link::new(seed);
-    let key = one::kernel::database_key(&[seed as u8; 32], "main");
+    let changes = seed % 2 == 1;
+    let (older, newer) = keys(seed);
     let mut devices = Vec::new();
     for device in 0..DEVICES {
-        let link = link.clone();
+        let (link, older, newer) = (link.clone(), older.clone(), newer.clone());
         devices.push(tokio::task::spawn_local(async move {
-            let mut db = retry(async || Db::open(&link, "global/sim/main", key).await).await;
+            let mut db = retry(async || Db::open(&link, "global/sim/main", older.clone()).await).await;
             retry(async || db.migrate(&link, &[SCHEMA.to_string()]).await).await;
             for i in 0..WRITES {
                 let id = (device * WRITES + i) as u64;
-                link.write(&mut db, &link, id, device).await;
+                write_handed(&link, &mut db, id, device, changes && i >= WRITES / 2, &newer).await;
             }
             retry(async || db.catch_up(&link).await).await;
             db
         }));
     }
+    // One never handed epoch 2: it writes until it meets a step under it, then under epoch 1 all the same.
+    let stale = changes.then(|| {
+        let (link, older) = (link.clone(), older.clone());
+        tokio::task::spawn_local(async move {
+            let mut db = retry(async || Db::open(&link, "global/sim/main", older.clone()).await).await;
+            retry(async || db.migrate(&link, &[SCHEMA.to_string()]).await).await;
+            let mut own = None;
+            for i in 0..WRITES {
+                let at = db.at();
+                if link.write(&mut db, &link, (DEVICES * WRITES + i) as u64, DEVICES).await.is_err() {
+                    break;
+                }
+                own = own.or((db.at() > at).then(|| db.at()));
+            }
+            own
+        })
+    });
     let mut dbs = Vec::new();
     for s in devices {
         dbs.push(s.await.unwrap());
+    }
+    let mut extra = 0;
+    if let Some(stale) = stale {
+        let own = stale.await.unwrap();
+        link.settle().await;
+        if let Some(at) = own {
+            stale_step(&link, &older[&1], at).await;
+            // And one more after it, from a device that was.
+            write_handed(&link, &mut dbs[0], u64::MAX >> 1, 0, true, &newer).await;
+            extra = 1;
+        }
     }
     link.settle().await;
     // Each reads to the end, as a new device does from nothing.
     for db in &mut dbs {
         retry(async || db.catch_up(&link).await).await;
     }
-    let fresh = Db::open(&link.steady(), "global/sim/main", key).await.unwrap();
+    let fresh = Db::open(&link.steady(), "global/sim/main", if changes { newer } else { older }).await.unwrap();
     link.none_failed_landed(&fresh, seed);
     let (rows, n) = state(&fresh);
-    assert_eq!(rows.len(), DEVICES * WRITES, "seed {seed}: every write landed once");
+    assert_eq!(rows.iter().filter(|r| r.1 < DEVICES as u64).count(), DEVICES * WRITES + extra, "seed {seed}: every write landed once");
     assert_eq!(n, rows.len() as u64, "seed {seed}: the count moved once for each write, however often the link lost an answer");
     for (i, db) in dbs.iter().enumerate() {
         assert_eq!(state(db), (rows.clone(), n), "seed {seed}: device {i} reads what a new device does");
@@ -321,21 +386,21 @@ fn saw(seen: &Seen, db: &Db, seed: u64) {
 
 async fn run_copied(seed: u64) {
     let link = Link::new(seed);
-    let key = one::kernel::database_key(&[seed as u8; 32], "main");
+    let key = keys(seed).0;
     let root = crate::temp(&format!("sim-{seed}"));
     let copies: Vec<Copied<Link>> = (0..COPYING).map(|s| Copied::new(link.clone(), root.join(s.to_string()))).collect();
     let seen = Seen::default();
     let mut devices = Vec::new();
     for device in 0..COPYING {
-        let (link, copies, seen) = (link.clone(), copies.clone(), seen.clone());
+        let (link, copies, seen, key) = (link.clone(), copies.clone(), seen.clone(), key.clone());
         devices.push(tokio::task::spawn_local(async move {
             let here = &copies[device];
-            let mut db = retry(async || Db::open(here, "global/sim/main", key).await).await;
+            let mut db = retry(async || Db::open(here, "global/sim/main", key.clone()).await).await;
             retry(async || db.migrate(here, &[SCHEMA.to_string()]).await).await;
             for i in 0..WRITES {
                 let id = (device * WRITES + i) as u64;
                 let at = db.at();
-                link.write(&mut db, here, id, device).await;
+                link.write(&mut db, here, id, device).await.expect("one epoch");
                 // Its notice reaches some of the others, which fetch what's new into their copies, if the link lets them.
                 if db.at() > at {
                     for (_, copy) in copies.iter().enumerate().filter(|(o, _)| *o != device) {
@@ -356,7 +421,7 @@ async fn run_copied(seed: u64) {
         dbs.push(s.await.unwrap());
     }
     link.settle().await;
-    let fresh = Db::open(&link.steady(), "global/sim/main", key).await.unwrap();
+    let fresh = Db::open(&link.steady(), "global/sim/main", key.clone()).await.unwrap();
     link.none_failed_landed(&fresh, seed);
     for (db, copy) in dbs.iter_mut().zip(&copies) {
         retry(async || db.catch_up(copy).await).await;
@@ -364,9 +429,10 @@ async fn run_copied(seed: u64) {
     for (i, (db, copy)) in dbs.iter().zip(&copies).enumerate() {
         assert_eq!(state(db), state(&fresh), "seed {seed}: device {i} caught up with the bucket");
         // Its copy alone opens to a step some device read, with the key and only with it.
-        let alone = Db::open(&copy.here_only(), "global/sim/main", key).await.unwrap_or_else(|e| panic!("seed {seed}: device {i}'s copy didn't open: {e:#}"));
+        let alone = Db::open(&copy.here_only(), "global/sim/main", key.clone()).await.unwrap_or_else(|e| panic!("seed {seed}: device {i}'s copy didn't open: {e:#}"));
         saw(&seen, &alone, seed);
-        assert!(Db::open(&copy.here_only(), "global/sim/main", one::kernel::database_key(&[!(seed as u8); 32], "main")).await.is_err(), "seed {seed}: another key opened device {i}'s copy");
+        let other = Keys::from([(1, one::kernel::database_key(&[!(seed as u8); 32], "main"))]);
+        assert!(Db::open(&copy.here_only(), "global/sim/main", other).await.is_ok_and(|db| db.version().unwrap() == 0), "seed {seed}: another key opened device {i}'s copy");
     }
     for (i, copy) in copies.iter().enumerate() {
         for name in walk(&root.join(i.to_string())).iter().filter_map(|f| f.strip_prefix(root.join(i.to_string())).ok()?.to_str().map(str::to_string)) {

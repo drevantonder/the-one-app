@@ -26,30 +26,6 @@ impl Node {
         Ok((format!("{}/invite#{secret}", address.trim_end_matches('/')), until))
     }
 
-    /// The key of each scope this device holds, with the people who may open it and its admins (Everyone's and groups'),
-    /// for an admin handing them to the install's kernel (`kernel keys`), so a serverless node opens what this one does
-    /// and the vault knows who may say who no longer does.
-    pub async fn keys_for_kernel(&self, caller: &Caller) -> Result<Vec<Value>> {
-        let scopes = self.with(|i| {
-            let m = &i.r.members;
-            ensure!(members::manages_scope(m, &caller.user, &Scope::Global), "only admins give the kernel the install's keys");
-            let people = |s: &Scope| m.users.values().filter(|u| !u.removed && m.may_use(&u.id, s)).map(|u| (u.id.clone(), u.name.clone())).collect::<BTreeMap<_, _>>();
-            let admins = |s: &Scope| m.users.keys().filter(|u| !matches!(s, Scope::User(_)) && m.role_in(u, s) == Some(Role::Admin)).cloned().collect::<Vec<_>>();
-            let title = |s: &Scope| match s {
-                Scope::Global => "Everyone".to_string(),
-                Scope::User(u) => m.users.get(u).map(|u| u.name.clone()).unwrap_or_default(),
-                Scope::Group(g) => m.groups.get(g).map(|g| g.name.clone()).unwrap_or_default(),
-            };
-            Ok(m.scopes().into_iter().filter(|s| i.r.holds(s)).map(|s| (s.clone(), title(&s), people(&s), admins(&s))).collect::<Vec<_>>())
-        })?;
-        let mut out = Vec::new();
-        for (scope, title, people, admins) in scopes {
-            let key = self.scope_key(&scope).await?;
-            out.push(json!({ "scope": scope.to_string(), "title": title, "key": data_encoding::BASE64URL_NOPAD.encode(&key), "people": people.keys().collect::<Vec<_>>(), "names": people, "admins": admins }));
-        }
-        Ok(out)
-    }
-
     /// Whether `user` is a person of the install.
     pub fn is_user(&self, user: &str) -> bool {
         self.with(|i| Ok(i.r.members.user(user).is_some())).unwrap_or(false)
@@ -193,25 +169,11 @@ impl Node {
         self.tell_vault(caller, members::roles_changed(&before, &after)).await
     }
 
-    /// Makes a group called `name`, with `caller` its first admin: → its id. Signed in, its key is the vault's, made
-    /// with it and sealed to them there, so their sign-ins open it at once and nobody's waits for `kernel keys`; this
-    /// device keeps it for its own work, and gives it to the devices that hold the group. If the vault can't make it,
-    /// no group is made.
+    /// Makes a group called `name`, with `caller` its first admin: → its id. Its first epoch is made by the first of
+    /// its admin's devices to need it.
     pub async fn make_group(&self, caller: &Caller, name: &str) -> Result<String> {
         ensure!(!name.trim().is_empty(), "give the group a name");
         let group = new_id();
-        let scope = Scope::Group(group.clone());
-        if let (Some(token), Ok((_, url))) = (caller.token.clone(), self.kernel()) {
-            let id = group.clone();
-            let made = match tokio::task::spawn_blocking(move || crate::kernel::Vault { url }.group(&token, &id)).await {
-                Ok(Ok(key)) => Ok(key),
-                Ok(Err(err)) => Err(format!("{err:#}").strip_prefix("the vault said: ").map(str::to_string)),
-                Err(_) => Err(None),
-            };
-            let ours = format!("your {}", crate::config::NAME.trim_start_matches("The "));
-            let key = made.map_err(|why| anyhow!("{} wasn't made: {}. Try again.", name.trim(), why.unwrap_or(format!("{ours}'s keys couldn't be reached"))))?;
-            self.adopt_key(&scope, key).await?;
-        }
         self.member_as(caller, "group", json!({ "group": group, "name": name })).await?;
         Ok(group)
     }

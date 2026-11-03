@@ -32,6 +32,8 @@ pub fn router(node: Node) -> Router {
 /// are: only the machine's user can read it. The CLI, its MCP, sidecars and the Mac app read it there.
 pub const LOCAL_TOKEN: &str = "local-token";
 pub const LOCAL_TOKEN_HEADER: &str = "x-one-local-token";
+/// The keys a token caller hands this device for its calls: `keys::seal_handoff`'s.
+pub const KEYS_HEADER: &str = "x-one-keys";
 
 /// Serves the local API on `listener`, knowing each request's peer, which `from_this_machine` checks.
 pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io::Result<()> {
@@ -66,6 +68,7 @@ pub fn routes() -> Router<Node> {
         .route("/llms.txt", get(llms))
         .route("/skills/{name}/{*path}", get(skill_file))
         .route("/v1/state", get(state))
+        .route("/v1/endpoint", get(endpoint))
         .route("/v1/apps", get(apps))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .route("/v1/widgets", get(widgets))
@@ -95,7 +98,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/sidecar", post(sidecar))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
-        .route("/v1/kernel/keys", post(kernel_keys))
         .route("/v1/kernel/run", post(kernel_run))
         .route("/v1/storage", get(storage_get).post(storage_post))
         .route("/v1/storage/{op}", post(storage_post))
@@ -133,6 +135,7 @@ pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-ho
 /// What someone signed in with the kernel may ask; the rest is for this machine's own programs.
 pub const SIGNED_IN: &[&str] = &[
     "/v1/state",
+    "/v1/endpoint",
     "/v1/apps",
     "/v1/call",
     "/v1/widgets",
@@ -277,8 +280,14 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
         if token.starts_with("run.") != (path == "/v1/kernel/run") {
             return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only a scheduled run asks that, and it asks nothing else" }))).into_response()).await;
         }
-        return match signed_in(&node, token).await {
+        return match signed_in(&node, token.clone()).await {
             Ok(me) => {
+                // The keys its caller hands this device for the token's calls, sealed to it.
+                if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
+                    && let Err(err) = node.hand(&token, &me.caller.user, handed)
+                {
+                    return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
+                }
                 req.extensions_mut().insert(me);
                 next.run(req).await
             }
@@ -367,6 +376,9 @@ struct Error(anyhow::Error);
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
+        if let Some(n) = self.0.downcast_ref::<crate::node::Needs>() {
+            return (StatusCode::PRECONDITION_REQUIRED, Json(json!({ "error": n.to_string(), "need": n.need, "to": n.to, "seal": n.seal }))).into_response();
+        }
         (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{:#}", self.0) }))).into_response()
     }
 }
@@ -469,9 +481,9 @@ async fn kernel_run(State(node): State<Node>, me: Me, Json(run): Json<crate::ker
     Ok(Json(node.kernel_run(&me.caller, &run).await?))
 }
 
-/// The keys of the scopes this device holds, for this machine's admin to hand to the install's kernel.
-async fn kernel_keys(State(node): State<Node>) -> Reply {
-    Ok(Json(json!(node.keys_for_kernel(&local(&node)?).await?)))
+/// This device as an endpoint, `{ key, seal }` (hex): what a caller seals the keys it hands a call to (`x-one-keys`).
+async fn endpoint(State(node): State<Node>) -> Json<Value> {
+    Json(json!(node.endpoint()))
 }
 
 async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>) -> Json<Value> {

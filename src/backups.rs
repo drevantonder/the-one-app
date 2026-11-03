@@ -1,11 +1,12 @@
-//! Backups: each scope's signed entries and the blobs they name, encrypted with the scope's own key and sent to a
-//! place that can't read them: a folder on one device's disk, or S3-compatible storage; a restore is an import. Each
-//! scope's key is sealed to the install's recovery key, so a backup and that key are all a recovery needs.
+//! Backups: each scope's signed entries and the blobs they name, encrypted with the key of the scope's newest epoch and
+//! sent to a place that can't read them: a folder on one device's disk, or S3-compatible storage; a restore is an
+//! import. Each epoch's key is sealed to the install's recovery key (`keys::epoch_name`'s `recovery`), and the place
+//! keeps that copy, so a backup and that key are all a recovery needs.
 //!
 //! A place holds a folder for each install, named by its genesis, so installs can share a bucket:
 //!
 //! ```text
-//! <install>/keys/<scope>/<key id>              the scope's key, sealed to the recovery key
+//! <install>/keys/<scope>/<key id>              an epoch's key, sealed to the recovery key
 //! <install>/objects/<name>                     a pack of entries, or a blob, encrypted
 //! <install>/snapshots/<scope>/<time>-<device>  what the scope's backup held then
 //! ```
@@ -17,18 +18,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
 use anyhow::{Context, Result, anyhow, ensure};
-use curve25519_dalek::edwards::CompressedEdwardsY;
-use curve25519_dalek::montgomery::MontgomeryPoint;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha512};
 
 use crate::bucket::{Place, folder, scope_of};
 use crate::entry::{Entry, Key, hex, pack, unpack};
-
-/// The object in a scope's folder in the bucket that names its key, by its id, and the folder of the key sealed to each
-/// device that holds the scope (by its key) and to the recovery key (`recovery`). No app has these names.
-pub const KEY_OBJECT: &str = "_key";
-pub const KEYS: &str = "_keys";
 
 /// The Vault item kind a place is: an item in Everyone, with a folder's `device` and `path`, or S3's `endpoint`,
 /// `bucket`, `region`, `key_id` and `secret`.
@@ -38,39 +31,16 @@ pub const EVERY: u64 = 3_600_000;
 /// How long a scope's changes may wait for the devices before this one in line, each, before it backs them up itself.
 pub const TAKE_OVER: u64 = 2 * 3_600_000;
 
-const SEAL: &str = "the one app 2026-11-01 backups: a scope key sealed to the recovery key";
 const OBJECT: &str = "the one app 2026-11-01 backups: an object's key";
 const SNAPSHOT: &str = "the one app 2026-11-01 backups: a scope's snapshots' key";
 const KEY_ID: &str = "the one app 2026-11-01 backups: a key's id";
 
 // Keys.
 
-/// Seals a scope's key to the recovery key's public half, as age seals to an ssh-ed25519 key: the Ed25519 key's
-/// X25519 twin, an ephemeral X25519 share, and a key derived from both that encrypts it. → share ‖ ciphertext.
-pub fn seal(recovery: &Key, scope_key: &[u8; 32]) -> Result<Vec<u8>> {
-    let to = CompressedEdwardsY(*recovery).decompress().context("the recovery key isn't a key")?.to_montgomery();
-    let ephemeral: [u8; 32] = rand::random();
-    let share = MontgomeryPoint::mul_base_clamped(ephemeral);
-    let shared = to.mul_clamped(ephemeral);
-    ensure!(shared.0 != [0; 32], "the recovery key isn't a key");
-    let mut out = share.0.to_vec();
-    out.extend(cipher(&wrap_key(&shared.0, &share.0, &to.0)).encrypt(&zero(), &scope_key[..]).map_err(|_| anyhow!("sealing failed"))?);
-    Ok(out)
-}
-
-/// Opens a sealed scope key with the recovery key's secret (its Ed25519 seed).
+/// Opens an epoch's key sealed to the recovery key, with the recovery key's secret (its Ed25519 seed).
 pub fn unseal(recovery_secret: &[u8; 32], sealed: &[u8]) -> Result<[u8; 32]> {
-    ensure!(sealed.len() == 32 + 32 + 16, "not a sealed key");
-    let scalar: [u8; 32] = Sha512::digest(recovery_secret)[..32].try_into()?;
-    let me = MontgomeryPoint::mul_base_clamped(scalar);
-    let share = MontgomeryPoint(sealed[..32].try_into()?);
-    let shared = share.mul_clamped(scalar);
-    let key = cipher(&wrap_key(&shared.0, &share.0, &me.0)).decrypt(&zero(), &sealed[32..]).map_err(|_| anyhow!("that recovery key doesn't open this backup"))?;
+    let key = crate::kernel::open_sealed(&crate::kernel::twin(recovery_secret).0, sealed).map_err(|_| anyhow!("that recovery key doesn't open this backup"))?;
     key.try_into().map_err(|_| anyhow!("not a sealed key"))
-}
-
-fn wrap_key(shared: &[u8; 32], share: &[u8; 32], to: &[u8; 32]) -> [u8; 32] {
-    blake3::derive_key(SEAL, &[&shared[..], share, to].concat())
 }
 
 fn cipher(key: &[u8; 32]) -> Aes256Gcm {
@@ -152,9 +122,9 @@ pub struct Job<'a> {
     /// The install's folder in the place.
     pub install: &'a str,
     pub scope: &'a str,
+    /// The key of the scope's newest epoch, and that key sealed to the recovery key, as the bucket keeps it.
     pub key: [u8; 32],
-    /// The recovery key's public half, which the scope's key is sealed to.
-    pub recovery: Key,
+    pub sealed: Vec<u8>,
     pub device: Key,
     pub now: u64,
     /// The latest snapshot of the scope in the place with this key, if any.
@@ -170,7 +140,7 @@ pub struct Job<'a> {
 /// Sends a scope what its backup lacks: its key, sealed, the first time; a pack of its new entries, its new blobs,
 /// and a snapshot. Returns the snapshot, or None when nothing new would be in it. `blob` reads a blob here.
 pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Option<Snapshot>> {
-    let Job { place, install, scope, key, recovery, device, now, previous, entries, blobs, bucket } = job;
+    let Job { place, install, scope, key, sealed, device, now, previous, entries, blobs, bucket } = job;
     let mut snap = previous.clone().unwrap_or_else(|| Snapshot { scope: scope.to_string(), ..Default::default() });
     if let Some(bucket) = bucket {
         copy_bucket(bucket, place, install, scope, &mut snap)?;
@@ -185,7 +155,7 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
     }
     let keys = format!("{install}/keys/{}/{}", folder(scope), key_id(&key));
     if previous.is_none() && place.get(&keys)?.is_none() {
-        place.put(&keys, &seal(&recovery, &key)?)?;
+        place.put(&keys, &sealed)?;
     }
     if !new.is_empty() {
         let bytes = pack(&new);
@@ -219,8 +189,8 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
 }
 
 /// Copies what a scope's folder in the install's bucket has that the place lacks, into `<install>/bucket/`, laid out
-/// as the bucket is: its key's id and the key sealed to each device and the recovery key, each app's key (sealed under
-/// the scope's), and each database's new steps and newest copy (sealed as they are), past what `snap` says it has.
+/// as the bucket is: each epoch's key sealed to the recovery key, each app's key in each epoch (sealed under it), and
+/// each database's new steps and newest copy (sealed as they are), past what `snap` says it has.
 fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: &mut Snapshot) -> Result<()> {
     let folder = folder(scope);
     let mut copy = |name: &str, known: bool| -> Result<bool> {
@@ -232,16 +202,17 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
         snap.bytes += bytes.len() as u64;
         Ok(true)
     };
-    copy(&format!("{folder}/{KEY_OBJECT}"), true)?;
-    for name in bucket.list(&format!("{folder}/{KEYS}"))? {
-        copy(&format!("{folder}/{KEYS}/{name}"), true)?;
+    for n in bucket.list(&format!("{folder}/_epochs"))? {
+        copy(&format!("{folder}/_epochs/{n}/recovery"), true)?;
     }
     for app in bucket.list(&folder)?.into_iter().filter(|a| crate::members::valid_app_name(a) || a == crate::members::APP) {
-        copy(&crate::kernel::app_key_name(scope, &app), true)?;
+        for n in bucket.list(&format!("{folder}/{app}/_key"))? {
+            copy(&format!("{folder}/{app}/_key/{n}"), true)?;
+        }
         for database in bucket.list(&format!("{folder}/{app}"))?.into_iter().filter(|d| !d.starts_with('_')) {
             let prefix = format!("{folder}/{app}/{database}");
             let Some(hint) = bucket.get(&crate::db::newest_name(&prefix))? else { continue };
-            let (_, newest_copy) = crate::db::newest(&hint)?;
+            let (_, newest_copy, epoch) = crate::db::newest(&hint)?;
             let (mut at, mut copied) = snap.databases.get(&format!("{app}/{database}")).copied().unwrap_or((0, 0));
             if newest_copy > copied && copy(&crate::db::copy_name(&prefix, newest_copy), false)? {
                 copied = newest_copy;
@@ -250,7 +221,7 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
             while copy(&crate::db::step_name(&prefix, at + 1), false)? {
                 at += 1;
             }
-            place.put(&format!("{install}/bucket/{}", crate::db::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied }))?)?;
+            place.put(&format!("{install}/bucket/{}", crate::db::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == newest_copy { epoch } else { 0 } }))?)?;
             snap.databases.insert(format!("{app}/{database}"), (at, copied));
         }
     }
@@ -445,7 +416,7 @@ pub fn installs(place: &Place) -> Result<Vec<String>> {
     Ok(place.list("")?.into_iter().filter(|n| n.len() == 16 && n.bytes().all(|b| b.is_ascii_hexdigit())).collect())
 }
 
-/// Every scope's keys in an install's backup, opened with the recovery key's secret.
+/// Every scope's epoch keys in an install's backup, opened with the recovery key's secret.
 pub fn open_keys(place: &Place, install: &str, recovery_secret: &[u8; 32]) -> Result<BTreeMap<String, Vec<[u8; 32]>>> {
     let mut out = BTreeMap::new();
     for dir in place.list(&format!("{install}/keys"))? {
@@ -578,7 +549,7 @@ mod tests {
                 install,
                 scope: "global",
                 key,
-                recovery: *recovery.verifying_key().as_bytes(),
+                sealed: crate::kernel::seal_to(&crate::kernel::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &key).unwrap(),
                 device: *device.verifying_key().as_bytes(),
                 now,
                 previous: previous.clone(),
@@ -659,7 +630,7 @@ mod tests {
                 install,
                 scope: "global",
                 key,
-                recovery: *recovery.verifying_key().as_bytes(),
+                sealed: crate::kernel::seal_to(&crate::kernel::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &key).unwrap(),
                 device: *device.verifying_key().as_bytes(),
                 now: hour + n as u64 * 60_000,
                 previous: previous.clone(),

@@ -18,8 +18,10 @@ impl Node {
         for scope in self.scopes_naming(hash)? {
             let name = crate::bucket::blob_name(&scope.to_string(), hash);
             let Some(sealed) = Bucket::get(&bucket.place, &name).await? else { continue };
-            let key = self.database_key(&scope, members::APP, crate::bucket::BLOBS).await?;
-            let bytes = crate::db::open(&key, &name, &sealed.bytes)?;
+            let keys = self.database_keys(&scope, members::APP, crate::bucket::BLOBS).await?;
+            let epoch = crate::keys::epoch_of(&sealed.bytes)?;
+            let key = keys.get(&epoch).with_context(|| format!("{} wasn't given {scope}'s epoch {epoch}", self.device_name()))?;
+            let bytes = crate::keys::open(key, &name, &sealed.bytes)?;
             ensure!(blake3::hash(&bytes).to_hex().as_str() == hash, "the blob kept as {hash} isn't it");
             release::put_blob(&self.0.dir, &bytes)?;
             return Ok(bytes);
@@ -27,7 +29,7 @@ impl Node {
         bail!("no device has put that blob in the bucket")
     }
 
-    /// Puts a blob this device has in the bucket, in `scope`, sealed with that scope's key, where it isn't: for a new
+    /// Puts a blob this device has in the bucket, in `scope`, sealed under that scope's newest epoch, where it isn't: for a new
     /// entry, always, since another device may have taken it out after a scope forgot it; else (`noted`) unless this
     /// device notes it put it there.
     pub(super) async fn share_blob(&self, scope: &Scope, hash: &str, noted: bool) -> Result<()> {
@@ -37,9 +39,9 @@ impl Node {
             return Ok(());
         }
         let Ok(bytes) = std::fs::read(release::blob_path(&self.0.dir, hash)?) else { return Ok(()) };
-        let key = self.database_key(scope, members::APP, crate::bucket::BLOBS).await?;
+        let keys = self.database_keys(scope, members::APP, crate::bucket::BLOBS).await?;
         let name = crate::bucket::blob_name(&scope.to_string(), hash);
-        Bucket::create(&self.bucket()?.place, &name, &crate::db::seal(&key, &name, &bytes)).await?;
+        Bucket::create(&self.bucket()?.place, &name, &crate::log::seal(&keys, &name, &bytes)?).await?;
         self.0.shared.lock().unwrap().insert(marker.clone());
         self.note_shared(&marker)
     }

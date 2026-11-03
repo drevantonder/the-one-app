@@ -154,12 +154,7 @@ fn start_new(dir: &Path) -> Result<String> {
     for (name, value) in [("address", &settings.address), ("kernel_vault", &settings.vault_url), ("kernel_schedules", &settings.schedules_url)] {
         crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": name, "value": value })))?;
     }
-    // The person's keys at the vault first, so the install's own are given to it before any client signs in.
     settings.try_person_keys()?;
-    let keys = crate::request(agent().post(on("/v1/kernel/keys")).send_json(json!({})))?;
-    for given in one::kernel::give_keys(&settings, keys.as_array().map(Vec::as_slice).unwrap_or_default()) {
-        given?;
-    }
     Ok(addr)
 }
 

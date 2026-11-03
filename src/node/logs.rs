@@ -14,7 +14,14 @@ impl Node {
             })?;
             let mut gained = false;
             for scope in scopes {
-                gained |= self.read_log(&scope).await?;
+                gained |= match self.read_log(&scope).await {
+                    // One whose newest key this device wasn't given yet: it reads the rest.
+                    Err(err) if scope != Scope::Global && err.is::<NotGiven>() => {
+                        tracing::debug!("{err:#}");
+                        false
+                    }
+                    other => other?,
+                };
             }
             if !gained {
                 break;
@@ -59,7 +66,7 @@ impl Node {
 
     /// Once this device has read a scope's entries up to step `at`, and hasn't said so since it started: a copy of them
     /// in the bucket if it's due, and their newest hint moved on (`src/log.rs`).
-    pub(super) async fn hint_log(&self, scope: &Scope, bucket: &impl crate::bucket::Bucket, key: &[u8; 32], at: u64) {
+    pub(super) async fn hint_log(&self, scope: &Scope, bucket: &impl crate::bucket::Bucket, key: &crate::db::Keys, at: u64) {
         let log = scope.to_string();
         if self.0.hinted.lock().unwrap().get(&log) == Some(&at) {
             return;
@@ -81,7 +88,7 @@ impl Node {
         for _ in 0..1000 {
             at += 1;
             let name = crate::db::step_name(&prefix, at);
-            if Bucket::create(&bucket, &name, &crate::db::seal(&key, &name, &bytes)).await? {
+            if Bucket::create(&bucket, &name, &crate::log::seal(&key, &name, &bytes)?).await? {
                 self.0.written.lock().unwrap().insert(scope.clone(), at);
                 return Ok(());
             }
@@ -89,9 +96,9 @@ impl Node {
         bail!("{scope} changed too often to write to")
     }
 
-    /// The key a scope's entries are sealed with in the bucket: the node's `log` of the scope.
-    pub(super) async fn log_key(&self, scope: &Scope) -> Result<[u8; 32]> {
-        self.database_key(scope, members::APP, crate::log::NAME).await
+    /// The keys a scope's entries are sealed with in the bucket, by epoch: the node's `log` of the scope.
+    pub(super) async fn log_key(&self, scope: &Scope) -> Result<crate::db::Keys> {
+        self.database_keys(scope, members::APP, crate::log::NAME).await
     }
 
     /// Tells the devices that hold `scope` it changed, so they read it now rather than at their next look: its entries,

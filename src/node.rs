@@ -14,7 +14,6 @@ use tokio::sync::broadcast;
 
 use crate::apps::{Apps, Context, Me, ScopeHandle};
 use crate::call::Append;
-use crate::backups::{KEY_OBJECT, KEYS};
 use crate::bucket::{Copied, Place};
 use crate::db::Db;
 use crate::entry::{Content, Entry, Key, Order, Scope, hex, new_id, short, unhex};
@@ -37,6 +36,8 @@ mod releases;
 mod scheduled;
 mod screens;
 mod sessions;
+pub use databases::NotGiven;
+pub use sessions::Needs;
 mod sidecars;
 mod state;
 mod status;
@@ -327,15 +328,19 @@ pub struct Inner {
     dbs: Mutex<HashMap<(Scope, String), Arc<tokio::sync::Mutex<Db>>>>,
     /// The databases another device said it wrote without sending the step, which a read catches up from the bucket.
     behind: Mutex<std::collections::HashSet<(Scope, String)>>,
-    /// Each scope's key, once this device has it.
-    scope_keys: Mutex<HashMap<Scope, [u8; 32]>>,
+    /// Each scope's epochs this device opens, by number, once it has looked.
+    epochs: Mutex<HashMap<Scope, crate::db::Keys>>,
+    /// Each database's keys by epoch as this device opens them (`database_keys`), with the newest epoch they're as of.
+    database_keys: Mutex<HashMap<(Scope, String), (u32, crate::db::Keys)>>,
     /// Whether this device is moving to the install's new storage now.
     moving: Mutex<bool>,
     /// Where the install's data went: every bucket this device has used writes there, after a move (`Copied`).
     moved: Arc<tokio::sync::RwLock<Option<Place>>>,
     /// This device's connector for the install's tunnel, with the token it runs with.
     tunnel: Mutex<Option<(String, tokio::task::JoinHandle<()>)>>,
-    /// Held while this device makes or finds a scope's key.
+    /// The `epoch` entries of epochs this device made, which it writes next.
+    epoch_entries: Mutex<Vec<Content>>,
+    /// Held while this device looks for or makes a scope's epochs.
     making_keys: tokio::sync::Mutex<()>,
     /// The last position this device wrote an entry of each scope at.
     written: Mutex<HashMap<Scope, u64>>,
@@ -448,11 +453,13 @@ impl Node {
             backup_looked: Mutex::new(HashMap::new()),
             dbs: Mutex::new(HashMap::new()),
             behind: Mutex::new(Default::default()),
-            scope_keys: Mutex::new(HashMap::new()),
+            epochs: Mutex::new(HashMap::new()),
+            database_keys: Mutex::new(HashMap::new()),
             moving: Mutex::new(false),
             moved: Arc::default(),
             tunnel: Mutex::new(None),
             making_keys: tokio::sync::Mutex::new(()),
+            epoch_entries: Mutex::new(Vec::new()),
             written: Mutex::new(HashMap::new()),
             hinted: Mutex::new(HashMap::new()),
             shared: Mutex::new(Default::default()),
@@ -625,6 +632,7 @@ impl Node {
             self.bring_in(&me, app).await?;
             self.append(&Scope::Global, members::node("install", json!({ "app": app }))).await?;
         }
+        self.write_epoch_entries().await;
         self.settle().await?;
         self.emit(Event::Install);
         Ok(hex(recovery.as_bytes()))
@@ -694,7 +702,7 @@ impl Node {
         if handled.members {
             self.0.changed.notify_one();
             self.emit(Event::Devices);
-            self.give_keys();
+            self.seal_epochs();
         }
         if handled.members || handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
             self.follow_storage();
@@ -778,6 +786,7 @@ impl Node {
                     tracing::debug!("reading the bucket: {err:#}");
                 }
                 self.fill_copies().await;
+                self.write_epoch_entries().await;
                 self.forget_sessions();
                 self.read_all_status();
             }

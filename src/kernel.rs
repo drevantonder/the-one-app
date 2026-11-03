@@ -25,31 +25,20 @@ fn hkdf(ikm: &[u8], salt: &[u8], info: &[u8]) -> [u8; 32] {
     out
 }
 
-/// An app's key in a scope is random, kept sealed under the scope's key: nonce ‖ AES-256-GCM(HKDF(scope key,
-/// "one/app\0<app>"), nonce, app key). Erasing the app deletes it, which destroys the key and so the app's data.
-pub fn seal_app_key(scope_key: &[u8; 32], app: &str, app_key: &[u8; 32]) -> Vec<u8> {
+/// An app's key in a scope's epoch is random, kept sealed under the epoch's key (`keys::app_key_name`): nonce ‖
+/// AES-256-GCM(HKDF(epoch key, "one/app\0<app>"), nonce, app key). Erasing the app deletes it, which destroys the key
+/// and so the app's data.
+pub fn seal_app_key(epoch_key: &[u8; 32], app: &str, app_key: &[u8; 32]) -> Vec<u8> {
     let nonce: [u8; 12] = rand::random();
     let mut out = nonce.to_vec();
-    out.extend(cipher(&hkdf(scope_key, &[], format!("one/app\0{app}").as_bytes())).encrypt(&nonce.into(), &app_key[..]).expect("encrypting in memory"));
+    out.extend(cipher(&hkdf(epoch_key, &[], format!("one/app\0{app}").as_bytes())).encrypt(&nonce.into(), &app_key[..]).expect("encrypting in memory"));
     out
 }
 
-/// The key an app's data in a scope was sealed with before app keys were random: derived from the scope's key. Only
-/// for data written then (`db::app_key`).
-pub fn derived_app_key(scope_key: &[u8; 32], app: &str) -> [u8; 32] {
-    hkdf(scope_key, &[], format!("one/app\0{app}").as_bytes())
-}
-
-/// Where an app's sealed key is kept in the bucket, beside its databases: `_key` in its folder, which no database
-/// can be named.
-pub fn app_key_name(scope: &str, app: &str) -> String {
-    format!("{}/{app}/_key", crate::bucket::folder(scope))
-}
-
-/// An app's key, from its sealed copy and its scope's key.
-pub fn open_app_key(scope_key: &[u8; 32], app: &str, sealed: &[u8]) -> Result<[u8; 32]> {
+/// An app's key, from its sealed copy and its epoch's key.
+pub fn open_app_key(epoch_key: &[u8; 32], app: &str, sealed: &[u8]) -> Result<[u8; 32]> {
     ensure!(sealed.len() == 60, "not a sealed app key");
-    let plain = cipher(&hkdf(scope_key, &[], format!("one/app\0{app}").as_bytes())).decrypt(sealed[..12].into(), &sealed[12..]).map_err(|_| anyhow!("that scope's key doesn't open {app}'s"))?;
+    let plain = cipher(&hkdf(epoch_key, &[], format!("one/app\0{app}").as_bytes())).decrypt(sealed[..12].into(), &sealed[12..]).map_err(|_| anyhow!("that epoch's key doesn't open {app}'s"))?;
     plain.try_into().map_err(|_| anyhow!("an app's key is 32 bytes"))
 }
 

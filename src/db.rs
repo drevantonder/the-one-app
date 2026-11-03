@@ -1,23 +1,27 @@
 //! App databases: an app's data in a scope is one SQLite database, the truth, kept in the bucket as steps at numbered
-//! positions, each sealed: the changeset of one write (SQLite's session extension), or one of the app's schema
-//! changes. Reading it is its newest copy and the steps after; writing it is a step created only if its position is
-//! free, so when two devices write at once, one wins and the other catches up and runs its write again.
+//! positions, each sealed under one of its scope's epochs (`src/keys.rs`) and naming it: the changeset of one write
+//! (SQLite's session extension), or one of the app's schema changes. Reading it is its newest copy and the steps after;
+//! writing it is a step created only if its position is free, so when two devices write at once, one wins and the
+//! other catches up and runs its write again.
 //!
 //! ```text
-//! <prefix>/newest            {"at": n, "copy": m}, replaced while unchanged: a hint, so readers needn't list
+//! <prefix>/newest            {"at": n, "copy": m, "epoch": e}, replaced while unchanged: a hint, so readers needn't
+//!                            list; e is the epoch copy m is sealed under, the oldest a reader starting there needs
 //! <prefix>/<n>               step n, from 1
-//! <prefix>/copy/<n>          the whole database after step n
+//! <prefix>/copy/<n>          the whole database after step n, under the epoch of the steps it holds
 //! ```
 //!
-//! No clock, disk or network: the bucket is all it reads and writes, so it runs wherever SQLite does. Its keys come
-//! from the kernel's tree (`src/kernel.rs`): a scope's key seals each app's (`app_key`), from which each database's
-//! is derived.
+//! Along a database's positions epochs never go down: a step under an epoch lower than the step before it, or that
+//! doesn't open with the key of the epoch it names, is skipped by every reader, its position taken, and the next write
+//! takes the following one. A writer writes under the newest epoch it was given, at once; the next copy is under it.
+//!
+//! No clock, disk or network: the bucket is all it reads and writes, so it runs wherever SQLite does. A database's key
+//! in each epoch comes from its app's key in that epoch (`app_key`, `kernel::database_key`).
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{c_char, c_int, c_void};
 
-use aes_gcm::aead::{Aead, Payload};
-use aes_gcm::{Aes256Gcm, KeyInit};
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use rusqlite::Connection;
 use rusqlite::types::{Value as Sql, ValueRef};
 use serde_json::{Map, Value, json};
@@ -29,65 +33,83 @@ pub const COPY_EVERY: u64 = 100;
 /// How many times a write runs again after losing a race before it gives up.
 const TRIES: usize = 50;
 
-/// Seals an object under its key and name, so it can't be read, changed, or passed off as another object: → a random
-/// nonce ‖ the ciphertext.
-pub fn seal(key: &[u8; 32], name: &str, bytes: &[u8]) -> Vec<u8> {
-    let nonce: [u8; 12] = rand::random();
-    let mut out = nonce.to_vec();
-    out.extend(Aes256Gcm::new(key.into()).encrypt(&nonce.into(), Payload { msg: bytes, aad: name.as_bytes() }).expect("encrypts"));
-    out
+/// A database's keys, by the epoch each opens.
+pub type Keys = BTreeMap<u32, [u8; 32]>;
+
+/// What a read or write stopped at: a copy or step sealed under an epoch whose key it wasn't given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Missing {
+    pub epoch: u32,
 }
 
-pub fn open(key: &[u8; 32], name: &str, sealed: &[u8]) -> Result<Vec<u8>> {
-    ensure!(sealed.len() >= 12 + 16, "{name} is too short to be sealed");
-    let nonce: [u8; 12] = sealed[..12].try_into().expect("12 bytes");
-    Aes256Gcm::new(key.into()).decrypt(&nonce.into(), Payload { msg: &sealed[12..], aad: name.as_bytes() }).map_err(|_| anyhow!("{name} didn't open with its key"))
-}
-
-/// An app's key in a scope, from its copy in the bucket (`kernel::app_key_name`), sealed under the scope's key. The
-/// first to need it makes it: at random, or, for a `database` written before app keys were random, the key derived
-/// from the scope's that its data was sealed with, so it still opens. Whichever is written first is the key.
-pub async fn app_key(bucket: &impl Bucket, scope_key: &[u8; 32], scope: &str, app: &str, database: &str) -> Result<[u8; 32]> {
-    let name = crate::kernel::app_key_name(scope, app);
-    if let Some(o) = bucket.get(&name).await? {
-        return crate::kernel::open_app_key(scope_key, app, &o.bytes);
+impl std::fmt::Display for Missing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "it needs the key of epoch {}, which it wasn't given", self.epoch)
     }
-    let prefix = format!("{}/{app}/{database}", crate::bucket::folder(scope));
-    let written = bucket.get(&newest_name(&prefix)).await?.is_some() || bucket.get(&step_name(&prefix, 1)).await?.is_some();
-    let key = if written { crate::kernel::derived_app_key(scope_key, app) } else { rand::random() };
-    if bucket.create(&name, &crate::kernel::seal_app_key(scope_key, app, &key)).await? {
-        return Ok(key);
+}
+
+impl std::error::Error for Missing {}
+
+/// An app's key in epoch `n` of a scope, from its copy in the bucket (`keys::app_key_name`), sealed under that epoch's
+/// key. The first to need it makes it, at random, unless `make` is false (an epoch nothing was written under yet,
+/// where a reader has nothing to open): whichever is written first is the key.
+pub async fn app_key(bucket: &impl Bucket, epoch_key: &[u8; 32], scope: &str, app: &str, n: u32, make: bool) -> Result<Option<[u8; 32]>> {
+    let name = crate::keys::app_key_name(scope, app, n);
+    if let Some(o) = bucket.get(&name).await? {
+        return crate::kernel::open_app_key(epoch_key, app, &o.bytes).map(Some);
+    }
+    if !make {
+        return Ok(None);
+    }
+    let key = rand::random();
+    if bucket.create(&name, &crate::kernel::seal_app_key(epoch_key, app, &key)).await? {
+        return Ok(Some(key));
     }
     let made = bucket.get(&name).await?.context("an app's key went as it was made")?;
-    crate::kernel::open_app_key(scope_key, app, &made.bytes)
+    crate::kernel::open_app_key(epoch_key, app, &made.bytes).map(Some)
 }
 
 /// One SQLite database of an app's, at a position in its steps.
 pub struct Db {
     prefix: String,
-    key: [u8; 32],
+    keys: Keys,
     conn: Connection,
-    /// The last step applied.
+    /// The last step applied (or passed over).
     at: u64,
     /// The newest copy this device knows of.
     copy: u64,
+    /// The epoch of the last step applied, or of the copy it started from: 0 before either.
+    epoch: u32,
+    /// The epoch of the copy it started from, as the newest hint says it.
+    copy_epoch: u32,
+    /// The epochs of what it read: the copy it started from and the steps it applied.
+    used: BTreeSet<u32>,
 }
 
 impl Db {
-    /// Reads a database as its newest steps leave it: empty if it has none.
-    pub async fn open(bucket: &impl Bucket, prefix: &str, key: [u8; 32]) -> Result<Db> {
-        let (at, copy) = match bucket.get(&newest_name(prefix)).await? {
+    /// Reads a database as its newest steps leave it, with its keys by epoch: empty if it has none. Fails with
+    /// `Missing` at a copy or step under an epoch whose key it wasn't given.
+    pub async fn open(bucket: &impl Bucket, prefix: &str, keys: Keys) -> Result<Db> {
+        let (at, copy, _) = match bucket.get(&newest_name(prefix)).await? {
             Some(o) => newest(&o.bytes)?,
-            None => (0, 0),
+            None => (0, 0, 0),
         };
-        let mut conn = Connection::open_in_memory()?;
+        let mut db = Db { prefix: prefix.into(), keys, conn: Connection::open_in_memory()?, at: 0, copy: 0, epoch: 0, copy_epoch: 0, used: BTreeSet::new() };
         if copy > 0 {
             let name = copy_name(prefix, copy);
             let sealed = bucket.get(&name).await?.with_context(|| format!("{name} is missing"))?;
-            let bytes = open(&key, &name, &sealed.bytes)?;
-            conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
+            let epoch = crate::keys::epoch_of(&sealed.bytes)?;
+            let key = db.keys.get(&epoch).ok_or(Missing { epoch })?;
+            // A copy that doesn't open is someone's junk: the steps say the same.
+            match crate::keys::open(key, &name, &sealed.bytes) {
+                Ok(bytes) => {
+                    db.conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
+                    (db.at, db.copy, db.epoch, db.copy_epoch) = (copy, copy, epoch, epoch);
+                    db.used.insert(epoch);
+                }
+                Err(err) => tracing::debug!("{name}: {err:#}"),
+            }
         }
-        let mut db = Db { prefix: prefix.into(), key, conn, at: copy, copy };
         db.catch_up(bucket).await?;
         ensure!(db.at >= at, "{prefix}/newest says step {at} was written, but it's missing");
         Ok(db)
@@ -97,9 +119,27 @@ impl Db {
         self.at
     }
 
-    /// Whether it was opened with `key`.
-    pub fn opens_with(&self, key: &[u8; 32]) -> bool {
-        self.key == *key
+    /// The epoch of the last step it applied, or the copy it started from: 0 before either.
+    pub fn epoch(&self) -> u32 {
+        self.epoch
+    }
+
+    /// The keys it was opened with, by epoch.
+    pub fn keys(&self) -> &Keys {
+        &self.keys
+    }
+
+    /// Takes keys of epochs it wasn't given, as a device does when it's handed a scope's new epoch: what it holds
+    /// stays as it was read.
+    pub fn add_keys(&mut self, keys: &Keys) {
+        for (epoch, key) in keys {
+            self.keys.entry(*epoch).or_insert(*key);
+        }
+    }
+
+    /// Whether `keys` open everything it read, each the same: so a call given them may use it as it is.
+    pub fn opens_for(&self, keys: &Keys) -> bool {
+        self.used.iter().all(|e| keys.get(e).is_some_and(|k| self.keys.get(e) == Some(k)))
     }
 
     pub fn prefix(&self) -> &str {
@@ -112,10 +152,39 @@ impl Db {
         loop {
             let name = self.step(self.at + 1);
             let Some(o) = bucket.get(&name).await? else { break };
-            self.apply(&open(&self.key, &name, &o.bytes)?)?;
+            if let Some((epoch, step)) = self.unseal(&name, &o.bytes)? {
+                self.apply(&step)?;
+                self.epoch = epoch;
+                self.used.insert(epoch);
+            }
             self.at += 1;
         }
         Ok(self.at > from)
+    }
+
+    /// A step, opened: None for one every reader passes over, under an epoch lower than the step before it or that
+    /// doesn't open with the key of the epoch it names.
+    fn unseal(&self, name: &str, sealed: &[u8]) -> Result<Option<(u32, Vec<u8>)>> {
+        let Ok(epoch) = crate::keys::epoch_of(sealed) else { return Ok(None) };
+        if epoch < self.epoch {
+            tracing::debug!("{name} is under epoch {epoch}, after {}: passed over", self.epoch);
+            return Ok(None);
+        }
+        let key = self.keys.get(&epoch).ok_or(Missing { epoch })?;
+        match crate::keys::open(key, name, sealed) {
+            Ok(step) => Ok(Some((epoch, step))),
+            Err(err) => {
+                tracing::debug!("{name}: {err:#}: passed over");
+                Ok(None)
+            }
+        }
+    }
+
+    /// The newest epoch it was given, and its key: what it writes under.
+    fn newest_key(&self) -> Result<(u32, [u8; 32])> {
+        let (epoch, key) = self.keys.last_key_value().with_context(|| format!("{} was opened with no keys to write with", self.prefix))?;
+        ensure!(*epoch >= self.epoch, Missing { epoch: self.epoch });
+        Ok((*epoch, *key))
     }
 
     /// Brings the database's schema to the app's newest: each of `migrations` it lacks, in order, as a step.
@@ -130,9 +199,11 @@ impl Db {
             let tried = self.apply(&step);
             self.conn.execute_batch("rollback to migrate; release migrate")?;
             tried?;
-            if bucket.create(&self.step(self.at + 1), &seal(&self.key, &self.step(self.at + 1), &step)).await? {
+            let (epoch, key) = self.newest_key()?;
+            let name = self.step(self.at + 1);
+            if bucket.create(&name, &crate::keys::seal(epoch, &key, &name, &step)).await? {
                 self.apply(&step)?;
-                self.at += 1;
+                self.wrote(epoch);
                 self.written(bucket).await;
             }
         }
@@ -144,11 +215,13 @@ impl Db {
         Ok(self.conn.query_row("pragma user_version", [], |r| r.get::<_, i64>(0))? as usize)
     }
 
-    /// Runs a write in one transaction, which is the step written after this device's newest: when another device
-    /// wrote that first, it catches up and runs `f` again, so `f` must do only database work.
+    /// Runs a write in one transaction, which is the step written after this device's newest, under the newest epoch
+    /// it was given: when another device wrote that first, it catches up and runs `f` again, so `f` must do only
+    /// database work.
     pub async fn write<R>(&mut self, bucket: &impl Bucket, mut f: impl FnMut(&Connection) -> Result<R>) -> Result<R> {
         for _ in 0..TRIES {
             self.catch_up(bucket).await?;
+            let (epoch, key) = self.newest_key()?;
             let open = Open::begin(&mut self.conn)?;
             let (result, changes) = changes(&open, &mut f)?;
             if changes.is_empty() {
@@ -157,16 +230,23 @@ impl Db {
             }
             let name = step_name(&self.prefix, self.at + 1);
             let step = [b"c".as_slice(), &changes].concat();
-            let sealed = seal(&self.key, &name, &step);
+            let sealed = crate::keys::seal(epoch, &key, &name, &step);
             if created(bucket, &name, &sealed).await? {
                 open.execute_batch("commit")?;
                 drop(open);
-                self.at += 1;
+                self.wrote(epoch);
                 self.written(bucket).await;
                 return Ok(result);
             }
         }
         bail!("{} changed too often to write to", self.prefix)
+    }
+
+    /// After its own step under `epoch` was created at the next position.
+    fn wrote(&mut self, epoch: u32) {
+        self.at += 1;
+        self.epoch = epoch;
+        self.used.insert(epoch);
     }
 
     /// Reads with a statement that only reads: its rows, each column by name.
@@ -192,13 +272,15 @@ impl Db {
     }
 
     async fn hint(&mut self, bucket: &impl Bucket) -> Result<()> {
-        if self.at >= self.copy + COPY_EVERY {
+        if self.at >= self.copy + COPY_EVERY
+            && let Some(key) = self.keys.get(&self.epoch)
+        {
             let name = copy_name(&self.prefix, self.at);
             let bytes = self.conn.serialize("main")?.to_vec();
-            bucket.create(&name, &seal(&self.key, &name, &bytes)).await?;
-            self.copy = self.at;
+            bucket.create(&name, &crate::keys::seal(self.epoch, key, &name, &bytes)).await?;
+            (self.copy, self.copy_epoch) = (self.at, self.epoch);
         }
-        hint(bucket, &self.prefix, self.at, self.copy).await
+        hint(bucket, &self.prefix, self.at, self.copy, self.copy_epoch).await
     }
 
     /// Applies a step: a changeset, or a schema change this database is due.
@@ -271,28 +353,30 @@ pub fn copy_name(prefix: &str, n: u64) -> String {
     format!("{prefix}/copy/{n:012}")
 }
 
-/// Moves the newest hint at `prefix` on to say at least step `at` and copy `copy`, replacing it only while unchanged.
-pub async fn hint(bucket: &impl Bucket, prefix: &str, at: u64, copy: u64) -> Result<()> {
+/// Moves the newest hint at `prefix` on to say at least step `at` and copy `copy` (sealed under `epoch`), replacing it
+/// only while unchanged.
+pub async fn hint(bucket: &impl Bucket, prefix: &str, at: u64, copy: u64, epoch: u32) -> Result<()> {
     let name = newest_name(prefix);
     for _ in 0..TRIES {
         let current = bucket.get(&name).await?;
         let said = current.as_ref().map(|o| newest(&o.bytes)).transpose()?;
-        let (was_at, was_copy) = said.unwrap_or((0, 0));
+        let (was_at, was_copy, was_epoch) = said.unwrap_or((0, 0, 0));
+        let epoch = if copy >= was_copy { epoch } else { was_epoch };
         let (at, copy) = (at.max(was_at), copy.max(was_copy));
-        if said == Some((at, copy)) {
+        if said == Some((at, copy, epoch)) {
             return Ok(());
         }
-        if bucket.replace(&name, &serde_json::to_vec(&json!({ "at": at, "copy": copy }))?, current.as_ref().map(|o| o.tag.as_str())).await? {
+        if bucket.replace(&name, &serde_json::to_vec(&json!({ "at": at, "copy": copy, "epoch": epoch }))?, current.as_ref().map(|o| o.tag.as_str())).await? {
             return Ok(());
         }
     }
     Ok(())
 }
 
-/// What a database's newest hint says: (its last step, its newest copy).
-pub fn newest(bytes: &[u8]) -> Result<(u64, u64)> {
+/// What a database's newest hint says: (its last step, its newest copy, the epoch that copy is sealed under).
+pub fn newest(bytes: &[u8]) -> Result<(u64, u64, u32)> {
     let v: Value = serde_json::from_slice(bytes)?;
-    Ok((v["at"].as_u64().unwrap_or(0), v["copy"].as_u64().unwrap_or(0)))
+    Ok((v["at"].as_u64().unwrap_or(0), v["copy"].as_u64().unwrap_or(0), v["epoch"].as_u64().unwrap_or(0) as u32))
 }
 
 /// Reads with a statement that only reads.
@@ -468,49 +552,93 @@ mod tests {
     use super::*;
     use crate::bucket::Memory;
 
-    #[test]
-    fn an_apps_key_is_made_once_and_data_written_before_keeps_its_key() {
-        rt().block_on(async {
-            let bucket = Memory::default();
-            let scope: [u8; 32] = rand::random();
-            let board = app_key(&bucket, &scope, "global", "board", "main").await.unwrap();
-            assert_ne!(board, crate::kernel::derived_app_key(&scope, "board"), "a new app's key is random");
-            assert_eq!(app_key(&bucket, &scope, "global", "board", "main").await.unwrap(), board, "and kept");
-
-            // The calendar wrote its database when keys were derived: its key is that one, kept from now on.
-            let derived = crate::kernel::derived_app_key(&scope, "calendar");
-            let mut db = Db::open(&bucket, "global/calendar/main", crate::kernel::database_key(&derived, "main")).await.unwrap();
-            db.migrate(&bucket, &[SCHEMA.to_string()]).await.unwrap();
-            assert_eq!(app_key(&bucket, &scope, "global", "calendar", "main").await.unwrap(), derived);
-            assert!(bucket.get(&crate::kernel::app_key_name("global", "calendar")).await.unwrap().is_some());
-        });
-    }
-
     const SCHEMA: &str = "create table counts (name text primary key, n integer not null); create table notes (text text)";
 
     fn rt() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread().build().unwrap()
     }
 
+    fn keys(list: &[(u32, [u8; 32])]) -> Keys {
+        list.iter().copied().collect()
+    }
+
+    async fn note(db: &mut Db, bucket: &impl Bucket, text: &str) {
+        db.write(bucket, |c| execute(c, "insert into notes values (?)", &[json!(text)]).map(|_| ())).await.unwrap();
+    }
+
+    fn notes(db: &Db) -> Vec<String> {
+        db.query("select text from notes order by rowid", &[]).unwrap().into_iter().map(|r| r["text"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn a_new_epoch_is_written_under_at_once_and_what_came_before_still_reads() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let (one, two): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
+            let mut old = Db::open(&bucket, "p", keys(&[(1, one)])).await.unwrap();
+            old.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            note(&mut old, &bucket, "before").await;
+
+            // A writer given epoch 2 writes under it at once, with no copy in its write.
+            let mut new = Db::open(&bucket, "p", keys(&[(1, one), (2, two)])).await.unwrap();
+            note(&mut new, &bucket, "after").await;
+            assert_eq!(crate::keys::epoch_of(&bucket.get(&step_name("p", 3)).await.unwrap().unwrap().bytes).unwrap(), 2);
+            assert!(bucket.get(&copy_name("p", 3)).await.unwrap().is_none());
+            assert_eq!(notes(&new), ["before", "after"]);
+
+            // A writer still on epoch 1 can't read past epoch 2, so writes nothing after it.
+            assert_eq!(old.write(&bucket, |_| Ok(())).await.unwrap_err().downcast::<Missing>().unwrap(), Missing { epoch: 2 });
+            // A step under epoch 1 after it anyway (a device that didn't read first) is passed over, its position taken.
+            let stale = {
+                let mut scratch = Db::open(&Memory::default(), "q", keys(&[(1, one)])).await.unwrap();
+                scratch.migrate(&Memory::default(), &[SCHEMA.into()]).await.unwrap();
+                let open = Open::begin(&mut scratch.conn).unwrap();
+                changes(&open, &mut |c: &Connection| execute(c, "insert into notes values ('stale')", &[]).map(|_| ())).unwrap().1
+            };
+            let name = step_name("p", 4);
+            assert!(bucket.create(&name, &crate::keys::seal(1, &one, &name, &[b"c".as_slice(), &stale].concat())).await.unwrap());
+            // And so is junk that names epoch 2 but doesn't open with its key.
+            let name = step_name("p", 5);
+            assert!(bucket.create(&name, &crate::keys::seal(2, &rand::random(), &name, b"cjunk")).await.unwrap());
+            note(&mut new, &bucket, "later").await;
+            assert_eq!(new.at(), 6);
+            let fresh = Db::open(&bucket, "p", keys(&[(1, one), (2, two)])).await.unwrap();
+            assert_eq!(notes(&fresh), ["before", "after", "later"], "data from before the change reads, the stale step doesn't");
+
+            // Given only epoch 2, it needs epoch 1 until a copy under 2 is written, then opens with 2 alone.
+            let missing = Db::open(&bucket, "p", keys(&[(2, two)])).await.err().unwrap().downcast::<Missing>().unwrap();
+            assert_eq!(missing, Missing { epoch: 1 });
+            for n in 0..COPY_EVERY {
+                note(&mut new, &bucket, &format!("{n}")).await;
+            }
+            let (_, copy, epoch) = newest(&bucket.get(&newest_name("p")).await.unwrap().unwrap().bytes).unwrap();
+            assert!(copy > 0 && epoch == 2, "the routine copy is under the newest epoch");
+            let two_only = Db::open(&bucket, "p", keys(&[(2, two)])).await.unwrap();
+            assert_eq!(notes(&two_only)[..3], ["before", "after", "later"]);
+            assert!(two_only.opens_for(&keys(&[(2, two)])) && !new.opens_for(&keys(&[(2, two)])), "a call given epoch 2 alone doesn't use what epoch 1 opened");
+        });
+    }
+
     #[test]
     fn what_the_bucket_keeps_is_sealed_to_its_name() {
         rt().block_on(async {
             let bucket = Memory::default();
-            let key = rand::random();
-            let mut a = Db::open(&bucket, "p", key).await.unwrap();
+            let key = keys(&[(1, rand::random())]);
+            let mut a = Db::open(&bucket, "p", key.clone()).await.unwrap();
             a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
-            a.write(&bucket, |c| execute(c, "insert into notes values ('a secret note')", &[]).map(|_| ())).await.unwrap();
-            a.write(&bucket, |c| execute(c, "insert into notes values ('another')", &[]).map(|_| ())).await.unwrap();
+            note(&mut a, &bucket, "a secret note").await;
+            note(&mut a, &bucket, "another").await;
             for (name, bytes) in bucket.objects.lock().unwrap().iter() {
                 assert!(name.ends_with("newest") || !bytes.windows(6).any(|w| w == b"secret" || w == b"create"), "{name} isn't sealed");
             }
-            assert!(Db::open(&bucket, "p", rand::random()).await.is_err(), "another key opens nothing");
+            let other = Db::open(&bucket, "p", keys(&[(1, rand::random())])).await.unwrap();
+            assert_eq!(other.version().unwrap(), 0, "another key opens nothing");
             // A step moved to another position doesn't open there.
             let mut objects = bucket.objects.lock().unwrap();
             let second = objects.get("p/000000000002").unwrap().clone();
-            objects.insert("p/000000000003".into(), second);
+            objects.insert("p/000000000004".into(), second);
             drop(objects);
-            assert!(Db::open(&bucket, "p", key).await.is_err());
+            assert_eq!(notes(&Db::open(&bucket, "p", key).await.unwrap()), ["a secret note", "another"]);
         });
     }
 
@@ -538,7 +666,7 @@ mod tests {
     fn a_write_given_up_on_leaves_nothing_behind() {
         rt().block_on(async {
             let bucket = Stalls::default();
-            let mut db = Db::open(&bucket, "p", rand::random()).await.unwrap();
+            let mut db = Db::open(&bucket, "p", keys(&[(1, rand::random())])).await.unwrap();
             db.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
             // A call that runs out of time, or whose caller goes away, drops its write while the bucket hasn't answered.
             bucket.1.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -548,8 +676,8 @@ mod tests {
             }
             assert!(db.query("select * from notes", &[]).unwrap().is_empty(), "what it wrote isn't read");
             bucket.1.store(false, std::sync::atomic::Ordering::Relaxed);
-            db.write(&bucket, |c| execute(c, "insert into notes values ('next')", &[]).map(|_| ())).await.expect("the next write goes ahead");
-            assert_eq!(db.query("select text from notes", &[]).unwrap(), vec![serde_json::from_value(json!({ "text": "next" })).unwrap()]);
+            note(&mut db, &bucket, "next").await;
+            assert_eq!(notes(&db), ["next"]);
         });
     }
 }

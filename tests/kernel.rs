@@ -417,7 +417,9 @@ fn the_vault_given_the_installs_keys_opens_what_its_nodes_wrote() {
     // nodes do, with the key its data was sealed with, never a new one that would open nothing.
     agent.put(format!("{}/install/global/notes/main/000000000001", v.sites)).send(&b"a step"[..]).unwrap();
     let given = vault.keys_until(&token, &[("global", "notes", Some("main"))]).unwrap().0;
-    assert_eq!(given[0].key, kernel::database_key(&kernel::derived_app_key(&global, "notes"), "main"), "the vault opens the Notes the nodes wrote");
+    let mut derived = [0; 32];
+    hkdf::Hkdf::<sha2::Sha256>::new(Some(&[]), &global).expand(b"one/app\0notes", &mut derived).unwrap();
+    assert_eq!(given[0].key, kernel::database_key(&derived, "main"), "the vault opens the Notes the nodes wrote");
 
     // Once given, its key stays; and so does that of a scope nodes made none for, once an item is sealed under it.
     assert_eq!(v.internal("scope-key", json!({ "scope": "global", "key": B64U.encode(&rand::random::<[u8; 32]>()), "people": [ANDRE] })).0, 409);
@@ -982,10 +984,6 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert!(state(&andres)["settings_items"].as_array().unwrap().iter().any(|i| i["name"] == "requests" && i["badge"] == 1), "his invite waits in Requests");
     assert_eq!(ask(&andres, "POST", "/v1/accept", json!({ "group": group })).0, 200);
     assert_eq!(members().as_array().unwrap().len(), 2);
-    // Its key is the vault's, made with it: Sam opened it at once, and Andre once he accepted, with no kernel keys.
-    let vault = kernel::Vault { url: v.url.clone() };
-    let opens = |token: &str, scope: &str| vault.keys_until(token, &[(scope, "board", None)]).is_ok();
-    assert!(opens(&sams, &format!("group:{group}")) && opens(&andres, &format!("group:{group}")));
 
     // What only this machine's own programs do, no sign-in from elsewhere (through the gateway) does: renaming the
     // device, say.
@@ -1015,23 +1013,18 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert_eq!(get(&andres, &sams_file), 400, "and Andre doesn't, by its hash");
 
     // Removing someone takes their keys at the vault as soon as the node writes it, with no kernel keys after.
+    let vault = kernel::Vault { url: v.url.clone() };
+    let opens = |token: &str, scope: &str| vault.keys_until(token, &[(scope, "board", None)]).is_ok();
     let key = || B64U.encode(&rand::random::<[u8; 32]>());
     v.internal("scope-key", json!({ "scope": "global", "key": key(), "people": [andre, sam], "admins": [andre] }));
     assert!(opens(&sams, "global"));
     assert_eq!(ask(&sams, "POST", "/v1/member", json!({ "group": group, "user": andre, "role": null })).0, 200);
-    assert!(!opens(&andres, &format!("group:{group}")) && opens(&andres, "global"));
-    // Letting someone in does too. Andre, the install's admin but no longer in it, can't: the invite is made, and
-    // he's told why he won't open it, on the screen he asked from. Sam invites him back as an admin, and he opens it
-    // once he accepts.
-    let (status, said) = ask(&andres, "POST", "/v1/invite", json!({ "group": group, "user": andre }));
-    assert_eq!(status, 400);
-    assert!(said["error"].as_str().unwrap().starts_with("You are invited to Sam's, but won't open what's in it"), "{said}");
+    assert!(opens(&andres, "global"));
+    // Sam invites him back as an admin.
     assert_eq!(ask(&sams, "POST", "/v1/invite", json!({ "group": group, "user": andre, "role": "admin" })).0, 200);
-    assert!(!opens(&andres, &format!("group:{group}")));
     assert_eq!(ask(&andres, "POST", "/v1/accept", json!({ "group": group })).0, 200);
-    assert!(opens(&andres, &format!("group:{group}")));
     assert_eq!(ask(&andres, "POST", "/v1/remove", json!({ "user": sam })).0, 200);
-    assert!(!opens(&sams, "global") && !opens(&sams, &format!("group:{group}")) && opens(&andres, "global"));
+    assert!(!opens(&sams, "global") && opens(&andres, "global"));
     // An admin who makes himself a member is one at the vault no more, at once.
     assert_eq!(ask(&andres, "POST", "/v1/role", json!({ "user": andre, "role": "member" })).0, 200);
     let err = vault.invite(&andres, "Kim").err().expect("he's no admin there").to_string();

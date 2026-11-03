@@ -229,11 +229,11 @@ impl Node {
         let now = now_ms();
         let me = self.0.id;
         let keys = self.held_keys().await;
-        let (install, recovery, plan) = self.with(|i| {
+        let (install, plan) = self.with(|i| {
             let m = &i.r.members;
-            let Some(global) = i.views.get("global").map(|(_, s)| s) else { return Ok((String::new(), [0; 32], Vec::new())) };
+            let Some(global) = i.views.get("global").map(|(_, s)| s) else { return Ok((String::new(), Vec::new())) };
             let install = i.r.root.map(|r| r.to_hex()[..16].to_string()).context("no install")?;
-            let recovery = m.recovery.context("the install has no recovery key")?;
+            m.recovery.context("the install has no recovery key")?;
             let frontier = i.r.store.frontier()?;
             let cache = self.0.backed.lock().unwrap();
             let failed = self.0.backup_failed.lock().unwrap();
@@ -295,7 +295,7 @@ impl Node {
                     plan.push((p, due, prune));
                 }
             }
-            Ok((install, recovery, plan))
+            Ok((install, plan))
         })?;
         for (p, due, prune) in plan {
             let place = match p.place {
@@ -314,7 +314,7 @@ impl Node {
             let mut snapshots = Vec::new();
             let mut error = None;
             for d in due {
-                match self.back_up_scope(&place, &p.id, &install, recovery, &d, now, force).await {
+                match self.back_up_scope(&place, &p.id, &install, &d, now, force).await {
                     Ok(Some(s)) => snapshots.push(s),
                     Ok(None) => {}
                     Err(err) => {
@@ -344,26 +344,26 @@ impl Node {
         Ok(())
     }
 
-    /// The key of each scope this device holds, by its name, of those it can have.
+    /// The key of the newest epoch of each scope this device holds, by its name, of those it opens.
     async fn held_keys(&self) -> BTreeMap<String, [u8; 32]> {
         let scopes = self.with(|i| Ok(i.r.members.scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
         let mut out = BTreeMap::new();
         for scope in scopes {
-            if let Ok(key) = self.scope_key(&scope).await {
+            if let Some((_, key)) = self.epoch_keys(&scope).await.ok().and_then(|k| k.last_key_value().map(|(n, k)| (*n, *k))) {
                 out.insert(scope.to_string(), key);
             }
         }
         out
     }
 
-    /// Backs up one scope to one place, with the scope's key: sends what the place lacks, unless (but for `force`) the
+    /// Backs up one scope to one place, with its newest epoch's key: sends what the place lacks, unless (but for `force`) the
     /// place has a snapshot of it from within the hour, which a device that just started doesn't know of yet.
-    async fn back_up_scope(&self, place: &Place, place_id: &str, install: &str, recovery: Key, d: &Due, now: u64, force: bool) -> Result<Option<Snapshot>> {
+    async fn back_up_scope(&self, place: &Place, place_id: &str, install: &str, d: &Due, now: u64, force: bool) -> Result<Option<Snapshot>> {
         let scope = Scope::parse(&d.scope)?;
-        let key = match d.key {
-            Some(key) => key,
-            None => self.scope_key(&scope).await?,
-        };
+        let (n, key) = self.epoch_keys(&scope).await?.pop_last().context("no epoch")?;
+        ensure!(d.key.is_none_or(|k| k == key), "{scope}'s newest epoch changed: it's backed up on the next run");
+        let name = crate::keys::epoch_name(&d.scope, n, "recovery");
+        let sealed = crate::bucket::Bucket::get(&self.bucket()?, &name).await?.with_context(|| format!("{name} is missing"))?.bytes;
         let cached = self.0.backed.lock().unwrap().get(&(place_id.to_string(), d.scope.clone())).filter(|s| s.1 == b::key_id(&key)).map(|s| s.0.clone());
         let (entries, blobs) = self.with(|i| {
             let entries = i.r.store.scope(&d.scope)?;
@@ -384,7 +384,7 @@ impl Node {
             if !force && previous.as_ref().is_some_and(|p| p.time + b::EVERY > now) {
                 return Ok((None, previous));
             }
-            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, recovery, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
+            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, sealed, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
             let written = b::back_up(job, |hash| std::fs::read(release::blob_path(&dir, hash).ok()?).ok())?;
             Ok((written.clone(), written.or(previous)))
         })

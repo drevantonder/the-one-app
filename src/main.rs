@@ -89,9 +89,6 @@ Usage:
                                        For someone who lost every passkey, --user them and pipe the recovery key.
                                        Where people sign in with Google, --user <id> --email <email> instead says
                                        who someone who was in the install before is, when they first sign in
-  {CLI} kernel keys                    give the kernel's vault the keys of the scopes this machine's node holds, made
-                                       before the install had a kernel, so its serverless node opens the same data; only
-                                       before the vault has given out keys under them
   {CLI} serverless deploy [--account <id>]
                                        put the install's serverless node in the kernel's Cloudflare account (a node as
                                        a Worker, with the API token in CLOUDFLARE_API_TOKEN) and send the address's
@@ -437,19 +434,6 @@ fn run(args: Vec<String>) -> Result<()> {
                 one::serverless::deploy(&cf, &settings)?;
             }
             print!("Deployed.\n{}", kernel_said(&settings));
-        }
-        ["kernel", "keys"] => {
-            let settings = one::kernel::Settings::load()?;
-            let keys = post("/v1/kernel/keys", json!({}))?;
-            let keys = keys.as_array().map(Vec::as_slice).unwrap_or_default();
-            for (people, given) in one::kernel::give_keys(&settings, keys).into_iter().zip(keys) {
-                let said = match people {
-                    Err(err) => format!("{err:#}"),
-                    Ok(people) if people.is_empty() => "no one with it has signed in yet".to_string(),
-                    Ok(people) => format!("opens for {}", people.iter().map(|u| given["names"][u].as_str().unwrap_or(u)).collect::<Vec<_>>().join(", ")),
-                };
-                println!("{}: {said}", given["title"].as_str().unwrap_or(""));
-            }
         }
         ["serverless", "deploy"] => {
             let mut settings = devices_here(one::kernel::Settings::load()?, true)?;

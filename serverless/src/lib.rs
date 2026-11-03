@@ -93,7 +93,8 @@ pub async fn open(bucket: JsValue, prefix: String, key: String, migrations: Stri
     let bucket = Js(bucket);
     let key = one::kernel::decode_key(&key).map_err(thrown)?;
     let migrations: Vec<String> = serde_json::from_str(&migrations)?;
-    let mut db = Db::open(&bucket, &prefix, key).await.map_err(thrown)?;
+    // As epoch 1's until the serverless node is handed keys by epoch (x-one-keys), as nodes are.
+    let mut db = Db::open(&bucket, &prefix, [(1, key)].into()).await.map_err(thrown)?;
     db.migrate(&bucket, &migrations).await.map_err(thrown)?;
     let handle = OPEN.with(|o| {
         let mut o = o.borrow_mut();
@@ -225,12 +226,12 @@ pub async fn read_log(bucket: JsValue, scope: String, key: String) -> Result<(),
     let prefix = one::log::prefix(&scope);
     let from = LOGS.with(|l| l.borrow().get(&scope).filter(|l| l.key == key).map(|l| l.at));
     let Some(from) = from else {
-        let (at, mut entries) = one::log::open(&bucket, &key, &prefix, &scope).await.map_err(thrown)?;
+        let (at, mut entries) = one::log::open(&bucket, &[(1, key)].into(), &prefix, &scope).await.map_err(thrown)?;
         entries.sort_by_key(Entry::order);
         LOGS.with(|l| l.borrow_mut().insert(scope, Log { key, at, entries }));
         return Ok(());
     };
-    let (at, new) = one::log::read(&bucket, &key, &prefix, &scope, from).await.map_err(thrown)?;
+    let (at, new) = one::log::read(&bucket, &[(1, key)].into(), &prefix, &scope, from).await.map_err(thrown)?;
     LOGS.with(|l| {
         if let Some(log) = l.borrow_mut().get_mut(&scope).filter(|l| l.key == key) {
             let fresh: Vec<Entry> = new.into_iter().filter(|e| !log.entries.iter().any(|k| k.author() == e.author() && k.seq() == e.seq())).collect();
@@ -386,7 +387,7 @@ pub async fn bundle(bucket: JsValue, key: String, hash: String) -> Result<String
     let key = one::kernel::decode_key(&key).map_err(thrown)?;
     let name = one::bucket::blob_name("global", &hash);
     let sealed = Js(bucket).get(&name).await.map_err(thrown)?.ok_or_else(|| JsError::new(&format!("{name} isn't in the bucket yet: a node on one of your machines puts it there")))?;
-    let bytes = one::db::open(&key, &name, &sealed.bytes).map_err(thrown)?;
+    let bytes = one::keys::open(&key, &name, &sealed.bytes).map_err(thrown)?;
     if blake3::hash(&bytes).to_hex().as_str() != hash {
         return Err(JsError::new(&format!("the bundle kept as {hash} isn't it")));
     }

@@ -327,7 +327,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert!(checked["vault"].as_array().unwrap().contains(&json!("Example key")), "{checked}");
     let restored = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
     assert!(restored.entries.iter().any(|e| e.content.kind == "genesis"));
-    assert_eq!(backed_up_posts(&dir, &install, &keys["global"]).await, ["before the backup"]);
+    assert_eq!(backed_up_posts(&dir, &install, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup"]);
     let steps_then = restored.snapshot.databases["board/main"].0;
     let files: Vec<Vec<u8>> = walk(&dir).iter().map(|f| std::fs::read(f).unwrap()).collect();
     assert!(!files.iter().any(|f| f.windows(12).any(|w| w == b"s3cret-value") || f.windows(17).any(|w| w == b"before the backup")), "nothing is readable on the disk");
@@ -340,7 +340,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     eventually("the second backup", async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
     let again = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
     assert!(again.snapshot.databases["board/main"].0 > steps_then);
-    assert_eq!(backed_up_posts(&dir, &install, &keys["global"]).await, ["before the backup", "after the backup"]);
+    assert_eq!(backed_up_posts(&dir, &install, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup", "after the backup"]);
     let checked = a.check_backups().await.unwrap();
     assert_eq!(checked[0]["place"], "T7 Shield", "{checked}");
     assert!(checked[0]["error"].is_null(), "{checked}");
@@ -386,18 +386,20 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert!(place("Sheet bucket").is_some_and(|p| p["kind"] == "s3"), "{}", a.backups().unwrap());
 }
 
-/// The board's posts in `global` as a place's copy of the install's bucket holds them, opened with the scope's key.
-async fn backed_up_posts(dir: &std::path::Path, install: &str, keys: &[[u8; 32]]) -> Vec<String> {
+/// The board's posts in `global` as a place's copy of the install's bucket holds them, opened with the recovery key
+/// alone: each epoch's key sealed to it, each app's key in the epoch sealed under that.
+async fn backed_up_posts(dir: &std::path::Path, install: &str, recovery: &[u8; 32]) -> Vec<String> {
     let copy = one::bucket::Place::Folder(dir.join(install).join("bucket"));
-    let Ok(Some(sealed)) = copy.get(&one::kernel::app_key_name("global", "board")) else { return Vec::new() };
-    for key in keys {
-        let Ok(app) = one::kernel::open_app_key(key, "board", &sealed) else { continue };
-        let key = one::kernel::database_key(&app, "main");
-        if let Ok(db) = one::db::Db::open(&copy, "global/board/main", key).await {
-            return db.query("select text from posts order by time", &[]).unwrap().into_iter().map(|r| r["text"].as_str().unwrap().to_string()).collect();
-        }
+    let mut keys = one::db::Keys::new();
+    for n in copy.list("global/_epochs").unwrap().iter().filter_map(|n| n.parse::<u32>().ok()) {
+        let epoch = one::backups::unseal(recovery, &copy.get(&one::keys::epoch_name("global", n, "recovery")).unwrap().unwrap()).unwrap();
+        let Ok(Some(sealed)) = copy.get(&one::keys::app_key_name("global", "board", n)) else { continue };
+        keys.insert(n, one::kernel::database_key(&one::kernel::open_app_key(&epoch, "board", &sealed).unwrap(), "main"));
     }
-    Vec::new()
+    match one::db::Db::open(&copy, "global/board/main", keys).await {
+        Ok(db) => db.query("select text from posts order by time", &[]).unwrap().into_iter().map(|r| r["text"].as_str().unwrap().to_string()).collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
