@@ -189,6 +189,8 @@ impl Node {
         ensure!(counts, "you aren't allowed to change that, so nothing changed");
         let before = self.with(|i| Ok(i.r.members.roles()))?;
         self.append_as(&Scope::Global, &caller.user, by, content).await?;
+        // A deploy, or an app added, runs here before it's done: its screens and calls answer at once.
+        self.settle().await?;
         let after = self.with(|i| Ok(i.r.members.roles()))?;
         self.tell_vault(caller, members::roles_changed(&before, &after)).await
     }

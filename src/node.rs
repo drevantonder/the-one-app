@@ -353,6 +353,8 @@ pub struct Inner {
     relay: relay::Relay,
     /// How many times its deploys were settled (`settle`), the first once its apps are loaded.
     settled: tokio::sync::watch::Sender<u64>,
+    /// Held while settling, so one that read the members before a change can't load its apps after one that read it.
+    settling: tokio::sync::Mutex<()>,
 }
 
 /// Set once this process's node is handing over to the next: it opens nothing only one of them may hold.
@@ -466,6 +468,7 @@ impl Node {
             sessions: Default::default(),
             relay: relay::Relay::new(),
             settled: tokio::sync::watch::channel(0).0,
+            settling: tokio::sync::Mutex::new(()),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -750,6 +753,7 @@ impl Node {
     /// Brings this device in line with the members: runs each app's latest deploy, fetching bundles it lacks, and
     /// says which build it runs.
     async fn settle(&self) -> Result<()> {
+        let _settling = self.0.settling.lock().await;
         let Ok((wanted, author)) = self.with(|i| {
             let wanted: BTreeMap<String, String> = i.r.members.apps.values().filter(|a| !a.erased).filter_map(|a| Some((a.name.clone(), a.bundle.clone()?))).collect();
             Ok((wanted, i.r.members.device(&self.0.id).is_some()))
