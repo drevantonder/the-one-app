@@ -1,10 +1,12 @@
 // The serverless node: a node of the install on Cloudflare Workers, which the gateway sends `/v1/` and `/mcp` to by
-// service binding. It holds nothing open. Each request brings its person's access token, checked as every node checks
-// one (src/lib.rs, which is the machine node's own Rust), keeping the sign-in and the keys it named until the token
-// expires. Who can do what it reads from the install's log in the bucket (src/log.rs), and each app's latest deploy
-// from the bucket too; it runs an app in an isolate of its own (Worker Loader, src/runtime/shim.js as its `ctx`) and
-// writes what a call wrote as one step (src/db.rs). An app's requests go out through the vault, which fills in the
-// Vault's items, so no secret reaches this node.
+// service binding. It holds no keys. Each request brings its person's access token, checked as every node checks one
+// (src/lib.rs, which is the machine node's own Rust), and the keys of the databases its call reaches, sealed to this
+// node (`x-one-keys`); one that lacks some is answered 428 with what it needs, as a node on a machine answers. Who can do
+// what it reads from the install's log in the bucket (src/log.rs), and each app's latest deploy from the bucket too,
+// through the URL signer's URLs, keeping what it read sealed in its Durable Object's storage, so a wake fetches only
+// what's newer; it runs an app in an isolate of its own (Worker Loader, src/runtime/shim.js as its `ctx`) and writes
+// what a call wrote as one step (src/db.rs). An app's requests go out through the vault, which fills in the Vault's
+// items, so no secret reaches this node.
 //
 // Calls of apps that keep to their own data run here when the install's order (src/rank.rs, set in Devices) puts this
 // node before every machine, or the machines are far. Everything else goes first to the install's nodes on machines:
@@ -17,13 +19,13 @@
 // send it as `/v1/call` here, and asks devices for calls; its connections to them live as long as it does, and it ends
 // itself once nobody has asked for a while, since iroh's timers would keep it awake, and billed, for good.
 //
-// Bindings: AUTH and VAULT (the kernel's services), LOADER (Worker Loader), NODE (this Worker's `Node`), NODE_KEY (its
-// endpoint's key, a secret), RELAY (the relay's Durable Object), LOCATION (where the relay is made), MACHINE (a node
+// Bindings: AUTH, VAULT and SIGNER (the kernel's services), LOADER (Worker Loader), NODE (this Worker's `Node`, where
+// every request runs), NODE_KEY (its endpoint's key, a secret), RELAY (the relay's Durable Object), LOCATION (where the relay is made), MACHINE (a node
 // on a machine: a Workers VPC service; or MACHINE_URL, its address), ADDRESS (the install's) and NAME (its name).
 // `built.js`, made when it's deployed, is the shim; `icons.json` is the icons every device draws.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, verify, open, query, write, close, statements, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, install, bundle, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
+import { initSync, verify, open, query, write, close, statements, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, install, bundle, opens, refresh, endpoint_of, signed, handoff, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
 import icons from "./icons.json";
@@ -72,7 +74,7 @@ async function claimsOf(env, token) {
   }
 }
 
-/// Asks the vault, with the person's access token.
+/// Asks the vault, with the person's access token: for the Vault's items, which it keeps.
 async function vault(env, token, method, path, body) {
   const r = await env.VAULT.fetch(`https://vault${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   const out = await r.json().catch(() => ({}));
@@ -93,75 +95,208 @@ async function nameOf(env, token, user) {
   return names.get(user);
 }
 
-/// Sign-ins this isolate checked, by a hash of their token, until it expires: whom each is for, with the keys its
-/// calls named, so the vault is asked once a session for each, not every call.
+/// Sign-ins this node checked, by a hash of their token, until it expires: whom each is for.
 const signedIn = new Map();
+/// The keys handed for each sign-in's calls (`x-one-keys`), by the same hash: `{ until, keys }`, `keys` a database's
+/// (`<scope>/<app>/<database>`) keys by epoch, base64url. Forgotten when it expires, or its person loses the scope.
+const handed = new Map();
 
-/// Whom a request is for: an access token the auth service at the install's address signed for it, whose session at
-/// the vault is open. → `{ token, user, client, clientName, name, keys, urls }`.
+/// Whom a request is for: an access token the auth service at the install's address signed for it. The keys it hands
+/// are opened, and the newest of each database they open fetched, while the token is checked, not after.
+/// → `{ hash, token, user, client, clientName, name }`.
 async function whom(request, env) {
   const auth = request.headers.get("authorization") || "";
   const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : refuse(403, "sign in first: a serverless node takes only sign-ins");
   const hash = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))));
+  const sealed = request.headers.get("x-one-keys");
+  if (sealed) take(env, hash, token, sealed);
   const now = Date.now();
   const kept = signedIn.get(hash);
   if (kept && now < kept.until) return kept.who;
   const claims = await claimsOf(env, token);
   const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!aud.includes(env.ADDRESS)) refuse(401, `that sign-in isn't for ${env.ADDRESS}`);
-  const session = await vault(env, token, "GET", "/session");
-  if (session.user !== claims.sub) refuse(401, "that sign-in's session is someone else's");
-  const who = { hash, token, user: claims.sub, client: claims.azp, clientName: session.name || "", name: await nameOf(env, token, claims.sub), keys: new Map(), urls: new Map() };
+  const who = { hash, token, user: claims.sub, client: claims.azp, clientName: claims.azp || "", name: await nameOf(env, token, claims.sub) };
   for (const [h, s] of signedIn) if (s.until <= now) signedIn.delete(h);
-  signedIn.set(hash, { who, until: Math.min(claims.exp * 1000, session.until) });
+  for (const [h, s] of handed) if (s.until <= now) handed.delete(h);
+  signedIn.set(hash, { who, until: claims.exp * 1000 });
   return who;
 }
 
-/// A key the vault gives this session: `app`'s `database` in `scope`, kept with the sign-in.
-function keyOf(env, who, scope, app, database) {
-  const id = `${scope}/${app}/${database}`;
-  if (!who.keys.has(id)) {
-    const got = vault(env, who.token, "POST", "/keys", { keys: [{ scope, app, database }] }).then(({ keys }) => keys[0].key);
-    who.keys.set(id, got);
-    got.catch(() => who.keys.delete(id));
+/// Keeps the keys a caller handed with `token`'s calls, and starts fetching what they open. Keys that aren't this
+/// node's to open (sealed to a node on a machine, which this one passes them on to) are left.
+function take(env, hash, token, sealed) {
+  let opened;
+  try {
+    opened = JSON.parse(handoff(env.NODE_KEY, token, sealed, Date.now()));
+  } catch {
+    return;
   }
-  return who.keys.get(id);
+  const kept = handed.get(hash) || { until: 0, keys: new Map() };
+  kept.until = Math.max(kept.until, opened.until);
+  for (const k of opened.keys) {
+    const id = `${k.scope}/${k.app}/${k.database}`;
+    if (!kept.keys.has(id)) kept.keys.set(id, {});
+    kept.keys.get(id)[k.epoch] = k.key;
+  }
+  handed.set(hash, kept);
+  bucket.prefetch(opened.keys.map((k) => newestOf(k.scope, k.app, k.database)));
 }
 
-// The bucket, through presigned URLs the vault signs for each call.
+const newestOf = (scope, app, database) => `${prefix(scope, app, database)}/newest`;
+
+/// A sign-in's keys of `app`'s `database` in `scope`, by epoch (JSON for src/lib.rs); or what it needs, said with 428.
+async function keysOf(env, who, scope, app, database) {
+  const kept = handed.get(who.hash);
+  const keys = kept && kept.until > Date.now() && kept.keys.get(`${scope}/${app}/${database}`);
+  if (keys) return JSON.stringify(keys);
+  return needs(env, [{ scope, app, database, have: [] }]);
+}
+
+/// Says with 428 what a sign-in needs, of `wants` (`{ scope, app, database, have, missing? }`), sealed to this node:
+/// its caller sends the call again with them.
+async function needs(env, wants) {
+  const need = JSON.parse(await needed(bucket, JSON.stringify(wants)));
+  for (const w of wants) if (w.missing && !need.some((n) => n.scope === w.scope && n.app === w.app && n.database === w.database && n.epoch === w.missing)) need.push({ scope: w.scope, epoch: w.missing, app: w.app, database: w.database });
+  const me = JSON.parse(endpoint_of(env.NODE_KEY));
+  const list = need.map((n) => `${n.scope}'s ${n.app}/${n.database} in epoch ${n.epoch}`).join(", ");
+  throw Object.assign(new Refused(428, `it needs keys it wasn't handed: ${list}`), { said: { need, to: me.key, seal: me.seal } });
+}
+
+/// Runs `f` with a database's keys; one that stops at an epoch it wasn't handed says so with 428.
+async function withKeys(env, who, scope, app, database, f) {
+  const keys = await keysOf(env, who, scope, app, database);
+  try {
+    return await f(keys);
+  } catch (err) {
+    if (err.missing === undefined) throw err;
+    return needs(env, [{ scope, app, database, have: Object.keys(JSON.parse(keys)).map(Number), missing: err.missing }]);
+  }
+}
+
+// The bucket, through the URL signer's presigned URLs, and what this node read of it, sealed.
 
 /// The names of the `n` steps after `name`, if it's a database's step.
 const following = (name, n) => JSON.parse(after(name, n));
 
-/// The bucket as src/db.rs reads and writes it (src/lib.rs: `Js`), for a session. A database's steps are read one
-/// after another, so asking for one fetches the next few at once; each fetched object is used once, so a read after a
-/// lost race is fresh. URLs to read are kept with the sign-in while they last.
-class Bucket {
-  constructor(env, who) {
-    this.env = env;
-    this.who = who;
-    this.token = who.token;
-    this.fetched = new Map();
+/// What this node has read from the bucket, as sealed as it was there, in its Durable Object's storage: every name but
+/// a database's `newest` is created once and never changed, so a copy or step kept here is never stale, and a wake
+/// reads only what's newer from the bucket. It holds no keys, so this opens nothing. Kept to `SEALED_MOST`, the least
+/// lately used going first.
+const SEALED_MOST = 1 << 30;
+const PART = 1 << 20;
+
+class Sealed {
+  constructor(sql) {
+    this.sql = sql;
+    sql.exec("CREATE TABLE IF NOT EXISTS sealed (name TEXT, part INTEGER, bytes BLOB, PRIMARY KEY (name, part))");
+    sql.exec("CREATE TABLE IF NOT EXISTS kept (name TEXT PRIMARY KEY, tag TEXT, size INTEGER, used INTEGER)");
   }
 
-  async readUrl(name) {
-    const fresh = (n) => (this.who.urls.get(n)?.until ?? 0) > Date.now() + 60_000;
-    if (!fresh(name)) {
-      const out = await vault(this.env, this.token, "POST", "/urls", { read: [name, ...following(name, 15).filter((n) => !fresh(n))] });
-      for (const [n, url] of Object.entries(out.read)) this.who.urls.set(n, { url, until: out.until });
-    }
-    return this.who.urls.get(name).url;
+  static keeps(name) {
+    return !name.endsWith("/newest");
   }
 
-  async fetchObject(name) {
-    const r = await fetch(await this.readUrl(name));
-    if (r.status === 404) return null;
-    if (!r.ok) throw new Error(`the bucket said ${r.status} to reading ${name}`);
-    return { bytes: new Uint8Array(await r.arrayBuffer()), tag: r.headers.get("etag") };
+  has(name) {
+    return this.sql.exec("SELECT 1 FROM kept WHERE name = ?", name).toArray().length > 0;
   }
 
   get(name) {
-    for (const n of [name, ...following(name, 5)]) if (!this.fetched.has(n)) this.fetched.set(n, this.fetchObject(n));
+    const [kept] = this.sql.exec("SELECT tag, size FROM kept WHERE name = ?", name).toArray();
+    if (!kept) return null;
+    const bytes = new Uint8Array(kept.size);
+    let at = 0;
+    for (const { bytes: part } of this.sql.exec("SELECT bytes FROM sealed WHERE name = ? ORDER BY part", name)) {
+      bytes.set(new Uint8Array(part), at);
+      at += part.byteLength;
+    }
+    if (at !== kept.size) return null;
+    this.sql.exec("UPDATE kept SET used = ? WHERE name = ?", Date.now(), name);
+    return { bytes, tag: kept.tag };
+  }
+
+  put(name, bytes, tag) {
+    if (!Sealed.keeps(name)) return;
+    this.sql.exec("DELETE FROM sealed WHERE name = ?", name);
+    for (let at = 0, part = 0; at < bytes.length || part === 0; at += PART, part++) this.sql.exec("INSERT INTO sealed VALUES (?, ?, ?)", name, part, bytes.subarray(at, at + PART));
+    this.sql.exec("INSERT OR REPLACE INTO kept VALUES (?, ?, ?, ?)", name, tag, bytes.length, Date.now());
+    let [{ total }] = this.sql.exec("SELECT COALESCE(SUM(size), 0) AS total FROM kept").toArray();
+    for (const old of this.sql.exec("SELECT name, size FROM kept ORDER BY used").toArray()) {
+      if (total <= SEALED_MOST) break;
+      this.sql.exec("DELETE FROM sealed WHERE name = ?", old.name);
+      this.sql.exec("DELETE FROM kept WHERE name = ?", old.name);
+      total -= old.size;
+    }
+  }
+}
+
+/// The bucket as src/db.rs reads and writes it (src/lib.rs: `Js`). A database's steps are read one after another, so
+/// asking for one fetches the next few at once; each fetched object is used once, so a read after a lost race is fresh.
+/// What's read or written is kept sealed (`Sealed`), and only what isn't there is fetched, its URLs signed in one
+/// request to the URL signer for everything asked for in the same turn, and kept while they last.
+class Bucket {
+  constructor(env, sealed) {
+    Object.assign(this, { env, sealed, urls: new Map(), fetched: new Map(), wanted: null });
+  }
+
+  /// Asks the URL signer, signed by this node's endpoint key: it gives URLs to the install's endpoints alone.
+  async sign(fields) {
+    const request = signed(this.env.NODE_KEY, "one/urls", JSON.stringify(fields), Date.now());
+    const r = await this.env.SIGNER.fetch(`${this.env.ADDRESS}/urls`, { method: "POST", headers: { "content-type": "application/json" }, body: request });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw Object.assign(new Error(`the URL signer said: ${out.error || r.status}`), { unanswered: r.status >= 500 });
+    return out;
+  }
+
+  /// A URL to read `name`: those wanted in one turn are signed in one request.
+  readUrl(name) {
+    const kept = this.urls.get(name);
+    if (kept && kept.until > Date.now() + 60_000) return kept.url;
+    if (!this.wanted) {
+      const wanted = (this.wanted = new Map());
+      queueMicrotask(() => {
+        this.wanted = null;
+        const names = [...wanted.keys()];
+        this.sign({ read: names }).then(
+          (out) => {
+            for (const n of names) {
+              this.urls.set(n, { url: out.read[n], until: out.until });
+              wanted.get(n).resolve(out.read[n]);
+            }
+          },
+          (err) => wanted.forEach((w) => w.reject(err)),
+        );
+      });
+    }
+    if (!this.wanted.has(name)) {
+      let resolve, reject;
+      const url = new Promise((y, n) => ((resolve = y), (reject = n)));
+      this.wanted.set(name, { url, resolve, reject });
+    }
+    return this.wanted.get(name).url;
+  }
+
+  async fetchObject(name) {
+    const kept = Sealed.keeps(name) && this.sealed.get(name);
+    if (kept) return kept;
+    const r = await fetch(await this.readUrl(name));
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`the bucket said ${r.status} to reading ${name}`);
+    const got = { bytes: new Uint8Array(await r.arrayBuffer()), tag: r.headers.get("etag") };
+    this.sealed.put(name, got.bytes, got.tag);
+    return got;
+  }
+
+  /// Starts fetching `names`, for a read soon.
+  prefetch(names) {
+    for (const n of names) if (!this.fetched.has(n)) this.fetched.set(n, this.fetchObject(n).catch(() => null));
+  }
+
+  get(name) {
+    // The steps after one aren't in the bucket yet, mostly: their URLs come with its, and only those read are fetched.
+    this.prefetch([name]);
+    for (const n of following(name, 15)) if (!this.urls.has(n) && !this.sealed.has(n)) this.readUrl(n).catch(() => {});
+    for (const n of following(name, 5)) this.prefetch([n]);
     const got = this.fetched.get(name);
     this.fetched.delete(name);
     return got;
@@ -181,8 +316,10 @@ class Bucket {
   }
 
   async create(name, bytes) {
-    const out = await vault(this.env, this.token, "POST", "/urls", { create: [name] });
-    return this.put(out.create[name], { "if-none-match": "*" }, name, bytes);
+    const out = await this.sign({ create: [name] });
+    const made = await this.put(out.create[name], { "if-none-match": "*" }, name, bytes);
+    if (made) this.sealed.put(name, bytes, null);
+    return made;
   }
 
   wait(ms) {
@@ -191,52 +328,53 @@ class Bucket {
 
   async replace(name, bytes, tag) {
     if (tag === null) return this.create(name, bytes);
-    const out = await vault(this.env, this.token, "POST", "/urls", { replace: [{ name, etag: tag }] });
+    const out = await this.sign({ replace: [{ name, etag: tag }] });
     return this.put(out.replace[name], { "if-match": tag }, name, bytes);
   }
 }
 
+/// The node's bucket, made with its Durable Object's storage, where every request runs.
+let bucket = null;
+
 // Who can do what.
 
-/// When each scope's entries were last read here, and with which key: a request reads them again only after a moment.
+/// When each scope's entries were last read here, and with which keys: a request reads them again only after a moment.
 const logsRead = new Map();
 
-/// Reads `scopes`' entries for a request, each with the key the vault gives its person: a scope they may not open is
-/// refused there, so its entries are never shown to them.
-async function readLogs(env, who, bucket, scopes) {
-  await Promise.all(scopes.map(async (scope) => {
-    const key = await keyOf(env, who, scope, "node", "log");
+/// Reads `scopes`' entries for a request, each with the keys its person handed: a scope whose they didn't hand is
+/// asked for with 428, so its entries are never shown to someone who can't open them.
+async function readLogs(env, who, scopes) {
+  await Promise.all(scopes.map((scope) => withKeys(env, who, scope, "node", "log", async (keys) => {
     const last = logsRead.get(scope);
-    if (last?.key === key && Date.now() - last.at < 2000) return;
-    await read_log(bucket, scope, key);
-    logsRead.set(scope, { key, at: Date.now() });
-  }));
+    if (last?.keys === keys && Date.now() - last.at < 2000) return;
+    await read_log(bucket, scope, keys);
+    logsRead.set(scope, { keys, at: Date.now() });
+  })));
 }
 
-/// Forgets what a sign-in was given for scopes its person may no longer use, as soon as the install's log says so, and
-/// the sign-in itself once they're out of the install: what they may still use, they ask the vault for again.
+/// Forgets what a sign-in was handed for scopes its person may no longer use, as soon as the install's log says so,
+/// and the sign-in itself once they're out of the install.
 function forgetLost(who) {
   const { scopes, removed } = JSON.parse(scopes_of(who.user));
   // Someone not let in yet has lost nothing.
   if (!removed && !scopes.length) return;
   const may = new Set(scopes);
-  const folders = new Set(scopes.map((s) => s.replace(":", "-")));
-  for (const id of who.keys.keys()) if (!may.has(id.split("/")[0])) who.keys.delete(id);
-  for (const name of who.urls.keys()) if (!folders.has(name.split("/")[0]) && !(name.startsWith("log/") && may.has("global"))) who.urls.delete(name);
+  const kept = handed.get(who.hash);
+  if (kept) for (const id of kept.keys.keys()) if (!may.has(id.split("/")[0])) kept.keys.delete(id);
   if (removed) {
     signedIn.delete(who.hash);
+    handed.delete(who.hash);
     refuse(403, "You were removed: an admin adds you back.");
   }
 }
 
 /// The install as a request's person sees it (src/lib.rs: `install`): `{ state, apps, me }`, from the entries of
-/// Everyone's, their own and their groups'.
+/// Everyone's, their own and the groups' they handed the keys of.
 async function installFor(env, who) {
-  const bucket = new Bucket(env, who);
   const mine = ["global", `user:${who.user}`];
-  await readLogs(env, who, bucket, mine);
+  await readLogs(env, who, mine);
   forgetLost(who);
-  const theirs = JSON.parse(groups(who.user)).map((g) => readLogs(env, who, bucket, [g]).then(() => g, () => null));
+  const theirs = JSON.parse(groups(who.user)).filter((g) => handed.get(who.hash)?.keys.has(`${g}/node/log`)).map((g) => readLogs(env, who, [g]).then(() => g, () => null));
   const read = [...mine, ...(await Promise.all(theirs)).filter(Boolean)];
   return JSON.parse(install(who.user, who.clientName, JSON.stringify(read), Date.now()));
 }
@@ -248,7 +386,7 @@ const modules = new Map();
 
 function moduleOf(env, who, hash) {
   if (!modules.has(hash)) {
-    const got = keyOf(env, who, "global", "node", "blobs").then((key) => bundle(new Bucket(env, who), key, hash));
+    const got = withKeys(env, who, "global", "node", "blobs", (keys) => bundle(bucket, keys, hash));
     modules.set(hash, got);
     got.catch(() => modules.delete(hash));
   }
@@ -272,7 +410,8 @@ const described = new Map();
 function describe(env, who, app) {
   const id = `${app.name}-${app.bundle}`;
   if (!described.has(id)) {
-    const got = appWorker(env, who, app).getEntrypoint("Call").run("describe", null, {}, null).then((r) => r.ok);
+    // Its bundle first: keys it needs are asked for as they are (428), which Worker Loader would hide.
+    const got = moduleOf(env, who, app.bundle).then(() => appWorker(env, who, app).getEntrypoint("Call").run("describe", null, {}, null)).then((r) => r.ok);
     described.set(id, got);
     got.catch(() => described.delete(id));
   }
@@ -288,10 +427,23 @@ const plain = (d) => !d.uses?.apps?.length && !d.uses?.sidecars?.length && !d.va
 /// What a person reads when an app needs a sidecar on a device and none is on.
 const needsDevice = (d, name) => `${d?.title || name} runs on your devices, and ${OFF}`;
 
-/// A call's databases, opened from the bucket as it first reaches each, and closed when it's done.
+/// Databases this node has open, by where they are in the bucket, kept while it lives (the `OPEN_MOST` used last), each
+/// brought up to what the bucket has when a call reaches it again, so a call reads only the steps since: `{ handle,
+/// queue, used }`. A sign-in uses one only if the keys it handed agree with those it was opened with.
+const kept = new Map();
+const OPEN_MOST = 4;
+
+/// Runs `f` on an open database once what's running on it is done: a write takes it while it waits for the bucket.
+function serially(db, f) {
+  const run = db.queue.then(f);
+  db.queue = run.catch(() => {});
+  return run;
+}
+
+/// A call's databases, opened from the bucket, or kept open here, as it first reaches each.
 class Call {
   constructor(env, ctx, who, app, scopes, view) {
-    Object.assign(this, { env, ctx, who, app, scopes, view, bucket: new Bucket(env, who), dbs: new Map() });
+    Object.assign(this, { env, ctx, who, app, scopes, view, bucket, dbs: new Map() });
   }
 
   db(scope) {
@@ -301,25 +453,46 @@ class Call {
   }
 
   async open(scope) {
-    const key = await keyOf(this.env, this.who, scope, this.app.name, "main");
-    const migrations = (await describe(this.env, this.who, this.app)).schema?.[kindOf(scope)] || [];
-    return open(this.bucket, prefix(scope, this.app.name, "main"), key, JSON.stringify(migrations));
+    const migrations = JSON.stringify((await describe(this.env, this.who, this.app)).schema?.[kindOf(scope)] || []);
+    const at = prefix(scope, this.app.name, "main");
+    return withKeys(this.env, this.who, scope, this.app.name, "main", async (keys) => {
+      const was = kept.get(at);
+      if (was && opens(was.handle, keys)) {
+        was.used = Date.now();
+        await serially(was, () => refresh(was.handle, this.bucket, keys, migrations));
+        return was;
+      }
+      const db = { handle: await open(this.bucket, at, keys, migrations), queue: Promise.resolve(), used: Date.now() };
+      // One opened with keys that don't agree with those of the one kept is this call's alone.
+      if (was) return Object.assign(db, { own: true });
+      kept.set(at, db);
+      const oldest = [...kept.entries()].sort((a, b) => a[1].used - b[1].used);
+      for (const [name, old] of oldest.slice(0, Math.max(0, kept.size - OPEN_MOST))) {
+        kept.delete(name);
+        serially(old, () => close(old.handle));
+      }
+      return db;
+    });
   }
 
   async query(scope, sql, params) {
-    return JSON.parse(query(await this.db(scope), sql, JSON.stringify(params)));
+    const db = await this.db(scope);
+    return serially(db, () => JSON.parse(query(db.handle, sql, JSON.stringify(params))));
   }
 
   /// Writes a call's appends: each scope's statements as one step. Nobody is told: this node runs only while no
   /// machine's answers, and devices read what changed from the bucket. → the databases it wrote.
   async write(appends) {
     const each = JSON.parse(statements(JSON.stringify(appends), JSON.stringify(this.scopes)));
-    for (const [scope, list] of Object.entries(each)) await write(await this.db(scope), this.bucket, JSON.stringify(list));
+    for (const [scope, list] of Object.entries(each)) {
+      const db = await this.db(scope);
+      await serially(db, () => write(db.handle, this.bucket, JSON.stringify(list)));
+    }
     return Object.keys(each).map((scope) => prefix(scope, this.app.name, "main"));
   }
 
   close() {
-    for (const db of this.dbs.values()) db.then(close, () => {});
+    for (const db of this.dbs.values()) db.then((d) => d.own && serially(d, () => close(d.handle)), () => {});
   }
 }
 
@@ -353,6 +526,8 @@ class Run {
     try {
       const body = { ...fields, me: this.view.me, now: Date.now(), scopes, read_only: !writes, token: crypto.randomUUID(), from };
       const reply = await appWorker(this.env, this.who, app).getEntrypoint("Call").run(what, null, body, new ForCall(this, app, call, finished, depth));
+      // Keys it found it needs while it ran are asked for as they are.
+      if (call.need) throw call.need;
       if (reply.error !== undefined) refuse(400, reply.error);
       if (writes) {
         const wrote = await call.write(reply.appends || []);
@@ -370,7 +545,12 @@ class Run {
   /// A call of `req.app`'s operation `req.op`, here: → `{ ok }`.
   async call(req, from = null, depth = 0) {
     const app = deployed(this.view, req.app) || refuse(404, `no app named ${req.app}`);
-    return { ok: await this.run(app, "call", { op: req.op, input: req.input ?? {} }, this.scopes(app, req.scopes), from, depth) };
+    const scopes = this.scopes(app, req.scopes);
+    // The keys of every database it may open, asked for at once, before it runs.
+    const kept = handed.get(this.who.hash);
+    const lacking = scopes.filter((h) => !(kept?.until > Date.now() && kept.keys.has(`${h.id}/${app.name}/main`)));
+    if (lacking.length) await needs(this.env, lacking.map((h) => ({ scope: h.id, app: app.name, database: "main", have: [] })));
+    return { ok: await this.run(app, "call", { op: req.op, input: req.input ?? {} }, scopes, from, depth) };
   }
 
   /// The apps a page shows and the scopes each reads (src/node.rs: `page_contexts`): with `page` (`user`,
@@ -484,6 +664,7 @@ class ForCall extends RpcTarget {
       }
       return new Response(`a serverless node doesn't do ${path} for apps yet, and ${OFF}`, { status: 501 });
     } catch (err) {
+      if (err.status === 428) this.call.need = err;
       return new Response(err.message, { status: err.status === 503 ? 503 : 400 });
     }
   }
@@ -492,7 +673,7 @@ class ForCall extends RpcTarget {
 /// An app's call that needs a node on a machine (a sidecar's, or one of an app that uses one), as this person.
 async function machineCall(run, q, d) {
   const call = { app: q.app, op: q.op, input: q.input ?? {}, sidecar: q.sidecar ? q.app : undefined, device: q.device };
-  const out = await onMachine(run.env, run.who, run.view, call, 15_000);
+  const out = await onMachine(run.env, run.ctx, run.who, run.view, call, 15_000);
   if (!out) refuse(503, needsDevice(d, q.app));
   return answered(out, q.app);
 }
@@ -510,12 +691,12 @@ const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 /// Asks the install's nodes on machines to run `call` as `who`, over iroh, each in Where Things Run's order until one is
 /// reached, with the keys its caller handed (`x-one-keys`, sealed to the node they meant): → its answer, `{ ok }` or
 /// what failed as `/v1/call` says it; or null if none was reached.
-async function onMachine(env, who, view, call, wait, keys = null) {
-  if (!env.NODE) return null;
+async function onMachine(env, ctx, who, view, call, wait, keys = null) {
+  if (!ctx.node) return null;
   const to = [...view.state.install.devices].sort((a, b) => a.order - b.order).map((s) => s.key);
   if (!to.length) return null;
   const message = JSON.stringify({ kind: "ask", body: { call: { ...call, me: { token: who.token }, keys: keys ?? undefined } } });
-  const r = await env.NODE.get(env.NODE.idFromName("node"), near(env)).ask(to, message, wait);
+  const r = await ctx.node.ask(to, message, wait);
   if (r.unreached !== undefined) {
     console.log(JSON.stringify({ machine: "off", why: r.unreached }));
     return null;
@@ -610,7 +791,7 @@ async function route(request, env, ctx, asked = false) {
     const d = app && (await describe(env, who, app));
     // An app that keeps to its own data runs here, unless a machine comes first; the rest on a machine when one answers.
     if (d && plain(d) && (asked || !machineFirst(run.view))) return json(await run.call(req));
-    const r = !asked && (await onMachine(env, who, run.view, req, 120_000, request.headers.get("x-one-keys")));
+    const r = !asked && (await onMachine(env, ctx, who, run.view, req, 120_000, request.headers.get("x-one-keys")));
     // Keys it needs are its caller's to send again, sealed to the node that said so.
     if (r) return json(r, r.ok !== undefined ? 200 : r.need ? 428 : 400);
     if (!d || d.uses?.sidecars?.length) refuse(503, needsDevice(d, req.app));
@@ -657,14 +838,15 @@ async function answer(request, env, ctx, asked) {
   try {
     return await route(request, env, ctx, asked);
   } catch (err) {
-    if (err instanceof Refused) return json({ error: err.message }, err.status);
+    if (err instanceof Refused) return json({ error: err.message, ...err.said }, err.status);
     console.error(err.stack || err);
     return json({ error: String(err?.message ?? err) }, 400);
   }
 }
 
+/// Every request runs in the node's one Durable Object, `Node`, which keeps what it read and its connections.
 export default {
-  fetch: (request, env, ctx) => answer(request, env, ctx, false),
+  fetch: (request, env) => env.NODE.get(env.NODE.idFromName("node"), near(env)).fetch(request),
 };
 
 /// This node as an iroh endpoint: one object, woken by the relay or by this Worker asking a device for a call.
@@ -675,6 +857,20 @@ export class Node extends DurableObject {
     this.out = [];
     this.asking = 0;
     this.last = Date.now();
+    bucket = new Bucket(env, new Sealed(ctx.storage.sql));
+    ctx.node = this;
+  }
+
+  /// A request the gateway sent: answered here, as an ask is.
+  async fetch(request) {
+    this.asking++;
+    this.awake();
+    try {
+      return await answer(request, this.env, this.ctx, false);
+    } finally {
+      this.asking--;
+      this.awake();
+    }
   }
 
   relay() {

@@ -104,6 +104,24 @@ impl Node {
         Ok(())
     }
 
+    /// The keys of `want`'s databases, every epoch this device has, handed to another node (sealed to `seal`) for this
+    /// device's own person's calls there with `token`, until it expires: what a 428 from that node asks for.
+    pub async fn hand_keys(&self, me: &Caller, seal: &[u8; 32], token: &str, want: &[(Scope, String, String)]) -> Result<String> {
+        ensure!(me.user == self.user()?, "{} hands only its own person's keys", self.device_name());
+        let issuer = self.issuer()?;
+        let asked = token.to_string();
+        let claims = tokio::task::spawn_blocking(move || issuer.verify(&asked, now_ms())).await??;
+        ensure!(claims.sub == me.user, "that sign-in is someone else's");
+        let mut keys = Vec::new();
+        for (scope, app, database) in want {
+            ensure!(self.with(|i| Ok(i.r.members.may_use(&me.user, scope)))?, "you may not use {scope}");
+            for (epoch, key) in self.database_keys(scope, app, database).await? {
+                keys.push(crate::keys::Handed { scope: scope.to_string(), epoch, app: app.clone(), database: database.clone(), key });
+            }
+        }
+        crate::keys::seal_handoff(seal, &crate::keys::Handoff { for_: crate::keys::token_id(token), until: claims.exp * 1000, keys })
+    }
+
     /// The keys a token caller was handed for a database, by epoch.
     fn handed(&self, me: &Caller, scope: &Scope, app: &str, database: &str) -> Keys {
         let Some(token) = &me.token else { return Keys::new() };

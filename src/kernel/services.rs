@@ -351,6 +351,7 @@ impl Settings {
             let mut out = vec![
                 ("AUTH".into(), "service:auth".into(), false),
                 ("VAULT".into(), "service:vault".into(), false),
+                ("SIGNER".into(), "service:signer".into(), false),
                 ("LOADER".into(), "loader:".into(), false),
                 ("ADDRESS".into(), self.address.clone(), false),
                 ("NAME".into(), self.name.clone(), false),

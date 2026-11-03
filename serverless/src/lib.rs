@@ -1,6 +1,7 @@
-//! The serverless node's Rust: the machine node's own code, as WebAssembly on Workers. `worker.js` answers requests,
-//! asks the vault and runs apps; this checks access tokens, and reads and writes apps' databases in the bucket
-//! (`src/db.rs`), through the presigned URLs `worker.js` gets for each call. Nothing outlives the call.
+//! The serverless node's Rust: the machine node's own code, as WebAssembly on Workers. `worker.js` answers requests
+//! and runs apps; this checks access tokens, opens the keys callers hand it, signs what it asks the URL signer, and
+//! reads and writes apps' databases in the bucket (`src/db.rs`), through the presigned URLs `worker.js` gets. It holds
+//! no keys but those handed it for a sign-in's calls.
 
 mod net;
 
@@ -65,6 +66,82 @@ fn thrown(err: anyhow::Error) -> JsError {
     JsError::new(&format!("{err:#}"))
 }
 
+/// An error as `worker.js` reads it: one that stopped at an epoch whose key it wasn't handed says which (`missing`).
+fn failed(err: anyhow::Error) -> JsValue {
+    let out = js_sys::Error::new(&format!("{err:#}"));
+    if let Some(m) = err.downcast_ref::<one::db::Missing>() {
+        let _ = Reflect::set(&out, &"missing".into(), &m.epoch.into());
+    }
+    out.into()
+}
+
+/// A database's keys as `worker.js` keeps them: JSON, `{ <epoch>: <key, base64url> }`.
+fn keys_of(keys: &str) -> Result<one::db::Keys> {
+    let keys: BTreeMap<u32, String> = serde_json::from_str(keys)?;
+    keys.into_iter().map(|(n, k)| Ok((n, one::kernel::decode_key(&k)?))).collect()
+}
+
+fn signing_key(seed: &str) -> Result<ed25519_dalek::SigningKey> {
+    Ok(ed25519_dalek::SigningKey::from_bytes(&one::keys::unhex(seed)?))
+}
+
+/// This node as an endpoint, from its key (hex): `{ key, seal }`, hex, what a caller seals the keys it hands to.
+#[wasm_bindgen]
+pub fn endpoint_of(seed: &str) -> Result<String, JsError> {
+    let e = one::keys::Endpoint::of(&signing_key(seed).map_err(thrown)?);
+    Ok(json!({ "key": data_encoding::HEXLOWER.encode(&e.key), "seal": data_encoding::HEXLOWER.encode(&e.seal) }).to_string())
+}
+
+/// `fields` (JSON) signed by this node's key for `domain`, as devices sign what they ask the URL signer.
+#[wasm_bindgen]
+pub fn signed(seed: &str, domain: &str, fields: &str, at: f64) -> Result<String, JsError> {
+    Ok(one::keys::signed_request(&signing_key(seed).map_err(thrown)?, domain, serde_json::from_str(fields)?, at as u64).to_string())
+}
+
+/// The keys a caller handed this node with `token`'s calls (`x-one-keys`): → `{ until, keys: [{ scope, epoch, app,
+/// database, key }] }`.
+#[wasm_bindgen]
+pub fn handoff(seed: &str, token: &str, sealed: &str, now: f64) -> Result<String, JsError> {
+    let handoff = one::keys::open_handoff(&one::keys::seal_secret(&signing_key(seed).map_err(thrown)?), sealed).map_err(thrown)?;
+    if handoff.for_ != one::keys::token_id(token) {
+        return Err(JsError::new("the keys handed are for another sign-in"));
+    }
+    if handoff.until <= now as u64 {
+        return Err(JsError::new("the keys handed have expired"));
+    }
+    Ok(json!({ "until": handoff.until, "keys": handoff.keys }).to_string())
+}
+
+/// What a sign-in needs for `wants` (JSON, `[{ scope, app, database, have: [epoch] }]`) that it wasn't handed, as a node
+/// on a machine says it (src/node/sessions.rs): every epoch from the one the database's newest copy is under to the
+/// scope's newest. → `[{ scope, epoch, app, database }]`.
+#[wasm_bindgen]
+pub async fn needs(bucket: JsValue, wants: String) -> Result<String, JsError> {
+    let bucket = Js(bucket);
+    let wants: Vec<Value> = serde_json::from_str(&wants)?;
+    let mut need = Vec::new();
+    for w in wants {
+        let (scope, app, database) = (w["scope"].as_str().unwrap_or(""), w["app"].as_str().unwrap_or(""), w["database"].as_str().unwrap_or(""));
+        let have: Vec<u32> = serde_json::from_value(w["have"].clone()).unwrap_or_default();
+        let prefix = format!("{}/{app}/{database}", one::bucket::folder(scope));
+        let hint = match bucket.get(&one::db::newest_name(&prefix)).await.map_err(thrown)? {
+            Some(o) => Some(one::db::newest(&o.bytes).map_err(thrown)?),
+            None => None,
+        };
+        let mut newest = hint.map(|(_, _, e)| e).unwrap_or(0).max(have.iter().copied().max().unwrap_or(0)).max(1);
+        while bucket.get(&one::keys::epoch_name(scope, newest + 1, "recovery")).await.map_err(thrown)?.is_some() {
+            newest += 1;
+        }
+        let oldest = match hint {
+            Some((_, 0, _)) => 1,
+            Some((_, _, epoch)) => epoch.clamp(1, newest),
+            None => newest,
+        };
+        need.extend((oldest..=newest).filter(|n| !have.contains(n)).map(|epoch| json!({ "scope": scope, "epoch": epoch, "app": app, "database": database })));
+    }
+    Ok(Value::from(need).to_string())
+}
+
 thread_local! {
     /// The databases calls running in this isolate have open, by handle.
     static OPEN: RefCell<(u32, HashMap<u32, Db>)> = RefCell::new((0, HashMap::new()));
@@ -87,16 +164,15 @@ pub fn verify(token: &str, jwks: &str, iss: &str, now: f64) -> Result<String, Js
     Ok(json!({ "sub": claims.sub, "azp": claims.azp, "aud": claims.aud, "exp": claims.exp, "scope": claims.scope }).to_string())
 }
 
-/// Opens a database at `prefix` with its key (base64url, from the vault) and brings it to `migrations` (JSON, its
-/// app's schema for the scope's kind): → a handle for `query`, `write` and `close`.
+/// Opens a database at `prefix` with its keys (`keys_of`, handed by the caller) and brings it to `migrations` (JSON,
+/// its app's schema for the scope's kind): → a handle for `query`, `write` and `close`.
 #[wasm_bindgen]
-pub async fn open(bucket: JsValue, prefix: String, key: String, migrations: String) -> Result<u32, JsError> {
+pub async fn open(bucket: JsValue, prefix: String, keys: String, migrations: String) -> Result<u32, JsValue> {
     let bucket = Js(bucket);
-    let key = one::kernel::decode_key(&key).map_err(thrown)?;
-    let migrations: Vec<String> = serde_json::from_str(&migrations)?;
-    // As epoch 1's until the serverless node is handed keys by epoch (x-one-keys), as nodes are.
-    let mut db = Db::open(&bucket, &prefix, [(1, key)].into()).await.map_err(thrown)?;
-    db.migrate(&bucket, &migrations).await.map_err(thrown)?;
+    let keys = keys_of(&keys).map_err(failed)?;
+    let migrations: Vec<String> = serde_json::from_str(&migrations).map_err(|e| failed(e.into()))?;
+    let mut db = Db::open(&bucket, &prefix, keys).await.map_err(failed)?;
+    db.migrate(&bucket, &migrations).await.map_err(failed)?;
     let handle = OPEN.with(|o| {
         let mut o = o.borrow_mut();
         o.0 += 1;
@@ -104,6 +180,30 @@ pub async fn open(bucket: JsValue, prefix: String, key: String, migrations: Stri
     });
     put(handle, db);
     Ok(handle)
+}
+
+/// Whether an open database's keys agree with `keys` (`keys_of`): whether a sign-in that handed them may use it.
+#[wasm_bindgen]
+pub fn opens(handle: u32, keys: &str) -> bool {
+    let Ok(keys) = keys_of(keys) else { return false };
+    OPEN.with(|o| o.borrow().1.get(&handle).is_some_and(|db| db.opens_for(&keys)))
+}
+
+/// Brings an open database up to what the bucket has, with `keys` too, and to `migrations`.
+#[wasm_bindgen]
+pub async fn refresh(handle: u32, bucket: JsValue, keys: String, migrations: String) -> Result<(), JsValue> {
+    let bucket = Js(bucket);
+    let keys = keys_of(&keys).map_err(failed)?;
+    let migrations: Vec<String> = serde_json::from_str(&migrations).map_err(|e| failed(e.into()))?;
+    let mut db = take(handle).map_err(failed)?;
+    db.add_keys(&keys);
+    let done = async {
+        db.catch_up(&bucket).await?;
+        db.migrate(&bucket, &migrations).await
+    }
+    .await;
+    put(handle, db);
+    done.map_err(failed)
 }
 
 /// Reads with a statement that only reads: its rows, as JSON.
@@ -198,7 +298,7 @@ pub fn following(name: &str, n: u32) -> String {
 /// A scope's entries this isolate read: the key they were read with, the last step read, and the entries (in replay
 /// order for `global`; another scope's are put in order with `global`'s when replayed, as they follow them).
 struct Log {
-    key: [u8; 32],
+    keys: one::db::Keys,
     at: u64,
     entries: Vec<Entry>,
 }
@@ -221,20 +321,22 @@ thread_local! {
 /// Reads a scope's entries (with the key of its log, from the vault) up to its newest step: from the newest copy the
 /// first time, and after that only the steps since. Requests reading at once each add what they read.
 #[wasm_bindgen]
-pub async fn read_log(bucket: JsValue, scope: String, key: String) -> Result<(), JsError> {
+pub async fn read_log(bucket: JsValue, scope: String, keys: String) -> Result<(), JsValue> {
     let bucket = Js(bucket);
-    let key = one::kernel::decode_key(&key).map_err(thrown)?;
+    let keys = keys_of(&keys).map_err(failed)?;
     let prefix = one::log::prefix(&scope);
-    let from = LOGS.with(|l| l.borrow().get(&scope).filter(|l| l.key == key).map(|l| l.at));
+    // What was read with keys that agree with these, sharing an epoch: only the scope's people have them.
+    let same = |l: &Log| l.keys.iter().all(|(n, k)| keys.get(n).is_none_or(|x| x == k)) && keys.keys().any(|n| l.keys.contains_key(n));
+    let from = LOGS.with(|l| l.borrow().get(&scope).filter(|l| same(l)).map(|l| l.at));
     let Some(from) = from else {
-        let (at, entries) = one::log::open(&bucket, &[(1, key)].into(), &prefix, &scope).await.map_err(thrown)?;
+        let (at, entries) = one::log::open(&bucket, &keys, &prefix, &scope).await.map_err(failed)?;
         let entries = if scope == "global" { causal(entries, &HashMap::new()) } else { entries };
-        LOGS.with(|l| l.borrow_mut().insert(scope, Log { key, at, entries }));
+        LOGS.with(|l| l.borrow_mut().insert(scope, Log { keys, at, entries }));
         return Ok(());
     };
-    let (at, new) = one::log::read(&bucket, &[(1, key)].into(), &prefix, &scope, from).await.map_err(thrown)?;
+    let (at, new) = one::log::read(&bucket, &keys, &prefix, &scope, from).await.map_err(failed)?;
     LOGS.with(|l| {
-        if let Some(log) = l.borrow_mut().get_mut(&scope).filter(|l| l.key == key) {
+        if let Some(log) = l.borrow_mut().get_mut(&scope).filter(|l| same(l)) {
             let fresh: Vec<Entry> = new.into_iter().filter(|e| !log.entries.iter().any(|k| k.author() == e.author() && k.seq() == e.seq())).collect();
             if !fresh.is_empty() {
                 log.entries.extend(fresh);
@@ -242,6 +344,7 @@ pub async fn read_log(bucket: JsValue, scope: String, key: String) -> Result<(),
                     log.entries = causal(std::mem::take(&mut log.entries), &HashMap::new());
                 }
             }
+            log.keys.extend(keys.clone());
             log.at = log.at.max(at);
         }
     });
@@ -387,16 +490,18 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
     json!({ "state": state, "apps": apps, "me": me_ })
 }
 
-/// A deploy's bundle from the bucket (`bucket::blob_name`), opened with the key of the node's `blobs` database in
+/// A deploy's bundle from the bucket (`bucket::blob_name`), opened with the keys of the node's `blobs` database in
 /// `global` and checked against its hash: → the app's module.
 #[wasm_bindgen]
-pub async fn bundle(bucket: JsValue, key: String, hash: String) -> Result<String, JsError> {
-    let key = one::kernel::decode_key(&key).map_err(thrown)?;
+pub async fn bundle(bucket: JsValue, keys: String, hash: String) -> Result<String, JsValue> {
+    let keys = keys_of(&keys).map_err(failed)?;
     let name = one::bucket::blob_name("global", &hash);
-    let sealed = Js(bucket).get(&name).await.map_err(thrown)?.ok_or_else(|| JsError::new(&format!("{name} isn't in the bucket yet: a node on one of your machines puts it there")))?;
-    let bytes = one::keys::open(&key, &name, &sealed.bytes).map_err(thrown)?;
+    let sealed = Js(bucket).get(&name).await.map_err(failed)?.ok_or_else(|| failed(anyhow!("{name} isn't in the bucket yet: a node on one of your machines puts it there")))?;
+    let epoch = one::keys::epoch_of(&sealed.bytes).map_err(failed)?;
+    let key = keys.get(&epoch).ok_or_else(|| failed(one::db::Missing { epoch }.into()))?;
+    let bytes = one::keys::open(key, &name, &sealed.bytes).map_err(failed)?;
     if blake3::hash(&bytes).to_hex().as_str() != hash {
-        return Err(JsError::new(&format!("the bundle kept as {hash} isn't it")));
+        return Err(failed(anyhow!("the bundle kept as {hash} isn't it")));
     }
-    one::bundle::module(&bytes).map_err(thrown)
+    one::bundle::module(&bytes).map_err(failed)
 }

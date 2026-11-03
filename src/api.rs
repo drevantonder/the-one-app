@@ -68,6 +68,7 @@ pub fn routes() -> Router<Node> {
         .route("/skills/{name}/{*path}", get(skill_file))
         .route("/v1/state", get(state))
         .route("/v1/endpoint", get(endpoint))
+        .route("/v1/hand", post(hand))
         .route("/v1/keys", get(keys_get).post(keys_post))
         .route("/v1/apps", get(apps))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
@@ -504,6 +505,20 @@ async fn endpoint(State(node): State<Node>) -> Json<Value> {
     Json(json!(node.endpoint()))
 }
 
+/// `{ seal, token, need }`: what this machine's own programs hand another node for their person's calls there with
+/// `token` (`x-one-keys`), the keys of the databases a 428's `need` names, sealed to its `seal` key. → `{ keys }`.
+async fn hand(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    let seal = crate::keys::unhex(text(&body, "seal")?)?;
+    let mut want: Vec<(crate::entry::Scope, String, String)> = Vec::new();
+    for n in body["need"].as_array().into_iter().flatten() {
+        let w = (crate::entry::Scope::parse(n["scope"].as_str().unwrap_or(""))?, text(n, "app")?.to_string(), text(n, "database")?.to_string());
+        if !want.contains(&w) {
+            want.push(w);
+        }
+    }
+    Ok(Json(json!({ "keys": node.hand_keys(&me.caller, &seal, text(&body, "token")?, &want).await? })))
+}
+
 /// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
 async fn keys_get(State(node): State<Node>, me: Me, Query(q): Query<std::collections::HashMap<String, String>>) -> Reply {
     let scope = crate::entry::Scope::parse(q.get("scope").map(String::as_str).unwrap_or(""))?;
@@ -574,7 +589,8 @@ async fn call_for(node: &Node, me: Me, body: Value) -> anyhow::Result<Value> {
 }
 
 /// A call the serverless node passes on over iroh (src/node/net.rs), as `/v1/call` takes one through the gateway: its
-/// person's, by the access token it carries in `me`, with the keys they hand this device (`keys`, as `x-one-keys`).
+/// person's, by the access token it carries in `me`, with the keys they hand this device (`keys`, as `x-one-keys`, unless
+/// they were sealed to another).
 /// → `{ ok }`, or what failed as the API says it.
 pub(crate) async fn call_signed_in(node: &Node, mut call: Value) -> Value {
     let (me, keys) = match call.as_object_mut() {
@@ -584,8 +600,9 @@ pub(crate) async fn call_signed_in(node: &Node, mut call: Value) -> Value {
     let ran = async {
         let token = me["token"].as_str().filter(|t| !t.is_empty()).ok_or_else(|| anyhow::anyhow!("sign in first"))?;
         let me = signed_in(node, token.to_string()).await?;
+        // Keys sealed to the node that passed the call on are its, not this one's: this one says what it needs.
         if let Some(handed) = keys.as_ref().and_then(Value::as_str) {
-            node.hand(token, &me.caller.user, handed)?;
+            let _ = node.hand(token, &me.caller.user, handed);
         }
         call_for(node, me, call).await
     };
