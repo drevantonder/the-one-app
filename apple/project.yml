@@ -79,6 +79,8 @@ targets:
           - CFBundleURLName: app.${CONFIG_CLI}.join
             CFBundleURLSchemes:
               - ${CONFIG_CLI}
+        # Asked for the first time an app scans a document (Shared/Views/ScreenFiles.swift).
+        NSCameraUsageDescription: Scan documents for your apps.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
@@ -106,6 +108,8 @@ targets:
         CLI: ${CONFIG_CLI}
         Yours: ${CONFIG_YOURS}
         BuildCommit: ${BUILD_COMMIT}
+        # Asked for the first time an app scans a document (Shared/Views/ScreenFiles.swift).
+        NSCameraUsageDescription: Scan documents for your apps.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
