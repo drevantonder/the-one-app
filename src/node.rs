@@ -354,6 +354,9 @@ pub struct Inner {
     sent: Mutex<Option<Vec<logs::Sent>>>,
     /// Whether this device is moving to the install's new storage now.
     moving: Mutex<bool>,
+    /// The install's recovery keys this device told the relay about since it started: the old ones taken out, the
+    /// current one let in as a client (`follow_recovery`).
+    recovery_told: Mutex<std::collections::BTreeSet<Key>>,
     /// Where the install's data went: every bucket this device has used writes there, after a move (`Copied`).
     moved: Arc<tokio::sync::RwLock<Option<Place>>>,
     /// This device's connector for the install's tunnel, with the token it runs with.
@@ -488,6 +491,7 @@ impl Node {
             database_keys: Mutex::new(HashMap::new()),
             sent: Mutex::new(None),
             moving: Mutex::new(false),
+            recovery_told: Mutex::new(Default::default()),
             moved: Arc::default(),
             tunnel: Mutex::new(None),
             making_keys: tokio::sync::Mutex::new(()),
@@ -905,6 +909,7 @@ impl Node {
             self.emit(Event::Devices);
             self.seal_epochs();
             self.settle_own();
+            self.follow_recovery();
         }
         if handled.members || handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
             self.follow_storage();

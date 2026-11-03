@@ -71,10 +71,11 @@ pub struct Settings {
     /// The local ports the auth service and the gateway listen on, when this machine runs them. The other services
     /// have none: other Workers reach them by binding.
     pub ports: [u16; 2],
-    /// The install's devices' public keys (hex), from the node on this machine when the kernel is deployed or served:
-    /// the relay starts its list with them, as its admins', when it has none yet.
+    /// The install's devices (`{ key, role, admin }`: key in hex, roles joined by spaces), and its recovery key as a
+    /// client, from the node on this machine when the kernel is deployed or served: the relay starts its list with
+    /// them when it has none yet.
     #[serde(skip)]
-    pub devices: Vec<String>,
+    pub devices: Vec<serde_json::Value>,
     /// The serverless node's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
     #[serde(default, skip_serializing)]
     pub serverless_key: String,

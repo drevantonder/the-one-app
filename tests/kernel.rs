@@ -396,7 +396,8 @@ impl Kernel {
         settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
         settings.resources = vec![RESOURCE.into()];
         settings.node_url = node_url;
-        settings.devices = devices;
+        // The install's first devices, its admin's machines that run its calls.
+        settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).collect();
         settings.serverless = serverless.is_some();
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let modules = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();

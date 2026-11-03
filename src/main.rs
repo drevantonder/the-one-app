@@ -208,15 +208,25 @@ else. Data goes to stdout, messages to stderr.
     )
 }
 
-/// `settings` with the keys of the install's devices and its recovery key, as the node on this machine knows them, and
-/// when its log last changed them, for the relay to take only them; none when no node answers here, which `needed` refuses, since that
-/// relay would take no one.
+/// `settings` with the install's devices (each key, its roles and whether it's an admin's) and its recovery key, as the
+/// node on this machine knows them, for the relay to take only them; none when no node answers here, which `needed`
+/// refuses, since that relay would take no one.
 fn devices_here(settings: one::kernel::Settings, needed: bool) -> Result<one::kernel::Settings> {
     let state = get("/v1/state").unwrap_or_default();
-    let mut devices: Vec<String> = state["install"]["devices"].as_array().into_iter().flatten().filter_map(|d| d["key"].as_str().map(str::to_string)).filter(|k| k.len() == 64).collect();
+    let install = &state["install"];
+    let admin = |user: &Value| install["users"].as_array().into_iter().flatten().any(|u| u["id"] == *user && u["role"] == "admin");
+    let mut devices: Vec<Value> = ["devices", "clients"]
+        .iter()
+        .flat_map(|list| install[*list].as_array().into_iter().flatten())
+        .filter(|d| d["key"].as_str().is_some_and(|k| k.len() == 64))
+        .map(|d| {
+            let roles: Vec<&str> = d["roles"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            json!({ "key": d["key"], "role": roles.join(" "), "admin": admin(&d["user"]) })
+        })
+        .collect();
     anyhow::ensure!(!needed || !devices.is_empty(), "no node of your One App answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new install, whose relay takes devices once this runs again beside one");
-    // The install's recovery key too, as an admin's: what it lets in, the relay takes.
-    devices.extend(state["install"]["recovery"].as_str().map(str::to_string));
+    // The install's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
+    devices.extend(install["recovery"].as_str().map(|k| json!({ "key": k, "role": "client", "admin": false })));
     Ok(one::kernel::Settings { devices, ..settings })
 }
 

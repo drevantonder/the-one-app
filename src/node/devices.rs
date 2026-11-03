@@ -215,6 +215,24 @@ impl Node {
         .await?
     }
 
+    /// Once the install's recovery key changed, an admin's device tells the relay to let the old one in no more and the
+    /// new one in as a client: once each since this device started.
+    pub(super) fn follow_recovery(&self) {
+        let told = self.with(|i| {
+            let m = &i.r.members;
+            let admins = m.machine(&self.0.id).is_some_and(|d| m.is_admin(&d.user));
+            Ok(m.recovery.filter(|_| admins && !m.recovery_was.is_empty()).map(|now| (now, m.recovery_was.clone())))
+        });
+        let Ok(Some((now, was))) = told else { return };
+        let mut done = self.0.recovery_told.lock().unwrap();
+        for old in was.into_iter().filter(|k| done.insert(*k)) {
+            self.tell_relay(json!({ "remove": hex(&old) }));
+        }
+        if done.insert(now) {
+            self.tell_relay(json!({ "add": hex(&now), "role": "client" }));
+        }
+    }
+
     /// Tells the relay something now, signed by this device (`one/relay`), as `tell_relay` does in the background.
     async fn tell_relay_now(&self, fields: Value) -> Result<()> {
         self.tell_relay_as(self.signing_key(), fields).await

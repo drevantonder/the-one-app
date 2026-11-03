@@ -173,6 +173,8 @@ pub struct Members {
     pub recovery_used: Option<(u64, String)>,
     /// When the install's recovery key was set: by the genesis, or by a `recovery` entry the one before it signed.
     pub recovery_set: u64,
+    /// The install's recovery keys before this one, which the relay lets in no more.
+    pub recovery_was: Vec<Key>,
     /// Where each endpoint's entries stop counting, by (endpoint, log): the first seq that doesn't, wherever it sorts.
     /// A removed device's in `global` after the last its remover had seen (`remove`'s `seq`), and a device's in a log
     /// it forked from the fork on (`Store::forks`).
@@ -709,7 +711,7 @@ impl Members {
                 ensure!(self.recovery == Some(author), "only the install's recovery key changes it");
                 let key = key_of("key")?;
                 ensure!(Some(key) != self.recovery && !self.machines.contains_key(&key), "a new recovery key is a key of its own");
-                self.recovery = Some(key);
+                self.recovery_was.extend(self.recovery.replace(key));
                 self.recovery_set = e.time();
             }
             "app" => {
@@ -1492,7 +1494,7 @@ mod tests {
         let e = recovery.write("global", ANDRE, node("recovery", json!({ "key": hex(&other.id()) })), &entries);
         entries.push(e.clone());
         let m = members(&entries);
-        assert_eq!((m.recovery, m.recovery_set), (Some(other.id()), e.time()));
+        assert_eq!((m.recovery, m.recovery_set, m.recovery_was.clone()), (Some(other.id()), e.time(), vec![recovery.id()]));
         entries.push(recovery.write("global", BOB, device(&Dev::new(11).endpoint(), BOB, "y", &[Kind::Client], None), &entries));
         assert!(members(&entries).machine(&Dev::new(11).id()).is_none(), "the old recovery key lets nobody in");
     }

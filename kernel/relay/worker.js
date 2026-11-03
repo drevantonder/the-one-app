@@ -5,7 +5,9 @@
 // frames. It's blind: what endpoints send each other is QUIC, sealed end to end, so it can only drop it.
 //
 // It admits only the install's endpoints, on its one list of them: `{ by, admin, role }` per key, `by` the key that let
-// it in, `role` what it is (`client`, `compute` or `service`). The install's first devices, its admins', are put in when the install is made (`DEVICES`, from the kernel's
+// it in, `role` what it is (`client`, `compute` or `service`, or a machine's several, with spaces). The install's first
+// devices, and its recovery key as a client, are put in when the install is made (`DEVICES`, `{ key, role, admin }`
+// each, from the kernel's
 // deploy, taken only while the list is empty, which it never is again: the last admin can't be taken out); after that,
 // devices tell it, and nothing else changes it. A computer joining with a pairing code a device made gets in too, by
 // the ticket it shows as iroh's relay auth token, until the code expires, and reaches only that device until it's
@@ -69,6 +71,8 @@ const UNPROVEN = 256;
 const PAIRING_FOR = 7 * 86_400_000;
 const PAIRINGS_PER_DEVICE = 8;
 const ROLES = ["client", "compute", "service"];
+/// Whether a key on the list plays `role`.
+const is = (it, role) => !!it && it.role.split(" ").includes(role);
 /// How often a sender is told that an endpoint it sends to isn't here, and how many such it remembers.
 const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
@@ -232,9 +236,8 @@ export class Relay extends DurableObject {
     } catch {}
     this.sql.exec("DELETE FROM bound WHERE ticket = ''");
     if (!this.sql.exec("SELECT 1 FROM keys LIMIT 1").toArray().length) {
-      for (const key of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
-        // The install's first devices are machines, which run its calls.
-        if (isKey(key)) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'install', 1, 'compute')", key);
+      for (const { key, role, admin } of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
+        if (isKey(key) && String(role).split(" ").every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'install', ?, ?)", key, admin === true ? 1 : 0, role);
       }
     }
     /// Each proven endpoint's socket, by its key; kept in the sockets' attachments across hibernation.
@@ -273,8 +276,8 @@ export class Relay extends DurableObject {
   /// null if neither. A request's (`at`) is taken once: → why not, if it was taken already.
   computes(by, { at, session } = {}) {
     if (at !== undefined && !this.take(by, at)) return "that request was taken already";
-    if (session !== undefined ? this.key(session)?.role !== "client" : !this.key(by)) return null;
-    return this.sql.exec("SELECT key FROM keys WHERE role = 'compute'").toArray().map((r) => r.key);
+    if (session !== undefined ? !is(this.key(session), "client") : !this.key(by)) return null;
+    return this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
   }
 
   /// Takes a signed request, `(by, at)`, once: → whether it wasn't taken before.
@@ -310,7 +313,7 @@ export class Relay extends DurableObject {
     }
     // Taken in at once only for a certificate its signer made and its endpoint's own proof, so this tells only them
     // whether they're on the list.
-    if (proved && this.key(session.by)?.role === "client") {
+    if (proved && is(this.key(session.by), "client")) {
       const [client, server] = Object.values(new WebSocketPair());
       this.ctx.acceptWebSocket(server);
       await this.admit(server, session.endpoint, { id: session.endpoint, by: session.by, until: session.until });
@@ -515,7 +518,7 @@ export class Relay extends DurableObject {
     let attachment = id && this.key(id) ? { id } : null;
     // A session's endpoint: the key its certificate names, signed by a client's key on the list. Checked here, not when
     // it connects, so that tells no one who's on the list either.
-    if (id && !attachment && said.session?.endpoint === id && this.key(said.session.by)?.role === "client" && said.session.until > Date.now()) {
+    if (id && !attachment && said.session?.endpoint === id && is(this.key(said.session.by), "client") && said.session.until > Date.now()) {
       attachment = { id, by: said.session.by, until: said.session.until };
     }
     if (id && !attachment && said.joining) {
@@ -624,7 +627,7 @@ export class Relay extends DurableObject {
         // A key that's no longer a client vouches for no session.
         if (told.role !== "client") this.endSessionsOf(told.add);
       } else {
-        if (told.role !== "client" && !admin && by.role !== "compute") return "only an admin's device or a compute adds a compute or a service";
+        if (told.role !== "client" && !admin && !is(by, "compute")) return "only an admin's device or a compute adds a compute or a service";
         this.sql.exec("INSERT INTO keys VALUES (?, ?, ?, ?)", told.add, told.by, wants ? 1 : 0, told.role);
       }
       // A pairing code's computer, added, is one of the install's: it reaches every endpoint now.
