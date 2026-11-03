@@ -63,6 +63,9 @@ pub fn try_install(rest: &[String]) -> Result<()> {
         Some("kernel") if rest.get(1).map(String::as_str) == Some("serve") => bail!("the try install runs its own kernel"),
         _ => {}
     }
+    if rest.first().map(String::as_str) == Some("client") && rest.get(1).map(String::as_str) == Some("web") {
+        web_client_built(&dir, &checkout, rest)?;
+    }
     let addr = match running(&dir) {
         Some(addr) => addr,
         None => start(&dir)?,
@@ -540,7 +543,10 @@ fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &
     match rest.first().map(String::as_str) {
         Some("web") => {
             // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it would test the address.
-            anyhow::ensure!(one::kernel::client_version().is_some(), "this build has no web client's WebAssembly: build it with CLIENT set, as {CLI} update does");
+            anyhow::ensure!(
+                one::kernel::client_version().is_some(),
+                "this build has no web client's WebAssembly: run this checkout's own build, target/debug/{CLI} try client web, which builds it"
+            );
             web(dir, settings, person.as_deref())?
         }
         Some(kind @ ("android" | "windows")) => {
@@ -554,6 +560,31 @@ fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &
     }
     println!("Ready in {}s.", started.elapsed().as_secs());
     Ok(())
+}
+
+/// For `try client web` from this checkout's own debug build: the web client's WebAssembly built, and this build made
+/// again with it embedded (the kernel serves what its build holds), as `{CLI} update` does for a release but at dev
+/// speed: no release build, and cargo keeps what hasn't changed, so a run with nothing changed does nothing here. The
+/// try install's programs run the old build, so a new one is stopped (it keeps its data) and the command run again as
+/// the new build, which starts it again.
+fn web_client_built(dir: &Path, checkout: &Path, rest: &[String]) -> Result<()> {
+    let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
+    if std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()) != own.canonicalize().ok() {
+        return Ok(());
+    }
+    eprintln!("Building the web client's WebAssembly (the first time takes minutes; cargo keeps what hasn't changed)…");
+    let built = crate::update::client(checkout, &checkout.join(one::config::CONFIG_FILE))?;
+    let held = |name: &str, bytes: &[u8]| std::fs::read(built.join(name)).is_ok_and(|file| file == bytes);
+    if !one::config::CLIENT.is_empty() && one::config::CLIENT.iter().all(|(name, bytes)| held(name, bytes)) {
+        return Ok(());
+    }
+    let again = format!("{}_TRY_WEB_CLIENT_EMBEDDED", CLI.to_uppercase());
+    anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again with the web client and doesn't hold it: build it with CLIENT={}", built.display());
+    eprintln!("Building {CLI} again with it (target/debug, not release)…");
+    crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).current_dir(checkout).env("CLIENT", &built).arg("build"))?;
+    stop(dir, false)?;
+    use std::os::unix::process::CommandExt;
+    Err(std::process::Command::new(&own).arg("try").args(rest).env(&again, "1").exec().into())
 }
 
 /// Someone's name as `--as` gives it, as people write it: "sam" is Sam.

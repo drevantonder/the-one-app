@@ -251,7 +251,7 @@ impl Parts {
 }
 
 /// Runs a command, showing its output only if it fails.
-fn run_quiet(cmd: &mut Command) -> Result<()> {
+pub fn run_quiet(cmd: &mut Command) -> Result<()> {
     let out = cmd.output().with_context(|| format!("run {:?}", cmd.get_program()))?;
     if !out.status.success() {
         bail!(
@@ -575,8 +575,14 @@ pub fn client(src: &Path, config: &Path) -> Result<PathBuf> {
         .context("build the client (rustup target add wasm32-unknown-unknown)")?;
     let out = src.join("target/client");
     let wasm = src.join("target/wasm32-unknown-unknown/web/one_client.wasm");
-    run_quiet(Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm)).context("make its glue (cargo install wasm-bindgen-cli, the version in Cargo.lock)")?;
     let built = out.join("one_client_bg.wasm");
+    // Its glue is only made again for a client cargo built again: one that's already here is what a build that has it
+    // embedded (`CLIENT`), so rewriting it would have that build done again.
+    let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
+    if modified(&built).is_some_and(|glued| modified(&wasm).is_some_and(|built| glued > built)) {
+        return Ok(out);
+    }
+    run_quiet(Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm)).context("make its glue (cargo install wasm-bindgen-cli, the version in Cargo.lock)")?;
     if quiet(Command::new("wasm-opt").arg("--version")) {
         run_quiet(Command::new("wasm-opt").args(["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "--enable-sign-ext", "--enable-mutable-globals", "--enable-reference-types", "--enable-multivalue", "-o"]).arg(&built).arg(&built))?;
     }
@@ -584,7 +590,7 @@ pub fn client(src: &Path, config: &Path) -> Result<PathBuf> {
 }
 
 /// Cargo, also where rustup puts it, for a shell that doesn't have it on its PATH.
-fn cargo() -> PathBuf {
+pub fn cargo() -> PathBuf {
     let rustup = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cargo/bin/cargo");
     if quiet(Command::new("cargo").arg("--version")) || !rustup.exists() { "cargo".into() } else { rustup }
 }
