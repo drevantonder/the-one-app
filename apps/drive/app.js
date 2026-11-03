@@ -28,7 +28,10 @@ const needsConnecting = () => new DriveError(`Drive needs connecting: sign in to
 const VAULT = {
   client: {
     title: "Google sign-in", type: "Google sign-in", domain: "google.com", hosts: [OAUTH],
-    why: "Make one in Google Cloud Console: APIs & Services › Credentials › Create OAuth client ID, type Desktop app.",
+    why: "Make one in Google Cloud Console: APIs & Services › Credentials › Create OAuth client ID, type Desktop app. It's set once, for everyone's Google apps.",
+    // Set once, by an admin in Everyone's Vault, for every app that declares a shared Google sign-in: anyone else is
+    // told which admin to ask.
+    shared: true,
     fields: { client_id: { label: "Client ID" }, client_secret: { label: "Client secret", secret: true } },
   },
   account: {
@@ -37,12 +40,13 @@ const VAULT = {
   },
 };
 
-/// The Google sign-in (OAuth client) this app is switched on for: yours first, else your group's or everyone's.
+/// The Google sign-in (OAuth client) this app is switched on for: yours first, else your group's or everyone's (the one
+/// an admin set for everyone).
 async function googleClient(ctx, id) {
   const all = (await ctx.vault.items()).filter((i) => i.fields.client_id?.value && i.fields.client_secret);
   return all.find((i) => i.fields.client_id.value === id) || all.find((i) => i.scope.startsWith("user:")) || all[0] || null;
 }
-const noClient = () => new Error(`Choose a Google sign-in from your Vault first: ${TITLE} has none yet; it's chosen on its settings page, or ask the person for it with vault_request (app ${APP}, need client)`);
+const noClient = () => new Error(`No Google sign-in is set up yet: vault_request (app ${APP}, need client) asks for it. An admin sets it once, for everyone; for anyone else it says which admin to ask, which is all to tell them`);
 
 /// The Google accounts this app is switched on for, the first signed in first.
 async function accountItems(ctx) {
@@ -408,11 +412,13 @@ async function start(account, b) {
   try {
     link = (await one.call("sign_in", account ? { account } : {})).url;
   } catch (e) {
-    // No Google sign-in yet: the person picks one from their Vault, or makes one, then it goes on.
-    if (/Choose a Google sign-in/.test(e.message) && one.vault) {
+    // No Google sign-in yet: an admin sets one up for everyone, then it goes on; anyone else is told whom to ask, and
+    // can't sign in until then.
+    if (/No Google sign-in/.test(e.message) && one.vault) {
       try { if (await one.vault("client")) return start(account, b); } catch (err) { e = err; }
     }
     busy(b, false, b?.id === "start" ? label() : b?.textContent);
+    if (/Ask .* to set up/.test(e.message) && b) b.disabled = true;
     document.getElementById("err").textContent = one.plain(e).title;
     return;
   }

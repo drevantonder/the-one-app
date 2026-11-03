@@ -15,7 +15,7 @@ Every service with accounts has the same operations:
 - `<app>_sign_out` signs one out. It can't be undone, so it takes `confirm: true` once the person asked for it.
 - Every other operation takes `account` (an address, a phone number, a browser profile, as `accounts` names it), the default one if you leave it out.
 
-Accounts are kept in the Vault as items, so you never handle their tokens. The Google apps share them: one "Google sign-in" and a "Google account" for each account, so an account signed in once serves every Google app switched on for it; another Google app may ask the person to allow a little more the first time.
+Accounts are kept in the Vault as items, so you never handle their tokens. The Google apps share them: one "Google sign-in", which an admin sets up once in Everyone's Vault for everyone (for anyone else, `vault_request` says which admin to ask, and that's all to tell them), and a "Google account" for each account, so an account signed in once serves every Google app switched on for it; another Google app may ask the person to allow a little more the first time.
 
 A service over a device (iMessage, Reminders, Calendar and Contacts on a Mac; Shell; Models) has the devices it runs on as its accounts. One with nothing to run on says what it needs, like "Needs a Mac".
 

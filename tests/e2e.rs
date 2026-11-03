@@ -230,7 +230,10 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     let port = echo().await;
     let module = |name: &str| format!(r#"export default {{
   name: "{name}",
-  vault: {{ account: {{ title: "Example account", type: "Example account", accounts: true, hosts: ["127.0.0.1"], fields: {{ email: {{}}, token: {{ secret: true }} }} }} }},
+  vault: {{
+    account: {{ title: "Example account", type: "Example account", accounts: true, hosts: ["127.0.0.1"], fields: {{ email: {{}}, token: {{ secret: true }} }} }},
+    client: {{ title: "Example sign-in", type: "Example sign-in", shared: true, hosts: ["127.0.0.1"], fields: {{ client_id: {{}} }} }},
+  }},
   ops: {{
     send: {{ run: async (ctx, {{ url, auth }}) => {{
       const r = await fetch(url, {{ method: "POST", headers: {{ authorization: auth }}, body: "" }});
@@ -289,6 +292,14 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     let refused = a.call(call("two", "send", json!({ "url": format!("http://localhost:{port}/"), "auth": "{{token}}" }))).await.unwrap_err();
     assert!(format!("{refused:#}").contains("sent only to 127.0.0.1"), "{refused:#}");
     assert!(a.call(call("one", "sign_out", json!({ "id": made }))).await.is_err(), "an app lets go only of what it uses");
+
+    // A shared need is asked in Everyone's Vault, from any page, and the item an admin sets counts for every app that
+    // shares it.
+    let asked = a.request_item(&me, &mine, "one", Some("client"), &json!({}), "").await.unwrap();
+    assert_eq!(asked["scope"], "global");
+    a.answer_request(&me, &one::entry::Scope::Global, asked["id"].as_str().unwrap(), &json!({ "fields": { "client_id": "c" } })).await.unwrap();
+    let shared = a.vault(&me, Some(&one::entry::Scope::Global)).await.unwrap();
+    assert_eq!((shared[0]["type"].as_str(), &shared[0]["apps"]), (Some("Example sign-in"), &json!(["one", "two"])));
 }
 
 /// A device whose key is still in server.json, from before devices were called devices, never quietly becomes a new one.
