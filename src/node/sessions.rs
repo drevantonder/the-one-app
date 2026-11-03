@@ -66,7 +66,7 @@ pub fn client_token(key: &Key) -> String {
 
 pub(super) const CLIENT: &str = "client.";
 
-/// The longest a client device's handed keys are kept here.
+/// The longest keys handed with no sign-in (a client device's, or with a call passed on) are kept here.
 const CLIENT_KEYS: u64 = 3_600_000;
 
 /// The client device a token `client_token` made is for.
@@ -74,31 +74,37 @@ pub fn client_of(token: &str) -> Option<Key> {
     data_encoding::HEXLOWER.decode(token.strip_prefix(CLIENT)?.as_bytes()).ok()?.try_into().ok()
 }
 
-/// Whether `token` is an access token the install's sign-in service signed, which another device can check: not a
-/// client device's or a scheduled run's.
-pub(super) fn is_sign_in(token: &str) -> bool {
-    !token.starts_with(CLIENT) && !token.starts_with(SERVERLESS) && !token.starts_with("run.")
+/// What calls another node passed on for `user` with no sign-in are kept by here (the serverless node's, or a
+/// machine's): that node's endpoint key, proven by QUIC, and the person it says the call is for. Like a client
+/// device's, no auth service signs it, so it's never a token anyone sends, and what it was handed (sealed here for
+/// that node's key) opens only that person's calls from it.
+pub fn passed_token(key: &Key, user: &str) -> String {
+    format!("{PASSED}{}/{user}", hex(key))
 }
 
-/// What the serverless node's calls for `user` are kept by here: its endpoint's key, proven by QUIC, and the person
-/// it says the call is for. Like a client device's, no auth service signs it, so it's never a token anyone sends, and
-/// what it was handed opens only that person's calls from it.
-pub fn serverless_token(key: &Key, user: &str) -> String {
-    format!("{SERVERLESS}{}/{user}", hex(key))
-}
+const PASSED: &str = "passed.";
 
-const SERVERLESS: &str = "serverless.";
-
-/// The `for` of a handoff with calls that bring `token`: a client device's key, the serverless node's, or the sha256
-/// of an access token.
+/// The `for` of a handoff with calls that bring `token`: a client device's key, the key of the node that passed it
+/// on, or the sha256 of an access token.
 fn handoff_for(token: &str) -> String {
     if let Some(key) = token.strip_prefix(CLIENT) {
         return key.to_string();
     }
-    if let Some((key, _)) = token.strip_prefix(SERVERLESS).and_then(|t| t.split_once('/')) {
+    if let Some((key, _)) = token.strip_prefix(PASSED).and_then(|t| t.split_once('/')) {
         return key.to_string();
     }
     crate::keys::token_id(token)
+}
+
+/// Whether `token` was made here for keys handed with no sign-in: a client device's, or a call another node passed on.
+pub(super) fn unsigned(token: &str) -> bool {
+    token.starts_with(CLIENT) || token.starts_with(PASSED)
+}
+
+/// Whether `token` is an access token the install's sign-in service signed, which another device can check: not a
+/// client device's, one another node passed on, or a scheduled run's.
+pub(super) fn is_sign_in(token: &str) -> bool {
+    !token.starts_with(CLIENT) && !token.starts_with(PASSED) && !token.starts_with("run.")
 }
 
 fn hash(token: &str) -> [u8; 32] {
@@ -140,8 +146,9 @@ impl Node {
         ensure!(handoff.for_ == handoff_for(token), "the keys handed are for another sign-in");
         let now = now_ms();
         // Kept no longer than a sign-in's token lasts, whatever the handoff says (one that doesn't check brings no call
-        // here to use them); a client device's, an hour at most, as it hands them again with its calls.
-        let until = match token.starts_with(CLIENT) {
+        // here to use them); with none (a client device's, or a call passed on), an hour at most, as they're handed
+        // again with the calls.
+        let until = match token.starts_with(CLIENT) || token.starts_with(PASSED) {
             true => handoff.until.min(now + CLIENT_KEYS),
             false => handoff.until.min(self.token_expiry(token).unwrap_or(u64::MAX)),
         };
@@ -192,6 +199,27 @@ impl Node {
     fn token_expiry(&self, token: &str) -> Option<u64> {
         let claims = self.issuer().ok()?.verify(token, now_ms()).ok()?;
         Some(claims.exp.saturating_mul(1000))
+    }
+
+    /// Keeps the keys another node, `from`, handed with a call it passed on for `user` with no sign-in: sealed here for
+    /// `from`'s key, and only of `scopes`, those the call names. → what the call's keys are kept by.
+    pub(super) fn hand_passed(&self, from: &Key, user: &str, sealed: &str, scopes: &[Scope]) -> Result<String> {
+        let handoff = crate::keys::open_handoff(&self.seal_secret(), sealed)?;
+        ensure!(handoff.for_ == hex(from), "the keys handed are for another node");
+        let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
+        ensure!(handoff.keys.iter().all(|k| named.contains(&k.scope)), "the keys handed are of a scope the call doesn't name");
+        let token = passed_token(from, user);
+        self.hand(&token, user, sealed)?;
+        Ok(token)
+    }
+
+    /// The keys a call with no sign-in was handed here, of `scopes` alone, for passing it on, until when they're kept.
+    pub(super) fn passing_on(&self, token: &str, scopes: &[Scope]) -> (Vec<crate::keys::Handed>, u64) {
+        let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
+        let kept = self.0.sessions.kept.lock().unwrap();
+        let Some(session) = kept.get(&hash(token)).filter(|s| s.live(now_ms())) else { return (Vec::new(), 0) };
+        let keys = session.keys.iter().filter(|((scope, _, _), _)| named.contains(scope)).flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| crate::keys::Handed { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone(), key: *key })).collect();
+        (keys, session.until)
     }
 
     /// The keys a token's calls were handed here, sealed to another device (`to`, its seal key) for a call this one
