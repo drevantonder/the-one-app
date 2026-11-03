@@ -24,6 +24,9 @@ struct PagesView: View {
                 }
                 .scrollTargetLayout()
             }
+            // Made again when the pages first come, at the page a link may have turned to before them: else it stays
+            // where Settings was alone, the first page now, its dots still saying Settings.
+            .id(store.pages.isEmpty)
             .scrollTargetBehavior(.paging)
             .scrollIndicators(.hidden)
             .scrollPosition(id: $position)

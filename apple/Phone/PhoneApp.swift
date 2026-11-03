@@ -150,7 +150,8 @@ final class Phone {
         if url.host() == "open", let app = value("app") {
             let scope = value("scope"), screen = value("screen") ?? "main"
             if screen == "main", store.app(app)?.hasScreens == false { return }
-            if let scope, store.pages.contains(where: { $0.scope == scope }) { store.current = scope }
+            // Its page, or once the pages come if they haven't yet (one that isn't there then turns to the person's own).
+            if let scope, store.pages.isEmpty || store.pages.contains(where: { $0.scope == scope }) { store.current = scope }
             store.path = [.screen(ScreenRoute(app: app, screen: screen, params: value("params") ?? "{}", scope: scope))]
         }
     }

@@ -634,10 +634,13 @@ final class Store {
                 await refreshApps()
             }
         }
+        #if os(macOS)
+        // Unless a link already chose where the window opens.
         if selection == nil {
             let kept = UserDefaults.standard.data(forKey: "selection").flatMap { try? JSONDecoder().decode(Route.self, from: $0) }
             selection = kept.flatMap(stillThere) ?? .page("user")
         }
+        #endif
         await refreshWidgets()
     }
 
