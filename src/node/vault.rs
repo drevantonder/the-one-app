@@ -221,14 +221,18 @@ impl Node {
                     );
                 }
                 let fields: serde_json::Map<String, Value> = d["fields"].as_object().into_iter().flatten().map(|(n, f)| (n.clone(), json!({ "secret": f["secret"] == true }))).collect();
-                json!({ "title": d["title"], "fields": fields, "hosts": d["hosts"], "need": need })
+                // Where to find it, as the app says, when the asker gave no reason of their own.
+                let why = if why.is_empty() { d["why"].as_str().unwrap_or("") } else { why };
+                json!({ "title": d["title"], "fields": fields, "hosts": d["hosts"], "need": need, "why": why })
             }
             _ => json!({ "title": ask["title"], "fields": ask["fields"], "hosts": ask["hosts"], "need": need }),
         };
         let id = new_id();
         data["id"] = json!(id);
         data["app"] = json!(app);
-        data["why"] = json!(why);
+        if data["why"].as_str().unwrap_or("").is_empty() {
+            data["why"] = json!(why);
+        }
         data["agent"] = json!(caller.agent);
         self.with(|i| {
             ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "you can't change the Vault in {scope}");

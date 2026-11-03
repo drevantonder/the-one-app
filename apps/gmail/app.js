@@ -44,6 +44,7 @@ const wrapped = (bytes) => toB64(bytes).replace(/.{76}(?=.)/g, "$&\r\n");
 const VAULT = {
   client: {
     title: "Google sign-in", type: "Google sign-in", domain: "google.com", hosts: [OAUTH],
+    why: "Make one in Google Cloud Console: APIs & Services › Credentials › Create OAuth client ID, type Desktop app.",
     fields: { client_id: { label: "Client ID" }, client_secret: { label: "Client secret", secret: true } },
   },
   account: {
