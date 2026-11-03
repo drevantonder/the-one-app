@@ -522,16 +522,13 @@ fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -
         Some(port) => port,
         None => {
             let log = format!("{}.log", web.file_name().unwrap().to_string_lossy());
-            let chrome = one::deploy::chrome().context("the web client needs Chrome or Chromium on this machine: none was found (CHROME=<path> names one)")?;
+            let mut chrome = one::deploy::chrome().context("the web client needs Chrome or Chromium on this machine: none was found (CHROME=<path> names one)")?;
             let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
             spawn(
                 dir,
-                std::process::Command::new(chrome).args([
-                    "--headless=new",
+                chrome.args([
                     &format!("--remote-debugging-port={port}"),
                     &format!("--user-data-dir={}", web.join("profile").display()),
-                    "--no-first-run",
-                    "--no-default-browser-check",
                     "--window-size=1280,860",
                     "--hide-scrollbars",
                     &settings.address,

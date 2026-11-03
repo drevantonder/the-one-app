@@ -591,15 +591,16 @@ fn the_gateway_names_the_windows_app_as_windows_does() {
 /// in a browser.
 #[test]
 fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
-    let chrome = one::deploy::chrome().expect("this test draws screens in Chrome or Chromium: none was found (CHROME=<path> names one)");
+    one::deploy::chrome().expect("this test draws screens in Chrome or Chromium: none was found (CHROME=<path> names one)");
     let dir = crate::temp("screens");
     // What each page says once it's drawn, as its title.
     let title = |name: &str, body: &str, own: bool| -> String {
         let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body, own);
         let path = dir.join(format!("{name}.html"));
         std::fs::write(&path, page).unwrap();
-        let out = std::process::Command::new(&chrome)
-            .args(["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--virtual-time-budget=5000", "--dump-dom"])
+        let out = one::deploy::chrome()
+            .unwrap()
+            .args(["--virtual-time-budget=5000", "--dump-dom"])
             .arg(format!("--user-data-dir={}", dir.join("profile").display()))
             .arg(format!("file://{}", path.display()))
             .output()
