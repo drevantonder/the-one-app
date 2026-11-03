@@ -196,11 +196,18 @@ fn start_new(dir: &Path) -> Result<String> {
     }
     // The person's keys at the vault first, so the install's own are given to it before any client signs in.
     settings.try_person_keys()?;
-    let keys = crate::request(agent().post(on("/v1/kernel/keys")).send_json(json!({})))?;
-    for given in one::kernel::give_keys(&settings, keys.as_array().map(Vec::as_slice).unwrap_or_default()) {
+    give_keys(dir, &addr, &settings)?;
+    Ok(addr)
+}
+
+/// Gives the vault the keys the try install's nodes made, as an admin does with `kernel keys`: once its person's are
+/// there, and again once someone invited has joined and signed in, for theirs.
+fn give_keys(dir: &Path, addr: &str, settings: &one::kernel::Settings) -> Result<()> {
+    let keys = crate::request(try_agent(dir).post(format!("http://{addr}/v1/kernel/keys")).send_json(json!({})))?;
+    for given in one::kernel::give_keys(settings, keys.as_array().map(Vec::as_slice).unwrap_or_default()) {
         given?;
     }
-    Ok(addr)
+    Ok(())
 }
 
 /// Starts a program of the try install's in a process group of its own, which stopping it stops (`pids`), logging to
@@ -548,6 +555,9 @@ fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u
         args.push(web_script(dir, &["invite", &admin.to_string(), &settings.address, name, &made])?);
     }
     web_script(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    if !marker.exists() {
+        give_keys(dir, &std::fs::read_to_string(dir.join("addr"))?.trim().to_string(), settings)?;
+    }
     std::fs::write(&marker, name)?;
     Ok((port, picture))
 }
