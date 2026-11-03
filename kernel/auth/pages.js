@@ -10,20 +10,19 @@ const escape = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)}
 // the white label's logo, light or dark with the system. Inline, as the page's policy allows nothing else.
 const style = `${kit}
   /* Near the top, not centred: text that comes in later (a client's name, a note) grows the page down, never moving
-     what's already there. */
+     what's already there. Sized as the web client's welcome is (web.css): its mark, title and button. */
   body { max-width: none; min-height: 100vh; padding: max(40px, 14vh) 24px 40px; display: grid; place-items: start center; background: var(--bg); }
   main { width: min(380px, 100%); text-align: center; }
-  .mark { display: block; width: 88px; height: 88px; margin: 0 auto 18px; }
-  h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; text-wrap: balance; }
+  .mark { display: block; width: 120px; height: 120px; margin: 0 auto 10px; }
+  h1 { font-size: 28px; font-weight: 600; margin: 10px 0 8px; text-wrap: balance; }
   p { margin: 0 0 22px; color: var(--muted); }
-  main .button { display: flex; width: 100%; font-size: 17px; padding: 11px 16px; margin: 0 0 10px; border-radius: 12px; }
-  main .button:not(.primary) { background: var(--card); }
-  input { display: block; width: 100%; font: inherit; text-align: center; padding: 11px 16px; margin: 0 0 10px; border-radius: 12px; border: 0.5px solid var(--line); background: var(--card); color: var(--text); }
+  main .button { display: flex; width: fit-content; min-width: 220px; margin: 0 auto 10px; font-size: 15px; padding: 9px 22px; }
+  input { display: block; width: 100%; font: inherit; text-align: center; padding: 11px 16px; margin: 0 0 10px; border-radius: 10px; border: 0; background: var(--fill); color: var(--text); outline: none; }
   .note { font-size: 13px; margin: 8px 0 0; }
-  .callout { color: var(--text); text-align: left; padding: 12px 16px; border-radius: 12px; background: var(--card); }
+  .callout { color: var(--text); font-size: 15px; text-align: left; padding: 14px 16px; border-radius: var(--radius); background: var(--card); }
   .list { text-align: left; margin: 0 0 22px; }
-  .list .button { width: auto; font-size: 15px; padding: 6px 12px; margin: 0; background: var(--bg); }
-  .error { color: var(--danger); min-height: 1.4em; margin: 8px 0 0; }
+  .list .button { width: auto; min-width: 0; font-size: 15px; padding: 4px 8px; margin: 0; background: none; }
+  .problems:not(:empty) { margin-top: 14px; }
   [hidden] { display: none !important; }
   .framed body { min-height: 0; place-items: start center; padding-top: 24px; }
   .framed .mark, .framed h1 { display: none; }
@@ -39,7 +38,15 @@ const webauthn = `
     encode: (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, ""),
   };
   const PRF_SALT = crypto.subtle.digest("SHA-256", new TextEncoder().encode("one/passkey-device")).then((h) => new Uint8Array(h));
-  const say = (text) => (document.querySelector(".error").textContent = text || "");
+  // A problem, as the kit draws one: its symbol, what happened, and what to do after the first sentence.
+  const say = (text) => {
+    const [title, ...rest] = String(text || "").split(/(?<=[.!?])\\s+/);
+    document.querySelector(".problems").innerHTML = text ? '<div class="problem" role="alert"><svg class="problem-icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-8,56a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm8,104a12,12,0,1,1,12-12A12,12,0,0,1,128,184Z"/></svg><div class="problem-main"><div class="problem-title"></div><div class="problem-text"></div></div></div>' : "";
+    if (!text) return;
+    document.querySelector(".problem-title").textContent = title;
+    document.querySelector(".problem-text").textContent = rest.join(" ");
+    document.querySelector(".problem-text").hidden = !rest.length;
+  };
   const quietly = (err) => say(err.name === "NotAllowedError" || err.name === "AbortError" ? "" : err.message);
   async function api(path, body) {
     const resp = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -126,7 +133,7 @@ const acts = `
 const page = (title, body, script) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141414"><title>${escape(title)}</title><style>${style}</style></head>
-<body><main><img class="mark" src="/logo.png" alt="">${body}<p class="error"></p></main><script>${webauthn}${script}</script></body></html>`;
+<body><main><img class="mark" src="/logo.png" alt="">${body}<div class="problems" role="status"></div></main><script>${webauthn}${script}</script></body></html>`;
 
 /// Which passkeys work, in plain words, for the pages that make or ask for one.
 const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system.";

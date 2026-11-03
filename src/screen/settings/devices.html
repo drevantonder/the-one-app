@@ -107,7 +107,7 @@
     const pick = (name, data) => `<a class="row plain go" ${data}><div class="main"><div class="title"><span>${one.esc(name)}</span></div></div><span class="chev">${one.icon("caret-right")}</span></a>`;
     const devices = () => {
       const on = keepers(scope);
-      choose(on.map((d) => pick(shown(d.name), `data-keep-device="${one.esc(d.key)}"`)), `Its schedules run on the device you choose, which holds ${appTitle(app)}’s keys alone, while it’s on.`);
+      choose(on.map((d) => pick(shown(d.name), `data-keep-device="${one.esc(d.key)}"`)), `It runs on the device you choose, while that device is on.`);
     };
     body.addEventListener("click", async (e) => {
       const t = e.target.closest("[data-keep-app], [data-keep-device]");
@@ -137,11 +137,13 @@
     const all = machines();
     if (!all.length) return "";
     const on = all.filter(holds).map((s) => shown(s.name));
-    const said = on.length ? `Your things run on ${list(on)}.` : "Nothing runs your things now. Turn on a machine below, or your apps can’t open what’s yours.";
+    // Nothing running them is a problem, shown on the section; otherwise it says where, in the list's first row.
+    const said = on.length ? `<div class="row plain"><div class="main">${one.esc(`Your things run on ${list(on)}.`)}</div></div>` : "";
+    const none = on.length ? "" : one.problem({ title: "Nothing runs your things", text: "Turn on a machine below, or your apps can’t open what’s yours." });
     const rows = all.map((s) => `<label class="row plain"><div class="main"><div class="title"><span>${one.esc(shown(s.name))}</span></div>${subs(always(s) ? "Yours, so it always does" : runBy(s))}</div>` +
       `<input type="checkbox" class="switch" data-runs="${one.esc(s.key)}" aria-label="Run your things on ${one.esc(shown(s.name))}"${holds(s) ? " checked" : ""}${always(s) || !device.keys ? " disabled" : ""}></label>`).join("");
-    return `<h2 class="section">Where Your Things Run</h2><div class="list"><div class="row plain"><div class="main">${one.esc(said)}</div></div>${rows}</div>` +
-      '<p class="footer">These open your own things when you use them, with the keys your device hands them, and keep none.</p>';
+    return `<h2 class="section">Where Your Things Run</h2>${none}<div class="list">${said}${rows}</div>` +
+      '<p class="footer">A machine opens your things only while you use them.</p>';
   };
 
   const clientRow = (c) =>
@@ -169,7 +171,7 @@
       const grants = (state.install?.grants || []).filter((g) => g.until > Date.now());
       html += '<h2 class="section">Kept Running</h2><div class="list">' + grants.map(grantRow).join("") +
         `<a class="row plain action-row" data-keep>${one.icon("arrows-clockwise")}<span>Keep an App Running…</span></a></div>` +
-        (grants.length ? '<p class="footer">Stopping one, or letting it run out, gives that app new keys the device doesn’t get.</p>' : "");
+        (grants.length ? '<p class="footer">When one stops or runs out, that device can’t open the app’s things any more.</p>' : "");
     }
     if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(deviceRow).join("") + "</div>";
     html += orderSection();
@@ -180,7 +182,7 @@
       const r = state.install.recovery_used;
       html += `<p class="footer">The recovery key last let in a device of ${one.esc(r.user === me() ? "yours" : `${userName(r.user)}’s`)}, ${one.esc(day(r.time))}.</p>`;
     }
-    if (error) html += `<p class="footer error">${one.esc(error)}</p>`;
+    if (error) html += one.problem({ title: error });
     return html;
   }
 
@@ -242,7 +244,7 @@
     try {
       r = await one.api("POST", "/v1/devices/approve", { code });
     } catch (err) {
-      return void (ask.innerHTML = `<p class="footer error">${one.esc(one.plain(err).title)}</p>`);
+      return void (ask.innerHTML = one.problem({ title: one.plain(err).title }));
     }
     one.confirm(ask, {
       title: `Approve ${r.device}?`,

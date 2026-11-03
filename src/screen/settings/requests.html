@@ -1,6 +1,6 @@
 <div class="large-title">Requests</div>
 <div id="requests"></div>
-<div id="error" class="footer error"></div>
+<div id="error"></div>
 <script>
   // What waits for this person: items apps and agents asked them for, and group invites.
   const esc = one.esc;
@@ -33,7 +33,7 @@
     const b = e.target.closest("button[data-request], button[data-join]");
     if (!b || b.disabled) return;
     const error = document.getElementById("error"), row = b.closest(".row");
-    error.textContent = "";
+    error.innerHTML = "";
     b.disabled = true;
     try {
       if (b.dataset.request) {
@@ -45,7 +45,7 @@
       }
     } catch (err) {
       shown(row, true);
-      error.textContent = one.plain(err).title;
+      error.innerHTML = one.problem({ title: one.plain(err).title });
     }
     b.disabled = false;
     draw();

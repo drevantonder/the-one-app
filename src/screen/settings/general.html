@@ -27,7 +27,7 @@
         ${admin ? `<label class="row plain"><div class="main"><div class="title"><span>Push Notifications</span></div></div><input type="checkbox" class="switch" id="push"${push() ? " checked" : ""}></label>` : shown("Push Notifications", push() ? "On" : "Off")}
         ${push() && admin ? `<div class="row plain go" id="push-key"><div class="main"><div class="title"><span>Apple Notifications Key</span><span class="value">${one.esc(pushKey)}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>` : ""}
       </div>
-      ${error ? `<p class="footer error">${one.esc(error)}</p>` : admin ? "" : `<p class="footer">Only admins change these.</p>`}`;
+      ${error ? one.problem({ title: error }) : admin ? "" : `<p class="footer">Only admins change these.</p>`}`;
   });
 
   async function set(name, value) {
@@ -71,7 +71,7 @@
             ? `<label class="row plain field go"><span>${w.label}</span><span class="value">${one.esc(files[w.name] || "Choose File…")}</span><input type="file" data-file="${w.name}" hidden></label>`
             : `<label class="row plain field"><span>${w.label}</span><input data-value="${w.name}" autocapitalize="off" spellcheck="false" value="${one.esc(values[w.name] || "")}"></label>`).join("")}
         </div><p class="footer">Sent only to Apple</p>` : ""}
-        ${problem ? `<p class="footer error">${one.esc(problem)}</p>` : ""}
+        ${problem ? one.problem({ title: problem }) : ""}
         <div style="margin-top:18px;text-align:right"><button class="button primary" id="save"${ready() ? "" : " disabled"}>Save</button></div>`;
     };
     paint();

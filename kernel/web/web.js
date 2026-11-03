@@ -171,7 +171,7 @@ window.__one = {};
     if (url.pathname === "/v1/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
     const route = Device.route(url.pathname, body);
     const user = auth.user();
-    if (!user || !(await net.start(user).catch(() => false))) throw Object.assign(new NodeError("This browser hasn't been approved yet."), { status: 403 });
+    if (!user || !(await net.start(user).catch(() => false))) throw Object.assign(new NodeError("This device hasn't been approved yet."), { status: 403 });
     for (let needed = 0, misses = 0; ; ) {
       const headers = { "x-one-user": user };
       if (body !== undefined) headers["content-type"] = "application/json";
@@ -465,7 +465,7 @@ window.__one = {};
   }
 
   function message(title, text, extra = "") {
-    return `<div class="unavailable"><div class="unavailable-title">${esc(title)}</div><div class="unavailable-text">${text}</div>${extra}</div>`;
+    return `<div class="unavailable">${one.problem({ title, text })}${extra}</div>`;
   }
 
   /// A page's Services folder: its services' icons, four at most, on frosted glass; with none, four faint empty places.
@@ -610,7 +610,7 @@ window.__one = {};
     setTimeout(() => f.loaded || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status">${one.loading()}</div>`), 400);
     const draw = (page) => {
       f.page = page;
-      f.html = look(page);
+      f.html = look(page, !!sheet);
       if (!into.isConnected) return;
       if (f.still) frame.style.visibility = "hidden";
       into.append(frame);
@@ -631,9 +631,9 @@ window.__one = {};
       if (!f.html) return draw(page);
       if (same(page, f.page)) return;
       f.page = page;
-      f.html = look(page);
+      f.html = look(page, !!sheet);
       frame.src = asset("frame.html");
-    }, (err) => f.html || ((f.loaded = true), (into.innerHTML = message("Can’t Open This", esc(one.plain(err).title)))));
+    }, (err) => f.html || ((f.loaded = true), (into.innerHTML = message("Can’t Open This", one.plain(err).title))));
     return f;
   }
 
@@ -731,12 +731,12 @@ window.__one = {};
   }
 
   /// What makes a screen sit in the window as its own: the window's background shows through, and on a
-  /// computer the Mac app's size of text.
-  function look(html) {
+  /// computer the Mac app's size of text. In a sheet (`raised`), its cards are a step lighter, as on a phone's.
+  function look(html, raised = false) {
     // This window's appearance, kept in step (see `scheme`); with the nonce of a page that runs only its own scripts
     // (the client's own screens), as one of them.
     const nonce = html.match(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-([0-9a-f]+)'/)?.[1];
-    const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { const scheme = (${scheme})(); let now = ${JSON.stringify(appearance())}; const apply = () => scheme(document, now);
+    const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { ${raised ? 'document.documentElement.setAttribute("data-raised", "");' : ""} const scheme = (${scheme})(); let now = ${JSON.stringify(appearance())}; const apply = () => scheme(document, now);
       addEventListener("DOMContentLoaded", apply); addEventListener("load", apply);
       addEventListener("message", (e) => { if (e.source === parent && e.data?.oneScheme) apply(now = e.data.oneScheme); }); })()</script>`;
     const style = `<style>html, body { background: transparent !important; }
@@ -961,7 +961,7 @@ window.__one = {};
     if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = "web";
     const own = signs[`${method} ${url.pathname}`];
     if (own) {
-      if (!device) throw new Error("This browser hasn't been approved yet.");
+      if (!device) throw new Error("This device hasn't been approved yet.");
       const out = await own(body || {});
       await refreshState().catch(() => {});
       return out ?? {};
@@ -1063,7 +1063,7 @@ window.__one = {};
     const name = config().name;
     document.title = name;
     root.innerHTML = `<div class="welcome"><img class="welcome-mark" src="/logo.png" alt=""><h1>${esc(name)}</h1>` +
-      `<button class="button primary big" data-signin>Sign In</button>${error ? `<div class="error welcome-error">${esc(error)}</div>` : ""}</div>`;
+      `<button class="button primary big" data-signin>Sign In</button>${error ? one.problem({ title: error }) : ""}</div>`;
     $("[data-signin]", root).onclick = async (e) => {
       e.target.disabled = true;
       try {
@@ -1075,7 +1075,7 @@ window.__one = {};
   }
 
   function showUnreachable(text) {
-    root.innerHTML = message("Can’t Reach Your Devices", esc(text), `<div class="unavailable-text">Trying again…</div>`);
+    root.innerHTML = message("Can’t Reach Your Devices", text, `<div class="unavailable-text">Trying again…</div>`);
   }
 
   /// Makes this browser a device of its person, before anything is asked of a node: one already, or let in by a passkey
@@ -1131,12 +1131,12 @@ window.__one = {};
     await refreshState().catch(() => {});
   }
 
-  /// "Approve This Browser": its code, and the code as a QR, a link that opens Approve on a phone that scans it.
+  /// "Approve This Device": its code, and the code as a QR, a link that opens Approve on a phone that scans it.
   async function showJoin(code, invited) {
     const name = config().name;
-    document.title = "Approve This Browser";
+    document.title = "Approve This Device";
     const link = `${location.origin}/approve#${code.replace(" ", "")}`;
-    root.innerHTML = `<div class="welcome join"><h1>Approve This Browser</h1>` +
+    root.innerHTML = `<div class="welcome join"><h1>Approve This Device</h1>` +
       `<p class="join-text">${invited ? "Whoever invited you approves it. Show them this code." : `Open ${esc(name)} on a device you already use, then Settings › Devices › Approve.`}</p>` +
       `<div class="join-code" aria-label="Code">${esc(code)}</div><div class="join-qr">${qrSvg(link)}</div>` +
       `<p class="join-note">Or scan this with that device.</p><button class="button" data-out>Sign Out</button></div>`;
@@ -1177,7 +1177,7 @@ window.__one = {};
       await device.load();
     } catch (err) {
       if (err.signedOut) return showSignedOut();
-      return void (root.innerHTML = message("Can’t Approve This Browser", esc(err.message)));
+      return void (root.innerHTML = message("Can’t Approve This Device", err.message));
     }
     // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
     const away = setTimeout(() => $(".window", root) || showUnreachable(UNANSWERED), 15000);

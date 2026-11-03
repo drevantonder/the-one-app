@@ -159,7 +159,7 @@ function addTo(name, { apps, places, admin }) {
     };
     sheet.body.innerHTML = '<div style="display:flex;justify-content:center;margin:2px 0 14px">' + one.appIcon(a, 64) + "</div>"
       + '<div class="list">' + places.map(row).join("") + "</div>"
-      + (error ? '<div class="footer error">' + one.esc(error) + "</div>" : "");
+      + (error ? one.problem({ title: error }) : "");
     for (const box of sheet.body.querySelectorAll("[data-scope]")) box.onchange = () => flip(box);
   };
   // The switch stays where it was put, and goes back only if the change fails.
@@ -508,8 +508,7 @@ const sections = [
     if (!list.length) return "";
     // Schedules run only on a device chosen to keep the app running: one that's on with none says so, with the fix.
     const unkept = list.find((s) => !s.invalid && s.on && s.runs_as && !(s.kept_by || []).length && s.may_keep);
-    const problem = unkept ? '<div class="banner"><span class="banner-icon">' + one.icon("warning-circle") + '</span><div class="banner-text">' + one.esc((a.title || name) + " needs a device to keep it running")
-      + "<span>Its schedules run on a device you choose, while it’s on.</span></div>" + \`<button class="button" onclick='keepIt(\${JSON.stringify(unkept.scope)})'>Choose a Device</button></div>\` : "";
+    const problem = unkept ? one.problem({ warn: true, title: (a.title || name) + " needs a device to keep it running", text: "Its schedules run on a device you choose, while it’s on.", action: { label: "Choose a Device", run: () => keepIt(unkept.scope) } }) : "";
     const places = new Set(list.map((s) => s.scope)).size > 1;
     const row = (s) => {
       let line;
@@ -564,7 +563,7 @@ function editSource() {
   const a = data.apps.find((x) => x.name === name);
   const sheet = one.sheet({ title: "Source Link", done: "Save" });
   sheet.body.innerHTML = '<div class="list"><div class="row plain"><input id="link" class="link-field" type="url" placeholder="https://github.com/…" autocapitalize="none" autocorrect="off" spellcheck="false"></div></div>'
-    + '<div id="link-error" class="footer error"></div>'
+    + '<div id="link-error"></div>'
     + (a.source ? '<div class="list" style="margin-top:20px"><a class="row plain danger-row" id="unlink">Remove Link</a></div>' : "");
   const field = sheet.body.querySelector("#link");
   field.value = a.source || "";
@@ -575,7 +574,7 @@ function editSource() {
       sheet.close();
       show();
     } catch (err) {
-      sheet.body.querySelector("#link-error").textContent = one.plain(err).title;
+      sheet.body.querySelector("#link-error").innerHTML = one.problem({ title: one.plain(err).title });
     }
   };
   sheet.body.closest(".sheet").querySelector("[data-done]").onclick = () => save(field.value.trim());

@@ -474,7 +474,7 @@ impl Device {
                 return Ok(*key);
             }
         }
-        Err(failed("This device hasn't been given the keys to that yet."))
+        Err(failed("This device can't open that yet."))
     }
 
     /// Starts this person's own scope's first epoch, as a newcomer's first device does: a random key, sealed to the

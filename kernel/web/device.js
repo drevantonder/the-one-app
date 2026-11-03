@@ -99,7 +99,7 @@ export class Device {
         return null;
       });
       const k = !r || (r.status === 204 && kept) ? kept.members : await this.replay(this.user, r.status === 204 ? undefined : new Uint8Array(await r.arrayBuffer()));
-      if (!k.roles.global?.[this.user]) throw new Error("Your One App's entries don't list you, so this browser didn't use them.");
+      if (!k.roles.global?.[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
       this.known = k;
     }
     return this.known;
@@ -138,7 +138,7 @@ export class Device {
     for (const [m, key] of keys) all.set(m, await hkdfKey(key));
     this.epochs.set(scope, all);
     if (!all.has(n) && n === 1 && newest === 0 && starts(await this.checked(true), scope, this.user)) await this.newEpoch(scope, 1);
-    if (!all.has(n)) throw new Error("This browser hasn't been given the keys to that yet.");
+    if (!all.has(n)) throw new Error("This device can't open that yet.");
     return all.get(n);
   }
 

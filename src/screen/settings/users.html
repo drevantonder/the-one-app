@@ -32,7 +32,7 @@
       return `<div class="row still">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div></div>${trailing}</div>`;
     });
     let html = `<div class="large-title">Users</div><div class="list">${rows.join("")}</div><div id="confirm"></div>`;
-    html += error ? `<p class="footer error">${one.esc(error)}</p>` : "";
+    html += error ? one.problem({ title: error }) : "";
     if (admin && one.config.join_domain) {
       const address = state.install?.settings?.address;
       const at = address ? ` at <b>${one.esc(address.replace(/^https?:\/\//, ""))}</b>` : "";
@@ -77,8 +77,8 @@
   function add() {
     const sheet = one.sheet({ title: "Add Someone", done: "Cancel" });
     sheet.body.innerHTML = `<div class="list"><label class="row plain"><input class="field" id="name" placeholder="Name" autocomplete="off" enterkeyhint="done"></label></div>
-      <p class="footer" id="note">You'll get a link to send them.</p><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Make Link</button></div>`;
-    const name = sheet.body.querySelector("#name"), go = sheet.body.querySelector("#go"), note = sheet.body.querySelector("#note");
+      <p class="footer">You'll get a link to send them.</p><div id="problem"></div><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Make Link</button></div>`;
+    const name = sheet.body.querySelector("#name"), go = sheet.body.querySelector("#go");
     name.oninput = () => (go.disabled = !name.value.trim());
     name.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
     go.onclick = async () => {
@@ -92,8 +92,7 @@
         sheet.body.innerHTML = `<div class="made"><div class="muted">Send ${one.esc(who)} this link. It works once, for ${days} days.</div>
           <div class="link"><span>${one.esc(link)}</span>${one.copyButton(link)}</div></div>`;
       } catch (e) {
-        note.className = "footer error";
-        note.textContent = one.plain(e).title;
+        sheet.body.querySelector("#problem").innerHTML = one.problem({ title: one.plain(e).title });
         back();
         go.disabled = false;
       }

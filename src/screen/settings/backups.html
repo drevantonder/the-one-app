@@ -1,6 +1,4 @@
 <style>
-  .place { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; flex: none; color: white; background: var(--c); }
-  .place .i { width: 16px; height: 16px; }
   .row.go { cursor: pointer; }
   .row .sub.error { color: var(--danger); white-space: normal; }
   .row .sub.warn { color: var(--warn); display: flex; align-items: center; gap: 5px; }
@@ -20,6 +18,7 @@
   let admin = false;
   let error = "";
   let asked = 0;
+  let install = {};
 
   const name = (device) => String(device || "").replace(/\.local$/, "");
   // A time for people: "14:00" (today) or "3 Nov, 14:00"; with `day`, "Today, 14:00", "Yesterday, 14:00" or
@@ -32,13 +31,16 @@
     if (days === 1) return `Yesterday, ${time}`;
     return d.toLocaleString(undefined, { weekday: "long", day: "numeric", month: "long", hour: "numeric", minute: "2-digit" });
   }
-  const placeIcon = (kind) => `<span class="place" style="--c:${kind === "folder" ? "#8e8e93" : "#ff9500"}">${one.icon(kind === "folder" ? "hard-drive-fill" : "cloud-fill")}</span>`;
+  const placeIcon = (kind) => one.appIcon({ name: kind, icon: kind === "folder" ? "hard-drive" : "cloud", color: "#8e8e93" }, 30);
   const list = (items) => [...items].join(", ");
+  // Whose data a snapshot holds, by name: Everyone, a person, a group.
+  const whose = (scope) => scope === "global" ? "Everyone" : scope.startsWith("user:") ? (install.users || []).find((u) => `user:${u.id}` === scope)?.name || "Someone" : scope.startsWith("group:") ? (install.groups || []).find((g) => `group:${g.id}` === scope)?.name || "A group" : scope;
 
   const draw = () => one.render("#backups", async () => {
     const [got, state] = await Promise.all([one.api("GET", "/v1/backups"), one.api("GET", "/v1/state")]);
     backups = got;
     admin = state.user?.role === "admin";
+    install = state.install || {};
     const places = backups.places || [];
     const failing = places.filter((p) => p.problem).sort((a, b) => a.problem.since - b.problem.since)[0];
     const problem = failing?.problem;
@@ -53,7 +55,7 @@
       : !places.length ? one.empty("Nothing is backed up yet.", admin ? { label: "Add Place…", run: addPlace } : null) : "";
     const snapshots = (backups.snapshots || []).slice(0, 8);
     return `${top}
-      ${error ? `<p class="footer error">${one.esc(error)}</p>` : ""}
+      ${error ? one.problem({ title: error }) : ""}
       ${places.length ? `<h2 class="section">Places</h2>
       <div class="list">${places.map((p, n) => `<div class="row go" data-place="${n}">${placeIcon(p.kind)}<div class="main">
           <div class="title"><span>${one.esc(p.title)}</span></div>
@@ -118,11 +120,11 @@
     });
   }
 
-  // A snapshot of the install: when, where it went, whose data it holds, and which devices wrote it.
+  // A snapshot: when, where it went, whose data it holds, and which devices wrote it.
   function openSnapshot(s) {
     const sheet = one.sheet({ title: when(s.time, true) });
     const taken = new Date(s.time).toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
-    sheet.body.innerHTML = one.info([["Taken", taken], ["Kept in", list(s.places)], ["Holds", list(s.scopes)], ["Written by", list(s.devices.map(name))]]);
+    sheet.body.innerHTML = one.info([["Taken", taken], ["Kept in", list(s.places)], ["Holds", list(s.scopes.map(whose))], ["Written by", list(s.devices.map(name))]]);
   }
 
   // Adds a place: S3-compatible storage by its endpoint, bucket and key, or a disk plugged into the device. Each is
@@ -141,11 +143,11 @@
         ${cloud
           ? `<h2 class="section">S3-Compatible Storage</h2><div class="list">${field("endpoint", "Endpoint", "https://….r2.cloudflarestorage.com", "url")}${field("bucket", "Bucket", "one-backups")}${field("key_id", "Access Key ID")}${field("secret", "Secret Key", "", "password")}${field("title", "Name", "Cloudflare R2")}</div>
              <p class="footer">Use a key that reaches only this bucket. It stays in the Vault.</p>`
-          : `<h2 class="section">A Disk on ${one.esc(name(backups.here))}</h2><div class="list">${disks.map((d) => `<div class="row plain go choice${v.path === d.path ? " on" : ""}" data-disk="${one.esc(d.path)}" data-name="${one.esc(d.name)}"><span class="place" style="--c:#8e8e93">${one.icon("hard-drive-fill")}</span><div class="main"><div class="title"><span>${one.esc(d.name)}</span></div><div class="sub">${one.esc(`Plugged into ${name(backups.here)} · ${size(d.free)} free`)}</div></div><span class="check">${one.icon("check")}</span></div>`).join("")}${field("path", "Folder", "/Volumes/…")}</div>
+          : `<h2 class="section">A Disk on ${one.esc(name(backups.here))}</h2><div class="list">${disks.map((d) => `<div class="row plain go choice${v.path === d.path ? " on" : ""}" data-disk="${one.esc(d.path)}" data-name="${one.esc(d.name)}">${placeIcon("folder")}<div class="main"><div class="title"><span>${one.esc(d.name)}</span></div><div class="sub">${one.esc(`Plugged into ${name(backups.here)} · ${size(d.free)} free`)}</div></div><span class="check">${one.icon("check")}</span></div>`).join("")}${field("path", "Folder", "/Volumes/…")}</div>
              <p class="footer">It's backed up while it's plugged in.</p>`}
         ${tried.length ? `<h2 class="section">Tried It</h2><div class="list">${tried.map((t) => `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(t.step)}</span><span class="${t.error ? "error" : ""}">${one.icon(t.error ? "x" : "check")}</span></div>${t.error ? `<div class="sub wrap error">${one.esc(one.plain(t.error).title)}</div>` : ""}</div></div>`).join("")}</div>
           ${added ? '<p class="footer">The first backup has started. After that, every hour that something changes.</p>' : ""}` : ""}
-        ${problem ? `<p class="footer error">${one.esc(problem)}</p>` : ""}
+        ${problem ? one.problem({ title: problem }) : ""}
         ${added ? "" : `<div class="actions"><button class="button primary" id="add-it"${ready() && !busy ? "" : " disabled"}>${busy ? '<span class="spinner small"></span>' : ""}Add</button></div>`}`;
     };
     paint();

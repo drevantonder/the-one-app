@@ -65,7 +65,7 @@ a { color: inherit; }
 .menu-choice.on { background: var(--tint); color: white; }
 
 /* Sheets: the kit's, as wide as the Mac app's; a screen in one fills it. */
-.sheet { --sheet-bg: var(--window); font-size: 14px; }
+.sheet { font-size: 14px; }
 .screen-sheet { max-width: 480px; height: min(620px, 88vh); display: flex; flex-direction: column; padding-bottom: 0; overflow: hidden; }
 .screen-sheet .sheet-body { flex: 1; min-height: 0; }
 .sheet-text { margin: 4px 4px 16px; color: var(--muted); }
@@ -84,13 +84,12 @@ a { color: inherit; }
 .welcome h1 { font-size: 28px; font-weight: 600; margin: 10px 0 16px; }
 .welcome-mark { width: 120px; height: 120px; }
 .button.big { font-size: 15px; padding: 9px 22px; }
-.welcome-error { max-width: 440px; font-size: 13px; }
+.welcome .problem, .unavailable .problem { width: min(440px, 100%); }
 .join h1 { margin-bottom: 4px; }
 .join-text, .join-note { color: var(--muted); font-size: 13px; max-width: 360px; margin: 0; }
 .join-code { font: 600 34px var(--mono, ui-monospace, monospace); letter-spacing: 0.08em; margin: 12px 0 6px; user-select: all; }
 .join-qr svg { width: 184px; height: 184px; display: block; border-radius: 8px; }
 .join .button { margin-top: 14px; }
-.unavailable-title { font-size: 17px; font-weight: 600; }
 .unavailable-text { color: var(--muted); font-size: 13px; max-width: 440px; }
 
 /* A phone's width: no sidebar, as the phones have none. The pages fill the window, and what's opened from them is

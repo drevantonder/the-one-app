@@ -1,7 +1,5 @@
 <div id="page"></div>
 <style>
-  .tile { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; flex: none; color: white; background: #34c759; }
-  .tile .i { width: 20px; height: 20px; }
   .action-row { color: var(--tint); cursor: pointer; }
   .danger-row { color: var(--danger); cursor: pointer; }
   .action-row.off, .danger-row.off { opacity: 0.4; pointer-events: none; }
@@ -13,6 +11,8 @@
   // The groups this person is in and is invited to, and making one; or, given `group`, that group's members and
   // invites, each member's role a button on their row for its admins. The last admin's role can't change.
   const group = one.params?.group;
+  // Groups' own icon, as Settings draws it.
+  const groupIcon = one.appIcon({ name: "groups", icon: "users-three", color: "#34c759" }, 34);
   let state;
   // Roles changed but not yet taken in, shown at once: null for someone being removed.
   const pending = {};
@@ -24,7 +24,7 @@
   };
   const userName = (id) => state.install?.users.find((u) => u.id === id)?.name || "Someone";
   const roleName = (r) => (r === "admin" ? "Admin" : "Member");
-  const footer = (text, bad) => (text ? `<p class="footer${bad ? " error" : ""}">${one.esc(text)}</p>` : "");
+  const footer = (text, bad) => (!text ? "" : bad ? one.problem({ title: text }) : `<p class="footer">${one.esc(text)}</p>`);
   const person = (id, name, trailing, sub = "") =>
     `<div class="row still">${one.avatar(id, name)}<div class="main"><div class="title"><span>${one.esc(name)}${id === state.user?.id ? " (you)" : ""}</span></div>${sub ? `<div class="sub">${one.esc(sub)}</div>` : ""}</div>${trailing}</div>`;
 
@@ -41,7 +41,7 @@
     one.largeTitle("Groups");
     let html = '<div class="large-title">Groups</div>';
     if (invited.length) {
-      html += '<h2 class="section">Invited</h2><div class="list">' + invited.map((g) => `<div class="row still"><div class="tile">${one.icon("users-three-fill")}</div>
+      html += '<h2 class="section">Invited</h2><div class="list">' + invited.map((g) => `<div class="row still">${groupIcon}
         <div class="main"><div class="title"><span>${one.esc(g.name)}</span></div><div class="sub">${one.esc(names(g.members))}</div></div>
         <button class="button capsule filled" data-accept="${one.esc(g.id)}">Join</button></div>`).join("") + "</div>";
     }
@@ -49,7 +49,7 @@
       return html + one.empty("A group shares its apps and data, on a page of its own.", { label: "New Group", run: () => create() }) + footer(error, true);
     }
     if (mine.length) {
-      html += (invited.length ? '<h2 class="section">Yours</h2>' : "") + '<div class="list">' + mine.map((g) => `<a class="row" data-group="${one.esc(g.id)}"><div class="tile">${one.icon("users-three-fill")}</div>
+      html += (invited.length ? '<h2 class="section">Yours</h2>' : "") + '<div class="list">' + mine.map((g) => `<a class="row" data-group="${one.esc(g.id)}">${groupIcon}
         <div class="main"><div class="title"><span>${one.esc(g.name)}</span></div><div class="sub">${one.esc(names(g.members))}</div></div>
         ${g.role === "admin" ? '<span class="note">Admin</span>' : ""}<span class="chev">›</span></a>`).join("") + "</div>";
     }
@@ -129,8 +129,8 @@
   function create() {
     const sheet = one.sheet({ title: "New Group", done: "Cancel" });
     sheet.body.innerHTML = `<div class="list"><label class="row plain"><input class="field" id="name" placeholder="Name" autocomplete="off" enterkeyhint="done"></label></div>
-      <p class="footer" id="note">You'll be its first admin.</p><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Create</button></div>`;
-    const name = sheet.body.querySelector("#name"), go = sheet.body.querySelector("#go"), note = sheet.body.querySelector("#note");
+      <p class="footer">You'll be its first admin.</p><div id="problem"></div><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Create</button></div>`;
+    const name = sheet.body.querySelector("#name"), go = sheet.body.querySelector("#go");
     name.oninput = () => (go.disabled = !name.value.trim());
     name.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
     go.onclick = async () => {
@@ -141,8 +141,7 @@
         one.tap("success");
         one.open("groups", { group: made.group });
       } catch (e) {
-        note.className = "footer error";
-        note.textContent = one.plain(e).title;
+        sheet.body.querySelector("#problem").innerHTML = one.problem({ title: one.plain(e).title });
         back();
         go.disabled = false;
       }
