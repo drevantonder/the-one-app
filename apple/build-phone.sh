@@ -17,7 +17,9 @@ if [ "${1:-}" = device ]; then
 		-derivedDataPath build/derived -allowProvisioningUpdates build -quiet)
 	if [ -n "${SSH_CONNECTION:-}" ]; then session "${build[@]}"; else "${build[@]}"; fi
 	if [ -n "${2:-}" ]; then rm -rf "$2" && mkdir -p "$2" && ditto "build/derived/Build/Products/Release-iphoneos/$name.app" "$2/$name.app"; exit; fi
-	device=${DEVICE:-$(xcrun devicectl list devices | grep physical | grep iPhone | grep -v unavailable | grep -Eo '[0-9A-F]{8}-[0-9A-F]{16}' | head -1)}
+	# The paired iPhone, as an update's job finds it (src/update.rs), over USB or the network.
+	devices=$(mktemp) && xcrun devicectl list devices --json-output "$devices" >/dev/null
+	device=${DEVICE:-$(jq -r '[.result.devices[] | select(.hardwareProperties.reality == "physical" and .hardwareProperties.deviceType == "iPhone" and .connectionProperties.pairingState == "paired")][0].identifier // empty' "$devices")}
 	xcrun devicectl device install app --device "$device" "build/derived/Build/Products/Release-iphoneos/$name.app"
 	xcrun devicectl device process launch --device "$device" "$id" || true
 else
