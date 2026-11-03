@@ -38,7 +38,9 @@ async function due(ctx, name, device) {
   const list = all.filter((p) => wanted(p.events, name));
   const side = (input) => (device ? ctx.sidecars.shell.run(input, { device }) : ctx.sidecars.shell.run(input));
   const said = await Promise.all(list.map(async (p) => {
-    const command = String(p.command).replaceAll("{device}", device || "").replaceAll(/  +/g, " ").trim();
+    const raw = String(p.command);
+    // Without a device the --device flag goes too, or the call would miss its value.
+    const command = (device ? raw.replaceAll("{device}", device) : raw.replace(/\s--device \{device\}/, "").replaceAll("{device}", "")).replaceAll(/  +/g, " ").trim();
     try {
       const r = await side({ command, timeout: TIMEOUT });
       const out = String(r?.stdout || "").trim();

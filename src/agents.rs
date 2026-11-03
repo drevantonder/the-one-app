@@ -371,15 +371,20 @@ export default Plugin.define({
   async setup(ctx) {
     await ctx.session.hook("prompt", async (event: any) => {
       try {
-        const sid = event.sessionID
+        const sid = event.sessionID ?? event.sessionId
         const seen = ((await ctx.storage.get("sessions")) ?? []) as string[]
         const first = !sid || !seen.includes(sid)
         const text = run(["agent-hooks", "context", "--format", "text", "--hook_event_name", first ? "SessionStart" : "UserPromptSubmit"])
-        if (text && sid) {
+        if (!text) {
+          if (sid && !first) await ctx.session.instructions.entry.remove({ sessionID: sid, key: "ai-usage" }).catch(() => {})
+          return
+        }
+        if (sid) {
           await ctx.session.instructions.entry.put({ sessionID: sid, key: "ai-usage", value: text })
           if (first) await ctx.storage.set("sessions", [...seen.filter((s) => s !== sid), sid].slice(-100))
-        } else if (!text && sid && !first) {
-          await ctx.session.instructions.entry.remove({ sessionID: sid, key: "ai-usage" })
+        } else if (event.prompt && typeof event.prompt.text === "string") {
+          console.warn("one-hooks: no session id on prompt hook; appending usage to the prompt")
+          event.prompt.text += "\n\n" + text
         }
       } catch {}
     })
