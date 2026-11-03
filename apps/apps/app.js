@@ -436,15 +436,15 @@ const sections = [
       \${tag ? '<div class="tag">' + one.esc(tag) + "</div>" : ""}<div class="act">\${act}</div></div></div>
       \${a.description ? '<div class="about">' + one.esc(a.description) + "</div>" : ""}\`;
   },
-  // A service's devices, under what it needs: those it runs on, with Remove for their owners, then those of theirs an
-  // owner removed it from, to install it again.
+  // A service's devices, under Runs On (or what it needs, where it runs on none): those it runs on, with Remove for
+  // their owners, then those of theirs an owner removed it from, to install it again.
   function needs({ where }) {
     if (!where) return "";
     const device = (name, op) => '<div class="row plain"><div class="main"><div class="title"><span>' + one.esc(name) + "</span></div></div>"
       + (op ? '<button class="button' + (op === "install_on" ? " primary" : "") + '" data-op="' + op + '" data-device="' + one.esc(name) + '">' + (op === "install_on" ? "Install" : "Remove") + "</button>" : "") + "</div>";
     const rows = [...where.runs.map((s) => device(s, where.remove.includes(s) && "remove_from")), ...where.install.map((s) => device(s, "install_on"))];
     if (!rows.length) return '<div class="needs">' + one.esc(where.line) + "</div>";
-    return '<h2 class="section">' + one.esc(where.needs || "Runs On") + '</h2><div class="list">' + rows.join("") + "</div>";
+    return '<h2 class="section">' + one.esc(where.runs.length ? "Runs On" : where.needs || "Runs On") + '</h2><div class="list">' + rows.join("") + "</div>";
   },
   function schedules({ health }) {
     // One a deploy removed no longer runs: it isn't the app's any more.
