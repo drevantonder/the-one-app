@@ -113,7 +113,8 @@ pub const ENDPOINT: &str = "one/endpoint";
 /// The longest a session's endpoint is vouched for, in milliseconds.
 pub const SESSION: u64 = 24 * 3_600_000;
 
-/// A device's word that `endpoint` is its own until `until` (ms, at most `SESSION` after `at`): a signed request,
+/// A device's word that `endpoint` is its own until `until` (ms, at most `SESSION` after `at`, and after whenever it's
+/// checked, so a device whose clock is fast asks for a little less): a signed request,
 /// as base64url JSON, the way the relay (iroh's auth token) and nodes (`x-one-endpoint`) take it. A browser's device
 /// key can't be read out of WebCrypto, and iroh signs with raw bytes, so its endpoint is a key of the session's, and
 /// this certificate is how the relay and nodes take that endpoint as the device.
@@ -131,8 +132,8 @@ pub struct Session {
     pub until: u64,
 }
 
-/// Checks a certificate (`certify`'s) at `now`: signed, not yet expired, for no longer than `SESSION`, and not signed in
-/// the future. Who signed it is for the caller to check: it counts only if they're a device of the install.
+/// Checks a certificate (`certify`'s) at `now`: signed, not yet expired, for no longer than `SESSION` from when it was
+/// signed or from `now`, whichever is sooner, and not signed in the future. Who signed it is for the caller to check: it counts only if they're a device of the install.
 pub fn check_certificate(certificate: &str, now: u64) -> Result<Session> {
     let request: Value = B64U.decode(certificate.trim().as_bytes()).ok().and_then(|b| serde_json::from_slice(&b).ok()).context("a certificate is base64url JSON")?;
     let (by, fields, at) = check_signed(ENDPOINT, &request)?;
@@ -140,7 +141,7 @@ pub fn check_certificate(certificate: &str, now: u64) -> Result<Session> {
     let until = fields["until"].as_u64().context("a certificate says until when")?;
     ensure!(at <= now + FRESH, "it was signed in the future, or the clock that signed it is wrong");
     ensure!(until > now, "that session has ended");
-    ensure!(until <= at + SESSION, "a session lasts a day at most");
+    ensure!(until <= at.min(now) + SESSION, "a session lasts a day at most");
     Ok(Session { by, endpoint, until })
 }
 
@@ -340,6 +341,7 @@ mod tests {
         assert!(check_certificate(&cert, at + SESSION).is_err(), "ended");
         assert!(check_certificate(&cert, at - FRESH - 1).is_err(), "signed in the future");
         assert!(check_certificate(&certify(&device, &endpoint, at + SESSION + 1, at), at).is_err(), "longer than a day");
+        assert!(check_certificate(&certify(&device, &endpoint, at + SESSION, at), at - 1).is_err(), "longer than a day from now");
         let request = signed_request(&device, "one/relay", json!({ "endpoint": HEXLOWER.encode(&endpoint), "until": at + 1 }), at);
         assert!(check_certificate(&B64U.encode(&canonical(&request)), at).is_err(), "only for its domain");
     }

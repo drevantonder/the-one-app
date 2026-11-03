@@ -485,6 +485,8 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
             keys::certify(&signer, &endpoint, at + keys::SESSION + 1, at),
             keys::certify(&signer, &endpoint, at + 10, at),
             keys::certify(&signer, &endpoint, at + keys::SESSION, at + keys::FRESH + 200),
+            // Signed by a clock a second fast, for a day from then: longer than a day from now.
+            keys::certify(&signer, &endpoint, at + 1_000 + keys::SESSION, at + 1_000),
             B64U.encode(&keys::canonical(&other)),
             B64U.encode(&keys::canonical(&tampered)),
             "not base64url!".into(),

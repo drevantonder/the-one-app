@@ -256,7 +256,7 @@ export async function checkCertificate(certificate, now = Date.now()) {
   if (!Number.isSafeInteger(fields.until)) throw new Error("a certificate says until when");
   if (fields.at > now + FRESH) throw new Error("it was signed in the future, or the clock that signed it is wrong");
   if (fields.until <= now) throw new Error("that session has ended");
-  if (fields.until > fields.at + SESSION) throw new Error("a session lasts a day at most");
+  if (fields.until > Math.min(fields.at, now) + SESSION) throw new Error("a session lasts a day at most");
   return { by, endpoint: fields.endpoint, until: fields.until };
 }
 
