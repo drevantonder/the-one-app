@@ -12,12 +12,15 @@
 // added. A session's endpoint gets in too (a browser's: its device key can't be read out of WebCrypto, and iroh signs
 // with raw bytes), by the certificate it shows as its auth token (keys::certify), signed by a client's key on the list,
 // naming the key it proves, until then: it reaches every endpoint as the key that signed it would, until its
-// certificate's `until` or that key is taken out or made something else. The URL signer asks it, by `allowed(key)`.
+// certificate's `until` or that key is taken out or made something else. With the certificate, `.`, and a request that
+// key signed just now (`proveSocket`, each `(by, at)` taken once), it's taken in at once, with no challenge's round
+// trip; without one, or with one that's stale or taken, it answers the challenge as any key does. The URL signer asks
+// it, by `allowed(key)`.
 //
 // A browser's WebSocket can't set a header, so its certificate is `?token=` in the relay's URL, where logs may keep
-// it. iroh shows the same token at every reconnect, so it can't be a proof made for each; but a certificate alone
-// gets nothing: the relay lets in only the endpoint that proves the key it names, and answers computes only to a
-// request that key signed.
+// it. iroh shows the same token at every reconnect, so its proof is used once, by the socket the web client opens
+// itself (net-worker.js); a certificate alone gets nothing: the relay lets in only the endpoint that proves the key it
+// names, and answers computes only to a request that key signed.
 //
 // `POST /relay/computes` answers a request signed by a key on the list, or by a session's key with its certificate
 // (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
@@ -49,7 +52,7 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
-import { checkCertificate, checkRequest, FRESH } from "../shared/crypto.js";
+import { b64u, checkCertificate, checkRequest, FRESH, SOCKET } from "../shared/crypto.js";
 
 initSync({ module: wasm });
 
@@ -221,6 +224,7 @@ export class Relay extends DurableObject {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, by TEXT NOT NULL, admin INTEGER NOT NULL, role TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pairings (hash TEXT PRIMARY KEY, until INTEGER NOT NULL, by TEXT NOT NULL, key TEXT);
       CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
+      CREATE TABLE IF NOT EXISTS sockets (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
       CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');`);
     // A binding made before tickets: none shows one, so each is made again.
     try {
@@ -289,17 +293,28 @@ export class Relay extends DurableObject {
     if (!protocols.includes(PROTOCOL)) return refuse(400, `the relay speaks ${PROTOCOL}`);
     const now = Date.now();
     // A pairing code's ticket (64 hex), or a session's certificate, if it shows one: whether it lets this key in is
-    // decided once the key is proved.
+    // decided once the key is proved, here if the certificate comes with its endpoint's proof.
     const ticket = token(request, url);
     const joining = isKey(ticket) ? await sha256(ticket) : null;
     if (joining && !(this.pairing(joining)?.until > now)) return refuse(403, "that pairing code has expired");
     let session = null;
+    let proved = false;
     if (ticket && !joining) {
+      const [certificate, proof] = ticket.split(".");
       try {
-        session = await checkCertificate(ticket, now);
+        session = await checkCertificate(certificate, now);
       } catch (e) {
         return refuse(403, String(e.message || e));
       }
+      proved = !!proof && (await this.proves(proof, session.endpoint, now));
+    }
+    // Taken in at once only for a certificate its signer made and its endpoint's own proof, so this tells only them
+    // whether they're on the list.
+    if (proved && this.key(session.by)?.role === "client") {
+      const [client, server] = Object.values(new WebSocketPair());
+      this.ctx.acceptWebSocket(server);
+      await this.admit(server, session.endpoint, { id: session.endpoint, by: session.by, until: session.until });
+      return new Response(null, { status: 101, webSocket: client, headers: { "Sec-WebSocket-Protocol": PROTOCOL } });
     }
     // Who's let in is said only after the challenge, the same for every key that isn't, so this tells no one who's on
     // the list; sockets that haven't answered are few, from one place and in all.
@@ -502,7 +517,6 @@ export class Relay extends DurableObject {
     // it connects, so that tells no one who's on the list either.
     if (id && !attachment && said.session?.endpoint === id && this.key(said.session.by)?.role === "client" && said.session.until > Date.now()) {
       attachment = { id, by: said.session.by, until: said.session.until };
-      await this.wake(said.session.until);
     }
     if (id && !attachment && said.joining) {
       const pairing = this.pairing(said.joining);
@@ -510,7 +524,6 @@ export class Relay extends DurableObject {
         // A pairing code lets in one computer: this one, again if it reconnects, until it expires or it's added.
         this.sql.exec("UPDATE pairings SET key = ? WHERE hash = ?", id, pairing.hash);
         attachment = { id, pairing: pairing.hash, until: pairing.until, to: pairing.by };
-        await this.wake(pairing.until);
       }
     }
     if (!attachment) {
@@ -518,6 +531,26 @@ export class Relay extends DurableObject {
       ws.send(deny("the relay takes only your One App's devices"));
       return ws.close(1008, "not allowed");
     }
+    await this.admit(ws, id, attachment);
+  }
+
+  /// Whether `proof` is `endpoint`'s, signed just now for its socket, and not shown before.
+  async proves(proof, endpoint, now) {
+    try {
+      const { by, fields } = await checkRequest(SOCKET, JSON.parse(new TextDecoder().decode(b64u.decode(proof))), now);
+      if (by !== endpoint) return false;
+      this.sql.exec("DELETE FROM sockets WHERE at < ? OR at > ?", now - 2 * FRESH, now + 2 * FRESH);
+      if (this.sql.exec("SELECT 1 FROM sockets WHERE by = ? AND at = ?", by, fields.at).toArray().length) return false;
+      this.sql.exec("INSERT INTO sockets VALUES (?, ?)", by, fields.at);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /// Takes a socket in as `id`, as `attachment` says, and tells it so.
+  async admit(ws, id, attachment) {
+    if (attachment.until) await this.wake(attachment.until);
     // The newest socket of a key is the one it's reached at.
     for (const other of this.ctx.getWebSockets()) {
       if (other !== ws && other.deserializeAttachment()?.id === id) {

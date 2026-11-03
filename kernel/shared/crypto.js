@@ -158,7 +158,7 @@ export function canonical(v) {
 const signed = (domain, v) => concat(text.encode(domain), new Uint8Array([0]), canonical(v));
 
 /// An Ed25519 private key to sign with: a CryptoKey (a browser's, not extractable), or a 32-byte seed.
-async function signingKey(key) {
+export async function signingKey(key) {
   if (key instanceof CryptoKey) return key;
   const seed = bytes(key);
   const pub = await ed25519Public(seed);
@@ -241,6 +241,16 @@ export const SESSION = 24 * 3_600_000;
 /// the relay and nodes take it (keys::certify).
 export async function certify(key, by, endpoint, until, at = Date.now()) {
   return b64u.encode(canonical(await signedRequest(key, by, ENDPOINT, { endpoint: hex.encode(endpoint), until }, at)));
+}
+
+/// What a session's endpoint signs to open its relay socket.
+export const SOCKET = "one/socket";
+
+/// A session's endpoint's word (its key's seed `secret`, its public half `endpoint`) that it's opening a relay socket
+/// now: base64url JSON, shown after its certificate (`<certificate>.<proof>`), so the relay takes it in with no
+/// challenge's round trip, once.
+export async function proveSocket(secret, endpoint, at = Date.now()) {
+  return b64u.encode(canonical(await signedRequest(secret, endpoint, SOCKET, {}, at)));
 }
 
 /// Checks a certificate at `now`: → `{ by, endpoint, until }` (keys hex), or throws (keys::check_certificate).

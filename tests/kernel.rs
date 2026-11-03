@@ -1136,6 +1136,31 @@ mod relay {
         data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()))
     }
 
+    /// iroh's relay frames a socket may be sent first: its challenge, or that it's in.
+    const CHALLENGE: u8 = 0;
+    const CONFIRMED: u8 = 2;
+
+    /// The kind of the first frame the relay sends a socket that shows `token`, as a browser's WebSocket asks.
+    fn first_frame(address: &str, token: &str) -> u8 {
+        use std::io::{Read, Write};
+        let host = address.trim_start_matches("http://");
+        let mut tcp = std::net::TcpStream::connect(host).unwrap();
+        tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        write!(tcp, "GET /relay?token={token} HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nsec-websocket-protocol: iroh-relay-v2\r\n\r\n").unwrap();
+        let mut got = Vec::new();
+        let mut byte = [0u8; 1];
+        while !got.ends_with(b"\r\n\r\n") {
+            tcp.read_exact(&mut byte).unwrap();
+            got.push(byte[0]);
+        }
+        assert!(got.starts_with(b"HTTP/1.1 101"), "{}", String::from_utf8_lossy(&got));
+        // A binary frame, short and unmasked, as the relay sends: its payload's first byte is iroh's frame type.
+        let mut head = [0u8; 3];
+        tcp.read_exact(&mut head).unwrap();
+        assert_eq!(head[0], 0x82, "not a binary frame");
+        head[2]
+    }
+
     fn ticket() -> String {
         data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>())
     }
@@ -1605,6 +1630,22 @@ mod relay {
                 assert!(online(&address, &other, Some(&vouched)).await.is_none(), "a session a compute or service vouched for got in");
                 assert_eq!(computes(ask(&other, &vouched)).0, 403, "a session a compute or service vouched for was told the computes");
             }
+
+            // With its key's proof it's taken in at once, with no challenge, once: shown again, stale, by another key or
+            // for another's certificate, it's challenged as any key is (and a stranger's then refused).
+            let proof = |key: &SecretKey, at: u64| data_encoding::BASE64URL_NOPAD.encode(&one::keys::canonical(&one::keys::signed_request(&signer(key), "one/socket", json!({}), at)));
+            let shown = format!("{cert}.{}", proof(&session, super::now()));
+            assert_eq!(first_frame(&address, &shown), CONFIRMED, "a session with its proof was challenged");
+            assert_eq!(first_frame(&address, &shown), CHALLENGE, "a proof was taken twice");
+            assert_eq!(first_frame(&address, &format!("{cert}.{}", proof(&session, super::now() - 120_000))), CHALLENGE, "a stale proof was taken");
+            assert_eq!(first_frame(&address, &format!("{cert}.{}", proof(&SecretKey::generate(), super::now()))), CHALLENGE, "another key's proof was taken");
+            let theirs = SecretKey::generate();
+            let foreign = format!("{}.{}", certify(&stranger, &theirs, super::now() + 60_000), proof(&theirs, super::now()));
+            assert_eq!(first_frame(&address, &foreign), CHALLENGE, "a stranger's session was taken in");
+            assert!(online(&address, &theirs, Some(&foreign)).await.is_none(), "a stranger's session got in with its proof");
+            let proved = online(&address, &session, Some(&format!("{cert}.{}", proof(&session, super::now())))).await.expect("a session with its proof isn't let in");
+            assert!(reaches(&address, &proved, &a).await, "a session taken in with its proof doesn't reach the install's devices");
+            proved.close().await;
 
             // Nothing for another endpoint, by a key not on the list, or once it has ended.
             assert!(online(&address, &SecretKey::generate(), Some(&cert)).await.is_none(), "a certificate let in an endpoint it doesn't name");
