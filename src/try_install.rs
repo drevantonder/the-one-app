@@ -166,6 +166,19 @@ fn with_home<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
     out
 }
 
+/// `f`, with this CLI reaching the node at `addr`.
+fn with_addr<T>(addr: &str, f: impl FnOnce() -> T) -> T {
+    let var = addr_var();
+    let was = std::env::var_os(&var);
+    unsafe { std::env::set_var(&var, addr) };
+    let out = f();
+    match was {
+        Some(was) => unsafe { std::env::set_var(&var, was) },
+        None => unsafe { std::env::remove_var(&var) },
+    }
+    out
+}
+
 /// Starts the try install's node and kernel: as it was, if it stopped by itself, or a new one. → the node's address.
 fn start(dir: &Path) -> Result<String> {
     let kept = dir.join("kernel").join("settings.json").exists() && dir.join("addr").exists();
@@ -273,6 +286,13 @@ fn spawn_kernel(dir: &Path, settings: &one::kernel::Settings, node: &str) -> Res
     for port in settings.ports {
         anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the try install's kernel's port {port} is taken now: {CLI} try stop, then {CLI} try for a new one");
     }
+    // A sign-in kept for this node's address by an earlier try install, whose kernel is gone, would be sent to this
+    // node, which refuses it: its kernel would find no devices for its relay, and the CLI says the key isn't published.
+    with_addr(node, || {
+        if one::sign_in::kept().is_some_and(|kept| kept.address != settings.address) {
+            let _ = std::fs::remove_file(one::sign_in::path());
+        }
+    });
     // Beside its node, which it asks for the install's devices, for its relay to take only them.
     spawn(dir, std::process::Command::new(std::env::current_exe()?).args(["kernel", "serve"]).env(addr_var(), node), "kernel.log")?;
     wait_for(&agent(), &format!("{}/.well-known/oauth-authorization-server", settings.address), &dir.join("kernel.log"))
