@@ -84,6 +84,18 @@ impl Install {
 #[derive(Clone)]
 pub struct Service(Arc<Inner>);
 
+/// Auth's refusal (403) of a service's request: its install link was used or ran out, or the request isn't signed as it should be.
+#[derive(Debug)]
+struct LinkRefused(String);
+
+impl std::fmt::Display for LinkRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for LinkRefused {}
+
 struct Inner {
     name: String,
     dir: PathBuf,
@@ -271,6 +283,7 @@ impl Service {
     /// approve it with; again before it runs out, until a device approves it.
     async fn ask_to_join(self) {
         let mut asked: Option<std::time::Instant> = None;
+        let mut asked_for_good = false;
         loop {
             if let Some(owner) = self.owner() {
                 let _ = std::fs::remove_file(self.0.dir.join("code"));
@@ -282,13 +295,20 @@ impl Service {
             }
             // Once the program offering it has said what it is, so the request says whether it serves everyone.
             let registered = !self.0.sidecars.describe().is_empty();
-            if registered && asked.is_none_or(|a| a.elapsed() > Duration::from_secs(10 * 60)) {
+            if registered && !asked_for_good && asked.is_none_or(|a| a.elapsed() > Duration::from_secs(10 * 60)) {
                 match self.request_approval().await {
                     Ok(()) => {
                         let code = self.code();
                         let _ = write_private(&self.0.dir.join("code"), code.as_bytes());
                         eprintln!("To make {} on {} yours, approve it on one of your devices: {} devices approve {code}", self.0.name, self.0.machine, crate::config::CLI);
                         asked = Some(std::time::Instant::now());
+                    }
+                    // Its install link was used (a device approved it, and a node will bring the entries that say so) or ran
+                    // out: asking again with it is no use, so it says what to do once, and waits for a node.
+                    Err(err) if err.downcast_ref::<LinkRefused>().is_some() => {
+                        eprintln!("{} isn't asking again: {err:#} If it was approved, it answers once a node of your One App reaches it.", self.0.name);
+                        asked = Some(std::time::Instant::now());
+                        asked_for_good = true;
                     }
                     Err(err) => {
                         eprintln!("asking your One App to approve {}: {err:#}", self.0.name);
@@ -318,7 +338,11 @@ impl Service {
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
             let mut resp = agent.post(&url).send_json(&body)?;
             let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-            ensure!(resp.status().is_success(), "{}", out["error"].as_str().unwrap_or("the sign-in service didn't answer"));
+            let said = out["error"].as_str().unwrap_or("the sign-in service didn't answer");
+            if resp.status() == 403 {
+                bail!(LinkRefused(said.to_string()));
+            }
+            ensure!(resp.status().is_success(), "{said}");
             Ok(())
         })
         .await?

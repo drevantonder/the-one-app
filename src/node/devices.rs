@@ -530,19 +530,27 @@ impl Node {
         ensure!(r.user == caller.user && caller.user == self.user()?, "approve a service on the device of yours that made its install link");
         self.enrolled(r)?;
         let endpoint = crate::keys::Endpoint { key: crate::keys::unhex(&r.key)?, seal: crate::keys::unhex(&r.seal)? };
-        ensure!(self.with(|i| Ok(i.r.members.machines.get(&endpoint.key).is_none()))?, "that service is listed already");
-        self.member_content(caller, members::service(&endpoint, &caller.user, &r.name, service, r.shared)).await?;
-        self.tell_relay(json!({ "add": r.key, "admin": false, "role": "service" }));
+        // Told first, and an answer that's no is the approver's to see: a service the relay won't let in is never reached.
+        // A service listed already but not let in, by an approval that didn't get so far, is let in now.
+        let listed = self.with(|i| Ok(i.r.members.service(&endpoint.key).is_some()))?;
+        ensure!(listed || self.with(|i| Ok(i.r.members.machines.get(&endpoint.key).is_none()))?, "that key is listed already, and not as a service");
+        if let Err(err) = self.tell_relay_now(json!({ "add": r.key, "admin": false, "role": "service" })).await {
+            // In already, from an approval that didn't get so far, which only an admin's device may change: fine.
+            ensure!(format!("{err:#}").contains("in already"), "your One App's relay won't let that service in: {err:#}");
+        }
+        if !listed {
+            self.member_content(caller, members::service(&endpoint, &caller.user, &r.name, service, r.shared)).await?;
+        }
         // Its first hello brings it the entries that say it's theirs: as soon as the relay lets it in.
         let (node, key) = (self.clone(), endpoint.key);
         tokio::spawn(async move {
             for _ in 0..20 {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                if node.with(|i| Ok(i.online(&key))).unwrap_or(true) {
+                if node.hello_service_now(&key).await {
                     return;
                 }
-                node.hello_services();
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }
+            tracing::warn!("service {} was approved but this device hasn't reached it", crate::entry::short(&key));
         });
         Ok(json!({ "device": r.name, "service": service, "approved": true }))
     }

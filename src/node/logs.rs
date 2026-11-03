@@ -304,30 +304,45 @@ impl Node {
         let Ok(services) = self.with(|i| Ok(i.r.members.machines.values().filter(|m| i.r.members.service(&m.key).is_some()).map(|m| (m.key, m.service.clone().unwrap_or_default())).collect::<Vec<_>>())) else {
             return;
         };
-        for (key, name) in services {
+        for (key, _) in services {
             let node = self.clone();
             tokio::spawn(async move {
-                let asked = Instant::now();
-                let offers = match node.hello_service(key).await {
-                    Ok(Some(offers)) => offers,
-                    Ok(None) => return tracing::debug!("service {} doesn't take calls from this device yet", short(&key)),
-                    Err(err) => return tracing::debug!("service {}: {err:#}", short(&key)),
-                };
-                let (mut describe, _) = offers;
-                // Whom it serves is what its listing says, never what it says of itself.
-                let users: Vec<String> = node.with(|i| { let m = &i.r.members; Ok(m.users.keys().filter(|u| m.service_serves(&key, u)).cloned().collect()) }).unwrap_or_default();
-                describe["name"] = json!(name);
-                let sidecars: Vec<Sidecar> = vec![(name.clone(), users, describe)];
-                let changed = node.with(|i| {
-                    i.far.insert(key, asked.elapsed());
-                    let before = i.peers.insert(key, Peer { sidecars: sidecars.clone(), load: None, seen: Instant::now() });
-                    Ok(before.is_none_or(|p| p.sidecars != sidecars || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
-                });
-                if changed.unwrap_or(false) {
-                    node.emit(Event::Changed { apps: vec![name] });
-                }
+                node.hello_service_now(&key).await;
             });
         }
+    }
+
+    /// Says hello to one service endpoint now, and lists what it offers as another device's hello does. → whether it
+    /// answered as one that takes this device's calls.
+    pub(super) async fn hello_service_now(&self, key: &Key) -> bool {
+        let key = *key;
+        let Some(name) = self.with(|i| Ok(i.r.members.machines.get(&key).and_then(|m| m.service.clone()))).ok().flatten() else { return false };
+        let asked = Instant::now();
+        let offers = match self.hello_service(key).await {
+            Ok(Some(offers)) => offers,
+            Ok(None) => {
+                tracing::debug!("service {} doesn't take calls from this device yet", short(&key));
+                return false;
+            }
+            Err(err) => {
+                tracing::debug!("service {}: {err:#}", short(&key));
+                return false;
+            }
+        };
+        let (mut describe, _) = offers;
+        // Whom it serves is what its listing says, never what it says of itself.
+        let users: Vec<String> = self.with(|i| { let m = &i.r.members; Ok(m.users.keys().filter(|u| m.service_serves(&key, u)).cloned().collect()) }).unwrap_or_default();
+        describe["name"] = json!(name);
+        let sidecars: Vec<Sidecar> = vec![(name.clone(), users, describe)];
+        let changed = self.with(|i| {
+            i.far.insert(key, asked.elapsed());
+            let before = i.peers.insert(key, Peer { sidecars: sidecars.clone(), load: None, seen: Instant::now() });
+            Ok(before.is_none_or(|p| p.sidecars != sidecars || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
+        });
+        if changed.unwrap_or(false) {
+            self.emit(Event::Changed { apps: vec![name] });
+        }
+        true
     }
 }
 
