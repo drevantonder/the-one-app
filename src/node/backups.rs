@@ -17,11 +17,13 @@ const LATE: u64 = 24 * 3_600_000;
 /// How long each device after the first in line waits before telling admins itself, in case those before it are down.
 const STAGGER: u64 = 10 * 60_000;
 
-/// What's wrong with a place, for admins: what, its fix, since when, and from when it's worth a push.
+/// What's wrong with a place, for admins: what, in a sentence and in a few words for its row, its fix, since when,
+/// and from when it's worth a push.
 #[derive(Clone, Debug)]
 pub struct Problem {
     pub place: String,
     pub text: String,
+    pub status: &'static str,
     pub fix: String,
     pub since: u64,
     pub push: Option<u64>,
@@ -29,7 +31,7 @@ pub struct Problem {
 
 impl Problem {
     pub fn json(&self) -> Value {
-        json!({ "place": self.place, "text": self.text, "fix": self.fix, "since": self.since })
+        json!({ "place": self.place, "text": self.text, "status": self.status, "fix": self.fix, "since": self.since })
     }
 }
 
@@ -52,6 +54,14 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
                 Some(_) => format!("{} {error}.", p.title),
                 None => format!("Couldn't back up to {} ({error}).", p.title),
             };
+            let status = match trouble {
+                Some(crate::bucket::Trouble::Key) => "Key not accepted",
+                Some(crate::bucket::Trouble::Bucket) => "No such bucket",
+                Some(crate::bucket::Trouble::Refused) => "Not allowed to write",
+                Some(crate::bucket::Trouble::Unreachable) => "Not reachable",
+                Some(crate::bucket::Trouble::Disk) => "Couldn't be used",
+                None => "Couldn't back up",
+            };
             let device = name(&last.device);
             let fix = match (trouble, &p.place) {
                 (_, Err(_)) => "Fix it in the Vault.".to_string(),
@@ -63,7 +73,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
                 (None, _) => "It tries again every hour.".to_string(),
             };
             let since = failing.last().map_or(last.time, |r| r.time);
-            out.push(Problem { place: p.id.clone(), text, fix, since, push: failing.iter().rev().nth(1).map(|r| r.time) });
+            out.push(Problem { place: p.id.clone(), text, status, fix, since, push: failing.iter().rev().nth(1).map(|r| r.time) });
             continue;
         }
         let mut late: Option<(u64, String)> = None;
@@ -86,7 +96,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
                 Ok(Place::Folder(_)) => format!("Check {backer} is on, with the disk plugged in."),
                 _ => format!("Check {backer} is on: it backs this up."),
             };
-            out.push(Problem { place: p.id.clone(), text: format!("Nothing has gone to {} for a day.", p.title), fix, since, push: Some(since + LATE) });
+            out.push(Problem { place: p.id.clone(), text: format!("Nothing has gone to {} for a day.", p.title), status: "Not backed up for a day", fix, since, push: Some(since + LATE) });
         }
     }
     Ok(out)

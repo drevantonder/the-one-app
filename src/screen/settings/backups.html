@@ -43,10 +43,12 @@
     const problem = failing?.problem;
     const newest = places.map((p) => p.last).filter(Boolean).sort((a, b) => b.time - a.time)[0];
     const waiting = Date.now() - asked < 10000;
-    // Fine says nothing: a problem shows on top, with what fixes it; otherwise each place says when it last backed up.
+    // Fine says nothing: a problem shows on top, with what fixes it, and its place's row says what's wrong in a few
+    // words; otherwise each place says when it last backed up. The last backup is worth saying once it's missed a run.
+    const missed = failing?.last && Date.now() - failing.last.time >= 3600000;
     const top = problem
-      ? one.problem({ title: failing.last ? `Not backed up to ${failing.title} since ${one.ago(failing.last.time, { long: true })}` : `Not backed up to ${failing.title} yet`,
-          text: [one.plain(problem.text).title, problem.fix].filter(Boolean).join(" "), action: waiting ? null : { label: "Back Up Now", run: backUpNow } })
+      ? one.problem({ title: `Couldn't back up to ${failing.title}`,
+          text: [missed && `Last backed up ${one.ago(failing.last.time, { long: true })}.`, problem.fix].filter(Boolean).join(" "), action: waiting ? null : { label: "Back Up Now", run: backUpNow } })
       : !places.length ? one.empty("Nothing is backed up yet.", admin ? { label: "Add Place…", run: addPlace } : null) : "";
     const snapshots = (backups.snapshots || []).slice(0, 8);
     return `${top}
@@ -54,7 +56,7 @@
       ${places.length ? `<h2 class="section">Places</h2>
       <div class="list">${places.map((p, n) => `<div class="row go" data-place="${n}">${placeIcon(p.kind)}<div class="main">
           <div class="title"><span>${one.esc(p.title)}</span></div>
-          ${p.problem ? `<div class="sub warn">${one.icon("warning-circle-fill")}${one.esc(one.plain(p.problem.text).title)}</div>`
+          ${p.problem ? `<div class="sub warn">${one.icon("warning-circle-fill")}${one.esc(p.problem.status)}</div>`
             : `<div class="sub">${one.esc(p.last ? `Backed up ${one.ago(p.last.time, { long: true })}` : p.kind === "folder" ? `Disk on ${name(p.device)}` : `Off-site · ${p.where}`)}</div>`}
         </div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}
         ${places.length && !problem && !waiting ? `<div class="row plain go" id="now"><div class="main"><div class="title"><span style="color:var(--tint)">Back Up Now</span></div></div></div>` : ""}
